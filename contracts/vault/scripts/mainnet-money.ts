@@ -749,6 +749,41 @@ async function readBackBoth(urls: readonly string[], hash: string, signer: strin
   return tx;
 }
 
+/**
+ * The record's read of a tx, as the money gate reads it after (scripts/ci/money-gate.mjs: readTx on each host of its
+ * list, which holds FastNEAR's archival hosts, so a tx older than the release pair keeps is still read): a success,
+ * FINAL, every receipt a success, on or after the build's start, and no host reading it failed. Read ok by two operators,
+ * their transactions must be one; read by one only (FastNEAR: dRPC keeps recent txs only, and no second keyless archival
+ * operator exists), it passes as the gate passes it, by proveRead: its signed bytes, rebuilt from FastNEAR's tx JSON,
+ * hash to the id, and its outcomes are proven against a final block dRPC names. Returns the transaction; throws why not.
+ */
+export async function recordRead(network: Network, hash: string, signer: string, fetchFn: typeof fetch = fetch, pause?: (ms: number) => Promise<void>): Promise<any> {
+  const gate: any = await import("../../../scripts/ci/money-gate.mjs");
+  const chain = network === "mainnet" ? "near" : "near-testnet";
+  const tx = { chain, hash, signer };
+  const list: string[] = gate.RPCS[chain];
+  const answers: { url: string; r: string; result?: any }[] = [];
+  for (const url of list) {
+    const out: { result?: any } = {};
+    answers.push({ url, r: await gate.readTx(fetchFn, url, tx, gate.FLOOR, pause, true, out), result: out.result });
+  }
+  const said = answers.map((a) => `${a.r} on ${a.url}`).join(", ");
+  if (answers.some((a) => /^(failed|old)/.test(a.r))) throw new Error(`${hash} (${signer}): ${said}`);
+  const ok = answers.filter((a) => a.r === "ok" && a.result);
+  if (new Set(ok.map((a) => json(a.result.transaction ?? null))).size > 1) throw new Error(`${hash} (${signer}): the RPCs return different transactions`);
+  const ops = gate.okOperators(chain, answers);
+  if (ops.size >= 2) return ok[0]!.result.transaction;
+  if (ops.size === 1) {
+    try {
+      await gate.proveRead(fetchFn, tx, answers, list, gate.FLOOR, pause);
+    } catch (e) {
+      throw new Error(`${hash} (${signer}): ${said}; read by one operator and not proven: ${String((e as Error)?.message ?? e).slice(0, 300)}`);
+    }
+    return ok[0]!.result.transaction;
+  }
+  throw new Error(`${hash} (${signer}): ${said}`);
+}
+
 type RunTxs = { U: string; G: string; R: string; vault: string; token: string; P: string; value: string; nf: string };
 const argsOf = (fc: any): any => {
   try {
@@ -891,12 +926,12 @@ export function recordProblems(a: { fund: number; deposit: number; withdraw: num
   return p;
 }
 
-/** The relayers' heard txs that read back a success on both RPCs and are the run's; the rest (a resend the vault refused) are left out. */
-async function landedOf(urls: readonly string[], hashes: string[], signer: string, mine: (t: unknown) => string[]) {
+/** The relayers' heard txs that read back a success (recordRead) and are the run's; the rest (a resend the vault refused) are left out. */
+async function landedOf(network: Network, hashes: string[], signer: string, mine: (t: unknown) => string[]) {
   const ok: { hash: string; signer: string }[] = [];
   for (const hash of [...new Set(hashes)]) {
     try {
-      const p = mine(await readBackBoth(urls, hash, signer));
+      const p = mine(await recordRead(network, hash, signer));
       if (p.length) throw new Error(`not the run's: ${p.join("; ")}`);
       ok.push({ hash, signer });
     } catch (e) {
@@ -928,24 +963,24 @@ async function record(argv: string[]) {
   if (run?.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network || d === undefined || w?.done !== true) throw new Error("record: the run has not landed both legs");
   // the owner's named txs must each read back a success, or nothing is written; open-u's and sweep-u's are kept before
   // they are sent, so one whose send never reached the chain is left out (logged), as a relayer's resend is
-  for (const t of [...named["--fund-tx"], ...named["--settle-tx"]]) await readBackBoth(o.urls, t.hash, t.signer);
-  const opens = (await Promise.all([...new Set(u.txs.map((t: any) => t.signer))].map((sg) => landedOf(o.urls, u.txs.filter((t: any) => t.signer === sg).map((t: any) => t.hash), sg as string, () => [])))).flat();
-  const sweeps = await landedOf(o.urls, sweepTxs.map((t) => t.hash), run.U, () => []);
+  for (const t of [...named["--fund-tx"], ...named["--settle-tx"]]) await recordRead(o.network, t.hash, t.signer);
+  const opens = (await Promise.all([...new Set(u.txs.map((t: any) => t.signer))].map((sg) => landedOf(o.network, u.txs.filter((t: any) => t.signer === sg).map((t: any) => t.hash), sg as string, () => [])))).flat();
+  const sweeps = await landedOf(o.network, sweepTxs.map((t) => t.hash), run.U, () => []);
   // each relayer tx, heard or named (a hash the device never heard: the relayer's answer came after its timeout), is
   // read back and held to the run: signer, receiver, method, amount, P or nullifier hash; a named one that is not refuses
   const want: RunTxs = { U: run.U, G: d.relayer, R: o.relayers.withdraw.relayer_account, vault: o.vault, token: o.token, P: run.precommitment, value: d.leaf.value, nf: w.nullifier_hash };
   for (const [flag, kind, signer] of [["--deposit-tx", "deposit", want.G], ["--withdraw-tx", "withdraw", want.R]] as const)
     for (const t of named[flag]) {
       if (t.signer !== signer) throw new Error(`record: ${flag} ${t.hash} names ${t.signer}, not the ${kind} relayer ${signer}`);
-      const p = relayerTxProblems(kind, await readBackBoth(o.urls, t.hash, t.signer), want);
+      const p = relayerTxProblems(kind, await recordRead(o.network, t.hash, t.signer), want);
       if (p.length) throw new Error(`record: ${flag} ${t.hash} is not the run's ${kind}: ${p.join("; ")}`);
     }
-  const deposits = await landedOf(o.urls, [...d.txs, ...heard.bind, ...named["--deposit-tx"].map((t) => t.hash)], want.G, (t) => relayerTxProblems("deposit", t, want));
-  const withdraws = await landedOf(o.urls, [...heard.withdraw, ...named["--withdraw-tx"].map((t) => t.hash)], want.R, (t) => relayerTxProblems("withdraw", t, want));
+  const deposits = await landedOf(o.network, [...d.txs, ...heard.bind, ...named["--deposit-tx"].map((t) => t.hash)], want.G, (t) => relayerTxProblems("deposit", t, want));
+  const withdraws = await landedOf(o.network, [...heard.withdraw, ...named["--withdraw-tx"].map((t) => t.hash)], want.R, (t) => relayerTxProblems("withdraw", t, want));
   const rp = recordProblems({ fund: named["--fund-tx"].length, deposit: deposits.length, withdraw: withdraws.length, status: w.row.status, settle: named["--settle-tx"].length });
   if (rp.length) throw new Error(`record: ${rp.join("; ")}`);
   const txs = [...opens, ...named["--fund-tx"], ...deposits, ...withdraws, ...sweeps, ...named["--settle-tx"]];
-  for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL on both operators, every receipt a success`);
+  for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL, every receipt a success, as the money gate reads it`);
   const runRec = {
     card: CARD, network: o.network, vault: o.vault, asset: o.token,
     accounts: { U: run.U, to: w.to, F: w.fee_recipient, R: o.relayers.withdraw.relayer_account, G: d.relayer },
@@ -956,7 +991,7 @@ async function record(argv: string[]) {
     `The run: contracts/vault/scripts/mainnet-money.ts on NEAR ${o.network}, the keyless vault ${o.vault} on USDC ${o.token}, both legs carried by the deployed helper.`,
     `Deposit: U ${run.U} (U_{s,i} of the run's 12 words, i ${run.i}) signed its ft_transfer_call as a NEP-366 DelegateAction (packages/wallet/src/deposit/bind.ts bindDeposit), carried by ${d.relayer}; the deposits page holds P ${run.precommitment} by U with ${d.leaf.value}, label ${d.leaf.label}, leaf ${d.leaf.leaf_index}.`,
     `Withdrawal: the wallet's withdrawRequest to ${w.to} (fund_recipient false, no change: withdrawn = the note), proved in this process by snarkjs fullProve on the kit's pinned setup files (the stand-in for the page's prover worker), carried by ${o.relayers.withdraw.relayer_account}; spends row #${w.row.index}: ${w.row.withdrawn} withdrawn to ${w.row.recipient}, fee ${w.row.fee} to ${w.fee_recipient}, payer ${w.row.payer}, ${w.row.status}.`,
-    `Every Tx above read back FINAL on ${o.urls.join(" and ")}, every receipt a success.`,
+    `Every Tx above read back FINAL, every receipt a success, as scripts/ci/money-gate.mjs reads it: on two operators, or, older than dRPC keeps, on FastNEAR's archival RPC and proven against a final block dRPC names.`,
     d.before ? `Before the deposit (${d.before.at}): U USDC ${d.before.U_usdc}, vault USDC ${d.before.vault_usdc}, totals ${JSON.stringify(d.before.totals)}. After (${d.after.at}): U USDC ${d.after.U_usdc}, vault USDC ${d.after.vault_usdc}, totals ${JSON.stringify(d.after.totals)}.` : "The deposit's balances were not kept: its step was restored from the chain.",
     w.before ? `Before the withdrawal (${w.before.at}): ${w.to} USDC ${w.before.to_usdc}, F USDC ${w.before.F_usdc}, vault USDC ${w.before.vault_usdc}. After (${w.after.at}): ${w.to} USDC ${w.after.to_usdc}, F USDC ${w.after.F_usdc}, vault USDC ${w.after.vault_usdc}, totals ${JSON.stringify(w.after.totals)}.` : "",
   ].filter(Boolean);

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bindProblem, feeProblems, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { bindProblem, feeProblems, recordRead, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteCommitment, noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { restorePages, writeRestored } from "../../../packages/wallet/src/notes/restore.ts";
@@ -326,6 +326,60 @@ test("LA: a second transfer that reached U after its deposit landed is no front-
   // the driver reads P's row on both RPCs for a front_run and records the deposit's own value, not the read at U
   assert.match(SRC, /outcome\.kind === "front_run"[\s\S]{0,400}r\.precommitment === BigInt\(run\.precommitment\)[\s\S]{0,200}const why = bindProblem\(outcome\.kind, row, U, amount\);/);
   assert.match(SRC, /st\.write\("deposit", \{ amount: String\(leaf\.value\)/);
+});
+
+// LC: every request the record's read of T02's 6-day-old withdrawal tx made on 2026-11-08 and each host's answer: dRPC
+// and FastNEAR's regular host no longer know it (UNKNOWN_TRANSACTION), FastNEAR's archival hosts read it. The run's
+// values are T02's own record (deployments/testnet-t02-run.json); the tx is its partial withdrawal (1.5 of 2 USDC)
+const READS = JSON.parse(readFileSync(path.join(HERE, "mainnet-money-reads.answers.json"), "utf8")).answers as { url: string; method: string; params: unknown; status: number; text: string }[];
+const T02R = JSON.parse(readFileSync(path.join(HERE, "..", "deployments", "testnet-t02-run.json"), "utf8"));
+const T02 = { hash: "DFFUVXsCGfsZ8jCiesFpnhsc2M5HDcSWZHD3Nm1bMczF", signer: T02R.accounts.R };
+const T02_RUN = { U: T02R.accounts.U, G: T02R.accounts.G, R: T02R.accounts.R, vault: T02R.vault, token: T02R.asset, P: T02R.deposit.precommitment, value: T02R.withdraw.withdrawn, nf: T02R.withdraw.nullifier_hash };
+// a replay of READS, in order per host, method and params (a block another host was asked for is answered as that host
+// answered it: one chain); `edit` changes one host's answer to a method
+function replay(edit: (host: string, method: string, text: string) => string = (_h, _m, t) => t) {
+  const queue = new Map<string, { status: number; text: string }[]>();
+  for (const a of READS) {
+    const k = `${a.url} ${a.method} ${JSON.stringify(a.params)}`;
+    queue.set(k, [...(queue.get(k) ?? []), { status: a.status, text: a.text }]);
+  }
+  return (async (url: string, init: { body: string }) => {
+    const b = JSON.parse(init.body);
+    const k = `${url} ${b.method} ${JSON.stringify(b.params)}`;
+    const q = queue.get(k) ?? (b.method === "block" ? [...queue].find(([key]) => key.endsWith(` block ${JSON.stringify(b.params)}`))?.[1] : undefined);
+    if (q === undefined) throw new Error(`not recorded: ${k.slice(0, 200)}`);
+    const a = q.length > 1 ? q.shift()! : q[0]!;
+    return new Response(edit(new URL(url).host, b.method, a.text), { status: a.status });
+  }) as unknown as typeof fetch;
+}
+const nowait = async () => {};
+
+test("LC: record reads a tx older than the release pair keeps on the money gate's archival hosts, proven against dRPC's final block", async () => {
+  const t = await recordRead("testnet", T02.hash, T02.signer, replay(), nowait);
+  assert.deepEqual(relayerTxProblems("withdraw", t, T02_RUN), []);
+  // the same answers with FastNEAR's tx JSON changed (another amount): its bytes no longer hash to the id, so one
+  // operator's read is not proven and nothing is recorded
+  const bump = (text: string) => {
+    const j = JSON.parse(text);
+    j.result.transaction.nonce += 1;
+    return JSON.stringify(j);
+  };
+  const forged = (h: string, m: string, text: string) => ((h.includes("fastnear") || h.includes("near.org")) && m === "EXPERIMENTAL_tx_status" && text.includes('"result"') ? bump(text) : text);
+  await assert.rejects(recordRead("testnet", T02.hash, T02.signer, replay(forged), nowait), /read by one operator and not proven/);
+  // dRPC reading it failed refuses it, whatever FastNEAR says
+  const fastnearTx = READS.find((a) => a.url.includes("archival-rpc.testnet.fastnear.com") && a.method === "EXPERIMENTAL_tx_status")!.text;
+  const failedOnDrpc = (h: string, m: string, text: string) => (h === "near-testnet.drpc.org" && m === "EXPERIMENTAL_tx_status" ? fastnearTx.replace('"status":{"SuccessValue"', '"status":{"Failure":{},"x"') : text);
+  await assert.rejects(recordRead("testnet", T02.hash, T02.signer, replay(failedOnDrpc), nowait), /failed[^,]* on https:\/\/near-testnet\.drpc\.org/);
+  // read ok by two operators (dRPC still keeping it), it needs no proof
+  const sameOnDrpc = (h: string, m: string, text: string) => (h === "near-testnet.drpc.org" && m === "EXPERIMENTAL_tx_status" ? fastnearTx : h.includes("fastnear") && m === "EXPERIMENTAL_light_client_proof" ? "{}" : text);
+  assert.deepEqual(relayerTxProblems("withdraw", await recordRead("testnet", T02.hash, T02.signer, replay(sameOnDrpc), nowait), T02_RUN), []);
+  // two operators that read it must return one transaction
+  const otherOnDrpc = (h: string, m: string, text: string) => (h === "near-testnet.drpc.org" && m === "EXPERIMENTAL_tx_status" ? bump(fastnearTx) : text);
+  await assert.rejects(recordRead("testnet", T02.hash, T02.signer, replay(otherOnDrpc), nowait), /the RPCs return different transactions/);
+  // every read of the record goes this way; the release pair's read stays for the tx this script just sent
+  const rec = SRC.slice(SRC.indexOf("async function record("), SRC.indexOf("function flags("));
+  assert.doesNotMatch(rec, /readBackBoth/);
+  assert.match(SRC, /async function landedOf\(network: Network,[\s\S]{0,300}mine\(await recordRead\(network, hash, signer\)\)/);
 });
 
 test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * fee < the note (withdrawRequest's fee < amount, the vault's fee <= withdrawn / 2)", () => {
