@@ -168,9 +168,14 @@ export class V01World {
   }
 
   /** The relayer's tx as a `tx` read shows it (deposit-bind.test.ts txView): FINAL once every receipt ran, else not. */
-  private txRead(hash: string, relayer: unknown, height: bigint) {
+  // a hash the RPC does not know: UNKNOWN_TRANSACTION only to wait_until NONE; to FINAL the release RPCs time out or
+  // answer HTTP 408 (read 8 Nov 2026), which the client throws
+  private txRead(hash: string, relayer: unknown, height: bigint, waitUntil: unknown) {
     const t = this.sent.find((x) => x.hash === hash);
-    if (t === undefined || relayer !== RELAYER) return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+    if (t === undefined || relayer !== RELAYER) {
+      if (waitUntil === "NONE") return { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+      throw new Error("HTTP 408");
+    }
     const rid = `r${hash}`;
     return {
       jsonrpc: "2.0",
@@ -208,7 +213,7 @@ export class V01World {
     const replay = replayDepositReads("testnet", publicKeyOf(this.u));
     const side = (k: 0 | 1, r: NearRpc): FollowRpc => ({
       name: r.name,
-      tx: async (params) => this.txRead(params.tx_hash as string, params.sender_account_id, this.height + BigInt(k)),
+      tx: async (params) => this.txRead(params.tx_hash as string, params.sender_account_id, this.height + BigInt(k), params.wait_until),
       block: async () => ({ jsonrpc: "2.0", id: "x", result: { header: { height: Number(this.height + BigInt(k)), timestamp_nanosec: (BigInt(this.timeMs) * 1_000_000n).toString() } } }),
       query: async (params) => {
         const height = this.height + BigInt(k);

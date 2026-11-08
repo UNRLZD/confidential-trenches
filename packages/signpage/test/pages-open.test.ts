@@ -69,9 +69,12 @@ test("withdraw.open: only with a seed, and it draws the withdraw form; signin.op
   assert.equal(takes("signin.open", "withdraw", false), false);
 });
 
-test("withdraw.open with a one-time id is refused until that way out is built; without one it is taken", () => {
+test("withdraw.open with a one-time id draws the held deposit's way out (card held-deposit-way-out); a from_id that is no 64-hex id is refused", () => {
   assert.equal(takesParams("withdraw.open", { return_key: "k" }), true);
-  assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: "ab".repeat(32) }), false);
-  assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: undefined }), false);
+  assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: "ab".repeat(32) }), true);
+  for (const bad of [undefined, "AB".repeat(32), "ab".repeat(31), "alice.near", 7]) assert.equal(takesParams("withdraw.open", { return_key: "k", from_id: bad }), false, String(bad));
+  for (const s of [PRF, SAVED, UNSAVED, TYPED]) assert.equal(pageFor("withdraw.open", undefined, s, true, "ab".repeat(32)), "held");
+  assert.equal(pageFor("withdraw.open", undefined, undefined, true, "ab".repeat(32)), "signed-out");
+  assert.equal(takes("signin.open", "held", false), false);
   for (const k of ["signin.open", "signout", "backup.open"] as const) assert.equal(takesParams(k, { return_key: "k" }), true);
 });

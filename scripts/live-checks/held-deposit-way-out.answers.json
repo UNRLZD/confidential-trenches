@@ -1,0 +1,48 @@
+{
+ "good": {
+  "key": "held-deposit-way-out",
+  "url": "local build",
+  "at": "2026-11-08T05:35:34.023Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-95ZhqfEhpjzYG3GmcWcqtIJDPhubAGv/cubDYEfnPbBZnRLNjPdhfjmmA0TQZ0lD",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 759889,
+   "sha384": "sha384-95ZhqfEhpjzYG3GmcWcqtIJDPhubAGv/cubDYEfnPbBZnRLNjPdhfjmmA0TQZ0lD",
+   "markers": {
+    "move out refused: ": 1,
+    "the typed account is U or the token": 1,
+    "dataset.held=`move-out`": 1,
+    "Move out": 1
+   }
+  }
+ },
+ "bad_live_before": {
+  "key": "held-deposit-way-out",
+  "url": "https://sign.confidential.unrealized.trade",
+  "at": "2026-11-08T01:57:58.119Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 727246,
+   "sha384": "sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI",
+   "markers": {
+    "move out refused: ": 0,
+    "the typed account is U or the token": 0,
+    "dataset.held=`move-out`": 0,
+    "Move out": 0
+   }
+  }
+ }
+}
