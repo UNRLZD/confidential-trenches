@@ -1536,6 +1536,23 @@ test("a full sell whose PumpSwap cashback claim does not simulate: planned again
   assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
 });
 
+// Card sol-w-sweep: what a full sell keeps on W is exactly what lifts the sweep to the floor when the teardown closes
+// only W's token account (one frame, its fee, rent(165) back): the floor, the sweep's fee, mark and page growth, that
+// frame's fee, less rent(165); at mainnet's rent 2,589,680, and on a cashback coin a later claim's cost more.
+test("a full sell whose teardown closes W's token account alone: the sweep's note is exactly the floor and W ends at 0; the kept amount pinned at mainnet's rent", async () => {
+  const mainnet = { lamportsPerByte: 5_080n, factor: 1n } as typeof rent;
+  assert.equal(solanaSellAfterFull(mainnet), 2_600_000n + 5_000n + 736_600n + 731_520n + 5_000n - 1_488_440n);
+  assert.equal(solanaSellAfterFull(mainnet), 2_589_680n);
+  assert.equal(solanaSellAfterFull(mainnet, true), 2_589_680n + 650_240n + 5_000n + 1_488_440n);
+  const w = await world({ ataLamports: TOKEN_RENT });
+  const a = await runPoolSell(w.host, ASK);
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.accounts.has(ATA), false);
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(w.told));
+  const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+  assert.deepEqual(w.c.deposits.filter((d) => d.sweep).map((d) => d.value), [floor]);
+});
+
 // Card sol-w-sweep: owed cashback on a coin that is not a cashback coin (W's volume account earned it trading another),
 // so the sell kept no claim's cost: what the sweep would make after that cost is under the floor, so nothing is swept,
 // W keeps it all, and stays owed (never dropped as "floor" is) for the pass that claims it.

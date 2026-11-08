@@ -660,16 +660,17 @@ export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint;
  * What a sell that empties W's holding leaves on W (card sol-w-sweep): enough that the rent back's sweep, once the
  * teardown has closed W's token account to W (its rent at least rent(165)), makes a note a withdraw can spend: the
  * sweep's floor (solanaSweepFloor, at least the program's least deposit), its own fee, its mark's rent and an entry on
- * each tree's page, and two teardown frames' fees; at least rent(0), the runtime's floor. Every lamport over it goes
+ * each tree's page, and the first teardown frame's fee (every frame closes an account worth more than its fee, so each
+ * later frame pays for itself); at least rent(0), the runtime's floor. Every lamport over it goes
  * into the sell's own note, and the rest, with the rents the teardown closes, into the sweep's: W ends at 0. At
- * mainnet's rent (5,080 a byte) 2,594,680. On a cashback coin (`cashback`), also what a later claim of cashback the
+ * mainnet's rent (5,080 a byte) 2,589,680. On a cashback coin (`cashback`), also what a later claim of cashback the
  * teardown could not take needs (solanaSweepKeep for one volume account), so the sweep still reaches the floor while W
  * keeps that claim's cost; when the claim goes, the sweep takes it too.
  */
 export function solanaSellAfterFull(rent: SolanaRent, cashback = false): bigint {
   const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
   const sweep = SOLANA_POOL_SELL_FEE + solanaRentMin(rent, 17) + 2n * 72n * rent.lamportsPerByte * rent.factor;
-  const need = floor + sweep + 2n * SOLANA_POOL_SELL_FEE - solanaRentMin(rent, 165) + solanaSweepKeep(rent, cashback ? 1 : 0);
+  const need = floor + sweep + SOLANA_POOL_SELL_FEE - solanaRentMin(rent, 165) + solanaSweepKeep(rent, cashback ? 1 : 0);
   const r0 = solanaRentMin(rent, 0);
   return need > r0 ? need : r0;
 }
