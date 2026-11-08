@@ -84,6 +84,11 @@ test("step 4: a wallet whose return note the restore found counts with no histor
   const got = await restoreWallets(SEED, r, read);
   assert.deepEqual(got.wallets.map((w) => [w.c, w.returnNote, w.history]), [["near", refKey(ret("near")), []], ["hop-sol", refKey(ret("hop-sol")), []]]);
   assert.ok(log.includes(`solana ${addr("hop-sol", L1, 0)}`));
+  // a hop's return note alone, with no wallet of its arm in use: the hop targets are still read and that one listed
+  const hopOnly = { notes: [...TWO.notes, note({ kind: "return", c: "hop-near", l: L2, j: 1 })], spends: TWO.spends };
+  const h = reader([`base ${addr("hop-evm", L2, 1)}`]);
+  const got2 = await restoreWallets(SEED, hopOnly, h.read);
+  assert.deepEqual(got2.wallets.map((w) => [w.c, w.l, w.j, w.history]), [["hop-evm", L2, 1, ["base"]], ["hop-near", L2, 1, []]]);
 });
 
 test("step 4: a read that fails or answers anything but yes or no is listed unread, never no history, and its arm's hop targets are read", async () => {
