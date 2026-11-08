@@ -59,6 +59,11 @@ export const MUTANT_SECONDS = {
   "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 65,
   "packages/signpage: node --test test/kit-version-mutants.test.mjs": 15,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
+  // card helper-sell-sweep-in-ci: the helper's sell sweep in its three parts, timed in one run off CI (207, 288 and
+  // 176 s) beside rules-refund-mutants (47 s there, 65 s above), so each is that run's time x 65 / 47, rounded up
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 287,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 399,
+  "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 244,
 };
 // a sweep with no measured time yet: about the middle one measured (197 s)
 export const NEW_SWEEP_SECONDS = 200;

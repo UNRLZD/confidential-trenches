@@ -392,6 +392,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
   return async (calls) =>
     calls.map((c, id) => {
       if (c.method === "eth_getBlockByNumber") return { jsonrpc: "2.0", id, result: head("0x" + headNo.toString(16)) };
+      // W's releases at a sale (card evm-sell-no-release-in-flight): none in the model, its finalized block its head
+      if (c.method === "eth_getLogs") return { jsonrpc: "2.0", id, result: [] };
       // a sale the model landed (card evm-sell-hook-converge, SALES below): its transaction, receipt and block
       if (c.method === "eth_getTransactionByHash" || c.method === "eth_getTransactionReceipt" || c.method === "eth_getBlockByHash") {
         const s = c.method === "eth_getBlockByHash" ? [...SALES.values()].find((x) => x.blockHash === c.params[0]) : SALES.get(String(c.params[0]));
@@ -1876,7 +1878,7 @@ const SELL_W = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"; // Hardhat account 
 const { sellDelegate: _keepMin, ...BASE_NO_DELEGATE } = builder.evmPoolVenues().base;
 const KEEP_MIN: builder.EvmPoolVenueList = Object.freeze({ ...builder.evmPoolVenues(), base: Object.freeze(BASE_NO_DELEGATE) });
 const sellOn = (pools: ModelPool[], token: string, scan?: EvmRpc, bought: EvmRoute | null = seededRoute(token), slippageBps = 100, venues: builder.EvmPoolVenueList = KEEP_MIN, signSim?: EvmPoolSellQuoteRequest["signSim"]) =>
-  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, boughtBlock: 1n, ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
+  evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps, boughtBlock: 1n, sent: [], ...(bought !== null ? { bought } : {}), ...(signSim ? { signSim } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scan, venues);
 const sellVerdict = async (p: ReturnType<typeof sellOn>) => {
   try {
     const q = await p;
@@ -2507,7 +2509,7 @@ test("PE (keep-min) where no sell delegate is pinned, the same pool keeps the lo
   const logs = [{ key: market.key, at: 4_500_000 }, { key: blocker.key, at: 4_500_001 }];
   viaHook(await sellVerdict(sellOn([market, blocker], token, scanner(5_000_000, logs))), blocker.key, 2n * AMOUNT);
   // its real sale reverts: the device bans the pool, and the next quote leaves through the market
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, banned: [hcPid(blocker.key)] } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], banned: [hcPid(blocker.key)] } as EvmPoolSellQuoteRequest;
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [chain([market, blocker], 0), chain([market, blocker], 1)], NOW, scanner(5_000_000, logs))));
 });
 
@@ -2564,7 +2566,7 @@ test("PE7 a sim on a block with no base fee is refused: it cannot be priced as t
       return { ...(r as object), result: h };
     });
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   const v = await sellVerdict(evmPoolSellQuoteWith(req, [noFee(chain(pools, 0)), noFee(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED));
   assert.deepEqual(v, { accepted: false, code: "rpc_error" });
 });
@@ -2584,7 +2586,7 @@ test("PE6 the sim's eth_call and its nonce read go from the pinned sender, with 
     return rpc(calls);
   };
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   atMarket(await sellVerdict(evmPoolSellQuoteWith(req, [wrap(chain(pools, 0)), wrap(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]), DELEGATED)));
   const k = sellMod as unknown as { EVM_POOL_SELL_GAS?: bigint; evmPoolSellTip?: (c: string) => bigint };
   assert.equal(k.EVM_POOL_SELL_GAS, SALE_GAS);
@@ -2613,7 +2615,7 @@ test("PE8 a sender too low to pay the sale's gas drops the hooked route and free
   // below it
   const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n), exec: (a) => 2n * a };
   const pools = [market, hooked];
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   const logs = scanner(5_000_000, [{ key: market.key, at: 4_500_000 }, { key: hooked.key, at: 4_500_001 }]);
   const funded = await sellVerdict(evmPoolSellQuoteWith(req, [chain(pools, 0), chain(pools, 1)], NOW, logs, DELEGATED));
   // the sale goes through it at that price (card evm-sell-hook-converge)
@@ -3698,6 +3700,10 @@ function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads
   return async (calls) => {
     const out = await rpc(calls);
     return calls.map((c, id) => {
+      // W's releases at the sale (card evm-sell-no-release-in-flight): the chain's answer, its finalized block the first
+      // head (never counted as a head asked)
+      if (c.method === "eth_getLogs") return out[id];
+      if (c.method === "eth_getBlockByNumber" && c.params[0] === "finalized") return { jsonrpc: "2.0", id, result: head("0x" + heads[0]!.toString(16), blockHash(heads[0]!), timestamp) };
       if (c.method === "eth_getBlockByNumber") {
         const latest = c.params[0] === "latest";
         // a wait that asks again with no sleep spins without end: refused here, at once, never a test that hangs
@@ -3714,7 +3720,7 @@ function landed(rpc: EvmRpc, heads: number[], asked: { heads: number } = { heads
 const landedSell = (token: string) => {
   const pool: ModelPool = { key: keyOf(token, NATIVE, 2500, 50, NATIVE), give: (a) => a };
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 2500, tickSpacing: 50, hooks: NATIVE, hookData: "0x" }] };
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: route, boughtBlock: BigInt(BUY_AT) } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: route, boughtBlock: BigInt(BUY_AT), sent: [] } as EvmPoolSellQuoteRequest;
   return { pool, req };
 };
 
@@ -4023,7 +4029,9 @@ test("B6 a sell's wait for its buy's block, the list reordered by round 1: round
   const byNum: string[] = [];
   const tag = (name: string, rpc: EvmRpc, delayMs: number): EvmRpc => async (calls) => {
     const latest = calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest");
-    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest")) byNum.push(name);
+    // the confirm's reads; W's releases (card evm-sell-no-release-in-flight: the finalized block, and the logs each with the
+    // agreed block's header) are read on both providers, and are not a confirm
+    if (!calls.some((c) => c.method === "eth_getLogs") && calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] !== "latest" && c.params[0] !== "finalized")) byNum.push(name);
     if (latest && delayMs > 0) await pause(delayMs);
     return rpc(calls);
   };
@@ -4758,7 +4766,7 @@ type HookedQuote = { route: unknown; amountOut: bigint; minOut: bigint; hooked: 
 // then pins the model's sell delegate, sender, pool and FeeCollector as Base's
 type SaleNet = { chain: "base" | "robinhood"; venues: builder.EvmPoolVenueList; nitro: boolean };
 const hcQuote = async (pools: ModelPool[], token: string, logs: { key: EvmPoolKey; at: number }[], banned?: readonly string[], sn?: SaleNet) => {
-  const req = { chain: sn?.chain ?? "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim, ...(banned ? { banned } : {}) } as EvmPoolSellQuoteRequest;
+  const req = { chain: sn?.chain ?? "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim, ...(banned ? { banned } : {}) } as EvmPoolSellQuoteRequest;
   try {
     return (await evmPoolSellQuoteWith(req, [chain(pools, 0, undefined, undefined, undefined, sn?.nitro), chain(pools, 1, undefined, undefined, undefined, sn?.nitro)], NOW, scanner(5_000_000, logs), sn?.venues ?? DELEGATED)) as unknown as HookedQuote;
   } catch (e) {
@@ -5009,7 +5017,7 @@ test("HC5 a sell quote's banned is a list of at most 4096 pool ids, each 0x and 
 test("HC6 the device's quote of a sale through an unlisted hook builds, and the sender's read-back takes it; the builder takes such a hook on no other route", async () => {
   const token = "0x00000000000000000000000000000000000c1c06";
   const honest: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => 2n * a, lie: (a) => 2n * a, state: pricedInto1(2n) };
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   const q = await evmPoolSellQuoteWith(req, [chain([seeded(token), honest], 0), chain([seeded(token), honest], 1)], NOW, scanner(5_000_000, [{ key: honest.key, at: 4_500_001 }]), DELEGATED);
   assert.deepEqual(q.hooked, [hcPid(honest.key)]);
   // Base's venue with a pool and a FeeCollector pinned, as pool-evm-deploy pins them
@@ -5098,7 +5106,7 @@ test("RV3 (control) with `bought` the honest route through X's market, the banne
   const logs = [{ key: pool.key, at: 4_500_000 }, { key: honest.key, at: 4_100_000 }, { key: hostile.key, at: 4_100_001 }];
   const pools = [seeded(token), pool, honest, hostile];
   const bought: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: x, fee: 2500, tickSpacing: 50, hooks: NATIVE, hookData: "0x" }, { currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
-  const q = (banned?: string[]) => evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, signSim, ...(banned ? { banned } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), DELEGATED);
+  const q = (banned?: string[]) => evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, sent: [], signSim, ...(banned ? { banned } : {}) } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, logs), DELEGATED);
   const q1 = await q();
   assert.deepEqual(q1.hooked, [hcPid(hostile.key)]);
   const h1 = q1 as unknown as HookedQuote;
@@ -5787,7 +5795,7 @@ test("review of 72e28658, L2 (PC) a sale whose `bought` route passes the native 
   const t: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(20)), give: (v) => v, lie: (v) => v };
   const pools = [seeded(token), a, t];
   const bought = v4Route([{ currency: x, fee: 3000, tickSpacing: 60, hooks: NATIVE }, { currency: NATIVE, fee: 3000, tickSpacing: 60, hooks: NATIVE }, { currency: token, fee: 3000, tickSpacing: 60, hooks: RH(20) }]);
-  const sale = await evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, []), DELEGATED).then((q) => ({ out: q.amountOut }), (e) => ({ code: (e as EvmQuoteError).code }));
+  const sale = await evmPoolSellQuoteWith({ chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought, boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest, [chain(pools, 0), chain(pools, 1)], NOW, scanner(5_000_000, []), DELEGATED).then((q) => ({ out: q.amountOut }), (e) => ({ code: (e as EvmQuoteError).code }));
   assert.deepEqual(sale, { out: AMOUNT / 10n });
 });
 
@@ -5967,7 +5975,7 @@ test("review of da11bbb6, L2 (sell) a proper set's read that answers 0 rather th
   const capped = (a: bigint) => (a === AMOUNT || a === 2n * AMOUNT ? 0n : a);
   const B: ModelPool = { key: keyOf(token, x, 3000, 60, PH(0x70)), give: (a) => a, lie: (a) => (a * 95n) / 100n, exec: (a, ctx) => (later(ctx) ? (a * 90n) / 100n : (a * 95n) / 100n) };
   const A: ModelPool = { key: keyOf(x, NATIVE, 3000, 60, PH(0x71)), give: (a) => a, lie: capped, exec: (a) => capped(a) };
-  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, signSim } as EvmPoolSellQuoteRequest;
+  const req = { chain: "base", token, w: SELL_W, amountIn: AMOUNT, slippageBps: 100, bought: seededRoute(token), boughtBlock: 1n, sent: [], signSim } as EvmPoolSellQuoteRequest;
   const got = await evmPoolSellQuoteWith(req, [chain([B, A], 0), chain([B, A], 1)], NOW, scanner(5_000_000, [{ key: B.key, at: 4_500_000 }, { key: A.key, at: 4_100_001 }]), DELEGATED).then(
     (q) => ({ out: q.amountOut }),
     (e) => ({ code: (e as EvmQuoteError).code, message: (e as EvmQuoteError).message, reference: (e as { reference?: unknown }).reference ?? null }),

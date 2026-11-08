@@ -275,13 +275,19 @@ try {
           check(await sheetClosed(f), `${tag}: the scrim did not close the trade sheet`);
           check((await f.evaluate(() => document.body.style.overflow)) === "", `${tag}: the page stays locked after the sheet closed`);
         }
-        // Sell, a quick buy and Escape
-        for (const [what, q] of [["Sell", ".tkp-sell"], ["a quick buy", ".tkp-chip"]]) {
-          await f.locator(q).first().click();
-          const o = await f.locator('[data-sheet="trade"]').waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false);
-          check(o, `${tag}: ${what} did not open the trade sheet`);
+        // Sell and Escape
+        await f.locator(".tkp-sell").first().click();
+        const o = await f.locator('[data-sheet="trade"]').waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false);
+        check(o, `${tag}: Sell did not open the trade sheet`);
+        await page.keyboard.press("Escape");
+        check(await sheetClosed(f), `${tag}: Escape did not close the sheet opened by Sell`);
+        // a quick buy signed out is the box's preset signed out (card app-quick-buy-one-tap): the sign-in sheet, no trade sheet
+        const chip = f.locator(".tkp-chip").first();
+        check(await chip.isEnabled(), `${tag}: a quick buy is disabled signed out`);
+        if (await sheetOpens(`${tag} quick buy`, f, () => chip.click())) {
+          check(!(await f.locator('[data-sheet="trade"]').isVisible()), `${tag}: a quick buy opened the trade sheet`);
           await page.keyboard.press("Escape");
-          check(await sheetClosed(f), `${tag}: Escape did not close the sheet opened by ${what}`);
+          check(await closed(f, '[data-sheet="signin"]'), `${tag}: Escape did not close the sign-in sheet after a quick buy`);
         }
         // the grab handle closes it too
         await f.locator(".tkp-buy").click();

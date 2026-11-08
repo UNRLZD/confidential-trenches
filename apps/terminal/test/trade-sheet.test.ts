@@ -48,14 +48,15 @@ test("the sheet draws the box only through the step: mounted once, hidden (not r
   assert.doesNotMatch(s, /window\.confirm|confirm\(|alert\(/);
 });
 
-test("the token page opens the one sheet with the box and the safety grid in it, from Buy, Sell and each quick buy", () => {
+test("the token page opens the one sheet with the box and the safety grid in it, from Buy and Sell (a quick buy buys in one tap: test/quick-buy.test.ts)", () => {
   const s = src("screens/token/TokenPage.tsx");
   assert.match(s, /import \{ TradeSheet, useTradeSheet \} from "\.\.\/trade\/TradeSheet\.tsx"/);
   assert.match(s, /<TradeSheet [^>]*state=\{sheet\.state\}/);
   // the box inside the sheet is the desktop's Ticket: TradeBox with the safety grid as its footer
-  assert.match(s, /<TradeSheet[\s\S]*?<Ticket r=\{r\} t=\{t\} \/>[\s\S]*?<\/TradeSheet>/);
+  // (its fill toast is the page's TradeToast, card app-quick-buy-one-tap)
+  assert.match(s, /<TradeSheet[\s\S]*?<Ticket r=\{r\} t=\{t\} toast=\{false\} \/>[\s\S]*?<\/TradeSheet>/);
   const bar = s.slice(s.indexOf('className="tkp-bottom"'));
-  assert.equal((bar.match(/onClick=\{sheet\.open\}/g) ?? []).length, 3, "the quick buys, Sell and Buy open the sheet");
+  assert.equal((bar.match(/onClick=\{sheet\.open\}/g) ?? []).length, 2, "Sell and Buy open the sheet");
   // the old sheet that unmounted on close is gone
   assert.doesNotMatch(s, /\{sheet && v && r && <TradeSheet/);
 });
@@ -74,11 +75,11 @@ test("the token page holds one trade state and both widths draw it: a buy starte
   assert.match(page, /<Desktop [^>]*t=\{trade\}/);
   assert.match(page, /<Phone [^>]*t=\{trade\}/);
   assert.match(page, /<TradeView t=\{t\}/);
-  assert.equal((page.match(/<Ticket r=\{r\} t=\{t\} \/>/g) ?? []).length, 2, "the desktop column and the sheet draw the same state");
+  assert.equal((page.match(/<Ticket r=\{r\} t=\{t\}( toast=\{false\})? \/>/g) ?? []).length, 2, "the desktop column and the sheet draw the same state");
   // the box is its state (useTrade, one quote and one follow of the kit per state) and its view (TradeView)
   const box = src("screens/trade/TradeBox.tsx");
   assert.match(box, /export function useTrade\(at: TradeAt \| null/);
-  assert.match(box, /export function TradeView\(\{ t, symbol, footer \}/);
+  assert.match(box, /export function TradeView\(\{ t, symbol, footer, toast = true \}/);
   assert.match(box, /const t = useTrade\(\{ chain, token, slippageBps \}, initialAmount\);\s*return <TradeView t=\{t\}/);
   // the view subscribes to nothing: every kit call and timer is the state's, so two views never quote or follow twice
   const view = box.slice(box.indexOf("export function TradeView("));

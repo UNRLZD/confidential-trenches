@@ -7,6 +7,7 @@
 import { pinnedBuildQuoted, type EvmPoolBuy, type EvmPoolVenueList } from "./buy-unpinned.ts";
 import { EvmPoolSellError, pinnedBuildSell, type EvmPoolSell } from "./sell-unpinned.ts";
 import { EVM_QUOTE_MAX_AGE_MS, EvmQuoteError, evmIsDeviceQuote, evmIsDeviceSellQuote, type EvmPoolBuyQuote, type EvmPoolSellQuote } from "../../checks/evm/quote.ts";
+import { evmSellReleasesClear } from "./sell-releases.ts";
 
 /** What W adds to a device sell quote: the return note's precommitment, the deadline (unix seconds), W's sell nonce,
  *  the sender's fee cap: by default the quote's feeMax, the device's own fee rule (card evm-buy-hookdata-fee); a
@@ -51,6 +52,9 @@ export function evmQuotedSell(venues: EvmPoolVenueList, quote: EvmPoolSellQuote,
   if (typeof fields !== "object" || fields === null) throw new EvmPoolSellError("bad_amount", "the sell's fields are an object");
   const { precommitment, feeCap: asked, feeRecipient, deadline, nonce } = fields;
   const { chain, w, token, amountIn: amount, target, route, minOut, feeMax, hooked } = quote;
+  // no sale while a release that pays W ETH is on its way: a hostile route could land it mid-swap and pass minOut with
+  // its ETH (audit E-01). The verdict is the quote's own read at its block, never the caller's (sell-releases.ts)
+  evmSellReleasesClear(quote);
   // the sender takes no more than the device's own fee rule allows, never a figure a caller or a server names
   const feeCap = asked === undefined ? feeMax : asked;
   if (feeCap > feeMax) throw new EvmPoolSellError("bad_fee", `the fee cap is above the device's fee rule's ${feeMax}`);
