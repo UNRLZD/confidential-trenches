@@ -4,8 +4,8 @@
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9KL6+ukzoMZ7kbSmjagrF9WVpRpB7N4XICIk7L22pM61KwDpcNfHTZQfi17Vy4W0\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-9KL6+ukzoMZ7kbSmjagrF9WVpRpB7N4XICIk7L22pM61KwDpcNfHTZQfi17Vy4W0",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bdI7qAnf/vTrk/S0pBB0DzC31RXm7KeOyPQWmkF5jKTBjCej6CfFW2fkx3t44M4U\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bdI7qAnf/vTrk/S0pBB0DzC31RXm7KeOyPQWmkF5jKTBjCej6CfFW2fkx3t44M4U",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -18,7 +18,9 @@
       "the sweep's rule leaves exactly that, for at most two": true,
       "the sweep goes on when only owed-cashback accounts are kept": true,
       "W owed, not dropped, when the rest is under the floor": true,
-      "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": true,
+      "a load that reads W as it read at its last end runs no pass": true,
+      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end with what W read as": true,
+      "a load whose own reads fail keeps every record, and the sell lock is taken per owed W, never around the list": true,
       "the plan marks a volume account owed only cashback": true
     }
   },
@@ -37,7 +39,9 @@
       "the sweep's rule leaves exactly that, for at most two": false,
       "the sweep goes on when only owed-cashback accounts are kept": false,
       "W owed, not dropped, when the rest is under the floor": false,
-      "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": false,
+      "a load that reads W as it read at its last end runs no pass": false,
+      "an owed W's record is dropped only when both RPCs read W empty, kept on every other end with what W read as": false,
+      "a load whose own reads fail keeps every record, and the sell lock is taken per owed W, never around the list": false,
       "the plan marks a volume account owed only cashback": false
     }
   }

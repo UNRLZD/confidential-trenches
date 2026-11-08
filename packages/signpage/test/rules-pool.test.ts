@@ -788,7 +788,7 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
 // device builds is refused (stuck) and no other reserve passes (extra). L-a: on the fallback the rule did not hold the
 // note to the pool's least deposit: at 216 x 2 a byte with two owed, reserve 5,420,920 (short + rent(0)) left a note of
 // 999,999, which the device refuses and the program (deposit.rs) too; the rule passed it.
-test("Solana full sell: the rule passes exactly the device's reserve, a note under the pool's least deposit never", async () => {
+test("Solana full sell: the rule passes exactly the device's reserve, a note under the pool's least deposit never, a partial sell's neither", async () => {
   const { venue, ref, reads } = await setup("pump");
   const amount = 5_000_000n;
   // a reference whose expected out is small, so min outs of a few million lamports (where the fallback and the floor
@@ -832,6 +832,9 @@ test("Solana full sell: the rule passes exactly the device's reserve, a note und
   la.minOut = 5_420_920n + 999_999n;
   assert.ok(la.made >= 0n);
   assert.deepEqual(run(la), { stuck: [], extra: [] }, "216 x 2, owed 2, a 999,999 note");
+  // and on a partial sell (the review of c1fd2d20, 3): a 999,999 note refused, exactly the least deposit passes
+  assert.equal(rule(2_000_000n, 1_000_001n, undefined as never), false, "a partial sell's 999,999 note");
+  assert.equal(rule(2_000_000n, 1_000_000n, undefined as never), true, "a partial sell's 1,000,000 note");
   // the fuzz: rents, owed counts, held lamports, fees and the cost of made accounts drawn at a fixed seed, each min out
   // anchored at an edge (the floor, the least deposit, the fallback's note at the least deposit, 0, the cap)
   let s = 7;

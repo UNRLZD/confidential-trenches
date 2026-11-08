@@ -38,13 +38,13 @@ const JS = [
   "function GE(e,t=0){let n=HE(e)>1000000n?HE(e):FE,r=ay(e,88),i=n+(sd+ay(e,IE)+2n*r)+sd-ay(e,165)+WE(e,t),a=ay(e,0);return i>a?i:a}",
   "ie=k.kind===`pumpswap`?gf:Qu,[ae,oe]=await Promise.all([UR(g,p,v,F,c),Promise.all([Qu,gf].map(async e=>k.cashback&&e===ie?!0:(await wR(g,t=>TR(t,Sf(f.address,e),`confirmed`))).some(t=>!(`none`in t)&&t.owner===e&&Mf(e,t.data)>0n))).then(e=>e.filter(Boolean).length)]),se=I?vy(k,_):GE(_,oe),ce=HE(_)>1000000n?HE(_):FE,",
   "let a=ay(_,0),o=BR({fee:r,made:M,rents:UE(_,v,ae,e),after:se,lamports:b,minOut:ee,keeps:I,...I?{}:{swept:se-a,base:a,floor:ce}});",
-  "var nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
+  "var sd=5000n,ad=1000000n,nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
   "let _=wE(g.data,16);if(_<u)return X(`min_out`);let v=ly(r,n.wallet,t.amount,_);if(typeof s!=`bigint`||s>=_)return X(`reserve`);let y=0n,b=c;if(b!==void 0&&b.full===!0){if(typeof b.lamports!=`bigint`||typeof b.fee!=`bigint`||typeof b.made!=`bigint`||b.fee<0n||b.made<0n||typeof b.next!=`boolean`||typeof b.rent?.lamportsPerByte!=`bigint`||typeof b.rent.factor!=`bigint`||b.rent.lamportsPerByte<0n||b.rent.factor<0n||b.rent.lamportsPerByte*b.rent.factor>6960n||!Number.isSafeInteger(b.owed)||b.owed<0||b.owed>2)return X(`reserve`);let e=b.fee+b.made+UE(b.rent,o,b.held,b.next)-b.lamports,t=GE(b.rent,b.owed),n=ay(b.rent,0),r=HE(b.rent)>1000000n?HE(b.rent):FE,i=e+t,a=i-(t-n)<=iE&&i<_&&_-i>=r;if(s!==(a?i:e+n))return X(`reserve`);a&&(y=t-n)}else if(s<0n)return X(`reserve`);if(s-y>iE||_-s<1000000n)return X(`reserve`);let x=OE(m,l,n.wallet,n.precommitment,o,!0);return x===_-s?",
   "var UE=(e,t)=>t===0?0n:iy(e,0)+BigInt(t)*(sd+iy(e,165));",
   "return typeof r!=`bigint`||!Number.isSafeInteger(o)||o<0||o>2?X(`sweep_reads`):l+5000n+HE(i,n,a)+UE(i,o)===r?l:X(`sweep_amount`)}",
   "function qR(e){return e.length>2||e.some(e=>e.cashback!==!0)?null:e.length}",
   "if(T<x)return{end:i>0?`owed`:`floor`,detail:``};",
-  "async function ZR(e,t,n,r){try{if(n===`holds`&&await r?.())return;if(n===`floor`)return await e.owed?.put({...t,passes:0,floor:!0});if(n!==`sent`&&n!==`gave_up`&&n!==`owed`)return await e.owed?.drop(t.address);if(t.passes+1>=5&&t.floor===!0)return await e.owed?.put({...t,passes:0});if(t.passes+1>=5)return e.told?.({});",
+  "async function XR(e,t,n){let r=await YR(t).catch(()=>void 0);(r===void 0||r!==n.seen)&&await ZR(e,n,await qR(e,t),r)}async function ZR(e,t,n,r){try{if(n===`nothing`)return await e.owed?.drop(t.address);let{seen:i,...a}=t;await e.owed?.put({...a,passes:t.passes+1,...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`)?{seen:r}:{}})}catch{}}async function QR(e,t=globalThis.navigator?.locks??null){if(!t||!e.owed)return;let n=await e.owed.list();if(n.length===0)return;let r=e.pin.program,{pool:i,scope:a}=oC(r),o=e.rpcs,s=e.wait??(e=>new Promise(t=>setTimeout(t,e))),c;try{c={store:await e.notes(),sync:xC(o,r),rent:await oy(o),wallets:await e.wallets()}}catch(t){for(let r of n)e.told?.({address:r.address,step:`rent_back`,state:`gave_up`,detail:`this load's reads: ${WR(t)}`}),await ZR(e,r,`gave_up`);return}let{store:l,sync:u,rent:d,wallets:f}=c;for(let{address:c}of n)if(!await t.request(`ct-pool/sell`,{mode:`exclusive`,ifAvailable:!0},async t=>{if(!t)return!1;let n=(await e.owed.list()).find(e=>e.address===c),p=n&&f.find(e=>e.chain===`sol`&&e.address===n.address&&e.l.toString()===n.l&&e.j===n.j);return n&&p&&await XR(e,{rpcs:o,program:r,pool:i,scope:a,rent:d,store:l,sync:u,w:p,mints:n.mints,wait:s},n),!0}))return}",
   "r.keep.push({address:e,why:o.join(`, `),...i.other.length===0&&i.amount>0n?{cashback:!0}:{}})",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
@@ -77,14 +77,19 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("||o>2?", "?"), 8],
     [JS.replace("e.some(e=>e.cashback!==!0)", "!1"), 9],
     [JS.replace("{end:i>0?`owed`:`floor`,", "{end:`floor`,"), 10],
-    [JS.replace("if(n===`floor`)return await e.owed?.put({...t,passes:0,floor:!0});", ""), 11],
-    [JS.replace("passes:0,floor:!0", "floor:!0"), 11],
-    [JS.replace("if(t.passes+1>=5&&t.floor===!0)return await e.owed?.put({...t,passes:0});", ""), 11],
-    [JS.replace("i.other.length===0&&", ""), 12],
+    [JS.replace("nE=sd+BigInt(14e5)*ad/1000000n", "nE=sd"), 6],
+    [JS.replace("ad=1000000n", "ad=2000000n"), 6],
+    [JS.replace("sd=5000n", "sd=0n"), 6],
+    [JS.replace("(r===void 0||r!==n.seen)&&", ""), [11, 12, 13]],
+    [JS.replace("if(n===`nothing`)return await e.owed?.drop(t.address)", "if(n!==`floor`)return await e.owed?.drop(t.address)"), 12],
+    [JS.replace(",...r!==void 0&&(n===`floor`||n===`holds`||n===`kept`)?{seen:r}:{}", ""), 12],
+    [JS.replace("await ZR(e,r,`gave_up`);return}", "await e.owed?.drop(r.address);return}"), 13],
+    [JS.replace("{mode:`exclusive`,ifAvailable:!0},async t=>{if(!t)return!1;", "{mode:`exclusive`},async t=>{"), 13],
+    [JS.replace("i.other.length===0&&", ""), 14],
   ];
   for (const [js, i] of planted) {
     assert.notEqual(js, JS, "each plant changes the line");
     const c = facts("", js).carries;
-    assert.deepEqual(Object.entries(c).filter(([, v]) => !v).map(([k]) => k), [Object.keys(MARKS)[i]], js.slice(0, 80));
+    assert.deepEqual(Object.entries(c).filter(([, v]) => !v).map(([k]) => k), [i].flat().map((n) => Object.keys(MARKS)[n]), js.slice(0, 80));
   }
 });

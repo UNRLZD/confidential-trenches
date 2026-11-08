@@ -129,8 +129,6 @@ export const POOL_SELL_LOCK = "ct-pool/sell";
 export const POOL_RENT_BACK_TRIES = 30;
 /** The rent back's one wall-clock bound, every step and read-back in it (review M2): the sell's own verdict budget. */
 export const POOL_RENT_BACK_MS = POOL_SELL_READS * POOL_SELL_WAIT_MS;
-/** Rent backs a W may start (its sell's, then one per page load) before the device stops owing it and tells so. */
-export const POOL_RENT_BACK_PASSES = 5;
 /** A sell whose deposit met a tree page another deposit filled first (WrongAccount on both RPCs, nothing moved): built
  *  again from new reads, at most this many times (review L2). */
 export const POOL_SELL_REBUILDS = 2;
@@ -387,9 +385,10 @@ export async function settlePoolSells(h: Pick<PoolSellHost, "pin" | "rpcs" | "no
  *  deposit having met a page another deposit filled first. */
 type Later = { back?: () => Promise<void>; rebuild?: true };
 
-/** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `floor`
- *  once a pass left W under the floor (lamports on W the pass bound never forgets). */
-export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; floor?: true };
+/** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `seen`,
+ *  what W read as (heldSeen) when its last pass ended on W's own state (under the floor, holding, an account kept), so
+ *  a load that reads W the same skips the pass. */
+export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; seen?: string };
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void> };
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
@@ -957,35 +956,35 @@ export function owedOf(keep: readonly { cashback?: true }[]): number | null {
   return keep.length;
 }
 
-/** A rent back, then its owed record. */
-async function rentBackOwed(h: PoolSellHost, x: RentBack, o: OwedRentBack): Promise<void> {
-  const e = await rentBack(h, x);
-  // W's sell note still INCOMING: its sell may land yet (review M-B), so a W that holds is owed until it settles
-  const sending = async (): Promise<boolean> => (await x.store.list()).some((n) => n.state === "INCOMING" && n.scope === x.scope && sellRef(n.ref) && sellOwner(n.ref, x.w.l, x.w.j));
-  await owedAfter(h, o, e, sending);
+/** What W reads as for its rent back: W and its accounts of the record's mints, the same bytes on both RPCs (one
+ *  getMultipleAccounts call on each), and the tokens the page's holdings show on W; undefined when the two RPCs differ.
+ *  Nothing is decided on it but whether a pass runs. */
+async function heldSeen(x: RentBack): Promise<string | undefined> {
+  const addresses = [x.w.address, ...solanaTeardownAddresses(x.w.address, x.mints)];
+  const [a, b] = (await both(x.rpcs, (r) => accountsOf(r, addresses))).map((reads) => reads.map((t) => (t === null ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`)).join("|"));
+  if (a !== b) return undefined;
+  const tokens = [...x.w.holdings.tokens].filter(([, t]) => t.amount > 0n).map(([mint]) => mint).sort().join(",");
+  return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${tokens}`)));
 }
 
-const sellOwner = (ref: NoteRef, l: bigint, j: number): boolean => (ref.kind === "return" ? ref.l === l && ref.j === j : ref.kind === "second" && ref.id.id === "R" && ref.id.l === l && ref.id.j === j);
+/** A rent back, then its owed record: none when W reads as it did when its last pass ended on W's own state (review 3
+ *  of c1fd2d20, 2b: a steady W costs one read a load, not a pass). */
+async function rentBackOwed(h: PoolSellHost, x: RentBack, o: OwedRentBack): Promise<void> {
+  const seen = await heldSeen(x).catch(() => undefined);
+  if (seen !== undefined && seen === o.seen) return;
+  await owedAfter(h, o, await rentBack(h, x), seen);
+}
 
-/** The owed record after a pass that ended `e`: dropped once nothing is left to do for W (or after
- *  POOL_RENT_BACK_PASSES passes, told), kept with one pass more while its sweep is unconfirmed or it gave up, so the
- *  next load runs it again; under the floor kept with its passes reset and never dropped by the bound; a W that holds is kept as it is while its sell note is INCOMING (`sending`), and dropped
- *  once that note is PLANNED again (its sell never landed: W's next sell owes its own). */
-async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, sending?: () => Promise<boolean>): Promise<void> {
+/** The owed record after a pass that ended `e` (review of c1fd2d20, 2a: no lamport on W goes untracked): dropped only
+ *  once both RPCs read W empty ("nothing"); every other end keeps it with one pass more (a pass bound dropped Ws whose
+ *  passes faulted, both RPCs down, and one reader's word that W holds a token dropped it too), with what W read as when
+ *  the pass ended on W's own state (under the floor, holding, an account kept), so the next load that reads W the same
+ *  skips it. */
+async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, seen?: string): Promise<void> {
   try {
-    if (e === "holds" && (await sending?.())) return;
-    // W under the floor (review 2 L4 of 911d7e25: a lying RPC's owed count can force the sell's rent(0) fallback, and
-    // what is left on W, ~2.13M, was forgotten): kept with its passes reset and marked, so only fault ends since this
-    // count, and the bound never drops it (review 3 L-b of 446d830f: five loads with both RPCs down did); every load
-    // sweeps it again once it can make a note (lamports sent to W)
-    if (e === "floor") return await h.owed?.put({ ...o, passes: 0, floor: true });
-    if (e !== "sent" && e !== "gave_up" && e !== "owed") return await h.owed?.drop(o.address);
-    if (o.passes + 1 >= POOL_RENT_BACK_PASSES && o.floor === true) return await h.owed?.put({ ...o, passes: 0 });
-    if (o.passes + 1 >= POOL_RENT_BACK_PASSES) {
-      h.told?.({ address: o.address, step: "rent_back", state: "gave_up", detail: `owed no more after ${POOL_RENT_BACK_PASSES} passes: what is left stays on W` });
-      return await h.owed?.drop(o.address);
-    }
-    await h.owed?.put({ ...o, passes: o.passes + 1 });
+    if (e === "nothing") return await h.owed?.drop(o.address);
+    const { seen: _last, ...rest } = o;
+    await h.owed?.put({ ...rest, passes: o.passes + 1, ...(seen !== undefined && (e === "floor" || e === "holds" || e === "kept") ? { seen } : {}) });
   } catch {
     // an owed record that cannot be written: the rent back runs again only while one is stored
   }
@@ -998,32 +997,37 @@ async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, sendi
  */
 export async function resumeRentBacks(h: PoolSellHost, locks: Locks | null = globalThis.navigator?.locks ?? null): Promise<void> {
   if (!locks || !h.owed) return;
-  await locks.request(POOL_SELL_LOCK, { mode: "exclusive", ifAvailable: true }, async (lock) => {
-    if (!lock) return;
-    const owed = await h.owed!.list();
-    if (owed.length === 0) return;
-    const program = h.pin.program;
-    const { pool, scope } = solanaPoolOf(program);
-    const rpcs = h.rpcs;
-    const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
-    let setup: { store: NoteStore; sync: SolanaTreeSync; rent: SolanaRent; wallets: readonly BuyWallet[] };
-    try {
-      setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: await h.wallets() };
-    } catch (e) {
-      // this load's own reads failed (a provider down): a pass for each, told
-      for (const o of owed) {
-        h.told?.({ address: o.address, step: "rent_back", state: "gave_up", detail: `this load's reads: ${faultOf(e)}` });
-        await owedAfter(h, o, "gave_up");
-      }
-      return;
-    }
-    const { store, sync, rent, wallets } = setup;
+  const owed = await h.owed.list();
+  if (owed.length === 0) return;
+  const program = h.pin.program;
+  const { pool, scope } = solanaPoolOf(program);
+  const rpcs = h.rpcs;
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  let setup: { store: NoteStore; sync: SolanaTreeSync; rent: SolanaRent; wallets: readonly BuyWallet[] };
+  try {
+    setup = { store: await h.notes(), sync: solanaTreeSync(rpcs, program), rent: await readSolanaRent(rpcs), wallets: await h.wallets() };
+  } catch (e) {
+    // this load's own reads failed (a provider down): told, each record kept for the next load
     for (const o of owed) {
-      const w = wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
-      if (w === undefined) continue;
-      await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait }, o);
+      h.told?.({ address: o.address, step: "rent_back", state: "gave_up", detail: `this load's reads: ${faultOf(e)}` });
+      await owedAfter(h, o, "gave_up");
     }
-  });
+    return;
+  }
+  const { store, sync, rent, wallets } = setup;
+  // the sell lock for one W at a time, never around the list (review of c1fd2d20, 2c): a sell tapped meanwhile waits
+  // for the one W in flight, and the rest of the list waits for the next load
+  for (const { address } of owed) {
+    const go = await locks.request(POOL_SELL_LOCK, { mode: "exclusive", ifAvailable: true }, async (lock) => {
+      if (!lock) return false;
+      // the record as it is now: a sell meanwhile may have written W's again or dropped it
+      const o = (await h.owed!.list()).find((r) => r.address === address);
+      const w = o && wallets.find((x) => x.chain === "sol" && x.address === o.address && x.l.toString() === o.l && x.j === o.j);
+      if (o && w) await rentBackOwed(h, { rpcs, program, pool, scope, rent, store, sync, w, mints: o.mints, wait }, o);
+      return true;
+    });
+    if (!go) return;
+  }
 }
 
 type Locks = Pick<LockManager, "request">;

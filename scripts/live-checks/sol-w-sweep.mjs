@@ -17,8 +17,10 @@
 //   - a sweep that leaves W exactly what each owed cashback claim costs later (rent(0), a frame's fee, the claim
 //     account's rent), at most two, checked by the sweep's rule;
 //   - the sweep goes on when every account kept is a volume account owed cashback only (the kit's plan marks them),
-//     W ending "owed" (its record kept) when the rest is under the floor; a sweep ending "floor" keeps W's record too,
-//     its passes reset, and the pass bound never drops it.
+//     W ending "owed" (its record kept) when the rest is under the floor;
+//   - an owed W's record dropped only when both RPCs read W empty, every other end (a fault, a load whose reads fail,
+//     one reader's word that W holds a token) keeping it, a load that reads W as at its last end running no pass, and
+//     the sell lock taken per owed W, so a sell tapped meanwhile waits for one W at most.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // rules-pool.test.ts), and that the served files are that commit's build is signpage-release's.
 //   node scripts/live-checks/sol-w-sweep.mjs [--record <file>] [--answer <file>]
@@ -35,12 +37,16 @@ const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}
 const I = "[\\w$]+"; // a minified name
 const esc = (n) => n.replace(/\$/g, "\\$");
 /** A mark whose named group `cap` must be SOLANA_POOL_SELL_RESERVE_MAX as the bundle defines it: the transaction fee's
- *  most, 145 bytes' rent and two pages' 216 at SOLANA_RENT_PER_BYTE_MAX, that rate 6,960 (rules/pool.ts). */
+ *  most (SOLANA_POOL_TX_FEE_MAX: 5,000 a signature and 1,400,000 compute units at 1,000,000 micro-lamports), 145 bytes'
+ *  rent and two pages' 216 at SOLANA_RENT_PER_BYTE_MAX, that rate 6,960 (rules/pool.ts). */
 const capOf = (re) => ({
   test(js) {
     const cap = re.exec(js)?.groups?.cap;
-    const rate = cap && new RegExp(`[,;]${esc(cap)}=${I}\\+145n\\*(${I})\\+2n\\*216n\\*\\1[,;]`).exec(js)?.[1];
-    return Boolean(rate) && new RegExp(`[,;]${esc(rate)}=6960n[,;]`).test(js);
+    const terms = cap && new RegExp(`[,;]${esc(cap)}=(${I})\\+145n\\*(${I})\\+2n\\*216n\\*\\2[,;]`).exec(js);
+    if (!terms) return false;
+    const fee = new RegExp(`[,;]${esc(terms[1])}=(${I})\\+BigInt\\(14e5\\)\\*(${I})/1000000n[,;]`).exec(js);
+    const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
+    return Boolean(fee) && is(terms[2], "6960n") && is(fee[1], "5000n") && is(fee[2], "1000000n");
   },
 });
 /** Each rule's mark in the bundle, by what it holds. */
@@ -56,7 +62,9 @@ export const MARKS = Object.freeze({
   "the sweep's rule leaves exactly that, for at most two": new RegExp(`\\|\\|(${I})<0\\|\\|\\1>2\\?${I}\\(\`sweep_reads\`\\):${I}\\+5000n\\+${I}\\(${I},${I},${I}\\)\\+${I}\\(${I},\\1\\)===`),
   "the sweep goes on when only owed-cashback accounts are kept": new RegExp(`function ${I}\\((${I})\\)\\{return \\1\\.length>2\\|\\|\\1\\.some\\((${I})=>\\2\\.cashback!==!0\\)\\?null:\\1\\.length\\}`),
   "W owed, not dropped, when the rest is under the floor": new RegExp(`\\{end:(${I})>0\\?\`owed\`:\`floor\`,`),
-  "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": new RegExp(`if\\((?<n>${I})===\`floor\`\\)return await (?<h>${I})\\.owed\\?\\.put\\(\\{\\.\\.\\.(?<o>${I}),passes:0,floor:!0\\}\\);if\\(\\k<n>!==\`sent\`&&\\k<n>!==\`gave_up\`&&\\k<n>!==\`owed\`\\)return await \\k<h>\\.owed\\?\\.drop\\(\\k<o>\\.address\\);if\\(\\k<o>\\.passes\\+1>=5&&\\k<o>\\.floor===!0\\)return await \\k<h>\\.owed\\?\\.put\\(\\{\\.\\.\\.\\k<o>,passes:0\\}\\);if\\(\\k<o>\\.passes\\+1>=5\\)`),
+  "a load that reads W as it read at its last end runs no pass": new RegExp(`async function (?<xr>${I})\\((?<h>${I}),(?<x>${I}),(?<o>${I})\\)\\{let (?<s>${I})=await ${I}\\(\\k<x>\\)\\.catch\\(\\(\\)=>void 0\\);\\(\\k<s>===void 0\\|\\|\\k<s>!==\\k<o>\\.seen\\)&&await (?<zr>${I})\\(\\k<h>,\\k<o>,await ${I}\\(\\k<h>,\\k<x>\\),\\k<s>\\)\\}`),
+  "an owed W's record is dropped only when both RPCs read W empty, kept on every other end with what W read as": new RegExp(`async function (?<xr>${I})\\((?<h>${I}),(?<x>${I}),(?<o>${I})\\)\\{let (?<s>${I})=await ${I}\\(\\k<x>\\)\\.catch\\(\\(\\)=>void 0\\);\\(\\k<s>===void 0\\|\\|\\k<s>!==\\k<o>\\.seen\\)&&await (?<zr>${I})\\(\\k<h>,\\k<o>,await ${I}\\(\\k<h>,\\k<x>\\),\\k<s>\\)\\}async function \\k<zr>\\((?<h2>${I}),(?<o2>${I}),(?<e2>${I}),(?<s2>${I})\\)\\{try\\{if\\(\\k<e2>===\`nothing\`\\)return await \\k<h2>\\.owed\\?\\.drop\\(\\k<o2>\\.address\\);let\\{seen:${I},\\.\\.\\.(?<rest>${I})\\}=\\k<o2>;await \\k<h2>\\.owed\\?\\.put\\(\\{\\.\\.\\.\\k<rest>,passes:\\k<o2>\\.passes\\+1,\\.\\.\\.\\k<s2>!==void 0&&\\(\\k<e2>===\`floor\`\\|\\|\\k<e2>===\`holds\`\\|\\|\\k<e2>===\`kept\`\\)\\?\\{seen:\\k<s2>\\}:\\{\\}\\}\\)\\}catch\\{\\}\\}`),
+  "a load whose own reads fail keeps every record, and the sell lock is taken per owed W, never around the list": new RegExp(`async function (?<xr>${I})\\((?<h>${I}),(?<x>${I}),(?<o>${I})\\)\\{let (?<s>${I})=await ${I}\\(\\k<x>\\)\\.catch\\(\\(\\)=>void 0\\);\\(\\k<s>===void 0\\|\\|\\k<s>!==\\k<o>\\.seen\\)&&await (?<zr>${I})\\(\\k<h>,\\k<o>,await ${I}\\(\\k<h>,\\k<x>\\),\\k<s>\\)\\}async function \\k<zr>\\([\\s\\S]{0,400}?\\}catch\\{\\}\\}async function ${I}\\([^)]*\\)\\{[\\s\\S]{0,700}?catch\\((?<err>${I})\\)\\{for\\(let (?<r>${I}) of (?<list>${I})\\)${I}\\.told\\?\\.\\(\\{[\\s\\S]{0,200}?state:\`gave_up\`[\\s\\S]{0,200}?\\}\\),await \\k<zr>\\(${I},\\k<r>,\`gave_up\`\\);return\\}[\\s\\S]{0,200}?for\\(let\\{address:(?<a>${I})\\}of \\k<list>\\)if\\(!await (?<lk>${I})\\.request\\(\`ct-pool/sell\`,\\{mode:\`exclusive\`,ifAvailable:!0\\},async (?<l>${I})=>\\{if\\(!\\k<l>\\)return!1;[\\s\\S]{0,400}?await \\k<xr>\\([\\s\\S]{0,200}?\\),!0\\}\\)\\)return\\}`),
   "the plan marks a volume account owed only cashback": new RegExp(`\\.\\.\\.(${I})\\.other\\.length===0&&\\1\\.amount>0n\\?\\{cashback:!0\\}:\\{\\}`),
 });
 
