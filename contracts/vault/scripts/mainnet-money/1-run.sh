@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Paste 1 of the mainnet money run (card vault-mainnet-money): the deposit and the relayed withdrawal, both carried by
 # the deployed helper (its mainnet switch, apps/helper/deploy/vault-lines.sh, must be live first). Real money: the
-# owner's paste, with the NEAR account the withdrawal pays as its one argument (an existing account the owner holds):
-#   sh contracts/vault/scripts/mainnet-money/1-run.sh <your-account.near>
+# owner's paste (lines.sh <commit> <account> prints it), which clones the public repo at the commit into a new folder of
+# its own and runs this from there, with the commit and the NEAR account the withdrawal pays (an existing account the
+# owner holds):  sh contracts/vault/scripts/mainnet-money/1-run.sh <commit> <your-account.near>
 # It types no secret. mainnet-money.ts run, with the run's folder ~/.confidential-trenches/runs/vault-mainnet-money/
 # (mode 700, outside the repo):
 #   1. the gate and the vault read on FastNEAR and dRPC, the named account read on both (it must exist), the relayer's
@@ -17,13 +18,15 @@
 #      followed until the spends row shows it paid to that account on both RPCs.
 # Stopped anywhere (Ctrl-C, a lost connection, a closed lid): paste the same line again. It restores the run's notes
 # from its seed and the vault's pages and goes on from where it stopped; keep the folder as it is.
-# It runs only from a clean checkout whose HEAD is pushed (source-gate.mjs); a changed or untracked path stops it.
+# It runs only from a fresh clone of the public repo at the reviewed, merged commit its line names (lines.sh prints the
+# line): source-gate.mjs holds the clone to that commit before pnpm installs, and the driver again before each signature.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
-[ $# = 1 ] || { echo "paste 1: name the NEAR account the withdrawal pays: sh $0 <your-account.near>"; exit 1; }
+[ $# = 2 ] || { echo "paste 1: the commit and the NEAR account the withdrawal pays: sh $0 <commit> <your-account.near>"; exit 1; }
+node contracts/vault/scripts/source-gate.mjs --commit "$1" --before-install
+pnpm install --frozen-lockfile
 DIR="$HOME/.confidential-trenches/runs"
 mkdir -p "$DIR"
 chmod 700 "$DIR"
-node contracts/vault/scripts/source-gate.mjs
-exec node contracts/vault/scripts/mainnet-money.ts run --state "$DIR/vault-mainnet-money" --to "$1"
+exec node contracts/vault/scripts/mainnet-money.ts run --commit "$1" --state "$DIR/vault-mainnet-money" --to "$2"

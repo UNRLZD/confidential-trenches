@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bindProblem, feeProblems, recordRead, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
+import { bindProblem, ownDeposit, runStepProblems, feeProblems, recordRead, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
 import { noteCommitment, noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
 import { restorePages, writeRestored } from "../../../packages/wallet/src/notes/restore.ts";
@@ -46,19 +46,21 @@ test("H1: the named account may not be U, the fee recipient or the relayer: the 
 });
 
 test("F1, F7: a request that pays anyone but the named account, funds a recipient or leaves change is refused before it is sent", () => {
-  const req = { recipient: "owner.near", changeValue: 0n, body: { fund_recipient: false } };
-  assert.deepEqual(requestProblems(req, "owner.near"), []);
+  const req = { noteId: "n1", recipient: "owner.near", changeValue: 0n, body: { fund_recipient: false } };
+  assert.deepEqual(requestProblems(req, "owner.near", "n1"), []);
   // main's withdrawRequest ignores `to` and pays the note's A_{l,j} with fund_recipient true: two refusals
-  const arming = { recipient: "a".repeat(64), changeValue: 0n, body: { fund_recipient: true } };
-  const p = requestProblems(arming, "owner.near");
+  const arming = { noteId: "n1", recipient: "a".repeat(64), changeValue: 0n, body: { fund_recipient: true } };
+  const p = requestProblems(arming, "owner.near", "n1");
   assert.ok(p.some((x) => /pays a{64}, not owner.near/.test(x)) && p.some((x) => /fund_recipient is true/.test(x)), p.join("\n"));
-  assert.match(requestProblems({ ...req, changeValue: 1n }, "owner.near").join(), /change note of 1/);
+  assert.match(requestProblems({ ...req, changeValue: 1n }, "owner.near", "n1").join(), /change note of 1/);
+  // F4 (27): a request that spends a note other than the one the run picked is refused, the proof made and nothing sent
+  assert.match(requestProblems({ ...req, noteId: "n2" }, "owner.near", "n1").join(), /spends note n2, not the run's n1/);
 });
 
 test("F1, F7: the driver withdraws the note's whole value less one fee to --to, through the wallet's own request", () => {
   assert.match(SRC, /amount: value - fee\.relayFee, to,/);
   assert.doesNotMatch(SRC, /withdrawHandoff\(/, "the form's two-quote draw leaves a lower quote's difference as change");
-  assert.match(SRC, /requestProblems\(req, to\)[\s\S]{0,700}relayWithdraw\(/, "the request is checked before it is sent");
+  assert.match(SRC, /requestProblems\(req, to, pick\.id\);\n\s+if \(rp\.length\) throw[\s\S]{0,700}relayWithdraw\(/, "the request is checked before it is sent");
 });
 
 test("F2: resume is a command, the wait for U has no time bound, and U holds at least min_deposit, not a fixed amount", () => {
@@ -298,11 +300,15 @@ test("L2: resume withdraws the run's UNSPENT note of its label (the deposit note
   assert.equal(noteToWithdraw([dep("UNSPENT"), other], 3)?.id, "d");
   assert.equal(noteToWithdraw([dep("SPENT"), stranger, refund, zero, other], 3)?.id, "r");
   assert.equal(noteToWithdraw([dep("SPENT"), stranger, { ...refund, state: "SPENT" }, zero, refund2, other], 3)?.id, "r2");
+  // F4 (23): the store lists by random id (store.ts getAllKeys), so a child may come before its parent: the walk goes on
+  // until the line stops growing, and the refund of a refund listed first is still found
+  assert.equal(noteToWithdraw([refund2, dep("SPENT"), { ...refund, state: "SPENT" }, other, stranger], 3)?.id, "r2");
+  assert.equal(noteToWithdraw([refund2, { ...refund, state: "SPENT" }, zero, dep("SPENT")], 3)?.id, "r2");
   assert.equal(noteToWithdraw([dep("SPENT"), zero, other, stranger], 3), null);
   assert.equal(noteToWithdraw([other], 3), null);
   // the arrival read follows the note withdrawn last, and the request must spend the picked note
   assert.match(SRC, /const pick = noteToWithdraw\(/);
-  assert.match(SRC, /req\.noteId !== pick\.id/);
+  assert.match(SRC, /requestProblems\(req, to, pick\.id\)/);
 });
 
 test("MA: after a refunded and settled payout, the refund note the wallet restores (the vault's fresh label) is the one withdrawn next", async () => {
@@ -333,18 +339,82 @@ test("MA: after a refunded and settled payout, the refund note the wallet restor
   }
 });
 
-test("LA: a second transfer that reached U after its deposit landed is no front-run: the run goes on with the deposit's note", () => {
-  const U = "a".repeat(64);
-  assert.equal(bindProblem("deposited", undefined, U, 5_000_000n), null);
-  // the earlier call landed 5 USDC; U now holds the 2 USDC of a later transfer, which this bind read
-  assert.equal(bindProblem("front_run", { depositor: U, value: 5_000_000n }, U, 2_000_000n), null);
+test("LA: a second transfer that reached U after its deposit landed is no front-run: the run goes on with the deposit's note", async () => {
+  const U = RUN.U;
+  const want = { ...RUN, value: undefined } as never;
+  const P = BigInt(RUN.P);
+  const rowU = { precommitment: P, depositor: U, value: 5_000_000n };
+  const reads = (byHash: Record<string, unknown>) => async (h: string) => {
+    if (!(h in byHash)) throw new Error(`${h}: not a success on both RPCs`);
+    return byHash[h];
+  };
+  assert.deepEqual(await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) }), { why: null });
+  assert.deepEqual(await bindProblem("struck", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) }), { why: "struck" });
+  // the earlier call landed 5 USDC, its tx heard and read back as the run's; U now holds the 2 USDC of a later transfer
+  const own = await bindProblem("front_run", { rows: [{ precommitment: 9n, depositor: "x.near", value: 1n }, rowU], want, amount: 2_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) });
+  assert.equal(own.why, null);
+  assert.equal(own.row, rowU);
   // P deposited by another account: a real front-run, named for what it is, and U's USDC is still at U
-  assert.match(String(bindProblem("front_run", { depositor: "x.near", value: 1_000_000n }, U, 5_000_000n)), /^front-run: P was deposited by x\.near, not U, with 1000000; U's 5000000 USDC stays at U/);
-  assert.match(String(bindProblem("front_run", undefined, U, 5_000_000n)), /no row of P/);
-  assert.equal(bindProblem("struck", undefined, U, 5_000_000n), "struck");
-  // the driver reads P's row on both RPCs for a front_run and records the deposit's own value, not the read at U
-  assert.match(SRC, /outcome\.kind === "front_run"[\s\S]{0,400}r\.precommitment === BigInt\(run\.precommitment\)[\s\S]{0,200}const why = bindProblem\(outcome\.kind, row, U, amount\);/);
-  assert.match(SRC, /st\.write\("deposit", \{ amount: String\(leaf\.value\)/);
+  const other = await bindProblem("front_run", { rows: [{ precommitment: P, depositor: "x.near", value: 1_000_000n }], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) });
+  assert.match(String(other.why), /^front-run: P was deposited by x\.near, not U, with 1000000; U's 5000000 USDC stays at U/);
+  assert.match(String((await bindProblem("front_run", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) })).why), /no row of P/);
+});
+
+test("F2: a row of P naming U is U's own only when a deposit tx of U for P with the row's value reads back a success", async () => {
+  const U = RUN.U;
+  const want = { ...RUN, value: undefined } as never;
+  const P = BigInt(RUN.P);
+  const reads = (byHash: Record<string, unknown>) => async (h: string) => {
+    if (!(h in byHash)) throw new Error(`${h}: not a success on both RPCs`);
+    return byHash[h];
+  };
+  // the reviewer's case: a front-runner rides P's prepay naming U, and no tx of U for P landed: a stop, never U's own
+  const front = { precommitment: P, depositor: U, value: 1_000_000n };
+  const stop = /^front-run: P was deposited naming U with 1000000, but no deposit tx of U for P with that value reads back a success/;
+  assert.match(String((await ownDeposit({ rows: [front], want, amount: 5_000_000n, txs: [], readTx: reads({}) })).why), stop);
+  // U's own call heard but failed on chain (PrecommitmentAlreadyUsed: a failed receipt): readTx throws, a stop
+  assert.match(String((await ownDeposit({ rows: [front], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({}) })).why), stop);
+  // a landed tx of U for P but of another value (U's 5 USDC) does not make the front-runner's 1 USDC row U's
+  assert.match(String((await ownDeposit({ rows: [front], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) })).why), stop);
+  // a landed tx that is not U's delegate for P (another precommitment) proves nothing
+  assert.match(String((await ownDeposit({ rows: [{ ...front, value: 5_000_000n }], want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx({}, {}, { msg: JSON.stringify({ precommitment: "9", depositor: U }) }) }) })).why), /naming U with 5000000, but no deposit tx/);
+  // F4 (22): the pages not read (null) is never U's own
+  assert.match(String((await ownDeposit({ rows: null, want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) })).why), /pages were not read/);
+  // F4 (21): the row is P's own row, never another row of the page
+  const rows = [{ precommitment: 77n, depositor: U, value: 5_000_000n }, { precommitment: P, depositor: "x.near", value: 5_000_000n }];
+  assert.match(String((await ownDeposit({ rows, want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) })).why), /deposited by x\.near/);
+  assert.match(String((await ownDeposit({ rows: rows.slice(0, 1), want, amount: 5_000_000n, txs: ["h1"], readTx: reads({ h1: depTx() }) })).why), /no row of P/);
+  // the driver: a front_run reads P's row, then asks ownDeposit with the note's calls and every heard or named deposit tx,
+  // each read back on both release RPCs; a row of P met while it waits goes through the same proof
+  assert.match(SRC, /const \{ why, row \} = await bindProblem\(outcome\.kind, \{ rows, want: wantOf\(\), amount, txs: \[\.\.\.callTxs, \.\.\.depositTxs\(\)\], readTx \}\);/);
+  assert.match(SRC, /const own = await ownDeposit\(\{ rows, want: wantOf\(\)/);
+  assert.match(SRC, /const readTx = \(h: string\) => readBackBoth\(o\.urls, h, relayers\.bind\);/);
+  assert.doesNotMatch(SRC, /r\.depositor === U\)/, "no row's depositor alone makes a deposit U's own");
+});
+
+test("F4 (28): a run step of another seed or network, or one that pays another account than --to, is refused", () => {
+  const run = { fingerprint: "f", network: "mainnet", to: "x.near" };
+  assert.deepEqual(runStepProblems(run, { fingerprint: "f", network: "mainnet", to: "x.near" }), []);
+  assert.match(runStepProblems(run, { fingerprint: "f", network: "mainnet", to: "y.near" }).join(), /this run pays x\.near; paste the same line with x\.near/);
+  assert.match(runStepProblems(run, { fingerprint: "g", network: "mainnet", to: "x.near" }).join(), /not this seed's/);
+  assert.match(runStepProblems(run, { fingerprint: "f", network: "testnet", to: "x.near" }).join(), /another network's/);
+  assert.match(SRC, /const rsp = runStepProblems\(run, \{ fingerprint: fp, network, to \}\);\n\s+if \(rsp\.length\) throw/);
+});
+
+test("F1: every step file names the commit that wrote it; a folder another commit wrote is refused, not gone on with", () => {
+  const A = "a".repeat(40), B = "b".repeat(40);
+  const dir = path.join(fresh(), "run");
+  const st = stateDir(dir, ROOTS, { create: true, commit: A });
+  st.writeOnce("run", { i: 1 });
+  st.write("deposit", { amount: "1" });
+  assert.equal(JSON.parse(readFileSync(path.join(dir, "run.json"), "utf8")).commit, A);
+  assert.equal(JSON.parse(readFileSync(path.join(dir, "deposit.json"), "utf8")).commit, A);
+  assert.deepEqual(st.read("deposit"), { amount: "1" });
+  // a resume from a new clone at the same commit goes on; at another commit, or with none, it is refused
+  assert.deepEqual(stateDir(dir, ROOTS, { create: false, commit: A }).read("run"), { i: 1 });
+  assert.throws(() => stateDir(dir, ROOTS, { create: false, commit: B }), new RegExp(`written by commit ${A}, not this paste's ${B}`));
+  assert.throws(() => stateDir(dir, ROOTS, { create: false }), /not this paste's none/);
+  assert.equal(stateDir(dir, ROOTS, { create: false, commit: A }).commit, A);
 });
 
 // LC: every request the record's read of T02's 6-day-old withdrawal tx made on 2026-11-08 and each host's answer: dRPC
@@ -418,7 +488,7 @@ test("L4: a read that fails or disagrees for a block is asked again, and after a
 });
 
 test("L4: a deposit that lands while the run waits ends the wait (P in the deposits pages): no second bind", () => {
-  assert.match(SRC, /r\.precommitment === BigInt\(run\.precommitment\) && r\.depositor === U/);
+  assert.match(SRC, /if \(rows !== null && rows\.some\(\(r\) => r\.precommitment === BigInt\(run\.precommitment\)\)\) \{/);
   assert.match(SRC, /if \(landed !== undefined\)[\s\S]{0,200}else \{[\s\S]{0,1500}bindDeposit\(seed64/);
 });
 

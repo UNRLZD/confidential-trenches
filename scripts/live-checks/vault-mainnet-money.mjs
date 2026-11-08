@@ -2,8 +2,8 @@
 // Live check of card vault-mainnet-money: on the real mainnet vault (contracts/vault/deployments/mainnet-v1.json, the
 // kit's mainnet row), one deposit of at least 1 USDC by U's signed call and one withdrawal of the whole note less the
 // relayer's fee to the NEAR account the owner named, both carried by the deployed helper, landed and stay as the run
-// record says (scripts/live-checks/vault-mainnet-money.run.json, written by
-// contracts/vault/scripts/mainnet-money.ts record). It needs no tx read (the money gate reads every Tx line of
+// record says (scripts/live-checks/vault-mainnet-money.run.json: contracts/vault/scripts/mainnet-money.ts record writes
+// it into the run's folder, outside the clone, and it is committed here from there). It needs no tx read (the money gate reads every Tx line of
 // vault-mainnet-money.md). On two mainnet operators (operatorProblems), at the final block, it holds the run's rows,
 // which never change once settled, to their exact values:
 //   - the vault's key list is [] and its code hash is the record's (no key added, no other code since the deploy);

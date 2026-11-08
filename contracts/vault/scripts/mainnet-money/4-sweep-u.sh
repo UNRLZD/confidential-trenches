@@ -6,9 +6,13 @@
 # struck U, or USDC reached U after the deposit (a second transfer): paste 1 deposits one transfer, so send one
 # transfer of the whole amount. U's 0.01 NEAR pays the gas. Not while paste 1 is waiting to deposit: a sweep then takes
 # the USDC that deposit would use. The tx is read back FINAL on both RPCs and kept in the run's sweep.json for the record.
-# It runs only from a clean checkout whose HEAD is pushed (source-gate.mjs); a changed or untracked path stops it.
+# It runs only from a fresh clone of the public repo at the reviewed, merged commit its line names (lines.sh prints the
+# line): source-gate.mjs holds the clone to that commit before pnpm installs, and the driver again before each signature.
+#   sh contracts/vault/scripts/mainnet-money/4-sweep-u.sh <commit>
 set -eu
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 cd "$ROOT"
-node contracts/vault/scripts/source-gate.mjs
-exec node contracts/vault/scripts/mainnet-money.ts sweep-u --state "$HOME/.confidential-trenches/runs/vault-mainnet-money"
+[ $# = 1 ] || { echo "paste 4: the commit paste 1 names: sh $0 <commit>"; exit 1; }
+node contracts/vault/scripts/source-gate.mjs --commit "$1" --before-install
+pnpm install --frozen-lockfile
+exec node contracts/vault/scripts/mainnet-money.ts sweep-u --commit "$1" --state "$HOME/.confidential-trenches/runs/vault-mainnet-money"

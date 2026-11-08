@@ -60,7 +60,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule } from "../../../packages/kit/src/near/networks.ts";
 import { depositId } from "../../../packages/wallet/src/derive/keys.ts";
-import { treeProblems } from "./source-gate.mjs";
+import { cloneProblems } from "./source-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../../..");
@@ -145,9 +145,10 @@ export function recipientProblems(to: unknown, a: { vault: string; token: string
   return [];
 }
 
-/** [] when a request the wallet made pays `to` straight, with no change note: what the run sends, checked before it is sent. */
-export function requestProblems(req: { recipient: string; changeValue: bigint; body: { fund_recipient: unknown } }, to: string): string[] {
+/** [] when a request the wallet made spends the picked note and pays `to` straight, with no change note: what the run sends, checked before it is sent. */
+export function requestProblems(req: { noteId?: string; recipient: string; changeValue: bigint; body: { fund_recipient: unknown } }, to: string, noteId: string): string[] {
   const p: string[] = [];
+  if (req.noteId !== noteId) p.push(`the wallet's request spends note ${req.noteId}, not the run's ${noteId}`);
   if (req.recipient !== to) p.push(`the wallet's request pays ${req.recipient}, not ${to}: this wallet does not pay a named account yet (card wallet-withdraw-move-out)`);
   if (req.body.fund_recipient !== false) p.push(`the request's fund_recipient is ${String(req.body.fund_recipient)}, not false`);
   if (req.changeValue !== 0n) p.push(`the request leaves a change note of ${req.changeValue}`);
@@ -208,17 +209,41 @@ export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: 
   return notes.find((n) => line.has(n.id) && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value > 0n) ?? null;
 }
 
+type DepositRow = { precommitment: bigint; depositor: string; value: bigint };
 /**
- * Null when the run goes on with the note bindDeposit landed: deposited, or a front_run whose row of P is U's own deposit
- * (its value is not what U held when this bind read it: a second transfer reached U after that deposit had landed).
- * Else why the run stops: a deposit of P by another account (a real front-run) or the bind's other outcome.
+ * Whether the row of P in the deposits pages is U's own deposit: { why: null, row } only when one of `txs` (the deposit
+ * relayer's hashes the device heard, the note's calls, or one the owner names) reads back a success on both RPCs
+ * (`readTx`, which throws otherwise) and is the run's: the deposit relayer carrying U's one signed ft_transfer_call of the
+ * row's value to the vault with P and U (relayerTxProblems). The row's depositor is named by whoever transfers
+ * (deposit.rs takes it from the msg), so a row naming U never proves it alone: a front-runner may name U. `rows` null:
+ * the pages were not read. Else why the run stops.
  */
-export function bindProblem(kind: string, row: { depositor: string; value: bigint } | undefined, U: string, amount: bigint): string | null {
-  if (kind === "deposited") return null;
-  if (kind !== "front_run") return kind;
-  if (row === undefined) return "front_run, and the deposits page holds no row of P on this read";
-  if (row.depositor === U) return null;
-  return `front-run: P was deposited by ${row.depositor}, not U, with ${row.value}; U's ${amount} USDC stays at U`;
+export async function ownDeposit(a: { rows: readonly DepositRow[] | null; want: Omit<RunTxs, "value">; amount: bigint; txs: readonly string[]; readTx: (hash: string) => Promise<unknown> }): Promise<{ why: string | null; row?: DepositRow }> {
+  if (a.rows === null) return { why: "front_run, and the deposits pages were not read: nothing is taken for U's own" };
+  const P = BigInt(a.want.P);
+  const row = a.rows.find((r) => r.precommitment === P);
+  if (row === undefined) return { why: "front_run, and the deposits page holds no row of P on this read" };
+  const stays = `U's ${a.amount} USDC stays at U (sweep-u sends it on)`;
+  if (row.depositor !== a.want.U) return { why: `front-run: P was deposited by ${row.depositor}, not U, with ${row.value}; ${stays}`, row };
+  for (const h of new Set(a.txs)) {
+    const t = await a.readTx(h).catch(() => null);
+    if (t !== null && relayerTxProblems("deposit", t, { ...a.want, value: String(row.value) }).length === 0) return { why: null, row };
+  }
+  return { why: `front-run: P was deposited naming U with ${row.value}, but no deposit tx of U for P with that value reads back a success on both RPCs (${a.txs.length} heard); ${stays}. If it is U's own and its hash was not heard, name it: resume ... --deposit-tx <hash>`, row };
+}
+
+/** Null when the run goes on with what bindDeposit landed: deposited, or a front_run that ownDeposit proves U's own. Else why the run stops. */
+export async function bindProblem(kind: string, a: Parameters<typeof ownDeposit>[0]): Promise<{ why: string | null; row?: DepositRow }> {
+  if (kind === "deposited") return { why: null };
+  if (kind !== "front_run") return { why: kind };
+  return ownDeposit(a);
+}
+
+/** [] when the folder's run step is this seed's and network's, and pays the `--to` this line names. */
+export function runStepProblems(run: { fingerprint?: unknown; network?: unknown; to?: unknown }, want: { fingerprint: string; network: Network; to: string }): string[] {
+  if (run.fingerprint !== want.fingerprint || run.network !== want.network) return ["the folder's run step is not this seed's, or another network's: keep the folder as it is and say so"];
+  if (run.to !== want.to) return [`refused, nothing sent: this run pays ${String(run.to)}; paste the same line with ${String(run.to)}`];
+  return [];
 }
 
 /** `fn` asked up to `tries` times (a provider a block behind the other, a dropped answer); null when every try failed. */
@@ -277,7 +302,7 @@ export const STEPS = ["run", "deposit", "withdraw", "open-u", "heard", "sweep"] 
 export type Step = (typeof STEPS)[number];
 
 /** The run's folder: its seed (made once when `create`), and its steps, each its own file. */
-export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS }: { create: boolean; fs?: Fs }) {
+export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS, commit = null }: { create: boolean; fs?: Fs; commit?: string | null }) {
   const real = path.resolve(dir);
   for (const r of roots) if (real === r || real.startsWith(r + path.sep)) throw new Error(`--state is inside the repository (${r}): the run's seed never lives in the repo`);
   const seedFile = path.join(real, "seed");
@@ -300,20 +325,32 @@ export function stateDir(dir: string, roots: string[], { create, fs = REAL_FS }:
     if (!STEPS.includes(step)) throw new Error(`no step ${step}`);
     return path.join(real, `${step}.json`);
   };
+  // every step file names the commit that wrote it (--commit; null for a testnet run without one): a folder another
+  // commit wrote is never gone on with, so one run's every signature is one commit's
+  const withCommit = (value: unknown) => (value !== null && typeof value === "object" && !Array.isArray(value) ? { ...(value as object), commit } : value);
+  for (const step of STEPS) {
+    const f = fileOf(step);
+    if (!existsSync(f)) continue;
+    const at = JSON.parse(readFileSync(f, "utf8"))?.commit ?? null;
+    if (at !== commit) throw new Error(`${f} was written by commit ${at ?? "none"}, not this paste's ${commit ?? "none"}: paste the line that names ${at ?? "no commit"}, keep the folder as it is`);
+  }
   return {
     dir: real,
     seed,
+    commit,
     read(step: Step): any {
       const f = fileOf(step);
-      return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : undefined;
+      if (!existsSync(f)) return undefined;
+      const { commit: _, ...value } = JSON.parse(readFileSync(f, "utf8")); // checked when the folder was opened
+      return value;
     },
     write(step: Step, value: unknown): void {
-      durable(fileOf(step), json(value) + "\n", "rename", fs);
+      durable(fileOf(step), json(withCommit(value)) + "\n", "rename", fs);
     },
     /** Writes the step once (link, as the seed): another process that wrote it first wins, and this one is refused. */
     writeOnce(step: Step, value: unknown): void {
       try {
-        durable(fileOf(step), json(value) + "\n", "link", fs);
+        durable(fileOf(step), json(withCommit(value)) + "\n", "link", fs);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`another run on this folder planned first: nothing more is done here; paste the same line again and it goes on with that plan`);
         throw e;
@@ -468,13 +505,15 @@ export async function nodeProver() {
 // ---- check: the gate, the vault read and, with --state, the run's U ----
 
 async function check(argv: string[]) {
-  const v = flags(argv, [], ["--network", "--state", "--to", "--bind-relayer"]);
-  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const v = flags(argv, [], ["--network", "--state", "--to", "--bind-relayer", "--commit"], ["--not-on-main"]);
+  const network = networkOf(v);
+  if (v["--commit"] !== undefined || v["--not-on-main"] !== undefined) SOURCE = sourceOf(v, network);
+  const o = await opened(network, v["--bind-relayer"]);
   const out: Record<string, unknown> = { network: o.network, vault: o.vault, token: o.token, min_deposit: o.minDeposit, bind_relayer: o.relayers.bind, withdraw_relayer: o.relayers.withdraw };
   if (v["--to"] !== undefined) out.to = await checkRecipient(o, v["--to"]);
   if (v["--state"] !== undefined) {
     const { repoRoots } = await import("./deploy.mjs");
-    const st = stateDir(v["--state"], repoRoots(), { create: false });
+    const st = stateDir(v["--state"], repoRoots(), { create: false, commit: SOURCE?.commit ?? null });
     const run = st.read("run");
     if (run === undefined) throw new Error("the run has not planned its note yet: paste 1 first, and this once it prints U");
     if (run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder's run step is not this seed's, or another network's: nothing is sent to its U");
@@ -489,18 +528,47 @@ async function check(argv: string[]) {
 
 // ---- run / resume: plan, U's USDC, the deposit, the withdrawal to --to; every stop goes on from the chain ----
 
-/** A mainnet command that signs (run, resume, open-u, sweep-u) runs only from a clean checkout whose HEAD is on a branch
- * or tag of the public repo (source-gate.mjs: deploy.mjs's sourceProblems), so what signed is what anyone can read. */
-function sourceGate(network: Network): void {
-  if (network !== "mainnet") return;
-  const p = treeProblems(ROOT);
-  if (p.length) throw new Error(`refused, nothing signed: ${p.join("; ")}`);
+/** The commit this process signs from (--commit), held by sourceGate before every signature; null: a testnet run without one. */
+let SOURCE: { commit: string; onMain: boolean } | null = null;
+
+/**
+ * The source a command runs from. Mainnet: --commit is required (the reviewed, merged commit the paste line names and
+ * clones), and --not-on-main is refused. Testnet: --commit holds the same gate, --not-on-main skipping only its origin and
+ * main check (the rehearsal of a commit not merged yet); no --commit, no gate (the offline tests).
+ */
+export function sourceOf(v: Record<string, string>, network: Network): { commit: string; onMain: boolean } | null {
+  const notOnMain = v["--not-on-main"] !== undefined;
+  if (notOnMain && network !== "testnet") throw new Error("refused, nothing signed: --not-on-main is for the testnet rehearsal only; a mainnet paste runs only a commit on main");
+  if (v["--commit"] === undefined) {
+    if (network === "mainnet") throw new Error("refused, nothing signed: a mainnet command runs only from a fresh clone at the commit its paste line names (--commit <sha>)");
+    if (notOnMain) throw new Error("--not-on-main names no commit: give --commit <sha>");
+    return null;
+  }
+  return { commit: v["--commit"], onMain: !notOnMain };
+}
+
+/**
+ * Refuses unless the process runs from a fresh clone at SOURCE's commit, every file the commit's and node_modules
+ * resolving inside it (source-gate.mjs cloneProblems), read again right before each signature and each load of code
+ * that sees a secret: a tree changed while the run waited never signs.
+ */
+function sourceGate(at: string): void {
+  if (SOURCE === null) return;
+  const p = cloneProblems({ root: ROOT, commit: SOURCE.commit, onMain: SOURCE.onMain });
+  if (p.length) throw new Error(`refused before ${at}, nothing signed: ${p.join("; ")}`);
+}
+
+/** The command's start: its source held, before anything is read. */
+function started(v: Record<string, string>): Network {
+  const network = networkOf(v);
+  SOURCE = sourceOf(v, network);
+  sourceGate("anything is read");
+  return network;
 }
 
 async function go(argv: string[], create: boolean) {
-  const v = flags(argv, ["--state", "--to"], ["--network", "--bind-relayer"]);
-  sourceGate(networkOf(v));
-  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const v = flags(argv, ["--state", "--to"], ["--network", "--bind-relayer", "--commit", "--deposit-tx"], ["--not-on-main"]);
+  const o = await opened(started(v), v["--bind-relayer"]);
   const { rpcs, vault, token, scope, relayers, network, minDeposit } = o;
   const to = await checkRecipient(o, v["--to"]);
   const { readWithdrawFeeMax } = await wallet("withdraw/feemax.ts");
@@ -537,7 +605,7 @@ async function go(argv: string[], create: boolean) {
   log(`fee now: ${fee0.relayFee} to ${fee0.feeRecipient}, at most the device's fee_max ${fee0.feeMax}`);
 
   const { repoRoots } = await import("./deploy.mjs");
-  const st = stateDir(v["--state"]!, repoRoots(), { create });
+  const st = stateDir(v["--state"]!, repoRoots(), { create, commit: SOURCE?.commit ?? null });
   const seed64 = await seed64Of(st.seed);
   const fp = fingerprintOf(st.seed);
   let run = st.read("run");
@@ -551,7 +619,8 @@ async function go(argv: string[], create: boolean) {
     first.ns.close();
     first.w.close?.();
   }
-  if (run.to !== to) throw new Error(`refused, nothing sent: this run pays ${run.to}; paste the same line with ${run.to}`);
+  const rsp = runStepProblems(run, { fingerprint: fp, network, to });
+  if (rsp.length) throw new Error(rsp.join("; "));
   const { i, U } = run as { i: number; U: string };
   await checkRecipient(o, v["--to"], [U]);
   log(`U is ${U} (U_{s,i}, i ${i}); the withdrawal goes to ${to}`);
@@ -584,6 +653,13 @@ async function go(argv: string[], create: boolean) {
     return res;
   };
 
+  // what proves a row of P is U's own (ownDeposit): the deposit relayer's txs heard or named, read back on both RPCs
+  const named = v["--deposit-tx"];
+  if (named !== undefined && !/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(named)) throw new Error("--deposit-tx takes a tx hash");
+  const wantOf = (): Omit<RunTxs, "value"> => ({ U, G: relayers.bind, R: relayers.withdraw.relayer_account, vault, token, P: run.precommitment, nf: "" });
+  const depositTxs = (): string[] => [...heard.bind, ...(named === undefined ? [] : [named])];
+  const readTx = (h: string) => readBackBoth(o.urls, h, relayers.bind);
+
   let note = mine;
   if (note === undefined) {
     // not landed: plan index i again (the store's counter raised to it, in its lane) and deposit what is at U
@@ -601,8 +677,11 @@ async function go(argv: string[], create: boolean) {
       }
       // U's call may have landed after the restore above (a stop while it was carried): its P in the deposits pages
       // ends the wait, and the note is restored into a fresh store of the lane, so nothing is signed twice
-      const rows = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits, () => []);
-      if (rows.some((r: any) => r.precommitment === BigInt(run.precommitment) && r.depositor === U)) {
+      const rows = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits as DepositRow[], () => null);
+      if (rows !== null && rows.some((r) => r.precommitment === BigInt(run.precommitment))) {
+        // a row of P ends the wait: U's own only when one of its txs reads back as the run's (ownDeposit), else a stop
+        const own = await ownDeposit({ rows, want: wantOf(), amount: usdc === null ? 0n : BigInt(usdc), txs: depositTxs(), readTx });
+        if (own.why !== null) throw new Error(`deposit: ${own.why}: resume goes on from here, and sweep-u sends what is at U to ${to}`);
         ns.close();
         w.close();
         ({ w, ns } = await storeOfLane(i % LANES));
@@ -623,19 +702,17 @@ async function go(argv: string[], create: boolean) {
     const tBind = Date.now();
     const deps: Record<string, unknown> = { store: ns, rpcs: [bindRpc(o.urls[0]), bindRpc(o.urls[1])], fetchFn: watch };
     if (network === "testnet") deps.relayerAccount = relayers.bind;
+    sourceGate("U signs its deposit");
     const outcome = await bindDeposit(seed64, { network, s: scope, i, noteId: note.id, amount }, deps);
     log(`bindDeposit: ${outcome.kind} in ${Date.now() - tBind} ms`);
-    let row: { depositor: string; value: bigint } | undefined;
-    if (outcome.kind === "front_run") {
-      const rows = await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits, () => []);
-      row = rows.find((r: any) => r.precommitment === BigInt(run.precommitment));
-    }
-    const why = bindProblem(outcome.kind, row, U, amount);
+    const calls = outcome.note?.id === undefined ? [] : ((await ns.get(outcome.note.id))?.calls ?? []);
+    const callTxs: string[] = calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []);
+    const rows = outcome.kind !== "front_run" ? [] : await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["deposits"] }).then((x: any) => x.deposits as DepositRow[], () => null);
+    const { why, row } = await bindProblem(outcome.kind, { rows, want: wantOf(), amount, txs: [...callTxs, ...depositTxs()], readTx });
     if (why !== null) throw new Error(`deposit: ${why} (${json(outcome)}); the USDC is at U or in the vault: resume goes on from here, and sweep-u sends what is at U to ${to}`);
-    if (outcome.kind === "front_run") log(`U's own deposit of P landed first with ${row!.value} (U then held ${amount}: a later transfer): the run goes on with that note`);
+    if (outcome.kind === "front_run") log(`U's own deposit of P landed first with ${row!.value}, its tx read back as the run's (U then held ${amount}: a later transfer): the run goes on with that note`);
     note = outcome.note;
-    const calls = (await ns.get(note.id))?.calls ?? [];
-    const txs = [...new Set([...calls.flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []), ...heard.bind])];
+    const txs = [...new Set([...callTxs, ...heard.bind])];
     const leaf = note.leaf;
     st.write("deposit", { amount: String(leaf.value), bind_ms: Date.now() - tBind, txs, relayer: relayers.bind, before, after: await balances({ U }), leaf: { value: String(leaf.value), label: String(leaf.label), commitment: String(leaf.commitment), leaf_index: String(leaf.leafIndex) } });
     log(`deposited ${leaf.value}: leaf ${leaf.leafIndex}; relayer txs ${txs.join(", ") || "none heard"}`);
@@ -657,6 +734,7 @@ async function go(argv: string[], create: boolean) {
     // the whole note to `to`, less the fee of this one quote: withdrawn = value, so no change note is left
     const value: bigint = pick.leaf.value;
     const fee = await feeOf(value);
+    sourceGate("the prover loads and sees the note's secrets");
     const prover = await nodeProver();
     const trees = treesOf(await vaultSync({ vault, rpcs, cursor: vaultSyncStart(vault), lists: ["leaves", "labels"] }));
     const ns2 = await lowerFinalTime(rpcs);
@@ -666,10 +744,10 @@ async function go(argv: string[], create: boolean) {
       feeRecipient: fee.feeRecipient, relayFee: fee.relayFee, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(),
       amount: value - fee.relayFee, to, deadlineMs: withdrawDeadlineMs(ns2), blockTimestampNanosec: ns2,
     });
-    const rp = requestProblems(req, to);
-    if (req.noteId !== pick.id) rp.push(`the wallet's request spends note ${req.noteId}, not the run's ${pick.id}`);
+    const rp = requestProblems(req, to, pick.id);
     if (rp.length) throw new Error(`refused, the proof made and nothing sent: ${rp.join("; ")}; the note stays in the vault, and resume makes a new request`);
     st.write("withdraw", { to, value: String(value), relay_fee: String(fee.relayFee), fee_recipient: fee.feeRecipient, nullifier_hash: String(nf), prove_ms: prover.times, before });
+    sourceGate("the withdrawal is signed");
     const out = await relayWithdraw(seed64, req, { notes: ns, network, rpcs, priceRpcs: network === "mainnet" ? rpcs : await opened_mainnet_pair(), fetchFn: watch });
     log(`relayWithdraw: ${out.kind}`);
     if (out.kind !== "landed") throw new Error(`withdrawal: ${out.kind}; the note is in the vault: resume makes a new request`);
@@ -702,6 +780,7 @@ async function opened_mainnet_pair() {
 
 /** Signs and sends one transaction on the pair's first RPC, then reads it back FINAL on both; { hash } or throws. */
 async function sendTx(o: Opened, signer: string, key: any, receiver: string, actions: unknown[], keep: (hash: string, error?: string) => void) {
+  sourceGate(`${signer} signs`);
   const { encodeTx } = await import("./testnet-usdc.mjs");
   const { b58decode, b58encode } = await import("./near-tx.mjs");
   const pk = `ed25519:${b58encode(key.pub)}`;
@@ -825,12 +904,11 @@ export function relayerTxProblems(kind: "deposit" | "withdraw", t: any, want: Ru
 }
 
 async function openU(argv: string[]) {
-  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer", "--register"]);
-  sourceGate(networkOf(v));
-  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const v = flags(argv, ["--state", "--payer", "--key-file"], ["--network", "--bind-relayer", "--register", "--commit"], ["--not-on-main"]);
+  const o = await opened(started(v), v["--bind-relayer"]);
   const { repoRoots, loadKey } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");
-  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false, commit: SOURCE?.commit ?? null });
   const run = st.read("run");
   if (run === undefined || run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder holds no run step of this seed and network: paste 1 first; nothing sent");
   const U = run.U as string;
@@ -871,12 +949,11 @@ async function openU(argv: string[]) {
 // ---- sweep-u: U's USDC to the named account, signed by U ----
 
 async function sweepU(argv: string[]) {
-  const v = flags(argv, ["--state"], ["--network", "--bind-relayer"]);
-  sourceGate(networkOf(v));
-  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const v = flags(argv, ["--state"], ["--network", "--bind-relayer", "--commit"], ["--not-on-main"]);
+  const o = await opened(started(v), v["--bind-relayer"]);
   const { repoRoots } = await import("./deploy.mjs");
   const { act } = await import("./testnet-usdc.mjs");
-  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false, commit: SOURCE?.commit ?? null });
   const run = st.read("run");
   if (run === undefined || run.fingerprint !== fingerprintOf(st.seed) || run.network !== o.network) throw new Error("the folder holds no run step of this seed and network: nothing sent");
   const U = run.U as string;
@@ -952,10 +1029,10 @@ async function record(argv: string[]) {
       k += 2;
     } else rest.push(a);
   }
-  const v = flags(rest, ["--state"], ["--network", "--bind-relayer"]);
-  const o = await opened(networkOf(v), v["--bind-relayer"]);
+  const v = flags(rest, ["--state"], ["--network", "--bind-relayer", "--commit"], ["--not-on-main"]);
+  const o = await opened(started(v), v["--bind-relayer"]);
   const { repoRoots } = await import("./deploy.mjs");
-  const st = stateDir(v["--state"]!, repoRoots(), { create: false });
+  const st = stateDir(v["--state"]!, repoRoots(), { create: false, commit: SOURCE?.commit ?? null });
   const run = st.read("run"), d = st.read("deposit"), w = st.read("withdraw"), u = st.read("open-u") ?? { txs: [] };
   const heard = st.read("heard") ?? { bind: [], withdraw: [] };
   const sweepTxs: { hash: string; signer: string }[] = (st.read("sweep") ?? { txs: [] }).txs;
@@ -981,13 +1058,14 @@ async function record(argv: string[]) {
   const txs = [...opens, ...named["--fund-tx"], ...deposits, ...withdraws, ...sweeps, ...named["--settle-tx"]];
   for (const t of txs) log(`${t.hash} (${t.signer}) read back FINAL, every receipt a success, as the money gate reads it`);
   const runRec = {
-    card: CARD, network: o.network, vault: o.vault, asset: o.token,
+    card: CARD, network: o.network, commit: st.commit, vault: o.vault, asset: o.token,
     accounts: { U: run.U, to: w.to, F: w.fee_recipient, R: o.relayers.withdraw.relayer_account, G: d.relayer },
     deposit: { value: d.leaf.value, precommitment: run.precommitment, label: d.leaf.label, leaf_index: d.leaf.leaf_index, commitment: d.leaf.commitment },
     withdraw: { withdrawn: w.row.withdrawn, relay_fee: w.row.fee, nullifier_hash: w.nullifier_hash, change_leaf_index: w.row.new_leaf_index, change_commitment: w.change_commitment },
   };
   const prose = [
     `The run: contracts/vault/scripts/mainnet-money.ts on NEAR ${o.network}, the keyless vault ${o.vault} on USDC ${o.token}, both legs carried by the deployed helper.`,
+    st.commit === null ? "Signed from a checkout with no commit named (a testnet run without --commit)." : `Every signature of the run was made from a fresh clone of ${o.network === "mainnet" || SOURCE?.onMain ? "the public repo" : "a commit not yet on main (the testnet rehearsal)"} at commit ${st.commit}, every file read against that commit's tree right before each signature (contracts/vault/scripts/source-gate.mjs); each step file of the run names it.`,
     `Deposit: U ${run.U} (U_{s,i} of the run's 12 words, i ${run.i}) signed its ft_transfer_call as a NEP-366 DelegateAction (packages/wallet/src/deposit/bind.ts bindDeposit), carried by ${d.relayer}; the deposits page holds P ${run.precommitment} by U with ${d.leaf.value}, label ${d.leaf.label}, leaf ${d.leaf.leaf_index}.`,
     `Withdrawal: the wallet's withdrawRequest to ${w.to} (fund_recipient false, no change: withdrawn = the note), proved in this process by snarkjs fullProve on the kit's pinned setup files (the stand-in for the page's prover worker), carried by ${o.relayers.withdraw.relayer_account}; spends row #${w.row.index}: ${w.row.withdrawn} withdrawn to ${w.row.recipient}, fee ${w.row.fee} to ${w.fee_recipient}, payer ${w.row.payer}, ${w.row.status}.`,
     `Every Tx above read back FINAL, every receipt a success, as scripts/ci/money-gate.mjs reads it: on two operators, or, older than dRPC keeps, on FastNEAR's archival RPC and proven against a final block dRPC names.`,
@@ -1014,12 +1092,13 @@ export function recordFiles(dir: string, network: Network) {
   return { run: path.join(dir, `${CARD}${suffix}.run.json`), md: path.join(dir, `${CARD}${suffix}.md`) };
 }
 
-function flags(argv: string[], required: string[], optional: string[] = []): Record<string, string> {
+function flags(argv: string[], required: string[], optional: string[] = [], booleans: string[] = []): Record<string, string> {
   const v: Record<string, string> = {};
   const allowed = [...required, ...optional];
   for (let k = 0; k < argv.length; k++) {
     const a = argv[k]!;
-    if (allowed.includes(a) && k + 1 < argv.length && !argv[k + 1]!.startsWith("--")) v[a] = argv[++k]!;
+    if (booleans.includes(a)) v[a] = "yes";
+    else if (allowed.includes(a) && k + 1 < argv.length && !argv[k + 1]!.startsWith("--")) v[a] = argv[++k]!;
     else throw new Error(`unknown argument ${a}`);
   }
   for (const k of required) if (!v[k]) throw new Error(`${k} is required`);
