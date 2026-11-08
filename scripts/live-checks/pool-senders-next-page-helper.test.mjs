@@ -1,6 +1,6 @@
-// node --test scripts/live-checks/pool-senders-next-page.test.mjs: the live check replays recorded runs
-// (pool-senders-next-page.answers.json). good: the live check's read() against this card's helper sender in process
-// (pool-senders-next-page.record-local.mjs: devnet, a throwaway fee payer, RPCs answering BlockhashNotFound): PASS.
+// node --test scripts/live-checks/pool-senders-next-page-helper.test.mjs: the live check replays recorded runs
+// (pool-senders-next-page-helper.answers.json). good: the live check's read() against this card's helper sender in process
+// (pool-senders-next-page-helper.record-local.mjs: devnet, a throwaway fee payer, RPCs answering BlockhashNotFound): PASS.
 // bad: the deployed helper before the card (0beea09b, api.confidential.unrealized.trade, the devnet pool), which refuses
 // both next-page forms on the bytes (not_pool): FAIL. Made from the good run: a next-page plant refused on the bytes, the
 // tenth account carried to the simulation, a plant missing, no run at all: each FAIL. The plants are checked against
@@ -13,10 +13,10 @@ import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { judge, judgeAll, plant, PLANTS } from "./pool-senders-next-page.mjs";
+import { judge, judgeAll, plant, PLANTS } from "./pool-senders-next-page-helper.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const A = JSON.parse(readFileSync(path.join(HERE, "pool-senders-next-page.answers.json"), "utf8"));
+const A = JSON.parse(readFileSync(path.join(HERE, "pool-senders-next-page-helper.answers.json"), "utf8"));
 const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 const edit = (runs, asked, f) => runs.map((run) => ({ ...run, reads: run.reads.map((x) => (x.asked === asked ? f(x) : x)) }));
 

@@ -1,15 +1,15 @@
-// The good answer of pool-senders-next-page.answers.json: the live check's own read() against this tree's helper
+// The good answer of pool-senders-next-page-helper.answers.json: the live check's own read() against this tree's helper
 // sender in process (apps/helper/src/pool/solana.ts solanaPoolSender), devnet, a throwaway fee payer made here, the
 // Rent sysvar at mainnet's 5,080 a byte (the fee 1,300,000, as the devnet helper publishes it), and RPCs that answer a
 // simulation the way a cluster does for a blockhash it never made (err "BlockhashNotFound") and a blockhash read. Each answer carries the
 // tree's commit in X-Helper-Commit, as server.ts sets it.
-//   node scripts/live-checks/pool-senders-next-page.record-local.mjs <commit> > <file>
+//   node scripts/live-checks/pool-senders-next-page-helper.record-local.mjs <commit> > <file>
 // Runs: once, it records the check's good answer from this tree's helper in process; the check itself runs after every helper deploy
 import { generateKeyPairSync, createPublicKey } from "node:crypto";
 import { solanaPoolSender } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { read } from "./pool-senders-next-page.mjs";
+import { read } from "./pool-senders-next-page-helper.mjs";
 
 const commit = process.argv[2];
 if (!/^[0-9a-f]{40}$/.test(commit ?? "")) throw new Error("usage: record-local.mjs <40-hex commit>");

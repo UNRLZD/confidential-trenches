@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card pool-senders-next-page: HELPER_HOST's Solana pool sender takes the forms the pool program takes
+// Live check of card pool-senders-next-page-helper: HELPER_HOST's Solana pool sender takes the forms the pool program takes
 // since d3edab1 (contracts/pool-solana/src/release.rs:155, buy.rs:155-159): a tag 2 naming the next state page as its
 // ninth account, and a tag 3 with flag bit 1 naming it after the tip account. For each Solana cluster with a pool deploy
 // record (scripts/ci/helper-live-checks.mjs solanaPools) it reads GET /v1/pool/fee for that pool, then POSTs
@@ -13,7 +13,7 @@
 // The two next-page forms pass every check the helper makes on the bytes and reach its simulation, which refuses the
 // junk proof (422 simulation_failed); a helper that predates the card refuses them on the bytes (422 not_pool). The
 // tenth account is refused on the bytes (422 not_pool) by both. Nothing is signed by the fee payer and nothing is sent.
-//   node scripts/live-checks/pool-senders-next-page.mjs [--base <url>] [--record <file>]
+//   node scripts/live-checks/pool-senders-next-page-helper.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
@@ -146,10 +146,10 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(runs, null, 1)}\n`);
     const r = judgeAll(runs);
     for (const l of r.lines) console.log(l);
-    console.log(r.ok ? "PASS pool-senders-next-page" : "FAIL pool-senders-next-page");
+    console.log(r.ok ? "PASS pool-senders-next-page-helper" : "FAIL pool-senders-next-page-helper");
     process.exit(r.ok ? 0 : 1);
   } catch (e) {
-    console.error(`pool-senders-next-page: ${e.message}`);
+    console.error(`pool-senders-next-page-helper: ${e.message}`);
     process.exit(2);
   }
 }
