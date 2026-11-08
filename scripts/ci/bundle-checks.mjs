@@ -110,6 +110,7 @@ export const OUT = {
   "app-chart-live": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
   "app-no-blank-pages": "a browser",
+  "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
   "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
   "trade-box-pool": "a browser",
   "app-console-429": "the helper under load",
