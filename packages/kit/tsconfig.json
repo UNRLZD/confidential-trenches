@@ -18,5 +18,9 @@
   "include": [
     "src",
     "test"
+  ],
+  "exclude": [
+    "src/core.ts",
+    "test/core-names.test.ts"
   ]
 }

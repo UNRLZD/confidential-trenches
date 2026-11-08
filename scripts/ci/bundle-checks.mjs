@@ -46,10 +46,12 @@ export const IN_PROCESS = [
   viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
   viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),
   viaRead("pool-deposit-sent-end", () => import("../live-checks/pool-deposit-sent-end.mjs")),
+  viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
+  { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
   { key: "app-harness-signin-e2e", host: "sign", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["sign"], f)) },
   { key: "app-harness-signin-e2e", host: "app", load: () => import("../live-checks/app-harness-signin-e2e.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, APP, ["app"], f)) },
@@ -61,6 +63,8 @@ export const CHILD_RUNS = [
   { key: "signpage-buy-route-events", host: "app", args: ["--local", "--host", "app"] },
   { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {

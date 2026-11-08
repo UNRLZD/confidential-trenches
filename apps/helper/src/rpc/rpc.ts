@@ -452,8 +452,9 @@ function parse(text: string): unknown {
 
 const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 
-/** The pool program each Solana route may scan with getProgramAccounts: the helper's own pinned pool program for that
- *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV), none when unset. */
+/** The pool programs each Solana route may scan with getProgramAccounts: the helper's own pinned pool programs for that
+ *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV; devnet's a list, comma apart, solanaPoolPrograms, which
+ *  refuses a bad one at start), none when unset. */
 export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET" };
 /** The note restore's scan (packages/wallet/src/pool/solana-restore.ts solanaMarks, the bucket read; the settle's
  *  solanaSettleSpent reads through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
@@ -485,10 +486,9 @@ const exactKeys = (o: Record<string, unknown>, keys: readonly string[]): boolean
  * program, or a wider one of the pool's (the tag alone, a large size, a compressed encoding, a slice, a sort, a
  * changed-since read), would spend the keyed provider's quota for every caller. Anything else is refused before any call.
  */
-function scanAllowed(r: Record<string, unknown>, program: string | undefined): boolean {
-  if (program === undefined || program === "") return false;
+function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): boolean {
   const p = r.params;
-  if (!Array.isArray(p) || p.length !== 2 || p[0] !== program || !isPlain(p[1])) return false;
+  if (!Array.isArray(p) || p.length !== 2 || typeof p[0] !== "string" || !programs.includes(p[0]) || !isPlain(p[1])) return false;
   const c = p[1];
   if (Object.keys(c).some((k) => !SCAN_CONFIG.has(k))) return false;
   if (c.commitment !== "finalized" || c.encoding !== "base64" || c.withContext !== true) return false;
@@ -504,8 +504,8 @@ function scanAllowed(r: Record<string, unknown>, program: string | undefined): b
   return bytes !== null && bytes.length === (size.dataSize as number) - SCAN_AT && bytes[bytes.length - 1] === SCAN_TAG;
 }
 
-/** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool program. */
-function check(chain: RpcChain, r: unknown, scan?: string): Record<string, unknown> | undefined {
+/** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool programs. */
+function check(chain: RpcChain, r: unknown, scan: readonly string[] = []): Record<string, unknown> | undefined {
   if (!isPlain(r)) return undefined;
   for (const k of Object.keys(r)) if (k !== "jsonrpc" && k !== "id" && k !== "method" && k !== "params") return undefined;
   if (r.jsonrpc !== "2.0") return undefined;
@@ -526,7 +526,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const now = deps.now ?? (() => performance.timeOrigin + performance.now());
   const log = deps.log ?? ((line: string) => console.log(`helper: ${line}`));
   const upstreams = readUpstreams(env);
-  const scanPrograms: Partial<Record<RpcChain, string>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, env[name]]));
+  const scanPrograms: Partial<Record<RpcChain, readonly string[]>> = Object.fromEntries(Object.entries(RPC_SCAN_PROGRAM_ENV).map(([c, name]) => [c, !env[name] ? [] : c === "solana-devnet" ? env[name]!.split(",") : [env[name]!]]));
   // a keyed Solana provider's slot: its fallback is the public endpoint, on a budget of its own
   const keyed = upstreams.solana.url !== SOLANA_PUBLIC;
   const slot: Slot = createSlot(deps.slot ?? "rpc", keyed, { now, log });

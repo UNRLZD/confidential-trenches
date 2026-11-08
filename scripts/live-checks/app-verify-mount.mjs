@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { watchErrors } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-verify-mount";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -348,7 +349,7 @@ async function main() {
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const route = harness ? await harnessRoute(build, release.rpcs) : null;
-  const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
+  const source = harness ? `harness, terminal build ${named(build)}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");
   if (record) writeFileSync(record, recorded(rec));

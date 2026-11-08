@@ -141,9 +141,9 @@ const PLANTED = {
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
   "the mutant sweeps run whole in every part": ['run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants", "test-mutants does not run scripts/ci/test-shards.mjs mutants"],
   "the whole sweep run again beside the split": ["      - name: the wallet package's test:mutants script\n", "      - run: pnpm -r --filter '!@blindfill/wallet' --if-present run test:mutants\n      - name: the wallet package's test:mutants script\n", "a ci.yml line runs test:mutants with pnpm -r"],
-  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
-  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
-  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]", "test-mutants: the sweeps are"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]", "test-mutants: the sweeps are"],
   "the wallet's own sweep dropped": ["      - name: the wallet package's test:mutants script\n        run: pnpm --filter @blindfill/wallet run test:mutants\n", "", "@blindfill/wallet's test:mutants runs nowhere"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
@@ -274,7 +274,7 @@ test("planted: a part added to the matrix drops nothing and doubles nothing; pas
     const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
     assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
   }
-  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6)\]/, `$1, 7]`);
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5)\]/, `$1, 6]`);
   assert.notEqual(more, CI);
   assert.deepEqual(shardProblems(more), []);
   assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);

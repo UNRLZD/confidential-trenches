@@ -609,6 +609,57 @@ test("R2b: a refund of value on a refund precommitment that is not refundNote(l,
   assert.equal(restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }).notes.length, 2);
 });
 
+// ---------- card exit-note-scan's review (F6): three guards on pages both RPCs serve wrongly in the same way ----------
+// A settled spend of ours whose refund_leaf_index does not hold H(refund_value, refund_label, rP): the refund note is
+// never written at a leaf it is not (restore.ts treeHas on spend.refundLeafIndex).
+test("a settled refund whose refund leaf index is not its commitment's leaf stops the restore", () => {
+  const v = new Vault();
+  const leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+  const change = { P: sec({ kind: "change", l: leaf.label, j: 0 }).precommitment, value: 30_000_000n, label: leaf.label };
+  const w = v.withdraw(sec(dep0).nullifierHash, 20_000_000n, change, sec({ kind: "refund", l: leaf.label, j: 0 }).precommitment, 77n);
+  v.payout(w.spend, 20_000_000n);
+  v.settle(w.spend);
+  assert.deepEqual(restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }).notes.map((n) => n.ref.kind).sort(), ["change", "deposit", "refund"], "the honest pages");
+  for (const at of [0n, 1n, BigInt(v.leaves.length), 2n ** 32n]) {
+    const pages = pagesOf(v);
+    pages.spends[0]!.refundLeafIndex = at;
+    assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP }), /spend 0's refund note: its commitment is not the state tree's leaf/, `refund leaf index ${at}`);
+  }
+});
+
+// A spend row of ours that withdrew more than its note held: the vault's proof check makes it impossible
+// (withdrawn <= value), so the pages are wrong; restore stops rather than make a change note of a negative value.
+test("a spend of ours that withdrew more than its note held stops the restore", () => {
+  const v = new Vault();
+  const leaf = v.deposit(sec(dep0).precommitment, 50_000_000n, hex64("U0"))!;
+  const change = { P: sec({ kind: "change", l: leaf.label, j: 0 }).precommitment, value: 0n, label: leaf.label };
+  v.withdraw(sec(dep0).nullifierHash, 50_000_000n, change, sec({ kind: "refund", l: leaf.label, j: 0 }).precommitment, 77n);
+  assert.equal(restorePages(SEED, SCOPE, pagesOf(v), { gap: TEST_GAP }).notes.length, 2, "the honest pages: a whole withdraw and its change of 0");
+  for (const over of [1n, 50_000_000n]) {
+    const pages = pagesOf(v);
+    pages.spends[0]!.withdrawn = 50_000_000n + over;
+    assert.throws(() => restorePages(SEED, SCOPE, pages, { gap: TEST_GAP }), /spend 0 withdrew more than its note held/, `withdrawn ${pages.spends[0]!.withdrawn}`);
+  }
+});
+
+// Leaves that are not the whole state tree, on both RPCs alike. vaultSync reads the leaves from 0 and stops on a count
+// that is not the tree's size (packages/kit/src/vault/sync.ts, "the pages end at"), before restore's own check
+// (restore.ts "the leaves read are not the whole state tree") runs; either one stops the restore with no note returned.
+test("leaves that are not the whole state tree, the same on both RPCs, stop the restore", async () => {
+  const w = new World(rng(5));
+  w.index(0, "note");
+  w.finish();
+  const honest = w.v.views();
+  assert.ok((await restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(honest), gap: TEST_GAP })).notes.length > 0, "the honest pages");
+  const planted: [string, View][] = [
+    ["a leaf short", { ...honest, leaves: honest.leaves.slice(0, -1) }],
+    ["a leaf past the tree", { ...honest, leaves: [...honest.leaves, "12345"] }],
+    ["a tree one larger", { ...honest, state_tree: { ...honest.state_tree, size: honest.state_tree.size + 1 } }],
+  ];
+  for (const [what, view] of planted)
+    await assert.rejects(restoreNotes({ seed64: SEED, vault: VAULT, token: TOKEN, rpcs: rpcs(view), gap: TEST_GAP }), /the pages end at \d+, the tree's size is \d+|not the whole state tree/, what);
+});
+
 // card vault-refund-precommit-reserve's pin: the vault holds a precommitment twice by design (deposit.rs:109-110
 // refuses a repeated P among deposits only; settle writes no precommitments), so a stranger can put a note on a P the
 // pages show: a deposit on a pending spend's refund_precommitment R, or a spend of their own naming our deposit P as

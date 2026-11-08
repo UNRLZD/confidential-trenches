@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-shell";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -251,8 +252,9 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         await doc.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(SETTLE_MS);
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
-        const shot = path.join(shots, `${w.name}-${id}.png`);
-        await page.screenshot({ path: shot });
+        // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+        const shot = `${w.name}-${id}.png`;
+        await page.screenshot({ path: path.join(shots, shot) });
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
         rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
@@ -301,10 +303,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const build = path.resolve(opt("--build", fileURLToPath(new URL("../../apps/terminal/dist", import.meta.url))));
       // the bytes served for a script are the build's own file at its path
       const fetchFn = async (u) => new Response(readFileSync(path.join(build, decodeURIComponent(new URL(u).pathname))));
-      rec = await collect({ shots: opt("--shots", undefined), fetchFn, route: await harnessRoute(build), source: `harness, ${build}` });
+      rec = await collect({ shots: opt("--shots", undefined), fetchFn, route: await harnessRoute(build), source: `harness, ${named(build)}` });
     } else rec = await collect({ url: opt("--url", APP_HOST), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);

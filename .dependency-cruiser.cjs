@@ -10,6 +10,9 @@
 // packages/exit, the exit tool, is Blindfill held as an app is, so it can do nothing an app cannot: from it an import
 // may land in its own folder or in the kit's two exports (the public entry, and ./core, which packages/kit/src/core.ts
 // keeps for packages/), and nowhere else in packages/, contracts/ or apps/.
+// The kit's ./core holds the wallet's seed tools (packages/kit/src/core.ts), so no other file of the kit reaches it or
+// the wallet in any form, the kit's own package name included (`@blindfill/kit/core` resolves through its exports):
+// the public entry and everything it reaches stay free of the seed. The kit's tests may read core to pin its names.
 const KIT_ENTRY = "^packages/kit/(dist/index\\.(js|d\\.ts)|src/index\\.ts)$";
 const KIT_CORE = "^packages/kit/(dist/core\\.(js|d\\.ts)|src/core\\.ts)$";
 const OUTSIDE = "^(packages|contracts)/";
@@ -34,6 +37,12 @@ module.exports = {
       severity: "error",
       from: { path: EXIT },
       to: { path: "^(packages|contracts|apps)/", pathNot: `${KIT_ENTRY}|${KIT_CORE}|${EXIT}` },
+    },
+    {
+      name: "kit-entry-never-core",
+      severity: "error",
+      from: { path: "^packages/kit/", pathNot: `${KIT_CORE}|^packages/kit/test/` },
+      to: { path: `${KIT_CORE}|^packages/wallet/` },
     },
     {
       name: "exit-imports-must-resolve",

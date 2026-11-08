@@ -16,7 +16,14 @@
 //   never keeps (it holds the precommitment only).
 // - The frame names nothing (`top` false). A quote waits for the first load's read, every naming in flight and a
 //   resync's naming (named()), so a quote right after a landing or another tab's sign-in reads the new record.
+// - Each pool the page's network pins is named the same way (card pool-deposit-address), under its own scope s: the
+//   note store's PLANNED deposit note of s (the index pool.deposit takes for a new U), its U_{s,i} as `id` (on Solana
+//   U_X itself; everywhere the ed25519 id a 1Click refund lands under, the key the refund move signs with), and on Base
+//   and Robinhood U^evm_{s,i}'s EIP-55 address as `evm`, where 1Click sends the coin. One scope at a time, in order;
+//   one that fails leaves its record as it was and the others are still named. Pools are named with no vault named.
 import { depositId as uOf, entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
+import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
+import type { PoolChain } from "../../kit/src/signpage/messages.ts";
 import type { WalletStore } from "@blindfill/wallet/store";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -26,6 +33,8 @@ export interface DepositNamerDeps {
   top: boolean;
   /** The release's vault scope on the page's network; null while none is named (nothing is named then). */
   scope(): bigint | null;
+  /** The pools the page's network pins, each named under its own scope (src/pools.ts PAGE_POOLS); none by default. */
+  pools?(): readonly { chain: PoolChain; scope: bigint }[];
   /** The page's full wallet store (main.ts open()). */
   open(): Promise<WalletStore>;
   /** The first load's read of the store. */
@@ -36,6 +45,7 @@ export interface DepositNamerDeps {
   openNotes?: (st: WalletStore) => Promise<Pick<NoteStore, "planDeposit" | "close">>;
   seed64Of?: (entropy: Uint8Array) => Uint8Array;
   derive?: typeof uOf;
+  deriveEvm?: typeof depositIdEvm;
 }
 
 export interface DepositNamer {
@@ -56,11 +66,16 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
   const openNotes = deps.openNotes ?? ((st: WalletStore) => openNoteStore(st));
   const seed64Of = deps.seed64Of ?? ((e: Uint8Array) => wordsToSeed64(entropyToWords(e)));
   const derive = deps.derive ?? uOf;
+  const deriveEvm = deps.deriveEvm ?? depositIdEvm;
   let naming: Promise<unknown> = Promise.resolve();
 
   async function nameNow(entropy: Uint8Array): Promise<void> {
-    const scope = deps.scope();
-    if (scope === null) return;
+    const vault = deps.scope();
+    const scopes: { scope: bigint; evm: boolean }[] = [
+      ...(vault === null ? [] : [{ scope: vault, evm: false }]),
+      ...(deps.pools?.() ?? []).map((p) => ({ scope: p.scope, evm: p.chain !== "solana" })),
+    ];
+    if (scopes.length === 0) return;
     const st = await deps.open();
     // the stored seed is the one given, on this handle (see the top)
     const stored = (await st.get("meta", "seed")) as { entropy?: unknown } | undefined;
@@ -69,21 +84,37 @@ export function depositNamer(deps: DepositNamerDeps): DepositNamer {
     if (!same) return;
     const seed64 = seed64Of(entropy);
     try {
-      const notes = await openNotes(st);
-      let index: number;
-      try {
-        const note = await notes.planDeposit(scope, (ref: NoteRef) => noteSecrets(seed64, ref).precommitment);
-        if (note.ref.kind !== "deposit" || note.scope !== scope) throw new Error("planDeposit gave no deposit note of this scope");
-        index = note.ref.i;
-      } finally {
-        notes.close();
+      for (const { scope, evm } of scopes) {
+        try {
+          await nameScope(st, entropy, seed64, scope, evm);
+        } catch {
+          // this scope's record stays as it was; the next landing or notes change names it again
+        }
       }
-      const u = derive(seed64, scope, index);
-      u.secretKey.fill(0);
-      await st.nameDeposit({ entropy }, { scope, index, id: u.id });
     } finally {
       seed64.fill(0);
     }
+  }
+
+  async function nameScope(st: WalletStore, entropy: Uint8Array, seed64: Uint8Array, scope: bigint, evm: boolean): Promise<void> {
+    const notes = await openNotes(st);
+    let index: number;
+    try {
+      const note = await notes.planDeposit(scope, (ref: NoteRef) => noteSecrets(seed64, ref).precommitment);
+      if (note.ref.kind !== "deposit" || note.scope !== scope) throw new Error("planDeposit gave no deposit note of this scope");
+      index = note.ref.i;
+    } finally {
+      notes.close();
+    }
+    const u = derive(seed64, scope, index);
+    u.secretKey.fill(0);
+    let address: string | undefined;
+    if (evm) {
+      const e = deriveEvm(seed64, scope, index);
+      e.secretKey.fill(0);
+      address = e.address;
+    }
+    await st.nameDeposit({ entropy }, { scope, index, id: u.id, ...(address === undefined ? {} : { evm: address }) });
   }
 
   return {

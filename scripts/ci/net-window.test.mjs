@@ -25,6 +25,7 @@ export const CHANGED = [
   "scripts/ci/money-gate.mjs",
   "scripts/pages-readback.mjs",
   "scripts/live-checks/app-buy-route-strip.mjs",
+  "scripts/live-checks/app-chart-controls.mjs",
   "scripts/live-checks/app-chart-live.mjs",
   "scripts/live-checks/app-console-429.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
@@ -33,6 +34,7 @@ export const CHANGED = [
   "scripts/live-checks/app-quick-buy-one-tap.mjs",
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/app-toast-clears-sheet-head.mjs",
   "scripts/live-checks/app-token-chart.mjs",
   "scripts/live-checks/app-token-route.mjs",
   "scripts/live-checks/base-200ms-blocks.mjs",
@@ -104,6 +106,7 @@ export const CHANGED = [
   "scripts/live-checks/oneclick-partner-fee-live.mjs",
   "scripts/live-checks/pool-answer-unknown.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
+  "scripts/live-checks/pool-deposit-address.mjs",
   "scripts/live-checks/pool-deposit-sent-end.mjs",
   "scripts/live-checks/pool-deposits.mjs",
   "scripts/live-checks/pool-evm-buy-pays-revert.mjs",
@@ -116,6 +119,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-sol-deploy-mainnet.mjs",
   "scripts/live-checks/pool-sol-deploy-sweep.mjs",
   "scripts/live-checks/pool-sol-deploy.mjs",
+  "scripts/live-checks/pool-senders-next-page-helper.mjs",
   "scripts/live-checks/precommit-taken-recover.mjs",
   "scripts/live-checks/relayer-cost-guards.mjs",
   "scripts/live-checks/relayer-withdraw-fee.mjs",
@@ -169,6 +173,8 @@ export const CHANGED = [
   "scripts/live-checks/vault-kit-settle.mjs",
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
+  "scripts/live-checks/wallet-withdraw-move-out.mjs",
+  "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

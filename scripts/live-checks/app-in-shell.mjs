@@ -43,6 +43,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-in-shell";
 // what a PASS line calls each engine: Chromium runs as the installed Google Chrome (scripts/browsers.mjs)
@@ -466,7 +467,8 @@ export function shellHeaders(signHeadersFile) {
 /** The helper's reads the terminal makes on its own (Discover's lists, the token route's lists and token read),
  *  answered from recorded live answers so the page under test never reaches the network and / draws a real token
  *  (card app-no-test-token): GET /v1/market/lists?chain=solana as read on 1 Nov, and GET /v1/market/token for the top of
- *  its Trending column as read on 3 Nov (apps/terminal/test/discover-data, test/token-source). A token read for any
+ *  its Trending column as read on 3 Nov (apps/terminal/test/discover-data, test/token-source); GET /v1/market/trades
+ *  answers an empty tape (card app-chart-controls). A token read for any
  *  other mint answers 404, as the helper answers a mint it does not know, never an aborted load. */
 const HELPER_HOST = "https://ct-api.unrealized.trade";
 const RECORDED = (f) => JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test", f), "utf8"));
@@ -516,6 +518,11 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/lists") {
       return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(LISTS) });
     }
+    // the token page's tape (card app-chart-controls, the chart's trade marks): answered as the helper answers a token
+    // whose book holds no trades yet, so the page draws no marks and makes no failed load
+    if (u.origin === HELPER_HOST && u.pathname === "/v1/market/trades") {
+      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ trades: [], src: "chain", as_of_ms: Date.now() }) });
+    }
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/token") {
       const known = u.searchParams.get("chain") === "solana" && u.searchParams.get("token") === TOKEN_ANSWER.row.token;
       return route.fulfill({ status: known ? 200 : 404, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(known ? TOKEN_ANSWER : { error: "unknown token" }) });
@@ -548,7 +555,7 @@ async function main() {
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const routes = harness ? Object.fromEntries(await Promise.all(KINDS.map(async (k) => [k, await harnessRoute(build, k)]))) : null;
   const expect = opt("--expect") ?? (harness ? "in" : "out");
-  const source = harness ? `harness, terminal build ${path.relative(REPO, build) || build}, the stand-in shell` : "live";
+  const source = harness ? `harness, terminal build ${named(build)}, the stand-in shell` : "live";
   const rec = await collect({ launchers, shots, source, expect, routes });
   const record = opt("--record");
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);

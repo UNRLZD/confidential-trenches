@@ -23,11 +23,12 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/withdraw/handoff.ts"))
-      return { ...r, source: wrap(String(r.source), "withdrawSettle", "export async function withdrawSettle(page, over) { void withdrawSettle__real; globalThis.__ctSettles.push(page.signal); return { outcomes: {} }; }") };
+      return { ...r, source: wrap(String(r.source), "withdrawSettle", "export async function withdrawSettle(page, over) { void withdrawSettle__real; globalThis.__ctSettles.push(page.signal); return { outcomes: globalThis.__ctOutcomes ?? {} }; }") };
     if (url.endsWith("/signpage/src/main.ts")) {
       const s = String(r.source);
       if (!s.includes("async function signOut(): Promise<void> {")) throw new Error("signOut: its line moved; update this test's hook");
-      return { ...r, source: `${s}\nglobalThis.__ctSignOut = signOut;\n` };
+      if (!s.includes("function withdrawDeps()")) throw new Error("withdrawDeps: its line moved; update this test's hook");
+      return { ...r, source: `${s}\nglobalThis.__ctSignOut = signOut;\nglobalThis.__ctWithdrawDeps = withdrawDeps;\n` };
     }
     return r;
   },
@@ -35,6 +36,8 @@ registerHooks({
 const gl = globalThis as Record<string, unknown>;
 const settles: (AbortSignal | undefined)[] = [];
 gl.__ctSettles = settles;
+// the settle pass answers one drift (a RESERVED note whose spend's change is not the device's) and one landing
+gl.__ctOutcomes = { n1: "unmatched", n2: "arrived" };
 
 // ---- a minimal DOM: what main.ts, src/shell.ts and src/backdrop.ts touch ----
 class El extends EventTarget {
@@ -141,4 +144,13 @@ test("the testnet page: a landing runs the withdrawals' settle pass, and its wai
   gl.__ctAtSignoutPost = () => (atPost ??= second.aborted);
   await (gl.__ctSignOut as () => Promise<void>)();
   assert.equal(atPost, true, "this tab's sign out stops the wait before the store signs out (not only once its own broadcast comes back)");
+});
+
+// card wallet-withdraw-move-out: main.ts keeps the pass's outcome, no longer dropping it: the form's deps count its drifts
+test("the settle pass's unmatched outcomes reach the withdraw form's deps", async () => {
+  await import("../src/main.ts");
+  await until("a settle pass", () => settles.length >= 1);
+  const deps = () => (gl.__ctWithdrawDeps as () => { unmatched?: () => number })();
+  await until("the pass's outcomes kept", () => deps().unmatched?.() === 1);
+  assert.equal(deps().unmatched?.(), 1);
 });

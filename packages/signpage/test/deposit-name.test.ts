@@ -12,6 +12,7 @@ import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { depositNamer, type DepositNamerDeps } from "../src/deposit-name.ts";
+import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 
 const ENTROPY = () => new Uint8Array(16); // the published all-zero vector (packages/wallet/test/vectors/a8.json)
 const SEED64 = wordsToSeed64(entropyToWords(ENTROPY()));
@@ -322,4 +323,81 @@ test("namings run one at a time, in order", async () => {
   first.open();
   await n.named();
   assert.equal(opened, 2);
+});
+
+// ---------- card pool-deposit-address: each pool's U_X, named ahead as the vault's U ----------
+const SOL_SCOPE = 4242n, BASE_SCOPE = 5151n;
+const evmOf = (s: bigint, i: number): string => {
+  const k = depositIdEvm(SEED64, s, i);
+  k.secretKey.fill(0);
+  return k.address;
+};
+const idOf = (s: bigint, i: number): string => {
+  const k = depositId(SEED64, s, i);
+  k.secretKey.fill(0);
+  return k.id;
+};
+
+test("a landing names each pool's planned index too: U_{s,i} on Solana; on an EVM pool U^evm_{s,i} beside U_{s,i}'s id", async () => {
+  const { w, ns } = await signedIn();
+  const n = namerOn(w, { pools: () => [{ chain: "solana", scope: SOL_SCOPE }, { chain: "base", scope: BASE_SCOPE }] });
+  n.name(ENTROPY());
+  await n.named();
+  const notes = await deposits(ns);
+  assert.deepEqual(notes.map((x) => x.scope).sort(), [SCOPE, SOL_SCOPE, BASE_SCOPE].sort());
+  assert.ok(notes.every((x) => x.state === "PLANNED"));
+  const at = (s: bigint) => indexOf(notes.find((x) => x.scope === s)!.ref);
+  assert.deepEqual(await w.get("meta", `deposit/${SCOPE}`), { v: 1, scope: SCOPE.toString(), index: at(SCOPE), id: U(at(SCOPE)) });
+  assert.deepEqual(await w.get("meta", `deposit/${SOL_SCOPE}`), { v: 1, scope: SOL_SCOPE.toString(), index: at(SOL_SCOPE), id: idOf(SOL_SCOPE, at(SOL_SCOPE)) });
+  assert.deepEqual(await w.get("meta", `deposit/${BASE_SCOPE}`),
+    { v: 1, scope: BASE_SCOPE.toString(), index: at(BASE_SCOPE), id: idOf(BASE_SCOPE, at(BASE_SCOPE)), evm: evmOf(BASE_SCOPE, at(BASE_SCOPE)) });
+  // again: the same indices, no second note on any scope
+  n.name(ENTROPY());
+  await n.named();
+  assert.equal((await deposits(ns)).length, 3);
+});
+
+test("review F4 N1: a Robinhood pool is named as an EVM pool: its record carries U^evm_{s,i} beside U_{s,i}'s id", async () => {
+  const HOOD_SCOPE = 6161n;
+  const { w, ns } = await signedIn();
+  const n = namerOn(w, { scope: () => null, pools: () => [{ chain: "robinhood", scope: HOOD_SCOPE }] });
+  n.name(ENTROPY());
+  await n.named();
+  const at = indexOf((await deposits(ns)).find((x) => x.scope === HOOD_SCOPE)!.ref);
+  assert.deepEqual(await w.get("meta", `deposit/${HOOD_SCOPE}`),
+    { v: 1, scope: HOOD_SCOPE.toString(), index: at, id: idOf(HOOD_SCOPE, at), evm: evmOf(HOOD_SCOPE, at) });
+});
+
+test("a pool's U_X moves on once money reached it, as the vault's; pools are named with no vault on the network", async () => {
+  const { w, ns } = await signedIn();
+  const n = namerOn(w, { scope: () => null, pools: () => [{ chain: "base", scope: BASE_SCOPE }] });
+  n.name(ENTROPY());
+  await n.named();
+  const first = (await deposits(ns))[0]!;
+  assert.equal(first.scope, BASE_SCOPE);
+  await ns.move(first.id, "PLANNED", "INCOMING");
+  n.name(ENTROPY());
+  await n.named();
+  const rec = (await w.get("meta", `deposit/${BASE_SCOPE}`)) as { index: number; id: string; evm: string };
+  assert.notEqual(rec.index, indexOf(first.ref));
+  assert.equal(rec.evm, evmOf(BASE_SCOPE, rec.index));
+  assert.equal(rec.id, idOf(BASE_SCOPE, rec.index));
+  assert.equal(await w.get("meta", `deposit/${SCOPE}`), undefined, "no vault on the network: no vault record");
+});
+
+test("one pool's naming that fails leaves the others named", async () => {
+  const { w, ns } = await signedIn();
+  const real = await openNoteStore(w);
+  closers.push(() => real.close());
+  const openNotes = async () => ({
+    planDeposit: (s: bigint, f: (r: NoteRef) => bigint) => (s === SOL_SCOPE ? Promise.reject(new Error("notes down")) : real.planDeposit(s, f)),
+    close: () => {},
+  });
+  const n = namerOn(w, { openNotes, pools: () => [{ chain: "solana", scope: SOL_SCOPE }, { chain: "base", scope: BASE_SCOPE }] });
+  n.name(ENTROPY());
+  await n.named();
+  assert.equal(await w.get("meta", `deposit/${SOL_SCOPE}`), undefined);
+  assert.ok(await w.get("meta", `deposit/${BASE_SCOPE}`));
+  assert.ok(await w.get("meta", `deposit/${SCOPE}`));
+  void ns;
 });

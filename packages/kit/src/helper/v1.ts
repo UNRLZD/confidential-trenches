@@ -367,10 +367,10 @@ export interface HelperWithdrawRequest {
   /** The 8 decimals in snarkjs order. */
   public_signals: [string, string, string, string, string, string, string, string];
   /**
-   * Always true: the kit sends fund_recipient: true on every /v1/withdraw (markets.md:1535-1536), and the relayer
-   * funds a new arming account A first when the recipient is one (H3.7 item 1).
+   * true when the recipient is an arming account A, which the relayer funds first when it has no account (H3.7 item
+   * 1); false when the vault pays the NEAR account the user typed straight (card wallet-withdraw-move-out).
    */
-  fund_recipient: true;
+  fund_recipient: boolean;
   token: HelperNearAccount;
 }
 

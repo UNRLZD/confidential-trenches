@@ -377,7 +377,7 @@
   }
  },
  "bad": {
-  "source": "harness, SIGN_HOST from /tmp/tmp.cI2pD1U4Ff",
+  "source": "harness, SIGN_HOST from tmp.cI2pD1U4Ff",
   "at": "2026-11-02T21:26:59.868Z",
   "browser": "chromium 153.0.8010.12 (Playwright)",
   "files": {
@@ -673,7 +673,7 @@
   }
  },
  "badWebkit": {
-  "source": "harness, SIGN_HOST from /tmp/tmp.cI2pD1U4Ff",
+  "source": "harness, SIGN_HOST from tmp.cI2pD1U4Ff",
   "at": "2026-11-02T21:27:25.925Z",
   "browser": "webkit 26.6 (Playwright)",
   "files": {
@@ -969,7 +969,7 @@
   }
  },
  "badLoose": {
-  "source": "harness, SIGN_HOST from /tmp/tmp.eA4EVi3hh2",
+  "source": "harness, SIGN_HOST from tmp.eA4EVi3hh2",
   "at": "2026-11-02T21:27:28.646Z",
   "browser": "webkit 26.6 (Playwright)",
   "files": {

@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -350,7 +351,7 @@ async function main() {
   let rec;
   try {
     rec = local
-      ? await collect({ browser, dir, source: `local, SIGN_HOST answered from ${given ? given : "packages/signpage's build (deploy.mjs build())"}` })
+      ? await collect({ browser, dir, source: `local, SIGN_HOST answered from ${given ? named(given) : "packages/signpage's build (deploy.mjs build())"}` })
       : await collect({ browser, signUrl: opt("--url") ?? SIGN_URL, source: "live" });
   } finally {
     await browser.close();

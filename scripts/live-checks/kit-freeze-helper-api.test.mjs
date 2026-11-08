@@ -72,15 +72,17 @@ test("recorded good answer with the helper up: the health parts and CORS headers
 
 // main as read then still names the origins before card hosts-main-on-top, which main is now held past (kit-v1 keeps
 // them: MOVED_SINCE_KIT_V1), and the run read the helper's health at its name before that card
-test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing: FAIL", async () => {
+test("recorded real run on GitHub main and kit-v1, before the cap was added: the cap and its code missing, fund_recipient still true: FAIL", async () => {
   const r = await check({ fetchFn: replay(REC.live_kit_v1), now: Date.parse("2026-11-01T08:32:10Z"), tag: "kit-v1", requireHealth: true });
   assert.equal(r.ok, false);
   const before = JSON.stringify(MOVED_SINCE_KIT_V1.HELPER_CORS_ORIGINS.value);
   assert.deepEqual(failed(r), [
     "BAD main: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES",
     `BAD main: cross-origin reads for exactly APP_HOST and SIGN_HOST, never *, no credentials: origins ${before}`,
+    "BAD main: every money-path shape equals its pin: differs: HelperWithdrawRequest",
     "BAD main: every frozen value equals its pin: differs: HELPER_CORS, HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS",
     "BAD kit-v1: every answer-code list equals its H7 row, in order: differs: HELPER_BIND_DEPOSIT_CODES",
+    "BAD kit-v1: every money-path shape equals its pin: differs: HelperWithdrawRequest",
     "BAD kit-v1: every frozen value equals its pin: differs: HELPER_RPC_METHODS, HELPER_BIND_DEPOSIT_CAP, HELPER_BIND_ANSWER_MS",
     `BAD ${HEALTH} does not answer (Error)`,
   ]);
@@ -156,7 +158,9 @@ test("more bad answers, each caught by exactly the lines named", () => {
     ["a third intent kind", (t) => t.replace("export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw;", 'export type HelperIntent = HelperIntentTransfer | HelperIntentFtWithdraw | { intent: "mt_withdraw" };'), [/intent kinds \[ft_withdraw,mt_withdraw,transfer\]/, /^every money-path shape equals its pin: differs: HelperIntent$/]],
     ["the deposit carried by ft_withdraw", (t) => t.replace('export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_transfer_call",', 'export type HelperBindDeposit = HelperDelegateAction<HelperFunctionCall<"ft_withdraw",'), [/HelperBindDeposit's action is HelperFunctionCall<"ft_withdraw"/, /^every money-path shape equals its pin: differs: HelperBindDeposit$/]],
     ["the onward receiver loosened", (t) => t.replace("  receiver_id: typeof HELPER_ONWARD_RECEIVER;", "  receiver_id: HelperNearAccount;"), [/^every money-path shape equals its pin: differs: HelperOnwardArgs$/]],
-    ["fund_recipient optional", (t) => t.replace("  fund_recipient: true;", "  fund_recipient?: boolean;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
+    ["fund_recipient optional", (t) => t.replace("  fund_recipient: boolean;", "  fund_recipient?: boolean;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
+    // card wallet-withdraw-move-out widened it to a boolean (the vault pays a typed NEAR account straight): back to kit-v1's true fails
+    ["fund_recipient pinned true again", (t) => t.replace("  fund_recipient: boolean;", "  fund_recipient: true;"), [/^every money-path shape equals its pin: differs: HelperWithdrawRequest$/]],
     ["a base64 signature", (t) => t.replace("  signature: HelperEd25519Signature;", "  signature: HelperBase64;"), [/^every money-path shape equals its pin: differs: HelperSignedIntent$/]],
     ["status items unbounded", (t) => t.replace("export const HELPER_STATUS_ITEMS_MAX = 100;", "export const HELPER_STATUS_ITEMS_MAX = 1000;"), [/^every frozen value equals its pin: differs: HELPER_STATUS_ITEMS_MAX$/]],
     ["salt in any case", (t) => t.replace("export const HELPER_SALT_PATTERN = /^[0-9a-f]{32}$/;", "export const HELPER_SALT_PATTERN = /^[0-9a-fA-F]{32}$/;"), [/^every frozen value equals its pin: differs: HELPER_SALT_PATTERN$/]],

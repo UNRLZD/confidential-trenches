@@ -13,13 +13,21 @@ import type { MarketChain } from "../discover/fields.ts";
 import { price, usd } from "../discover/format.ts";
 
 /** The timeframes the page draws (R5 token.js TF_LABEL) and the helper's name for each (06b `Tf`). */
-export const TF_API = { "1m": "1m", "5m": "5m", "15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d" } as const;
+export const TF_API = { "1s": "1s", "1m": "1m", "5m": "5m", "15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d" } as const;
 export type ChartTf = keyof typeof TF_API;
 export const CHART_TFS = Object.keys(TF_API) as ChartTf[];
+/** The chains whose helper serves 1s bars (card app-chart-controls): Solana's are its own chain reads, 1s included
+ *  (apps/helper/src/data/solana/trades.ts candles); Base's and Robinhood's answer 1s as not found
+ *  (apps/helper/src/data/evm/swaps.ts candles). R5 draws 1s only where it is served (token.js U.chartPanel). */
+export const TF_1S_CHAINS: readonly MarketChain[] = ["solana"];
+/** Whether the helper serves `tf` for a chain (1s only on TF_1S_CHAINS; none before the chain is known). The toolbar
+ *  draws every timeframe from its first paint and turns off the ones not served, so no button moves when the token's
+ *  chain lands (BAR-10 CLS). */
+export const tfServed = (chain: MarketChain | null, tf: ChartTf): boolean => tf !== "1s" || (chain !== null && TF_1S_CHAINS.includes(chain));
 /** 15m is the default (BRF v2.0.5, M157). */
 export const DEFAULT_TF: ChartTf = "15m";
 /** Seconds per bar, for the chart's period. */
-export const TF_SECONDS: Record<ChartTf, number> = { "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400 };
+export const TF_SECONDS: Record<ChartTf, number> = { "1s": 1, "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400 };
 /** Bars asked for: the helper's most (CANDLES_MAX, apps/helper/src/data/solana/token.ts). */
 export const CANDLES_LIMIT = 500;
 
@@ -149,6 +157,10 @@ export const LIVE_BACKOFF_MAX_MS = 30_000;
  *  A live read follows a good read by less than RESYNC_MS, under the shortest timeframe's bar (1m), so it never spans
  *  more than one new bar. */
 export const LIVE_LIMIT = 2;
+/** At 1s a bar opens every second a trade lands, so a live read asks for the newest LIVE_LIMIT_1S: more than the
+ *  seconds one read cycle can span (a read's TIMEOUT_MS, 10 s, then LIVE_MS), so a busy token's bars are never skipped
+ *  between two reads (a failed read is followed by a full one). */
+export const LIVE_LIMIT_1S = 16;
 /** A full read (CANDLES_LIMIT bars, the page's first read again) at least this often, and as the first read after a
  *  failed one: the helper can rebuild a token's bars (a book read again after its reads went stale, a pool found
  *  again, a restart), and its older bars then differ from the ones drawn (two of the three recorded tapes,
@@ -245,7 +257,7 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     if (hidden()) return next(LIVE_MS);
     const sent = now();
     const full = fails > 0 || away || sent - lastFull >= RESYNC_MS;
-    const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : LIVE_LIMIT, deps.fetchFn);
+    const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : cur.tf === "1s" ? LIVE_LIMIT_1S : LIVE_LIMIT, deps.fetchFn);
     if (stopped) return;
     if ("failed" in got) return failed(got.waitMs);
     const bars = foldBars(cur.bars, got.bars, cur.tf);

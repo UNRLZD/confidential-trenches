@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "app-pool-withdraw";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -184,8 +185,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     let source = `live ${APP_HOST}, the stand-in shell signed in`;
     if (a.includes("--harness")) {
       build = path.resolve(opt("--build", path.join(REPO, "apps/terminal/dist")));
-      const rel = path.relative(REPO, build);
-      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : build}, the stand-in shell signed in`;
+      source = `harness, terminal build ${named(build)}, the stand-in shell signed in`;
     }
     const routes = Object.fromEntries(await Promise.all(SHELLS.map(async (s) => [s, await routeFor(build, s)])));
     const rec = await collect({ shots: opt("--shots", undefined), routes, source });
