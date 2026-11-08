@@ -213,8 +213,9 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
         }
         await target.click('.dsc-tab[data-tab="new"]');
       }
-      const shot = path.join(shots, `${w.name}-discover.png`);
-      await page.screenshot({ path: shot });
+      // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+      const shot = `${w.name}-discover.png`;
+      await page.screenshot({ path: path.join(shots, shot) });
       const origin = new URL(target.url()).origin;
       // the frame's own document answers under its own CSP (read below); only what it loads, and the frames it opens, are judged
       const nav = (r) => r.isNavigationRequest();
@@ -266,7 +267,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);

@@ -35,6 +35,7 @@ const REFUSED = [
   "file:///etc/site/index.html",
   "dir=/tmp/x",
   "(from /tmp/x)",
+  "harness, terminal build ../../../../private/tmp/x/dist",
 ];
 // look-alikes that are not local paths: a URL's own path, a dash or dot name, a repo path, a file name, a regex in code
 const ALLOWED = [
@@ -49,6 +50,7 @@ const ALLOWED = [
   "0-desktop.png",
   "if (!/^https:\\/\\//.test(url)) return",
   "a/home/b",
+  "../kit/src/index.ts",
   "/home",
   "ratio 1:2",
   "live",

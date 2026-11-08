@@ -5,7 +5,7 @@
 // It reads every scripts/live-checks/*.answers.json git lists (tracked, and untracked but not ignored), parses it, and
 // refuses any key or string value that holds an absolute local path: a POSIX path under a user's, a temp or a mount
 // folder (/Users/, /home/, /root/, /private/, /tmp/, /var/folders/, /var/tmp/, /Volumes/, /mnt/, /opt/, /run/user/),
-// a home-relative ~/ path, a Windows drive (C:\ or C:/), a UNC share (\\server\) or a file: URL. A path counts only
+// the same folder reached by climbing out of the repo (../../private/tmp/), a home-relative ~/ path, a Windows drive (C:\ or C:/), a UNC share (\\server\) or a file: URL. A path counts only
 // where it starts the string or follows a space or punctuation, so a URL's own path (https://host/tmp/x) and a
 // look-alike (/tmp-x, tmp.abc) pass. A file that does not parse is refused, since it cannot be read.
 // Risk it holds: a reader of the public repo sees the recorder's machine paths and tool folders (app-trade-box-mount's
@@ -21,7 +21,7 @@ const POSIX = ["Users", "home", "root", "private", "tmp", "var/folders", "var/tm
 // the POSIX folders and ~/ in their own case (/Users/ is macOS's; a lower-case /users/ is a URL's); a drive followed
 // by a name (C:\Users, so a regex's escaped s:\/\/ in recorded code passes), a share and a file: URL in any case
 const PATTERNS = [
-  new RegExp([`${AT}/(?:${POSIX.join("|")})/`, `${AT}~/`].join("|")),
+  new RegExp([`${AT}/(?:${POSIX.join("|")})/`, `${AT}(?:\\.\\./)+(?:${POSIX.join("|")})/`, `${AT}~/`].join("|")),
   new RegExp([String.raw`(?<![A-Za-z0-9_])[A-Za-z]:[\\/][A-Za-z0-9_.$~-]`, String.raw`${AT}\\\\[A-Za-z0-9_.$-]+\\`, String.raw`(?<![A-Za-z0-9_])file:/`].join("|"), "i"),
 ];
 
