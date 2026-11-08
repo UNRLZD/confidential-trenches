@@ -89,6 +89,9 @@ const depositIx = (o: { program?: string; pool?: string; from?: string; fromSign
       acc(solanaPoolPage(PROGRAM, 1, o.label ?? 4), false, true),
       acc(o.mark ?? solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
       acc(o.system ?? SOLANA_SYSTEM_PROGRAM, false, false),
+      // each tree's next page (card pool-senders-next-page: a deposit names them)
+      acc(solanaPoolPage(PROGRAM, 0, (Math.floor((o.state ?? 6) / 1024) + 1) * 1024), false, true),
+      acc(solanaPoolPage(PROGRAM, 1, (Math.floor((o.label ?? 4) / 1024) + 1) * 1024), false, true),
     ],
     data: Uint8Array.from([1, ...u64(o.value ?? 2_000_000_000n), ...pre]),
   };

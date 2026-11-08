@@ -192,6 +192,19 @@ export const preMarkAddress = (program, precommitment) => pda([enc("pre"), preco
 export const pageAddress = (program, tree, pageNo) => pda([enc("page"), Uint8Array.of(tree), le(pageNo, 4)], program);
 export const programDataAddress = (program) => pda([address(program)], LOADER_V3).address;
 
+/** The devnet pool every devnet check pins, read from a deploy record (by default today's, DEPLOYMENT; a replay passes
+ *  the record its recording carries): its program, the pool and programdata that program derives, and its code's
+ *  sha256 and length. A record that is not devnet's, or whose pool or programdata is not its program's, is refused. */
+export function devnetPin(record = JSON.parse(readFileSync(DEPLOYMENT, "utf8"))) {
+  const program = record?.program_id;
+  if (record?.cluster !== "devnet" || typeof program !== "string") throw new Error(`not a devnet deploy record: ${record?.cluster}, ${program}`);
+  const pool = poolAddress(program).address;
+  const programdata = programDataAddress(program);
+  if (record.pool !== pool || record.programdata !== programdata) throw new Error(`the record's pool ${record.pool} and programdata ${record.programdata} are not ${program}'s (${pool}, ${programdata})`);
+  if (!/^[0-9a-f]{64}$/.test(record.so_sha256 ?? "") || !(Number(record.so_len) > 0)) throw new Error(`the record names no code: sha256 ${record.so_sha256}, ${record.so_len} bytes`);
+  return Object.freeze({ program, pool, programdata, so_sha256: record.so_sha256, so_len: Number(record.so_len), record });
+}
+
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The longest Retry-After rpc() waits out in one try (card signpage-pool-flow-answers): a longer one is waited for this
  * long, so a throttled provider never holds a check past its job's bound. */
