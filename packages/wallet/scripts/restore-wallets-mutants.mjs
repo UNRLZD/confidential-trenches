@@ -12,6 +12,8 @@ const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
 const ARMS = "wallet/src/restore/arms.ts";
 const IDR = "wallet/src/restore/id-reader.ts";
+const AFT = "wallet/src/restore/after.ts";
+const NOTES = "wallet/src/notes/restore.ts";
 const ID = ["wallet", "test/restore-id-reader.test.ts"];
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
@@ -59,8 +61,8 @@ const M = [
   ["step 7 covers the highest plus one", WAL, [["x.highest + 2 * RESTORE_LANES", "x.highest + RESTORE_LANES"]], RW, "step 7"],
   ["step 7 covers an empty lane's first index only", WAL, [["x.highest === null ? x.lane + RESTORE_LANES :", "x.highest === null ? x.lane :"]], RW, "step 7"],
   ["the re-reads take ids that hold a note", WAL, [["if (!held.has(i)) rereads.push", "rereads.push"]], RW, "step 7"],
-  ["the re-reads due at the window's end", WAL, [["return nowMs < plan.until ?", "return nowMs <= plan.until ?"]], RW, "step 7"],
-  ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], RW, "step 7"],
+  ["the re-reads due at the window's end", AFT, [["if (Math.min(...now.timesMs) >= restoreMs + REREAD_MS) return", "if (Math.min(...now.timesMs) > restoreMs + REREAD_MS) return"]], ID, "step 7's re-reads"],
+  ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], ID, "step 7's re-reads"],
   ["W's secret key left in memory", WAL, [["    w.secretKey.fill(0);\n", ""]], ["wallet", "test/pool-zeroing.test.ts"], "restoreWallets zeroes"],
   ["review N1 fold: the pass's floor the lower final", IDR, [["const floor = Math.max(fin[0].h, fin[1].h);", "const floor = Math.min(fin[0].h, fin[1].h);"]], ID, "the pass:"],
   ["review N1 fold: no bound on the wait for the provider behind", IDR, [["if (k >= passTries) throw", "if (false) throw"]], ID, "the pass:"],
@@ -72,15 +74,26 @@ const M = [
   ["review P1: a pass exactly 120 below the finals refused", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h <= Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
   ["review P1 fold: freshness judged against the lower final", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h < Math.min(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
   ["review P1: a scan's pass not held above its height", IDR, [["if (opts.after !== undefined && floor <= opts.after) throw", "if (false) throw"]], ID, "a stale pass"],
-  ["review P1: the second scan's pass at its bound height taken", ARMS, [["after: secondScanBoundHeight(scan.at) }", "after: secondScanBoundHeight(scan.at) - 1 }"]], ID, "a stale pass"],
+  ["review P1: the second scan's pass at its bound height taken", AFT, [["openRestorePass(network, rpcs, passOpts(o, bound));", "openRestorePass(network, rpcs, passOpts(o, bound - 1));"]], ID, "second scan:"],
+  ["review P1: the re-reads' pass at the restore's height taken", AFT, [["openRestorePass(network, rpcs, passOpts(o, restored.h));", "openRestorePass(network, rpcs, passOpts(o, restored.h - 1));"]], ID, "step 7's re-reads"],
   ["review P2: a pass's providers matched by name", IDR, [["own[0] !== rpcs[0] || own[1] !== rpcs[1]", "own[0].name !== rpcs[0].name || own[1].name !== rpcs[1].name"]], ID, "a stale pass"],
-  ["review R1: the re-reads take any reader", WAL, [['  readerPast(reader, plan.after, "the re-reads");\n', ""]], RW, "step 7"],
-  ["review R1: the second scan takes any reader", ARMS, [["  return readerPast(reader, secondScanBoundHeight(scan.at), step);", "  return reader;"]], ID, "a reader carries its pass"],
-  ["review R1: a reader at the height itself taken", IDR, [["if (reader.pass.h <= height) throw", "if (reader.pass.h < height) throw"]], RW, "step 7"],
-  ["review R1: a reader that does not carry its pass", IDR, [['Object.defineProperty(f, "pass", { value: pass,', 'Object.defineProperty(f, "pass", { value: undefined,']], ID, "a reader carries its pass"],
+  // delta review 5: the steps that look for money after a height own their reads (src/restore/after.ts)
+  ["review R1: the re-reads take a pass openRestorePass never opened", AFT, [["  ownPass(restored, network, rpcs);\n  if (plan?.after", "  if (plan?.after"]], ID, "owned steps take no reader"],
+  ["review R1: the second scan takes a pass openRestorePass never opened", AFT, [["  ownPass(restored, network, rpcs);\n  const restoreMs", "  const restoreMs"]], ID, "owned steps take no reader"],
+  ["review R1: a restore's pass taken on other provider objects", IDR, [["own[0] === on.rpcs[0] && own[1] === on.rpcs[1]", "true"]], ID, "owned steps take no reader"],
+  ["review R1: afterRestore takes a pass openRestorePass never opened", WAL, [["if (!isRestorePass(restored)) throw", "if (false) throw"]], RW, "step 7"],
+  ["review R1: the re-reads take a plan of another height", AFT, [["if (plan?.after !== restored.h) throw", "if (false) throw"]], ID, "owned steps take no reader"],
+  ["review R1: the re-reads read on the restore's pass", AFT, [["const read = await nearIdReader(network, rpcs, pass,", "const read = await nearIdReader(network, rpcs, restored,"]], ID, "owned steps take no reader"],
+  ["review R1: the second scan's ids read on the restore's pass", AFT, [["notes, await nearIdReader(network, rpcs, pass,", "notes, await nearIdReader(network, rpcs, restored,"]], ID, "second scan:"],
+  ["review R1: the second scan's arms read on the restore's pass", AFT, [["await nearBalanceReader(network, rpcs, pass,", "await nearBalanceReader(network, rpcs, restored,"]], ID, "second scan:"],
+  ["review R1: the re-reads' clock the higher final", AFT, [["if (Math.min(...now.timesMs) >= restoreMs", "if (Math.max(...now.timesMs) >= restoreMs"]], ID, "step 7's re-reads"],
+  ["review R1: the restore block's hash not checked", AFT, [["if (y === NO_BLOCK || y.hash !== pass.hash) throw", "if (y === NO_BLOCK) throw"]], ID, "step 7's"],
   ["review R2: the pass holds the caller's own array", IDR, [["PASSES.set(pass, Object.freeze([rpcs[0], rpcs[1]] as const));", "PASSES.set(pass, rpcs);"]], ID, "a stale pass"],
-  ["review R3: the second scan's pass opened before it is due", ARMS, [["  scanDue(scan);\n  return openRestorePass", "  return openRestorePass"]], ID, "a stale pass"],
-  ["review R3: the second scan's reads before it is due", ARMS, [["  scanDue(scan);\n  return readerPast", "  return readerPast"]], ID, "a reader carries its pass"],
+  ["review R3: the second scan runs before it is due", AFT, [["  if (!secondScanDue(at, now, boundMs)) return { due: false };\n", ""]], ID, "second scan:"],
+  ["review R3: the second scan's bound is the restore's block", AFT, [["await boundTimesMs(rpcs, bound)", "await boundTimesMs(rpcs, restored.h)"]], ID, "second scan:"],
+  ["review R3: a skipped bound block stops the scan", AFT, [['if ("block_id" in params && cause === "UNKNOWN_BLOCK") return NO_BLOCK;', ""]], ID, "second scan:"],
+  ["review R3: the second scan's vault read below its bound", AFT, [["    atLeast: bound,\n", ""]], ID, "second scan:"],
+  ["review R3: restoreNotes drops atLeast", NOTES, [["height: a.atLeast ?? 0 }", "height: 0 }"]], ID, "second scan:"],
   ["review N2: an id read as money left out of step 7's re-reads", WAL, [["const held = new Set(x.notes);", "const held = new Set([...x.notes, ...x.money]);"]], RW, "step 7"],
   ["review N3: step 7 takes a restore with a lane stopped at its reach", WAL, [["  if (stopped.length > 0)\n    throw", "  if (false)\n    throw"]], RW, "N3"],
   ["review N3: an unfinished restore called complete", WAL, [["complete: out.every((x) => x.reach === null)", "complete: true"]], RW, "N3"],

@@ -25,7 +25,7 @@
 // - Step 7, after the restore: the new store draws its own lane when it opens (../store/index.ts). Its deposit counter
 //   for the scope is raised past the lost store's possible index, to its lane's highest with a note or any history plus
 //   two of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open
-//   re-reads, in every lane, each deposit id up to that lane's highest plus two (in an empty lane, its first two) that
+//   re-reads (./after.ts rereadOnOpen, on its own pass and clock), in every lane, each deposit id up to that lane's highest plus two (in an empty lane, its first two) that
 //   holds no note (an id read as money, a used id now empty and an id whose read failed included: review N2, as one
 //   provider may fake money), so a late send to a quote the lost store named is found. A restore with a lane stopped
 //   past its note walk's end is unfinished (`complete` false): step 7 refuses it, raising no counter (review N3).
@@ -33,7 +33,7 @@ import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
 import { RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
-import { readerPast, type RestorePass } from "./id-reader.ts";
+import { isRestorePass, type RestorePass } from "./id-reader.ts";
 
 /** The tags of an arm's own wallets, and of its hop targets (wallet.md l.91-100). */
 export const ARM_TAGS = ["sol", "evm", "near"] as const satisfies readonly Chain[];
@@ -57,6 +57,13 @@ const U32 = 0xffffffff;
 /**
  * Whether an address has history on a chain: any balance, nonce or transaction (on EVM a balance and a nonce, on Solana
  * one signature, on NEAR the account itself). Throws when it cannot tell.
+ *
+ * The contract every HistoryReader keeps (step 4; the restore's and step 7's second scan's, ./after.ts; a later card
+ * builds the one on the chains' RPCs, as ./id-reader.ts nearIdReader is step 5's):
+ * - Both providers of the chain are read, two operators, as nearIdReader's pair.
+ * - History on either provider means found (true): one provider may hide history, and found only adds reads.
+ * - "No history" (false) needs both providers to answer none.
+ * - One provider failing while the other shows none is no answer: it throws, never false.
  */
 export type HistoryReader = (chain: HistoryChain, address: string) => Promise<boolean>;
 /**
@@ -253,27 +260,29 @@ export async function restoreDepositIds(
   return { lanes: out, complete: out.every((x) => x.reach === null) };
 }
 
-/** Step 7's plan: the index the new lane's counter was raised to, and the ids every open re-reads until `until`. */
-export type AfterRestore = { scope: bigint; lane: number; next: number; until: number; after: number; rereads: { lane: number; i: number; id: string }[] };
+/**
+ * Step 7's plan: the index the new lane's counter was raised to, the restore's pass block (`after`), and the ids every
+ * open re-reads for REREAD_MS of block time past that block (./after.ts rereadOnOpen owns those reads and their clock).
+ */
+export type AfterRestore = { scope: bigint; lane: number; next: number; after: number; rereads: { lane: number; i: number; id: string }[] };
 
 /** The last index step 7 covers in a lane: its highest with a note or any history plus two of the lane (empty: its second). */
 const coverTo = (x: LaneIds): number => (x.highest === null ? x.lane + RESTORE_LANES : x.highest + 2 * RESTORE_LANES);
 
 /**
  * Step 7: raises the store's deposit counter for the scope past the lost store's possible index in the store's lane,
- * and gives the ids to re-read on each open until `until` (the restore's NEAR final block time, `atMs`, plus 72 h).
+ * and gives the ids to re-read on each open (./after.ts rereadOnOpen, for 72 h of block time past `restored`'s block).
+ * `restored` is the restore's own pass, one openRestorePass opened.
  */
 export async function afterRestore(
   seed64: Uint8Array,
   store: { readonly lane: number; raiseDepositIndex(scope: bigint, min: number): Promise<number> },
   scope: bigint,
   lanes: readonly LaneIds[],
-  atMs: number,
-  restored: Pick<RestorePass, "h">,
+  restored: RestorePass,
 ): Promise<AfterRestore> {
-  if (!Number.isSafeInteger(atMs) || atMs <= 0) throw new Error("atMs is the restore's NEAR block time in ms");
-  // the restore's pass: the re-reads exist to see money after its block (review R1)
-  if (!Number.isSafeInteger(restored?.h) || restored.h <= 0) throw new Error("restored: the restore's pass");
+  // the restore's pass: the re-reads exist to see money after its block, so only a pass openRestorePass opened (R1)
+  if (!isRestorePass(restored)) throw new Error("restored: the pass is not one openRestorePass opened");
   if (lanes.length !== RESTORE_LANES || !lanes.every((x, k) => x.lane === k)) throw new Error("lanes: one per lane, in order");
   // an unfinished restore (review N3): a lane stopped past its note walk's end was never read past its reach, so no
   // counter is raised and nothing is re-read on its word; the user restores again with the reaches named
@@ -289,15 +298,6 @@ export async function afterRestore(
     const held = new Set(x.notes);
     for (let i = x.lane; i <= coverTo(x) && i <= U32; i += RESTORE_LANES) if (!held.has(i)) rereads.push({ lane: x.lane, i, id: depositAccount(seed64, scope, i).account });
   }
-  return { scope, lane: store.lane, next, until: atMs + REREAD_MS, after: restored.h, rereads };
+  return { scope, lane: store.lane, next, after: restored.h, rereads };
 }
 
-/**
- * The ids an open re-reads: step 7's list while the NEAR final block time `nowMs` is before its end, then none. The
- * reader they are read with is taken here and must read a block past the restore's (review R1: never the restore's
- * own reader, which reads its one pinned block for as long as it lives).
- */
-export function rereadsDue(plan: Pick<AfterRestore, "until" | "after" | "rereads">, reader: { readonly pass: Pick<RestorePass, "h"> }, nowMs: number): AfterRestore["rereads"] {
-  readerPast(reader, plan.after, "the re-reads");
-  return nowMs < plan.until ? plan.rereads : [];
-}

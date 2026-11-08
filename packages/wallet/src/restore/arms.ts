@@ -15,16 +15,14 @@
 // - Step 7, the second scan (l.335-342): a withdrawal the lost store signed lands until its deadline_ms, an arming
 //   delegate until its max_block_height, so steps 3-5 run once more only after both RPCs' final blocks are past both
 //   bounds, plus 1Click's delivery time counted from the later of the two. Block time and height are read from the chain on two RPCs, never the device
-//   clock (l.346-348).
+//   clock (l.346-348). secondScanDue is the rule; ./after.ts secondScan runs it on its own reads.
 // - Step 7, an arm with nothing visible (l.343-345): an arm whose spends row shows it landed, but whose A, W and V
 //   hold nothing, has its money in flight with 1Click or due as a late refund to V: its W and V are re-read on each
 //   open until money shows. quietArms gives that list; the open loop is the caller's.
 import { armAccount, freshWallet, refundId, returnId, type Chain } from "../derive/index.ts";
 import type { NoteRestore } from "../notes/restore.ts";
 import { arrivalOf } from "../withdraw/arrival.ts";
-import type { NearNetwork, NearRpc } from "../deposit/account.ts";
-import { openRestorePass, readerPast, type PassBalanceReader, type PassIdReader, type PassOpts, type RestorePass } from "./id-reader.ts";
-import { ARM_TAGS, restoreDepositIds, type DepositIds, type HistoryChain, type WalletRestore } from "./wallets.ts";
+import { ARM_TAGS, type HistoryChain, type WalletRestore } from "./wallets.ts";
 
 /** A balance read: "usdc" ft_balance_of on the vault's token, "near" the account's NEAR, "intents" its intents.near holdings. */
 export type ArmRead = "usdc" | "near" | "intents";
@@ -127,36 +125,6 @@ const pair = (xs: unknown, name: string): [number, number] => {
 /** The first block past the second scan's height bound: the higher restore height plus SECOND_SCAN_BLOCKS plus one. */
 export function secondScanBoundHeight(at: Pick<FinalPair, "heights">): number {
   return Math.max(...pair(at?.heights, "at.heights")) + SECOND_SCAN_BLOCKS + 1;
-}
-
-/** The second scan's clock: both RPCs' final blocks at the restore and now, and the bound block's times (secondScanDue). */
-export type SecondScan = { at: FinalPair; now: FinalPair; bound: [number, number] | null };
-const scanDue = (scan: SecondScan): void => {
-  if (!secondScanDue(scan?.at, scan?.now, scan?.bound)) throw new Error("the second scan is not due: the lost store's last delegate or its 1Click delivery may still land");
-};
-
-/**
- * The second scan's own pass (review P1, R3): it exists to see money that lands after the bound, so it opens only when
- * the scan is due (secondScanDue: both bounds past, plus 1Click's delivery time), and a pass whose block is not above
- * secondScanBoundHeight(at) is refused. The restore's own pass is never reused for it.
- */
-export function openSecondScanPass(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], scan: SecondScan, opts: Omit<PassOpts, "after"> = {}): Promise<RestorePass> {
-  scanDue(scan);
-  return openRestorePass(network, rpcs, { ...opts, after: secondScanBoundHeight(scan.at) });
-}
-
-// the second scan's readers (review R1): taken explicitly, due, and reading a block past the bound
-const scanReader = <R extends { readonly pass: Pick<RestorePass, "h"> }>(reader: R, scan: SecondScan, step: string): R => {
-  scanDue(scan);
-  return readerPast(reader, secondScanBoundHeight(scan.at), step);
-};
-/** Step 7's second scan of the deposit ids (step 5 once more), on a reader of the second scan's own pass. */
-export async function secondScanDepositIds(seed64: Uint8Array, scope: bigint, r: Parameters<typeof restoreDepositIds>[2], reader: PassIdReader, scan: SecondScan, opts: Parameters<typeof restoreDepositIds>[4] = {}): Promise<DepositIds> {
-  return restoreDepositIds(seed64, scope, r, scanReader(reader, scan, "the second scan"), opts);
-}
-/** Step 7's second scan of R, V and A (step 5 once more), on a balance reader of the second scan's own pass. */
-export async function secondScanArmAccounts(seed64: Uint8Array, r: Pick<NoteRestore, "spends">, w: Pick<WalletRestore, "wallets" | "unread">, read: PassBalanceReader, scan: SecondScan, opts: { pick?: (n: number) => number } = {}): Promise<ArmRestore> {
-  return restoreArmAccounts(seed64, r, w, scanReader(read, scan, "the second scan"), opts);
 }
 
 /**

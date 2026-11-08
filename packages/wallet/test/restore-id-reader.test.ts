@@ -7,14 +7,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { vaultScopeOf } from "@blindfill/kit";
+import { VAULT_CONSTANTS, vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote } from "../src/notes/restore.ts";
-import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRereadPass, openRestorePass, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
-import { openSecondScanPass, secondScanArmAccounts, secondScanDepositIds, type SecondScan } from "../src/restore/arms.ts";
-import { rereadsDue } from "../src/restore/wallets.ts";
-import { afterRestore, DEPOSIT_ID_MARGIN, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
+import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRestorePass, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
+import { rereadOnOpen, secondScan, type AfterRpc } from "../src/restore/after.ts";
+import { afterRestore, DEPOSIT_ID_MARGIN, REREAD_MS, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
 const DRPC = "https://near.drpc.org";
@@ -319,9 +318,9 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
 });
 
 // review P1 and P2 (the reviewer's probe3): a pass at 1000, money landing at 1100, the chain at 1700. A reader built on
-// the old pass would read the chain before the money with nothing erroring until the providers drop block 1000; a scan
-// that exists to see money after a height opens its own pass above it; a pass holds its two providers by identity.
-test("a stale pass is refused; a fresh one reads money; the second scan's and the re-reads' passes are above their heights; providers by identity", async () => {
+// the old pass would read the chain before the money with nothing erroring until the providers drop block 1000; a pass
+// holds its two providers by identity. The steps that look for money after a height own their passes (below).
+test("a stale pass is refused; a fresh one reads money; providers by identity", async () => {
   let tip = 1000;
   const chain = (url: string): NearRpc => ({
     name: url,
@@ -357,20 +356,6 @@ test("a stale pass is refused; a fresh one reads money; the second scan's and th
   assert.equal(atLiar.h, 1000);
   tip = 1700;
   await assert.rejects(idReaderAt("mainnet", [liarLow, rpcs[1]], atLiar, o), /^Error: the pass at block 1000 is stale: the RPCs' finals are at 1000 and 1700, over 120 blocks past it; open a fresh pass$/);
-  // the second scan: its pass must be above secondScanBoundHeight (restore finals 1000 and 990: 1000 + 600 + 1 = 1601),
-  // and it opens only when due (review R3): 2 min of block time past the later bound
-  const T0 = 1_762_600_000_000, B = T0 + 11 * 60_000;
-  const scanAt = (h: number, t: number): SecondScan => ({ at: { heights: [1000, 990], timesMs: [T0, T0] }, now: { heights: [h, h], timesMs: [t, t] }, bound: [B, B] });
-  tip = 1601;
-  await assert.rejects(openSecondScanPass("mainnet", rpcs, scanAt(1601, B + 120_001), o), /^Error: the pass at block 1601 is not past block 1601; read again once the chain is past it$/);
-  tip = 1602;
-  assert.throws(() => openSecondScanPass("mainnet", rpcs, scanAt(1602, B + 120_000), o), /^Error: the second scan is not due: the lost store's last delegate or its 1Click delivery may still land$/);
-  assert.equal((await openSecondScanPass("mainnet", rpcs, scanAt(1602, B + 120_001), o)).h, 1602);
-  // the open's re-reads: their pass must be above the restore's
-  tip = 1000;
-  await assert.rejects(openRereadPass("mainnet", rpcs, old, o), /the pass at block 1000 is not past block 1000/);
-  tip = 1001;
-  assert.equal((await openRereadPass("mainnet", rpcs, old, o)).h, 1001);
   // P2: an object named as the release URL but not the one the pass was opened on is refused
   const lookalike: NearRpc = { name: FAST, query: rpcs[0].query };
   assert.throws(() => idReaderAt("mainnet", [lookalike, rpcs[1]], now, o), /the pass was opened on other RPCs/);
@@ -382,50 +367,140 @@ test("a stale pass is refused; a fresh one reads money; the second scan's and th
   assert.equal(typeof (await idReaderAt("mainnet", rpcs, mine, o)), "function");
 });
 
-// review R1 (the reviewer's probe4): a reader reads its one pass for as long as it lives, so a reader built at 1000 and
-// called at 1700 would answer unused for money that landed at 1100. It carries its pass, read-only, and every step that
-// exists to see money after a height takes the reader and refuses one whose pass is not above it.
-test("a reader carries its pass; the re-reads and the second scan refuse a reader not past their height", async () => {
-  let tip = 1000;
-  const chain = (url: string): NearRpc => ({
+// ---------- step 7's owned steps (restore/after.ts; review R1, delta review 5) ----------
+// A chain for the steps that look for money after a height: block h's time is T0 + (h - 1000) s; `tip` is every final
+// (`vault` and `intents` lag the vault's and intents.near's view finals when set); money lands at block 1100 on the ids
+// in `money`; the mainnet vault answers its views, empty; `block` answers headers, UNKNOWN_BLOCK for a skipped height.
+const T0 = 1_762_600_000_000;
+const timeOf = (h: number): number => T0 + (h - 1000) * 1000;
+const MVAULT = NEAR_NETWORKS.mainnet.vault;
+const MSCOPE = vaultScopeOf(keccak_256, MVAULT, USDC);
+const mid = (i: number) => depositAccount(SEED, MSCOPE, i).account;
+type StepWorld = { tip: number; vault?: number; intents?: number; skip?: Set<number>; finalMs?: number; restoreHash?: string; money: string[] };
+const tree = { size: 0, depth: 0, root: "0" };
+const vaultConfig = { version: "blindfill-vault 0.1.0", asset: USDC, scope: String(MSCOPE), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX };
+function stepChain(url: string, s: StepWorld): AfterRpc {
+  const noBlock = { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } };
+  return {
     name: url,
     query: async (p) => {
-      const h = p.finality === "final" ? tip : heightOf(p);
-      if (p.account_id === "intents.near" && p.request_type === "view_account") return { jsonrpc: "2.0", result: { amount: "1", block_height: h, block_hash: hashOf(h) } };
-      const a = answer(h >= 1100 ? W({ [id(at(0, 1))]: { usdc: 9n, storage: true }, [U1]: { usdc: 9n } }) : W({}), p) as { result?: Record<string, unknown> };
+      const final = p.finality === "final";
+      if (p.account_id === MVAULT) {
+        const h = final ? (s.vault ?? s.tip) : heightOf(p);
+        const m = p.method_name as string;
+        return view(m === "config" ? vaultConfig : m === "state_tree" || m === "label_tree" ? tree : [], h);
+      }
+      const pass = p.account_id === "intents.near" && p.request_type === "view_account";
+      const h = final ? (pass ? (s.intents ?? s.tip) : s.tip) : heightOf(p);
+      if (pass) return { jsonrpc: "2.0", result: { amount: "1", block_height: h, block_hash: hashOf(h) } };
+      const a = answer(h >= 1100 ? W(Object.fromEntries(s.money.map((u) => [u, { usdc: 9n, storage: true }]))) : W({}), p) as { result?: Record<string, unknown> };
       if (a.result) Object.assign(a.result, { block_height: h, block_hash: hashOf(h) });
       return a;
     },
-  });
-  const rpcs = [chain(FAST), chain(DRPC)] as const;
-  const o = { sleep: noSleep, tries: 1, first: () => 0 };
-  const T0 = 1_762_600_000_000;
-  const restored = await openRestorePass("mainnet", rpcs, o);
-  const reader = await idReaderAt("mainnet", rpcs, restored, o);
-  const balance = await balanceAt("mainnet", rpcs, restored, o);
-  assert.equal(reader.pass, restored);
-  assert.equal(balance.pass, restored);
-  assert.throws(() => { (reader as { pass: unknown }).pass = undefined; }, TypeError, "read-only");
-  const lanes = await restoreDepositIds(SEED, SCOPE, R, reader);
-  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, T0, restored);
-  assert.equal(plan.after, 1000);
-  tip = 1700;
-  // the restore's own reader, still answering from block 1000: refused by the re-reads and the second scan
-  assert.equal(await reader(id(at(0, 1))), "unused", "it reads its one block, 1000, before the money");
-  assert.throws(() => rereadsDue(plan, reader, T0), /^Error: the re-reads: the reader's pass at block 1000 is not past block 1000; open a fresh pass$/);
-  assert.throws(() => rereadsDue(plan, { pass: undefined } as unknown as typeof reader, T0), /the reader carries no pass/);
-  const B = T0 + 11 * 60_000;
-  const due: SecondScan = { at: { heights: [1000, 1000], timesMs: [T0, T0] }, now: { heights: [1700, 1700], timesMs: [B + 120_001, B + 120_001] }, bound: [B, B] };
-  await assert.rejects(secondScanDepositIds(SEED, SCOPE, R, reader, due), /^Error: the second scan: the reader's pass at block 1000 is not past block 1601; open a fresh pass$/);
-  await assert.rejects(secondScanArmAccounts(SEED, { spends: [] }, { wallets: [], unread: [] }, balance, due), /the second scan: the reader's pass at block 1000 is not past block 1601/);
-  // fresh passes past their heights read the money
-  const reread = await idReaderAt("mainnet", rpcs, await openRereadPass("mainnet", rpcs, restored, o), o);
-  assert.equal(rereadsDue(plan, reread, T0).length > 0, true);
-  assert.equal(await reread(id(at(0, 1))), "money");
-  const scanned = await idReaderAt("mainnet", rpcs, await openSecondScanPass("mainnet", rpcs, due, o), o);
-  assert.deepEqual((await secondScanDepositIds(SEED, SCOPE, R, scanned, due)).lanes[0]!.money, [at(0, 1)]);
-  // a second scan not yet due refuses even a fresh reader
-  await assert.rejects(secondScanDepositIds(SEED, SCOPE, R, scanned, { ...due, now: { ...due.now, timesMs: [B + 120_000, B + 120_000] } }), /the second scan is not due/);
+    block: async (p) => {
+      const h = "block_id" in p ? p.block_id : s.tip;
+      if ("block_id" in p && (h > s.tip || s.skip?.has(h))) return noBlock;
+      const hash = h === 1000 && s.restoreHash ? s.restoreHash : hashOf(h);
+      const ms = "finality" in p && s.finalMs !== undefined ? s.finalMs : timeOf(h);
+      return { jsonrpc: "2.0", result: { header: { height: h, hash, timestamp_nanosec: String(BigInt(ms) * 1_000_000n) } } };
+    },
+  };
+}
+// one pair of provider objects over two worlds (a pass holds its providers by identity); set() changes both, or each
+function stepPair(base: StepWorld) {
+  const a: StepWorld = { ...base }, b: StepWorld = { ...base };
+  const rpcs = [stepChain(FAST, a), stepChain(DRPC, b)] as const;
+  const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined };
+  return { rpcs, set: (x: Partial<StepWorld>, y: Partial<StepWorld> = x) => void (Object.assign(a, clear, x), Object.assign(b, clear, y)) };
+}
+const so = { sleep: noSleep, tries: 1, first: () => 0 };
+// the reviewer's probe5 chain: a note at 3 (lane 3), money landing at index 11 (lane 3, k=1) at block 1100
+const r5 = (): Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked"> => ({ notes: [dep(3)], laneHighest: [null, null, null, 3, null, null, null, null], laneWalked: Array.from({ length: 8 }, (_, l) => (l === 3 ? 3 : l - 8) + 8 * 10_000) });
+const store = { lane: 0, raiseDepositIndex: async (_s: bigint, m: number) => m };
+
+test("step 7's owned steps take no reader, pass height or clock: the probe5 ways in are gone or refused", async () => {
+  const idMod = await import("../src/restore/id-reader.ts"), armsMod = await import("../src/restore/arms.ts"), walletsMod = await import("../src/restore/wallets.ts");
+  for (const [m, names] of [[idMod, ["readerPast", "openRereadPass"]], [armsMod, ["secondScanDepositIds", "secondScanArmAccounts", "openSecondScanPass"]], [walletsMod, ["rereadsDue"]]] as const)
+    for (const n of names) assert.equal(n in m, false, `${n} is off the surface`);
+  const { rpcs, set } = stepPair({ tip: 1000, money: [id(11), mid(at(0, 1))] });
+  const restored = await openRestorePass("mainnet", rpcs, so);
+  const old = await idReaderAt("mainnet", rpcs, restored, so);
+  const lanes = await restoreDepositIds(SEED, SCOPE, r5(), old);
+  const plan = await afterRestore(SEED, store, SCOPE, lanes, restored);
+  set({ tip: 1700 });
+  // (a) a forged pass, or a copy of the real one: refused by both steps (a reader can no longer be handed in at all)
+  for (const forged of [{ ...restored, h: 1e9 }, { ...restored }, { h: 1e9 }]) {
+    await assert.rejects(rereadOnOpen({ network: "mainnet", rpcs, restored: forged as RestorePass, plan, opts: so }), /^Error: restored: the pass is not one openRestorePass opened on these RPCs$/);
+    await assert.rejects(secondScan({ seed64: SEED, network: "mainnet", rpcs, restored: forged as RestorePass, wallets: { wallets: [], unread: [] }, gap: 3, opts: so }), /^Error: restored: the pass is not one openRestorePass opened on these RPCs$/);
+  }
+  // a real pass opened on other provider objects: refused
+  await assert.rejects(rereadOnOpen({ network: "mainnet", rpcs: stepPair({ tip: 1700, money: [] }).rpcs, restored, plan, opts: so }), /not one openRestorePass opened on these RPCs/);
+  // (b) afterRestore takes only a real pass (restore-wallets.test.ts holds the rest); a plan of another height is refused
+  await assert.rejects(afterRestore(SEED, store, SCOPE, lanes, { h: 1 } as RestorePass), /^Error: restored: the pass is not one openRestorePass opened$/);
+  await assert.rejects(rereadOnOpen({ network: "mainnet", rpcs, restored, plan: { ...plan, after: 1 }, opts: so }), /^Error: plan: not the restore's \(its block is not the pass's\)$/);
+  // (c) the re-reads read on their own pass above the restore's: the money at 11 shows; the restore's reader still says unused
+  assert.equal(await old(id(11)), "unused", "the restore's reader reads block 1000, before the money");
+  const got = await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
+  assert.ok(got.due);
+  assert.deepEqual(got.ids.find((x) => x.i === 11), { lane: 3, i: 11, id: id(11), state: "money" });
+  assert.equal(got.ids.length, plan.rereads.length);
+});
+
+test("step 7's re-reads: due for 72 h of block time past the restore's block on both finals, on a pass above it", async () => {
+  const { rpcs, set } = stepPair({ tip: 1000, money: [id(11)] });
+  const restored = await openRestorePass("mainnet", rpcs, so);
+  const plan = await afterRestore(SEED, store, SCOPE, await restoreDepositIds(SEED, SCOPE, r5(), await idReaderAt("mainnet", rpcs, restored, so)), restored);
+  const run = () => rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so });
+  // the pass is above the restore's block: at the restore's own tip it is refused, to be read again
+  await assert.rejects(run(), /^Error: the pass at block 1000 is not past block 1000; read again once the chain is past it$/);
+  // due until both finals are REREAD_MS past the restore block's time (block 1000 + 259,200 s)
+  assert.equal(REREAD_MS, 72 * 3_600_000, "72 h of NEAR block time (a deposit address's life, D44)");
+  const end = 1000 + 72 * 3_600;
+  set({ tip: end - 1 });
+  assert.equal((await run()).due, true);
+  set({ tip: end });
+  assert.deepEqual(await run(), { due: false });
+  // one provider's final time lying late never ends the re-reads early: both must be past
+  set({ tip: 2000, finalMs: timeOf(end) }, { tip: 2000 });
+  assert.equal((await run()).due, true);
+  set({ tip: 2000 }, { tip: 2000, finalMs: timeOf(end) });
+  assert.equal((await run()).due, true);
+  // the restore block's header must name the pass's hash on both providers
+  set({ tip: 2000 }, { tip: 2000, restoreHash: "F".padEnd(44, "a") });
+  await assert.rejects(run(), /^Error: https:\/\/near\.drpc\.org: the restore's block 1000 is not the pass's /);
+});
+
+test("step 7's second scan: due on its own reads of both finals and the bound block, the vault read past the bound, ids on a pass above it", async () => {
+  const { rpcs, set } = stepPair({ tip: 1000, money: [mid(at(0, 1))] });
+  const restored = await openRestorePass("mainnet", rpcs, so);
+  const scan = () => secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...so, margin: 2 } });
+  // the bound: block 1601 (1000 + 600 + 1), its time T0 + 601 s; due once both finals are 2 min past it: past T0 + 721 s
+  set({ tip: 1600 });
+  assert.deepEqual(await scan(), { due: false }, "the height bound is not past");
+  set({ tip: 1721 });
+  assert.deepEqual(await scan(), { due: false }, "the bound block's 2 min are not past");
+  set({ tip: 1722 });
+  const got = await scan();
+  assert.ok(got.due);
+  assert.deepEqual(got.ids.lanes[0]!.money, [at(0, 1)], "the money after the restore's block shows");
+  assert.ok(got.notes.height >= 1601, "the vault read at or past the bound block");
+  // the vault's finals lagging below the bound: the scan's vault read refuses them (restoreNotes atLeast)
+  set({ tip: 1722, vault: 1600 });
+  await assert.rejects(scan(), /below the cursor's 1601/);
+  // intents.near's finals at the bound: the scan's own pass is refused until it is above it
+  set({ tip: 1722, intents: 1601 });
+  await assert.rejects(scan(), /^Error: the pass at block 1601 is not past block 1601; read again once the chain is past it$/);
+  // one provider's final time lying late is outvoted: due needs both
+  set({ tip: 1721 }, { tip: 1721, finalMs: T0 + 3_600_000 });
+  assert.deepEqual(await scan(), { due: false });
+  // a skipped bound block: the next block's time is the bound (later, never earlier)
+  set({ tip: 1722, skip: new Set([1601]) });
+  assert.deepEqual(await scan(), { due: false }, "1602's time T0 + 602 s: due past T0 + 722 s");
+  set({ tip: 1723, skip: new Set([1601]) });
+  assert.equal((await scan()).due, true);
+  // the restore block's header must name the pass's hash on both providers
+  set({ tip: 1723 }, { tip: 1723, restoreHash: "F".padEnd(44, "a") });
+  await assert.rejects(scan(), /^Error: https:\/\/near\.drpc\.org: the restore's block 1000 is not the pass's /);
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------
@@ -521,6 +596,6 @@ test("a faked money on a used, empty id keeps it in step 7's re-reads", async ()
   const fake = (p: Record<string, unknown>) => (argsOf(p).account_id === id(u) && p.method_name === "ft_balance_of" ? view("5") : undefined);
   const lanes = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, sleep: noSleep, tries: 1 }));
   assert.deepEqual(lanes[3]!.money, [u], "the faked money is taken (nothing outvotes money)");
-  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, 1_762_600_000_000, { h: 1 });
-  assert.ok(rereadsDue(plan, { pass: { h: 2 } }, 1_762_600_000_000).some((x) => x.i === u), "the id is re-read until its move lands");
+  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, LIVE!);
+  assert.ok(plan.rereads.some((x) => x.i === u), "the id is re-read until its move lands");
 });

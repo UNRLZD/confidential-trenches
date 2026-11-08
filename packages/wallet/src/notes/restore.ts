@@ -112,6 +112,11 @@ export type RestoreArgs = {
    * thread unless given.
    */
   walk?: (lane: number, scope: bigint, gap: number, precommitments: ReadonlySet<bigint>, reach: number | null) => Promise<LaneWalk>;
+  /**
+   * The height the vault's pages are read at or above (vaultSync's cursor.height: "behind" below it), 0 unless given.
+   * Step 7's second scan (../restore/after.ts secondScan) reads them at or past its bound block.
+   */
+  atLeast?: number;
 };
 
 /** Steps 2 and 3: the vault's pages on two RPCs, then every note of this seed found in them. */
@@ -119,7 +124,9 @@ export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
   // two hosts of one operator are one read: a pair that is not a release pair is refused before any read
   if (nearPairNetwork(a.rpcs) === null) throw new Error(nearPairRule());
   const scope = vaultScopeOf(keccak_256, a.vault, a.token);
-  const s = await vaultSync({ vault: a.vault, rpcs: a.rpcs, cursor: vaultSyncStart(a.vault), lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
+  if (a.atLeast !== undefined && (!Number.isSafeInteger(a.atLeast) || a.atLeast < 0)) throw new Error("atLeast is a block height");
+  const cursor = { ...vaultSyncStart(a.vault), height: a.atLeast ?? 0 };
+  const s = await vaultSync({ vault: a.vault, rpcs: a.rpcs, cursor, lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
   if (s.leaves.length !== s.stateTree.size) throw new Error("the leaves read are not the whole state tree");
   // the vault's own scope and token, read on both RPCs: a wrong token string would give an empty restore that looks valid
   const finalHeights = await readConfig(a.rpcs, a.vault, a.token, scope, s.height, a.signal);
