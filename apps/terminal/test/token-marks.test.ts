@@ -24,7 +24,7 @@ const good = () => ({
 const trade = (o: Partial<Trade> = {}): Trade => ({ t_ms: T0 + 10, side: "buy", usd: "10", amt: "5", trader: "A", tx: "t", ...o });
 
 test("the url asks the chain, the token and 50 rows", () => {
-  assert.equal(TRADES_URL("solana", "Mint111"), "https://api.confidential.unrealized.trade/v1/market/trades?chain=solana&token=Mint111&limit=50");
+  assert.equal(TRADES_URL("solana", "Mint111"), "https://ct-api.unrealized.trade/v1/market/trades?chain=solana&token=Mint111&limit=50");
   assert.match(TRADES_URL("base", "0xa&b"), /token=0xa%26b&limit=50$/);
 });
 
