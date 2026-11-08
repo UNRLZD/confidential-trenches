@@ -26,7 +26,7 @@ const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const OTHER = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16).fill(0x7f)));
 const TEST_GAP = 64; // the property's walk; every generated lane gap is checked to be below it (RESTORE_GAP is tested below)
 // card fresh-run-margin: the default run keeps the property's first seeded cases and the gap rule at a gap of TEST_GAP;
-// FULL_RUNS=1 (the package's test:mutants script, CI's test-wallet job) runs every case and the rule at RESTORE_GAP
+// FULL_RUNS=1 (the package's test:mutants script, run by CI's test-mutants split) runs every case and the rule at RESTORE_GAP
 const FULL = process.env.FULL_RUNS === "1";
 const CHAIN_TAGS = Object.keys(d.CHAINS) as d.Chain[];
 

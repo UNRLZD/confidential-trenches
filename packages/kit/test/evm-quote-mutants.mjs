@@ -747,11 +747,11 @@ export const MUTANTS = [
   [QUOTE, "const gas = EVM_POOL_SELL_GAS - EVM_7702_AUTH_GAS;", "const gas = EVM_POOL_SELL_GAS;", R, "PE6 "],
   [QUOTE, "const tip = evmPoolSellTip(chain);", "const tip = 0n;", R, "PE6 "],
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } } };", R, "PE1 "],
-  [QUOTE, "override: asW, tx }]);", "override: asW }]);", R, "PE6 "],
+  [QUOTE, "override: asW, tx }], lim);", "override: asW }], lim);", R, "PE6 "],
   // the sender's balance is its own (review point 4, 4 Nov): a balance override on it, on the nonce read or the sim, is caught,
   // and a sender too low to pay the sim's gas, read at the block, skips the sim and keeps every route at its keep-min
   // value (card evm-sell-unfunded-sim-keeps-route: dropping them let a seeded pool set the price), never the sale
-  [QUOTE, "override: asW, tx }]);", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) } }, tx }]);", R, "PE6 "],
+  [QUOTE, "override: asW, tx }], lim);", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) } }, tx }], lim);", R, "PE6 "],
   [QUOTE, "override: { ...asW, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", "override: { ...asW, [sender]: { balance: qty(gas * maxFee + 10n ** 18n) }, [EVM_SELL_SIM]: { code: SIM_POOL_CODE } }, tx };", R, "PE6 "],
   [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE8 "],
   [QUOTE, "if (bal!.kind !== \"out\" || bal!.amountOut < gas * maxFee) return { routes, sim: \"skipped\" };", "if (false) return { routes, sim: \"skipped\" };", R, "PE9 "],
@@ -953,7 +953,7 @@ export const MUTANTS = [
   // through ask unwrapped. Left out, as harmless: T4 (gated's plain call, \`f\`, which no request of a quote calls: ask
   // sends a gated provider's through GATED) and A2 (ask's \`e === MOVED\`: a moved request's rejection is dropped by
   // agreeing, which marks it moved before it rejects, as an rpc_error or MOVED alike).
-  [QUOTE, "    Array.from({ length: n }, async (_, n) => {\n      const c0 = n * CALLS_PER_BATCH;\n      const batch = calls.slice(c0, c0 + CALLS_PER_BATCH);", "    Array.from({ length: 1 }, async (_, n) => {\n      const c0 = n * CALLS_PER_BATCH;\n      const batch = calls.slice(c0);", R, "QE1 "],
+  [QUOTE, "    starts.map(async (c0, n) => {\n      const batch = calls.slice(c0, starts[n + 1] ?? calls.length);", "    starts.slice(0, 1).map(async (c0, n) => {\n      const batch = calls.slice(c0);", R, "QE1 "],
   [QUOTE, "        past();\n        gate?.sent();\n", "        past();\n", R, "QE1 "],
   [QUOTE, "  const late = () => spares > 0 && (spares--, true);", "  const late = () => true;", R, "QE4 "],
   [QUOTE, "() => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);", "() => false);", R, "QE3 "],
@@ -968,6 +968,18 @@ export const MUTANTS = [
   [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
   [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs))", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined)", R, "QE7 "],
   [QUOTE, "gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "gated(poolRpcs, v.scan?.parallel ?? 2)", R, "QE8 "],
+  // card evm-buy-quote-in-window: a round's reads 64 to a call
+  [BUYU, "      reads: bare({ perCall: 64, maxBytes: 200_000 }),", "      reads: Object.freeze({ perCall: 6, maxBytes: 200_000 }),", R, "QE9 "],
+  // review of 2c02f7df: each venue's reads pinned, and no request past the venue's bytes (a call's split, a batch's cut)
+  [BUYU, "took 200,000\n      reads: bare({ perCall: 6, maxBytes: 24_000 }),", "took 200,000\n      reads: Object.freeze({ perCall: 64, maxBytes: 24_000 }),", R, "QE14 "],
+  [QUOTE, "    if (part.length > 1 && bytesOf(callOf(part)) > lim.maxBytes) {", "    if (false) {", R, "QE14 "],
+  [QUOTE, "    if (k === CALLS_PER_BATCH || size + b > lim.maxBytes) {", "    if (k === CALLS_PER_BATCH) {", R, "QE14 "],
+  // past the scan's bound a plain rpc_error: its halves and the spare's spans are asked past it
+  [QUOTE, '  const past = () => new ScanStop("rpc_error", ', '  const past = () => new EvmQuoteError("rpc_error", ', R, "QE12 "],
+  // the counter QE12 reads: without it the scan's asks read 0
+  [QUOTE, "      scanAsks++;\n", "", R, "QE12 "],
+  // a request queued at the gate past the bound: a plain rpc_error there is asked as its halves and handed to the spare
+  [QUOTE, "      if (now >= untilMs) throw past();", '      if (now >= untilMs) throw new EvmQuoteError("rpc_error", "past the bound");', R, "QE13 "],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
