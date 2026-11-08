@@ -268,7 +268,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // of every Initialize log with its last block in the same batch, 132-1,207 ms (2026-11-08 18:29Z from this Mac).
       // A cold index of the scan's 1M blocks: 100 spans, 4,701 pools, 25 batches on each, no 429, 10.8 s; the gap a
       // minute on, one batch each, 1.7 s (18:33Z). Some of Pocket's backends refuse 1,000 blocks (above), so a span it
-      // answers with an error is asked as its halves on both. The margin: 474 blocks; the cap: CAP_BASE pools.
+      // answers with an error is asked as its halves on both. The margin: 474 blocks; the cap: 131,072 pools.
       index: bare({ readers: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"] as const), span: 10_000, perBatch: 5, parallel: 4, margin: 474, cap: 131_072 }),
     }),
     robinhood: bare({
@@ -398,7 +398,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // The index's readers (card evm-pool-index): Robinhood's own and Pocket, two operators, each a 10,000-block span
       // of every Initialize log with its last block in the same batch, 257-1,209 ms (2026-11-08 18:29Z from this Mac).
       // Robinhood's own answered 20 of 42 batches 429 at 4 at once (5 spans a batch, 18:33Z), as it does the scan's 4
-      // (above), so 2 at once of 10 spans. RH_NOTE The margin: 7,119 blocks; the cap: CAP_RH pools.
+      // (above), so 2 at once of 10 spans: a cold index of the scan's 10M blocks, 1,000 spans and 49,761 pools,
+      // took 542.7 s, Robinhood's own answering 144 of its 246 batches 429 and Pocket none of its 102; the gap a minute
+      // on, 3 batches each, 2.2 s, no 429 (18:42-18:52Z). The margin: 7,119 blocks; the cap: 131,072 pools.
       index: bare({ readers: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"] as const), span: 10_000, perBatch: 10, parallel: 2, margin: 7_119, cap: 131_072 }),
     }),
     // The testnets: each pin is pool-evm-deploy's record (scripts/live-checks/pool-evm-deploy.<chain>.json, deployed
