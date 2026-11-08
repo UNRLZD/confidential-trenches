@@ -968,14 +968,14 @@ const sellOwner = (ref: NoteRef, l: bigint, j: number): boolean => (ref.kind ===
 
 /** The owed record after a pass that ended `e`: dropped once nothing is left to do for W (or after
  *  POOL_RENT_BACK_PASSES passes, told), kept with one pass more while its sweep is unconfirmed or it gave up, so the
- *  next load runs it again; a W that holds is kept as it is while its sell note is INCOMING (`sending`), and dropped
+ *  next load runs it again; under the floor kept as it is; a W that holds is kept as it is while its sell note is INCOMING (`sending`), and dropped
  *  once that note is PLANNED again (its sell never landed: W's next sell owes its own). */
 async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, sending?: () => Promise<boolean>): Promise<void> {
   try {
     if (e === "holds" && (await sending?.())) return;
     // W under the floor (review 2 L4 of 911d7e25: a lying RPC's owed count can force the sell's rent(0) fallback, and
     // what is left on W, ~2.13M, was forgotten): kept as it is, never dropped by the pass bound, so every load sweeps it
-    // again once it can make a note (a lower relay fee, a claim, lamports sent to W)
+    // again once it can make a note (lamports sent to W)
     if (e === "floor") return await h.owed?.put({ ...o });
     if (e !== "sent" && e !== "gave_up" && e !== "owed") return await h.owed?.drop(o.address);
     if (o.passes + 1 >= POOL_RENT_BACK_PASSES) {

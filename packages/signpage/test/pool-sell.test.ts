@@ -1653,7 +1653,7 @@ test("a full sell whose note with the sweep's keep lands under the floor keeps r
   assert.ok(kept >= SOLANA_POOL_MIN_DEPOSIT && kept < FLOOR, `with the keep: ${kept}`);
   assert.equal(short, BigInt(FEE) + 1_468_120n - lamports);
   assert.equal(w.c.deposits.length, 1, "nothing swept");
-  assert.ok(w.owed.has(W.address), "W's record kept");
+  assert.equal(w.owed.get(W.address)?.passes, 0, "W's record kept, no pass spent");
 });
 
 // Review 2 L4 of 911d7e25: RPC B reads W's two volume accounts owed claims until the sell lands, the chain owing none:
@@ -1669,7 +1669,7 @@ test("one RPC's lie of two claims owed forces the rent(0) sell: the sweep ends u
   assert.ok(minOut - (short + solanaSellAfterFull(rent, 0)) >= FLOOR, "honest, the keep would have gone");
   assert.equal(w.c.deposits[0]!.value, minOut - short - solanaRentMin(rent, 0));
   assert.equal(w.c.deposits.length, 1, "nothing swept");
-  assert.ok(w.owed.has(W.address), "W's record kept");
+  assert.equal(w.owed.get(W.address)?.passes, 0, "W's record kept, no pass spent");
 });
 
 // Review L3 and Info of 38faee89: two volume accounts owed a claim neither can take this pass (PumpSwap's cashback, its
