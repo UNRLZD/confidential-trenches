@@ -53,11 +53,12 @@ const SNAP = { chain: recorded.chain, as_of_ms: recorded.as_of_ms, lists: Object
 const ROWS = new Map(Object.values(SNAP.lists).flat().map((r) => [r.token, r]));
 const TRENDING = columnRows(SNAP, "trending").map((r) => r.token);
 const NEW = columnRows(SNAP, "new").map((r) => r.token);
-// the lists a later read answers: a new token with the most 1h volume, so it lands on top of Trending
+// the lists a later read answers: a new token with the most 1h volume (a decimal string, as the helper sends it), so it
+// lands on top of Trending
 const NEW_TOP = "RaiLTop1111111111111111111111111111111111111";
 const TOPPED = (() => {
   const first = SNAP.lists.trending_1h[0];
-  const top = { ...first, token: NEW_TOP, symbol: "TOP", vol_1h_usd: 10 * Math.max(...SNAP.lists.trending_1h.map((r) => Number(r.vol_1h_usd) || 0)) };
+  const top = { ...first, token: NEW_TOP, symbol: "TOP", vol_1h_usd: String(10 * Math.ceil(Math.max(...SNAP.lists.trending_1h.map((r) => Number(r.vol_1h_usd) || 0)))) };
   return { ...SNAP, lists: { ...SNAP.lists, trending_1h: [top, ...SNAP.lists.trending_1h] } };
 })();
 
