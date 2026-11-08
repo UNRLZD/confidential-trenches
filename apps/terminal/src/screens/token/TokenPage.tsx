@@ -436,7 +436,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
   useEffect(() => {
     const d = drawn.current;
     if (d === null) return;
-    setScale(d, scale);
+    setScale(d, scale, phone === true);
     setIndicators(d, indicators, volume, phone === true);
     setDisplay(d, grid, lastLine);
     setAuto(isAuto(d));

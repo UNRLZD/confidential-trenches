@@ -61,6 +61,9 @@ function styles(el: HTMLElement): DeepPartial<Styles> {
   };
 }
 
+/** The price range starts under the legend (its rows: two on desktop, three on the phone), in px. */
+const gapOf = (phone: boolean) => ({ top: phone ? 80 : 44, bottom: 0.1 });
+
 /** The volume pane, under the candles. Its pane is named here: createIndicator answers the indicator's id, not its
  *  pane's, so the pane's height is set by the name it was made with. */
 const VOL_PANE = "pane_VOL";
@@ -84,7 +87,7 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
   // the newest bar close to the price axis, as R5 draws it
   chart.setOffsetRightDistance(phone ? 16 : 40);
   // the price range starts under the legend (its rows: two on desktop, three on the phone), in px
-  chart.overrideYAxis({ paneId: "candle_pane", gap: { top: phone ? 80 : 44, bottom: 0.1 } });
+  chart.overrideYAxis({ paneId: "candle_pane", gap: gapOf(phone) });
   chart.subscribeAction("onCrosshairChange", (d) => {
     const k = (d as { kLineData?: KLineData } | undefined)?.kLineData;
     if (k) onBar(k);
@@ -164,8 +167,9 @@ const CANDLE = "candle_pane";
 
 /** The price scale (R5's bottom bar %, log): the library's own axes. */
 export type Scale = "normal" | "percentage" | "logarithm";
-export function setScale(d: Drawn, s: Scale): void {
-  d.chart.overrideYAxis({ paneId: CANDLE, name: s });
+export function setScale(d: Drawn, s: Scale, phone: boolean): void {
+  // the gap again with the axis, so a new scale keeps the range under the legend
+  d.chart.overrideYAxis({ paneId: CANDLE, name: s, gap: gapOf(phone) });
 }
 
 /** The price axis's own fit flag (the library's: a drag on the axis sets a range of its own and clears it). */
