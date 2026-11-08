@@ -886,6 +886,31 @@ test("F4: a registration read as ran that does not read registered on both provi
   store.close();
 });
 
+test("M14: after a restart, U's own registration whose tx is not read yet (unknown) sends nothing, past the settle time too; once it reads dropped, one new one goes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const s = setup({ dir });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  // the helper died after its tx was written and sent, before its outcome was read
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "pending", tx: { tx_hash: "earlier", nonce: "1", height: "221603850", block_hash: base58(Buffer.alloc(32, 7)), signed_tx: "" } } });
+  s.store.close();
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const r2 = relayer(usdcOn(() => s.chain));
+  let earlier: "unknown" | "dropped" = "unknown";
+  r2.resolve = async (tx: TxRef) => (tx.tx_hash === "earlier" ? { kind: earlier, tx_hash: tx.tx_hash, why: "not read yet" } : { kind: "unknown", tx_hash: tx.tx_hash, why: "x" });
+  const clock = { ms: NOW + OWN_SETTLE_MS + 1 };
+  const c2 = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(s.chain), () => NOW), relayer: r2, held: async () => false, now: () => clock.ms, resolveEveryMs: 1 });
+  assert.equal(await c2.registerSeen(u), "in_flight");
+  await c2.sweep();
+  assert.equal(r2.sent.length, 0, "an unread tx may still land: never paid twice");
+  earlier = "dropped";
+  clock.ms += 10 * SWEEP_MS;
+  assert.equal(await c2.registerSeen(u), "registered");
+  assert.deepEqual(r2.sent.map((x) => x.action.method), ["storage_deposit"], "the dropped one replaced by one new one");
+  store.close();
+});
+
 test("a struck signer gets no registration from registerSeen or the sweep, and is owed no more", async () => {
   const s = setup();
   const u = hex();

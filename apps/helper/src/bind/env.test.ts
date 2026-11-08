@@ -202,3 +202,37 @@ test("card intents-u-registered-first: a seen id's registration logs its code on
   const lines = src.split("\n").filter((l) => l.includes("intents register") || (l.includes("console.") && l.includes("register")));
   assert.ok(lines.length >= 2 && lines.every((l) => /registerLine\(/.test(l) || /return `helper: intents register \$\{listed \? code : "upstream"\}`/.test(l)), lines.join("\n"));
 });
+
+test("card intents-u-registered-first (review F1, F2): mainnet's token watch holds a seen U's registration (no relayer start, nothing logged) and warm starts the owed registrations' sweep", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "benv-iu-"));
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  const hash = base58(Buffer.alloc(32, 9));
+  const asked: string[] = [];
+  const fetchFn = (async (_url: string, init?: RequestInit) => {
+    const { method, params } = JSON.parse(String(init?.body)) as { method: string; params: Record<string, unknown> };
+    const what = method === "query" ? String(params.method_name ?? params.request_type) : method;
+    asked.push(what);
+    if (method === "block") return Response.json({ result: { header: { height: 100, hash, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } } });
+    if (what === "storage_balance_of") return Response.json({ result: { block_height: 100, block_hash: hash, logs: [], result: [...Buffer.from("null")] } });
+    return new Response("{}", { status: 500 });
+  }) as unknown as typeof fetch;
+  // USDC halted: the watch's status at the higher block holds the token
+  const halted = { token: "usdc", caught_up: true, halted: true, vault_blocked: false, code_hash_ok: true, code_hash: "", block_height: 100, last_event: null };
+  const watch = { statusAt: async () => halted, pausedAt: async () => true } as unknown as NonNullable<NonNullable<Parameters<typeof bindSenderFromEnv>[1]>["mainnet"]>;
+  const s = bindSenderFromEnv(env, { mainnet: watch }, fetchFn);
+  const u = "c".repeat(64);
+  const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
+  const errors: string[] = [];
+  t.mock.method(console, "error", (line: string) => void errors.push(line));
+  await s.quoted!(JSON.stringify(q));
+  await s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  assert.ok(asked.includes("storage_balance_of"), "U's registration read");
+  assert.deepEqual([...new Set(asked)].sort(), ["block", "storage_balance_of"], "held: no balance read, no relayer start");
+  assert.deepEqual(errors, [], "held is in flight: nothing logged");
+  // warm: the sweep tries the owed U again on its own, with no device poll
+  const before = asked.filter((x) => x === "storage_balance_of").length;
+  s.warm();
+  for (let i = 0; i < 200 && asked.filter((x) => x === "storage_balance_of").length === before; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(asked.filter((x) => x === "storage_balance_of").length > before, "warm's sweep read the owed U again");
+  s.stop();
+});
