@@ -17,8 +17,11 @@
 //   that nothing follows. A read that throws is down (not kept for the id, so the same request runs again).
 // - A quote only when the page's pools are pinned on the network 1Click pays out on (POOL_DEPOSIT_NETWORK, mainnet):
 //   the testnet build gives the same-chain U_X but refuses a quote not_allowed, nothing sent.
-// - A quote whose min out is under the pool's smallest deposit is refused not_allowed (pool-deposit-quote.ts "floor").
-import { base58, hex } from "@scure/base";
+// - A quote whose min out is under the device's own floor for X's pool is refused not_allowed (pool-deposit-quote.ts
+//   "floor"; card pool-deposit-follow): the rung plus one deposit's worst-case cost (and on Solana the rent U_X keeps),
+//   read at quote time on two RPCs (`floor`: readSolanaPoolFloor on Solana). No floor read, or one that answers null:
+//   not_allowed, nothing sent; a read that throws: down.
+import { base58, base64, hex } from "@scure/base";
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
@@ -26,7 +29,11 @@ import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type SignpageResul
 import { POOL_DEPOSIT_NETWORK, askDepositQuote, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
-import { checkPoolDepositQuote } from "./pool-deposit-quote.ts";
+import { checkPoolDepositQuote, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
+import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaPoolDepositTx } from "../../kit/src/trade/solana/pool-deposit.ts";
+import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { DepositRuleRefused } from "./rules/deposit.ts";
 import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH } from "./rules/deposit-dry.ts";
 
@@ -52,6 +59,9 @@ export interface PoolAddressDeps {
   /** The device's own two price reads of `originAsset` and of X's coin; null when it has none. */
   priced?(chain: PoolChain, originAsset: string): PoolQuotePricing | null;
   /** The follow that takes a checked quote under request `id` on into X's pool; none, and no quote is answered. */
+  /** The device's floor for a quote into X's pool to U_X, read at quote time on two RPCs (readSolanaPoolFloor); null
+   *  when it has none for the chain. None given: no quote. */
+  floor?(chain: PoolChain, wallet: string): Promise<bigint | null>;
   checked?(id: string, chain: PoolChain, result: NonNullable<SignpageResults["pool.address"]["quote"]>, u: { scope: bigint; index: number; wallet: string; refundId: string }): Promise<void>;
   fetch?: typeof fetch;
   now?: () => number;
@@ -106,6 +116,27 @@ function aboveCap(amount: bigint, decimalsIn: number, reads: readonly [string, s
   return amount * p.n * 10n ** BigInt(USDC_DECIMALS) > HELPER_BIND_DEPOSIT_CAP * p.d * 10n ** BigInt(decimalsIn);
 }
 
+/**
+ * The Solana floor at quote time (card pool-deposit-follow): the Rent sysvar on both RPCs (the kit's readSolanaRent: two
+ * providers, one rate), and the fee each RPC prices a deposit message by U_X at (getFeeForMessage of the kit's own
+ * deposit tx at that RPC's latest blockhash; the fee is per signature, so the note's value, precommitment and the trees'
+ * sizes do not move it), the higher of the two. A read that does not answer throws (the host answers down).
+ */
+export async function readSolanaPoolFloor(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, wallet: string): Promise<bigint> {
+  const rent = await readSolanaRent(rpcs);
+  const fees = await Promise.all(rpcs.map(async (rpc) => {
+    const bh = (await rpc("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown } } | null;
+    const blockhash = bh?.value?.blockhash;
+    if (typeof blockhash !== "string") throw new Error("no blockhash");
+    const { message } = solanaPoolDepositTx(program, wallet, { value: SOL_LADDER.min, precommitment: 1n }, { stateSize: 0, labelSize: 0 }, blockhash);
+    const v = ((await rpc("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown } | null)?.value;
+    if (!Number.isSafeInteger(v) || (v as number) < 0) throw new Error("no fee for the deposit message");
+    return BigInt(v as number);
+  }));
+  const fee = fees[0]! > fees[1]! ? fees[0]! : fees[1]!;
+  return solanaPoolDepositFloor(fee, rent);
+}
+
 /** The pool.address handler for ApiHost.kinds: a Deferred answered once the records, and a quote when asked, are done. */
 export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, unknown>, ctx?: { id: string }) => Deferred<"pool.address"> {
   return (params, ctx) => {
@@ -122,7 +153,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       if (!quoted) return void (out = { result: { chain, address: before.wallet, asset } });
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
-      if (ctx === undefined || deps.checked === undefined) return;
+      if (ctx === undefined || deps.checked === undefined || deps.floor === undefined) return;
       if (deps.network !== POOL_DEPOSIT_NETWORK) return; // 1Click pays out on mainnet only: never to a devnet pool's U_X
       const origin = params.origin_asset;
       if (typeof origin !== "string") return;
@@ -135,6 +166,14 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
         : aboveCap(amount, priced.decimalsIn, priced.pricing.in);
       if (over === null) return;
       if (over) return void (out = { error: "above_max" });
+
+      let floor: bigint | null;
+      try {
+        floor = await deps.floor(chain, before.wallet);
+      } catch {
+        return void (out = { error: "down" });
+      }
+      if (floor === null) return;
 
       const now = deps.now ?? Date.now;
       let request;
@@ -161,6 +200,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
           wallet: before.wallet,
           refundId: before.record.id,
           check: { path: DEPOSIT_QUOTE_PATH, pricing: priced.pricing, decimalsIn: priced.decimalsIn, decimalsOut, now: now() },
+          floor,
         });
       } catch (e) {
         return void (out = { error: e instanceof DepositRuleRefused ? "not_allowed" : "quote_check_failed" });
