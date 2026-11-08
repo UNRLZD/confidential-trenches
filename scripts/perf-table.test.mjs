@@ -18,7 +18,7 @@ const good = () => ({
 });
 const dirWith = (records) => {
   const d = mkdtempSync(join(tmpdir(), "perf-runs-"));
-  records.forEach((r, i) => writeFileSync(join(d, `r${i}.json`), typeof r === "string" ? r : JSON.stringify(r)));
+  records.forEach((r, i) => writeFileSync(join(d, typeof r === "string" ? `r${i}.json` : `${r.id}.json`), typeof r === "string" ? r : JSON.stringify(r)));
   return d;
 };
 
@@ -32,6 +32,9 @@ test("a good record makes the README row and the doc, p95 rounded up, links buil
     const doc = renderDoc(runs);
     assert.match(doc, /\| Buy \| tap to filled \| 5 \| 5 \| 1,200 ms \/ 3,225 ms \| 3,225 ms \| 0\.000105 SOL median \(n=1\) \|/);
     assert.ok(doc.includes(`(https://solscan.io/tx/${SIG})`));
+    // the record the doc names is the public file the numbers come from, never the raw run's path (source)
+    assert.ok(doc.includes("Record: `perf/runs/solana-phone-test.json`."));
+    assert.ok(!doc.includes(good().source));
   } finally { rmSync(d, { recursive: true }); }
 });
 
@@ -67,11 +70,15 @@ for (const [name, plant] of Object.entries(broken)) {
   });
 }
 
-test("refused: a record that is not JSON, and an id used twice", () => {
+test("refused: a record that is not JSON, an id used twice, and a file not named <id>.json", () => {
   let d = dirWith(["{not json"]);
   try { assert.throws(() => loadRuns(d), /not JSON/); } finally { rmSync(d, { recursive: true }); }
-  d = dirWith([good(), good()]);
+  d = dirWith([good()]);
+  writeFileSync(join(d, "zz-copy.json"), JSON.stringify(good()));
   try { assert.throws(() => loadRuns(d), /used twice/); } finally { rmSync(d, { recursive: true }); }
+  d = mkdtempSync(join(tmpdir(), "perf-runs-"));
+  writeFileSync(join(d, "solana-phone.json"), JSON.stringify(good()));
+  try { assert.throws(() => loadRuns(d), /perf record solana-phone\.json: holds id solana-phone-test, so its file must be solana-phone-test\.json/); } finally { rmSync(d, { recursive: true }); }
 });
 
 test("the README block is replaced between its markers, and a README without them is refused", () => {
