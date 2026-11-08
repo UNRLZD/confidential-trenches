@@ -1,13 +1,13 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at e11791bd, release-101, the /app.js of release-101 (packages/signpage/releases/release-101.json): the deposit builder refuses a note under the release floor at the rent read: PASS",
-    "bad": "main c7778df0's build (mainnet): the deposit builder takes any note from 1,000,000 lamports and no rent, the /app.js of no release list from release-101 on: FAIL",
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at fde0056b (the merge of main 570fb416), release-102, the /app.js of release-102 (packages/signpage/releases/release-102.json): the deposit builder refuses a note under the release floor at the rent read: PASS",
+    "bad": "main c7778df0's build (mainnet): the deposit builder takes any note from 1,000,000 lamports and no rent, the /app.js of no release list from release-102 on: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-08T15:2xZ, before this card's deploy: FAIL; its sha384 equals bad's, the same bytes",
-    "unreached": "this card's release-101 bundle with !1&& planted in front of the floor's refusal (the refusal never reached, every mark still in the bytes) and index.html pinning it: FAIL, its bytes the /app.js of no release list"
+    "unreached": "this card's former release-101 bundle (taken back on the merge of main 570fb416, whose release-101 is sol-rent-back-dust-burn's) with !1&& planted in front of the floor's refusal (the refusal never reached, every mark still in the bytes) and index.html pinning it: FAIL, its bytes the /app.js of no release list"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-acaJh3HRThSoCcg2+JtQ4apHkH4cf3kHXnOXNd1mjiMqnsA6rpOV/tamkxCvn+qF\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-acaJh3HRThSoCcg2+JtQ4apHkH4cf3kHXnOXNd1mjiMqnsA6rpOV/tamkxCvn+qF",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ",
     "floor": true,
     "rent": true
   },

@@ -12,7 +12,7 @@ import { FIRST_RELEASE, facts, judge, releasedAppJs } from "./kit-sol-pool-depos
 const ANSWERS = JSON.parse(readFileSync(new URL("./kit-sol-pool-deposit-floor.answers.json", import.meta.url), "utf8"));
 const NO_FLOOR = "BAD the bundle's Solana pool deposit builds a note under the release floor: one that costs more to release than it holds";
 const NO_RENT = "BAD the bundle's Solana pool deposit takes no rent read: its floor cannot follow the rent";
-const UNRELEASED = "BAD SIGN_HOST's served /app.js is the /app.js of no release list from release-101 on: bytes no tested source built";
+const UNRELEASED = "BAD SIGN_HOST's served /app.js is the /app.js of no release list from release-102 on: bytes no tested source built";
 
 test("recorded good answer: this card's build refuses a note under the release floor: PASS", () => {
   const v = judge(ANSWERS.good);
@@ -35,9 +35,9 @@ test("recorded bad answer unreached (the refusal behind !1&&, its marks still th
   assert.deepEqual(v.lines, [UNRELEASED]);
 });
 
-test("the release lists read: release-101's /app.js is the good answer's; a list before release-101 is not read", () => {
+test("the release lists read: release-102's /app.js is the good answer's; a list before release-102 is not read", () => {
   const r = releasedAppJs();
-  assert.equal(r.get(ANSWERS.good.sha384), "release-101");
+  assert.equal(r.get(ANSWERS.good.sha384), "release-102");
   assert.equal(r.has(ANSWERS.bad.sha384), false);
   assert.ok([...r.values()].every((x) => Number(x.slice(8)) >= FIRST_RELEASE));
 });

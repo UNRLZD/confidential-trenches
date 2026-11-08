@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-sol-pool-deposit-floor";
 export const SIGN = "https://confidential.unrealized.trade";
 /** This card's release: the first list whose signing page holds the floor. */
-export const FIRST_RELEASE = 101;
+export const FIRST_RELEASE = 102;
 // the lists are data read from the checkout, as signpage-release reads them; no package code is imported
 const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
 /** The SIGN_HOST /app.js of every written release list from FIRST_RELEASE on: its sha384 to its release. */
