@@ -43,6 +43,10 @@ function server() {
   };
   const A = commit(script, "A");
   const B = commit(script.replace("#!/usr/bin/env bash\n", `#!/usr/bin/env bash\n${"# a longer header in B\n".repeat(40)}`), "B");
+  // C: a commit the remote holds on another branch only (card redeploy-commit-first: never deployed)
+  git(remote, "checkout", "-q", "-b", "side");
+  const C = commit(script, "C");
+  git(remote, "checkout", "-q", "main");
   // the server: an empty repository with A fetched and checked out, as the first deploy's command leaves it
   mkdirSync(root);
   git(root, "init", "-q");
@@ -55,7 +59,7 @@ function server() {
   // of the statuses; `compose up --scale helper=<n>` first starts the stopped containers it counts (as compose does),
   // then adds new-<k> from ct-helper:$HELPER_COMMIT until there are n, and with no --scale adds one; it exits 1 after
   // that when STUB_READY=0 (compose does the same when --wait times out). `compose run` (the settings check) exits 2 when
-// STUB_ENV=1. Caddy is one container apart from the helper's: `compose ps -q caddy` prints caddy-1 unless STUB_CADDY=none,
+// STUB_ENV=1, and `compose build` exits 1 when STUB_BUILD=0. Caddy is one container apart from the helper's: `compose ps -q caddy` prints caddy-1 unless STUB_CADDY=none,
   // and `compose exec -T caddy sh -c 'test -S <socket>'` passes only with STUB_CADDY=socket (the default; nosocket: a Caddy
   // started with admin off). The other `compose exec` (the Caddy reload) writes its stdin to reload.in and exits 1 when
   // STUB_RELOAD=0 (a Caddyfile Caddy refuses). STUB_ADD=0 makes it add none and STUB_IMAGE
@@ -83,7 +87,7 @@ case "$1 $2" in
     if [ -n "$want" ]; then awk -v w="$want " 'index(" " w, " " $2 " ") { print $1 }' "$S"
     elif [ $all = 1 ]; then awk '{ print $1 }' "$S"
     else awk '$2 == "running" { print $1 }' "$S"; fi ;;
-  "compose build") ;;
+  "compose build") [ "\${STUB_BUILD:-1}" = 1 ] || { echo "failed to solve: process did not complete successfully" >&2; exit 1; } ;;
   "compose exec")
     case "$*" in *"test -S /config/caddy-admin.sock"*) [ "\${STUB_CADDY:-socket}" = socket ]; exit $? ;; esac
     cat > "${dir}/reload.in"
@@ -134,7 +138,7 @@ exit 0
     return { commit: /^HELPER_COMMIT=(.*)$/m.exec(t)?.[1], release: /^HELPER_RELEASE=(.*)$/m.exec(t)?.[1] };
   };
   const reloaded = () => (existsSync(path.join(dir, "reload.in")) ? readFileSync(path.join(dir, "reload.in"), "utf8") : null);
-  return { dir, root, A, B, env, reloaded, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, remote, root, A, B, C, env, reloaded, git, run, runWith, docker, running, all, seed, head, values, deployDir: path.join(root, "apps/helper/deploy"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const mode = (f) => statSync(f).mode & 0o777;
@@ -409,6 +413,83 @@ test("a commit the remote does not have fails before the .env is written", () =>
 // card helper-ready-gate: the swap has no gap. The new helper starts beside the old one (docker-rollout's pattern:
 // `up --no-recreate --scale helper=<n+1>`), compose waits bounded for its healthcheck, and only then is the old one stopped.
 const lines = (s) => s.docker().map((l) => l.split("|")[1]);
+
+// card redeploy-commit-first: on 7 Nov 03:40Z a mistyped 40-hex commit printed "HELPER_RELEASE raised by one" before the
+// fetch failed ("upload-pack: not our ref"). The commit is now fetched from the repository's main and checked to be on
+// it before deploy/.env is read, and the two lines are written only once the image is built and its settings check passed.
+const ENV_BEFORE = (s) => `# vendor keys\nJUPITER_API_KEY=${SECRET}\nHELPER_COMMIT=${s.A}\nHELPER_RELEASE=5\nLAST=z`;
+const typo = (sha) => sha.slice(0, 20) + (sha[20] === "0" ? "1" : "0") + sha.slice(21);
+
+test("a commit not on the repository's main (a typo, one on another branch only, a tree's id, not 40 hex) changes nothing: deploy/.env byte-equal, the checkout and compose untouched, no release line, exit nonzero", () => {
+  const s = server();
+  try {
+    s.run(s.A);
+    writeFileSync(s.env, ENV_BEFORE(s), { mode: 0o600 });
+    const tree = s.git(s.remote, "rev-parse", `${s.B}^{tree}`);
+    const bad = { typo: typo(s.B), "another branch": s.C, "a tree": tree, short: s.B.slice(0, 12), "upper case": s.B.toUpperCase() };
+    const calls = s.docker().length;
+    for (const [name, sha] of Object.entries(bad)) {
+      const r = s.run(sha);
+      assert.notEqual(r.status, 0, `${name}: ${r.out}`);
+      assert.equal(readFileSync(s.env, "utf8"), ENV_BEFORE(s), `${name}: deploy/.env changed`);
+      assert.equal(mode(s.env), 0o600, name);
+      assert.equal(s.head(), s.A, `${name}: the checkout moved`);
+      assert.equal(s.docker().length, calls, `${name}: compose ran:\n${s.docker().slice(calls).join("\n")}`);
+      assert.doesNotMatch(r.out, /HELPER_RELEASE (started|kept|raised)/, `${name}: a release was named:\n${r.out}`);
+      if (/^[0-9a-f]{40}$/.test(sha)) assert.match(r.out, /redeploy: the commit is not on main of the repository \(a typo, or a branch not merged\); nothing changed/, name);
+      assert.ok(!r.out.includes(SECRET), name);
+    }
+    assert.deepEqual(readdirSync(s.deployDir).filter((f) => f.startsWith(".env")), [".env"]);
+  } finally {
+    s.done();
+  }
+});
+
+test("an image that does not build, or whose settings check refuses: deploy/.env stays byte-equal and no helper starts", () => {
+  for (const stub of [{ STUB_BUILD: "0" }, { STUB_ENV: "1" }]) {
+    const s = server();
+    try {
+      s.seed("old-1");
+      writeFileSync(s.env, ENV_BEFORE(s), { mode: 0o600 });
+      const r = s.runWith(stub, s.B);
+      assert.equal(r.status, 1, `${JSON.stringify(stub)}: ${r.out}`);
+      assert.equal(readFileSync(s.env, "utf8"), ENV_BEFORE(s), `${JSON.stringify(stub)}: deploy/.env changed`);
+      assert.ok(!lines(s).some((c) => c.startsWith("compose up") || c.startsWith("stop") || c.startsWith("rm")), lines(s).join("\n"));
+      assert.deepEqual(s.running(), ["old-1"]);
+      assert.deepEqual(readdirSync(s.deployDir).filter((f) => f.startsWith(".env")), [".env"]);
+    } finally {
+      s.done();
+    }
+  }
+});
+
+test("the default repository URL (no REDEPLOY_REMOTE), sent by url.insteadOf to a bare copy: a commit on main moves both lines, one on another branch moves neither", () => {
+  const s = server();
+  try {
+    const bare = path.join(s.dir, "bare.git");
+    s.git(s.dir, "clone", "-q", "--bare", s.remote, bare);
+    const shell = {
+      REDEPLOY_REMOTE: null,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: `url.file://${bare}.insteadOf`,
+      GIT_CONFIG_VALUE_0: "https://github.com/UNRLZD/confidential-trenches.git",
+    };
+    writeFileSync(s.env, ENV_BEFORE(s), { mode: 0o600 });
+    const side = s.runWith(shell, s.C);
+    assert.equal(side.status, 1, side.out);
+    assert.equal(readFileSync(s.env, "utf8"), ENV_BEFORE(s));
+    const good = s.runWith(shell, s.B);
+    assert.equal(good.status, 0, good.out);
+    assert.match(good.out, /HELPER_RELEASE raised by one/);
+    assert.equal(readFileSync(s.env, "utf8"), `# vendor keys\nJUPITER_API_KEY=${SECRET}\nHELPER_COMMIT=${s.B}\nHELPER_RELEASE=6\nLAST=z\n`);
+    assert.equal(s.head(), s.B);
+    assert.equal(s.git(s.root, "rev-parse", "--is-shallow-repository"), "false", "the depth-1 checkout was made complete once");
+    assert.ok(s.docker().includes(`${s.deployDir}|compose build helper|${s.B}|6`), s.docker().join("\n"));
+  } finally {
+    s.done();
+  }
+});
+
 
 test("a new helper that never gets ready: the deploy fails naming the bound, the new container is removed, the old one is never stopped or removed and still runs", () => {
   const s = server();
