@@ -90,6 +90,9 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // deposit.quote does (deposit.assets asks the token list, then one dry quote per asset at once)
   "deposit.assets": 15_000,
   "deposit.dry": 15_000,
+  // a pool's deposit address (card pool-deposit-address): with an origin asset, the helper's 1Click round trip, as
+  // deposit.quote
+  "pool.address": 15_000,
 } as const satisfies Record<SignpageKind, number | null>;
 deepFreeze(SIGNPAGE_TIMEOUT_MS);
 
