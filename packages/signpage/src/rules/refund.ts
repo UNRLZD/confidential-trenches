@@ -50,7 +50,7 @@ import { SOLANA_MAX_TX_BYTES, solanaDecodeMessage, solanaResolveKeys } from "../
 import { SOLANA_SYSTEM_PROGRAM } from "../../../kit/src/checks/solana/checks.ts";
 import { NEAR_NETWORKS, type NearNetwork } from "../../../kit/src/near/networks.ts";
 import { VAULT_TOKEN_CODE_HASH } from "../../../kit/src/vault/shapes.ts";
-import { DEPOSIT_QUOTE_SLIPPAGE_BPS } from "../../../wallet/src/deposit/quote.ts";
+import { checkPoolDepositWallet, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_MIN_OUT } from "../../../wallet/src/deposit/quote.ts";
 import { EVM_CHAIN_IDS } from "../../../wallet/src/pool/evm.ts";
 import { INTENTS, addressForm } from "../withdraw/checks.ts";
 import { DEPOSIT_DESTINATION_ASSET } from "./deposit.ts";
@@ -190,6 +190,43 @@ export function checkRefundMoveQuote(request: OneClickRequest, answer: unknown, 
   if (req.refundTo !== s.id) return refuse("refundTo");
   if (req.refundType !== "INTENTS") return refuse("refundType");
   const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: true });
+  return passQuote(checked, { kind: "refund", signer: s.id, origin: req.originAsset });
+}
+
+export interface PoolRefundQuoteContext extends RefundQuoteContext {
+  /** X, the pool the refunded quote was for, and U_X, its one-time deposit wallet there (the id's own, as derived). */
+  chain: ReturnChain;
+  wallet: string;
+  /** The pool's floor at quote time (../pool-deposit-quote.ts solanaPoolDepositFloor, evmPoolDepositFloor): at least
+   *  the rung. */
+  floor: bigint;
+}
+
+/** The pool refund carry (card pool-deposit-follow): origin the asset U_{s,i} holds inside intents.near (INTENTS),
+ *  destination X's coin, delivered to U_X on X (DESTINATION_CHAIN), refunded under the id (INTENTS); never into the
+ *  vault; min out at least the pool's floor. Its intent is the refund move's (checkIdTransferIntent). */
+export function checkPoolRefundQuote(request: OneClickRequest, answer: unknown, ctx: PoolRefundQuoteContext): RefundQuote {
+  const s = idOf(ctx.signer);
+  if (s.role !== "U") return refuse("signer");
+  if (!Object.hasOwn(NEAR_NETWORKS, ctx.network) || ctx.network !== "mainnet") return refuse("network");
+  const chain = ctx.chain;
+  if (!Object.hasOwn(RETURN_NATIVE, chain)) return refuse("chain");
+  try {
+    checkPoolDepositWallet(chain, ctx.wallet, s.id);
+  } catch {
+    return refuse("deposit_wallet");
+  }
+  if (typeof ctx.floor !== "bigint" || ctx.floor < POOL_DEPOSIT_MIN_OUT[chain]) return refuse("floor");
+  const req = requestOf(request);
+  if (typeof ctx.origin !== "string" || req.originAsset !== ctx.origin) return refuse("originAsset");
+  if (req.depositType !== "INTENTS") return refuse("depositType");
+  if (req.destinationAsset !== RETURN_NATIVE[chain]) return refuse("destinationAsset");
+  if (req.recipient !== ctx.wallet) return refuse("recipient");
+  if (req.recipientType !== "DESTINATION_CHAIN") return refuse("recipientType");
+  if (req.refundTo !== s.id) return refuse("refundTo");
+  if (req.refundType !== "INTENTS") return refuse("refundType");
+  const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: false });
+  if (checked.minAmountOut < ctx.floor) return refuse("floor");
   return passQuote(checked, { kind: "refund", signer: s.id, origin: req.originAsset });
 }
 
