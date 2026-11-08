@@ -21,6 +21,8 @@ const F4D = "F4d: stored only up to the reorg margin below the head";
 const F5 = "F5: a pool only one reader reported is kept only if";
 const F6 = "F6: past the hard pool cap the index refuses by name";
 const HALVES = "a span answered with an error is asked as its halves";
+const LIMITED = "a rate limit answered inside a batch is asked again";
+const LAG = "a sync whose readers lag the last sync's head";
 
 /** [find, replace, test]: each a rule removed. */
 export const MUTANTS = [
@@ -37,7 +39,9 @@ export const MUTANTS = [
   // F4c: the newest span not asked alone first
   ["let at = queue.shift();\n  while (at !== undefined && pin === null) {", "let at = queue.shift();\n  if (at !== undefined) queue.push(at);\n  at = undefined;\n  while (at !== undefined && pin === null) {", F4C],
   // F4d: no margin
-  ["const stored = Math.max(from - 1, n - c.margin);", "const stored = n;", F4D],
+  ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = n;", F4D],
+  // a lagging sync lowers what an earlier one stored
+  ["const stored = Math.max(old?.through ?? from - 1, n - c.margin);", "const stored = Math.max(from - 1, n - c.margin);", LAG],
   // F5: one reader's pool kept unread
   ["(y.pools.has(id) ? both : one).push(p);", "both.push(p);", F5],
   // F5: one provider's state is enough
@@ -47,7 +51,9 @@ export const MUTANTS = [
   // F6: no cap
   ["if (count > c.cap) return refuse(", "if (false) return refuse(", F6],
   // the halves: an error answer is no cut
-  ["if (l?.error !== undefined && l.result === undefined) return { hash: \"\", pools: new Map(), cut: true };", "", HALVES],
+  ["if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : { hash: \"\", pools: new Map(), cut: true };", "", HALVES],
+  // a rate limit in a batch asked as halves
+  ["return limited(l.error) ? null : { hash", "return false ? null : { hash", LIMITED],
   // a 429 spends a try
   ["if (/429|rate limit/i.test(String((e as Error)?.message)) && waits < INDEX_LIMITED_WAITS) {", "if (false) {", HALVES],
 ];

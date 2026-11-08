@@ -44,6 +44,8 @@ type Reader = {
   state?: Set<string>;
   /** a getLogs over more than this many blocks is answered with an error */
   maxRange?: number;
+  /** getLogs answered with a rate-limit error inside a 200, this many first */
+  limitedInBody?: number;
   calls: EvmRpcCall[][];
 };
 function reader(r: Reader): EvmRpc {
@@ -71,6 +73,10 @@ function reader(r: Reader): EvmRpc {
         const f = c.params[0] as { fromBlock: string; toBlock: string };
         const [a, b] = [Number(f.fromBlock), Number(f.toBlock)];
         if (r.maxRange !== undefined && b - a + 1 > r.maxRange) return { error: { code: -32602, message: "nope" } };
+        if (r.limitedInBody !== undefined && r.limitedInBody > 0) {
+          r.limitedInBody--;
+          return { error: { code: -32005, message: "25/second request limit reached" } };
+        }
         return { result: r.pools.filter((p) => p.block >= a && p.block <= b && p.block <= r.head).map(logOf) };
       }
       if (c.method === "eth_call") {
@@ -226,4 +232,25 @@ test("a span answered with an error is asked as its halves on both, and a 429 wa
   assert.equal(r.stats.limited[0], 2);
   // a reader that answers every span with an error refuses rather than ask halves without end
   await assert.rejects(evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [], maxRange: 0 }, { head, pools: ps, calls: [] })), (e: Error & { code?: string }) => e.code === "too_many_pools" || e.code === "rpc_error");
+});
+
+test("a rate limit answered inside a batch is asked again, never as halves", async () => {
+  const head = 1_000_000;
+  const ps = pools(10, head);
+  const a: Reader = { head, pools: ps, calls: [], limitedInBody: 2 };
+  const r = await evmPoolIndexSync(null, cfgOf(a, { head, pools: ps, calls: [] }));
+  assert.equal(r.coversThrough, head);
+  const spans = a.calls.flat().filter((c) => c.method === "eth_getLogs").map((c) => c.params[0] as { fromBlock: string; toBlock: string });
+  assert.ok(spans.every((f) => Number(f.toBlock) - Number(f.fromBlock) + 1 === 10_000), "no span asked as halves");
+});
+
+test("a sync whose readers lag the last sync's head keeps what that sync stored", async () => {
+  const head = 1_000_000;
+  const ps = pools(5, head);
+  const r = await evmPoolIndexSync(null, cfgOf({ head, pools: ps, calls: [] }, { head, pools: ps, calls: [] }));
+  const lag = head - 200; // above the stored head - 474, below the head
+  const r2 = await evmPoolIndexSync(r.index, cfgOf({ head: lag, pools: ps, calls: [] }, { head: lag, pools: ps, calls: [] }));
+  assert.equal(r2.coversThrough, lag);
+  assert.equal(r2.index!.through, r.index!.through);
+  assert.ok(r2.index!.spans.every(([, y]) => y <= r2.index!.through));
 });

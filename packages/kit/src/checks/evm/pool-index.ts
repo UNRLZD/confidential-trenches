@@ -81,6 +81,9 @@ const SEL_EXTSLOAD = "1e2eaeaf"; // PoolManager.extsload(bytes32)
 const POOLS_SLOT = 6n; // v4-core StateLibrary.POOLS_SLOT
 const U24 = 0xffffff;
 
+/** A call's error naming the reader's rate limit (checks/evm/quote.ts `limited`'s words): asked again later, never as
+ *  halves, which would spend the halves on a reader that is only busy. */
+const limited = (e: unknown) => /request limit|rate limit|too many requests|exceeded its compute units per second/i.test(String((e as { message?: unknown } | null)?.message ?? ""));
 const hex = (b: Uint8Array) => "0x" + bytesToHex(b);
 const word = (n: bigint) => BigInt.asUintN(256, n).toString(16).padStart(64, "0");
 const keccak = (h: string) => hex(keccak_256(hexToBytes(h)));
@@ -186,7 +189,8 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   const n = Math.min(heads[0]!, heads[1]!);
   if (old !== null && n < old.through) return refuse("rpc_error", `the readers' head ${n} is below the index's ${old.through}`);
   const from = old?.from ?? Math.max(0, n - c.depth + 1);
-  const stored = Math.max(from - 1, n - c.margin);
+  // never below what an earlier sync stored at its own, higher head (a reader that lags it is still at or above it)
+  const stored = Math.max(old?.through ?? from - 1, n - c.margin);
 
   // the jobs: every gap of the stored spans to N, in spans of c.span blocks, newest first (the one ending at N first)
   const jobs: Job[] = [];
@@ -208,7 +212,7 @@ export async function evmPoolIndexSync(prev: EvmPoolIndexData | null, c: EvmPool
   // logs were answered with an error or at the cap, which no reader's words explain (M383); null where it gave neither
   const answerOf = (out: readonly unknown[] | null, i: number, j: Job): Answer | null => {
     const l = out?.[2 * i] as { result?: unknown; error?: unknown } | null | undefined;
-    if (l?.error !== undefined && l.result === undefined) return { hash: "", pools: new Map(), cut: true };
+    if (l?.error !== undefined && l.result === undefined) return limited(l.error) ? null : { hash: "", pools: new Map(), cut: true };
     const logs = l?.result;
     const blk = (out?.[2 * i + 1] as { result?: { number?: unknown; hash?: unknown } | null } | null | undefined)?.result;
     if (!Array.isArray(logs) || !blk || !isHash(blk.hash) || !isQty(blk.number) || Number(blk.number) !== j.b) return null;
