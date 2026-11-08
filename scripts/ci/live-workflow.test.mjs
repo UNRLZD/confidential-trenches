@@ -151,8 +151,9 @@ test("the signing page's forty-seven checks (signpage-shell runs four ways, pool
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 37, "the app's thirty-seven checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock, app-quick-buy-one-tap, app-toast-clears-sheet-head and app-chart-controls the newest");
+  assert.equal(app.include.length, 38, "the app's thirty-eight checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock, app-quick-buy-one-tap, app-toast-clears-sheet-head, app-chart-controls and deposit-to-pool the newest");
   assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
+  assert.ok(app.include.some((e) => e.key === "deposit-to-pool" && e.chrome && e.args === ""), "deposit-to-pool runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host app"), "page-evm-rpc-csp reads APP_HOST alone after every app deploy");
   assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "token-page-fills-after" && e.chrome && e.args === ""), "token-page-fills-after runs after every app deploy, in Chrome");
