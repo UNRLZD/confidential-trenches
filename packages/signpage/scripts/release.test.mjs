@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, listDir, main as listMain, makeList, matches, parseRules, publishedPath, RELEASED, releaseProblems } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -164,10 +164,10 @@ test("the committed release-1 names both hosts' pages and scripts, the worker an
   assert.ok(!existsSync(join(PKG, "releases", "release-0.json")));
 });
 
-// ---------- the ledger: old releases never change, the newest is this checkout's SIGN_HOST build ----------
+// ---------- the ledger: old releases never change, on every branch; the newest names the build a sign deploy serves ----------
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
-const STALE = "is not this checkout's SIGN_HOST build";
+const STALE = "the newest release, is not this SIGN_HOST build";
 /** A copy of the package's served sources (index.html and public/), the folder deploy.mjs build() reads, to plant in. */
 function pkgCopy() {
   const dir = mkdtempSync(join(tmpdir(), "ct-signpage-pkg-"));
@@ -181,77 +181,97 @@ function releasesCopy() {
   for (const f of readdirSync(join(PKG, "releases"))) writeFileSync(join(dir, f), readFileSync(join(PKG, "releases", f)));
   return dir;
 }
+/** deploy.mjs build() of `pkg`, handed to `f`, then removed. */
+function withBuild(pkg, f) {
+  const built = buildSign(pkg);
+  try {
+    return f(built);
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
+}
+/** The list text release-list.mjs writes for SIGN_HOST's build of `pkg`, named `tag`. */
+const listText = (tag, pkg = PKG) => withBuild(pkg, (b) => `${JSON.stringify(makeList(tag, { SIGN_HOST: b }, null), null, 1)}\n`);
 
-test("every committed release is as written, and the newest is this checkout's SIGN_HOST build", () => {
-  assert.deepEqual(releaseProblems(), []);
+test("every committed release is as written", () => {
+  assert.deepEqual(ledgerProblems(), []);
   for (const [tag, sha] of Object.entries(RELEASED)) assert.equal(sha256(readFileSync(join(PKG, "releases", `${tag}.json`))), sha, tag);
 });
 
-test("planted: an old release edited after it was written fails", () => {
+test("planted: on a card branch, a SIGN_HOST change with no new release leaves the ledger clean; an old release edited after it was written fails", () => {
   const dir = releasesCopy();
+  const pkg = pkgCopy();
   try {
+    // what SIGN_HOST serves changed, no release cut: the branch's ledger holds; only a deploy of it is refused
+    writeFileSync(join(pkg, "public", "app.js"), `${readFileSync(join(pkg, "public", "app.js"), "utf8")} `);
+    assert.deepEqual(ledgerProblems(dir), []);
+    assert.ok(withBuild(pkg, (b) => unreleasedProblems(b, dir)).some((l) => l.includes(STALE)));
     const f = join(dir, "release-1.json");
     writeFileSync(f, readFileSync(f, "utf8").replace(/"bytes": (\d+)/, (_, n) => `"bytes": ${Number(n) + 1}`));
-    assert.deepEqual(releaseProblems(dir).filter((l) => !l.includes(STALE)).map((l) => l.split(" (")[0]), ["release-1 was edited after it was written"]);
+    assert.deepEqual(ledgerProblems(dir).map((l) => l.split(" (")[0]), ["release-1 was edited after it was written"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(pkg, { recursive: true, force: true });
   }
 });
 
-test("planted: any change to what SIGN_HOST serves, with no new release, fails: /, /app.js, the worker, a header", () => {
-  const newest = Object.keys(RELEASED).at(-1);
-  const next = `release-${Number(newest.slice(8)) + 1}`;
+test("planted: a deploy's build that the newest list does not name fails: /, /app.js, the worker, a header, an extra file", () => {
+  // the newest list names this tree's build: release-<N+1> past every committed one, beside them, in the ledger
+  const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+  const [tag, next] = [`release-${n + 1}`, `release-${n + 2}`];
+  const dir = releasesCopy();
+  const text = listText(tag);
+  writeFileSync(join(dir, `${tag}.json`), text);
+  const ledger = { ...RELEASED, [tag]: sha256(text) };
   const planted = (file, edit) => {
     const pkg = pkgCopy();
     try {
       const f = join(pkg, file);
-      writeFileSync(f, edit(readFileSync(f, "utf8")));
-      return releaseProblems(undefined, undefined, pkg);
+      writeFileSync(f, edit(existsSync(f) ? readFileSync(f, "utf8") : ""));
+      return withBuild(pkg, (b) => unreleasedProblems(b, dir, ledger));
     } finally {
       rmSync(pkg, { recursive: true, force: true });
     }
   };
   const one = (p, what) => {
     assert.equal(p.length, 1, p.join("\n"));
-    assert.ok(p[0].startsWith(`${newest} ${STALE} (SIGN_HOST ${what}`) && p[0].endsWith(`: write ${next}`), p[0]);
+    assert.ok(p[0].startsWith(`${tag}, ${STALE} (SIGN_HOST ${what}`) && p[0].includes(`: cut ${next} on main`), p[0]);
   };
-  one(planted("public/app.js", (t) => `${t} `), "/app.js:");
-  one(planted("index.html", () => "<!doctype html>"), "/:");
-  one(planted("public/prover-worker.js", (t) => t.replace("{", "{ ")), "/prover-worker.js:");
-  // a connect-src added to the page's policy: the _headers file and every file's headers differ
-  const wider = planted("public/_headers", (t) => {
-    assert.ok(t.includes("connect-src "));
-    return t.replace("connect-src ", "connect-src https://evil.example ");
-  });
-  assert.ok(wider.some((l) => l.startsWith(`${newest} ${STALE} (SIGN_HOST _headers:`)), wider.join("\n"));
-  assert.ok(wider.some((l) => l.startsWith(`${newest} ${STALE} (SIGN_HOST /app.js:`)), wider.join("\n"));
-  // a file served that the list does not name
-  const pkg = pkgCopy();
   try {
-    writeFileSync(join(pkg, "public", "extra.js"), "steal()");
-    one(releaseProblems(undefined, undefined, pkg), "/extra.js: built, not in the list");
+    assert.deepEqual(withBuild(PKG, (b) => unreleasedProblems(b, dir, ledger)), []);
+    one(planted("public/app.js", (t) => `${t} `), "/app.js:");
+    one(planted("index.html", () => "<!doctype html>"), "/:");
+    one(planted("public/prover-worker.js", (t) => t.replace("{", "{ ")), "/prover-worker.js:");
+    // a connect-src added to the page's policy: the _headers file and every file's headers differ
+    const wider = planted("public/_headers", (t) => {
+      assert.ok(t.includes("connect-src "));
+      return t.replace("connect-src ", "connect-src https://evil.example ");
+    });
+    assert.ok(wider.some((l) => l.startsWith(`${tag}, ${STALE} (SIGN_HOST _headers:`)), wider.join("\n"));
+    assert.ok(wider.some((l) => l.startsWith(`${tag}, ${STALE} (SIGN_HOST /app.js:`)), wider.join("\n"));
+    one(planted("public/extra.js", () => "steal()"), "/extra.js: built, not in the list");
   } finally {
-    rmSync(pkg, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("planted: the newest list is picked by N, not by text (release-1000 after release-999)", () => {
-  const dir = releasesCopy();
+  const dir = mkdtempSync(join(tmpdir(), "ct-releases-"));
   try {
-    const newest = Object.keys(RELEASED).at(-1);
-    // lo an old list (release-1's, not this build), hi this build's: hi is the newest. Both past any real release (one
-    // more digit than the ledger's newest), so a real list is never overwritten (hi sorts before lo as text)
+    // lo an old list (release-1's, not this build), hi this build's: hi is the newest, though "release-10…" sorts first as text
     const d = String(Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))))).length + 1;
     const [lo, hi, next] = [`release-${10 ** d - 1}`, `release-${10 ** d}`, `release-${10 ** d + 1}`];
-    writeFileSync(join(dir, `${lo}.json`), readFileSync(join(dir, "release-1.json")));
-    writeFileSync(join(dir, `${hi}.json`), readFileSync(join(dir, `${newest}.json`)));
-    const ledger = { ...RELEASED, [lo]: RELEASED["release-1"], [hi]: RELEASED[newest] };
-    assert.deepEqual(releaseProblems(dir, ledger), []);
+    const [old, mine] = [readFileSync(join(PKG, "releases", "release-1.json")), listText(hi)];
+    writeFileSync(join(dir, `${lo}.json`), old);
+    writeFileSync(join(dir, `${hi}.json`), mine);
+    assert.equal(newestRelease(dir), hi);
+    assert.deepEqual(withBuild(PKG, (b) => unreleasedProblems(b, dir, { [lo]: sha256(old), [hi]: sha256(mine) })), []);
     // and the other way round, hi the stale one, fails on hi
-    writeFileSync(join(dir, `${lo}.json`), readFileSync(join(dir, `${newest}.json`)));
-    writeFileSync(join(dir, `${hi}.json`), readFileSync(join(dir, "release-1.json")));
-    const p = releaseProblems(dir, { ...RELEASED, [lo]: RELEASED[newest], [hi]: RELEASED["release-1"] });
-    assert.ok(p.length && p.every((l) => l.startsWith(`${hi} ${STALE}`) && l.endsWith(`: write ${next}`)), p.join("\n"));
+    writeFileSync(join(dir, `${lo}.json`), mine);
+    writeFileSync(join(dir, `${hi}.json`), old);
+    const p = withBuild(PKG, (b) => unreleasedProblems(b, dir, { [lo]: sha256(mine), [hi]: sha256(old) }));
+    assert.ok(p.length && p.every((l) => l.startsWith(`${hi}, ${STALE}`) && l.includes(`: cut ${next} on main`)), p.join("\n"));
+    assert.equal(newestRelease(mkdtempSync(join(tmp, "none-"))), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -264,8 +284,11 @@ test("planted: a list not in the ledger, and a ledger entry whose list is gone, 
     const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
     const [unlisted, gone] = [`release-${n + 2}`, `release-${n + 1}`];
     writeFileSync(join(dir, `${unlisted}.json`), readFileSync(join(dir, "release-1.json")));
-    assert.ok(releaseProblems(dir).some((l) => l.startsWith(`${unlisted} is not in RELEASED`)));
-    assert.ok(releaseProblems(dir, { ...RELEASED, [gone]: "0".repeat(64) }).includes(`${gone} is in RELEASED but its list is gone`));
+    assert.ok(ledgerProblems(dir).some((l) => l.startsWith(`${unlisted} is not in RELEASED`)));
+    assert.ok(ledgerProblems(dir, { ...RELEASED, [gone]: "0".repeat(64) }).includes(`${gone} is in RELEASED but its list is gone`));
+    // the deploy is held to the ledger too: an unlisted newest list is refused even when it names the build
+    assert.ok(withBuild(PKG, (b) => unreleasedProblems(b, dir)).some((l) => l.startsWith(`${unlisted} is not in RELEASED`)));
+    assert.deepEqual(ledgerProblems(mkdtempSync(join(tmp, "empty-")), {}), ["no release list"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -7,7 +7,11 @@
 // (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
 // rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
 // and the worker and the thread file against a fresh build of the kit's;
-// any refusal stops here, before a token is read or a byte is uploaded. So does an uncommitted change anywhere in the
+// any refusal stops here, before a token is read or a byte is uploaded. So does a build that the newest committed
+// release list (packages/signpage/releases, newest by N) does not name, file for file and header for header, or a
+// list the ledger does not hold as written (release-list.mjs unreleasedProblems, card signpage-release-at-deploy): every
+// build SIGN_HOST serves is a release, cut on main right before the deploy (the flow is in release-list.mjs's header),
+// and the live check signpage-release-at-deploy reads SIGN_HOST against that list after it. So does an uncommitted change anywhere in the
 // tree (the build carries the kit's prover too), no HEAD, or a failed `pnpm install --frozen-lockfile` (run first, so
 // the build reads HEAD's lockfile): the upload is named by HEAD's commit, so it is HEAD's build.
 // --dry-run stops after the gate and keeps the build folder, so `wrangler pages dev` can serve it; it builds a work in
@@ -166,8 +170,9 @@ export function checkProver(dir) {
   return p;
 }
 
-/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), a test's stand-ins. */
-export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG, net = {}) {
+/** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), and
+ *  `released` the release lists and their ledger ({ dir, ledger }; the committed ones by default), a test's stand-ins. */
+export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG, net = {}, released = {}) {
   const dryRun = argv.includes("--dry-run");
   if (argv.some((a) => a !== "--dry-run")) return { code: 2, err: ["usage: node packages/signpage/scripts/deploy.mjs [--dry-run]"] };
   // the tree the build reads, before it reads it: a deploy is HEAD's commit and nothing else (--dry-run builds a work in
@@ -186,7 +191,14 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
   try {
     const problems = checkDir(dir);
     if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
-    if (dryRun) return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${dirty ? "; the tree has uncommitted changes: a deploy would refuse it" : ""}`] };
+    // loaded here, not at the top: release-list.mjs imports this file and the terminal's deploy, which --live-runs needs not
+    const { unreleasedProblems } = await import("./release-list.mjs");
+    const unreleased = unreleasedProblems(dir, ...(released.dir ? [released.dir, released.ledger] : []));
+    if (dryRun) {
+      const would = [dirty && "the tree has uncommitted changes", unreleased.length && `no committed release names this build (${unreleased[0]})`].filter(Boolean);
+      return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded${would.map((w) => `; ${w}: a deploy would refuse it`).join("")}`] };
+    }
+    if (unreleased.length) return { code: 1, err: [...unreleased.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
     const args = ["dlx", WRANGLER, "pages", "deploy", dir, "--project-name", PROJECT, "--branch", BRANCH, "--commit-hash", sha, "--commit-dirty=false"];

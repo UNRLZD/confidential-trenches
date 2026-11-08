@@ -8,9 +8,10 @@ import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, checkPins, deploy, liveRuns } from "./deploy.mjs";
+import { makeList } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -43,6 +44,32 @@ function recorder({ head = "abc", status = "", install = 0 } = {}) {
 }
 // a package folder that is not there: build() throws on it, so a deploy that returns on it never built
 const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
+
+// card signpage-release-at-deploy: a deploy uploads only a build the newest committed release names. The tests that
+// reach the upload deploy this tree's build against a releases folder whose one list names that build, so they hold on a
+// card branch that changes SIGN_HOST and cuts no release (the release is cut on main, right before the sign deploy)
+/** A releases folder whose one list, release-1, names `pkg`'s SIGN_HOST build, and its ledger: { dir, ledger }. */
+function releasedAs(pkg = PKG) {
+  const built = build(pkg);
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "ct-signpage-released-"));
+    const text = `${JSON.stringify(makeList("release-1", { SIGN_HOST: built }, null), null, 1)}\n`;
+    writeFileSync(join(dir, "release-1.json"), text);
+    return { dir, ledger: { "release-1": createHash("sha256").update(text).digest("hex") } };
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
+}
+let releasedTree;
+const RELEASED_TREE = () => (releasedTree ??= releasedAs());
+after(() => releasedTree && rmSync(releasedTree.dir, { recursive: true, force: true }));
+/** A copy of the package's served sources (index.html and public/), the folder build() reads, to plant in. */
+function pkgCopy() {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-test-"));
+  cpSync(join(PKG, "index.html"), join(d, "index.html"));
+  cpSync(join(PKG, "public"), join(d, "public"), { recursive: true });
+  return d;
+}
 
 const WORKER_RULE = "/prover-worker.js\n  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'\n";
 const THREAD_RULE = "/prover-thread.js\n  Content-Security-Policy: default-src 'none'; script-src 'wasm-unsafe-eval'\n";
@@ -166,7 +193,7 @@ test("--dry-run stops after the gate and keeps the build, whose _headers is the 
 
 test("with the gate passed and no token, nothing is uploaded", async () => {
   const { uploads, run } = recorder();
-  const r = await deploy([], {}, run);
+  const r = await deploy([], {}, run, undefined, {}, RELEASED_TREE());
   assert.equal(r.code, 2);
   assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
   assert.equal(uploads().length, 0);
@@ -175,7 +202,7 @@ test("with the gate passed and no token, nothing is uploaded", async () => {
 test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", async () => {
   const rec = recorder();
   const { uploads, run } = rec;
-  const r = await deploy([], ENV, run, undefined, signHost(rec).net);
+  const r = await deploy([], ENV, run, undefined, signHost(rec).net, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   const up = uploads().find((c) => c.cmd === "pnpm");
   assert.deepEqual(up.args.slice(9), ["--commit-hash", "abc", "--commit-dirty=false"]);
@@ -234,7 +261,7 @@ test("an unknown argument is a usage error", async () => {
 
 test("a deploy's live runs name every live check that reads SIGN_HOST, and its success line is the command that runs them on GitHub's runners", async () => {
   const rec = recorder();
-  const r = await deploy([], ENV, rec.run, undefined, signHost(rec).net);
+  const r = await deploy([], ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=\S+$/.test(l)), r.out.join("\n"));
   assert.ok(r.out.includes("then: gh run watch --exit-status"), r.out.join("\n"));
@@ -317,7 +344,7 @@ test("a deploy wrangler calls done while SIGN_HOST still serves the old bundle e
   const rec = recorder();
   const OLD = "console.log('release-57')\n";
   const h = signHost(rec, { "/app.js": OLD });
-  const r = await deploy([], ENV, rec.run, undefined, h.net);
+  const r = await deploy([], ENV, rec.run, undefined, h.net, RELEASED_TREE());
   assert.equal(r.code, 1, (r.out ?? []).join("\n"));
   const said = [...(r.out ?? []), ...(r.err ?? [])].join("\n");
   assert.doesNotMatch(said, /next:/);
@@ -334,7 +361,7 @@ test("a deploy wrangler calls done while SIGN_HOST still serves the old bundle e
 test("a deploy whose SIGN_HOST serves exactly the build it uploaded (/ and /app.js) prints next:", async () => {
   const rec = recorder();
   const h = signHost(rec);
-  const r = await deploy([], ENV, rec.run, undefined, h.net);
+  const r = await deploy([], ENV, rec.run, undefined, h.net, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
   assert.ok(r.out.some((l) => /^next: gh workflow run live\.yml -f host=sign -f commit=abc$/.test(l)), r.out.join("\n"));
   assert.deepEqual([...new Set(h.asked.map((a) => new URL(a.url).pathname))].sort(), ["/", "/app.js"]);
@@ -344,9 +371,52 @@ test("a deploy whose SIGN_HOST serves exactly the build it uploaded (/ and /app.
 test("a SIGN_HOST that cannot be read, or answers other than 200, is never taken as done", async () => {
   for (const fail of [async () => { throw new TypeError("fetch failed"); }, async () => new Response("gone", { status: 404 })]) {
     const rec = recorder();
-    const r = await deploy([], ENV, rec.run, undefined, { fetch: fail, sleep: async () => {} });
+    const r = await deploy([], ENV, rec.run, undefined, { fetch: fail, sleep: async () => {} }, RELEASED_TREE());
     assert.equal(r.code, 1, (r.out ?? []).join("\n"));
     assert.doesNotMatch([...(r.out ?? []), ...(r.err ?? [])].join("\n"), /next:/);
+  }
+});
+
+// Card signpage-release-at-deploy: the "newest release is this build" rule moved here from every card branch's
+// release.test, so a release is cut once per sign deploy, not once per card.
+test("planted: a deploy of a build no committed release names is refused before the token, nothing uploaded; --dry-run says a deploy would refuse it", async () => {
+  const pkg = pkgCopy();
+  const named = releasedAs(pkg);
+  try {
+    // the build the newest list names goes up (the stand-in SIGN_HOST serves what was uploaded)
+    const ok = recorder();
+    const good = await deploy([], ENV, ok.run, pkg, signHost(ok).net, named);
+    assert.equal(good.code, 0, (good.err ?? []).join("\n"));
+    assert.equal(ok.uploads().length, 1);
+    // one file served that the newest list does not name: refused, against the planted lists and the committed ones
+    writeFileSync(join(pkg, "public", "extra.txt"), "a page change with no release");
+    for (const released of [named, {}]) {
+      const rec = recorder();
+      const r = await deploy([], ENV, rec.run, pkg, signHost(rec).net, released);
+      assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+      assert.ok(r.err.some((l) => /^REFUSED release-\d+, the newest release, is not this SIGN_HOST build \(SIGN_HOST \/extra\.txt: built, not in the list\): cut release-\d+ on main/.test(l)), r.err.join("\n"));
+      assert.equal(r.err.at(-1), "nothing was uploaded");
+      assert.equal(rec.uploads().length, 0);
+    }
+    // so is a changed byte in a file the list names, and a list the ledger does not hold as written (even one naming the build)
+    rmSync(join(pkg, "public", "extra.txt"));
+    writeFileSync(join(pkg, "index.html"), `${readFileSync(join(pkg, "index.html"), "utf8")}\n`);
+    const changed = recorder();
+    const c = await deploy([], ENV, changed.run, pkg, signHost(changed).net, named);
+    assert.ok(c.code === 1 && c.err.some((l) => l.startsWith("REFUSED release-1, the newest release, is not this SIGN_HOST build (SIGN_HOST /: the build's ")), (c.err ?? []).join("\n"));
+    const edited = recorder();
+    const e = await deploy([], ENV, edited.run, undefined, signHost(edited).net, { ...RELEASED_TREE(), ledger: { "release-1": "0".repeat(64) } });
+    assert.ok(e.code === 1 && e.err.some((l) => l.startsWith("REFUSED release-1 was edited after it was written")), (e.err ?? []).join("\n"));
+    assert.deepEqual([changed.uploads().length, edited.uploads().length], [0, 0]);
+    // --dry-run builds it and says a deploy would refuse it
+    const dry = recorder();
+    const d = await deploy(["--dry-run"], {}, dry.run, pkg, {}, named);
+    assert.equal(d.code, 0, (d.err ?? []).join("\n"));
+    rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
+    assert.match(d.out[0], /; no committed release names this build \(release-1, the newest release, is not this SIGN_HOST build \(SIGN_HOST \/: [^)]*\)[^;]*: a deploy would refuse it$/);
+  } finally {
+    rmSync(pkg, { recursive: true, force: true });
+    rmSync(named.dir, { recursive: true, force: true });
   }
 });
 
