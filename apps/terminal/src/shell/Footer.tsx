@@ -4,7 +4,7 @@ import { WORDS } from "../screens/verify/words.ts";
 import { buildNetwork } from "../screens/verify/release.ts";
 import eth from "./coins/eth.svg";
 import sol from "../screens/market/logos/solana.svg";
-import { BLOCK_EVERY_MS, FOOTER_LINKS, FOOTER_WORDS, fmtBlock, fmtUsd, footerRpcs, footerTicks, nextConn, readFinalBlock, type Conn } from "./footer.ts";
+import { BLOCK_EVERY_MS, FOOTER_LINKS, FOOTER_WORDS, fmtBlock, fmtUsd, footerRpcs, footerTicks, nextConn, readFinalBlock, type BlockRead, type Conn } from "./footer.ts";
 import { useSignpage } from "./signpage-frame.tsx";
 
 // The desktop footer as R5 draws it (design/proto/assets/app.js:375-385 at design-lock-r5): the prices, the connection
@@ -17,19 +17,20 @@ const w = (k: keyof typeof FOOTER_WORDS) => {
   return word.draft ? <span data-draft-copy>{word.text}</span> : word.text;
 };
 
-/** The block read every BLOCK_EVERY_MS while the page and the footer show (the phone draws no footer, so it reads
- *  nothing), on the build's network's pair. */
-function useConnection(footer: RefObject<HTMLElement | null>): Conn {
+/** The live read: NEAR's final block on the build's network's pair. */
+const liveRead = (): Promise<BlockRead | null> => readFinalBlock(footerRpcs(buildNetwork()));
+
+/** `read` every BLOCK_EVERY_MS while the page and the footer show (the phone draws no footer, so it reads nothing). */
+function useConnection(footer: RefObject<HTMLElement | null>, read: () => Promise<BlockRead | null>): Conn {
   const [conn, setConn] = useState<Conn>({ kind: "wait" });
   useEffect(() => {
-    const rpcs = footerRpcs(buildNetwork());
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       if (!document.hidden && (footer.current?.getClientRects().length ?? 0) > 0) {
-        const read = await readFinalBlock(rpcs);
+        const r = await read();
         if (!alive) return;
-        setConn((c) => nextConn(c, read));
+        setConn((c) => nextConn(c, r));
       }
       if (alive) timer = setTimeout(tick, BLOCK_EVERY_MS);
     };
@@ -38,14 +39,15 @@ function useConnection(footer: RefObject<HTMLElement | null>): Conn {
       alive = false;
       clearTimeout(timer);
     };
-  }, [footer]);
+  }, [footer, read]);
   return conn;
 }
 
-export function Footer() {
+/** `read`: the block read, the live one unless a screen fixture passes its own (test/*: no request leaves the page). */
+export function Footer({ read = liveRead }: { read?: () => Promise<BlockRead | null> }) {
   const { snapshot } = useSignpage();
   const ref = useRef<HTMLElement>(null);
-  const conn = useConnection(ref);
+  const conn = useConnection(ref, read);
   // drawn again on each block read, so a price past its bound leaves within one read
   const ticks = footerTicks(snapshot.state?.pools, Date.now());
   const height = conn.kind === "wait" ? null : conn.height;
