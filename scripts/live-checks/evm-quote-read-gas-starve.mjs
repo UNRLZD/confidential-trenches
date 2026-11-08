@@ -20,8 +20,7 @@
 // kit's buy quote ships in no host's bundle yet)
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE } from "../../packages/kit/src/checks/evm/quote.ts";
+import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-quote-read-gas-starve";
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
