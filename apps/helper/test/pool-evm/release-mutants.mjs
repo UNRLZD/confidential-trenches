@@ -1,12 +1,11 @@
 // Removes or weakens each of the EVM pool sender's withdraw and buy checks (src/pool/evm.ts, POST /v1/pool/evm/send,
 // card helper-evm-sender-2: the strict decode and W's EIP-712 signature), one at a time, and runs the test named for it
-// in src/pool/evm-release.test.ts (or evm.test.ts): each named test passes on the code as it is and fails on every
-// mutant. The mutants are made in a copy of the helper's src in a fresh temporary folder beside the helper (apps/, so
-// the tests' own ../../../../ paths still reach the repository root), with the helper's node_modules linked in so the
-// copy resolves the same installed modules, removed at the end; the tree's own files are never changed. Exits 1 when a
-// named test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file
-// exactly once (the style of sell-mutants.mjs).
-//   node apps/helper/test/pool-evm/release-mutants.mjs   (a long run: 75 test runs, one per mutant)
+// in src/pool/evm-release.test.ts (or evm.test.ts, evm-buy-gas-depth.test.ts): each named test passes on the code as it
+// is and fails on every mutant; mutant-sweep.mjs runs the list (each entry's text in its file exactly once, read before
+// any test runs; the mutants made in a copy of the helper, never in the tree) and exits 1 on any problem. CI runs it as
+// apps/helper's test:mutants, in parts, each one command of ci.yml's test-mutants split (scripts/ci/test-shards.mjs);
+// test/pool-evm/mutant-sweep.test.mjs holds the list and the sweep's refusals (card helper-release-sweep-in-ci).
+//   node apps/helper/test/pool-evm/release-mutants.mjs [<k>/<n>]   (part k of n only)
 //
 // Left out, as equivalent (no input tells them apart, each refusal still made by another check, as the pool's own
 // ecrecover makes it): the v test (a v but 27 or 28 gives a recovery id below 0 or above 1, which recovers no key or
@@ -14,10 +13,10 @@
 // signer), evmReadBuy's selector test (evmReadRelease calls it only on buy's selector), evmReleaseDigest's method/Buy
 // agreement throw (both readers always set them alike), and the 65-byte length test in evmReleaseSigner (both readers
 // slice exactly 65 bytes).
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../../scripts/group-run.mjs";
+import { sweepMain } from "./mutant-sweep.mjs";
 
 const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
@@ -150,51 +149,4 @@ export const MUTANTS = [
   [EVM, '  if (word(d, 18) !== BigInt(32 * (HEAD_WORDS + W_WORDS))) throw new Error("the signature\'s offset");\n', "", T2, "withdraw's signature is read in its one canonical form"],
 ];
 
-// "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a
-// run past 120 s is killed, its process group with it (scripts/group-run.mjs), and counts as a fail
-let lastFail = "";
-function run(dir, file, name) {
-  const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
-  const r = runSync("node", args, { cwd: dir, stdio: "pipe", encoding: "utf8", timeoutMs: 120_000 });
-  if (r.status !== 0) {
-    lastFail = `${r.stdout ?? ""}${r.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
-    return "fail";
-  }
-  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = mkdtempSync(join(HELPER, "..", ".release-mutants-"));
-  let bad = 0;
-  try {
-    for (const p of ["src", "test", "package.json"]) cpSync(join(HELPER, p), join(dir, p), { recursive: true });
-    symlinkSync(join(HELPER, "node_modules"), join(dir, "node_modules"), "dir");
-    const src = new Map([EVM].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    for (const [file, t] of [...new Set(MUTANTS.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
-      const r = run(dir, file, t);
-      if (r !== "pass") {
-        console.log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
-        bad++;
-      }
-    }
-    if (bad === 0) {
-      MUTANTS.forEach(([file, find, repl, tf, t], i) => {
-        const s = src.get(file);
-        if (s.split(find).length !== 2) {
-          console.log(`FAIL mutant ${i + 1}: its text is in ${file} ${s.split(find).length - 1} times, not once: ${find.slice(0, 70)}`);
-          bad++;
-          return;
-        }
-        writeFileSync(join(dir, file), s.replace(find, repl));
-        const r = run(dir, tf, t);
-        writeFileSync(join(dir, file), s);
-        console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].trim().slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
-        if (r !== "fail") bad++;
-      });
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
-  process.exit(bad === 0 ? 0 : 1);
-}
+if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "release-mutants.mjs");

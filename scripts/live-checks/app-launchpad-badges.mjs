@@ -171,8 +171,9 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
           await target.click('.dsc-tab[data-tab="new"]');
         } else for (const key of COLUMNS) rows.push(...(await target.evaluate(READ, { scope: `.dsc-grid .dsc-col[data-col="${key}"]`, column: key })));
       }
-      const shot = path.join(shots, `${w.name}-discover.png`);
-      await page.screenshot({ path: shot });
+      // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
+      const shot = `${w.name}-discover.png`;
+      await page.screenshot({ path: path.join(shots, shot) });
       const body = lists ? await lists.json().catch(() => null) : null;
       const served = new Map();
       for (const rs of Object.values(body?.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string") served.set(r.token, { launchpad: r.launchpad ?? null, chain: r.chain });
@@ -193,7 +194,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
-    if (file) writeFileSync(file, `${JSON.stringify(rec, null, 1)}\n`);
+    // the record leaves out where this machine kept the shots
+    if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
     const { ok, lines } = judge(rec);
     for (const l of lines) console.log(l);
     console.log(`screenshots: ${rec.shots}`);

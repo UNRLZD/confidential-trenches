@@ -13,10 +13,12 @@
 //   goes on meanwhile.
 // - Withdraw is drawn in every state and acts only when ready: it reads the note value and the fee bound again, checks
 //   both fields again (the address on both RPCs) and hands over only an answer equal to the one drawn, with the fee it
-//   drew. With no hand-off given (no build gives one yet: ./handoff.ts) it is drawn and not offered (data-pending, as
+//   drew. With no hand-off given (a build whose release names no relayer: ./handoff.ts) it is drawn and not offered (data-pending, as
 //   New account is on the sign-in choices). The hand-off's outcome is drawn as data-outcome; a hand-off that found the
 //   relayer's fee above the drawn one ({ kind: "fee" }) gives the new fee, which is drawn (both fields checked at it)
 //   and nothing goes on until the next tap.
+// - A vault withdrawal the page's settle pass left "unmatched" is shown above the fields (data-notice), read at open and
+//   at every tap's reads.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
@@ -32,6 +34,7 @@ export const WITHDRAW_WORDS = {
   insufficient: "Insufficient", // S12.6's draft (09-design-brief.md:1402)
   min: "Min $", // S12.7's draft "Min $X" (09-design-brief.md:1403), X the smallest amount above the fee
   busy: "Busy · Retry", // S12.10's draft (09-design-brief.md:1405), for a check the RPCs could not answer
+  unmatched: "Withdrawal unmatched", // new, card wallet-withdraw-move-out: a settle pass's drift note left RESERVED; the owner picks
 } as const;
 
 /** The quiet time after the last keystroke before a check runs. */
@@ -48,10 +51,13 @@ export interface WithdrawFormDeps {
   available: () => Promise<bigint>;
   /** The device's own bound on the relay fee, in base units; a rejection leaves it unread. */
   fee: () => Promise<bigint>;
-  /** The wallet's withdraw path, given the fee the form drew; absent on every build until the typed account is paid
+  /** The wallet's withdraw path, given the fee the form drew; absent where the release names no vault or relayer
    *  (./handoff.ts). Its answer, when it gives one, is drawn as data-outcome, except { kind: "fee", fee }: the relayer's
    *  fee is now above the drawn one, so the form draws that fee and goes no further. */
   handoff?: (w: CheckedWithdraw, fee: bigint) => void | Promise<void | { kind: string; fee?: bigint }>;
+  /** How many vault withdrawals the page's last settle pass left "unmatched" (./handoff.ts withdrawSettle: a spend of
+   *  the note whose change is not this device's, the note kept RESERVED); read at open and at every tap's reads. */
+  unmatched?: () => number;
 }
 
 export type FormState = "empty" | "typing" | "refused" | "ready";
@@ -126,14 +132,20 @@ export function drawWithdrawForm(doc: Document, deps: WithdrawFormDeps, button: 
   const go = button("withdraw", WITHDRAW_WORDS.withdraw, () => run(withdraw));
   go.dataset.draftCopy = "withdraw";
   if (!deps.handoff) go.dataset.pending = "withdraw-relay";
-  form.append(to.label, to.line, amount.label, amount.line, go);
+  const notice = doc.createElement("p");
+  notice.dataset.notice = "unmatched";
+  notice.dataset.draftCopy = "unmatched";
+  notice.textContent = WITHDRAW_WORDS.unmatched;
+  const drift = (): void => void (notice.hidden = !((deps.unmatched?.() ?? 0) > 0));
+  drift();
+  form.append(notice, to.label, to.line, amount.label, amount.line, go);
 
   // read at open, and again on Retry while either is unread; one that cannot be read stays null (unread)
   let ctx: { available: bigint | null; fee: bigint | null } = { available: null, fee: null };
   const load = (): Promise<void> =>
-    Promise.all([deps.available().catch(() => null), deps.fee().catch(() => null)]).then(([available, fee]) => {
+    (drift(), Promise.all([deps.available().catch(() => null), deps.fee().catch(() => null)]).then(([available, fee]) => {
       ctx = { available: typeof available === "bigint" ? available : null, fee: typeof fee === "bigint" ? fee : null };
-    });
+    }));
   let loaded = load();
 
   let seq = 0;

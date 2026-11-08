@@ -32,6 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
+import { named } from "./record-names.mjs";
 
 const KEY = "signpage-prover-host";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -378,7 +379,7 @@ export async function collect({ harness = false, site } = {}) {
     }
     const files = await readFiles(serve);
     const run = await readPage(serve);
-    return { source: harness ? `harness, SIGN_HOST from ${site ?? "a fresh deploy.mjs --dry-run build"}` : `live ${SIGN}`, at: new Date().toISOString(), browser: run.browser, files, page: run.page };
+    return { source: harness ? `harness, SIGN_HOST from ${site ? named(site) : "a fresh deploy.mjs --dry-run build"}` : `live ${SIGN}`, at: new Date().toISOString(), browser: run.browser, files, page: run.page };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }

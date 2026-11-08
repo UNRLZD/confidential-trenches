@@ -288,6 +288,22 @@ const depositDry: SignpageSchema = (v) => {
   return at78(d.min_amount_out_usd) <= at78(d.amount_out_usd);
 };
 
+/** pool.address's answer (card pool-deposit-address): the chain's one-time deposit wallet U_X, an address of that chain
+ *  (base58 of 32 bytes on Solana, 0x and 40 hex on an EVM chain), the chain's pool asset, and for money from another
+ *  chain the checked quote to U_X, its min out in that asset's whole units at no more than its decimals. */
+const poolQuote = obj({ deposit_address: str, origin_asset: str, amount_in: dec, min_amount_out: dec, deadline: iso, time_estimate_s: uint });
+const poolAddressFields = obj({ chain: poolChain, address: str, asset: oneOf(POOL_ASSETS) }, { quote: poolQuote });
+const poolAddress: SignpageSchema = (v) => {
+  if (!poolAddressFields(v)) return false;
+  const r = v as { chain: Chain; address: string; asset: PoolAsset; quote?: { min_amount_out: string } };
+  if (POOL_CHAIN_ASSET[r.chain] !== r.asset) return false;
+  if (!(r.chain === "solana" ? solAddress(r.address) : /^0x[0-9a-fA-F]{40}$/.test(r.address))) return false;
+  return r.quote === undefined || unitsAt(r.quote.min_amount_out, POOL_ASSET_DECIMALS[r.asset]) !== null;
+};
+/** pool.address's params: a pool chain, and for money from another chain the origin asset and amount, both or neither. */
+const poolAddressParams: SignpageSchema = (v) =>
+  obj({ chain: poolChain })(v) || obj({ chain: poolChain, origin_asset: str, amount: dec })(v);
+
 /** The result of each kind, as SignpageResults names it. */
 export const SIGNPAGE_RESULT_SCHEMAS = {
   "deposit.quote": obj({
@@ -320,6 +336,7 @@ export const SIGNPAGE_RESULT_SCHEMAS = {
   "pool.withdraw": open,
   "deposit.assets": depositAssets,
   "deposit.dry": depositDry,
+  "pool.address": poolAddress,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
@@ -350,6 +367,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
   "deposit.assets": obj({}),
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
+  "pool.address": poolAddressParams,
 } as const satisfies Record<SignpageKind, SignpageSchema>;
 deepFreeze(SIGNPAGE_PARAM_SCHEMAS);
 
@@ -396,6 +414,6 @@ export const signpageProgressRouteSchema: SignpageSchema = (v) => routeWallet(v)
 export const signpageAnswerOkSchema = obj({ v: lit(1), id: str, ok: lit(true), result: (v) => isPlainObject(v) });
 export const signpageAnswerErrorSchema = obj({ v: lit(1), id: str, ok: lit(false), error: obj({ code: errorCode }) });
 
-/** True when `kind` is one of the twenty-three. */
+/** True when `kind` is one of the twenty-four. */
 export const signpageIsKind = (kind: unknown): kind is SignpageKind =>
   typeof kind === "string" && (SIGNPAGE_KINDS as readonly string[]).includes(kind);

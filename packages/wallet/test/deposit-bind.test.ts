@@ -27,6 +27,7 @@ import {
   LAPSE_MARGIN,
   readU,
   resetBindSession,
+  SHORT_READ_CALLS,
   resignDeposit,
   txCarriesFinal,
 } from "../src/deposit/bind.ts";
@@ -480,6 +481,26 @@ test("a front-run on P: the note lands with that leaf as front_run, and nothing 
   assert.equal(t.sent.length, 0);
 });
 
+test("audit V-01: a stranger takes P after U's call left, naming U as depositor at another value: front_run, never deposited", async () => {
+  // the relayer's prepay put P on chain; the stranger's 1 USDC naming P and U lands first, U's call is refunded in full
+  for (const [what, depositor, value] of [["U at 1 USDC", "", 1_000_000n], ["U at 1 base unit over", "", AMOUNT + 1n], ["a stranger at the call's amount", "f".repeat(64), AMOUNT]] as const) {
+    resetBindSession();
+    const t = await setup(["tx"], (c) => (s) => {
+      c.finals.add(s.hash);
+      c.a.nonce = c.b.nonce = s.nonce;
+      c.addRow(s.p, { depositor: depositor || c.u, value });
+    });
+    const note = landed(await bindDeposit(SEED, t.args, t.deps), "front_run");
+    assert.equal(note.leaf!.value, value, what);
+    assert.equal(t.chain.balance, 100_000_000n, `${what}: U's USDC refunded whole`);
+    assert.equal(t.sent.length, 1, what);
+  }
+  // U at the call's own amount is one value: deposited
+  resetBindSession();
+  const t = await setup(["tx"], (c) => (s) => (c.finals.add(s.hash), (c.a.nonce = c.b.nonce = s.nonce), c.addRow(s.p, { value: AMOUNT })));
+  landed(await bindDeposit(SEED, t.args, t.deps), "deposited");
+});
+
 test("a check code from the relayer stops the bind with that code; nothing more is sent", async () => {
   const t = await setup(["gas_too_low"]);
   assert.deepEqual(await bindDeposit(SEED, t.args, t.deps), { kind: "refused", code: "gas_too_low" });
@@ -670,6 +691,24 @@ for (const code of ["in_flight", "p_used", "expired", "bad_nonce"]) {
     assert.equal(t.sent.length, 1);
   });
 }
+// The review of 9c218554 (M1): the device signs only after reading U's USDC at or above the amount on both RPCs, so a
+// relayer's read short of it (a ran call's debit before its refund, audit V-01) is no refusal: the chain settles it.
+test("amount_above_balance settles from the pages and U's nonce: nothing carried, the call lapses and is signed again at its own nonce, never refused", async () => {
+  const t = await setup(["amount_above_balance", "tx"]);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.nonce, t.sent[0]!.nonce, "signed again at the same nonce: the first never ran");
+  assert.ok(t.sent[1]!.mbh > t.sent[0]!.mbh, "a fresh window");
+});
+test("amount_above_balance on SHORT_READ_CALLS - 1 calls of a note (a refund delayed two windows) still lands; on SHORT_READ_CALLS it is refused, the money in U", async () => {
+  const t = await setup([...Array(SHORT_READ_CALLS - 1).fill("amount_above_balance"), "tx"]);
+  landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, SHORT_READ_CALLS);
+  resetBindSession();
+  const r = await setup(Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  assert.deepEqual(await bindDeposit(SEED, r.args, r.deps), { kind: "refused", code: "amount_above_balance" });
+  assert.equal(r.sent.length, SHORT_READ_CALLS);
+});
 for (const code of ["token_halted", "relayer_low"]) {
   test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
     const t = await setup([code, "tx"]);

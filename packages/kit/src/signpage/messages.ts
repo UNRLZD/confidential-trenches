@@ -11,10 +11,10 @@ import type { Chain, OrderTrigger } from "../orders/record.ts";
 import { deepFreeze } from "../freeze.ts";
 
 /**
- * The twenty-three request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
- * pool kinds (card signpage-pool-kinds) and the two deposit sheet reads, deposit.assets and deposit.dry (card
- * kit-deposit-assets-dry), were added after kit-v1 without changing any other kind. A page of an earlier release
- * refuses a kind it does not have "not_allowed".
+ * The twenty-four request kinds, app to page. nav and reload are to SIGN_HOST's shell (card signpage-shell); the four
+ * pool kinds (card signpage-pool-kinds), the two deposit sheet reads, deposit.assets and deposit.dry (card
+ * kit-deposit-assets-dry), and pool.address (card pool-deposit-address) were added after kit-v1 without changing any
+ * other kind. A page of an earlier release refuses a kind it does not have "not_allowed".
  */
 export const SIGNPAGE_KINDS = [
   "deposit.quote",
@@ -40,6 +40,7 @@ export const SIGNPAGE_KINDS = [
   "pool.withdraw",
   "deposit.assets",
   "deposit.dry",
+  "pool.address",
 ] as const;
 deepFreeze(SIGNPAGE_KINDS);
 
@@ -144,6 +145,15 @@ export interface SignpageParams {
    * user's. Signs nothing and needs no sign-in.
    */
   "deposit.dry": { origin_asset: string; amount: string };
+  /**
+   * Where money for chain X's pool goes (card pool-deposit-address): U_X, the chain's one-time deposit wallet the device
+   * names ahead, and, with `origin_asset` and `amount` (both or neither, as deposit.quote's), a checked 1Click deposit
+   * address for money from another chain whose recipient is U_X and whose refund lands inside intents.near under
+   * U_{s,i}, the ed25519 one-time id of the same scope and index (on Solana U_X's own key; on Base and Robinhood the id
+   * beside U_X's EVM key). Until the follow is built (card pool-deposit-follow), a quote is refused not_allowed; that
+   * card carries money that reaches U_X on into X's pool with no tap. The request's id is the deposit's op id in state.ops.
+   */
+  "pool.address": { chain: PoolChain; origin_asset?: string; amount?: string };
 }
 
 export interface TxRef {
@@ -190,6 +200,20 @@ export interface SignpageResults {
   "pool.withdraw": OpenResult;
   "deposit.assets": { assets: DepositAsset[] };
   "deposit.dry": DepositDry;
+  "pool.address": PoolAddress;
+}
+
+/**
+ * pool.address's answer (card pool-deposit-address): `address` is U_X on `chain` (base58 on Solana, EIP-55 on an EVM
+ * chain), `asset` the chain's pool asset (SOL, ETH). `quote`, only when the request named an origin asset, is the checked
+ * 1Click quote to U_X, as deposit.quote's answer but `min_amount_out` in whole units of the pool's asset
+ * (POOL_ASSET_DECIMALS). An address only: never a key, the 12 words or which note is whose.
+ */
+export interface PoolAddress {
+  chain: PoolChain;
+  address: string;
+  asset: PoolAsset;
+  quote?: SignpageResults["deposit.quote"];
 }
 
 /**

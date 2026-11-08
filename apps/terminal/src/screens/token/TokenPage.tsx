@@ -13,6 +13,8 @@ import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeView, useTrade } from "../trade/TradeBox.tsx";
 import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
+import { TradeToast } from "../trade/TradeToast.tsx";
+import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
 import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { liveBars, mountChart, unmountChart } from "./chart.ts";
@@ -43,8 +45,6 @@ function W({ id }: { id: WordId }) {
   const w = WORDS[id];
   return w.draft ? <span data-draft-copy={w.text}>{w.text}</span> : <>{w.text}</>;
 }
-
-const QUICK = [10, 25, 50, 100] as const;
 
 /** A skeleton the height of the value it stands for: one line of that value's own font, so the strip keeps its height
  *  when the read lands (BAR-10 CLS). */
@@ -298,9 +298,9 @@ interface Ready {
 
 /** The box with the safety grid under it: the desktop column and the phone sheet draw the same, from the page's one
  *  trade state (TokenPage's useTrade), so a buy started at one width is the buy the other width draws. */
-function Ticket({ r, t }: { r: Ready; t: Trade }) {
+function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   const { row, risk } = r.data;
-  return <TradeView t={t} symbol={row.symbol} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
+  return <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />;
 }
 
 /** The strip's and the tiles' Tax: the token read's transfer fee as the safety grid draws it (trade/safety.ts). */
@@ -448,9 +448,9 @@ function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartS
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">
           <div className="tkp-quick">
-            {QUICK.map((q) => (
-              <button key={q} type="button" className="tkp-chip" onClick={sheet.open}>
-                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>${q}
+            {PRESETS.map((p) => (
+              <button key={String(p)} type="button" className="tkp-chip" data-preset={centsToDecimal(p)} disabled={t.presetOff(p)} onClick={() => t.tapPreset(p)}>
+                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>{fmtUsd(p)}
               </button>
             ))}
           </div>
@@ -462,9 +462,10 @@ function Phone({ v, r, c, t }: { v: TokenView | null; r: Ready | null; c: ChartS
       )}
       {v && r && (
         <TradeSheet state={sheet.state} onClose={sheet.close} label={`${WORDS.buy.text} ${v.symbol}`} closeLabel={signinWord("close")} head={<SheetHead v={v} />}>
-          <Ticket r={r} t={t} />
+          <Ticket r={r} t={t} toast={false} />
         </TradeSheet>
       )}
+      {v && <TradeToast t={t} symbol={v.symbol} sheetOpen={sheet.state.open} />}
     </div>
   );
 }

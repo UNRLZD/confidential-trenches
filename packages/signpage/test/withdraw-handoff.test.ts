@@ -158,6 +158,8 @@ async function handoffOf(v: World, p: Page, over: HandoffOver = {}) {
     fetchFn: helper(),
     sync: async () => ({ stateTree: v.stateTree, labelTree: v.labelTree, newestStateRoot: v.stateTree.root!, newestLabelRoot: v.labelTree.root! }),
     blockNs: async () => blockNs,
+    // no arrival read unless a test gives its pair: a landing ends "landed", as before the arrival read
+    arrival: async () => Promise.reject(new Error("no arrival read in this test")),
     ...over,
   });
   assert.ok(h);
@@ -168,10 +170,10 @@ const tick = () => new Promise((r) => setImmediate(r));
 const expired = async (v: World, req: WithdrawRequest): Promise<RelayOutcome> => ({ kind: "expired", note: (await v.ns.get(req.noteId))!, route: "relayer", lastAnswer: null });
 
 // ---------- the form: reads only ----------
-test("no build's form hands off: the testnet form, whose release names a vault and a relayer, gives no hand-off either", async () => {
+test("the testnet form, whose release names a vault and a relayer, offers the hand-off that pays the typed account", async () => {
   const v = await world([5_000_000n]);
   const d = testnet(v);
-  assert.equal(d.handoff, undefined, "Withdraw stays pending until the typed account is paid (wallet-withdraw-move-out)");
+  assert.equal(typeof d.handoff, "function", "Withdraw is offered: the vault pays the typed account straight (wallet-withdraw-move-out)");
   assert.equal(await d.available(), 5_000_000n);
   assert.equal(await d.fee(), RELAY_FEE);
 });
@@ -285,15 +287,18 @@ test("the hand-off proves on the page's prover, RESERVES the note with its reque
   assert.ok(waited instanceof AbortSignal, "the wait is bounded");
   const req = sent as WithdrawRequest | null;
   assert.ok(req);
-  // the smallest note covering 3 USDC plus the fee, RESERVED with its request's bytes, paying its own A
+  // the smallest note covering 3 USDC plus the fee, RESERVED with its request's bytes, paying the typed account straight
   const spent = (await v.ns.get(req.noteId))!;
   assert.equal(spent.leaf?.value, 5_000_000n);
   assert.equal(spent.state, "RESERVED");
   assert.equal(spent.request, JSON.stringify(req.body));
   const a = armAccount(SEED, spent.leaf!.label, 0);
   a.secretKey.fill(0);
-  assert.equal(req.body.withdrawal.recipient, a.id);
-  assert.deepEqual(asked, [], "no read names A: register_deposit is the token's minimum for every A (card relayer-cost-guards, review F2)");
+  assert.equal(req.body.withdrawal.recipient, "alice.testnet");
+  assert.equal(req.recipient, "alice.testnet");
+  assert.equal(req.body.fund_recipient, false);
+  assert.notEqual(req.body.withdrawal.recipient, a.id, "never the note's A");
+  assert.deepEqual(asked, [], "no read names the typed account: register_deposit is the token's minimum for every recipient (card relayer-cost-guards, review F2)");
   assert.equal(req.body.withdrawal.register_deposit, String(MIN));
   assert.equal(req.body.withdrawal.fee_recipient, R.fee_recipient);
   assert.equal(req.body.withdrawal.relay_fee, String(RELAY_FEE));
@@ -366,7 +371,7 @@ async function leftReserved(v: World, relayErr = new Error("page died mid-relay"
   return sent!;
 }
 const settleWith = (v: World, relay: HandoffOver["relay"], p = page(v)) =>
-  withdrawSettle(p, { network: "testnet", rpcs: pair("testnet"), priceRpcs: pair("mainnet"), fetchFn: helper(), relay });
+  withdrawSettle(p, { network: "testnet", rpcs: pair("testnet"), priceRpcs: pair("mainnet"), fetchFn: helper(), relay, arrival: async () => Promise.reject(new Error("no arrival read in this test")) });
 
 test("page death during the proof: the HELD note goes back to UNSPENT when the note store opens again", async () => {
   const v = await world([5_000_000n]);
@@ -473,6 +478,8 @@ class Chain {
   leaves: { v: bigint; h: number }[] = Array.from({ length: 8 }, (_, k) => ({ v: BigInt(100 + k), h: 0 }));
   spends: Spend[] = [{ nh: 41n, withdrawn: 1_000_000n, newLeaf: 7, context: 43n, h: 0 }];
   status = "in_flight";
+  recipient = "a".repeat(64);
+  refundValue = "0";
   land(nh: bigint, withdrawn: bigint, leaf: bigint, context: bigint): void {
     this.leaves.push({ v: leaf, h: this.height });
     this.spends.push({ nh, withdrawn, newLeaf: this.leaves.length - 1, context, h: this.height });
@@ -486,8 +493,8 @@ class Chain {
       label_tree: tree(0),
       spends: spends.map((s, index) => ({
         index, nullifier_hash: String(s.nh), withdrawn: String(s.withdrawn), new_leaf_index: s.newLeaf, refund_precommitment: "5",
-        refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: this.status,
-        payer: "relayer.confidential.unrlzd.near", reserve: "0", recipient: "a".repeat(64), fee: "30000", context: String(s.context),
+        refund_value: this.refundValue, refund_label: "0", refund_leaf_index: 0, status: this.status,
+        payer: "relayer.confidential.unrlzd.near", reserve: "0", recipient: this.recipient, fee: "30000", context: String(s.context),
       })),
       leaves: leaves.map((l) => String(l.v)),
     } as Record<string, unknown>;
@@ -607,4 +614,141 @@ test("the settle pass on a ragequit whose SPENT move fails (another tab moved th
     return { kind: "unmatched", spend: { context: 0n } as never };
   });
   assert.deepEqual(pass.outcomes, { [req.noteId]: "failed" });
+});
+
+// ---------- card wallet-withdraw-move-out: the vault pays the typed account; the arrival read on the pair ----------
+const { withdrawArrival } = await import("../../wallet/src/withdraw/arrival.ts");
+const paidTo = (to: string, status = "paid", refundValue = "0"): Chain => Object.assign(new Chain(), { status, recipient: to, refundValue });
+/** A fetch that counts every POST /v1/withdraw (a send) and answers the fee for anything else. */
+function counting(posts: string[]): typeof fetch {
+  const fee = helper();
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      posts.push(String(init.body));
+      return new Response(JSON.stringify({ error: { code: "in_flight" } }), { status: 409, headers: { "content-type": "application/json" } });
+    }
+    return fee(input, init);
+  }) as typeof fetch;
+}
+
+test("the hand-off ends at the arrival: landed on the pair, then the spend reads paid to the typed account: arrived", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("alice.testnet");
+  const h = await handoffOf(v, page(v), { relay: realRelayLanded(c), arrivalRpcs: c.rpcs(), arrival: withdrawArrival });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "arrived" });
+});
+
+test("the payout failed (refund_pending): the hand-off ends refunded, never arrived", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("alice.testnet", "refund_pending", "3188142");
+  const h = await handoffOf(v, page(v), { relay: realRelayLanded(c), arrivalRpcs: c.rpcs(), arrival: withdrawArrival });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "refunded" });
+});
+
+test("resume: the page dies after the relay landed, before the arrival read: the rerun sends nothing new and relays nothing", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("alice.testnet");
+  const died = new Error("page died after the relay");
+  const h = await handoffOf(v, page(v), { relay: realRelayLanded(c), arrival: async () => Promise.reject(died) });
+  // the relay's landing is kept: the change note written, the spent note SPENT; the arrival unread
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "landed" });
+  const spent = (await v.ns.list()).find((n) => n.ref.kind !== "change")!;
+  assert.equal(spent.state, "SPENT");
+  // the rerun (a reload's settle pass) on the same store: no note is RESERVED, so nothing is sent or relayed again
+  const posts: string[] = [];
+  let relayed = 0;
+  const pass = await withdrawSettle(page(v), { network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: counting(posts), relay: async () => (relayed++, Promise.reject(new Error("no relay"))) });
+  assert.deepEqual(pass.outcomes, {});
+  assert.equal(relayed, 0);
+  assert.deepEqual(posts, []);
+});
+
+test("resume: the page dies after the send, before landed: the rerun sends the same bytes once, then reads the arrival", async () => {
+  const v = await world([5_000_000n]);
+  const req = await leftReserved(v);
+  const c = paidTo("alice.testnet");
+  const posts: string[] = [];
+  let calls = 0;
+  const pass = await withdrawSettle(page(v), {
+    network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: counting(posts), arrivalRpcs: c.rpcs(),
+    relay: (seed, r, deps) => {
+      calls++;
+      assert.equal(JSON.stringify(r.body), JSON.stringify(req.body), "the stored bytes, never re-proved");
+      return realRelayLanded(c)!(seed, r, deps);
+    },
+  });
+  assert.deepEqual(pass.outcomes, { [req.noteId]: "arrived" });
+  assert.equal(calls, 1);
+  assert.ok(posts.every((b) => b === JSON.stringify(req.body)), "any send is the same bytes");
+  // a second rerun: nothing RESERVED, nothing sent
+  const again = await withdrawSettle(page(v), { network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: counting(posts), relay: async () => Promise.reject(new Error("no relay")) });
+  assert.deepEqual(again.outcomes, {});
+});
+
+// review of c19ad399, L3: a landing by another attempt of these words (another device, own false) ends on its spend row
+test("a landing that is not own, paid to another account, ends elsewhere (never a bare landed)", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("eve.testnet");
+  const h = await handoffOf(v, page(v), {
+    relay: async (_seed, r) => ({ kind: "landed", own: false, change: (await v.ns.get(r.noteId))!, spend: { nullifierHash: BigInt(r.body.public_signals[1]), recipient: "eve.testnet", status: "paid", refundValue: 0n } as never }),
+    arrivalRpcs: c.rpcs(),
+    arrival: async () => Promise.reject(new Error("a landing that is not own reads no arrival")),
+  });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "elsewhere" });
+});
+
+// review of c19ad399, L4: one deadline per tap, so a tap never waits HANDOFF_WAIT_MAX_MS twice
+test("the relay and the arrival read after it share one deadline: the same signal", async () => {
+  const v = await world([5_000_000n]);
+  const c = paidTo("alice.testnet");
+  let relaySignal: AbortSignal | undefined;
+  let arrivalSignal: AbortSignal | undefined;
+  const landed = realRelayLanded(c)!;
+  const h = await handoffOf(v, page(v), {
+    relay: async (seed, r, deps) => ((relaySignal = deps.signal), landed(seed, r, deps)),
+    arrivalRpcs: c.rpcs(),
+    arrival: async (a) => ((arrivalSignal = a.signal), withdrawArrival(a)),
+  });
+  assert.deepEqual(await h({ recipient: "alice.testnet", amount: 3_000_000n }, RELAY_FEE), { kind: "arrived" });
+  assert.ok(relaySignal instanceof AbortSignal);
+  assert.equal(arrivalSignal, relaySignal, "the arrival waits under the relay's own deadline, not a fresh one");
+});
+
+// review of a6903d91, N1: the settle pass follows each note from its own relay to its own arrival, all at once, so a
+// note held to the bound never cuts a later note's arrival, and each arrival waits under its own note's deadline (M6)
+test("the settle pass: a note held to the bound never ends a later note's arrival, each read under its own note's deadline", async () => {
+  const v = await world([5_000_000n, 6_000_000n]);
+  const a = await leftReserved(v);
+  const b = await leftReserved(v);
+  assert.notEqual(a.noteId, b.noteId);
+  const list = async () => {
+    const all = await v.ns.list();
+    return [...all.filter((n) => n.id === a.noteId), ...all.filter((n) => n.id !== a.noteId)];
+  };
+  const ns = new Proxy(v.ns, { get: (t, k) => (k === "list" ? list : (Reflect.get(t, k) as (...x: unknown[]) => unknown)?.bind?.(t) ?? Reflect.get(t, k)) });
+  const c = paidTo("alice.testnet");
+  const landed = realRelayLanded(c)!;
+  const relaySignals = new Map<string, AbortSignal>();
+  const arrivalSignals: AbortSignal[] = [];
+  const pass = await withdrawSettle({ ...page(v), notes: async () => ns }, {
+    network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: helper(), arrivalRpcs: c.rpcs(), waitMs: 3_000,
+    relay: async (seed, r, deps) => {
+      relaySignals.set(r.noteId, deps.signal!);
+      // A: a pair that never settles, held until its bound
+      if (r.noteId === a.noteId) return new Promise((_ok, no) => deps.signal!.addEventListener("abort", () => no(deps.signal!.reason), { once: true }));
+      return landed(seed, r, deps);
+    },
+    // B's payout runs 500 ms after its landing: the arrival waits for it under its signal, as the pair's rounds do
+    arrival: async (x) => {
+      arrivalSignals.push(x.signal!);
+      await new Promise<void>((ok, no) => {
+        const t = setTimeout(ok, 500);
+        x.signal!.addEventListener("abort", () => (clearTimeout(t), no(x.signal!.reason)), { once: true });
+      });
+      return withdrawArrival(x);
+    },
+  });
+  assert.deepEqual(pass.outcomes, { [a.noteId]: "failed", [b.noteId]: "arrived" });
+  assert.equal(arrivalSignals.length, 1);
+  assert.equal(arrivalSignals[0], relaySignals.get(b.noteId), "B's arrival waits under B's own deadline, never a fresh one");
 });

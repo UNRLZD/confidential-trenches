@@ -31,7 +31,9 @@ test("every file the sandbox suite reads is one the rule runs the suite for", ()
     // the kit's entry exports the NEAR pair rule from this file, which imports nothing (covered by packages/kit/src/)
     "packages/kit/src/near/networks.ts",
     // relayer_withdraw.rs: the withdraw relayer's CLI, the send it drives (through its imports) and the fixture
-    "apps/helper/test/withdraw-send/carry.ts", "apps/helper/src/withdraw/send.ts", "apps/helper/src/withdraw/checks.ts", "apps/helper/src/withdraw/fee.ts", "contracts/vault/tests/fixtures/withdraw-spends.json"]) {
+    "apps/helper/test/withdraw-send/carry.ts", "apps/helper/src/withdraw/send.ts", "apps/helper/src/withdraw/checks.ts", "apps/helper/src/withdraw/fee.ts", "contracts/vault/tests/fixtures/withdraw-spends.json",
+    // settle.rs's kit_settle_mock: the kit's settle CLI and the one script it imports
+    "packages/kit/test/vault-settle-cli.mjs", "contracts/vault/scripts/near-tx.mjs"]) {
     assert.ok(reads.includes(f), `the suite reads ${f}, and suiteReads did not find it`);
   }
   assert.deepEqual(uncovered(reads), []);
@@ -39,7 +41,7 @@ test("every file the sandbox suite reads is one the rule runs the suite for", ()
 
 test("planted: a file the suite reads but the rule misses fails", () => {
   const reads = suiteReads();
-  for (const gone of ["apps/helper/src/token-status/", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/", "apps/helper/src/withdraw/", "apps/helper/test/withdraw-send/"]) {
+  for (const gone of ["apps/helper/src/token-status/", "packages/kit/zk/", "scripts/net-window.mjs", "packages/kit/test/vectors/", "apps/helper/src/withdraw/", "apps/helper/test/withdraw-send/", "packages/kit/test/vault-settle-cli.mjs"]) {
     const missed = uncovered(reads, PATHS.filter((p) => p !== gone));
     assert.ok(missed.length > 0 && missed.every((f) => f.startsWith(gone)), `without ${gone} the rule still covers ${missed}`);
   }

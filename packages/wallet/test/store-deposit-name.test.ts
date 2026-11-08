@@ -193,3 +193,26 @@ test("nameDeposit waits for the seed lock (a sign out or a seed write in flight)
   await holder;
   assert.deepEqual(await naming, { v: 1, scope: "5", index: 0, id: id(0) });
 });
+
+// card pool-deposit-address: an EVM pool's record names U^evm_{s,i} beside U_{s,i}'s 64-hex id (the refund's), so the
+// API answers both from public data; the address only in the EIP-55 case it is derived in, and nothing else beside it.
+test("an EVM pool's record: the EIP-55 address beside the 64-hex id, read back as written; any other shape refused", async () => {
+  const s = await openWalletStore({ indexedDB: new IDBFactory() });
+  closers.push(s);
+  await s.insertSeed(SEED());
+  const EVM = "0x52908400098527886E0F7030069857D2E4169EE7"; // EIP-55's own vector (its checksum is all upper case)
+  const EVM2 = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"; // another of its vectors
+  const named = await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 9n, index: 0, id: id(0), evm: EVM });
+  assert.deepEqual(named, { v: 1, scope: "9", index: 0, id: id(0), evm: EVM });
+  const { depositRecordOf } = await import("../src/store/index.ts");
+  assert.deepEqual(depositRecordOf(await s.get("meta", "deposit/9")), { v: 1, scope: "9", index: 0, id: id(0), evm: EVM });
+  assert.deepEqual(depositRecordOf({ v: 1, scope: "9", index: 0, id: id(0) }), { v: 1, scope: "9", index: 0, id: id(0) }, "a record with no address still reads");
+  for (const evm of [EVM.toLowerCase(), EVM2.toLowerCase(), "0xFB" + EVM2.slice(4), EVM.slice(0, -1), "0X" + EVM.slice(2), id(0), 7, null]) {
+    await assert.rejects(s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 10n, index: 0, id: id(0), evm: evm as string }), /a deposit record is/, String(evm));
+    assert.equal(depositRecordOf({ v: 1, scope: "9", index: 0, id: id(0), evm }), undefined, String(evm));
+  }
+  assert.equal(depositRecordOf({ v: 1, scope: "9", index: 0, id: id(0), evm: EVM, more: 1 }), undefined, "a sixth key");
+  assert.equal(depositRecordOf({ v: 1, scope: "9", index: 0, id: id(0), other: EVM }), undefined, "a fifth key that is not evm");
+  // a later naming of the same index with another address is a new record, never the old one kept
+  assert.deepEqual(await s.nameDeposit({ entropy: new Uint8Array(16).fill(0x7f) }, { scope: 9n, index: 0, id: id(0), evm: EVM2 }), { v: 1, scope: "9", index: 0, id: id(0), evm: EVM2 });
+});
