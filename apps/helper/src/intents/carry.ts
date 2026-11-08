@@ -310,6 +310,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       // (its key's nonce at F), so a new one may go now.
       if (o.kind === "final") return no("registration_failed");
     }
+    // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
+    if (await holds()) return no("in_flight");
     if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
     // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
     const rec: SignerRecord = store.signer(signer);
@@ -378,6 +380,8 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       // (the storage read above, next time). Dropped is read on both (its key's nonce at F), so a new one may go now.
       if (o.kind === "final") return no("registration_failed");
     }
+    // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
+    if (await holds()) return no("in_flight");
     if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
     // the claim, read again after the awaits and written before the send
     const rec = store.signer(signer);
