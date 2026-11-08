@@ -39,7 +39,7 @@ const run = (dir) => {
 
 const GOOD = {
   // SIGN_HOST and URLs built on it, not children of it
-  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\nexport const U = \`https://\${SIGN_HOST}/\`;\nexport const V = "https://" + SIGN_HOST;\nexport const W = [SIGN_HOST, "json"].join(".");\nexport const child = (n) => n.endsWith(\`.\${SIGN_HOST}\`);\n`,
+  "packages/wallet/src/derive/constants.ts": `export const SIGN_HOST = "${SIGN_HOST}";\nexport const U = \`https://\${SIGN_HOST}/\`;\nexport const V = "https://" + SIGN_HOST;\nexport const W = [SIGN_HOST, "json"].join(".");\nexport const X = "https://".concat(SIGN_HOST);\nconst S = SIGN_HOST;\nexport const Y = \`https://\${S}/\`;\n`,
   "apps/terminal/public/_headers": `/*\n  Content-Security-Policy: connect-src 'self' https://${HELPER} https://${SIGN_HOST}; frame-ancestors https://${SIGN_HOST}\n`,
   "apps/helper/deploy/Caddyfile": `{$HELPER_SITE:${HELPER}} {\n}\n`,
   // a name that only ends like ours, and SIGN_HOST's parent, are not children
@@ -85,6 +85,17 @@ const PLANTED = {
   "packages/signpage/src/a9-concat.ts": [`export const H = "https://" + "sign." + SIGN_HOST;\n`, /a9-concat\.ts:1: "sign\." \+ SIGN_HOST is a child/],
   "packages/signpage/src/a10-join.ts": [`export const H = ["app", SIGN_HOST].join(".");\n`, /a10-join\.ts:1: \["app", SIGN_HOST\]\.join\("\."\) is a child/],
   "apps/terminal/src/a11-label.ts": [`export const h = (label: string) => \`\${label}.\${d.SIGN_HOST}\`;\n`, /a11-label\.ts:1: \$\{label\}\.\$\{d\.SIGN_HOST\} is a child/],
+  // review F7: a split name, a concat call, an alias, a Python f-string, a shell variable without braces, and a suffix
+  // led by a dot (written or built), which lets any child in
+  "packages/signpage/src/a13-split.ts": [`export const H = "https://api." + "${SIGN_HOST}";\n`, /a13-split\.ts:1: "https:\/\/api\." \+ "confidential\.unrealized\.trade" is a child/],
+  "packages/signpage/src/a14-concat.ts": [`export const H = "https://api.".concat(SIGN_HOST);\n`, /a14-concat\.ts:1: "https:\/\/api\."\.concat\(SIGN_HOST is a child/],
+  "packages/signpage/src/a15-concat-args.ts": [`export const H = "".concat("api.", SIGN_HOST);\n`, /a15-concat-args\.ts:1: \.concat\("api\.", SIGN_HOST is a child/],
+  "packages/signpage/src/a16-alias.ts": ["const S = SIGN_HOST;\nexport const H = `https://api.${S}`;\n", /a16-alias\.ts:2: api\.\$\{S\} is a child/],
+  "scripts/a17-fstring.py": [`HOST = f"api.{SIGN_HOST}"\n`, /a17-fstring\.py:1: api\.\{SIGN_HOST\} is a child/],
+  "scripts/deploy/a18-shell.sh": [`HOST="api.$SIGN_HOST"\n`, /a18-shell\.sh:1: api\.\$SIGN_HOST is a child/],
+  "apps/helper/src/a19-endswith.ts": [`export const ok = (o: string) => o.endsWith(".${SIGN_HOST}");\n`, /a19-endswith\.ts:1: \.confidential\.unrealized\.trade is a suffix of SIGN_HOST/],
+  "apps/helper/src/a20-regex.ts": [`export const R = /^https:\\/\\/[a-z]+\\.confidential\\.unrealized\\.trade$/;\n`, /a20-regex\.ts:1: \.confidential\.unrealized\.trade is a suffix of SIGN_HOST/],
+  "apps/helper/src/a21-endswith-built.ts": ["export const ok = (o: string) => o.endsWith(`.${SIGN_HOST}`);\n", /a21-endswith-built\.ts:1: \.\$\{SIGN_HOST\} is a suffix of SIGN_HOST/],
   // test data under a public/ folder is served by Pages, so it is read
   "apps/terminal/public/fixtures/a12.json": [`{ "helper": "https://${child("api")}" }\n`, /public\/fixtures\/a12\.json:1: api\.confidential\.unrealized\.trade is a child/],
 };
