@@ -1,10 +1,12 @@
 // node --test scripts/live-checks/pool-senders-next-page-helper.test.mjs: the live check replays recorded runs
 // (pool-senders-next-page-helper.answers.json). good: the live check's read() against this card's helper sender in process
-// (pool-senders-next-page-helper.record-local.mjs: devnet, a throwaway fee payer, RPCs answering BlockhashNotFound): PASS.
-// bad: the deployed helper before the card (0beea09b, api.confidential.unrealized.trade, the devnet pool), which refuses
-// both next-page forms on the bytes (not_pool): FAIL. Made from the good run: a next-page plant refused on the bytes, the
-// tenth account carried to the simulation, a plant missing, no run at all: each FAIL. The plants are checked against
-// the helper's own byte checks, so the check plants what the route reads.
+// (pool-senders-next-page-helper.record-local.mjs: both pools of the devnet move, a throwaway fee payer, RPCs answering
+// BlockhashNotFound): PASS. bad: the deployed helper before the card (0beea09b, api.confidential.unrealized.trade), which
+// refuses both next-page forms on the bytes (not_pool) on 2S5wpE7U and serves no 92YuYhb4 (404): FAIL. bad_one_program:
+// this card's helper serving only 9Z6Yi2Vc: FAIL on 2S5wpE7U. Made from the good run: a next-page plant refused on the
+// bytes, the tenth account carried to the simulation, a plant missing, a pool's run missing, a fee answer naming another
+// program, no run at all: each FAIL. The plants are checked against the helper's own byte checks, so the check plants
+// what the route reads.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -13,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { checkSolanaPoolTx } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
 import { b58encode } from "./helper-pool-senders.mjs";
-import { judge, judgeAll, plant, PLANTS } from "./pool-senders-next-page-helper.mjs";
+import { DEVNET_MOVE, judge, judgeAll, plant, PLANTS, poolsToRead } from "./pool-senders-next-page-helper.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "pool-senders-next-page-helper.answers.json"), "utf8"));
@@ -25,13 +27,32 @@ test("recorded good run: both next-page forms reach the simulation, the tenth ac
   assert.equal(r.ok, true, r.lines.join("\n"));
 });
 
-test("recorded bad run: the deployed helper before the card refuses both next-page forms (not_pool): FAIL", () => {
+test("recorded bad run: the deployed helper before the card refuses both next-page forms (not_pool) and serves no 92YuYhb4: FAIL", () => {
   const r = judgeAll(A.bad);
   assert.equal(r.ok, false);
   const b = bad(r);
-  assert.equal(b.length, 2, b.join("\n"));
+  assert.equal(b.length, 6, b.join("\n"));
   assert.ok(b[0].includes("planted next_tag2") && b[0].includes("not_pool"), b.join("\n"));
   assert.ok(b[1].includes("planted next_tag3") && b[1].includes("tag 3 flags other than bit 0"), b.join("\n"));
+  assert.ok(b[2].includes("GET /v1/pool/fee answers 404") && b[2].includes(DEVNET_MOVE[1].pool), b.join("\n"));
+});
+
+test("recorded bad run: a helper serving only one devnet program of the move: FAIL on the other pool", () => {
+  const r = judgeAll(A.bad_one_program);
+  assert.equal(r.ok, false);
+  const b = bad(r);
+  assert.equal(b.length, 4, b.join("\n"));
+  assert.ok(b[0].includes("GET /v1/pool/fee answers 404") && b[0].includes(DEVNET_MOVE[0].pool), b.join("\n"));
+});
+
+test("both pools of the devnet move are read, each its program's pool; a run missing or on another program FAILs", () => {
+  for (const m of DEVNET_MOVE) assert.equal(solanaPoolAccount(m.program), m.pool, `${m.pool} is ${m.program}'s pool`);
+  assert.deepEqual(poolsToRead({ mainnet: null, devnet: DEVNET_MOVE[0].pool }).map((w) => w.pool), DEVNET_MOVE.map((m) => m.pool));
+  assert.deepEqual(poolsToRead({ mainnet: null, devnet: DEVNET_MOVE[1].pool }).map((w) => w.pool), DEVNET_MOVE.map((m) => m.pool));
+  assert.deepEqual(A.good.map((r) => r.pool).sort(), DEVNET_MOVE.map((m) => m.pool).sort());
+  for (const m of DEVNET_MOVE) assert.equal(judgeAll(A.good.filter((r) => r.pool !== m.pool)).ok, false, `no run for ${m.pool}`);
+  const other = A.good.map((r) => (r.pool === DEVNET_MOVE[0].pool ? { ...r, program: DEVNET_MOVE[1].program } : r));
+  assert.equal(judgeAll(other).ok, false, "the fee answer names another program than the run wants");
 });
 
 test("made from the good run: a next-page form refused, the tenth carried, a plant or the fee missing, no run: each FAIL", () => {

@@ -672,7 +672,8 @@ export function solanaPoolPrograms(cluster: string, value: string, name: string)
 }
 
 /** The Solana pool senders the host's environment sets, by pool address: one for each program a cluster lists, on that
- *  cluster's one fee payer, fee and RPCs; a cluster with none of its names set is off. */
+ *  cluster's one fee payer, fee and RPCs; a cluster with none of its names set is off. A program that two clusters
+ *  name throws. */
 export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>, fetchFn?: typeof fetch): Map<string, SolanaPoolSender> {
   const out = new Map<string, SolanaPoolSender>();
   for (const [cluster, names] of Object.entries(POOL_SOLANA_ENV)) {
@@ -685,6 +686,9 @@ export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>
     if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
     for (const p of programs) {
       const s = solanaPoolSender({ cluster, program: p, feePayerSecret: key!, fee: fee! }, { providers });
+      // one pool, one sender: a program another cluster already serves (both key on the same pool address) would
+      // silently take that cluster's sends to its own fee payer and RPCs, so it stops the start instead
+      if (out.has(s.pool)) throw new Error(`${names[0]} names a program another cluster already serves`);
       out.set(s.pool, s);
     }
   }
