@@ -509,6 +509,32 @@ test("L1 the payload rule refuses the vault and intents.near, called straight", 
   }
 });
 
+test("L1 the vault as a String or a toJSON object (=== compares identity, JSON.stringify signs the vault's name): refused by the rule and by moveOutHeld, before anything is read or signed", async () => {
+  const strings = /U, the typed account, the token and every account id are strings/;
+  for (const to of [NET.vault!, "intents.near"]) {
+    for (const look of [new String(to), { toJSON: () => to }] as unknown as string[]) {
+      assert.throws(() => checkMoveCalls(U, look, TOKEN, moveCalls(look, 1n, false, 0n), 2_500_000n, 0n), strings);
+      assert.throws(() => checkMoveCalls(U, look, TOKEN, moveCalls(look, 1n, true, STORAGE_MIN), 2_500_000n, STORAGE_MIN), strings);
+      // the typed account a string, an account id in the calls not one (a toJSON object's function is not cloned)
+      const calls = moveCalls(TO, 1n, true, STORAGE_MIN);
+      calls[0]!.args.account_id = look;
+      assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls, 2_500_000n, STORAGE_MIN), typeof look === "object" && "toJSON" in (look as object) ? /not plain data/ : strings);
+      const chain = new Chain();
+      chain.registered.add(to);
+      seedOpens = 0;
+      let reads = 0;
+      const d0 = deps(await heldOp("sender_struck"), chain);
+      const counted = d0.rpcs.map((r) => Object.fromEntries(Object.entries(r).map(([k, f]) => [k, typeof f === "function" ? (...a: unknown[]) => (reads++, (f as (...x: unknown[]) => unknown).apply(r, a)) : f]))) as unknown as typeof d0.rpcs;
+      await assert.rejects(moveOutHeld("op1", look, { ...d0, rpcs: counted }), strings);
+      assert.equal(reads, 0, "no RPC is read with it");
+      assert.equal(chain.sent.length, 0);
+      assert.equal(seedOpens, 0);
+    }
+  }
+  assert.throws(() => checkMoveCalls(new String(U) as unknown as string, TO, TOKEN, moveCalls(TO, 1n, false, 0n), 2_500_000n, 0n), strings);
+  assert.throws(() => checkMoveCalls(U, TO, new String(TOKEN) as unknown as string, moveCalls(TO, 1n, false, 0n), 2_500_000n, 0n), strings);
+});
+
 test("D3 the look-back nonce must agree on both RPCs: the second answers a lower nonce at height - SETTLE_BLOCKS only, the record stays followed", async () => {
   const chain = new Chain();
   chain.registered.add(TO);

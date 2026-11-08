@@ -243,13 +243,18 @@ const INTENTS = "intents.near";
  */
 export function checkMoveCalls(u: string, to: string, token: string, given: readonly MoveCall[], usdc: bigint, storageMin: bigint): SealedMove {
   // the rule reads a deep copy, and the copy it passed is what can be signed (sealed below): a change to `given` later,
-  // or to anything it holds, reaches nothing signed
+  // or to anything it holds, reaches nothing signed. Every name is a string: === compares a String's or a toJSON
+  // object's identity while JSON.stringify signs the name it stands for (a vault passing as another account)
+  const strings = "U, the typed account, the token and every account id are strings";
+  if (typeof u !== "string" || typeof to !== "string" || typeof token !== "string") throw new MoveOutRefused(strings);
   let calls: MoveCall[];
   try {
     calls = structuredClone([...given]);
   } catch {
     throw new MoveOutRefused("the calls are not plain data");
   }
+  // the copy's account ids, read once (a getter on `given` ran in the clone and is gone)
+  if (!calls.every((c) => isObj(c) && isObj(c.args) && (c.args.receiver_id === undefined || typeof c.args.receiver_id === "string") && (c.args.account_id === undefined || typeof c.args.account_id === "string"))) throw new MoveOutRefused(strings);
   if (!IMPLICIT.test(u) || to === u || to === token) throw new MoveOutRefused("the typed account is U or the token");
   const net = Object.values(NEAR_NETWORKS).find((n) => n.usdc === token);
   if (net === undefined) throw new MoveOutRefused("the token is no release's USDC");
@@ -392,6 +397,8 @@ async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: r
  * resumes: it sends recorded bytes again and reads them, and never signs. Answers how far it got.
  */
 export async function moveOutHeld(opId: string, to: string | null, deps: MoveOutDeps): Promise<MoveOutOutcome> {
+  // the typed account is a string or nothing, before any read (checkMoveCalls refuses it again)
+  if (to !== null && typeof to !== "string") throw new MoveOutRefused("U, the typed account, the token and every account id are strings");
   const { ops, rpcs } = deps;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const seedLock = deps.seedLock ?? (<T>(fn: () => Promise<T>) => fn());
