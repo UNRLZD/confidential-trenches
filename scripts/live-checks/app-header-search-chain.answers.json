@@ -1,0 +1,79 @@
+{
+ "good": {
+  "source": "a local build read from hs-dist; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T16:21:07.714Z",
+  "lists": {
+   "status": 200,
+   "chain": "solana",
+   "rows": 191,
+   "chains": [
+    "solana"
+   ],
+   "first": "2TLYAv8ZpDgwtdnq4bnnqJfqtgk3XtPL8HDkqZBUpump"
+  },
+  "token": {
+   "asked": "2TLYAv8ZpDgwtdnq4bnnqJfqtgk3XtPL8HDkqZBUpump",
+   "status": 200,
+   "row": true
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CdkRFBdD.js",
+    "status": 200,
+    "found": [
+     "search-input",
+     "chain-chip",
+     "chain-menu",
+     "search-button-phone",
+     "search-sheet"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DAN3MxOF.css",
+    "status": 200,
+    "found": [
+     ".srch-pop",
+     ".srch-sheet",
+     ".chainchip",
+     "1023.98px"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T16:21:09.150Z",
+  "lists": {
+   "status": 200,
+   "chain": "solana",
+   "rows": 191,
+   "chains": [
+    "solana"
+   ],
+   "first": "4to5BufKpqKa7QsQ132WJWAuXGdoogwhasFQ4fJzpump"
+  },
+  "token": {
+   "asked": "4to5BufKpqKa7QsQ132WJWAuXGdoogwhasFQ4fJzpump",
+   "status": 200,
+   "row": true
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-C9uNuoZ8.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-C2BXWgyY.css",
+    "status": 200,
+    "found": []
+   }
+  ]
+ }
+}
