@@ -39,7 +39,8 @@
 #   Before step 1, once the commit is found on main (objects only: no checkout, no .env), the socket is read: a running Caddy
 #   with no socket (one started from a Caddyfile with `admin off`), or a helper running with no Caddy, is refused, naming
 #   the one command that fixes it, with nothing changed, so a redeploy never ends with a new helper behind the old Caddy.
-# It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
+# It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local
+# repository), and a line names it, never its value.
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
 set -euo pipefail
@@ -61,6 +62,7 @@ main() {
   deploy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   root="$(cd "$deploy/../../.." && pwd)"
   remote="${REDEPLOY_REMOTE:-https://github.com/UNRLZD/confidential-trenches.git}"
+  if [[ -n "${REDEPLOY_REMOTE:-}" ]]; then echo "redeploy: main is fetched from REDEPLOY_REMOTE, not the repository's URL"; fi
 
   # the commit first: one not on main never reaches the .env, so no release is read, named or written for it
   on_main "$root" "$remote" "$sha" || exit 1
@@ -81,7 +83,9 @@ main() {
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
   build_helper
-  # the two lines move only for an image that built and takes its settings
+  # the two lines move only for an image that built and takes its settings, and before the swap: a helper started
+  # with this release may mark a settle failed under it, and src/withdraw/send.ts:512 never signs again under a
+  # release that already failed, so a swap that fails after its start leaves this release recorded, the next one more
   write_env "$env" "$sha" "$release"
   swap_helper "$wait_s" "$sha"
   if [[ "$caddy_ran" == yes ]]; then
@@ -97,8 +101,14 @@ main() {
 on_main() {
   local root="$1" remote="$2" sha="$3" whole=""
   if [[ "$(git -C "$root" rev-parse --is-shallow-repository)" == true ]]; then whole=--unshallow; fi
-  git -C "$root" fetch -q --no-tags ${whole:+"$whole"} "$remote" "+refs/heads/main:refs/remotes/origin/main"
-  if ! git -C "$root" cat-file -e "$sha^{commit}" 2>/dev/null || ! git -C "$root" merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+  # checked here: on_main runs under `|| exit 1`, where set -e is off, and a failed fetch would leave the old copy of
+  # main to judge the commit
+  git -C "$root" fetch -q --no-tags ${whole:+"$whole"} "$remote" "+refs/heads/main:refs/remotes/origin/main" || {
+    echo "redeploy: main of the repository could not be fetched (above); nothing changed" >&2
+    return 1
+  }
+  # the id itself is a commit (an annotated tag's id would peel to one), and main descends from it
+  if [[ "$(git -C "$root" cat-file -t "$sha" 2>/dev/null)" != commit ]] || ! git -C "$root" merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
     echo "redeploy: the commit is not on main of the repository (a typo, or a branch not merged); nothing changed" >&2
     return 1
   fi

@@ -426,7 +426,12 @@ test("a commit not on the repository's main (a typo, one on another branch only,
     s.run(s.A);
     writeFileSync(s.env, ENV_BEFORE(s), { mode: 0o600 });
     const tree = s.git(s.remote, "rev-parse", `${s.B}^{tree}`);
-    const bad = { typo: typo(s.B), "another branch": s.C, "a tree": tree, short: s.B.slice(0, 12), "upper case": s.B.toUpperCase() };
+    // review LOW 3: an annotated tag on B, its object already on the server, peels to a commit on main: refused by type
+    s.git(s.remote, "tag", "-a", "-m", "t", "t1", s.B);
+    const tag = s.git(s.remote, "rev-parse", "t1");
+    s.git(s.root, "fetch", "-q", `file://${s.remote}`, tag);
+    assert.equal(s.git(s.root, "cat-file", "-t", tag), "tag");
+    const bad = { typo: typo(s.B), "another branch": s.C, "a tree": tree, "a tag object": tag, short: s.B.slice(0, 12), "upper case": s.B.toUpperCase() };
     const calls = s.docker().length;
     for (const [name, sha] of Object.entries(bad)) {
       const r = s.run(sha);
@@ -440,6 +445,39 @@ test("a commit not on the repository's main (a typo, one on another branch only,
       assert.ok(!r.out.includes(SECRET), name);
     }
     assert.deepEqual(readdirSync(s.deployDir).filter((f) => f.startsWith(".env")), [".env"]);
+    // review MEDIUM 2: C's objects already on the server (an earlier deploy fetched it by id, or vault-lines.sh's old
+    // step 1): only main's ancestry refuses it
+    s.git(s.root, "fetch", "-q", "--depth", "1", `file://${s.remote}`, s.C);
+    assert.equal(s.git(s.root, "cat-file", "-t", s.C), "commit");
+    const present = s.run(s.C);
+    assert.notEqual(present.status, 0, present.out);
+    assert.match(present.out, /redeploy: the commit is not on main of the repository \(a typo, or a branch not merged\); nothing changed/);
+    assert.equal(readFileSync(s.env, "utf8"), ENV_BEFORE(s), "C present: deploy/.env changed");
+    assert.equal(s.head(), s.A, "C present: the checkout moved");
+    assert.equal(s.docker().length, calls, "C present: compose ran");
+  } finally {
+    s.done();
+  }
+});
+
+// review MEDIUM 1: a fetch of main that fails stops step 0; the server's old copy of main never decides
+test("main that cannot be fetched (the remote unreachable after a good run) stops the redeploy naming the fetch: deploy/.env byte-equal, the checkout and compose untouched", () => {
+  const s = server();
+  try {
+    assert.equal(s.run(s.B).status, 0);
+    const before = readFileSync(s.env, "utf8");
+    const calls = s.docker().length;
+    const missing = path.join(s.dir, "no-such-remote");
+    const r = s.runWith({ REDEPLOY_REMOTE: `file://${missing}` }, s.A);
+    assert.notEqual(r.status, 0, r.out);
+    assert.match(r.out, /redeploy: main of the repository could not be fetched \(above\); nothing changed/);
+    assert.equal(readFileSync(s.env, "utf8"), before, "deploy/.env changed");
+    assert.equal(s.head(), s.B, "the checkout moved");
+    assert.equal(s.docker().length, calls, `compose ran:\n${s.docker().slice(calls).join("\n")}`);
+    assert.doesNotMatch(r.out, /HELPER_RELEASE (started|kept|raised)/, r.out);
+    // review LOW 2: the remote is named as REDEPLOY_REMOTE, never its value
+    assert.match(r.out, /redeploy: main is fetched from REDEPLOY_REMOTE, not the repository's URL/);
+    assert.ok(!r.out.split("\n").filter((l) => l.startsWith("redeploy:")).some((l) => l.includes(missing)), r.out);
   } finally {
     s.done();
   }
@@ -480,6 +518,7 @@ test("the default repository URL (no REDEPLOY_REMOTE), sent by url.insteadOf to 
     assert.equal(readFileSync(s.env, "utf8"), ENV_BEFORE(s));
     const good = s.runWith(shell, s.B);
     assert.equal(good.status, 0, good.out);
+    assert.doesNotMatch(good.out, /REDEPLOY_REMOTE/, "no REDEPLOY_REMOTE line with the repository's own URL");
     assert.match(good.out, /HELPER_RELEASE raised by one/);
     assert.equal(readFileSync(s.env, "utf8"), `# vendor keys\nJUPITER_API_KEY=${SECRET}\nHELPER_COMMIT=${s.B}\nHELPER_RELEASE=6\nLAST=z\n`);
     assert.equal(s.head(), s.B);
@@ -495,8 +534,11 @@ test("a new helper that never gets ready: the deploy fails naming the bound, the
   const s = server();
   try {
     s.seed("old-1");
+    writeFileSync(s.env, ENV_BEFORE(s), { mode: 0o600 });
     const r = s.runWith({ STUB_READY: "0", REDEPLOY_READY_S: "45" }, s.B);
     assert.notEqual(r.status, 0, r.out);
+    // review LOW 1: written before the swap, so the release a started helper ran under stays recorded (send.ts:512)
+    assert.deepEqual(s.values(), { commit: s.B, release: "6" });
     assert.match(r.out, /redeploy: the new helper was not ready within 45 s; the old one keeps serving/);
     const calls = lines(s);
     assert.ok(calls.includes("compose up -d --no-deps --no-recreate --scale helper=2 --wait --wait-timeout 45 helper"), calls.join("\n"));
