@@ -234,7 +234,7 @@ test("H2: a sweep sends U's whole USDC to the named account, refused when the ac
   assert.match(SRC, /still holds \$\{left\} USDC[^`]*sweep-u/);
   assert.match(SRC, /\.\.\.withdraws, \.\.\.sweeps,/, "the record holds every sweep");
   const paste = readFileSync(path.join(HERE, "mainnet-money", "4-sweep-u.sh"), "utf8");
-  assert.match(paste, /mainnet-money\.ts sweep-u --state /);
+  assert.match(paste, /mainnet-money\.ts sweep-u --commit "\$1" --state /);
   assert.match(readFileSync(path.join(HERE, "mainnet-money", "1-run.sh"), "utf8"), /one transfer/);
 });
 
