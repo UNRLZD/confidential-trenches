@@ -11,8 +11,11 @@
 //   - the refusal of a close of the claim's WSOL account anywhere but right after its claim, to the wallet;
 //   - the simulation's claim paid in full: the volume account's claim account left with exactly what it held less the
 //     claim;
-//   - a claim that does not simulate planned around once, claims off (review L2 of 5592a871): only when SIM alone
-//     refuses a plan that claims, so the other closes still go and the owed volume account stays open.
+//   - a claim that does not simulate planned around (review L2 of 5592a871, M1 and L1 of 11c963f9): only when SIM alone
+//     refuses a plan that claims, the claims' frame errs on both providers and every frame before it is clean on both
+//     (one provider's error stays a refusal, read again); the failing program's claim alone goes off when both
+//     providers name it, at most twice; the other closes still go, the owed volume account stays open, and the pool
+//     sell's rent back ends "owed", so W stays owed and a later pass claims it.
 // It does not prove those lines run or refuse: that is the kit's tests at the released commit
 // (test/solana-teardown-cashback.test.ts, a mainnet wallet owed 12,742,862 recorded on two RPCs, and planted frames
 // that claim to another account), and that the served files are that commit's build is signpage-release's.
@@ -35,8 +38,12 @@ export const MARKS = Object.freeze({
   "the volume account's own claim account read, any other refused": new RegExp(`!==(${I})\\.mint\\|\\|${I}\\.encode\\(${I}\\.subarray\\(32,64\\)\\)!==\\1\\.uva\\)throw Error\\(\`\\$\\{${I}\\} is not the volume account's \\$\\{\\1\\.mint\\} account\`\\)`),
   "a volume close before its claim in the frame refused": new RegExp(`if\\((${I})&&!${I}\\.includes\\(\\1\\)\\)\\{${I}\\.push\\(\`\\$\\{${I}\\}: close of \\$\\{${I}\\} before its claim in this frame\`\\)`),
   "the claim's WSOL closed only right after its claim, to the wallet": new RegExp(`${I}\\[1\\]\\?\\.key!==(${I})\\|\\|${I}\\[2\\]\\?\\.key!==\\1\\|\\|!${I}\\[0\\]\\?\\.writable\\|\\|!${I}\\[1\\]\\?\\.writable\\|\\|!${I}\\(${I}\\[${I}-1\\],(${I})\\)\\)\\{${I}\\.push\\(\`\\$\\{${I}\\}: close of \\$\\{\\2\\.to\\} not right after its claim\`\\)`),
-  "a refusal planned around only when SIM alone refuses a claim": new RegExp(`return (${I})\\.ok\\|\\|!\\1\\.plan\\|\\|\\1\\.plan\\.claim\\.length===0\\|\\|\\1\\.results\\.some\\((${I})=>!\\2\\.ok&&\\2\\.id!==\`SIM\`\\)\\?null:\`its claim did not simulate: `),
-  "a teardown refused at SIM planned again once, claims off": new RegExp(`(${I})=await (${I})\\(${I}\\),(${I})=${I}\\(\\1\\.verdict\\);return \\3===null\\?\\1:\\2\\(${I}\\(${I},${I},\\3\\),\\3\\)`),
+  "a refusal planned around only when SIM alone refuses a claim": new RegExp(`if\\((${I})\\.ok\\|\\|!\\1\\.plan\\|\\|\\1\\.plan\\.claim\\.length===0\\|\\|\\1\\.results\\.some\\((${I})=>!\\2\\.ok&&\\2\\.id!==\`SIM\`\\)`),
+  "planned around only when the claims' frame errs on both providers and every frame before it is clean on both": new RegExp(`if\\(!(${I})\\.slice\\(0,-1\\)\\.every\\(\\(\\[(${I}),(${I})\\]\\)=>(${I})\\(\\2\\)&&\\4\\(\\3\\)\\)\\)return null;let\\[(${I}),(${I})\\]=\\1\\.at\\(-1\\);if\\(!(${I})\\(\\5\\)\\|\\|!\\7\\(\\6\\)\\)return null;`),
+  "the failing program's claim alone off when both providers name it": new RegExp(`(${I})=typeof (${I})==\`string\`&&\\2===(${I})&&(${I})\\.includes\\(\\2\\)\\?\\2:null,(${I})=\`its claim did not simulate on either provider: A \\$\\{${I}\\(${I}\\)\\}, B \\$\\{${I}\\(${I}\\)\\}\`,(${I})=\\{\\.\\.\\.${I}\\};for\\(let (${I}) of \\1===null\\?\\4:\\[\\1\\]\\)\\6\\[\\7\\]=\\5;`),
+  "a teardown refused at SIM planned again at most twice, one more program's claims off each time": new RegExp(`for\\(let (${I})=0;\\1<2;\\1\\+\\+\\)\\{let (${I})=${I}\\((${I})\\.verdict,\\3\\.frames\\.map\\(${I}=>${I}\\.wire\\),\\3\\.reads\\.simulations,\\3\\.reads\\.unclaimed\\);if\\(\\2===null\\|\\|Object\\.keys\\(\\2\\)\\.length===Object\\.keys\\(\\3\\.reads\\.unclaimed\\?\\?\\{\\}\\)\\.length\\)return \\3;\\3=await ${I}\\(${I}\\(${I},${I},\\2\\),\\2\\)\\}`),
+  "W left owed when the teardown keeps an unclaimed account": new RegExp(`return ${I}\\((${I})\\.ok\\.unclaimed===void 0\\?\`kept\`:\`owed\`,\\1\\.ok\\.keep\\.map`),
+  "an owed rent back keeps its record": /&&(\w+)!==`gave_up`&&\1!==`owed`\)return await [\w$]+\.owed\?\.drop\(/,
   "the claim paid in full in the simulation": new RegExp(`if\\((${I})!==(${I})\\.fromAmount-\\2\\.amount&&${I}\\.push\\(\`\\$\\{${I}\\}: \\$\\{\\2\\.from\\} holds \\$\\{\\1\\?\\?\`nothing read\`\\} after the claim \\(want \\$\\{\\2\\.fromAmount-\\2\\.amount\\}\\)\`\\)`),
 });
 

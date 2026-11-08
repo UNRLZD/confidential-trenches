@@ -1,6 +1,8 @@
 // node --test scripts/live-checks/solana-teardown-cashback.test.mjs: the live check replays its recorded answers
 // (solana-teardown-cashback.answers.json). good: this card's SIGN_HOST build, its teardown claiming owed cashback before
-// a volume close, and planning around a claim that does not simulate: PASS. bad: main 3a57948a's build: FAIL. liveBefore: SIGN_HOST before this card's deploy: FAIL. Planted
+// a volume close, and planning around a claim whose frame errs on both providers, one program at a time, W left owed:
+// PASS. bad: main 3a57948a's build: FAIL. liveBefore: SIGN_HOST before this card's deploy: FAIL. beforeFold: 11c963f9's
+// build (any SIM refusal turned every claim off, W's record dropped; review M1 and L1): FAIL on those marks alone. Planted
 // on the good one: another /app.js, no pin, each mark taken away: each FAIL; and planted bundles with a mark's line
 // changed: each FAIL.
 import assert from "node:assert/strict";
@@ -15,6 +17,19 @@ test("recorded good answer: this card's build claims owed cashback before the vo
   const v = judge(ANSWERS.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(v.lines, []);
+});
+
+test("recorded answer beforeFold (11c963f9's build): FAIL, naming only what review M1 and L1 of it changed", () => {
+  const v = judge(ANSWERS.beforeFold);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [
+    "BAD the served bundle has no a refusal planned around only when SIM alone refuses a claim",
+    "BAD the served bundle has no planned around only when the claims' frame errs on both providers and every frame before it is clean on both",
+    "BAD the served bundle has no the failing program's claim alone off when both providers name it",
+    "BAD the served bundle has no a teardown refused at SIM planned again at most twice, one more program's claims off each time",
+    "BAD the served bundle has no W left owed when the teardown keeps an unclaimed account",
+    "BAD the served bundle has no an owed rent back keeps its record",
+  ]);
 });
 
 for (const k of ["bad", "liveBefore"]) {
@@ -39,8 +54,12 @@ const JS = [
   "if(a.owner!==`Tk`||e.length!==Df||z.encode(e.subarray(0,32))!==t.mint||z.encode(e.subarray(32,64))!==t.uva)throw Error(`${i} is not the volume account's ${t.mint} account`);",
   "if(d&&!w.includes(d)){l.push(`${c}: close of ${e} before its claim in this frame`);continue}",
   "if(v.length!==3||v[1]?.key!==t||v[2]?.key!==t||!v[0]?.writable||!v[1]?.writable||!g(b[e-1],T)){l.push(`${c}: close of ${T.to} not right after its claim`);continue}",
-  "function Nf(e){return e.ok||!e.plan||e.plan.claim.length===0||e.results.some(e=>!e.ok&&e.id!==`SIM`)?null:`its claim did not simulate: ${(e.results.find(e=>e.id===`SIM`)?.detail??``).slice(0,160)}`}",
-  "s=await o(t),c=Nf(s.verdict);return c===null?s:o(jf(e,n,c),c)}",
+  "function Pf(e,t,n,r={}){if(e.ok||!e.plan||e.plan.claim.length===0||e.results.some(e=>!e.ok&&e.id!==`SIM`)||t.length===0||n.length!==t.length)return null;",
+  "if(!n.slice(0,-1).every(([e,t])=>i(e)&&i(t)))return null;let[o,s]=n.at(-1);if(!a(o)||!a(s))return null;",
+  "p=typeof d==`string`&&d===f&&u.includes(d)?d:null,m=`its claim did not simulate on either provider: A ${c(o)}, B ${c(s)}`,h={...r};for(let e of p===null?u:[p])h[e]=m;return h}",
+  "for(let t=0;t<2;t++){let t=Pf(s.verdict,s.frames.map(e=>e.wire),s.reads.simulations,s.reads.unclaimed);if(t===null||Object.keys(t).length===Object.keys(s.reads.unclaimed??{}).length)return s;s=await o(Mf(e,n,t),t)}return s}",
+  "if(v.ok.keep.length>0)return h(v.ok.unclaimed===void 0?`kept`:`owed`,v.ok.keep.map(e=>`${e.address}: ${e.why}`).join(`; `));",
+  "if(n!==`sent`&&n!==`gave_up`&&n!==`owed`)return await e.owed?.drop(t.address);",
   "if(t!==e.fromAmount-e.amount&&y.push(`${o}: ${e.from} holds ${t??`nothing read`} after the claim (want ${e.fromAmount-e.amount})`),e.unwrap)continue;",
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
@@ -54,9 +73,15 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("v[1]?.key!==t||", ""), 4],
     [JS.replace("||e.results.some(e=>!e.ok&&e.id!==`SIM`)", ""), 5],
     [JS.replace("e.plan.claim.length===0||", ""), 5],
-    [JS.replace("return c===null?s:o(jf(e,n,c),c)", "return s"), 6],
-    [JS.replace("o(jf(e,n,c),c)", "o(jf(e,n,c))"), 6],
-    [JS.replace("if(t!==e.fromAmount-e.amount&&", "if(false&&"), 7],
+    [JS.replace("every(([e,t])=>i(e)&&i(t))", "every(([e,t])=>i(e)||i(t))"), 6],
+    [JS.replace("if(!a(o)||!a(s))return null;", "if(!a(o)&&!a(s))return null;"), 6],
+    [JS.replace("d===f&&u.includes(d)", "u.includes(d)"), 7],
+    [JS.replace("for(let e of p===null?u:[p])", "for(let e of u)"), 7],
+    [JS.replace("t<2;", "t<1;"), 8],
+    [JS.replace("s=await o(Mf(e,n,t),t)", "s=await o(Mf(e,n,t))"), 8],
+    [JS.replace("v.ok.unclaimed===void 0?`kept`:`owed`", "`kept`"), 9],
+    [JS.replace("&&n!==`owed`)", ")"), 10],
+    [JS.replace("if(t!==e.fromAmount-e.amount&&", "if(false&&"), 11],
   ];
   for (const [js, i] of planted) {
     const c = facts("", js).carries;
