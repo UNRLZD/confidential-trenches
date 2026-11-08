@@ -30,6 +30,9 @@ const S = "test/evm-sell-quote.test.ts";
 const SELLU = "src/trade/evm/sell-unpinned.ts";
 const QD = "src/trade/evm/quoted.ts";
 const PF = "src/trade/evm/pool-fee.ts";
+// W's releases at a sell (card evm-sell-no-release-in-flight, audit E-01): the verdict and the builder's guard
+const SR = "src/trade/evm/sell-releases.ts";
+const NR = "card evm-sell-no-release-in-flight";
 const E = "test/evm-pool-fee.test.ts";
 
 // [file, text, replacement, test file, the test that must fail]
@@ -817,6 +820,82 @@ export const MUTANTS = [
   [QUOTE, 'if (fee !== undefined && (typeof fee !== "string" || !/^0x[0-9a-fA-F]{1,64}$/.test(fee))) return refuse(', "if (false) return refuse(", R, "R11 "],
   // the sim signer's signature recovers to W over SellDelegate's own digest (review of the exec sim, LOW 3)
   [SELLU, "      word(BigInt(chainId)),", "      word(0n),", S, "planted: the sim signer"],
+  // no sell while a release that pays W ETH is not final on two RPCs (card evm-sell-no-release-in-flight, audit E-01):
+  // the builder's guard, the verdict's record, its chain, W and block, and each rule of what is pending
+  [QD, "  evmSellReleasesClear(quote);\n", "", S, NR],
+  [SR, "!MADE.has(releases as EvmSellReleases)", "false", S, NR],
+  [SR, "  MADE.add(v);\n", "", S, NR],
+  [SR, "if (v.chain !== quote.chain || ", "if (", S, NR],
+  [SR, " || v.w !== quote.w.toLowerCase()) throw", ") throw", S, NR],
+  [SR, "v.w !== quote.w.toLowerCase())", "v.w !== quote.w)", S, NR],
+  // the verdict's block is the quote's (review of 982a19bd, F1b)
+  [SR, "if (v.block !== quote.block.number) throw", "if (false) throw", S, NR],
+  [SR, "if (v.block !== quote.block.number) throw", "if (v.block < quote.block.number) throw", S, NR],
+  [SR, "if (v.pending.length > 0) {", "if (false) {", S, NR],
+  // every release in the tail is pending, in the agreed range and above the quote's block (F3), but one buy that funded
+  // the sale: its token and its block (review of 982a19bd, F2; of 181fd050, R2-3)
+  [SR, "  for (const e of [...r.agreed, ...r.above]) {\n    if (!funded", "  for (const e of [...r.agreed]) {\n    if (!funded", S, NR],
+  [SR, "  for (const e of [...r.agreed, ...r.above]) {\n    if (!funded", "  for (const e of [...r.above]) {\n    if (!funded", S, NR],
+  [SR, "if (!funded && e.kind === \"buy\"", "if (e.kind === \"buy\"", S, NR],
+  [SR, " && e.token === r.funding.token.toLowerCase() && e.block", " && e.block", S, NR],
+  [SR, " && e.block === r.funding.block) funded = true;", ") funded = true;", S, NR],
+  [SR, "if (!funded && e.kind === \"buy\" && e.token === r.funding.token.toLowerCase() && e.block === r.funding.block) funded = true;", "if (false) funded = true;", S, NR],
+  [SR, "noteOf.get(e.nullifier) ?? null", "null", S, NR],
+  [SR, "    landed.add(e.nullifier);\n", "", S, NR],
+  [SR, "if (landed.has(e.nullifier)) throw", "if (false) throw", S, NR],
+  [SR, "if (!landed.has(s.nullifier) && (s.deadlineMs", "if ((s.deadlineMs", S, NR],
+  [SR, "|| finalMs <= s.deadlineMs))", "|| finalMs < s.deadlineMs))", S, NR],
+  [SR, "(s.deadlineMs === undefined || finalMs <= s.deadlineMs)", "true", S, NR],
+  [SR, "(s.deadlineMs === undefined || finalMs", "(finalMs", S, NR],
+  [SR, "const finalMs = fin.timestamp * 1000n;", "const finalMs = fin.timestamp;", S, NR],
+  // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
+  // the agreement up to it, the logs' checks
+  [QUOTE, "evmSellSentOf(req.sent) ?? refuse(", "evmSellSentOf(req.sent ?? []) ?? refuse(", S, NR],
+  [QUOTE, "hooked, releases });", "hooked });", S, NR],
+  [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (n - fin.number >= EVM_SELL_TAIL_MAX) return refuse(", S, NR],
+  [QUOTE, "for (let a = low(fin.number + 1n, n); ", "for (let a = low(fin.number, n); ", S, NR],
+  [QUOTE, 'toBlock: b === null ? "latest" : hx(b)', "toBlock: b === null ? hx(n) : hx(b)", S, NR],
+  [QUOTE, "if (header(got[part.length], who).hash !== block.hash) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "(x, y) => upTo(x) === upTo(y),", "() => true,", S, NR],
+  [QUOTE, 't0 === TOPIC_BOUGHT ? "buy" : null', 't0 === TOPIC_BOUGHT ? "withdraw" : null', S, NR],
+  [QUOTE, 'nullifier: BigInt("0x" + data.slice(2 + 64 * 3, 2 + 64 * 4))', 'nullifier: BigInt("0x" + data.slice(2 + 64 * 2, 2 + 64 * 3))', S, NR],
+  [QUOTE, "|| removed === true) {", ") {", S, NR],
+  [QUOTE, "if (kind === null || lower(topics[1]) !== wTopic) return refuse(", "if (kind === null) return refuse(", S, NR],
+  [QUOTE, "if (keys.size !== out.length) return refuse(", "if (false) return refuse(", S, NR],
+  // a log above the quote's block one provider alone gave counts only once a second confirms it (review of 181fd050,
+  // R2-1, R2-2); the funding buy is the quote's token at its boughtBlock (R2-3)
+  [QUOTE, "const above = [...inA.values()].filter((e) => inB.has(e.key));", "const above: ReleaseLog[] = [];", S, NR],
+  [QUOTE, "above.push(...confirmed);", "above.push(...at);", S, NR],
+  [QUOTE, "for (const x of at) if (keys.has(x.key)) confirmed.add(x.key);", "for (const x of at) if (false) confirmed.add(x.key);", S, NR],
+  // review of 9c2a87d5, I-1: m1, the claimant asked to confirm its own log, and m3, a denial that holds no one
+  [QUOTE, "const others = list.map((_, k) => k).filter((k) => k !== claimant);", "const others = list.map((_, k) => k).filter(() => true);", S, NR],
+  [QUOTE, "    if (deny >= need) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (deny >= need) {\n", S, NR],
+  // R3-1: a low head within maxLag, a block of another hash, an error to the logs by hash; R4-1: a denial only by more
+  // than half of the whole list
+  [QUOTE, "if (e.block > head + maxLag) deny++;", "if (false) deny++;", S, NR],
+  [QUOTE, "if (h.hash !== e.hash) deny++;", "if (h.hash !== e.hash) {}", S, NR],
+  [QUOTE, "if (!at.every((x) => keys.has(x.key))) deny++;", "if (false) deny++;", S, NR],
+  [QUOTE, "else if (Array.isArray(r)) {\n          const keys = new Set(r.map(", "else {\n          const keys = new Set((Array.isArray(r) ? r : []).map(", S, NR],
+  [QUOTE, "if (deny >= need) {", "if (deny >= need - 1) {", S, NR],
+  [QUOTE, "confirmed.has(x.key));\n  const need = Math.floor(list.length / 2) + 1;", "confirmed.has(x.key));\n  const need = 1;", S, NR],
+  // R4-4: the stall refuses and holds the claimant
+  [QUOTE, "    if (monotonic() >= until) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (monotonic() >= until) {\n", S, NR],
+  [QUOTE, "    if (monotonic() >= until) {", "    if (false) {", S, NR],
+  // the wait runs as long as another provider's head moves toward the block (base-sepolia's maxLag is about 20 s)
+  [QUOTE, "if (head > best && head < e.block) [best, until]", "if (false) [best, until]", S, NR],
+  // R3-2: by EVM_SELL_CONFIRM_BY_MS after the quote's block, a refusal that holds the claimant
+  [QUOTE, "    if (clock() >= byMs) {\n      HOLD.get(list[claimant]!)?.();\n", "    if (clock() >= byMs) {\n", S, NR],
+  [QUOTE, "    if (clock() >= byMs) {", "    if (false) {", S, NR],
+  // R3-3: the cap, and nothing past a claimant's first denial
+  [QUOTE, "if (out.filter((e) => e.block > n).length > EVM_SELL_ABOVE_MAX) return refuse(", "if (false) return refuse(", S, NR],
+  [QUOTE, "if (out.filter((e) => e.block > n).length > EVM_SELL_ABOVE_MAX) return refuse(", "if (out.filter((e) => e.block > n).length >= EVM_SELL_ABOVE_MAX) return refuse(", S, NR],
+  [QUOTE, "      if (denied) break;", "      if (false) break;", S, NR],
+  [QUOTE, "{ token: t, block: boughtBlock }", "{ token: t, block: 0n }", S, NR],
+  [QUOTE, "data.slice(2 + 64 * 5 + 24, 2 + 64 * 6)", "data.slice(2 + 64 * 4 + 24, 2 + 64 * 5)", S, NR],
+  // I-3: the Bought token in lower case, whatever the provider's hex
+  [QUOTE, 'lower("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', '("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', S, NR],
+  [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2)", "rpcs", S, NR],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
@@ -870,7 +949,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       dirs.push(dir);
       for (const p of ["src", "test", "package.json"]) cpSync(join(KIT, p), join(dir, p), { recursive: true });
     }
-    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
+    const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF, SR].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
     const byFile = new Map();
     for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
     const tb = performance.now();
