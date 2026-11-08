@@ -1,16 +1,143 @@
 {
  "good": {
   "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
-  "at": "2026-11-08T14:01:31.060Z",
+  "route": "/",
+  "at": "2026-11-08T18:43:19.063Z",
   "browser": "156.0.8078.79",
   "loads": [
    {
     "width": "phone",
     "legend": true,
     "toggled": false,
-    "heldMs": 30370,
-    "moves": 75,
-    "texts": 24,
+    "heldMs": 32133,
+    "bars": 500,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 905,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.69M (+0.45%)Vol $12.4K"
+     },
+     {
+      "kind": "point",
+      "at": 2205,
+      "text": "PUMP · 15 · UNRLZDC $1.68B−$9.30M (−0.55%)Vol $159.68"
+     },
+     {
+      "kind": "rest",
+      "at": 3506,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.66M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "point",
+      "at": 4806,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.67M (+0.74%)Vol $11.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 6108,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.66M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "point",
+      "at": 7410,
+      "text": "PUMP · 15 · UNRLZDC $1.68B−$1.93M (−0.11%)Vol $7.30K"
+     },
+     {
+      "kind": "rest",
+      "at": 8711,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.64M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "point",
+      "at": 10013,
+      "text": "PUMP · 15 · UNRLZDC $1.67B−$7.08M (−0.42%)Vol $6.49K"
+     },
+     {
+      "kind": "rest",
+      "at": 11315,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.63M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 12616,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$19.10M (+1.13%)Vol $58.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 13918,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 15220,
+      "text": "PUMP · 15 · UNRLZDC $1.68B−$350.35 (−0.00%)Vol $26.72"
+     },
+     {
+      "kind": "rest",
+      "at": 16521,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 17819,
+      "text": "PUMP · 15 · UNRLZDC $1.70B−$4.34M (−0.26%)Vol $14.8K"
+     },
+     {
+      "kind": "rest",
+      "at": 19120,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 20422,
+      "text": "PUMP · 15 · UNRLZDC $1.69B+$300.6K (+0.02%)Vol $2.01K"
+     },
+     {
+      "kind": "rest",
+      "at": 21724,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 23025,
+      "text": "PUMP · 15 · UNRLZDC $1.67B−$7.63M (−0.45%)Vol $9.71K"
+     },
+     {
+      "kind": "rest",
+      "at": 24326,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 25627,
+      "text": "PUMP · 15 · UNRLZDC $1.71B−$2.56M (−0.15%)Vol $8.13K"
+     },
+     {
+      "kind": "rest",
+      "at": 26928,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 28229,
+      "text": "PUMP · 15 · UNRLZDC $1.69B−$3.45M (−0.20%)Vol $13.9K"
+     },
+     {
+      "kind": "rest",
+      "at": 29531,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 30832,
+      "text": "PUMP · 15 · UNRLZDC $1.68B−$3.04M (−0.18%)Vol $54.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 32133,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     }
+    ],
     "shifts": [],
     "errors": []
    },
@@ -18,20 +145,526 @@
     "width": "desktop",
     "legend": true,
     "toggled": true,
-    "heldMs": 30104,
-    "moves": 67,
-    "texts": 25,
+    "heldMs": 30444,
+    "bars": 500,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 295,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 595,
+      "text": "PUMP · 15 · UNRLZDO $1.74BH $1.74BL $1.72BC $1.72B−$25.83M (−1.48%)Vol $55.0K"
+     },
+     {
+      "kind": "rest",
+      "at": 895,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 1195,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.70BL $1.69BC $1.69B−$1.28M (−0.08%)Vol $9.44K"
+     },
+     {
+      "kind": "rest",
+      "at": 1495,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 1795,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.68BL $1.67BC $1.68B−$231.6K (−0.01%)Vol $5.98K"
+     },
+     {
+      "kind": "rest",
+      "at": 2095,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 2395,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.68B+$13.20M (+0.79%)Vol $14.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 2695,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 2995,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.69BL $1.68BC $1.69B+$2.53M (+0.15%)Vol $11.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 3295,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 3596,
+      "text": "PUMP · 15 · UNRLZDO $1.73BH $1.74BL $1.71BC $1.72B−$10.16M (−0.59%)Vol $59.9K"
+     },
+     {
+      "kind": "rest",
+      "at": 3895,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 4195,
+      "text": "PUMP · 15 · UNRLZDO $1.66BH $1.67BL $1.66BC $1.66B−$2.58M (−0.16%)Vol $9.37K"
+     },
+     {
+      "kind": "rest",
+      "at": 4494,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 4795,
+      "text": "PUMP · 15 · UNRLZDO $1.70BH $1.71BL $1.70BC $1.70B−$5.50M (−0.32%)Vol $18.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 5095,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 5396,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.68B+$9.41M (+0.56%)Vol $280.66"
+     },
+     {
+      "kind": "rest",
+      "at": 5694,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 5995,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.71BL $1.69BC $1.71B+$12.40M (+0.73%)Vol $10.1K"
+     },
+     {
+      "kind": "rest",
+      "at": 6295,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 6594,
+      "text": "PUMP · 15 · UNRLZDO $1.66BH $1.67BL $1.66BC $1.66B−$264.7K (−0.02%)Vol $286.65"
+     },
+     {
+      "kind": "rest",
+      "at": 6894,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 7195,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.68BL $1.67BC $1.67B−$9.24M (−0.55%)Vol $42.45"
+     },
+     {
+      "kind": "rest",
+      "at": 7495,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 7795,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.67B−$1.39M (−0.08%)Vol $26.1K"
+     },
+     {
+      "kind": "rest",
+      "at": 8095,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 8395,
+      "text": "PUMP · 15 · UNRLZDO $1.73BH $1.74BL $1.73BC $1.73B−$394.4K (−0.02%)Vol $1.02K"
+     },
+     {
+      "kind": "rest",
+      "at": 8695,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 8995,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.69BL $1.67BC $1.67B−$6.73M (−0.40%)Vol $20.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 9295,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 9595,
+      "text": "PUMP · 15 · UNRLZDO $1.70BH $1.70BL $1.70BC $1.70B+$46.7K (+0.00%)Vol $159.06"
+     },
+     {
+      "kind": "rest",
+      "at": 9895,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 10195,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.68BL $1.67BC $1.68B−$6.98M (−0.42%)Vol $2.75K"
+     },
+     {
+      "kind": "rest",
+      "at": 10494,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 10794,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.70BL $1.69BC $1.69B−$2.90M (−0.17%)Vol $11.3K"
+     },
+     {
+      "kind": "rest",
+      "at": 11096,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 11395,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.71BL $1.70BC $1.70B−$9.05M (−0.53%)Vol $5.81K"
+     },
+     {
+      "kind": "rest",
+      "at": 11695,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 11994,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.68B+$10.42M (+0.62%)Vol $2.18K"
+     },
+     {
+      "kind": "rest",
+      "at": 12295,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 12595,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.69BL $1.68BC $1.69B+$8.77M (+0.52%)Vol $3.42K"
+     },
+     {
+      "kind": "rest",
+      "at": 12894,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 13194,
+      "text": "PUMP · 15 · UNRLZDO $1.68BH $1.69BL $1.67BC $1.68B+$331.7K (+0.02%)Vol $5.92K"
+     },
+     {
+      "kind": "rest",
+      "at": 13496,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 13795,
+      "text": "PUMP · 15 · UNRLZDO $1.70BH $1.71BL $1.69BC $1.69B−$4.39M (−0.26%)Vol $17.8K"
+     },
+     {
+      "kind": "rest",
+      "at": 14094,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 14394,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.67BL $1.66BC $1.66B−$7.59M (−0.46%)Vol $7.79K"
+     },
+     {
+      "kind": "rest",
+      "at": 14696,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 14994,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.67B−$1.59M (−0.10%)Vol $5.53K"
+     },
+     {
+      "kind": "rest",
+      "at": 15296,
+      "text": "PUMP · 15 · UNRLZDO $1.69BH $1.69BL $1.69BC $1.69B−$8.55M (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 15594,
+      "text": "PUMP · 15 · UNRLZDO $1.67BH $1.68BL $1.67BC $1.68B+$13.25M (+0.79%)Vol $22.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 15994,
+      "text": "PUMP · 15 · UNRLZDO $0.00365H $0.00365L $0.00363C $0.00363−$0.0₄16 (−0.44%)Vol $4.08K"
+     },
+     {
+      "kind": "point",
+      "at": 16294,
+      "text": "PUMP · 15 · UNRLZDO $0.00377H $0.00378L $0.00376C $0.00376−$0.0₄13 (−0.36%)Vol $10.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 16594,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 16894,
+      "text": "PUMP · 15 · UNRLZDO $0.00363H $0.00365L $0.00363C $0.00363+$0 (+0.01%)Vol $717.72"
+     },
+     {
+      "kind": "rest",
+      "at": 17194,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 17494,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00371L $0.00369C $0.00369+$0 (+0.00%)Vol $159.06"
+     },
+     {
+      "kind": "rest",
+      "at": 17794,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 18094,
+      "text": "PUMP · 15 · UNRLZDO $0.00365H $0.00367L $0.00365C $0.00365+$0.0₅7 (+0.19%)Vol $8.26K"
+     },
+     {
+      "kind": "rest",
+      "at": 18394,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 18695,
+      "text": "PUMP · 15 · UNRLZDO $0.00368H $0.0037L $0.00368C $0.00368−$0.0₅6 (−0.17%)Vol $11.3K"
+     },
+     {
+      "kind": "rest",
+      "at": 18994,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 19294,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00373L $0.00371C $0.00371−$0.0₄2 (−0.53%)Vol $5.81K"
+     },
+     {
+      "kind": "rest",
+      "at": 19594,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 19894,
+      "text": "PUMP · 15 · UNRLZDO $0.00366H $0.00366L $0.00364C $0.00366+$0.0₅4 (+0.10%)Vol $5.93K"
+     },
+     {
+      "kind": "rest",
+      "at": 20194,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 20495,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00366C $0.00367−$0.0₄14 (−0.39%)Vol $8.98K"
+     },
+     {
+      "kind": "rest",
+      "at": 20794,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 21094,
+      "text": "PUMP · 15 · UNRLZDO $0.00381H $0.00381L $0.00378C $0.0038−$0.0₅4 (−0.11%)Vol $8.14K"
+     },
+     {
+      "kind": "rest",
+      "at": 21394,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 21694,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00371L $0.00368C $0.00368−$0.0₅6 (−0.17%)Vol $11.1K"
+     },
+     {
+      "kind": "rest",
+      "at": 21994,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 22294,
+      "text": "PUMP · 15 · UNRLZDO $0.00363H $0.00363L $0.00361C $0.00361−$0.0₄17 (−0.46%)Vol $7.79K"
+     },
+     {
+      "kind": "rest",
+      "at": 22610,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 22910,
+      "text": "PUMP · 15 · UNRLZDO $0.00364H $0.00367L $0.00364C $0.00367+$0.0₄29 (+0.79%)Vol $14.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 23211,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 23510,
+      "text": "PUMP · 15 · UNRLZDO $0.00366H $0.00367L $0.00364C $0.00367+$0.0₅6 (+0.18%)Vol $4.71K"
+     },
+     {
+      "kind": "rest",
+      "at": 23811,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 24110,
+      "text": "PUMP · 15 · UNRLZDO $0.00376H $0.00376L $0.00375C $0.00375−$0.0₅9 (−0.23%)Vol $11.8K"
+     },
+     {
+      "kind": "rest",
+      "at": 24410,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 24711,
+      "text": "PUMP · 15 · UNRLZDO $0.00362H $0.00364L $0.00362C $0.00362+$0 (+0.00%)Vol $200.32"
+     },
+     {
+      "kind": "rest",
+      "at": 25010,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 25310,
+      "text": "PUMP · 15 · UNRLZDO $0.00372H $0.00373L $0.00369C $0.00371−$0.0₅7 (−0.18%)Vol $22.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 25627,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 25927,
+      "text": "PUMP · 15 · UNRLZDO $0.00363H $0.00366L $0.00363C $0.00365+$0.0₄21 (+0.56%)Vol $280.66"
+     },
+     {
+      "kind": "rest",
+      "at": 26227,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 26543,
+      "text": "PUMP · 15 · UNRLZDO $0.0037H $0.00371L $0.00368C $0.00369−$0.0₄14 (−0.38%)Vol $9.96K"
+     },
+     {
+      "kind": "rest",
+      "at": 26844,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 27143,
+      "text": "PUMP · 15 · UNRLZDO $0.00364H $0.00364L $0.00356C $0.00359−$0.0₄56 (−1.54%)Vol $133.3K"
+     },
+     {
+      "kind": "rest",
+      "at": 27444,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 27743,
+      "text": "PUMP · 15 · UNRLZDO $0.00364H $0.00366L $0.00364C $0.00366+$0.0₄22 (+0.60%)Vol $3.59K"
+     },
+     {
+      "kind": "rest",
+      "at": 28043,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 28344,
+      "text": "PUMP · 15 · UNRLZDO $0.00367H $0.00369L $0.00367C $0.00367−$0.0₅1 (−0.04%)Vol $3.58K"
+     },
+     {
+      "kind": "rest",
+      "at": 28644,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 28944,
+      "text": "PUMP · 15 · UNRLZDO $0.00374H $0.00377L $0.00373C $0.00377+$0.0₄33 (+0.88%)Vol $44.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 29244,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 29543,
+      "text": "PUMP · 15 · UNRLZDO $0.00366H $0.00368L $0.00365C $0.00365−$0.0₄19 (−0.51%)Vol $27.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 29843,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     },
+     {
+      "kind": "point",
+      "at": 30143,
+      "text": "PUMP · 15 · UNRLZDO $0.00365H $0.0037L $0.00364C $0.0037+$0.0₄43 (+1.16%)Vol $62.4K"
+     },
+     {
+      "kind": "rest",
+      "at": 30444,
+      "text": "PUMP · 15 · UNRLZDO $0.00369H $0.00369L $0.00367C $0.00367−$0.0₄19 (−0.50%)Vol $1.22K"
+     }
+    ],
     "shifts": [
      {
-      "at": 17184,
-      "value": 0.000473828727816358,
+      "at": 17539,
+      "value": 0.0006330112284593622,
       "input": true,
       "sources": [
-       "canvas 1047,140 50x597 -> 1041,140 56x597",
-       "canvas 1047,738 50x83 -> 1041,738 56x83",
-       "span.tkp-lgkv 344,145 92x10 -> 365,145 103x10",
-       "span.tkp-lgkv 288,145 50x10 -> 304,145 54x10",
-       "span.tkp-lgkv 231,145 50x10 -> 242,145 54x10"
+       "div 1026,140 71x261 -> 1050,140 47x261",
+       "div 1026,402 71x83 -> 1050,402 47x83",
+       "span.tkp-lgkv 387,145 92x10 -> 430,145 97x10",
+       "span.tkp-lgkv 336,145 43x10 -> 368,145 54x10",
+       "span.tkp-lgkv 285,145 43x10 -> 307,145 54x10"
       ]
      }
     ],
@@ -41,16 +674,143 @@
  },
  "bad": {
   "source": "live",
-  "at": "2026-11-08T14:02:37.218Z",
+  "route": "/",
+  "at": "2026-11-08T18:43:18.898Z",
   "browser": "156.0.8078.79",
   "loads": [
    {
     "width": "phone",
     "legend": true,
     "toggled": false,
-    "heldMs": 30369,
-    "moves": 75,
-    "texts": 26,
+    "heldMs": 32137,
+    "bars": 500,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 906,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.69M (+0.45%)Vol $12.4K"
+     },
+     {
+      "kind": "point",
+      "at": 2207,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.66M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 3507,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.66M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "point",
+      "at": 4809,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.64M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 6110,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.64M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "point",
+      "at": 7412,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.64M (+0.45%)Vol $12.5K"
+     },
+     {
+      "kind": "rest",
+      "at": 8713,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.63M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 10015,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.63M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 11316,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.63M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 12616,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 13919,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 15220,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 16520,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 17822,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 19123,
+      "text": "PUMP · 15 · UNRLZDC $1.71B+$7.62M (+0.45%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 20427,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 21728,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 23030,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 24329,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 25632,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 26931,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 28235,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 29533,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 30835,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 32137,
+      "text": "PUMP · 15 · UNRLZDC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     }
+    ],
     "shifts": [],
     "errors": []
    },
@@ -58,36 +818,526 @@
     "width": "desktop",
     "legend": true,
     "toggled": true,
-    "heldMs": 30177,
-    "moves": 67,
-    "texts": 26,
+    "heldMs": 30374,
+    "bars": 500,
+    "reads": [
+     {
+      "kind": "rest",
+      "at": 292,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 593,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 892,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 1192,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 1492,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 1792,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 2092,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.75M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 2392,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 2711,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 3009,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 3308,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 3608,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 3909,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 4209,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 4509,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "point",
+      "at": 4809,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.72B+$12.76M (+0.75%)Vol $12.6K"
+     },
+     {
+      "kind": "rest",
+      "at": 5108,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 5408,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 5709,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 6008,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 6308,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 6608,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 6909,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 7208,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 7509,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 7809,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 8108,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 8410,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 8709,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 9008,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 9308,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 9608,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 9910,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 10209,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 10508,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 10808,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 11108,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 11408,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 11708,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 12009,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 12309,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 12610,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 12908,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 13208,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 13508,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 13808,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 14108,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 14408,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 14707,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 15008,
+      "text": "PUMP · 15 · UNRLZDO $1.71BH $1.72BL $1.71BC $1.71B+$7.62M (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 15375,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 15674,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 15975,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 16274,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 16575,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 16875,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 17174,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 17474,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 17776,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 18076,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 18375,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 18674,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 18975,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 19276,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 19575,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 19875,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 20174,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 20475,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 20775,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 21074,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 21374,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 21675,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 21974,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 22274,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 22574,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 22874,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 23175,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 23474,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 23775,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 24074,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 24374,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 24674,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 24974,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 25275,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 25574,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 25874,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 26175,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 26474,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 26774,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 27074,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 27374,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 27674,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 27974,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 28274,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 28574,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 28874,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 29174,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 29476,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 29774,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "point",
+      "at": 30074,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     },
+     {
+      "kind": "rest",
+      "at": 30374,
+      "text": "PUMP · 15 · UNRLZDO $0.00373H $0.00374L $0.00372C $0.00372+$0.0₄17 (+0.45%)Vol $12.7K"
+     }
+    ],
     "shifts": [
      {
-      "at": 17464,
-      "value": 0.00047462277091906725,
+      "at": 17195,
+      "value": 0.0006330112284593622,
       "input": true,
       "sources": [
-       "canvas 1047,140 50x597 -> 1041,140 56x597",
-       "canvas 1047,738 50x83 -> 1041,738 56x83",
-       "span.tkp-lgkv 344,145 86x10 -> 365,145 97x10",
-       "span.tkp-lgkv 288,145 50x10 -> 304,145 54x10",
-       "span.tkp-lgkv 231,145 50x10 -> 242,145 54x10"
-      ]
-     },
-     {
-      "at": 21207,
-      "value": 2.9751499003343623e-06,
-      "input": false,
-      "sources": [
-       "span.tkp-lgkv 365,145 97x10 -> 360,145 97x10"
-      ]
-     },
-     {
-      "at": 22389,
-      "value": 3.119574652777778e-06,
-      "input": false,
-      "sources": [
-       "span.tkp-lgkv 360,145 97x10 -> 365,145 103x10"
+       "div 1026,140 71x261 -> 1050,140 47x261",
+       "div 1026,402 71x83 -> 1050,402 47x83",
+       "span.tkp-lgkv 387,145 92x10 -> 430,145 97x10",
+       "span.tkp-lgkv 336,145 43x10 -> 368,145 54x10",
+       "span.tkp-lgkv 285,145 43x10 -> 307,145 54x10"
       ]
      }
     ],
