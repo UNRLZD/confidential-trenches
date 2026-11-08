@@ -157,10 +157,13 @@ const resend = new Map<string, { nonce: bigint; code: string }>();
 const short = new Map<string, Set<string>>();
 /**
  * The calls of one note the relayer may answer amount_above_balance before the bind ends refused (held, with that
- * reason). The honest relayer reads U's USDC at final, so it reads it short of a call the device signed only while a
- * ran call's debit is in and its refund is not (3 heights on NEAR, REFUND_HEIGHTS in follow.ts); each later call is
- * signed a lapsed window on (DEPOSIT_WINDOW + LAPSE_MARGIN + 1 = 126 heights, about 76 s). So 3 calls hold a refund
- * delayed two windows (about 2.5 min) by congestion, and a relayer that reads short past that is refused, not followed.
+ * reason). A slow refund never causes one: the device reads U's USDC at or above the amount on both RPCs before every
+ * sign, so at most the one call whose debit lands between that read and the relayer's is read short. What the count
+ * absorbs is a lagging provider of the relayer's: one that reads U short at final after both of the device's RPCs read
+ * it in full. Each later call is signed a lapsed window on (DEPOSIT_WINDOW + LAPSE_MARGIN + 1 = 126 heights, about
+ * 76 s), so the third needs that provider stalled about two windows; past that the relayer is refused, not followed.
+ * The last such answer settles its call first (the pages, U's nonce): a relayer that carried it anyway lands the note
+ * (review wnpt3 I2), and only a call that did not land ends the bind held.
  */
 export const SHORT_READ_CALLS = 3;
 
@@ -676,6 +679,17 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
         await pause("lapse");
       }
     };
+    // The SHORT_READ_CALLS-th amount_above_balance (review wnpt3 I2): the call is settled before the bind holds, and
+    // nothing is signed. The pages at a block past its window: P held lands the note; P absent with U's key nonce read
+    // there holds it (the call never ran, or ran and was refunded to U). A bind that ends on this wait settles here again.
+    const shortHeld = async (out: SignedDepositDelegate): Promise<BindOutcome> => {
+      for (;;) {
+        const pages = await watch.read(signal, lapsed(out));
+        if (pages.state === "held") return land(pages.row);
+        if (pages.state === "absent" && (await readU(U, rpcs, pages.height)) !== null) return { kind: "refused", code: "amount_above_balance" };
+        await pause("lapse");
+      }
+    };
     // a call the relayer refused for now: the same bytes again while ahead of max_block_height, else settled
     const sendAgain = async (out: SignedDepositDelegate): Promise<Step> => {
       resend.delete(own.noteId);
@@ -718,6 +732,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     if (last !== undefined) {
       const out = callOf(last);
       const was = resend.get(own.noteId);
+      if ((short.get(own.noteId)?.size ?? 0) >= SHORT_READ_CALLS) return await shortHeld(out);
       if (was?.nonce !== out.nonce) step = { call: out, send: false };
       else if (was.code === "prepay_open") step = (await prepaid()) ?? (await sendAgain(out));
       else step = await sendAgain(out);
@@ -740,7 +755,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       if (answer !== null && !answer.ok && answer.code === "amount_above_balance") {
         const seen = short.get(own.noteId) ?? new Set<string>();
         short.set(own.noteId, seen.add(out.signed_delegate));
-        if (seen.size >= SHORT_READ_CALLS) return { kind: "refused", code: answer.code };
+        if (seen.size >= SHORT_READ_CALLS) return await shortHeld(out);
       }
       if (answer === null || answer.ok || SETTLE.has(answer.code)) step = await settle(out);
       else if (answer.code === "sender_struck") return strike();

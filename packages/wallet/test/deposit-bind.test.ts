@@ -709,6 +709,20 @@ test("amount_above_balance on SHORT_READ_CALLS - 1 calls of a note (a refund del
   assert.deepEqual(await bindDeposit(SEED, r.args, r.deps), { kind: "refused", code: "amount_above_balance" });
   assert.equal(r.sent.length, SHORT_READ_CALLS);
 });
+// Card held-deposit-way-out, review wnpt3 I2: the SHORT_READ_CALLS-th amount_above_balance settles its call before the
+// bind holds: a relayer that answers it and carries the call anyway lands the note, never held with P in the vault.
+test("I2: the SHORT_READ_CALLS-th amount_above_balance of a call the relayer carried anyway lands the note, never refused", async () => {
+  const t = await setup(Array(SHORT_READ_CALLS).fill("amount_above_balance"));
+  const send = t.deps.fetchFn;
+  let n = 0;
+  const carried = (async (url: string, init: RequestInit) => {
+    const res = await send(url, init);
+    if (++n === SHORT_READ_CALLS) lands(t.chain)(t.sent.at(-1)!);
+    return res;
+  }) as typeof fetch;
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, fetchFn: carried }));
+  assert.equal(t.sent.length, SHORT_READ_CALLS, "nothing signed after the third");
+});
 for (const code of ["token_halted", "relayer_low"]) {
   test(`REVIEW I (expect PASS; kills M44): ${code} waits and sends the same signed bytes`, async () => {
     const t = await setup([code, "tx"]);

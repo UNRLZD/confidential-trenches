@@ -100,6 +100,7 @@ import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { type BindDeps, bindDeposit, DepositBindRefused, type BindOutcome, type BindRpc, bindRpc, DepositsWatch, findDeadCall, LAPSE_MARGIN, ownRow, POLL_MS, readU, RELEASE_RELAYER } from "./bind.ts";
 import { depositId } from "../derive/keys.ts";
+import type { MoveOutRecord } from "./moveout.ts";
 import type { MoveRecord, RefundMoveAsk, RefundMoveResult, RefundRead } from "./refund.ts";
 
 /** The helper's 1Click proxy for status (apps/helper/src/proxy/vendors.ts: oneclick, /v0/status read upstream by GET). */
@@ -392,6 +393,8 @@ export interface FollowRecord {
   final?: true;
   /** Why the op is held. */
   why?: string;
+  /** A held op's way out (./moveout.ts): U's own transfer to the typed account, written before it is sent. */
+  out?: MoveOutRecord;
 }
 export type DepositOp = { kind: "deposit"; stage: DepositStage; txs: { chain: "near"; hash: string }[]; created_ms: number; follow: FollowRecord } & DepositFacts;
 
