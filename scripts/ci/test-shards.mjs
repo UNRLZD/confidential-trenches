@@ -59,13 +59,14 @@ export const MUTANT_SECONDS = {
   "packages/signpage: node --test test/kit-version-mutants.test.mjs": 20,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
   "packages/signpage: node scripts/held-mutants.mjs": 84,
-  // card sol-rent-back-dust-burn: the rent back's 66 plants in three parts of 22. Not yet timed whole on CI: its pull
-  // request #482 at bc8b2560 ran the unsplit sweep 643 s and was cancelled at the job's limit (16:43:44Z to 16:54:27Z,
-  // job 128793441224), and sol-w-sweep's 39 plants took 411.7 s (#469, job 128795848174), so each part is set at 240 s,
-  // above 643 s / 3 and 22 x 10.6 s, until a CI log times it
-  "packages/signpage: node scripts/rent-back-mutants.mjs 1/3": 240,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 2/3": 240,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 3/3": 240,
+  // card sol-rent-back-dust-burn: the rent back's plants in three parts, mutant i in part (i % 3) + 1. CI timed them on
+  // #482 with 22 plants a part (run 42505633746, jobs 128807530871 and 128807530932: 172, 306 and 182 s); card
+  // sol-sell-deposit-back-floor's plants make them 29, 28 and 28 (its run on a local machine, the parts in
+  // series, all 85 killed: 230, 220 and 212 s). Each part is the larger of CI's time a plant times its plants now and
+  // that run's time, rounded up; the plan's heaviest of eight parts 516 s, under 540
+  "packages/signpage: node scripts/rent-back-mutants.mjs 1/3": 230,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 2/3": 390,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 3/3": 232,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 226,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 301,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 208,

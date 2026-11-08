@@ -1,0 +1,28 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 1cc3585b (this card merged with main 610143c2): the sell's rule refuses a deposit back under the kit's release floor at the rent read, by name: PASS against a release list holding it (release-107)",
+    "bad": "87c410c4's build (mainnet; the floor card kit-sol-pool-deposit-floor merged with main 999e1826): the sell's rule refuses only a deposit back under the pool's least deposit: FAIL",
+    "liveBefore": "SIGN_HOST read 2026-11-08T19:23Z, before this card's deploy: FAIL",
+    "unreached": "this card's bundle with !1&& planted in front of the floor's refusal (never reached) and index.html pinning it: FAIL, its mark gone and its bytes in no release list"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
+    "floor": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qhEVFxPqUCNJmNJZzxDN7BeBIb8k4U6QTQZXO8Z66qyiWGmhYoPv6Fg/xTPd7AGZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qhEVFxPqUCNJmNJZzxDN7BeBIb8k4U6QTQZXO8Z66qyiWGmhYoPv6Fg/xTPd7AGZ",
+    "floor": false
+  },
+  "liveBefore": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ",
+    "floor": false
+  },
+  "unreached": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-1zNmBpNNm8lHy5pA18P+lA7TPOeKT6h2WqokwhjmVYJxv1WoqPJqNmD8Ui/Cow2f\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-1zNmBpNNm8lHy5pA18P+lA7TPOeKT6h2WqokwhjmVYJxv1WoqPJqNmD8Ui/Cow2f",
+    "floor": false
+  }
+}
