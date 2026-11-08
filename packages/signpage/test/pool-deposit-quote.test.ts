@@ -30,6 +30,8 @@ const PRICING = { in: ["1", "1"], out: ["150", "150.1"] } as const; // USDC in, 
 
 const ctxOf = (chain: "solana" | "base", wallet: string, decimalsOut: number, refundId = chain === "solana" ? SOL_ID : EVM_ID) => ({
   seed: SEED, chain, wallet, refundId, check: { path: "keyless" as const, pricing: PRICING, decimalsIn: 6, decimalsOut, now: NOW },
+  // the rung itself unless a test names the floor (the floor's own tests below)
+  floor: chain === "solana" ? 10_000_000n : 1_000_000_000_000_000n,
 });
 
 /** 1Click's signed answer to `req`, at its own floor plus `extra`, with the pair's fee entry. */
@@ -141,4 +143,48 @@ test("review F3: a min out under the pool's smallest deposit is refused by the p
 test("review F4 Q4: a request whose origin is the pool's own coin is refused originAsset", () => {
   const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
   refusedRule("originAsset", () => checkPoolDepositQuote({ ...req, originAsset: "nep141:sol.omft.near" }, answerOf(req, 9), ctxOf("solana", SOL_U, 9)));
+});
+
+// card pool-deposit-follow (review of pool-deposit-address, question 3): U_X pays its deposit's fee and rents out of what
+// arrives, and must end at 0 or at least an empty account's rent, so the rung alone is short. The floor the quote is held
+// to is the rung plus the worst-case deposit cost (both trees at a new page, the mark's address empty) plus rent(0), from
+// the fee and the Rent sysvar read on two RPCs at quote time, and it holds on minAmountOut, never on amountOut.
+const RENT_NOW = { lamportsPerByte: 5_080n, factor: 1n } as const; // the Rent sysvar on two mainnet RPCs, 8 Nov 01:57Z
+
+test("pool-deposit-follow floor: the Solana floor is the rung, the worst-case deposit cost and rent(0)", async () => {
+  const { solanaPoolDepositFloor } = await import("../src/pool-deposit-quote.ts");
+  // 10,000,000 + (5,000 + 736,600 + 2 x 1,097,280) + 650,240, the review's own read of today's rent
+  assert.equal(solanaPoolDepositFloor(5_000n, RENT_NOW), 13_586_400n);
+  assert.equal(solanaPoolDepositFloor(10_000n, RENT_NOW), 13_591_400n);
+});
+
+test("pool-deposit-follow floor: the EVM floor is the rung plus the capped gas at 2 x base fee + tip, plus the L1 fee", async () => {
+  const { evmPoolDepositFloor } = await import("../src/pool-deposit-quote.ts");
+  const { EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom } = await import("../src/rules/pool.ts");
+  const r = { baseFee: 5_000_000n, tip: 10_000_000n, l1Fee: 30_000_000_000n, stateDepth: 3n, labelDepth: 2n };
+  assert.equal(evmPoolDepositFloor(r), 1_000_000_000_000_000n + (EVM_DEPOSIT_GAS_MAX + evmDepositHeadroom(3n, 2n)) * 20_000_000n + 30_000_000_000n);
+});
+
+test("pool-deposit-follow floor R11: a min out under the floor is refused even when amountOut is over it", () => {
+  // 2 USDC at 150 USD/SOL: about 13,200,000 lamports, over the bare rung but under the 13,586,400 floor
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 2_000_000n, NOW);
+  const ans = answerOf(req, 9, 1_000n, (a) => {
+    a.quote.amountOut = "14000000";
+    a.quote.amountOutFormatted = "0.014000000";
+  });
+  assert.ok(BigInt(ans.quote.minAmountOut as string) < 13_586_400n && BigInt(ans.quote.amountOut as string) >= 13_586_400n);
+  assert.ok(BigInt(ans.quote.minAmountOut as string) >= 10_000_000n);
+  refusedRule("floor", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), floor: 13_586_400n }));
+});
+
+test("pool-deposit-follow floor: at the floor passes, one under is refused; no floor, or one under the rung, refuses", () => {
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
+  const ans = answerOf(req, 9);
+  const min = BigInt(ans.quote.minAmountOut as string);
+  assert.equal(checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), floor: min }).minAmountOut, min);
+  refusedRule("floor", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), floor: min + 1n }));
+  // the floor is the device's own read: none given is no quote (fail closed), and a floor under the rung is no floor
+  const { floor: _none, ...noFloor } = ctxOf("solana", SOL_U, 9);
+  refusedRule("floor", () => checkPoolDepositQuote(req, ans, noFloor as never));
+  refusedRule("floor", () => checkPoolDepositQuote(req, ans, { ...ctxOf("solana", SOL_U, 9), floor: 9_999_999n }));
 });

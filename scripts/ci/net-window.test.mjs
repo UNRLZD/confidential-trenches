@@ -106,6 +106,7 @@ export const CHANGED = [
   "scripts/live-checks/pool-answer-unknown.mjs",
   "scripts/live-checks/pool-buy-send-fast.mjs",
   "scripts/live-checks/pool-deposit-address.mjs",
+  "scripts/live-checks/pool-deposit-follow.mjs",
   "scripts/live-checks/pool-deposit-sent-end.mjs",
   "scripts/live-checks/pool-deposits.mjs",
   "scripts/live-checks/pool-evm-buy-pays-revert.mjs",
