@@ -307,8 +307,9 @@ if (DUST) {
   const at = kept ?? join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.stranger`);
   if (!kept) writeFileSync(at, Buffer.from(key).toString("hex") + "\n", { mode: 0o600, flag: "wx" });
   const S = base58.encode(ed25519.getPublicKey(key));
-  // S's token account (Token-2022's with ImmutableOwner is 170 bytes; 200 bounds it) and its two fees
-  const need = solanaRentMin(rent, 200) + 2n * FEE;
+  // S's token account (Token-2022's with ImmutableOwner is 170 bytes; 200 bounds it), its two fees, and S's own
+  // rent-exempt minimum, since S stays open after them (12:45Z: S at 1,700,000 failed "insufficient funds for rent")
+  const need = solanaRentMin(rent, 200) + solanaRentMin(rent, 0) + 2n * FEE;
   dust = { S, key, need, ata: null, w: null, armed: undefined, sent: false, p: null };
   log(`FLOW_DUST: the stranger S ${S} (its key kept at ${at}); fund S with at least ${need} lamports on devnet (S is waited for after the buy, U first)`);
 }
