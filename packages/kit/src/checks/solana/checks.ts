@@ -1185,7 +1185,9 @@ export type SolanaHeld =
  * lamports). `fromAmount` and `toAmount` are the two accounts' token amounts as read.
  */
 export type SolanaClaim = { program: string; uva: string; mint: string; from: string; to: string; amount: bigint; open: boolean; unwrap: boolean; fromAmount: bigint; toAmount: bigint };
-export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string }[] };
+/** `keep[].cashback`: the account stays open only for cashback a claim could not take this time (card sol-w-sweep: the
+ *  wallet then keeps what that claim needs later, and nothing more). */
+export type SolanaTeardownPlan = { close: SolanaHeld[]; claim: SolanaClaim[]; keep: { address: string; why: string; cashback?: true }[] };
 /** The accounts a claim under `program` moves between: the volume account's and the wallet's, of the claim's mint. */
 export function solanaCashbackAccounts(wallet: string, program: string): { uva: string; mint: string; from: string; to: string } {
   const mint = program === SOLANA_PUMP_AMM_PROGRAM ? SOLANA_SOL_MINT : SOLANA_PUMP_STABLE_MINT;
@@ -1314,7 +1316,7 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
         }
       }
     }
-    if (why.length) plan.keep.push({ address, why: why.join(", ") });
+    if (why.length) plan.keep.push({ address, why: why.join(", "), ...(o.other.length === 0 && o.amount > 0n ? { cashback: true as const } : {}) });
     else plan.close.push({ kind: "volume", address, program: o.program, lamports: o.lamports });
   }
   return plan;

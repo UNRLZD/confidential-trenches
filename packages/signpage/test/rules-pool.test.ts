@@ -449,6 +449,15 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   for (const r of [-1n, floor, floor + 1n, 5000 as never]) {
     assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, r), refusedAs("reserve"), String(r));
   }
+  // card sol-w-sweep: a reserve under 0 (W's surplus deposited too) only up to what W holds, as both RPCs read it
+  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n, 0n), refusedAs("reserve"));
+  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n), refusedAs("reserve"));
+  // W holding it: the reserve passes and the deposit must then be min out plus that surplus, exactly
+  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n, 1n), refusedAs("deposit_amount"));
+  const surplus = 3_000_000n;
+  const withSurplus = checkSolanaSell(sellWire({ dep: { value: floor + surplus } }), ask, solCtx(), venue, reference, slot, SOL_READS, -surplus, surplus);
+  assert.equal(withSurplus.back, floor + surplus);
+  assert.throws(() => checkSolanaSell(sellWire({ dep: { value: floor + surplus } }), ask, solCtx(), venue, reference, slot, SOL_READS, -surplus, surplus - 1n), refusedAs("reserve"));
 });
 
 // ---------- EVM ----------

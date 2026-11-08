@@ -31,10 +31,10 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_PASSES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, solanaSellReserve, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_PASSES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, solanaSellAfterFull, solanaSellReserve, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
+import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -637,6 +637,12 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
 const settle = (w: World) => settlePoolSells(w.host, fakeLocks());
 const ours = async (ns: NoteStore) => (await ns.list()).filter((n) => n.scope === SCOPE).map((n) => ({ ref: n.ref, state: n.state, value: n.leaf?.value, leafIndex: n.leaf?.leafIndex }));
 const rentMin = (size: number): bigint => solanaRentMin(rent, size);
+/** What a sell that empties W keeps (card sol-w-sweep), and the note a default world's full sell makes: min out and W's
+ *  surplus over the sell's fee, the mark's rent, both pages' growth and that. */
+const AFTER = solanaSellAfterFull(rent);
+// on a cashback coin, also a later claim's cost (card sol-w-sweep: solanaSweepKeep for one volume account)
+const AFTER_CB = solanaSellAfterFull(rent, true);
+const FULL = MIN_OUT + BigInt(ENOUGH) - BigInt(FEE) - rentMin(17) - 2n * 72n * rent.lamportsPerByte * rent.factor - AFTER;
 const sends = (w: World) => w.c.log.filter((x) => x.endsWith("sendTransaction"));
 /** The notes of W's sells, without its sweep's (card sol-buy-rent-back: after a full sell, every lamport W holds goes
  *  back as its next return note). */
@@ -656,7 +662,7 @@ test("a sell: checked, simulated unsigned on both RPCs, signed by W, sent on bot
   assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: sig }] });
   assert.deepEqual(w.sent, [sig], "answered at the send with W's own signature");
   // the note: the return note of W's (l, j), UNSPENT, with the deposit's leaf (the next state leaf)
-  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
   // the bytes: one signature slot, W's; no compute budget; the venue's sell, then last the deposit into the pinned pool
   const { tx } = w.c.txs.get(sig)!;
   assert.equal(tx[0], 1);
@@ -670,7 +676,7 @@ test("a sell: checked, simulated unsigned on both RPCs, signed by W, sent on bot
   const dep = m.instructions.at(-1)!;
   assert.equal(m.staticKeys[dep.programIndex], PROGRAM);
   assert.equal(m.staticKeys[dep.accounts[0]!], POOL);
-  assert.equal(new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true), MIN_OUT, "a reserve of 0: W keeps its rent and fees");
+  assert.equal(new DataView(dep.data.buffer, dep.data.byteOffset + 1, 8).getBigUint64(0, true), FULL, "W's surplus with min out: W keeps its fee, the rents and what the sweep needs");
   assert.equal(beInt(dep.data.subarray(9, 41)), preOf(RETURN));
   // simulated on both before W is derived; sent on both
   const log = w.c.log;
@@ -682,12 +688,12 @@ test("a sell: checked, simulated unsigned on both RPCs, signed by W, sent on bot
   assert.ok(w.seeds.length >= 1 && w.seeds.every((s) => s.every((b) => b === 0)), "every seed copy zeroed");
 });
 
-test("a W short of lamports keeps them on W: the reserve is its fee, the mark's rent and the pages' growth up to an empty account's rent", async () => {
+test("a W short of lamports keeps them on W: the reserve is its fee, the mark's rent and the pages' growth up to what the rent back's sweep needs (solanaSellAfterFull)", async () => {
   const lamports = 1_000_000;
   const w = await world({ lamports });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled");
-  const reserve = BigInt(FEE) + rentMin(17) + 2n * 72n * rent.lamportsPerByte * rent.factor + rentMin(0) - BigInt(lamports);
+  const reserve = BigInt(FEE) + rentMin(17) + 2n * 72n * rent.lamportsPerByte * rent.factor + AFTER - BigInt(lamports);
   assert.ok(reserve > 0n);
   assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT - reserve, leafIndex: BigInt(N) }]);
 });
@@ -744,7 +750,7 @@ test("a sell that never reads back, its blockhash never past on both RPCs, is se
   assert.equal((a as { txs: unknown[] }).txs.length, 1);
   const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
   const [n] = (await w.ns.list()).filter((x) => x.scope === SCOPE);
-  assert.deepEqual({ ref: n!.ref, state: n!.state, sends: n!.sends }, { ref: RETURN, state: "INCOMING", sends: [{ signature: sig, value: MIN_OUT, last_valid_block_height: 151n }] });
+  assert.deepEqual({ ref: n!.ref, state: n!.state, sends: n!.sends }, { ref: RETURN, state: "INCOMING", sends: [{ signature: sig, value: FULL, last_valid_block_height: 151n }] });
   assert.equal(w.c.log.filter((x) => x === "0:getTransaction").length, 3, "read back each round");
 });
 
@@ -760,7 +766,7 @@ test("past the blockhash's last height on both RPCs with no mark: not_landed, th
   plant.lands = true;
   const b = await runPoolSell(w.host, ASK);
   assert.equal("stage" in b && b.stage, "filled");
-  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
 });
 
 test("card pool-deposits I-3, every path: a stranger's system account at the return note's mark is no mark: the sell is planned and sent, its drop read as dropped (never pending for ever), and the next sell takes the account over and fills", async () => {
@@ -775,7 +781,7 @@ test("card pool-deposits I-3, every path: a stranger's system account at the ret
   plant.lands = true;
   const b = await runPoolSell(w.host, ASK);
   assert.equal("stage" in b && b.stage, "filled", JSON.stringify(b));
-  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: FULL + rentMin(17), leafIndex: BigInt(N) }]);
   assert.equal(w.c.accounts.get(at)!.owner, PROGRAM);
 });
 
@@ -797,7 +803,8 @@ test("another deposit takes the return note's precommitment first: the sell fail
 });
 
 test("a mark already on both RPCs for the return note, not in the store, is the user's own: adopted UNSPENT with its leaf, and the sell takes second arrival 0", async () => {
-  const w = await world();
+  // W's token account at its real rent, which the teardown returns for the sweep (solanaSellAfterFull counts on it)
+  const w = await world({ ataLamports: TOKEN_RENT });
   w.c.deposit(preOf(RETURN), 12_345_678n);
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled");
@@ -805,7 +812,7 @@ test("a mark already on both RPCs for the return note, not in the store, is the 
   const got = await ours(w.ns);
   assert.deepEqual(sells(w, got).sort((x, y) => Number(x.leafIndex! - y.leafIndex!)), [
     { ref: RETURN, state: "UNSPENT", value: 12_345_678n, leafIndex: BigInt(N) },
-    { ref: SECOND(0), state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N + 1) },
+    { ref: SECOND(0), state: "UNSPENT", value: FULL, leafIndex: BigInt(N + 1) },
   ]);
   // the refs the store holds are passed over: the full sell's sweep took second arrival 1, so W, given the coin and
   // lamports again, sells into second arrival 2
@@ -1015,7 +1022,7 @@ test("a page killed right after the send keeps the note: the reload's settle sto
   const ends: Promise<void>[] = [];
   await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2, settled: (s, stage) => void ends.push(settleSellOps(w.store, s, stage)) }, locks);
   await Promise.all(ends);
-  assert.deepEqual(await ours(ns2), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(ns2), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
   assert.deepEqual(opOf("k1", await w.store.get("ops", "k1")), { id: "k1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }] });
   // settled once: a second pass changes nothing
   await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2 }, locks);
@@ -1044,7 +1051,7 @@ test("a page killed after a send that never lands: the reload's settle waits whi
   plant.lands = true;
   const b = await runPoolSell(w.host, ASK);
   assert.equal("stage" in b && b.stage, "filled");
-  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
 });
 
 test("the next sell of a W whose last sell a closed page left landing is refused while it may still land, and settles it first once it has", async () => {
@@ -1066,8 +1073,8 @@ test("a graduated cashback coin bought on the curve sells on PumpSwap from a W a
   const ok = await world({ venue: "pumpswap", cashback: true, lamports: Number(need) });
   const a = await runPoolSell(ok.host, ask);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  // the cashback accounts' rent is kept on W, out of the deposit, with the mark's rent, the pages' growth and rent(0)
-  const reserve = BigInt(FEE) + cashbackRent + rentMin(17) + 2n * 72n * rent.lamportsPerByte * rent.factor + rentMin(0) - need;
+  // the cashback accounts' rent is kept on W, out of the deposit, with the mark's rent, the pages' growth and what the sweep needs
+  const reserve = BigInt(FEE) + cashbackRent + rentMin(17) + 2n * 72n * rent.lamportsPerByte * rent.factor + AFTER_CB - need;
   assert.deepEqual(await ours(ok.ns), [{ ref: RETURN, state: "UNSPENT", value: VF.pumpswap.minOut - reserve, leafIndex: BigInt(N) }]);
   // 3bdca74's PumpSwap need (the fee and the wrapped-SOL account) without the cashback accounts: refused, unbuilt
   for (const lamports of [BigInt(FEE) + rentMin(165), need - 1n]) {
@@ -1097,7 +1104,7 @@ test("failed on both RPCs with another deposit's mark of exactly the sell's valu
   const w = await world({ frontRunSame: true });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "refused");
-  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT, leafIndex: BigInt(N) }]);
+  assert.deepEqual(await ours(w.ns), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
 });
 
 // The re-review (low): an error after the send is no refusal: the transaction may land.
@@ -1206,7 +1213,7 @@ const GROWS = 2n * 72n * rent.lamportsPerByte * rent.factor;
 const wAfter = (lamports: bigint, minOut: bigint, value: bigint, made = 0n) => lamports - BigInt(FEE) - made - rentMin(17) - GROWS + (minOut - value);
 const deposited = async (w: World) => (await ours(w.ns))[0]?.value ?? -1n;
 
-test("a PumpSwap sell of part of W's holding leaves W the next sell's need (the fee and the wrapped-SOL account); a sell of all of it, rent(0)", async () => {
+test("a PumpSwap sell of part of W's holding leaves W the next sell's need (the fee and the wrapped-SOL account); a sell of all of it, what the sweep needs (solanaSellAfterFull)", async () => {
   const ask = { ...ASK, token: VF.pumpswap.mint };
   const lamports = BigInt(FEE) + rentMin(165); // exactly this sell's own need
   const next = BigInt(FEE) + rentMin(165);
@@ -1216,7 +1223,7 @@ test("a PumpSwap sell of part of W's holding leaves W the next sell's need (the 
   assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(part)), next);
   const all = await world({ venue: "pumpswap", lamports: Number(lamports) });
   assert.equal("stage" in (await runPoolSell(all.host, ask)) && "filled", "filled");
-  assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(all)), rentMin(0));
+  assert.equal(wAfter(lamports, VF.pumpswap.minOut, await deposited(all)), AFTER);
 });
 
 test("a curve sell of part of W's holding leaves W the PumpSwap need the coin has once it graduates, with both cashback accounts on a cashback coin", async () => {
@@ -1269,7 +1276,7 @@ test("W's PumpSwap cashback accounts are counted one by one, by owner, there onl
     const ok = await at(base + made);
     const a = await runPoolSell(ok.host, ask);
     assert.equal("stage" in a && a.stage, "filled", `${JSON.stringify(plant)} ${JSON.stringify(a)}`);
-    assert.equal(wAfter(base + made, VF.pumpswap.minOut, await deposited(ok), made), rentMin(0), JSON.stringify(plant));
+    assert.equal(wAfter(base + made, VF.pumpswap.minOut, await deposited(ok), made), AFTER_CB, JSON.stringify(plant));
     if (made > 0n) assert.deepEqual(await runPoolSell((await at(base + made - 1n)).host, ask), { error: "not_funded" }, JSON.stringify(plant));
   }
 });
@@ -1296,7 +1303,7 @@ test("at a page boundary of both trees a funded W sells: a whole curve sale and 
   const c = await world({ leaves: 1024, lamports: Number(curveW) });
   const a = await runPoolSell(c.host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  const reserve = BigInt(FEE) + rentMin(17) + pages + rentMin(0) - curveW;
+  const reserve = BigInt(FEE) + rentMin(17) + pages + AFTER - curveW;
   assert.ok(reserve > 2_810_000n, "over the old cap");
   assert.deepEqual(await ours(c.ns), [{ ref: RETURN, state: "UNSPENT", value: MIN_OUT - reserve, leafIndex: 1024n }]);
   // part of the holding on PumpSwap, from a W at PumpSwap's need: it keeps that need for the next sell
@@ -1466,11 +1473,15 @@ test("a full sell whose PumpSwap volume account is owed cashback: the teardown c
 // Review L2 of 5592a871: the claim rides in the teardown's last frame and the verdict covers every frame, so a claim
 // that does not simulate refused the whole teardown, W's token account's close with it. Planned again with claims off,
 // W's token account still closes to W, and the owed volume account stays open, its cashback in its own WSOL account and
-// the reason told; nothing is swept, so W keeps the fee to claim it later (review L4 of 0068524a).
-test("a full sell whose PumpSwap cashback claim does not simulate: planned again with claims off, W's token account still closes to W, the owed volume account stays open with its cashback and the reason, nothing swept", async () => {
+// the reason told. Card sol-w-sweep: that kept account left every lamport on W (11c963f9: W kept the sell's surplus and
+// the token account's rent, swept nothing); now the sweep goes, W keeps exactly what the later claim needs
+// (solanaSweepKeep: rent(0), the claim frame's fee, the claim account's rent; review L4 of 0068524a), and W stays owed.
+test("a full sell whose PumpSwap cashback claim does not simulate: planned again with claims off, W's token account still closes to W, the owed volume account stays open with its cashback and the reason, and the sweep leaves W only the claim's cost, owed for the next pass", async () => {
   const CASHBACK = 12_742_862n;
   const back: string[] = [];
-  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }], claimFails: true });
+  // a cashback coin (its pool's is_cashback_coin set), whose W already holds both cashback accounts
+  const plant: Plant = { venue: "pumpswap", cashback: true, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }], claimFails: true };
+  const w = await world(plant);
   w.host.back = (s) => void back.push(s);
   const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
   const source = solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
@@ -1483,15 +1494,47 @@ test("a full sell whose PumpSwap cashback claim does not simulate: planned again
   assert.equal(w.c.accounts.get(vol)?.lamports, before);
   assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), CASHBACK);
   assert.equal(w.c.accounts.get(solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), undefined);
-  // one frame, the compute limit and the token close alone; W keeps what it held plus that rent less the frame's fee
-  assert.equal(back.length, 1);
+  // the teardown's one frame (the compute limit and the token close alone), then the sweep
+  assert.equal(back.length, 2, JSON.stringify(w.told));
   const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
   assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner]);
+  // the sell kept AFTER_CB on W; the sweep took all of it and the token account's rent but the claim's cost
+  const keep = rentMin(0) + BigInt(FEE) + rentMin(165);
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), keep);
   const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
-  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), afterSell + BigInt(TOKEN_RENT) - BigInt(FEE));
+  assert.equal(afterSell, AFTER_CB);
+  const swept = afterSell + BigInt(TOKEN_RENT) - BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH) - keep;
+  assert.ok(swept >= solanaSweepFloor(rent), "the sweep's note is one a withdraw can spend");
+  assert.deepEqual(w.c.deposits[1], { pre: preOf(SECOND(0)), value: swept, sweep: true });
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+  // owed for the next pass, which claims the cashback and sweeps it with the rest
+  assert.equal(w.owed.get(W.address)?.passes, 1);
+  // the next load, the claim taken now: from the claim's cost alone, the claim and the volume close in one frame, then
+  // the sweep carries the cashback, the volume account's rent and the claim's cost into the pool, W at 0
+  await settle(w);
+  plant.claimFails = false;
+  w.told.length = 0;
+  await resumeRentBacks(w.host, fakeLocks());
+  assert.equal(w.c.accounts.get(vol), undefined, "the volume account closed");
+  assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), 0n, "its cashback claimed");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(w.told));
+  assert.equal(back.length, 4);
+  const again = keep - BigInt(FEE) + CASHBACK + VOLUME_RENT - (BigInt(FEE) + rentMin(17) + GROWTH);
+  assert.deepEqual(w.c.deposits[2], { pre: preOf(SECOND(1)), value: again, sweep: true });
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+});
+
+// Card sol-w-sweep: owed cashback on a coin that is not a cashback coin (W's volume account earned it trading another),
+// so the sell kept no claim's cost: what the sweep would make after that cost is under the floor, so nothing is swept,
+// W keeps it all, and stays owed (never dropped as "floor" is) for the pass that claims it.
+test("owed cashback the teardown could not claim, with the rest under the floor once the claim's cost is kept: nothing swept, W keeps it all, owed for the next pass", async () => {
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.equal(w.c.deposits.length, 1, "nothing swept");
-  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:kept"]);
-  assert.match(w.told[0]!.detail, new RegExp(`^${vol}: cashback ${CASHBACK} unclaimed \\(its claim did not simulate: .*CashbackDisabled`));
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), AFTER + BigInt(TOKEN_RENT) - BigInt(FEE));
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:owed"]);
+  assert.equal(w.owed.get(W.address)?.passes, 1);
 });
 
 // The devnet run at 0068524a: the sell filled, then provider B answered HTTP 429 to the rent back's reads, and the
@@ -1540,19 +1583,39 @@ test("a full sell whose pages hold more than their rent (anyone may send lamport
 });
 
 // Review M1 of 0068524a: W after its teardown made a note no withdraw can spend (the devnet run's 2,154,336 under
-// 2,600,000), its rents gone with it. Under the floor the lamports stay on W.
-test("a full sell from W at its sell's least need: the rents come back to W, and W's lamports, under the smallest note a withdraw spends, stay on W", async () => {
+// 2,600,000), so the sweep stopped at the floor and those lamports stayed on W, out of the app's sight (card sol-w-sweep,
+// signpage-pool-sell's re-review LOW 4). A full sell now keeps on W exactly what lifts the sweep to the floor
+// (solanaSellAfterFull) and deposits the rest with its proceeds; the teardown's rents then carry the sweep past the
+// floor, and W ends at 0.
+test("a full sell from W at its sell's least need: W keeps only what the sweep needs, the rents come back to W, and the sweep takes W to 0, nothing left on W", async () => {
   const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: false }, rent);
   const w = await world({ lamports: Number(need), ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.equal(w.c.accounts.has(ATA), false);
   assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), false);
-  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
-  assert.ok(left > 0n && left - BigInt(FEE) - rentMin(17) - GROWTH < solanaSweepFloor(rent), String(left));
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
-  assert.equal(w.told.at(-1)?.state, "floor");
-  assert.equal(w.owed.size, 0);
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(w.told));
+  // the sell's note: min out less its fee, the mark's rent, the pages' growth and what W keeps, over what W held
+  const sell = w.c.deposits[0]!;
+  assert.equal(sell.value, MIN_OUT - (BigInt(FEE) + rentMin(17) + GROWTH + AFTER - need));
+  // the sweep's: what W kept and the two closed rents, less two teardown frames' fees and its own costs, over the floor
+  const sweep = w.c.deposits.find((d) => d.sweep)!;
+  assert.equal(sweep.value, AFTER + BigInt(TOKEN_RENT) + VOLUME_RENT - 2n * BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH));
+  assert.ok(sweep.value >= solanaSweepFloor(rent));
+  assert.equal(w.told.at(-1)?.state, "sent");
+});
+
+// A full sell too small to hold the sweep's share back (the reserve would pass its cap or leave the note under the
+// program's least deposit) keeps rent(0) only, as before card sol-w-sweep: priced with what the sweep needs first.
+test("solanaSellReserve: a full sell deposits W's surplus over the fee, rents and what it keeps (a reserve under 0); a partial sell leaves it on W", () => {
+  const p = { fee: 5_000n, made: 0n, rents: 1_000_000n, after: AFTER, minOut: 50_000_000n };
+  const lamports = 10_000_000n;
+  assert.deepEqual(solanaSellReserve({ ...p, lamports, keeps: false }), { reserve: 5_000n + 1_000_000n + AFTER - lamports, value: 50_000_000n + lamports - 5_000n - 1_000_000n - AFTER });
+  assert.ok(5_000n + 1_000_000n + AFTER - lamports < 0n);
+  assert.deepEqual(solanaSellReserve({ ...p, lamports, keeps: true }), { reserve: 0n, value: 50_000_000n });
+  // at the floor of what the sweep needs, under its cap: priced with it
+  assert.ok(5_000n + 1_000_000n + AFTER < 5_420_920n);
+  assert.ok(AFTER >= rentMin(0));
 });
 
 // Review M2 of 0068524a: the teardown's read-back had no wall-clock bound: one slow provider held the seed lock and the
@@ -1685,6 +1748,19 @@ test("the sweep's rule: W the only signer, the deposit alone, its value exactly 
   refused(() => checkSolanaSweep(wire([{ ...six, accounts: six.accounts.slice(0, 6) }]), ctx, reads, lamports, rent, held), "deposit_accounts");
   const small = costs + SOLANA_POOL_MIN_DEPOSIT - 1n;
   refused(() => checkSolanaSweep(wire([dep(small - costs)]), ctx, reads, small, rent, held), "amount");
+  // card sol-w-sweep: per volume account still owed cashback, W keeps exactly what its later claim costs (rent(0), the
+  // claim frame's fee, the claim account's rent), and nothing more or less; no more owed accounts than the two programs
+  const big = 10_000_000n;
+  const keep = (n: bigint) => (n === 0n ? 0n : rentMin(0) + n * (BigInt(FEE) + rentMin(165)));
+  assert.equal(solanaSweepKeep(rent, 0), 0n);
+  for (const n of [1, 2] as const) {
+    assert.equal(solanaSweepKeep(rent, n), keep(BigInt(n)));
+    assert.equal(checkSolanaSweep(wire([dep(big - costs - keep(BigInt(n)))]), ctx, reads, big, rent, held, n), big - costs - keep(BigInt(n)));
+    refused(() => checkSolanaSweep(wire([dep(big - costs - keep(BigInt(n)) + 1n)]), ctx, reads, big, rent, held, n), "sweep_amount");
+    refused(() => checkSolanaSweep(wire([dep(big - costs - keep(BigInt(n)) - 1n)]), ctx, reads, big, rent, held, n), "sweep_amount");
+  }
+  refused(() => checkSolanaSweep(wire([dep(big - costs - keep(1n))]), ctx, reads, big, rent, held), "sweep_amount");
+  for (const n of [3, -1, 1.5, Number.NaN]) refused(() => checkSolanaSweep(wire([dep(big - costs - keep(1n))]), ctx, reads, big, rent, held, n), "sweep_reads");
 });
 
 // Review M1 of 0068524a: the sweep's floor was the pool's least deposit (1,000,000), not the smallest note the device can

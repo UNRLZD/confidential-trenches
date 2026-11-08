@@ -550,6 +550,7 @@ export function checkSolanaSell(
   slot: number,
   reads: SolanaPoolReads,
   reserve: bigint,
+  lamports?: bigint,
 ): PoolDraw {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana") return refuse("kind");
   const pin = pinOf(ctx);
@@ -581,7 +582,11 @@ export function checkSolanaSell(
     if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
-  if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");
+  // a reserve under 0 is W's own surplus deposited with the proceeds (card sol-w-sweep): a sell that empties W's holding
+  // puts every lamport over what the rent back needs into the user's note, never more than W holds as both RPCs read
+  // it (`lamports`)
+  if (typeof reserve !== "bigint" || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");
+  if (reserve < 0n && (typeof lamports !== "bigint" || -reserve > lamports)) return refuse("reserve");
   const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
@@ -655,14 +660,24 @@ export function solanaDepositRents(rent: SolanaRent, sizes: { stateSize: number;
  * left on it or sent anywhere but the user's own note. Under the smallest note the device spends (solanaSweepFloor),
  * refused: those lamports stay on W.
  */
-export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld): bigint {
+/**
+ * What a sweep leaves on W for `owed` volume accounts kept only for cashback a claim could not take this time (card
+ * sol-w-sweep; review L4 of 0068524a: W keeps what claiming them later costs): per account one frame's fee and the rent
+ * of the claim account its claim opens (rent(165)), and rent(0), so W stays an account; none when nothing is owed.
+ */
+export const SOLANA_SWEEP_OWED_MAX = 2;
+export const solanaSweepKeep = (rent: SolanaRent, owed: number): bigint =>
+  owed === 0 ? 0n : solanaRentMin(rent, 0) + BigInt(owed) * (SOLANA_LAMPORTS_PER_SIGNATURE + solanaRentMin(rent, 165));
+
+export function checkSolanaSweep(wire: Uint8Array, ctx: PoolContext & { precommitment: bigint }, reads: SolanaPoolReads, lamports: bigint, rent: SolanaRent, held: SolanaDepositHeld, owed = 0): bigint {
   const pin = pinOf(ctx);
   const d = decode(wire, reads);
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   if (head(d.ixs) !== 0 || d.ixs.length !== 1) return refuse("instructions");
   const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);
   if (typeof lamports !== "bigint" || typeof rent?.lamportsPerByte !== "bigint" || typeof rent.factor !== "bigint" || rent.lamportsPerByte < 0n || rent.factor < 0n) return refuse("sweep_reads");
-  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents(rent, reads, held) !== lamports) return refuse("sweep_amount");
+  if (!Number.isSafeInteger(owed) || owed < 0 || owed > SOLANA_SWEEP_OWED_MAX) return refuse("sweep_reads");
+  if (value + SOLANA_LAMPORTS_PER_SIGNATURE + solanaDepositRents(rent, reads, held) + solanaSweepKeep(rent, owed) !== lamports) return refuse("sweep_amount");
   if (value < SOLANA_POOL_MIN_DEPOSIT || value < solanaSweepFloor(rent)) return refuse("amount");
   passedWire(wire);
   return value;
