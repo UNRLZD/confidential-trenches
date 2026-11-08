@@ -61,8 +61,12 @@ function rpcs() {
       if (p.method_name === "storage_balance_of") return view({ total: "1", available: "0" }, h);
       throw new Error(String(p.method_name));
     },
-    tx: async ({ tx_hash, sender_account_id }: { tx_hash: string; sender_account_id: string }) =>
-      landed.has(tx_hash) ? { result: { final_execution_status: "FINAL", status: { SuccessValue: "" }, transaction: { hash: tx_hash, signer_id: sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status: { SuccessValue: "" } } }] } } : { error: { cause: { name: "UNKNOWN_TRANSACTION" } } },
+    // a hash nobody sent: UNKNOWN_TRANSACTION only to wait_until NONE; to FINAL the release RPCs time out or answer 408
+    tx: async ({ tx_hash, sender_account_id, wait_until }: { tx_hash: string; sender_account_id: string; wait_until: string }) => {
+      if (landed.has(tx_hash)) return { result: { final_execution_status: "FINAL", status: { SuccessValue: "" }, transaction: { hash: tx_hash, signer_id: sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status: { SuccessValue: "" } } }] } };
+      if (wait_until === "NONE") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+      throw new Error("HTTP 408");
+    },
     call: async (method: string, params: unknown) => {
       if (method === "gas_price") return { result: { gas_price: "100000000" } };
       const b = Buffer.from((params as { signed_tx_base64: string }).signed_tx_base64, "base64");

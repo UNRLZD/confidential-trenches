@@ -80,9 +80,14 @@ class Chain {
         if (p.method_name === "storage_balance_bounds") return view({ min: STORAGE_MIN.toString(), max: STORAGE_MIN.toString() }, h);
         throw new Error(`unexpected ${String(p.method_name)}`);
       },
-      tx: async ({ tx_hash, sender_account_id }) => {
+      // the release RPCs, read 8 Nov 2026: a hash nobody sent answers UNKNOWN_TRANSACTION (HTTP 200) only to wait_until
+      // NONE; to FINAL fastnear times out (10 s, or no answer in 30 s) and dRPC answers HTTP 408, which the client throws
+      tx: async ({ tx_hash, sender_account_id, wait_until }) => {
         const st = (k === "b" && this.txsB !== null ? this.txsB : this.txs).get(tx_hash);
-        if (st === undefined) return { error: { cause: { name: "UNKNOWN_TRANSACTION" } } };
+        if (st === undefined) {
+          if (wait_until === "NONE") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+          throw new Error("HTTP 408");
+        }
         const status = st === "ok" ? { SuccessValue: "" } : { Failure: { ActionError: {} } };
         return { result: { final_execution_status: "FINAL", status, transaction: { hash: tx_hash, signer_id: sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status } }] } };
       },

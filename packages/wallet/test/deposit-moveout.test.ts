@@ -80,9 +80,14 @@ class Chain {
         if (p.method_name === "storage_balance_bounds") return view({ min: STORAGE_MIN.toString(), max: STORAGE_MIN.toString() }, h);
         throw new Error(`unexpected ${String(p.method_name)}`);
       },
-      tx: async ({ tx_hash, sender_account_id }) => {
+      // the release RPCs, read 8 Nov 2026: a hash nobody sent answers UNKNOWN_TRANSACTION (HTTP 200) only to wait_until
+      // NONE; to FINAL fastnear times out (10 s, or no answer in 30 s) and dRPC answers HTTP 408, which the client throws
+      tx: async ({ tx_hash, sender_account_id, wait_until }) => {
         const st = (k === "b" && this.txsB !== null ? this.txsB : this.txs).get(tx_hash);
-        if (st === undefined) return { error: { cause: { name: "UNKNOWN_TRANSACTION" } } };
+        if (st === undefined) {
+          if (wait_until === "NONE") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+          throw new Error("HTTP 408");
+        }
         const status = st === "ok" ? { SuccessValue: "" } : { Failure: { ActionError: {} } };
         return { result: { final_execution_status: "FINAL", status, transaction: { hash: tx_hash, signer_id: sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status } }] } };
       },
@@ -565,4 +570,55 @@ test("D4 another op of U holds a gone record (FINAL failed): the tap clears it t
   assert.deepEqual(op1.follow.out_past?.map((r) => r.hash), [(first as { hash: string }).hash], "and kept as op1's history");
   assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.out?.to, "bob.testnet");
   assert.deepEqual([...new Set(chain.sent)].map((x) => decode(x).nonce), [8n, 9n]);
+});
+
+test("L1 an expired record read absent on one RPC and with no answer on the other (a 408): settled expired, a resume answers failed and signs nothing", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  chain.a.height = chain.b.height = 1000 + Number(TX_VALIDITY_BLOCKS) + 1;
+  const [a, b] = chain.rpcs();
+  const mute: MoveOutRpc = { ...b, tx: async () => { throw new Error("HTTP 408"); } };
+  seedOpens = 0;
+  const n = chain.sent.length;
+  assert.equal((await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: [a, mute] })).kind, "failed", "U's nonce alone proves it can never land");
+  assert.equal(seedOpens, 0);
+  assert.equal(chain.sent.length, n, "nothing sent");
+});
+
+test("L1 taken needs UNKNOWN_TRANSACTION on both RPCs: absent on one and a 408 on the other, U's nonce taken long ago, the record stays followed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  chain.nonce = 8n;
+  chain.usdc = 0n;
+  chain.nonceAt = (h) => (h >= 1050 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1050 + SETTLE_BLOCKS + 1;
+  const [a, b] = chain.rpcs();
+  const mute: MoveOutRpc = { ...b, tx: async () => { throw new Error("HTTP 408"); } };
+  seedOpens = 0;
+  assert.equal((await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: [a, mute] })).kind, "sent", "one RPC's UNKNOWN_TRANSACTION alone never settles a record");
+  assert.equal(seedOpens, 0);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past, undefined);
+  // both answer UNKNOWN_TRANSACTION: taken, a resume answers empty
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
+});
+
+test("L1 one RPC reads the tx ok, the other absent, and both read U's nonce below it past the window (hostile reads): never settled, the record stays followed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.txsB = new Map();
+  chain.onSend = (_s, h) => void chain.txs.set(h, "ok"); // the first RPC says it landed; U's nonce never moves
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  chain.a.height = chain.b.height = 1000 + Number(TX_VALIDITY_BLOCKS) + 1;
+  seedOpens = 0;
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "sent", "a tx one RPC reads is never settled as expired");
+  assert.equal(seedOpens, 0);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past, undefined);
 });

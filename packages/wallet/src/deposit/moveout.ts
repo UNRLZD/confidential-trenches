@@ -273,11 +273,13 @@ export function signMoveTx(u: string, publicKey: Uint8Array, secretKey: Uint8Arr
 /**
  * One RPC's read of the move's tx: ok (FINAL, every receipt a success), failed (FINAL, a failure), absent (the RPC's own
  * UNKNOWN_TRANSACTION, as scripts/ci/money-gate.mjs reads "missing"), or unknown: a timeout, a 429 or 5xx, receipts
- * still running or any other answer is no word on whether the tx exists.
+ * still running or any other answer is no word on whether the tx exists. Asked with wait_until NONE, which answers at
+ * once with the tx's outcome so far: to FINAL a hash the RPC does not know never answers UNKNOWN_TRANSACTION (the
+ * release RPCs, read 8 Nov 2026: fastnear times out, dRPC answers 408), so FINAL is checked on the answer instead.
  */
 async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "failed" | "absent" | "unknown"> {
   try {
-    const a = await r.tx({ tx_hash: hash, sender_account_id: u, wait_until: "FINAL" });
+    const a = await r.tx({ tx_hash: hash, sender_account_id: u, wait_until: "NONE" });
     if (isObj(a) && isObj(a.error) && isObj(a.error.cause) && a.error.cause.name === "UNKNOWN_TRANSACTION") return "absent";
     const res = isObj(a) && a.error === undefined ? a.result : undefined;
     if (!isObj(res) || res.final_execution_status !== "FINAL" || !isObj(res.transaction) || res.transaction.hash !== hash || res.transaction.signer_id !== u) return "unknown";
@@ -337,9 +339,12 @@ export const SETTLE_BLOCKS = 100;
 type Gone = { gone: "failed" | "expired" | "taken"; usdc: bigint | null };
 /** Whether record `had` of U can still land (live: follow it), or is gone, read on both RPCs. */
 async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<"live" | Gone> {
-  const st = await readBoth(rpcs, had.hash, U);
-  if (st === "failed") return { gone: "failed", usdc: null };
-  if (st !== "absent" && st !== "unknown") return "live";
+  const sides = await Promise.all(rpcs.map((r) => txState(r, had.hash, U)));
+  if (sides.every((x) => x === "failed")) return { gone: "failed", usdc: null };
+  // a side that reads the tx (ok, or failed on one only) keeps it live; otherwise (absent or no answer, in any mix) U's
+  // nonce decides: expired needs no tx read, taken needs both RPCs to answer UNKNOWN_TRANSACTION
+  if (sides.some((x) => x === "ok" || x === "failed")) return "live";
+  const st = sides.every((x) => x === "absent") ? "absent" : "unknown";
   const r = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
   if (r === null) return "live";
   if (r.nonce < BigInt(had.nonce) && BigInt(r.height) > BigInt(had.height) + TX_VALIDITY_BLOCKS) return { gone: "expired", usdc: r.usdc };

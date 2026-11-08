@@ -86,7 +86,7 @@ export interface BindDepositArgs {
 
 /** A NEAR provider that also reads a transaction's status (the kit's HELPER_RPC_METHODS.near names `tx`). */
 export interface BindRpc extends NearRpc {
-  tx(params: { tx_hash: string; sender_account_id: string; wait_until: "FINAL" }): Promise<unknown>;
+  tx(params: { tx_hash: string; sender_account_id: string; wait_until: "FINAL" | "NONE" }): Promise<unknown>;
 }
 /** A provider by URL, for both `query` (nearRpc) and `tx`. A status other than 200 or no answer in time throws. */
 export function bindRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): BindRpc {
