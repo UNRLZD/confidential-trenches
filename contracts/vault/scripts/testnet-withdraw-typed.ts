@@ -48,7 +48,8 @@ import { carryWithdraw, outcomeRound, type WithdrawSendDeps } from "../../../app
 import { USDC_CODE_HASH } from "../../../apps/helper/src/token-status/status.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, "../../..");
+/** The repository as the file system spells it, whatever spelling node was started by (review of a6903d91, N2). */
+export const ROOT = realpathSync.native(path.resolve(HERE, "../../.."));
 export const CARD = "wallet-withdraw-move-out";
 const NEAR = 10n ** 24n;
 /** W's NEAR at creation: its own account storage, no key. */
@@ -81,9 +82,9 @@ function parseArgs(argv: string[]) {
   return { parent: v["--parent"]!, keyFile: v["--key-file"]!, t04State: v["--t04-state"]!, rwsState: v["--rws-state"]!, state: v["--state"]!, out: v["--out"] ?? DEFAULT_OUT };
 }
 /**
- * Whether `file` is inside one of `roots` (realpaths, deploy.mjs repoRoots), compared on its real path: the file's own,
- * or for a file not made yet its nearest existing parent's, so a symlink or another spelling of the repository on a
- * case-insensitive disk is refused too (as deploy.mjs loadKey does).
+ * Whether `file` is inside one of `roots`, both compared on their real paths: the file's own, or for a file not made
+ * yet its nearest existing parent's, and each root's, so a symlink or another spelling of the repository on a
+ * case-insensitive disk, on either side, still compares equal (as deploy.mjs loadKey does).
  */
 export function inside(file: string, roots: string[]): boolean {
   let at = path.resolve(file);
@@ -93,7 +94,10 @@ export function inside(file: string, roots: string[]): boolean {
     at = path.dirname(at);
   }
   const real = path.join(realpathSync.native(at), ...rest);
-  return roots.some((r) => real === r || real.startsWith(r + path.sep));
+  return roots.some((r) => {
+    const root = existsSync(r) ? realpathSync.native(r) : path.resolve(r);
+    return real === root || real.startsWith(root + path.sep);
+  });
 }
 
 /**
@@ -137,6 +141,9 @@ async function main() {
   if (args.parent !== deployment.parent) throw new Error(`--parent must be the vault's parent ${deployment.parent}`);
   const roots: string[] = repoRoots();
   if (inside(args.state, roots)) throw new Error("--state is inside the repository: the run's seed never lives in the repo");
+  // checked here, before anything is read or sent, so a bad --out never costs a run's deposit (review of a6903d91, N2)
+  const out = path.resolve(ROOT, args.out);
+  if (!inside(out, [ROOT])) throw new Error("--out must be inside the repository");
   mkdirSync(path.dirname(path.resolve(args.state)), { recursive: true, mode: 0o700 });
 
   // the testnet build: set before the page's modules load (relay.ts folds the testnet relayer on it)
@@ -384,8 +391,6 @@ async function main() {
   const text = [`CARD ${CARD} / live: PASS`, "Money path: yes", ...txs.map((t: { hash: string; signer: string }) => `Tx: near-testnet ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
   const lp = localProblems(text);
   if (lp.length) throw new Error(`the record: ${lp.join("; ")}`);
-  const out = path.resolve(ROOT, args.out);
-  if (!inside(out, [ROOT])) throw new Error("--out must be inside the repository");
   writeFileSync(out, text);
   console.log(text);
   log(`record written to ${path.relative(ROOT, out)}`);

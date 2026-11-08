@@ -713,3 +713,42 @@ test("the relay and the arrival read after it share one deadline: the same signa
   assert.ok(relaySignal instanceof AbortSignal);
   assert.equal(arrivalSignal, relaySignal, "the arrival waits under the relay's own deadline, not a fresh one");
 });
+
+// review of a6903d91, N1: the settle pass follows each note from its own relay to its own arrival, all at once, so a
+// note held to the bound never cuts a later note's arrival, and each arrival waits under its own note's deadline (M6)
+test("the settle pass: a note held to the bound never ends a later note's arrival, each read under its own note's deadline", async () => {
+  const v = await world([5_000_000n, 6_000_000n]);
+  const a = await leftReserved(v);
+  const b = await leftReserved(v);
+  assert.notEqual(a.noteId, b.noteId);
+  const list = async () => {
+    const all = await v.ns.list();
+    return [...all.filter((n) => n.id === a.noteId), ...all.filter((n) => n.id !== a.noteId)];
+  };
+  const ns = new Proxy(v.ns, { get: (t, k) => (k === "list" ? list : (Reflect.get(t, k) as (...x: unknown[]) => unknown)?.bind?.(t) ?? Reflect.get(t, k)) });
+  const c = paidTo("alice.testnet");
+  const landed = realRelayLanded(c)!;
+  const relaySignals = new Map<string, AbortSignal>();
+  const arrivalSignals: AbortSignal[] = [];
+  const pass = await withdrawSettle({ ...page(v), notes: async () => ns }, {
+    network: "testnet", rpcs: c.rpcs(), priceRpcs: pair("mainnet"), fetchFn: helper(), arrivalRpcs: c.rpcs(), waitMs: 3_000,
+    relay: async (seed, r, deps) => {
+      relaySignals.set(r.noteId, deps.signal!);
+      // A: a pair that never settles, held until its bound
+      if (r.noteId === a.noteId) return new Promise((_ok, no) => deps.signal!.addEventListener("abort", () => no(deps.signal!.reason), { once: true }));
+      return landed(seed, r, deps);
+    },
+    // B's payout runs 500 ms after its landing: the arrival waits for it under its signal, as the pair's rounds do
+    arrival: async (x) => {
+      arrivalSignals.push(x.signal!);
+      await new Promise<void>((ok, no) => {
+        const t = setTimeout(ok, 500);
+        x.signal!.addEventListener("abort", () => (clearTimeout(t), no(x.signal!.reason)), { once: true });
+      });
+      return withdrawArrival(x);
+    },
+  });
+  assert.deepEqual(pass.outcomes, { [a.noteId]: "failed", [b.noteId]: "arrived" });
+  assert.equal(arrivalSignals.length, 1);
+  assert.equal(arrivalSignals[0], relaySignals.get(b.noteId), "B's arrival waits under B's own deadline, never a fresh one");
+});

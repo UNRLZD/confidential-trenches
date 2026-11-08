@@ -2,18 +2,18 @@
  "good": {
   "key": "wallet-withdraw-move-out",
   "url": "local build",
-  "at": "2026-11-08T00:25:02.211Z",
+  "at": "2026-11-08T01:21:29.360Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-EqThJA+j7IrCzplICSz/jQmdxnvqGQmHnhKdZeHHHxECOtkM5Cxf14tKzKNZX8KP",
+   "integrity": "sha384-cZdY562e2HncJCSjRZY9cJtnVoZqLsmELktM8WVoGJybAuHxkVNDkIRoxw3S04lA",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 735319,
-   "sha384": "sha384-EqThJA+j7IrCzplICSz/jQmdxnvqGQmHnhKdZeHHHxECOtkM5Cxf14tKzKNZX8KP",
+   "bytes": 735333,
+   "sha384": "sha384-cZdY562e2HncJCSjRZY9cJtnVoZqLsmELktM8WVoGJybAuHxkVNDkIRoxw3S04lA",
    "markers": {
     "to: not a NEAR account id": 1,
     "to: the vault, intents.near or the token": 1,

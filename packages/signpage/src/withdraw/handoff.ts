@@ -258,9 +258,10 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
   } finally {
     seed.fill(0);
   }
-  // each is awaited in turn below: a later note's refusal waits for its turn with a handler, never unhandled meanwhile
-  for (const [, p] of going) p.catch(() => {});
-  for (const [id, p] of going) {
+  // each note is followed from its own relay to its own arrival, all at once, each under its own deadline: a note held
+  // to its bound never cuts another note's arrival (review of a6903d91, N1). Each is awaited at once with a handler,
+  // so a later note's refusal is never unhandled while an earlier one waits.
+  const settled = going.map(async ([id, p]): Promise<SettlePass["outcomes"][string]> => {
     try {
       const o = await p;
       // a spend whose new leaf is not this seed's change: only a ragequit (context 0, vault.md l.99) inserts no change,
@@ -268,12 +269,15 @@ export async function withdrawSettle(page: HandoffPage, over: HandoffOver = {}):
       // RESERVED, "unmatched" for the form to show, never dropped
       if (o.kind === "unmatched" && o.spend.context === 0n) {
         await notes.move(id, "RESERVED", "SPENT");
-        out.outcomes[id] = "spent";
-      } else out.outcomes[id] = typed.get(id) === undefined ? o.kind : await arrivedOf(o, typed.get(id)!, n, over, signals.get(id)!);
+        return "spent";
+      }
+      return typed.get(id) === undefined ? o.kind : await arrivedOf(o, typed.get(id)!, n, over, signals.get(id)!);
     } catch {
-      out.outcomes[id] = "failed";
+      return "failed";
     }
-  }
+  });
+  const ends = await Promise.all(settled);
+  going.forEach(([id], i) => (out.outcomes[id] = ends[i]!));
   return out;
 }
 
