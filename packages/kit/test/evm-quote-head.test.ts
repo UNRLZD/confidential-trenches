@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
 
 type Answer = { result?: Record<string, unknown> | string } & Record<string, unknown>;
 type Exchange = { calls: EvmRpcCall[]; answers: Answer[] };
@@ -25,6 +26,8 @@ function provider(ex: Exchange[], seen: string[], lie: { on: boolean }): EvmRpc 
   return async (calls) => {
     for (const c of calls) seen.push(c.method === "eth_getBlockByNumber" ? `head:${c.params[0] === "latest" ? "latest" : "number"}` : c.method);
     const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
+    const gas = e === undefined ? gasRoundAnswers(ex, calls) : undefined;
+    if (gas !== undefined) return gas;
     if (e === undefined) throw new Error("no recorded answer for these calls");
     const a = structuredClone(e.answers);
     if (lie.on && calls[0]!.method === "eth_getBlockByNumber" && calls[0]!.params[0] !== "latest") (a[0]!.result as Record<string, unknown>).hash = "0x" + "ab".repeat(32);

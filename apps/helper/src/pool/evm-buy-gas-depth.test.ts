@@ -148,3 +148,19 @@ test("pays-revert M1 on every gas path: a buy goes out only when its simulation 
     }
   }
 });
+
+// card evm-buy-gas-floor, review of 498eae83 L1: the kit takes a route only where its swap fits 476,190 (500,000 / 1.05),
+// which leaves 23,810 for what moves before the buy lands, less than one first crossing of a v4 tick (two fee-growth
+// slots set from 0, 2 x 22,100). The helper's limit covers that: PrivacyPoolSimple.buy reverts SwapGasTooLow under
+// BUY_SWAP_GAS + BUY_FAIL_GAS + 1,000 left (PrivacyPoolSimple.sol:75), so the estimate lands where that check passes and
+// every gas of the limit above the estimate reaches the swap, which is given all but BUY_FAIL_GAS (:78; a 64th of the gas
+// left is under BUY_FAIL_GAS, so EIP-150 takes nothing more): the swap gets at least BUY_SWAP_GAS + (limit - estimate)
+test("evm-buy-gas-floor L1: at every measured estimate a buy's limit leaves its swap at least 544,200 gas (500,000 and two first tick crossings)", async () => {
+  const [BUY_SWAP_GAS, TICK_CROSSINGS] = [500_000n, 2n * 22_100n];
+  for (const estimate of [ONE_HOP_DEPTH_2, ONE_HOP_DEPTH_11, HEAVIEST_DEPTH_2, HEAVIEST_DEPTH_32]) {
+    const { a, sent } = await carry("buyBaseSepolia", { estimate });
+    assert.deepEqual([a.status, code(a), sent.length], [200, "ok", 1], JSON.stringify(a.body));
+    const swap = BUY_SWAP_GAS + (txFields(sent[0]!).gas - estimate);
+    assert.ok(swap >= BUY_SWAP_GAS + TICK_CROSSINGS, `estimate ${estimate}: the swap gets ${swap}`);
+  }
+});
