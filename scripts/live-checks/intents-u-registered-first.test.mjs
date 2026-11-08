@@ -73,3 +73,38 @@ test("planted bundles: the good lines PASS; each line changed so the gate no lon
     assert.deepEqual(check(js).lines, [ALL[i]], `planted ${i}`);
   }
 });
+
+// ---- the mainnet run's read-back (intents-u-registered-first-run.mjs): the owner's run, not made yet, so its answers
+// here are built in the RPC's own shape (EXPERIMENTAL_tx_status, call_function's storage_balance_of), not recorded ----
+const R = await import("./intents-u-registered-first-run.mjs");
+const U = "0fddd0bfdaa562c5cc85461d6d8f33b344d054d48490c5dac1ffe17ad178dd22";
+const RUN = { u: U, reg: "9EhDqfwUH1ZmDmrSS2d2d7sHtoefquSaBBVaGmGJj4Rv", intent: "6fb2C7emjPC3zruNHm3maqTifGjQYwFWaazHKz9N6J5w", relayer: "bind.confidential.unrlzd.near" };
+const b64 = (v) => Buffer.from(JSON.stringify(v)).toString("base64");
+const status = (receiver, method, args, ok = true) => ({
+  status: ok ? { SuccessValue: "" } : { Failure: {} },
+  transaction: { signer_id: RUN.relayer, receiver_id: receiver, actions: [{ FunctionCall: { method_name: method, args: b64(args), gas: 1, deposit: "0" } }] },
+  transaction_outcome: { block_hash: "h", outcome: { status: { SuccessReceiptId: "r" } } },
+  receipts_outcome: [{ outcome: { status: ok ? { SuccessValue: "" } : { Failure: {} } } }],
+});
+const REG = status(R.USDC, "storage_deposit", { account_id: U, registration_only: true });
+const payload = JSON.stringify({ signer_id: U, verifying_contract: "intents.near", deadline: "2026-11-09T02:00:00.000Z", nonce: "x", intents: [] });
+const INTENT = status(R.INTENTS, "execute_intents", { signed: [{ standard: "raw_ed25519", payload, public_key: "ed25519:1", signature: "ed25519:1" }] });
+const BAL = { total: "1250000000000000000000", available: "0" };
+const GOOD_RUN = { reg: [REG, REG], intent: [INTENT, INTENT], heights: { reg: 100, intent: 105 }, before: { reg: [null, null], intent: [BAL, BAL] } };
+
+test("mainnet run read-back: a fresh U registered by the relayer before its intent: PASS; each planted fault FAILs", () => {
+  assert.deepEqual(R.judge(RUN, GOOD_RUN).lines, []);
+  const planted = [
+    ["intent before registration", { ...GOOD_RUN, heights: { reg: 105, intent: 100 } }, "BAD the registration's block is not before the intent's"],
+    ["U unregistered before its intent", { ...GOOD_RUN, before: { ...GOOD_RUN.before, intent: [null, null] } }, "BAD storage_balance_of(U) not registered on both RPCs before its intent"],
+    ["one RPC says null before the intent", { ...GOOD_RUN, before: { ...GOOD_RUN.before, intent: [BAL, null] } }, "BAD storage_balance_of(U) not registered on both RPCs before its intent"],
+    ["U registered before (not fresh)", { ...GOOD_RUN, before: { ...GOOD_RUN.before, reg: [BAL, BAL] } }, "BAD U was not fresh: storage_balance_of(U) not null on both RPCs before its registration"],
+    ["another account registered", { ...GOOD_RUN, reg: [status(R.USDC, "storage_deposit", { account_id: "b".repeat(64), registration_only: true }), status(R.USDC, "storage_deposit", { account_id: "b".repeat(64), registration_only: true })] }, "BAD the reg tx does not register exactly U, registration_only"],
+    ["registration failed", { ...GOOD_RUN, reg: [status(R.USDC, "storage_deposit", { account_id: U, registration_only: true }, false), status(R.USDC, "storage_deposit", { account_id: U, registration_only: true }, false)] }, "BAD the reg tx did not succeed in every receipt"],
+    ["the RPCs disagree", { ...GOOD_RUN, intent: [INTENT, REG] }, "BAD the intent tx does not read alike on both RPCs"],
+  ];
+  for (const [name, a, line] of planted) assert.deepEqual(R.judge(RUN, a).lines, [line], name);
+  assert.throws(() => R.argsOf({ ...RUN, u: "alice.near" }));
+  assert.throws(() => R.argsOf({ ...RUN, intent: RUN.reg }));
+  assert.match(R.record(RUN), /^CARD intents-u-registered-first \/ mainnet run: PASS\nMoney path: yes\nTx: near 9EhD\S+ bind\.confidential\.unrlzd\.near\nTx: near 6fb2\S+ bind\.confidential\.unrlzd\.near\n/);
+});
