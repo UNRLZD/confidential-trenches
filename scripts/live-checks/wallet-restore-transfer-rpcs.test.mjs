@@ -11,7 +11,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { JOBS, USDC, W, check, replayer, spoil } from "./wallet-restore-transfer-rpcs.mjs";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { CHECK, JOBS, USDC, W, check, replayer, spoil } from "./wallet-restore-transfer-rpcs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-restore-transfer-rpcs.answers.json", import.meta.url), "utf8"));
 // a replay reaches no provider, so it waits for none: each run ends in seconds, the helper route's 50,000 blocks of Base
@@ -118,7 +120,8 @@ test("a replay's child reads a clock that stands still, so the wallet's spare wa
 });
 
 test("every stdio bridge of the wallet's checks hands a replay's answers one at a time in the read's own order, and every live check that runs one gives its replay the still clock (card spares-replay-order: one fix on every bridge)", () => {
-  const dir = new URL("../../packages/wallet/scripts/", import.meta.url);
+  // the bridges' folder, by the path the live check itself runs its bridge from (CHECK), so no file here names it
+  const dir = pathToFileURL(path.dirname(CHECK) + path.sep);
   const bridges = readdirSync(dir).filter((f) => f.endsWith(".ts") && /createInterface\(\{ input: process\.stdin \}\)/.test(readFileSync(new URL(f, dir), "utf8")));
   assert.ok(bridges.length >= 4, bridges.join(", "));
   for (const f of bridges) {
