@@ -10,7 +10,7 @@ import type { MarketChain } from "../discover/fields.ts";
 import { TF_SECONDS } from "./candles.ts";
 import type { Bar, ChartTf } from "./candles.ts";
 
-const BASE = "https://api.confidential.unrealized.trade";
+const BASE = "https://ct-api.unrealized.trade";
 export const TRADES_LIMIT = 50;
 export const TRADES_URL = (chain: MarketChain, token: string): string =>
   `${BASE}/v1/market/trades?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}&limit=${TRADES_LIMIT}`;
