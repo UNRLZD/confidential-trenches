@@ -42,6 +42,8 @@ class Chain {
   txs = new Map<string, "ok" | "failed">();
   /** the access key nonce answered as a JSON string (nearcore answers a number; a hostile RPC may not) */
   nonceString = false;
+  /** the head hash both RPCs answer (default: a 32-byte hash per height) */
+  headHash: string | null = null;
   /** U's key nonce at a height (default: the current one at every height) */
   nonceAt: (h: number) => bigint = () => this.nonce;
   /** what the second RPC answers differently, at the same height */
@@ -64,7 +66,7 @@ class Chain {
       name,
       block: async (p) => {
         const h = "block_id" in p ? p.block_id : this[k].height;
-        return { result: { header: { height: h, hash: sk.hash ?? base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
+        return { result: { header: { height: h, hash: sk.hash ?? this.headHash ?? base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
       },
       query: async (p) => {
         const h = at(p);
@@ -347,6 +349,40 @@ test("L a nonce of 2^64-1 or more, answered as a string by both RPCs, is unread:
   chain.nonce = 2n ** 64n - 2n;
   assert.equal((await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain))).kind, "moved");
   assert.equal(decode(chain.sent[0]!).nonce, 2n ** 64n - 1n);
+});
+
+test("M1 a head hash of 33 or 31 bytes, the same on both RPCs, is unread: nothing opened or signed (review 4 M1)", async () => {
+  for (const n of [33, 31, 0]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.headHash = base58.encode(new Uint8Array(n).fill(7));
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, String(n));
+    assert.equal(seedOpens, 0);
+    assert.equal(chain.sent.length, 0);
+  }
+});
+
+test("L1 the amount is a digit string: a JSON number or a bigint is refused (review 4 L1)", () => {
+  for (const amount of [5, 5n, "05", "5.0", " 5"]) {
+    const calls = moveCalls(TO, 5n, false, 0n);
+    (calls.at(-1)!.args as Record<string, unknown>).amount = amount;
+    assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls, 10n, 0n), MoveOutRefused, String(amount));
+  }
+  assert.equal(checkMoveCalls(U, TO, TOKEN, moveCalls(TO, 5n, false, 0n), 10n, 0n).calls.at(-1)!.args.amount, "5");
+});
+
+test("L2 a call with a field of any other name is refused as a move-out refusal, never a TypeError (review 4 L2)", () => {
+  for (const extra of [new Uint8Array(1), "unsigned", { x: 1 }, undefined]) {
+    for (const k of [0, 1]) {
+      const calls = moveCalls(TO, 5n, true, STORAGE_MIN) as unknown as Record<string, unknown>[];
+      calls[k]!.x = extra;
+      assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls as never, 10n, STORAGE_MIN), (e: unknown) => e instanceof MoveOutRefused && /method, args, gas and deposit/.test((e as Error).message), `call ${k}: ${String(extra)}`);
+    }
+  }
+  const calls = moveCalls(TO, 5n, false, 0n) as unknown as Record<string, unknown>[];
+  delete calls[0]!.gas;
+  assert.throws(() => checkMoveCalls(U, TO, TOKEN, calls as never, 10n, 0n), MoveOutRefused);
 });
 
 test("M3 U's one key is not U's own key: nothing signed", async () => {

@@ -92,6 +92,16 @@ test("the signer signs only a move a check sealed (review 3): an unchecked list,
   // a nonce that does not fit the u64 is refused, never cut to its low 8 bytes (exit-ids-out delta review 4, finding 3)
   for (const n of [2n ** 64n, 2n ** 64n + 8n, -1n]) assert.throws(() => m.signMoveTx(PK, SK, n, BH, sealed), /does not fit 8 bytes/, String(n));
   assert.equal(base64.decode(m.signMoveTx(PK, SK, 2n ** 64n - 1n, BH, sealed).signed).length, signed.length, "the largest u64 signs");
+  // the block hash is exactly 32 bytes: 33 or 31 would move every field after it (review 4 M1)
+  for (const n of [33, 31, 0, 64]) assert.throws(() => m.signMoveTx(PK, SK, 1n, base58.encode(new Uint8Array(n).fill(7)), sealed), /block hash is not 32 bytes/, String(n));
+  assert.throws(() => m.signMoveTx(PK, SK, 1n, "0OIl", sealed), /block hash is not 32 bytes/, "not base58");
+  // a getter that answers the checked account once, then another: the copy the check read is the one sealed
+  let reads = 0;
+  const flip = m.moveCalls(TO, 5n, false, 0n);
+  Object.defineProperty(flip[0]!.args, "receiver_id", { enumerable: true, get: () => (reads++ === 0 ? TO : "b".repeat(64)) });
+  const flipped = m.checkMoveCalls(U, TO, TOKEN, flip, 10n, 0n);
+  assert.equal(flipped.calls[0]!.args.receiver_id, TO);
+  assert.ok(Buffer.from(base64.decode(m.signMoveTx(PK, SK, 1n, BH, flipped).signed)).includes(Buffer.from(`"receiver_id":"${TO}"`)));
   // a list the check refuses is never sealed
   assert.throws(() => m.checkMoveCalls(U, TO, TOKEN, m.moveCalls(TO, 50n, false, 0n), 10n, 0n), m.MoveOutRefused);
   // a seal of the real module is not one of the copy's, and the copy's are not the module's: one set per module

@@ -115,6 +115,16 @@ const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 const IMPLICIT = /^[0-9a-f]{64}$/;
 const big = (x: unknown): bigint | null => (typeof x === "string" && DIGITS.test(x) ? BigInt(x) : typeof x === "number" && Number.isSafeInteger(x) && x >= 0 ? BigInt(x) : null);
+/** A base58 hash of exactly 32 bytes, else null. */
+const hash32 = (x: unknown): Uint8Array | null => {
+  if (typeof x !== "string") return null;
+  try {
+    const b = base58.decode(x);
+    return b.length === 32 ? b : null;
+  } catch {
+    return null;
+  }
+};
 const resultAt = (a: unknown, at: number): Obj | undefined => {
   const r = isObj(a) && a.error === undefined ? a.result : undefined;
   return isObj(r) && r.error === undefined && r.block_height === at ? r : undefined;
@@ -188,7 +198,7 @@ export async function readMoveOut(u: string, to: string, token: string, rpcs: re
         r.call("gas_price", [at]),
       ]);
       const head = isObj(b) && isObj(b.result) && isObj(b.result.header) ? b.result.header : undefined;
-      if (!head || head.height !== at || typeof head.hash !== "string") return null;
+      if (!head || head.height !== at || typeof head.hash !== "string" || hash32(head.hash) === null) return null;
       const nonce = keyNonce(keys, at, own);
       if (resultAt(code, at)?.code_hash !== VAULT_TOKEN_CODE_HASH) return null; // the token's code is the pin (W:928)
       const a = resultAt(acct, at);
@@ -259,6 +269,8 @@ export function checkMoveCalls(u: string, to: string, token: string, given: read
   } catch {
     throw new MoveOutRefused("the calls are not plain data");
   }
+  // each call is exactly method, args, gas and deposit: a field of any other name is refused, never frozen or signed
+  if (!calls.every((c) => isObj(c) && Object.keys(c).sort().join() === "args,deposit,gas,method" && isObj(c.args))) throw new MoveOutRefused("each call is method, args, gas and deposit, nothing else");
   // the copy's account ids, read once (a getter on `given` ran in the clone and is gone)
   if (!calls.every((c) => isObj(c) && isObj(c.args) && (c.args.receiver_id === undefined || typeof c.args.receiver_id === "string") && (c.args.account_id === undefined || typeof c.args.account_id === "string"))) throw new MoveOutRefused(strings);
   if (!IMPLICIT.test(u) || to === u || to === token) throw new MoveOutRefused("the typed account is U or the token");
@@ -268,7 +280,7 @@ export function checkMoveCalls(u: string, to: string, token: string, given: read
   const last = calls.at(-1);
   if (calls.length < 1 || calls.length > 2 || !last || last.method !== "ft_transfer" || last.deposit !== 1n || last.gas !== MOVE_GAS.ft_transfer) throw new MoveOutRefused("one ft_transfer with 1 yocto, last");
   if (Object.keys(last.args).join() !== "receiver_id,amount" || last.args.receiver_id !== to) throw new MoveOutRefused("ft_transfer names the typed account and an amount, no memo");
-  const amount = big(last.args.amount);
+  const amount = typeof last.args.amount === "string" ? big(last.args.amount) : null; // a string, as NEP-141 reads it: never a JSON number
   if (amount === null || amount < 1n || amount > usdc - 1n) throw new MoveOutRefused("the amount is above U's USDC less one base unit");
   if (calls.length === 2) {
     const r = calls[0]!;
@@ -300,8 +312,11 @@ function seal(move: SealedMove): SealedMove {
 function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {
   if (!SEALED.has(move)) throw new MoveOutRefused("the move is not one a check of this module passed");
   const { signer: u, receiver: token, calls } = move;
+  // the block hash is exactly 32 bytes: one of another length moves every field after it in the bytes nearcore reads
+  const blockHash32 = hash32(blockHash);
+  if (blockHash32 === null) throw new MoveOutRefused("the block hash is not 32 bytes of base58");
   if (Array.from(publicKey, (b) => b.toString(16).padStart(2, "0")).join("") !== u) throw new MoveOutRefused("the key is not the move's U");
-  const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(base58.decode(blockHash)).u32(calls.length);
+  const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(blockHash32).u32(calls.length);
   for (const c of calls) tx.u8(2).string(c.method).bytes(new TextEncoder().encode(JSON.stringify(c.args))).u64(c.gas).u128(c.deposit);
   const bytes = tx.done();
   const digest = sha256(bytes);
