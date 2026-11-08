@@ -11,7 +11,7 @@ import { VAULT_CONSTANTS, vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote } from "../src/notes/restore.ts";
-import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRestorePass, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
+import { ID_READ_TRIES, nearBalanceReader as balanceAt, nearIdReader as idReaderAt, openRestorePass, passTimeMs, PASS_TRIES, PASS_WAIT_MS, type RestorePass } from "../src/restore/id-reader.ts";
 import { rereadOnOpen, secondScan, type AfterRpc } from "../src/restore/after.ts";
 import { afterRestore, DEPOSIT_ID_MARGIN, REREAD_MS, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
 
@@ -376,7 +376,7 @@ const timeOf = (h: number): number => T0 + (h - 1000) * 1000;
 const MVAULT = NEAR_NETWORKS.mainnet.vault;
 const MSCOPE = vaultScopeOf(keccak_256, MVAULT, USDC);
 const mid = (i: number) => depositAccount(SEED, MSCOPE, i).account;
-type StepWorld = { tip: number; vault?: number; intents?: number; skip?: Set<number>; finalMs?: number; restoreHash?: string; restoreMs?: number; retain?: number; money: string[] };
+type StepWorld = { tip: number; vault?: number; intents?: number; skip?: Set<number>; finalMs?: number; restoreHash?: string; restoreMs?: number; retain?: number; blockMs?: number; failBlock?: number; blockTip?: number; money: string[] };
 const tree = { size: 0, depth: 0, root: "0" };
 const vaultConfig = { version: "blindfill-vault 0.1.0", asset: USDC, scope: String(MSCOPE), max_tree_depth: 32, min_deposit: "1000000", max_relay_fee_bps: 5000, page_max: VAULT_CONSTANTS.PAGE_MAX };
 function stepChain(url: string, s: StepWorld): AfterRpc {
@@ -398,11 +398,18 @@ function stepChain(url: string, s: StepWorld): AfterRpc {
       return a;
     },
     block: async (p) => {
-      const h = "block_id" in p ? p.block_id : s.tip;
+      // `failBlock`: that many `block` reads fail first, a bare HTTP 429 (FastNEAR, delta review 7), then one UNKNOWN_BLOCK
+      // from a node a block behind
+      if (s.failBlock !== undefined && s.failBlock > 0) {
+        s.failBlock--;
+        if (s.failBlock > 0) throw new Error("HTTP 429");
+        if ("block_id" in p) return noBlock;
+      }
+      const h = "block_id" in p ? p.block_id : (s.blockTip ?? s.tip);
       // `retain`: the depth a provider still serves a block by height (FastNEAR about 20.7 h, dRPC about 28 h, read 8 Nov)
       if ("block_id" in p && (h > s.tip || s.skip?.has(h) || (s.retain !== undefined && h < s.tip - s.retain))) return noBlock;
       const hash = h === 1000 && s.restoreHash ? s.restoreHash : hashOf(h);
-      const ms = "finality" in p && s.finalMs !== undefined ? s.finalMs : h === 1000 && s.restoreMs !== undefined ? s.restoreMs : timeOf(h);
+      const ms = "finality" in p && s.finalMs !== undefined ? s.finalMs : h === 1000 && s.restoreMs !== undefined ? s.restoreMs : T0 + (h - 1000) * (s.blockMs ?? 1000);
       return { jsonrpc: "2.0", result: { header: { height: h, hash, timestamp_nanosec: String(BigInt(ms) * 1_000_000n) } } };
     },
   };
@@ -411,7 +418,7 @@ function stepChain(url: string, s: StepWorld): AfterRpc {
 function stepPair(base: StepWorld) {
   const a: StepWorld = { ...base }, b: StepWorld = { ...base };
   const rpcs = [stepChain(FAST, a), stepChain(DRPC, b)] as const;
-  const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined, restoreMs: undefined, retain: undefined };
+  const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined, restoreMs: undefined, retain: undefined, blockMs: undefined, failBlock: undefined, blockTip: undefined };
   return { rpcs, set: (x: Partial<StepWorld>, y: Partial<StepWorld> = x) => void (Object.assign(a, clear, x), Object.assign(b, clear, y)) };
 }
 const so = { sleep: noSleep, tries: 1, first: () => 0 };
@@ -535,6 +542,55 @@ test("step 7's clock: the pass keeps its block's time from its open, agreed on b
   const at73 = 1000 + 73 * HOUR;
   set({ tip: at73, ...gc }, { tip: at73, ...gcB });
   assert.deepEqual(await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: so }), { due: false });
+});
+
+// delta review 7: the header reads are retried as the views are, in every path (the open, both finals, the bound); a
+// time-less pass is refused by the steps; the bound block's stand-in is older than the LOWER final by the delivery time.
+test("step 7's clock: header reads retried as the views (a 429, a node a block behind); a time-less pass refused; the bound against the lower final", async () => {
+  // the open: two 429s then an UNKNOWN_BLOCK on dRPC's read of the pass's block, then its header: the pass opens with
+  // the time; with tries 1 it is refused, naming the cause
+  {
+    const { rpcs, set } = stepPair({ tip: 1000, money: [] });
+    set({}, { failBlock: 3 });
+    const pass = await openRestorePass("mainnet", rpcs, { sleep: noSleep });
+    assert.equal(passTimeMs(pass), T0);
+    set({}, { failBlock: 1 });
+    await assert.rejects(openRestorePass("mainnet", rpcs, so), /^Error: https:\/\/near\.drpc\.org: the pass's block 1000 is not served \(UNKNOWN_BLOCK\)$/);
+    set({}, { failBlock: 2 });
+    await assert.rejects(openRestorePass("mainnet", rpcs, so), /^Error: HTTP 429$/);
+  }
+  // the steps' finals and bound: a 429 on each is retried
+  {
+    const { rpcs, set } = stepPair({ tip: 1000, money: [mid(at(0, 1))] });
+    const restored = await openRestorePass("mainnet", rpcs, so);
+    const o = { sleep: noSleep, first: () => 0 };
+    set({ tip: 1722, failBlock: 2 }, { tip: 1722, failBlock: 2 });
+    assert.equal((await secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...o, margin: 2 } })).due, true);
+    const plan = { scope: SCOPE, lane: 0, next: 0, after: restored.h, rereads: [] };
+    set({ tip: 2000, failBlock: 2 }, { tip: 2000 });
+    assert.equal((await rereadOnOpen({ network: "mainnet", rpcs, restored, plan, opts: o })).due, true);
+  }
+  // a pass opened on query-only objects holds no time: the steps refuse it, even once the objects read blocks
+  {
+    const { rpcs } = stepPair({ tip: 1000, money: [] });
+    const q = rpcs.map((r) => ({ name: r.name, query: r.query })) as unknown as [AfterRpc, AfterRpc];
+    const pass = await openRestorePass("mainnet", q, so);
+    assert.equal(passTimeMs(pass), null);
+    q.forEach((r, k) => Object.assign(r, { block: rpcs[k]!.block }));
+    const plan = { scope: SCOPE, lane: 0, next: 0, after: pass.h, rereads: [] };
+    await assert.rejects(rereadOnOpen({ network: "mainnet", rpcs: q, restored: pass, plan, opts: so }), /^Error: restored: the pass was opened on RPCs that read no blocks, so it holds no block time$/);
+    await assert.rejects(secondScan({ seed64: SEED, network: "mainnet", rpcs: q, restored: pass, wallets: { wallets: [], unread: [] }, gap: 3, opts: so }), /holds no block time/);
+  }
+  // 205 ms blocks (600 of them just over 2 min) and dRPC 36 blocks behind, both honest: against its own final, FastNEAR's
+  // stand-in for the bound stays within 2 min of dRPC's final for good; against the lower final, the scan is due
+  {
+    const { rpcs, set } = stepPair({ tip: 1000, money: [mid(at(0, 1))] });
+    const restored = await openRestorePass("mainnet", rpcs, so);
+    set({ tip: 10_000, blockMs: 205 }, { tip: 10_000, blockTip: 9_964, blockMs: 205 });
+    const got = await secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...so, margin: 2 } });
+    assert.ok(got.due);
+    assert.deepEqual(got.ids.lanes[0]!.money, [at(0, 1)]);
+  }
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------

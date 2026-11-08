@@ -119,6 +119,31 @@ export async function blockHeader(r: BlockRpc, params: { block_id: number } | { 
   if ("block_id" in params && h.height !== params.block_id) throw new Error(`${r.name}: ${what}: answered block ${String(h.height)}, not ${params.block_id}`);
   return { h: h.height as number, hash: h.hash, ms: blockTimeMsOf(h.timestamp_nanosec) };
 }
+/**
+ * blockHeader retried on its provider as the views are (`tries` reads, ID_READ_TRIES unless given, `backoffMs`
+ * doubling from ID_READ_BACKOFF_MS; delta review 7: FastNEAR answered a bare HTTP 429 to 9 of 60 opens), so a busy
+ * provider or a node a block behind is no refusal. `served`: a block that must exist (the pass's agreed block), so
+ * NO_BLOCK is retried too, then refused as "not served"; else NO_BLOCK is returned (a skipped height).
+ */
+export async function headerRetried(
+  r: BlockRpc,
+  params: { block_id: number } | { finality: "final" },
+  what: string,
+  o: { tries?: number; backoffMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  served = false,
+): Promise<{ h: number; hash: string; ms: number } | typeof NO_BLOCK> {
+  const tries = o.tries ?? ID_READ_TRIES, backoff = o.backoffMs ?? ID_READ_BACKOFF_MS, sleep = o.sleep ?? sleepMs;
+  for (let k = 0; ; k++) {
+    try {
+      const y = await blockHeader(r, params, what);
+      if (served && y === NO_BLOCK) throw new Error(`${r.name}: ${what} ${"block_id" in params ? params.block_id : "final"} is not served (UNKNOWN_BLOCK)`);
+      return y;
+    } catch (e) {
+      if (k + 1 >= tries) throw e;
+      await sleep(backoff * 2 ** k);
+    }
+  }
+}
 
 /** The view's answer and its block, or null for an account the provider says does not exist (view_account only). */
 async function view(rpc: NearRpc, params: Obj, what: string, ask: Ask): Promise<{ v: unknown; b: Block | null }> {
@@ -227,7 +252,8 @@ export function openRestorePass(network: NearNetwork, rpcs: readonly [NearRpc, N
     // provider's early time would end step 7's re-reads at once; delta review 6)
     let ms: number | null = null;
     if (readsBlocks(rpcs[0]) && readsBlocks(rpcs[1])) {
-      const hs = await Promise.all([blockHeader(rpcs[0], { block_id: floor }, "the pass's block"), blockHeader(rpcs[1], { block_id: floor }, "the pass's block")]);
+      // retried as the views (a 429, a node a block behind); the hash and time checks below refuse at once
+      const hs = await Promise.all(rpcs.map((r) => headerRetried(r as BlockRpc, { block_id: floor }, "the pass's block", opts, true)));
       for (const [k, y] of hs.entries()) if (y === NO_BLOCK || y.hash !== x.hash) throw new Error(`${rpcs[k]!.name}: the pass's block ${floor} is not ${x.hash}; the restore does not start`);
       const [t0, t1] = hs as { ms: number }[];
       if (t0!.ms !== t1!.ms) throw new Error(`the RPCs' times of the restore's block ${floor} differ; the restore does not start`);

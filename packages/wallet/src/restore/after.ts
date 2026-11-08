@@ -26,7 +26,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { NEAR_NETWORKS, type NearNetwork } from "../deposit/account.ts";
 import { restoreNotes, type NoteRestore, type RestoreArgs } from "../notes/restore.ts";
 import { restoreArmAccounts, SECOND_SCAN_BLOCKS, SECOND_SCAN_DELIVERY_MS, secondScanBoundHeight, secondScanDue, type ArmRestore, type FinalPair } from "./arms.ts";
-import { blockHeader, isRestorePass, NO_BLOCK, nearBalanceReader, nearIdReader, openRestorePass, passTimeMs, type BlockRpc, type IdReaderOpts, type PassOpts, type RestorePass } from "./id-reader.ts";
+import { headerRetried, isRestorePass, NO_BLOCK, nearBalanceReader, nearIdReader, openRestorePass, passTimeMs, type BlockRpc, type IdReaderOpts, type PassOpts, type RestorePass } from "./id-reader.ts";
 import { REREAD_MS, restoreDepositIds, type AfterRestore, type DepositIds, type IdState, type WalletRestore } from "./wallets.ts";
 
 /** A NEAR provider for views (`query`) and block headers (`block`), named by its exact URL (../withdraw/relay.ts relayRpc). */
@@ -37,8 +37,8 @@ export type AfterOpts = Omit<PassOpts, "after"> & Pick<IdReaderOpts, "first" | "
 const why = (e: unknown): string => (e instanceof Error ? e.message : "the read failed").slice(0, 200);
 
 // both providers' final blocks, now
-async function finalsNow(rpcs: readonly [AfterRpc, AfterRpc]): Promise<FinalPair> {
-  const x = await Promise.all(rpcs.map((r) => blockHeader(r, { finality: "final" }, "the final block")));
+async function finalsNow(rpcs: readonly [AfterRpc, AfterRpc], o: AfterOpts): Promise<FinalPair> {
+  const x = await Promise.all(rpcs.map((r) => headerRetried(r, { finality: "final" }, "the final block", pick(o))));
   const [a, b] = x as { h: number; ms: number }[];
   return { heights: [a!.h, b!.h], timesMs: [a!.ms, b!.ms] };
 }
@@ -53,12 +53,13 @@ function restoreTimeMs(pass: RestorePass): number {
 
 // each provider's time of the bound block: the first block at or above it (NEAR skips heights). Once that provider's
 // final is more than SECOND_SCAN_BLOCKS past the bound, a later block's time stands in (later, so due is never early):
-// the block SECOND_SCAN_BLOCKS * 2^n below the final, the nearest one at least SECOND_SCAN_DELIVERY_MS older than it, or
-// the bound itself. A block that far back is not read: an old block is no longer served by height (delta review 6).
-async function boundTimesMs(rpcs: readonly [AfterRpc, AfterRpc], bound: number, now: FinalPair): Promise<[number, number]> {
+// the block SECOND_SCAN_BLOCKS * 2^n below the final, the nearest one at least SECOND_SCAN_DELIVERY_MS older than the
+// lower final, or the bound itself. A block that far back is not read: an old block is no longer served by height
+// (delta review 6).
+async function boundTimesMs(rpcs: readonly [AfterRpc, AfterRpc], bound: number, now: FinalPair, o: AfterOpts): Promise<[number, number]> {
   const firstFrom = async (r: AfterRpc, height: number): Promise<number> => {
     for (let k = height; k <= height + VAULT_SYNC_LAG_MAX; k++) {
-      const y = await blockHeader(r, { block_id: k }, "the bound block");
+      const y = await headerRetried(r, { block_id: k }, "the bound block", pick(o));
       if (y !== NO_BLOCK) return y.ms;
     }
     throw new Error(`${r.name}: no block from ${height} to ${height + VAULT_SYNC_LAG_MAX}`);
@@ -67,7 +68,9 @@ async function boundTimesMs(rpcs: readonly [AfterRpc, AfterRpc], bound: number, 
     for (let d = SECOND_SCAN_BLOCKS; ; d *= 2) {
       const h = Math.max(bound, now.heights[k] - d);
       const ms = await firstFrom(rpcs[k], h);
-      if (h === bound || ms + SECOND_SCAN_DELIVERY_MS < now.timesMs[k]) return ms;
+      // older than the LOWER final by the delivery time (delta review 7: against its own final, two honest providers a
+      // few blocks apart could keep it within 2 min of the other's final for good)
+      if (h === bound || ms + SECOND_SCAN_DELIVERY_MS < Math.min(...now.timesMs)) return ms;
     }
   };
   return await Promise.all([one(0), one(1)]);
@@ -99,7 +102,7 @@ export async function rereadOnOpen(a: { network: NearNetwork; rpcs: readonly [Af
   ownPass(restored, network, rpcs);
   if (plan?.after !== restored.h) throw new Error("plan: not the restore's (its block is not the pass's)");
   const restoreMs = restoreTimeMs(restored);
-  const now = await finalsNow(rpcs);
+  const now = await finalsNow(rpcs, o);
   if (Math.min(...now.timesMs) >= restoreMs + REREAD_MS) return { due: false };
   const pass = await openRestorePass(network, rpcs, passOpts(o, restored.h));
   const read = await nearIdReader(network, rpcs, pass, readerOpts(o));
@@ -137,9 +140,9 @@ export async function secondScan(
   ownPass(restored, network, rpcs);
   const restoreMs = restoreTimeMs(restored);
   const at: FinalPair = { heights: [restored.h, restored.h], timesMs: [restoreMs, restoreMs] };
-  const now = await finalsNow(rpcs);
+  const now = await finalsNow(rpcs, o);
   const bound = secondScanBoundHeight(at);
-  const boundMs = now.heights.every((h) => h >= bound) ? await boundTimesMs(rpcs, bound, now) : null;
+  const boundMs = now.heights.every((h) => h >= bound) ? await boundTimesMs(rpcs, bound, now, o) : null;
   if (!secondScanDue(at, now, boundMs)) return { due: false };
   const { vault, usdc: token } = NEAR_NETWORKS[network];
   const notes = await restoreNotes({
