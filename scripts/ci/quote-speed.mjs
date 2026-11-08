@@ -123,7 +123,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         runTry: async (i) => {
           if (check === null) {
             linkKit();
-            ({ check } = await import(pathToFileURL(path.join(ROOT, CHECK)).href));
+            // CHECK, as a static path (kit-reach refuses an import it cannot read); loaded once the kit is linked
+            ({ check } = await import("../live-checks/evm-quote-warm-round.mjs"));
           }
           return runTry(i);
         },
