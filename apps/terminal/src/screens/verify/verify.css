@@ -57,6 +57,9 @@
 .vmeta { margin: 6px 0 0; padding: 0 2px; display: flex; flex-direction: column; gap: 6px; }
 .vfy .t3 { color: var(--text-3); }
 .vfy .sk { display: inline-block; width: 90px; height: 12px; background: #181818; border-radius: 6px; animation: vfy-skp 1.2s linear infinite; vertical-align: middle; }
+/* a skeleton line per RPC (card verify-pools): set at its line's top, the skeleton never sticks out of a host's line
+   (centred, it stood 0.2 px out of each at 1440 and the pools below moved 0.4 px as the read landed) */
+.vmeta .rpcline .sk { vertical-align: top; }
 
 /* the pools (card verify-pools): a heading, then a row per chain as the vault's rows; an opened row's block and RPCs as
    the vault's meta, and its two explorer links, each a 44 px tap */

@@ -125,7 +125,9 @@ export function Verify({ view, pools, onClose, opened = [] }: { view: VerifyView
             </div>
             <div>
               <dt><W id="rpcs" /></dt>
-              <dd className="num">{read ? (read.rpcs.length ? read.rpcs.map((r) => <span key={r} className="rpcline">{host(r)}</span>) : "—") : <span className="sk" />}</dd>
+              {/* before the read, a skeleton line per RPC of the pair, so the read's two hosts fill the lines held for
+                  them and the pools below never move (BAR-10's CLS at /verify, card verify-pools) */}
+              <dd className="num">{read ? (read.rpcs.length ? read.rpcs.map((r) => <span key={r} className="rpcline">{host(r)}</span>) : "—") : [0, 1].map((i) => <span key={i} className="rpcline"><span className="sk" /></span>)}</dd>
             </div>
           </dl>
           {pools && (

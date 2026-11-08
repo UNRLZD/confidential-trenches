@@ -140,6 +140,19 @@ try {
       await ctx.close();
     }
 
+    // the read landing moves nothing below the vault's rows (card verify-pools: BAR-10's CLS at /verify): the pools'
+    // box and each of the vault's meta rows sit where they sat while loading
+    {
+      const at = async (f) => {
+        const { ctx, page } = await open(browser, w, f);
+        const boxes = await page.$$eval(".vbody > .vmeta > div, .vpools", (els) => els.map((e) => { const r = e.getBoundingClientRect(); return [e.className || e.firstElementChild?.textContent, Math.round(r.top * 10) / 10, Math.round(r.height * 10) / 10]; }));
+        await ctx.close();
+        return boxes;
+      };
+      const [before, after] = [await at("loading"), await at("read")];
+      check(before.length === 3 && JSON.stringify(before) === JSON.stringify(after), `@${w.name}: loading to read moved the block, RPCs or pools: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+    }
+
     // a tap opens a row's checks in place and a second tap closes them
     {
       const { ctx, page } = await open(browser, w, "read");
