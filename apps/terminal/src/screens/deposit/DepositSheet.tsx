@@ -5,9 +5,10 @@ import { useLocation } from "react-router";
 import { ROUTES } from "../../routes/routes.ts";
 import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
+import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
-import type { Answer, Asset, DryQuote, RecentRow, SheetState } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import type { Answer, Asset, Dest, DryQuote, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -21,6 +22,10 @@ import "./deposit.css";
 // drawn in place: Waiting, Processing with one counter (BAR-11), Deposited only at the kit's done (BAR-12), and branch D:
 // Refunded, the refund move with its counter, Held with Withdraw (withdraw.open with the id; the address is typed on
 // SIGN_HOST's own form, W:684). No dialog before a step and no timer: every change is an answer or an event.
+// The To row (card deposit-to-pool, v2 A3) names where the money goes: the NEAR vault, the cash home, and the Solana,
+// Base and Robinhood pools, each by its chain's mark (market/pads.ts). Only the vault takes a deposit from the sheet
+// today (model.ts destFundable): a pool picked asks no quote and shows no address, Not available, until the kit follows
+// money sent to a pool's address on into the pool (card pool-deposit-follow).
 
 export const SHEET_ID = "deposit";
 
@@ -34,6 +39,8 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   const { pathname } = useLocation();
   const state = src.snapshot.state;
   const balance = useBalance(src.snapshot) ?? 0n;
+  const [dest, setDest] = useState<Dest>("near");
+  const fundable = destFundable(dest);
   const [picked, setPicked] = useState<{ symbol: string; chain: string } | null>(null);
   const asset = pickAsset(src.assets, picked);
   const [amount, setAmount] = useState(() => src.start?.amount ?? "");
@@ -49,7 +56,8 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   // the dry quote follows the amount: a new amount drops the old answer at once, and an older answer never lands on a
   // newer amount
   useEffect(() => {
-    if (!asset) return;
+    // a pool picked asks nothing: deposit.dry quotes what lands in the vault, never in a pool
+    if (!asset || !fundable) return;
     const amt = parseAmount(amount);
     const n = ++seq.current;
     if (!amt) return setDry({ kind: "idle" });
@@ -57,16 +65,16 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     void dryQuote(asset, amt).then((r) => {
       if (n === seq.current) setDry(r.ok ? { kind: "ok", value: r.value } : { kind: "refused", code: r.code });
     });
-  }, [asset, amount, dryQuote, tries]);
+  }, [asset, amount, dryQuote, tries, fundable]);
 
   const status = reqId ? src.status(reqId) : null;
   const ticking = checked.kind === "ok";
   const now = useNow(src, ticking);
-  const s = sheetState({ signedIn: state?.signed_in === true, moneyOn: src.moneyOn, codeSaved: state?.code_saved !== false, asset, amount, dry, checked, status, now });
+  const s = sheetState({ dest, signedIn: state?.signed_in === true, moneyOn: src.moneyOn, codeSaved: state?.code_saved !== false, asset, amount, dry, checked, status, now });
 
   async function getAddress() {
     const amt = parseAmount(amount);
-    if (!asset || !amt) return;
+    if (!asset || !amt || !fundable) return;
     setChecked({ kind: "pending" });
     const { id, reply } = await src.quote(asset, amt);
     setReqId(id);
@@ -151,12 +159,22 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
       </>
     );
     foot = <Action kind="buy" on control="deposit-copy" onClick={() => src.copy(q.deposit_address)}><W id="copy" /></Action>;
+  } else if (s === "pool-off") {
+    body = (
+      <>
+        <Dests dest={dest} pick={setDest} />
+        <Stat tone="warn" label={<W id="notAvailable" />} />
+        <Recent rows={recentRows(state?.ops)} />
+      </>
+    );
+    foot = <Action kind="buy" on={false} control="deposit-get" onClick={() => {}}><W id="getAddress" /></Action>;
   } else if (s === "S4.20") {
     body = <Stat tone="warn" label={<W id="expired" />} />;
     foot = <Action kind="buy" on={src.moneyOn} control="deposit-get" onClick={again}><W id="getAddress" /></Action>;
   } else {
     body = (
       <>
+        <Dests dest={dest} pick={setDest} />
         <Form s={s} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
         <Recent rows={recentRows(state?.ops)} />
       </>
@@ -171,7 +189,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   }
 
   return (
-    <div className="dep" data-sheet={SHEET_ID} data-state={s}>
+    <div className="dep" data-sheet={SHEET_ID} data-state={s} data-dest={dest}>
       <div className="dep-scrim" onClick={onClose} />
       <aside className="dep-box" aria-labelledby="dep-seg-on">
         <div className="grab"><i /></div>
@@ -258,6 +276,30 @@ function Form({ s, amount, setAmount, dry, asset, assets, pick, retry }: { s: Sh
       </div>
       {quote}
     </>
+  );
+}
+
+/**
+ * The To row (card deposit-to-pool): the NEAR vault and the three pools in DESTS' order, one tile each with its chain's
+ * mark and name (data, market/pads.ts CHAINS). The picked tile is on; a tile the sheet cannot fund yet is drawn quieter,
+ * and picking it shows Not available in place of the form (pool-off).
+ */
+function Dests({ dest, pick }: { dest: Dest; pick(d: Dest): void }) {
+  return (
+    <div className="ddest">
+      <div className="lb" id="dep-to"><W id="to" /></div>
+      <div className="dtiles" role="group" aria-labelledby="dep-to" data-dests={DESTS.join(" ")}>
+        {DESTS.map((d) => {
+          const m = CHAINS[d]!;
+          return (
+            <button key={d} type="button" className={d === dest ? "on" : undefined} aria-pressed={d === dest} data-dest={d} data-fundable={destFundable(d) ? "yes" : "no"} onClick={() => pick(d)}>
+              <span className="mk" style={{ padding: Math.round(20 * m.inset) }}><img src={m.logo} alt="" /></span>
+              <span className="nm">{m.name}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

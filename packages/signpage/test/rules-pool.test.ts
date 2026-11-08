@@ -169,7 +169,8 @@ const solCtx = (o: Partial<PoolContext> = {}): PoolContext & { precommitment: bi
 const acc = (k: string, signer: boolean, writable: boolean) => ({ key: k, signer, writable });
 const cuLimit = { program: SOLANA_COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.of(2, 0x40, 0x0d, 0x03, 0) };
 type Ixx = { program: string; accounts: { key: string; signer: boolean; writable: boolean }[]; data: Uint8Array };
-const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string } = {}): Ixx => {
+// the kit's tag 1 since card pool-senders-next-page: the six, then each tree's next page (deposit.rs:72-76)
+const depositIx = (o: { program?: string; pool?: string; from?: string; fromSigns?: boolean; value?: bigint; pre?: bigint; state?: number; label?: number; mark?: string; system?: string; nextState?: string; nextLabel?: string; six?: boolean } = {}): Ixx => {
   const program = o.program ?? PROGRAM;
   const pre = preBytes(o.pre ?? PRE);
   return {
@@ -181,6 +182,7 @@ const depositIx = (o: { program?: string; pool?: string; from?: string; fromSign
       acc(solanaPoolPage(PROGRAM, 1, o.label ?? 4), false, true),
       acc(o.mark ?? solanaProgramAddress([enc("pre"), pre], PROGRAM), false, true),
       acc(o.system ?? SOLANA_SYSTEM_PROGRAM, false, false),
+      ...(o.six ? [] : [acc(o.nextState ?? solanaPoolPage(PROGRAM, 0, 1024), false, true), acc(o.nextLabel ?? solanaPoolPage(PROGRAM, 1, 1024), false, true)]),
     ],
     data: Uint8Array.from([1, ...u64(o.value ?? 2_000_000_000n), ...pre]),
   };
@@ -221,6 +223,12 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
     [ok([cuLimit, depositIx({ pre: PRE + 1n })]), "precommitment"],
     [ok([cuLimit, depositIx({ state: 2_000 })]), "state_page"],
     [ok([cuLimit, depositIx({ label: 1_100 })]), "label_page"],
+    // card pool-senders-next-page: the next pages are each tree's page after its size's, writable; a seventh account or a ninth is no form
+    [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 0, 2048) })]), "state_page"],
+    [ok([cuLimit, depositIx({ nextState: solanaPoolPage(PROGRAM, 1, 1024) })]), "state_page"],
+    [ok([cuLimit, depositIx({ nextLabel: solanaPoolPage(PROGRAM, 1, 0) })]), "label_page"],
+    [ok([cuLimit, { ...depositIx(), accounts: depositIx().accounts.slice(0, 7) }]), "deposit_accounts"],
+    [ok([cuLimit, { ...depositIx(), accounts: [...depositIx().accounts, acc(SOLANA_SYSTEM_PROGRAM, false, false)] }]), "deposit_accounts"],
     [ok([cuLimit, depositIx()], { bh: key(8) }), "blockhash"],
     [ok([cuLimit, depositIx(), { program: SOLANA_SYSTEM_PROGRAM, accounts: [acc(SOL_W, true, true), acc(other, false, true)], data: Uint8Array.of(2, 0, 0, 0, ...u64(1n)) }]), "instructions"],
     [ok([depositIx(), cuLimit]), "compute_budget"],
@@ -233,13 +241,34 @@ test("Solana deposit: another program, pool, depositor, amount, precommitment, p
   assert.throws(() => checkSolanaDeposit(ok([cuLimit, depositIx()]), depAsk, solCtx({ solana: undefined }), SOL_READS), refusedAs("solana_not_pinned"));
 });
 
+// Card pool-senders-next-page, review of 14b04117: the trees on different pages (releases grow the state tree alone),
+// each tree's next page from its own size; the next page's privileges held; a plain deposit takes the eight only.
+test("Solana deposit: each tree's next page from its own size, the trees on different pages; a read-only next page or the six alone is refused", () => {
+  const next = (tree: 0 | 1, size: number) => solanaPoolPage(PROGRAM, tree, (Math.floor(size / 1024) + 1) * 1024);
+  for (const [s, l] of [[1030, 1000], [1000, 1030]] as const) {
+    const reads = { ...SOL_READS, stateSize: s, labelSize: l };
+    const dep = (o: Parameters<typeof depositIx>[0] = {}) => wire(SOL_W, [cuLimit, depositIx({ state: s, label: l, nextState: next(0, s), nextLabel: next(1, l), ...o })]);
+    assert.equal(checkSolanaDeposit(dep(), depAsk, solCtx(), reads).amount, 2_000_000_000n, `${s}/${l}`);
+    // the state tree's next page from the label tree's size, and the label's from the state's: refused
+    assert.throws(() => checkSolanaDeposit(dep({ nextState: next(0, l) }), depAsk, solCtx(), reads), refusedAs("state_page"), `${s}/${l} state`);
+    assert.throws(() => checkSolanaDeposit(dep({ nextLabel: next(1, s) }), depAsk, solCtx(), reads), refusedAs("label_page"), `${s}/${l} label`);
+  }
+  // the right next page, read-only: refused
+  const ro = (i: 6 | 7) => { const x = depositIx(); x.accounts[i] = { ...x.accounts[i]!, writable: false }; return wire(SOL_W, [cuLimit, x]); };
+  assert.throws(() => checkSolanaDeposit(ro(6), depAsk, solCtx(), SOL_READS), refusedAs("state_page"));
+  assert.throws(() => checkSolanaDeposit(ro(7), depAsk, solCtx(), SOL_READS), refusedAs("label_page"));
+  // the six alone: every deposit the device builds names the next pages, so a plain deposit takes the eight only
+  assert.throws(() => checkSolanaDeposit(wire(SOL_W, [cuLimit, depositIx({ six: true })]), depAsk, solCtx(), SOL_READS), refusedAs("deposit_accounts"));
+});
+
 // ---------- Solana withdraw (tag 2) ----------
 
 const release: SolanaPoolRelease = { ...fxRelease, deadlineMs: NOW + 120_000n };
 const TO = key(77);
 const relIx = (r: SolanaPoolRelease = release, w = SOL_W, fp = SOL_FEE_PAYER, program = PROGRAM): Ixx => ({
   program,
-  accounts: solanaPoolReleaseAccounts({ program, pool: solanaProgramAddress([enc("pool")], program) }, w, fp, r, 6).map((a) => ({ ...a })),
+  // the kit's tag 2 since card pool-senders-next-page: the release's eight, then the next state page (release.rs:155)
+  accounts: [...solanaPoolReleaseAccounts({ program, pool: solanaProgramAddress([enc("pool")], program) }, w, fp, r, 6), acc(solanaPoolPage(program, 0, 1024), false, true)].map((a) => ({ ...a })),
   data: solanaEncodePoolRelease(r),
 });
 const send = (to = TO, v = release.withdrawnValue - release.relayFee, from = SOL_W): Ixx => ({
@@ -269,6 +298,10 @@ test("Solana withdraw: another pool program, release, recipient, fee payer, a fe
     [wdWire([relIx(), send(), send()]), solCtx(), "instructions"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 0 ? { ...x, key: key(48) } : x)) }]), solCtx(), "release_accounts"],
     [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 6 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_000) } : x)) }]), solCtx(), "release_accounts"],
+    // card pool-senders-next-page: the ninth is the state tree's next page, writable, and it is there
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 8 ? { ...x, key: solanaPoolPage(PROGRAM, 0, 2_048) } : x)) }]), solCtx(), "release_accounts"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.map((x, i) => (i === 8 ? { ...x, writable: false } : x)) }]), solCtx(), "release_accounts"],
+    [wdWire([{ ...relIx(), accounts: relIx().accounts.slice(0, 8) }]), solCtx(), "release_accounts"],
   ] as const) {
     assert.throws(() => checkSolanaWithdraw(w, wdAsk, ctx, release, SOL_READS), refusedAs(rule), rule);
   }
@@ -393,6 +426,10 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   assert.throws(() => atCap(floor - 1n), refusedAs("reserve"));
   // a higher min out the bytes carry is fine, its deposit that min out less the reserve
   assert.equal(checkSolanaSell(sellWire({ minOut: floor + 10n }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor + 10n - RESERVE);
+  // the deposit back in the six as well (card pool-senders-next-page: a sell over 1,232 bytes with the eight, the PumpSwap
+  // cashback sell with no lookup table, sends the form before d3edab1); the next pages wrong are still refused
+  assert.equal(checkSolanaSell(sellWire({ dep: { six: true } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE).back, floor - RESERVE);
+  assert.throws(() => checkSolanaSell(sellWire({ dep: { nextState: key(45) } }), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE), refusedAs("state_page"));
   for (const [w, rule] of [
     [sellWire({ minOut: floor - 1n }), "min_out"],
     [sellWire({ amount: amount - 1n }), "sell"],
@@ -670,7 +707,9 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
   assert.doesNotMatch(code, /helper\/v1|withdraw\/relay|solanaJsonRpc|solanaHelperRpc|readSolana[A-Z]\w*\(|evmAgreed|evmNow|RELEASE_HELPER|TRADE_HELPER/);
   const imports = [...src.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
   // trade/evm/quoted.ts: the record of the builds the device's own quotes made (card evm-buy-hookdata-fee); the rules
-  // call only its two predicates, which read no server (the line above holds that the file calls no reader)
-  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-buy|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
+  // call only its two predicates, which read no server (the line above holds that the file calls no reader);
+  // trade/solana/pool-deposit.ts: its constant SOLANA_POOL_NEXT_PAGE_WINDOW (card pool-senders-next-page), a module of
+  // pure builders with no reader
+  assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-(buy|deposit)|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
   assert.deepEqual([...code.matchAll(/\b(evmQuoted\w*|evmIsQuoted\w*)\b/g)].map((m) => m[1]).filter((n) => !/^evmIsQuoted(Buy|Sell)$/.test(n!)), [], "the rules call quoted.ts's predicates only, never its builders");
 });

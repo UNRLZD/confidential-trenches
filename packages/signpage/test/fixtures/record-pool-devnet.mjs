@@ -5,8 +5,8 @@
 import { solanaProgramAddress } from "../../../kit/src/checks/solana/message.ts";
 
 const RPCS = ["https://api.devnet.solana.com", "https://solana-devnet.api.onfinality.io/public"];
-const PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
-const POOL = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";
+const PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
+const POOL = "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr";
 const PRE = "13d795c96f00c2a5ea68c15e29ba995b6914a00da16e14d9ce596fd57921bc6a";
 const enc = new TextEncoder();
 const hexBytes = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));

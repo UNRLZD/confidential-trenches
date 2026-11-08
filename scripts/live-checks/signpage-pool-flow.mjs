@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-flow: the devnet pool the signing page's testnet build pins (SOL_POOLS.devnet,
-// packages/wallet/src/pool/solana.ts) is the deployed one. The pins are written out here, not read from the wallet:
+// packages/wallet/src/pool/solana.ts) is the deployed one. The pins are not read from the wallet:
 //   - the program and pool are those of contracts/pool-solana's devnet deployment record
-//     (scripts/live-checks/pool-sol-deploy.devnet.json);
+//     (scripts/live-checks/pool-sol-deploy.devnet.json, read by devnetPin); a replay is judged on today's record too, so
+//     a recording on another program or pool FAILs;
 //   - on two devnet RPCs of two operators, pool-sol-deploy's own check passes for that program:
 //     - an executable upgradeable-loader program with its upgrade authority none, and the build's code;
 //     - the pool account the program's, with the record's deposit in its trees;
@@ -24,25 +25,26 @@
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
 // error exit 2.
 import "../net-window.mjs";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DEPLOYMENT, DEVNET_PROVIDERS, RETRY_AFTER_CAP_MS, account, answerOf, check as deployCheck, onTwoOperators, operatorOf, pageAddress, poolAddress, programDataAddress, recorder, retryAfterMs, rpc } from "./pool-sol-deploy.mjs";
+import { DEVNET_PROVIDERS, RETRY_AFTER_CAP_MS, account, answerOf, check as deployCheck, onTwoOperators, operatorOf, pageAddress, poolAddress, programDataAddress, recorder, retryAfterMs, rpc, devnetPin } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-flow";
-/** SOL_POOLS.devnet in the testnet build, and the pool its program derives. */
+/** SOL_POOLS.devnet in the testnet build: its program and pool are today's deploy record's (devnetPin), its fee payer
+ *  the helper's devnet one. */
 export const PIN = Object.freeze({
-  program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ",
+  program: devnetPin().program,
   feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb",
-  pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr",
+  pool: devnetPin().pool,
   /** DEVNET_TABLE (packages/signpage/src/pool-testnet.ts). */
-  table: "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy",
+  table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
 });
-/** Run 4's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
- *  flow. */
+/** Run 7's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
+ *  flow, on today's devnet pool (program 9Z6Yi2Vc, pool 92YuYhb4) and the helper serving it. */
 export const RUN = Object.freeze({
-  deposit: "63fqkqcKM2jQq7aPitYXUzeUWnm7FTyCMHMUhHVSrXbDQeZwHxkXBFUvkEzE5JVkAaspXqDUYc8hRBGh3R4Zkera",
-  buy: "2MbB4Fq7KU1TiSkYA1GpPYAUTTyt68Jz2quLfvsp5xP72yawSYG1E9D3bs9mBHirYar8UTLQm786CyfgUD5VPNua",
-  sell: "3ZMVTe6R7zXPpE76MC6oJCSXBUZT2XYH6kyrXhDGt4stS5U8WyPPKnzHWsXrrdD2RWSMW919DEhTqLptiX7myG3w",
+  deposit: "53ppgpzgRj1Ler5byRWVpUhxgXRizaEtnkYBuQjoSWXH1KAk9xyVkhrphgWkigWCVakKuEs1z2h7ErHXo2rr8jTx",
+  buy: "2r3panFRXsEE4K4duP9juAXpVjLpzQPNetEDUmyowJ8EbDq6wWbPPQs3eoRjBCSDoU5jrKbNZ14SQMtXv3wCWnD7",
+  sell: "2BATzt6gAKUzhgTUvoUs3keMEAyLZW3x1M3VeWzLNpqqnRjCEssGv3LzFmcZrSpueDVYdQgToYuDPAyztN87u3Ty",
 });
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 export const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
@@ -126,7 +128,7 @@ function message(b) {
 
 /** The run's reads: the table and the run's transactions on the first two devnet operators that answer
  * (onTwoOperators: one that is out moves the read to the next, fewer than two FAILs), and the helper's fee answer. */
-async function checkRun({ table, fetchFn, rpcs, sleep, helper }, say) {
+async function checkRun({ pin, pinTable, table, fetchFn, rpcs, sleep, helper }, say) {
   // each read that answers null keeps the provider's own answer (answerOf: its HTTP status, the null and its slot), and
   // a JSON-RPC error FAILs on the provider that answered it, named
   const walk = await onTwoOperators(rpcs, (u) => operatorOf(u, "devnet"), fetchFn, async (u, say, fetchFn) => {
@@ -151,24 +153,24 @@ async function checkRun({ table, fetchFn, rpcs, sleep, helper }, say) {
   const d = reads[0]?.data;
   const addrs = d && d.length >= 56 ? Array.from({ length: (d.length - 56) / 32 }, (_, i) => b58(d.subarray(56 + 32 * i, 88 + 32 * i))) : [];
   const active = d && d.length >= 56 && Buffer.from(d.subarray(4, 12)).equals(Buffer.alloc(8, 0xff));
-  const need = [PIN.pool, pageAddress(PIN.program, 0, 0).address, pageAddress(PIN.program, 1, 0).address];
-  say(table === PIN.table, `the table read is the pin's: ${table}`);
+  const need = [pin.pool, pageAddress(pin.program, 0, 0).address, pageAddress(pin.program, 1, 0).address];
+  say(table === pinTable, `the table read is the pin's: ${table}`);
   say(reads.every((r) => r?.owner === ALT_PROGRAM) && same && active && need.every((a) => addrs.includes(a)), `table ${table}: the ALT program's, the same bytes on both RPCs, active, holding the pool and both first pages: ${walk.values.map((v) => v.table?.owner ?? v.said.table ?? "not read").join(", ")}, ${addrs.length} addresses`);
   let w = null; // the buy's W: its second static key (the fee payer first)
   for (const [name, sig] of Object.entries(RUN)) {
     const txs = walk.values.map((v) => v.txs[name]);
     const saidOf = walk.values.map((v) => v.said[name] ?? "not read");
-    const ok = txs.length === 2 && txs.every((t) => t && t.err === null && t.calls.includes(PIN.program) && t.keys.includes(PIN.pool));
+    const ok = txs.length === 2 && txs.every((t) => t && t.err === null && t.calls.includes(pin.program) && t.keys.includes(pin.pool));
     if (name === "buy") w = txs[0]?.keys[1] ?? null;
     const shape =
-      name === "buy" ? txs.every((t) => t && t.payer === PIN.feePayer && t.tables.includes(PIN.table) && t.calls.includes(PUMP_PROGRAM) && t.keys[1] === w)
+      name === "buy" ? txs.every((t) => t && t.payer === PIN.feePayer && t.tables.includes(pinTable) && t.calls.includes(PUMP_PROGRAM) && t.keys[1] === w)
       : name === "sell" ? txs.every((t) => t && w !== null && t.payer === w && t.signers === 1 && t.calls.includes(PUMP_PROGRAM))
       : true;
     const what = name === "buy" ? ", paid by the pin's fee payer, loading the pin's table, calling pump.fun" : name === "sell" ? ", signed and paid by the buy's W alone, calling pump.fun" : "";
     say(ok && shape, `${name} ${sig}: succeeded on both RPCs at finalized, the pinned program on the pool${what}: ${txs.map((t, i) => (t ? `err ${JSON.stringify(t.err)}, payer ${t.payer}` : `not found (${saidOf[i]})`)).join("; ")}`);
   }
   const h = helper?.json;
-  say(helper?.status === 200 && h?.cluster === "devnet" && h?.program === PIN.program && h?.pool === PIN.pool && h?.fee_payer === PIN.feePayer, `the helper's fee answer names the pin's program and fee payer: ${!helper ? "not read" : h?.program && h?.fee_payer ? `${helper.status}, ${h.program}, ${h.fee_payer}` : `HTTP ${helper.status}, ${JSON.stringify(h).slice(0, 160)}`}`);
+  say(helper?.status === 200 && h?.cluster === "devnet" && h?.program === pin.program && h?.pool === pin.pool && h?.fee_payer === PIN.feePayer, `the helper's fee answer names the pin's program and fee payer: ${!helper ? "not read" : h?.program && h?.fee_payer ? `${helper.status}, ${h.program}, ${h.fee_payer}` : `HTTP ${helper.status}, ${JSON.stringify(h).slice(0, 160)}`}`);
 }
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -180,19 +182,25 @@ function b58(bytes) {
   return out;
 }
 
-/** The verdict for `program` read through `fetchFn` (live, or a recorded answer replayed), and SIGN_HOST's read `sign`. */
-export async function check({ program = PIN.program, table = PIN.table, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper } = {}) {
-  const record = JSON.parse(readFileSync(DEPLOYMENT, "utf8"));
+/** The verdict for `program` read through `fetchFn` (live, or a recorded answer replayed), and SIGN_HOST's read `sign`,
+ *  against today's devnet pin (devnetPin(), the deploy record pool-sol-deploy.devnet.json) and today's table pin
+ *  PIN.table, the ones a live run reads: a replay is judged on them too, so a recording on another program, pool or
+ *  table FAILs (it takes no deploy record or table pin of its own). */
+export async function check({ program, table = PIN.table, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper, ...rest } = {}) {
+  if ("deployment" in rest || "pinTable" in rest) throw new Error("check reads today's devnet pin and table only: no deploy record or table pin is passed in");
+  const pinTable = PIN.table;
+  const pin = devnetPin();
+  const record = pin.record;
+  program ??= pin.program;
   const lines = [];
   const say = (pass, text) => lines.push(`${pass === null ? "info" : pass ? "ok  " : "BAD "} ${text}`);
   say(sign?.status === 200 && sign.bytes > 0 && Array.isArray(sign.found) && sign.found.length === 0, `SIGN_HOST's /app.js is the mainnet build, with no testnet pin or provider: ${sign ? `${sign.status}, ${sign.bytes} chars, carries [${sign.found.join(", ")}]` : "not read"}`);
-  say(program === PIN.program, `the program read is the pin's: ${program}`);
-  say(record.cluster === "devnet" && record.program_id === PIN.program && record.pool === PIN.pool, `the deployment record names the pin's program and pool: ${record.program_id}, ${record.pool}`);
-  say(poolAddress(PIN.program).address === PIN.pool, `the pin's pool derives from its program: ${poolAddress(PIN.program).address}`);
-  const deployment = program === PIN.program ? record : { ...record, program_id: program, programdata: programDataAddress(program), pool: poolAddress(program).address };
-  const r = await deployCheck({ deployment, fetchFn, rpcs, ...(sleep ? { sleep } : {}) });
+  say(program === pin.program, `the program read is the pin's: ${program}`);
+  say(record.program_id === pin.program && record.pool === pin.pool && poolAddress(pin.program).address === pin.pool, `the deployment record's program and pool, its pool derived from its program: ${record.program_id}, ${record.pool}`);
+  const read = program === pin.program ? record : { ...record, program_id: program, programdata: programDataAddress(program), pool: poolAddress(program).address };
+  const r = await deployCheck({ deployment: read, fetchFn, rpcs, ...(sleep ? { sleep } : {}) });
   for (const l of r.lines) lines.push(l.startsWith("FAIL") ? `BAD ${l.slice(4)}` : l);
-  await checkRun({ table, fetchFn, rpcs, sleep, helper }, say);
+  await checkRun({ pin, pinTable, table, fetchFn, rpcs, sleep, helper }, say);
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 
@@ -205,10 +213,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const rec = recorder();
     const sign = await readSign();
     const helper = await readHelper();
+    const deployment = devnetPin().record;
     const program = opt("--program") ?? PIN.program;
     const table = opt("--table") ?? PIN.table;
     const r = await check({ program, table, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, helper });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, pin_table: PIN.table, program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);
