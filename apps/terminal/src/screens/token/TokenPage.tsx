@@ -19,6 +19,9 @@ import { DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfs
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
+import { TradeMarks } from "./TradeMarks.tsx";
+import { useTrades } from "./trades.ts";
+import type { Trade as TapeTrade } from "./trades.ts";
 import { coinUsd, factors, QUOTE, scaleBars, supplyOf, unitDrawn, valueText, volumeIn } from "./units.ts";
 import type { ChartUnit } from "./units.ts";
 import { copyText, readWatch, shareHref, toggleWatch, tokenLinks, tokenView } from "./model.ts";
@@ -223,6 +226,8 @@ interface ChartState {
   /** The token's supply (MCap) and its chain coin's USD price (the coin unit); null when not read. */
   supply: number | null;
   coin: number | null;
+  /** The token's newest trades, drawn as marks while Display's Trades is on (trades.ts). */
+  trades: readonly TapeTrade[];
 }
 
 /** R5's legend (token.js U.legend): the bar under the crosshair, else the newest; its colour is its close against the
@@ -454,6 +459,7 @@ function Chart({ c, phone }: { c: ChartState; phone?: boolean }) {
       {!phone && <Toolbar c={c} unit={unit} />}
       <div className="tkp-plot" data-drawn={ready !== null} data-unit={`${unit.mc ? "mc" : "price"}/${unit.quote ? "coin" : "usd"}`} onMouseLeave={() => setAt(null)} onPointerUp={() => drawn.current && setAuto(isAuto(drawn.current))}>
         <div className="tkp-kc" ref={host} data-testid="chart-canvas" />
+        {ready && c.ctl.trades && c.sym && <TradeMarks chart={drawn.current?.chart ?? null} bars={ready.bars} tf={ready.tf} factor={f.price} symbol={c.sym} phone={phone === true} version={version} trades={c.trades} />}
         {ready && bars && c.sym && <Legend sym={c.sym} tf={ready.tf} bars={bars} at={at} precision={precision} unit={unit} phone={phone} />}
         {s === "loading" && <span className="tkp-sk tkp-plotsk" />}
         {s === "empty" && <span className="tkp-plotmsg"><W id="noData" /></span>}
@@ -671,6 +677,8 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
   // the page's one trade state, drawn by the desktop column's box and the phone sheet's (card app-phone-trade-sheet)
   const trade = useTrade(row ? { chain: row.chain, token: row.token } : null);
+  // the tape behind the marks, read only while they are drawn
+  const tape = useTrades(ctl.trades ? (row?.chain ?? null) : null, ctl.trades ? (row?.token ?? null) : null);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
@@ -681,7 +689,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
   const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
-  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price) };
+  const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape };
   return (
     <section className="tkp" data-token-page={data.status} data-pushed={pushed || undefined} data-token={v?.token} data-filling={v?.filling} aria-busy={v === null || v.filling} aria-label={v === null ? WORDS.loading.text : undefined}>
       <Desktop v={v} r={ready} c={c} t={trade} />
