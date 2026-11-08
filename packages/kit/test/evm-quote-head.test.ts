@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { EvmQuoteError, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { EVM_HEAD_REUSE_MS, evmHeadWatch, evmPoolBuyQuoteWith, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
-import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
+import { asRecorded, gasRoundAnswers, withMarker } from "./evm-quote-gas-fx.ts";
 // the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
 // for call: these replays send 6 a call (Robinhood's venue sends 64, card evm-buy-quote-in-window: QE9)
 evmReadsPerCall(6);
@@ -26,15 +26,16 @@ const MAX_LAG = 5n; // Base's (trade/evm/buy-unpinned.ts)
 /** A provider answering from the recording, counting each method it is asked; `lie` answers another hash to the
  *  by-number confirmation. */
 function provider(ex: Exchange[], seen: string[], lie: { on: boolean }): EvmRpc {
-  return async (calls) => {
+  return async (sent) => {
+    const calls = asRecorded(sent);
     for (const c of calls) seen.push(c.method === "eth_getBlockByNumber" ? `head:${c.params[0] === "latest" ? "latest" : "number"}` : c.method);
     const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
     const gas = e === undefined ? gasRoundAnswers(ex, calls) : undefined;
-    if (gas !== undefined) return gas;
+    if (gas !== undefined) return withMarker(sent, gas);
     if (e === undefined) throw new Error("no recorded answer for these calls");
     const a = structuredClone(e.answers);
     if (lie.on && calls[0]!.method === "eth_getBlockByNumber" && calls[0]!.params[0] !== "latest") (a[0]!.result as Record<string, unknown>).hash = "0x" + "ab".repeat(32);
-    return a;
+    return withMarker(sent, a);
   };
 }
 function chain() {

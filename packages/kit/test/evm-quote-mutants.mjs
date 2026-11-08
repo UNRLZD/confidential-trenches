@@ -85,9 +85,9 @@ export const MUTANTS = [
   [QUOTE, "d.slice(8 + 128, 8 + 128 + 8) === NOT_ENOUGH_LIQUIDITY", "d.slice(8 + 64, 8 + 64 + 8) === NOT_ENOUGH_LIQUIDITY", Q, "Q3 "],
   [QUOTE, "if (q2 !== null && q2 <= q) return refuse(", "if (q2 !== null && q2 < q) return refuse(", Q, "Q3 "],
   [QUOTE, "if (q2 !== null && q2 <= q) return refuse(", "if (false) return refuse(", Q, "Q3 "],
-  [QUOTE, 'if (q2 === null && route.venue === "uniswap-v3") return refuse(', "if (false) return refuse(", R, "R8 "],
-  [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? true : y > x);", Q, "Q3 "],
-  [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? !isV3 : true);", Q, "Q3 "],
+  [QUOTE, 'if (q2 === null && route.venue === "uniswap-v3" && !gas2) return refuse(', "if (false) return refuse(", R, "R8 "],
+  [QUOTE, "    if (!isV3) return true;\n", "    return true;\n", Q, "Q3 "],
+  [QUOTE, "    if (y !== null) return y > x;", "    if (y !== null) return true;", Q, "Q3 "],
   [QUOTE, 'fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route', "fills(c) ? [{ route: c.route", Q, "Q3 "],
   // the device's own reference: every standard route through every listed middle on both venues, and the pinned
   // launchpad pools
@@ -371,6 +371,27 @@ export const MUTANTS = [
   [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {", "      if (true) {", R, "T7 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
   [QUOTE, "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      g(() => {", "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      ((x: () => Promise<readonly unknown[]>) => x())(() => {", R, "T8 "],
+  // each read's own gas (card evm-quote-read-gas-starve): the code at Multicall3 and the call's gas, success word 2,
+  // the read again alone, the agreement on it, and the buy's own route refused by name
+  [QUOTE, "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o, [MULTICALL3]: { code: EVM_READ_GAS_CODE } }]", "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o }]", R, "GS1 "],
+  [QUOTE, "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }", "data: aggregate(part.map((i) => reads[i]!)) }", R, "GS4 "],
+  [QUOTE, "if ((ok !== 0 && ok !== 1 && ok !== 2) || at(e + 32) !== 0x40)", "if ((ok !== 0 && ok !== 1) || at(e + 32) !== 0x40)", R, "GS1 "],
+  [QUOTE, "    if (ok === 2) out.push({ kind: \"revert\", partial: false, gas: true });\n    else if (ok === 0) {", "    if (ok === 0 || ok === 2) {", R, "GS2 "],
+  [QUOTE, "for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {", "for (const per of [] as number[]) {", R, "GS2 "],
+  [QUOTE, "for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {", "for (const per of again === undefined ? [1] : []) {", R, "GS11 "],
+  [QUOTE, "    readSizes.set(key, n);\n", "", R, "GS12 "],
+  [QUOTE, "if (len < 96 || r.slice(2 + 2 * (len - 32)).toLowerCase() !== READ_MARKER) return refuse(", "if (len < 64) return refuse(", R, "GS8 "],
+  [QUOTE, "    if (c.route?.venue === \"uniswap-v3\" && c.route.tokens.length === 2) return true;\n", "", R, "GS6 "],
+  [QUOTE, "    if (c.route?.venue === \"uniswap-v3\" && c.route.tokens.length === 2) return true;\n", "", S, "GS9 "],
+  [QUOTE, "  if (value < reference.amountOut) ranOut(reference, \"the best route that fits\");\n", "", R, "GS7 "],
+  [QUOTE, "  if (value < reference.amountOut) ranOut(reference, \"the best route that fits\");\n", "", R, "GS13 "],
+  [QUOTE, "    if (listed !== null && near(listed.amountOut, value)) ranOut(listed, \"the best route through listed pools within the slippage\");\n", "", R, "GS14 "],
+  [QUOTE, "    { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },", "    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },", R, "GS13 "],
+  [QUOTE, "if (q2 === null && route.venue === \"uniswap-v3\" && gas2 && route.tokens.length > 2) return refuse(", "if (false) return refuse(", R, "GS7 "],
+  [QUOTE, "    if (c.route !== undefined) outOfGas.set(c.at, { route: c.route, amountOut: x });\n", "", S, "GS10 "],
+  [QUOTE, "if (q2 === null && route.venue === \"uniswap-v3\" && !gas2) return refuse(\"partial_fill\"", "if (q2 === null && route.venue === \"uniswap-v3\") return refuse(\"partial_fill\"", R, "GS6 "],
+  [QUOTE, "const agreed = (a: Answer, b: Answer) => same(a, b) && (a.kind === \"out\" || a.gas === (b as { gas?: true }).gas);", "const agreed = (a: Answer, b: Answer) => same(a, b);", R, "GS5 "],
+  [QUOTE, "      if (m.kind === \"revert\" && m.gas === true) return refuse(", "      if (false) return refuse(", R, "GS3 "],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
@@ -384,12 +405,12 @@ export const MUTANTS = [
   // native first
   [QUOTE, "  if (nativeExists && wethStart && (nativeBest === null || value <= nativeBest.amountOut)) {", "  if (false) {", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
-  [QUOTE, "const natives = ownFits && v.nativeFirst && wethStart ? filled.filter((c) => startsNative(c.route)) : [];", "const natives = ownFits && v.nativeFirst && wethStart ? filled : [];", R, "N3a "],
+  [QUOTE, "const natives = ownFits && v.nativeFirst && wethStart ? priced.filter((c) => startsNative(c.route)) : [];", "const natives = ownFits && v.nativeFirst && wethStart ? priced : [];", R, "N3a "],
   // native when at least as good: a WETH route equal to the best native route still refuses
-  [QUOTE, "value <= nativeBest.amountOut", "value < nativeBest.amountOut", R, "N3b "],
-  [QUOTE, "value <= nativeBest.amountOut", "value <= nativeBest.amountOut && false", R, "N3b "],
+  [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest === null || value < nativeBest.amountOut)", R, "N3b "],
+  [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest === null || value <= nativeBest.amountOut && false)", R, "N3b "],
   [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest !== null && value <= nativeBest.amountOut)", R, "R7 "],
-  [QUOTE, "    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },", "    { l: filled.filter((c) => !v.nativeFirst || startsNative(c.route)), band: ownFits ? (c) => c.amountOut >= value : all },", R, "N1f "],
+  [QUOTE, "    { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },", "    { l: priced.filter((c) => !v.nativeFirst || startsNative(c.route)), band: ownFits ? (c) => c.amountOut >= value : all },", R, "N1f "],
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
   // only a device quote builds, within 30 s, and W signs only that build
   [QUOTE, "QUOTED.add(quote);", "", Q, "Q7 "],
@@ -407,7 +428,7 @@ export const MUTANTS = [
   [QUOTE, 'if (typeof url !== "string" || !/^https:\\/\\//.test(url)) return refuse(', "if (false) return refuse(", Q, "Q8 "],
   // a provider's answer
   [QUOTE, "if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len)", "if (!Number.isSafeInteger(o) || o < 0)", Q, "Q9 "],
-  [QUOTE, "if (e + 96 + dl > len) return refuse(", "if (false) return refuse(", Q, "Q9 "],
+  [QUOTE, "if (e + 96 + dl > len - 32) return refuse(", "if (false) return refuse(", Q, "Q9 "],
   [QUOTE, "\n  if (!Array.isArray(out) || out.length !== calls.length)", "\n  if (!Array.isArray(out))", Q, "Q9 "],
   // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
   [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],
@@ -427,8 +448,8 @@ export const MUTANTS = [
   // more than the slippage under the reference, the pick falls back to the reference's own route, so best() decides only
   // among routes within the slippage, at one minOut, the reference's)
   [QUOTE, 'fills(c, c.route.venue === "uniswap-v3") ? [{ route: c.route, amountOut: out(c.at)! }] : []', "out(c.at) !== null ? [{ route: c.route, amountOut: out(c.at)! }] : []", S, "planted: a pool that runs out"],
-  [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? true : y > x);", S, "planted: a pool that runs out"],
-  [QUOTE, "return x !== null && x > 0n && (y === null ? !isV3 : y > x);", "return x !== null && x > 0n && (y === null ? !isV3 : true);", S, "planted: a pool that runs out"],
+  [QUOTE, "    if (!isV3) return true;\n", "    return true;\n", S, "planted: a pool that runs out"],
+  [QUOTE, "    if (y !== null) return y > x;", "    if (y !== null) return true;", S, "planted: a pool that runs out"],
   [QUOTE, "? pick.amountOut : reference!.amountOut) * BigInt(10000 - slippageBps)) / 10000n;", "? pick.amountOut : reference!.amountOut));", S, "the device picks the pool"],
   [QUOTE, 'if (minOut === 0n) return refuse("no_quote", "the pool quotes too little to set a minimum above 0");', "", S, "planted: a pool that runs out"],
   [QUOTE, 'hooks: lower(h.hooks), hookData: "0x" }));', 'hooks: lower(h.hooks), hookData: "0x00" }));', S, "the device picks the pool"],
@@ -769,7 +790,7 @@ export const MUTANTS = [
   [QUOTE, "kept.push(a.amountOut < r.amountOut ? { route: r.route, amountOut: a.amountOut } : r);", "kept.push(r);", R, "PE10 "],
   [QUOTE, "kept.push(a.amountOut < r.amountOut ? { route: r.route, amountOut: a.amountOut } : r);", "kept.push({ route: r.route, amountOut: a.amountOut });", R, "PE9 "],
   [QUOTE, "    if (i < 0) kept.push(r);\n", "    if (i < 0) continue;\n", R, "PE a pool"],
-  [QUOTE, "feeMax, hooked, releases, sim });", "feeMax, hooked, releases });", R, "PE9 "],
+  [QUOTE, "feeMax, hooked, releases, sim, outOfGas: ", "feeMax, hooked, releases, outOfGas: ", R, "PE9 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut < gas * maxFee - 1n)", R, "PE8 "],
   [QUOTE, "bal!.amountOut < gas * maxFee)", "bal!.amountOut <= gas * maxFee)", R, "PE8 "],
   // card evm-buy-gas-floor (audit I-4): a buy's route is taken, named or priced against only where its swap, run as
@@ -902,7 +923,7 @@ export const MUTANTS = [
   // the quote's own read (review of 982a19bd, F1): the device's list, the finalized block, the pages, the agreed block,
   // the agreement up to it, the logs' checks
   [QUOTE, "evmSellSentOf(req.sent) ?? refuse(", "evmSellSentOf(req.sent ?? []) ?? refuse(", S, NR],
-  [QUOTE, "hooked, releases, sim });", "hooked, sim });", S, NR],
+  [QUOTE, "hooked, releases, sim, outOfGas: ", "hooked, sim, outOfGas: ", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (false) return refuse(", S, NR],
   [QUOTE, "if (n - fin.number > EVM_SELL_TAIL_MAX) return refuse(", "if (n - fin.number >= EVM_SELL_TAIL_MAX) return refuse(", S, NR],
   [QUOTE, "for (let a = low(fin.number + 1n, n); ", "for (let a = low(fin.number, n); ", S, NR],
