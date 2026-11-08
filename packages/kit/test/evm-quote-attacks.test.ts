@@ -7355,3 +7355,39 @@ test("QE9 a round's exact-out reads are sent 64 to a call: the cold case's in tw
   assert.ok(sizes.every((n) => n <= 64), `calls of ${sizes.join(",")} reads`);
   assert.equal(sizes.length, Math.ceil(reads / 64), `${reads} reads in ${sizes.length} calls`);
 });
+
+// Card evm-buy-quote-in-window: discovery outside the window. The scan provider is slow (each scan request after the
+// first block ticks the device's clock 4 s, as RX2), so the scans outlast that block; the chain's head moves on with
+// the clock. The quote agrees a fresh block, goes on from the spans its first attempt kept, and quotes; no request is
+// sent past its own block's time plus EVM_QUOTE_MAX_AGE_MS. At 2b194f7c it refused stale_quote.
+test("QE10 scans that outlast the block: the quote goes on at a fresh block from the spans kept, and quotes", { timeout: 20_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0xc00);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0, heads: 0 };
+  // the head's time: the clock's, read again once the head held is 20 s old (one per attempt here)
+  const headTs = () => {
+    if (clock.ts === 0 || NOW + clock.ms - clock.ts * 1000 > 20_000) clock.ts = Math.floor((NOW + clock.ms) / 1000);
+    return clock.ts;
+  };
+  const moving = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) clock.heads++;
+    const out = await rpc(calls);
+    return out.map((a) => {
+      const r = (a as { result?: { timestamp?: unknown } } | null)?.result;
+      return r !== null && typeof r === "object" && typeof r.timestamp === "string" ? { ...(a as object), result: { ...r, timestamp: "0x" + headTs().toString(16) } } : a;
+    });
+  };
+  const scan = scanner(RC_HEAD, logs, [], 100_000);
+  const slow: EvmRpc = async (calls) => {
+    if (clock.ts > 0 && calls.some((c) => c.method === "eth_getLogs")) {
+      clock.sent++;
+      if (NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
+      clock.ms += 4_000;
+    }
+    return scan(calls);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(req, [moving(chain(pools, 0, RC_HEAD)), moving(chain(pools, 1, RC_HEAD))], NOW, slow, undefined, () => clock.ms));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  assert.ok(clock.ms > quoteMod.EVM_QUOTE_MAX_AGE_MS, `the scans ran ${clock.ms} ms of the device's clock`);
+  assert.ok(clock.heads >= 4, `${clock.heads} head reads: a second block was agreed`);
+  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} scan requests sent past their block's deadline`);
+});

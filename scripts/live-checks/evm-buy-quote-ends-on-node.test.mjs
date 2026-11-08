@@ -2,7 +2,8 @@
 // Good: `good`, a real run of the check on the card's kit (see its `from`): both chains' quotes read at their agreed
 // block and end within the bound and the request cap with a refusal the kit names; no quote fitted the window (card
 // evm-buy-quote-in-window). Bad: `bad`, the same check on a copy of the kit with quote.ts at 3a73b181, before the card
-// (11:59Z): both quotes ran to the scan's 60 s bound. Bad: `atOnce`, the check's own run with every request failing to
+// (11:59Z): both quotes ran to the scan's 60 s bound, past the bound then (40 s); since card evm-buy-quote-in-window
+// (the bound is the scans', 60 s, plus 10 s) it fails on the read floor alone, as recorded with no reads counted. Bad: `atOnce`, the check's own run with every request failing to
 // connect: the kit refuses rpc_error in time and under the cap, but before any read, which the floor fails.
 //   node --test scripts/live-checks/evm-buy-quote-ends-on-node.test.mjs
 import assert from "node:assert/strict";
@@ -20,10 +21,10 @@ test("the good answer (the card's kit) passes: both quotes read at their block a
   assert.ok(A.good.runs.every((x) => x.ms <= BOUND_MS && x.requests <= MAX_REQUESTS && x.end !== "quote"), "no quote fitted the window");
 });
 
-test("the bad answer (the kit before the card) fails: both quotes run past the bound", () => {
+test("the bad answer (the kit before the card) fails: no read counted at an agreed block", () => {
   const r = judge(A.bad);
   assert.equal(r.ok, false);
-  assert.equal(r.lines.filter((l) => l.startsWith("BAD") && / past /.test(l)).length, 2, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => l.startsWith("BAD") && /no read at an agreed block/.test(l)).length, 2, r.lines.join("\n"));
 });
 
 test("the refuses-at-once answer fails on the floor alone: in time, under the cap, a named refusal, no read", () => {

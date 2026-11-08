@@ -11,6 +11,7 @@ export {
   EVM_NOOP_HOOK_CODE,
   EVM_QUOTE_MAX_AGE_MS,
   EVM_QUOTE_MAX_HINTS,
+  EVM_SCAN_BOUND_MS,
   EVM_SELL_PROBE_CODE,
   evmBuyRevertedPools,
   evmBuySwapFitCall,

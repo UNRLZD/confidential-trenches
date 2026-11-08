@@ -1,25 +1,25 @@
 {
  "good": {
-  "at": "2026-11-08T13:13:52.023Z",
+  "at": "2026-11-08T14:13:50.373Z",
   "runs": [
    {
     "chain": "base",
-    "ms": 31113,
-    "requests": 314,
-    "reads": 90,
-    "end": "stale_quote",
-    "message": "stale_quote: the quote's block is more than 30 s old: no more scans are sent"
+    "ms": 60019,
+    "requests": 421,
+    "reads": 99,
+    "end": "rpc_error",
+    "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
    },
    {
     "chain": "robinhood",
-    "ms": 31871,
-    "requests": 863,
-    "reads": 2303,
+    "ms": 60002,
+    "requests": 474,
+    "reads": 702,
     "end": "rpc_error",
-    "message": "rpc_error: provider 2 answered the multicall with an error: [0x56c960c03050772cadf80fbefda959d87ac3cfc095aa83c029bcf61d85defd65] layer stale\nmissing trie node b2f88317fda0e73d40c4e"
+    "message": "rpc_error: the scan provider did not answer within the quote's bound of 60000 ms"
    }
   ],
-  "from": "a real run of the card's kit with the review fold (8a0fab87 and this commit's quote.ts), 2026-11-08T13:13Z: both quotes read at their agreed block and end in time and under the cap with a named refusal; no quote fitted the window (card evm-buy-quote-in-window)"
+  "from": "a real run of card evm-buy-quote-in-window's kit (64 reads a call, a quote going on at a fresh block while its scans keep new spans, the scan stopped whole past its bound), 2026-11-08T14:13Z: both quotes read at their agreed block and end within the scans' bound with a named refusal; no quote landed"
  },
  "bad": {
   "at": "2026-11-08T11:59:52.212Z",
