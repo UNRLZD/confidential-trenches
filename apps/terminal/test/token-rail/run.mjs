@@ -13,7 +13,9 @@
 //   - opening / reads the lists once (the rail and the top-token read share the read in flight);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
-//     the expand button draws the full rail over the chart with the main column unmoved, and its row opens its token.
+//     the expand button draws the full rail over the chart with the main column unmoved, and its row opens its token;
+//   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1440) shows it in the
+//     first row and moves no row already drawn: each row's element keeps its box, and no layout shift.
 //   node apps/terminal/test/token-rail/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { REFRESH_MS } from "../../src/screens/discover/data.ts";
 import { columnRows } from "../../src/screens/discover/model.ts";
 
 const HELPER = "https://ct-api.unrealized.trade";
@@ -50,6 +53,13 @@ const SNAP = { chain: recorded.chain, as_of_ms: recorded.as_of_ms, lists: Object
 const ROWS = new Map(Object.values(SNAP.lists).flat().map((r) => [r.token, r]));
 const TRENDING = columnRows(SNAP, "trending").map((r) => r.token);
 const NEW = columnRows(SNAP, "new").map((r) => r.token);
+// the lists a later read answers: a new token with the most 1h volume, so it lands on top of Trending
+const NEW_TOP = "RaiLTop1111111111111111111111111111111111111";
+const TOPPED = (() => {
+  const first = SNAP.lists.trending_1h[0];
+  const top = { ...first, token: NEW_TOP, symbol: "TOP", vol_1h_usd: 10 * Math.max(...SNAP.lists.trending_1h.map((r) => Number(r.vol_1h_usd) || 0)) };
+  return { ...SNAP, lists: { ...SNAP.lists, trending_1h: [top, ...SNAP.lists.trending_1h] } };
+})();
 
 const fails = [];
 const check = (ok, what) => {
@@ -71,7 +81,7 @@ async function open(browser, route, w, reads) {
     const u = new URL(r.request().url());
     if (u.origin === HELPER && u.pathname === "/v1/market/lists") {
       reads.lists++;
-      return r.fulfill(json(200, { ...SNAP, as_of_ms: Date.now() }));
+      return r.fulfill(json(200, { ...(reads.topped ? TOPPED : SNAP), as_of_ms: Date.now() }));
     }
     if (u.origin === HELPER && u.pathname === "/v1/market/token") {
       const row = u.searchParams.get("chain") === "solana" ? ROWS.get(u.searchParams.get("token")) : undefined;
@@ -230,6 +240,31 @@ try {
         check(await ready(f, next), `${tag}: an expanded rail row did not open ${next}`);
         const after = await readPage(f);
         check(after.open === "false" && after.railW !== null && Math.abs(after.railW - 78) <= 1, `${tag}: after the hop the rail is ${after.railW} wide (open ${after.open}), want slim`);
+      }
+      // a refresh lands a token on top: it is drawn in the first row, and no drawn row moves
+      if (k.name === "out" && (w.name === "1600" || w.name === "1440")) {
+        const rowsSel = '.tkp-desk [data-testid="token-rail"] [role="listitem"]';
+        const before = await f.evaluate((sel) => [...document.querySelectorAll(sel)].map((e, i) => {
+          e.__slot = i;
+          const b = e.getBoundingClientRect();
+          return [b.x, b.y, b.width, b.height];
+        }), rowsSel);
+        reads.topped = true;
+        const landed = await f.waitForSelector(`${rowsSel}:first-child[data-token="${NEW_TOP}"]`, { timeout: REFRESH_MS + 5_000 }).then(() => true, () => false);
+        await page.waitForTimeout(400);
+        const after = await f.evaluate((sel) => {
+          const els = [...document.querySelectorAll(sel)];
+          const box = (e) => {
+            const b = e.getBoundingClientRect();
+            return [b.x, b.y, b.width, b.height];
+          };
+          return { n: els.length, kept: els.filter((e) => e.__slot !== undefined).map((e) => [e.__slot, box(e)]), cls: window.__cls ?? null };
+        }, rowsSel);
+        check(landed && after.n === TRENDING.length + 1, `${tag}: a refresh with a new top token: first row ${landed ? NEW_TOP : "not it"}, ${after.n} rows (want ${TRENDING.length + 1})`);
+        const moved = after.kept.filter(([i, b]) => b.some((x, j) => Math.abs(x - before[i][j]) > 0.5));
+        check(after.kept.length === before.length && moved.length === 0, `${tag}: the refresh moved drawn rows: ${after.kept.length}/${before.length} kept, ${moved.length} moved (${moved.slice(0, 3).map(([i, b]) => `row ${i} y ${before[i][1].toFixed(1)} -> ${b[1].toFixed(1)}`).join(", ")})`);
+        check(after.cls === 0, `${tag}: layout shift ${after.cls} after the refresh, want 0`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-refresh.png`) });
       }
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
       await ctx.close();
