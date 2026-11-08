@@ -220,7 +220,7 @@ else {
       program,
       // from U_X alone (review H1): pool.deposit run with the op's own U_{s,i} as its fixed source, never the newest U
       deposit: (g, amount, signal) =>
-        depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
+        depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
       refund: poolRefundMover({
         read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair()),
         floor: async (g) => readSolanaPoolFloor(pair, program, g.u),

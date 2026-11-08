@@ -471,8 +471,9 @@ function uOf(ref: NoteRef): { s: bigint; i: number } | null {
 
 /** The run of one pool.deposit (`ask` already passed checkPoolRequest), or, with no ask, the INCOMING notes finished. */
 /** A deposit's fixed source (card pool-deposit-follow, review H1): U_{s,i} alone, from its planned deposit note or its
- *  next second arrival; never the newest-used-or-planned pick, so money a quote sent to an older U_X goes in from U_X. */
-export type PoolDepositFrom = { s: bigint; i: number };
+ *  next second arrival; never the newest-used-or-planned pick, so money a quote sent to an older U_X goes in from U_X.
+ *  `u` is the op's U_X: U_{s,i}'s own address must be it (review 2 L2), so an op naming another index never pays from it. */
+export type PoolDepositFrom = { s: bigint; i: number; u: string };
 export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fixed?: PoolDepositFrom): Promise<PoolDepositAnswer> {
   if (ask !== null && (ask.kind !== "pool.deposit" || ask.chain !== "solana")) return { error: "not_allowed" };
   const { pool, scope } = solanaPoolOf(h.pin.program);
@@ -727,6 +728,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fi
       // the fixed source: U_{s,i}'s planned deposit note, else (its deposit used) its next second arrival; a U with a
       // note still landing is read again next time; a U the store never planned is refused
       if (fixed.s !== scope) return { error: "not_allowed" };
+      if (uKey(fixed).address !== fixed.u) return { error: "not_allowed" };
       if (busy.has(fixed.i)) return { stage: "not_landed", txs: [] };
       const dep = all.find((n) => n.ref.kind === "deposit" && n.ref.s === fixed.s && n.ref.i === fixed.i) as (NoteRecord & { ref: Extract<NoteRef, { kind: "deposit" }> }) | undefined;
       if (dep === undefined) return { error: "not_allowed" };

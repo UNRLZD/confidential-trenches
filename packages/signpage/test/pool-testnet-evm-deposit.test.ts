@@ -231,12 +231,12 @@ test("pool-deposit-follow review H1: depositFrom runs the Solana deposit kind wi
       evm: () => (ask) => (evm.push(ask), refuse),
     },
   });
-  t.depositFrom({ chain: "solana", amount: "0.05" }, { s: 7n, i: 3 }, ctx);
-  assert.deepEqual(sol, [{ ask: { kind: "pool.deposit", chain: "solana", token: null, amount: 50_000_000n, slippageBps: 0, decimals: 9 }, from: { s: 7n, i: 3 } }]);
-  assert.deepEqual(t.depositFrom({ chain: "base", amount: "0.05" }, { s: 7n, i: 3 }, ctx), refuse);
-  assert.deepEqual(t.depositFrom({ chain: "solana", amount: "-1" }, { s: 7n, i: 3 }, ctx), refuse);
+  t.depositFrom({ chain: "solana", amount: "0.05" }, { s: 7n, i: 3, u: "U_X" }, ctx);
+  assert.deepEqual(sol, [{ ask: { kind: "pool.deposit", chain: "solana", token: null, amount: 50_000_000n, slippageBps: 0, decimals: 9 }, from: { s: 7n, i: 3, u: "U_X" } }]);
+  assert.deepEqual(t.depositFrom({ chain: "base", amount: "0.05" }, { s: 7n, i: 3, u: "U_X" }, ctx), refuse);
+  assert.deepEqual(t.depositFrom({ chain: "solana", amount: "-1" }, { s: 7n, i: 3, u: "U_X" }, ctx), refuse);
   // a kind passed in is the rule's own: still a deposit
-  t.depositFrom({ chain: "solana", amount: "0.05", kind: "pool.buy" }, { s: 7n, i: 3 }, ctx);
+  t.depositFrom({ chain: "solana", amount: "0.05", kind: "pool.buy" }, { s: 7n, i: 3, u: "U_X" }, ctx);
   assert.equal(sol.length, 2);
   assert.equal((sol[1]!.ask as { kind: string }).kind, "pool.deposit");
   assert.equal(evm.length, 0, "no EVM kind runs from depositFrom");
