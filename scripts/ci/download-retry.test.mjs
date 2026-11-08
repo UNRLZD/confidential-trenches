@@ -1,9 +1,10 @@
 // The download-retry gate (download-retry.mjs) on planted workflows: a curl without curl's own retry, a wget, an apt-get
-// with no Acquire::Retries, a rustup, cargo or git install outside scripts/ci/retry.sh, and a foundry-toolchain step with
-// no second run are each refused by file and line; the repo's own workflows pass. And retry.sh itself: three tries, a
-// pause between them, the last try's exit code. Card ci-cargo-near-cached: a curl to a file, a fetch.sh or a Playwright
+// with no Acquire::Retries, a rustup, cargo or git install outside scripts/ci/retry.sh, and (card ci-foundry-cached)
+// any foundry-toolchain step are each refused by file and line; the repo's own workflows pass. And retry.sh itself:
+// three tries, a pause between them, the last try's exit code. Card ci-cargo-near-cached: a curl to a file, a fetch.sh or a Playwright
 // install with no cache in front of it are refused, and fetch.sh itself uses a matching cached file with no request,
-// refuses a bad one and fails on bad bytes. Card ci-cargo-fetch-retry: a cargo command with no retried
+// refuses a bad one and fails on bad bytes; it asks GitHub's API for a release asset's bytes, with the job's token,
+// and sends neither header to any other url. Card ci-cargo-fetch-retry: a cargo command with no retried
 // `cargo fetch --locked` of its manifest before it, a fetch with no retry or no registry cache, a script that builds
 // crates itself and a container build of deploy.mjs outside retry.sh are refused; fresh-dir.sh clears a dir for a retry.
 //   node --test scripts/ci/download-retry.test.mjs
@@ -14,7 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync,
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { downloadRetry, refusals, cacheRefusals, cargoRefusals, fetchScriptRefusals, withoutHeldRetries } from "./download-retry.mjs";
+import { downloadRetry, refusals, cacheRefusals, cargoRefusals, fetchScriptRefusals } from "./download-retry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATE = join(ROOT, "scripts/ci/download-retry.mjs");
@@ -34,12 +35,13 @@ test("the repo's own workflows and actions pass, and their downloads are the one
   assert.deepEqual(r.refusals, []);
   assert.ok(r.read >= 4, `${r.read} files read`);
   const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-  // not dead rules: the pinned files (each through fetch.sh, whose curl carries the flags), the rustup installs and
-  // the foundry pair are there, and each is held
-  assert.ok(ci.split("bash scripts/ci/fetch.sh ~/.cache/ci-downloads/").length - 1 >= 4);
+  // not dead rules: the pinned files (each through fetch.sh, whose curl carries the flags) and the rustup installs are
+  // there, and each is held; Foundry is two of those files, through GitHub's API, and no foundry-toolchain is left
+  assert.ok(ci.split("bash scripts/ci/fetch.sh ~/.cache/ci-downloads/").length - 1 >= 6);
+  assert.equal(ci.split("bash scripts/ci/fetch.sh ~/.cache/ci-downloads/foundry-1.7.1.tar.gz cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b \\\n            https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756\n").length - 1, 2);
+  assert.doesNotMatch(ci, /foundry-rs\/foundry-toolchain@|github\.com\/foundry-rs\/[\w.-]+\/releases/);
   assert.ok(readFileSync(FETCH, "utf8").includes(`curl -sSfL ${FLAGS} -o`));
   assert.ok(ci.split("bash scripts/ci/retry.sh rustup toolchain install").length - 1 >= 4);
-  assert.match(ci, /- id: foundry\n\s+continue-on-error: true\n\s+uses: foundry-rs\/foundry-toolchain@/);
   assert.match(readFileSync(join(ROOT, ".github/actions/chrome/action.yml"), "utf8"), /Acquire::Retries=5/);
 });
 
@@ -47,15 +49,13 @@ test("main's workflows before this card: every download without its retry is ref
   const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
   const before = ci
     .replaceAll(` ${FLAGS}`, "")
-    .replaceAll("bash scripts/ci/retry.sh ", "")
-    .replace(/- id: foundry\n\s+continue-on-error: true\n(\s+)uses:/, "- uses:");
+    .replaceAll("bash scripts/ci/retry.sh ", "");
   const r = what(before);
   // the curls are fetch.sh's now: its one curl without the flags is refused as a workflow's
   assert.deepEqual(fetchScriptRefusals(readFileSync(FETCH, "utf8").replaceAll(` ${FLAGS}`, "")).map(([, w]) => w.split(": ")[0]), ["a curl without --retry 6 --retry-all-errors"]);
   assert.equal(r.filter((x) => x.includes("rustup toolchain install not run through")).length, 4, r.join("\n"));
   // the EVM pool's forge-std, in test-scripts and in slither (card pool-review-3)
   assert.equal(r.filter((x) => x.includes("git submodule update not run through")).length, 2, r.join("\n"));
-  assert.ok(r.some((x) => x.includes("a foundry-toolchain step without an id")), r.join("\n"));
 });
 
 test("curl: each of the three flags is needed, on any line of a continued command; a comment is not a command", () => {
@@ -98,30 +98,15 @@ test("rustup, cargo install and git submodule update run only through scripts/ci
   assert.deepEqual(what(job(run('install -m 0755 a "$HOME/.cargo/bin/cargo-near"'))), []);
 });
 
-test("foundry-toolchain: a first step that may fail, then the same action and version once more on its failure", () => {
-  assert.deepEqual(what(job(PAIR)), []);
-  assert.deepEqual(what(job(foundry())), ["7: a foundry-toolchain step without an id and continue-on-error"]);
-  // (its second run, now with no first step, is refused too)
-  assert.deepEqual(what(job(PAIR.replace("        continue-on-error: true\n", ""))), ["8: a foundry-toolchain step without an id and continue-on-error", "14: a foundry-toolchain retry with no first step before it"]);
-  assert.deepEqual(what(job(PAIR.replace(/      - if: steps\.foundry\.outcome == 'failure'\n        uses:[^]*$/, ""))), ["9: a foundry-toolchain step with no second run after it (if"]);
-  assert.deepEqual(what(job(PAIR.replace("- if: steps.foundry.outcome == 'failure'\n        uses", "- if: steps.other.outcome == 'failure'\n        uses"))), ["9: a foundry-toolchain step with no second run after it (if", "15: a foundry-toolchain retry with no first step before it"]);
-  assert.deepEqual(what(job(PAIR.replace(/version: v1\.7\.1\n$/, "version: v1.6.0\n"))), ["15: a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
-  assert.deepEqual(what(job(PAIR.replace(/(- if: steps\.foundry\.outcome == 'failure'\n)(        uses)/, "$1        continue-on-error: true\n$2"))), ["16: a foundry-toolchain second run that is not the same action and version, or does not fail the job"]);
-  assert.deepEqual(what(job(foundry("if: steps.foundry.outcome == 'failure'\n        "))), ["8: a foundry-toolchain retry with no first step before it"]);
-});
-
-test("a pair holds only within one job, and only a held pair's continue-on-error is blanked for the shard rule", () => {
-  // the second run in another job is no second run of this one
-  const split = PAIR.replace("      - if: steps.foundry.outcome == 'failure'\n        run: sleep 30\n", "      - if: steps.foundry.outcome == 'failure'\n        run: sleep 30\n  b:\n    runs-on: ubuntu-24.04\n    steps:\n");
-  assert.ok(what(job(split)).includes("9: a foundry-toolchain step with no second run after it (if"), what(job(split)).join("\n"));
-  assert.doesNotMatch(withoutHeldRetries(job(split)), /# a held retry/);
-  const held = withoutHeldRetries(job(PAIR));
-  assert.doesNotMatch(held, /continue-on-error/);
-  assert.equal(held.split("\n").length, job(PAIR).split("\n").length);
-  // any other step's continue-on-error stays for the shard rule to refuse
-  const other = job(PAIR + "      - continue-on-error: true\n        run: \"true\"\n");
-  assert.equal(withoutHeldRetries(other).split("continue-on-error").length - 1, 1);
-  assert.equal(withoutHeldRetries(job(foundry("id: foundry\n        continue-on-error: true\n        "))).split("continue-on-error").length - 1, 1);
+test("foundry-toolchain: any step of it is refused, main's retry pair included (card ci-foundry-cached)", () => {
+  // main's pair before this card: both runs read github.com/foundry-rs's release pages, which answered 504 from
+  // 8 Nov 08:45Z and failed PRs #454 and #455 three times each
+  assert.deepEqual(what(job(PAIR)), ["9: a foundry-toolchain step", "15: a foundry-toolchain step"]);
+  assert.deepEqual(what(job(foundry())), ["7: a foundry-toolchain step"]);
+  assert.deepEqual(what(job(foundry("if: steps.foundry.outcome == 'failure'\n        "))), ["8: a foundry-toolchain step"]);
+  assert.deepEqual(what(job(foundry().replace("uses: foundry", "uses: 'foundry").replace(" # v1.9.1", "' # v1.9.1"))), ["7: a foundry-toolchain step"]);
+  // a comment that names it is no step
+  assert.deepEqual(what(job(`      # uses: foundry-rs/foundry-toolchain@${SHA}\n      - run: "true"\n`)), []);
 });
 
 test("the command line: exit 1 with one line per refusal, exit 0 on held workflows, exit 1 on none read", () => {
@@ -131,13 +116,14 @@ test("the command line: exit 1 with one line per refusal, exit 0 on held workflo
     assert.equal(cli().status, 1);
     mkdirSync(join(dir, ".github/workflows"), { recursive: true });
     mkdirSync(join(dir, ".github/actions/b"), { recursive: true });
-    writeFileSync(join(dir, ".github/workflows/a.yml"), job(run("curl -sSfL https://x/y")));
+    writeFileSync(join(dir, ".github/workflows/a.yml"), job(run("curl -sSfL https://x/y") + foundry()));
     writeFileSync(join(dir, ".github/actions/b/action.yml"), `runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: |\n        sudo apt-get update\n`);
     const r = cli();
     assert.equal(r.status, 1);
     assert.match(r.stderr, /REFUSED: \.github\/workflows\/a\.yml:9: a curl without/);
+    assert.match(r.stderr, /REFUSED: \.github\/workflows\/a\.yml:10: a foundry-toolchain step/);
     assert.match(r.stderr, /REFUSED: \.github\/actions\/b\/action\.yml:6: an apt-get/);
-    writeFileSync(join(dir, ".github/workflows/a.yml"), job(run(`curl -sSfL ${FLAGS} https://x/y`) + PAIR));
+    writeFileSync(join(dir, ".github/workflows/a.yml"), job(run(`curl -sSfL ${FLAGS} https://x/y`)));
     writeFileSync(join(dir, ".github/actions/b/action.yml"), `runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: sudo apt-get -o Acquire::Retries=5 update\n`);
     const ok = cli();
     assert.equal(ok.status, 0, ok.stderr);
@@ -260,6 +246,38 @@ test("fetch.sh: a cached file that matches is used with no request; a bad one is
     // not a sha256, or a missing argument
     assert.equal(fetch(`file://${good}`, "abc").status, 2);
     assert.equal(spawnSync("bash", [FETCH, file, sum], { encoding: "utf8" }).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fetch.sh: a GitHub API release asset gets Accept: application/octet-stream and the job's token; no other url gets either", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fetch-sh-api-"));
+  try {
+    // a curl on PATH that records its arguments, one per line, and fails at once
+    writeFileSync(join(dir, "curl"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${dir}/args"\nexit 22\n`);
+    chmodSync(join(dir, "curl"), 0o755);
+    const sum = "cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b";
+    const args = (url, token) => {
+      const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
+      delete env.GITHUB_TOKEN;
+      if (token) env.GITHUB_TOKEN = token;
+      const r = spawnSync("bash", [FETCH, join(dir, "f.tgz"), sum, url], { encoding: "utf8", env });
+      assert.equal(r.status, 22, r.stderr);
+      return readFileSync(join(dir, "args"), "utf8").trim().split("\n");
+    };
+    const API = "https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756";
+    assert.deepEqual(args(API, "t0k"), ["-sSfL", "--retry", "6", "--retry-all-errors", "-o", join(dir, "f.tgz.part"), "-H", "Accept: application/octet-stream", "-H", "Authorization: Bearer t0k", API]);
+    // no token in the step: the API still answers, at the anonymous rate limit
+    assert.deepEqual(args(API, ""), ["-sSfL", "--retry", "6", "--retry-all-errors", "-o", join(dir, "f.tgz.part"), "-H", "Accept: application/octet-stream", API]);
+    // the release page, another API path, another host that ends like it: no header, the token never leaves
+    for (const url of [
+      "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_linux_amd64.tar.gz",
+      "https://api.github.com/repos/foundry-rs/foundry/releases/latest",
+      "https://api.github.com/repos/foundry-rs/foundry/releases/assets/415095756/x",
+      "https://api.github.com.evil.example/repos/a/b/releases/assets/1",
+      "http://api.github.com/repos/a/b/releases/assets/1",
+    ]) assert.deepEqual(args(url, "t0k"), ["-sSfL", "--retry", "6", "--retry-all-errors", "-o", join(dir, "f.tgz.part"), url], url);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
