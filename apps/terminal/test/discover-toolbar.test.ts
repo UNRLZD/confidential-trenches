@@ -28,7 +28,7 @@ test("Fewer flags hides a row with a known flag on Top 10 or dev, at the line (a
   assert.equal(flagged({ ...bare, top10_bps: 4500 }), true);
   assert.equal(flagged({ ...bare, dev_bps: 999 }), false);
   assert.equal(flagged({ ...bare, dev_bps: 1000 }), true);
-  // snipers_bps is null on every served row: Fewer flags does not read it (CO 8 Nov, app-discover-toolbar)
+  // snipers_bps is null on every served row: Fewer flags does not read it (card app-discover-toolbar)
   assert.equal(flagged({ ...bare, snipers_bps: 5000 }), false);
   assert.equal(passes({ ...bare, dev_bps: 1500 }, FEWER), false);
   assert.equal(passes({ ...bare, top10_bps: 1200, dev_bps: 50 }, FEWER), true);

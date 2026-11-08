@@ -9,7 +9,7 @@ import { qbAmount } from "./view.ts";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 
-/** The owner's words only (a draft is drawn by Discover.tsx's W, the one place that marks one, and handed in). */
+/** Final words only (a draft is drawn by Discover.tsx's W, the one place that marks one, and handed in). */
 // the drafts (words.ts DRAFTS, held by discover-screens.test.ts) are left out by name
 type FinalId = Exclude<WordId, "updated" | "padMenuTitle">;
 export const T = ({ id }: { id: FinalId }) => <>{WORDS[id].text}</>;
