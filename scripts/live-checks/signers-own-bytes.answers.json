@@ -1,12 +1,12 @@
 {
   "_note": {
-    "good": "facts() over card signers-own-bytes' build at 19baad0e on main 4729bfb8 (review 1 folded): PASS",
+    "good": "facts() over card signers-own-bytes' build at 60e71226 on main 53921971 (reviews 1-4 folded; release-97): PASS",
     "bad": "SIGN_HOST read at 2026-11-08 07:39Z, before this card's deploy: FAIL, every mark named",
-    "planted": "the good build with one line changed each (A-E): each FAIL on the mark it breaks"
+    "planted": "the good build with one line changed each (A-H): each FAIL on the mark it breaks"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-6szY6cYKzjnF2+l9uMpr7l2161e4DhrlfhsKWRs2GK7kETVtsbZWALodOOMKjuN4\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-6szY6cYKzjnF2+l9uMpr7l2161e4DhrlfhsKWRs2GK7kETVtsbZWALodOOMKjuN4",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-a0RanfpvEtBAx6bRMQzvWB2t0jjJAfPmyskcYxki98f415uFXaAa5sLWvRJxWJUW\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-a0RanfpvEtBAx6bRMQzvWB2t0jjJAfPmyskcYxki98f415uFXaAa5sLWvRJxWJUW",
     "carries": {
       "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
       "the signer refuses a wire not in the registry before anything else": true,
@@ -28,8 +28,8 @@
   },
   "planted": {
     "A the gate bypassed: no copy, the caller's wire": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-kykTj4oAOmVQfAa+h/BGQ/Kh8Inn0hecuzkFUt/QSeQJ6o1C8STJ5RkDrVGvFf/r\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-kykTj4oAOmVQfAa+h/BGQ/Kh8Inn0hecuzkFUt/QSeQJ6o1C8STJ5RkDrVGvFf/r",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-gLFcZftAKbuXodQZiWCssohR3brw+hT86bvw1fv81MsXBC9IQxVnkwFSwnZReZSS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-gLFcZftAKbuXodQZiWCssohR3brw+hT86bvw1fv81MsXBC9IQxVnkwFSwnZReZSS",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
         "the signer refuses a wire not in the registry before anything else": false,
@@ -39,8 +39,8 @@
       }
     },
     "B the registry keeps the caller's array, no copy": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rsqcxcdVNfonBbG5BoTUGgHV79QPEthQ5s7t5/BqpvP5J9nH+CHeJnGH3omB/Rom\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-rsqcxcdVNfonBbG5BoTUGgHV79QPEthQ5s7t5/BqpvP5J9nH+CHeJnGH3omB/Rom",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qdJmuggDMLRbfu27/pXnSGdsAnzPeS/CIA5I6sZxdZ19l+b/5DAtyJBpNM8TAABe\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-qdJmuggDMLRbfu27/pXnSGdsAnzPeS/CIA5I6sZxdZ19l+b/5DAtyJBpNM8TAABe",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
         "the signer refuses a wire not in the registry before anything else": false,
@@ -50,8 +50,8 @@
       }
     },
     "C the length not compared": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-rKdQRuCO9zfYgGUrn3yaWxhNBPWyWqz7R2NejwANhWoBsAo7le4JuNMO1RV5Vr2h\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-rKdQRuCO9zfYgGUrn3yaWxhNBPWyWqz7R2NejwANhWoBsAo7le4JuNMO1RV5Vr2h",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-3dBRuWLQDWSNi1qfYJMvfAwfdeGred8jgbVBTJaUe2tioWBlentCspK7Dlw8TxuS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-3dBRuWLQDWSNi1qfYJMvfAwfdeGred8jgbVBTJaUe2tioWBlentCspK7Dlw8TxuS",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
         "the signer refuses a wire not in the registry before anything else": false,
@@ -61,8 +61,8 @@
       }
     },
     "D the height not compared": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-SMlhWe+Ae6FxWtWbkufFDQUtgKafRW1u+6Mt+RynV2ZFo0h/fa4X91F0hvKhGsGT\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-SMlhWe+Ae6FxWtWbkufFDQUtgKafRW1u+6Mt+RynV2ZFo0h/fa4X91F0hvKhGsGT",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ImK0NdePHtPV/R9ApBWlYR4NSXLQsQRiccK1Y6+Ccky/9nkWGdmMJo7xfb338MrO\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-ImK0NdePHtPV/R9ApBWlYR4NSXLQsQRiccK1Y6+Ccky/9nkWGdmMJo7xfb338MrO",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": false,
         "the signer refuses a wire not in the registry before anything else": false,
@@ -72,8 +72,8 @@
       }
     },
     "E the signer handed the caller's message": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-aB2rehv8Xt9dTJDhMfH1NWTPITfhTl5j2/2OHJeUDYEQm++Mco7theN1+6GGnh9N\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-aB2rehv8Xt9dTJDhMfH1NWTPITfhTl5j2/2OHJeUDYEQm++Mco7theN1+6GGnh9N",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-nVKAWmC38swwC4jx3fBj5Ga0IlKCeX6dmerYpAFI3wf27rYpH5LjteFo1Omg4a8Q\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-nVKAWmC38swwC4jx3fBj5Ga0IlKCeX6dmerYpAFI3wf27rYpH5LjteFo1Omg4a8Q",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
         "the signer refuses a wire not in the registry before anything else": true,
@@ -83,8 +83,8 @@
       }
     },
     "F a leg registered before its verdict": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ORWE1TAoFzyw9Jh5p/BhEUdnKs9OyOJxOl6UgbIRQ+P6ah5h6sxQcMsOfm/CLkcH\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-ORWE1TAoFzyw9Jh5p/BhEUdnKs9OyOJxOl6UgbIRQ+P6ah5h6sxQcMsOfm/CLkcH",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-8DmorHJEoZgDfP/q7B/9p8B5uatLB+a/yHqsTgdsq4D2OXQk7AsrSEECYTwQ4GWA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-8DmorHJEoZgDfP/q7B/9p8B5uatLB+a/yHqsTgdsq4D2OXQk7AsrSEECYTwQ4GWA",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
         "the signer refuses a wire not in the registry before anything else": true,
@@ -93,9 +93,9 @@
         "a teardown's frames are copied before their simulations and registered only after their checks pass, before they are signed": true
       }
     },
-    "G the teardown simulates the live wire": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-SnVc6rXqogpsA8UMY7E7pIAKIqSbf7O+lJ9GOiXL9WZT0PgXrVLwYe4HHSAzizy2\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-SnVc6rXqogpsA8UMY7E7pIAKIqSbf7O+lJ9GOiXL9WZT0PgXrVLwYe4HHSAzizy2",
+    "G the teardown checks the live wires, not its copies": {
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ni8sSCje/iP32sCCTUsyc1/OL49lvuf7p+U59juoKg3JnI7vd/PZp+Q575hSOKpZ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-ni8sSCje/iP32sCCTUsyc1/OL49lvuf7p+U59juoKg3JnI7vd/PZp+Q575hSOKpZ",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
         "the signer refuses a wire not in the registry before anything else": true,
@@ -105,8 +105,8 @@
       }
     },
     "H the teardown's frames never registered": {
-      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-i/1/OLgSm1ajyZMpqJNX2r9Sz/zQxHqMj45KAzgzCkc++Qb05BS2KxhZeJzt031k\"></script>\n  </head>\n  <body></body>\n</html>\n",
-      "sha384": "sha384-i/1/OLgSm1ajyZMpqJNX2r9Sz/zQxHqMj45KAzgzCkc++Qb05BS2KxhZeJzt031k",
+      "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-x8YxpjEr6YvY5f1ssznM6wHf5rMe69WD9N5S6AVy7Xje7CH83zQ7K6J4SxSMMWHS\"></script>\n  </head>\n  <body></body>\n</html>\n",
+      "sha384": "sha384-x8YxpjEr6YvY5f1ssznM6wHf5rMe69WD9N5S6AVy7Xje7CH83zQ7K6J4SxSMMWHS",
       "carries": {
         "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy": true,
         "the signer refuses a wire not in the registry before anything else": true,

@@ -44,13 +44,21 @@ const COPY = (own) =>
       `[^]{0,200}?!${I}\\.verify\\((${I}),\\4,${I}\\.decode\\(\\6\\)\\)\\)\\)throw Error\\(\`the signature for \\$\\{\\6\\} does not verify\`\\);return \\2\\.set\\(\\7,1\\),\\{wire:\\2,lastValidBlockHeight:\\3\\}\\}`,
   );
 const LEG = (reg) => new RegExp(`,(${I})\\.ok\\?\\(${esc(reg)}\\((${I}),(${I})\\),\\{leg:${I},rec:${I},assembled:\\2,checked:\\3,`);
-// the teardown: the copies taken before the simulations, simulated and checked, and registered after the checks pass
-const TEARDOWN = (reg) =>
+// the teardown: the kit's checked teardown copies each frame's wire before it simulates, checks those copies and returns
+// them as wires; the flow registers those copies, after the checks pass, before it signs
+const TEARDOWN_CHECKED = new RegExp(
+  `async function (${I})\\(${I},${I},(${I}),(${I}),${I},(${I})\\)\\{let ${I}=async\\((${I}),(${I})\\)=>\\{let (${I})=${I}\\(${I},\\5,${I}\\),(${I})=\\7\\.map\\((${I})=>Uint8Array\\.from\\(\\9\\.wire\\)\\),(${I})=\\{accounts:\\2,wallet:\\3,simulations:await \\4\\(\\7\\)` +
+    `[^;]{0,80}?\\};return\\{plan:\\5,frames:\\7,wires:\\8,reads:\\10,verdict:${I}\\(\\8,${I},\\10\\)\\}\\}`,
+);
+const TEARDOWN_SIGNED = (checked, reg) =>
   new RegExp(
-    `(${I})=(${I})\\.map\\((${I})=>Uint8Array\\.from\\(\\3\\.wire\\)\\),(${I})=await Promise\\.all\\(\\1\\.map\\(` +
-      `[^;]{0,200}?,(${I})=${I}\\(\\1,${I},\\{accounts:${I},wallet:[^;]{0,120}?,simulations:\\4\\}\\);` +
-      `if\\(!\\5\\.ok\\|\\|\\2\\.length===0\\)return\\{verdict:\\5[^;]{0,80}\\};\\2\\.forEach\\(\\((${I}),(${I})\\)=>${esc(reg)}\\(\\6,\\1\\[\\7\\]\\)\\);let ${I}=await ${I}\\(${I},\\2\\.map\\(`,
+    `\\{frames:(${I}),wires:(${I}),verdict:(${I})\\}=await ${esc(checked)}\\([^;]{0,400}?\\);` +
+      `if\\(!\\3\\.ok\\|\\|\\1\\.length===0\\)return\\{verdict:\\3[^;]{0,80}\\};\\1\\.forEach\\(\\((${I}),(${I})\\)=>${esc(reg)}\\(\\4,\\2\\[\\5\\]\\)\\);let ${I}=await ${I}\\(${I},\\1\\.map\\(`,
   );
+const teardown = (js, reg) => {
+  const c = TEARDOWN_CHECKED.exec(js);
+  return c !== null && TEARDOWN_SIGNED(c[1], reg).test(js);
+};
 
 export const MARKS = Object.freeze([
   "the registry keeps a copy of the checked bytes and height, compares every byte and the height, and hands out a copy",
@@ -63,7 +71,7 @@ export const MARKS = Object.freeze([
 /** What the check keeps of the reads: the index, the served bundle's sha384, and which lines the bundle carries. */
 export function facts(index, js) {
   const r = REGISTRY.exec(js);
-  const has = r ? [true, GATE(r[5]).test(js), COPY(r[5]).test(js), LEG(r[2]).test(js), TEARDOWN(r[2]).test(js)] : MARKS.map(() => false);
+  const has = r ? [true, GATE(r[5]).test(js), COPY(r[5]).test(js), LEG(r[2]).test(js), teardown(js, r[2])] : MARKS.map(() => false);
   return { index, sha384: sha384(js), carries: Object.fromEntries(MARKS.map((k, i) => [k, has[i]])) };
 }
 
