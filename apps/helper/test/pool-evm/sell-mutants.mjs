@@ -1,12 +1,9 @@
 // Removes or weakens each of the EVM pool sender's sell checks (src/pool/evm.ts, POST /v1/pool/evm/sell, card
 // helper-evm-sender), one at a time, and runs the test named for it in src/pool/evm-sell.test.ts: each named test
-// passes on the code as it is and fails on every mutant. The mutants are made in a copy of the helper's src and test in
-// a fresh temporary folder beside the helper, with its node_modules linked (so the copy resolves the same installed
-// modules, @blindfill/kit included), removed at the end; the tree's own files are never changed. Exits 1 when a named
-// test passes on its mutant, fails or runs no test on the code as it is, or a mutant's text is not in its file exactly
-// once, which it reads first, before any test runs (the style of packages/kit/test/evm-quote-mutants.mjs). CI runs it
-// as apps/helper's test:mutants, one command of ci.yml's test-mutants split (scripts/ci/test-shards.mjs);
-// test/pool-evm/sell-mutants.test.mjs holds the list and the sweep's refusals.
+// passes on the code as it is and fails on every mutant; mutant-sweep.mjs runs the list (each entry's text in its file
+// exactly once, read before any test runs; the mutants made in a copy of the helper, never in the tree) and exits 1 on
+// any problem. CI runs it as apps/helper's test:mutants, in parts, each one command of ci.yml's test-mutants split
+// (scripts/ci/test-shards.mjs); test/pool-evm/mutant-sweep.test.mjs holds the list and the sweep's refusals.
 //   node apps/helper/test/pool-evm/sell-mutants.mjs [<k>/<n>]   (part k of n only; test:mutants runs the parts, one
 //   command each, so ci.yml's split can share them out)
 //
@@ -23,10 +20,10 @@
 // EVM_LANE_SENT_RETRY_S = 1 s, a held answer's one-block wait counted from the last held send instead of now and a
 // failed hold read's rest of its block rounded down instead of up (each wait is then a block or less, at least 1 s, so
 // 1 s either way; both survived the sweep's first whole run, card helper-sell-sweep-in-ci).
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../../../scripts/group-run.mjs";
+import { sweepMain } from "./mutant-sweep.mjs";
 
 const HELPER = fileURLToPath(new URL("../..", import.meta.url));
 const EVM = "src/pool/evm.ts";
@@ -347,96 +344,4 @@ export const MUTANTS = [
   [EVM, "\"Paid(address,uint256)\"", "\"Paid(address indexed,uint256)\"", T, "the Paid topic is FeeCollector's"],
 ];
 
-// "pass", "fail" or "none" (no test ran) of the tests in `file` whose names start with `name`, in the copy `dir`; a
-// run past 120 s is killed, its process group with it (scripts/group-run.mjs), and counts as a fail; each run without
-// the node --test runner's NODE_TEST_CONTEXT, which turns a child's report from TAP on stdout into the runner's own
-// (so a sweep started from a test, as test/pool-evm/sell-mutants.test.mjs does, reads its runs right)
-const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
-let lastFail = "";
-function run(dir, file, name) {
-  const args = ["--test", "--test-reporter=tap", "--test-name-pattern", `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, file];
-  const r = runSync("node", args, { cwd: dir, env: CHILD_ENV, stdio: "pipe", encoding: "utf8", timeoutMs: 120_000 });
-  if (r.status !== 0) {
-    lastFail = `${r.stdout ?? ""}${r.stderr ?? ""}`.split("\n").filter((l) => /error|Error|not ok/.test(l)).slice(0, 4).join("\n");
-    return "fail";
-  }
-  return /^# pass ([1-9]\d*)$/m.test(r.stdout) ? "pass" : "none";
-}
-
-/** Every entry of `list` whose text is not in its file exactly once, one line each: an entry left behind by a change to
- *  the code (card helper-sell-sweep-in-ci: five stood stale for days, unseen, while no CI job ran the sweep) or one
- *  that names two places. `read` gives a file's text. */
-export function stale(list, read = (f) => readFileSync(join(HELPER, f), "utf8")) {
-  const text = new Map();
-  return list.flatMap(([file, find], i) => {
-    if (!text.has(file)) text.set(file, read(file));
-    const n = text.get(file).split(find).length - 1;
-    return n === 1 ? [] : [`mutant ${i + 1}: its text is in ${file} ${n} times, not once: ${JSON.stringify(find.split("\n")[0].trim().slice(0, 70))}`];
-  });
-}
-
-/** Runs `list` and returns its problems' count: every stale entry first, the whole list's (then no test runs), else
- *  each named test of the entries `pick` takes on the code as it is (each must pass), else each of those mutants (its
- *  named test must fail; one that passes is a survivor). `pick` takes an entry's index in `list`. */
-export function sweep(list, log = console.log, pick = () => true) {
-  const old = stale(list);
-  for (const s of old) log(`FAIL ${s}`);
-  if (old.length) return old.length;
-  // the copy sits beside the helper (in apps/), as release-mutants.mjs's does, with test/ in it and the helper's
-  // node_modules linked: evm-sell.test.ts imports ../../test/pool-evm/release-sign.ts, and its ../../../../ paths reach
-  // the repository root (a copy inside the helper with src alone failed every named test on the code as it is)
-  const dir = mkdtempSync(join(HELPER, "..", ".sell-mutants-"));
-  let bad = 0;
-  try {
-    for (const p of ["src", "test", "package.json"]) cpSync(join(HELPER, p), join(dir, p), { recursive: true });
-    symlinkSync(join(HELPER, "node_modules"), join(dir, "node_modules"), "dir");
-    const src = new Map([...new Set(list.map((m) => m[0]))].map((f) => [f, readFileSync(join(dir, f), "utf8")]));
-    const mine = list.filter((_, i) => pick(i));
-    for (const [file, t] of [...new Set(mine.map((m) => `${m[3]}\u0000${m[4]}`))].map((k) => k.split("\u0000"))) {
-      const r = run(dir, file, t);
-      if (r !== "pass") {
-        log(`FAIL "${t}" in ${file} ${r === "none" ? "names no test" : `fails on the code as it is:\n${lastFail}`}`);
-        bad++;
-      }
-    }
-    if (bad === 0) {
-      list.forEach(([file, find, repl, tf, t], i) => {
-        if (!pick(i)) return;
-        const s = src.get(file);
-        writeFileSync(join(dir, file), s.replace(find, repl));
-        const r = run(dir, tf, t);
-        writeFileSync(join(dir, file), s);
-        log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].trim().slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
-        if (r !== "fail") bad++;
-      });
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  return bad;
-}
-
-/** `<k>/<n>`: part k of n, every n-th entry from the k-th (so each part gets some of every check's mutants); none: the
- *  whole list. Anything else is refused. */
-export function partOf(arg, size) {
-  if (arg === undefined) return { what: `${size} mutants`, pick: () => true };
-  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(arg);
-  if (!m || Number(m[1]) > Number(m[2])) throw new Error(`the part is <k>/<n> with 1 <= k <= n, not ${JSON.stringify(arg)}`);
-  const [k, n] = [Number(m[1]), Number(m[2])];
-  const count = Array.from({ length: size }, (_, i) => i).filter((i) => i % n === k - 1).length;
-  return { what: `${count} mutants (part ${k} of ${n})`, pick: (i) => i % n === k - 1 };
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  let part;
-  try {
-    if (process.argv.length > 3) throw new Error("one part at most: node sell-mutants.mjs [<k>/<n>]");
-    part = partOf(process.argv[2], MUTANTS.length);
-  } catch (e) {
-    console.log(`FAIL ${e.message}`);
-    process.exit(1);
-  }
-  const bad = sweep(MUTANTS, console.log, part.pick);
-  console.log(bad === 0 ? `every one of ${part.what} fails its named test` : `${bad} problem(s)`);
-  process.exit(bad === 0 ? 0 : 1);
-}
+if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "sell-mutants.mjs");
