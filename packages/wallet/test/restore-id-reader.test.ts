@@ -11,7 +11,7 @@ import { vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import type { NoteRestore, RestoredNote } from "../src/notes/restore.ts";
-import { ID_READ_TRIES, nearIdReader } from "../src/restore/id-reader.ts";
+import { ID_READ_TRIES, nearBalanceReader, nearIdReader } from "../src/restore/id-reader.ts";
 import { DEPOSIT_ID_MARGIN, restoreDepositIds } from "../src/restore/wallets.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
@@ -173,6 +173,32 @@ test("retries: a view is retried with doubling backoff on its provider, then the
   // but money or a trace on the provider that answers is enough
   assert.equal(await nearIdReader("mainnet", [provider(FAST, W({ [U1]: { usdc: 1n } }), down), provider(DRPC, W({ [U1]: { usdc: 1n } }))], { first: () => 0, sleep: noSleep })(U1), "money");
   assert.equal(await nearIdReader("mainnet", [provider(FAST, W({ [U2]: { account: true } })), provider(DRPC, W({}), down)], { first: () => 1, sleep: noSleep })(U2), "used");
+});
+
+// ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------
+test("the R/V/A balance reader on mainnet's answers, and above 0 on either provider is enough, 0 only on both", async () => {
+  const ex = (url: string) => (p: Record<string, unknown>) => {
+    if (p.account_id !== "intents.near" || argsOf(p).account_id !== REC.ids.money_intents) return undefined;
+    return p.method_name === "mt_tokens_for_owner" ? REC.intents[url]!.tokens : REC.intents[url]!.held;
+  };
+  const live = (f: number) => nearBalanceReader("mainnet", [replay(FAST, [], ex(FAST)), replay(DRPC, [], ex(DRPC))], { first: () => f, tries: 1 });
+  for (const f of [0, 1]) {
+    assert.equal(await live(f)("usdc", REC.ids.money_usdc!), 3_000_668n);
+    assert.equal(await live(f)("near", REC.ids.used_account!), 20_000_000_000_000_000_000_000n);
+    assert.equal(await live(f)("near", REC.ids.never_used!), 0n, "no account is 0 NEAR, on both");
+    assert.ok((await live(f)("intents", REC.ids.money_intents!)) > 0n);
+  }
+  const empty = W({});
+  const rich = W({ [U1]: { usdc: 7n, tokens: { "nep141:a": 2n, "nep141:b": 3n }, account: true } });
+  const b = (x: Map<string, Id>, y: Map<string, Id>, fx?: () => unknown) => nearBalanceReader("mainnet", [provider(FAST, x, fx), provider(DRPC, y)], { first: () => 0, sleep: noSleep });
+  assert.equal(await b(empty, rich)("usdc", U1), 7n, "the second provider shows what the first hid");
+  assert.equal(await b(rich, empty)("intents", U1), 5n);
+  assert.equal(await b(empty, empty)("usdc", U1), 0n);
+  await assert.rejects(b(empty, empty, () => new Error("HTTP 503"))("usdc", U1), /HTTP 503/, "a 0 needs both providers");
+  assert.equal(await b(rich, rich, () => new Error("HTTP 503"))("usdc", U1), 7n, "the provider up shows money: enough");
+  const halted = () => ({ jsonrpc: "2.0", result: { error: "Smart contract panicked: FiatToken: paused", logs: [], block_height: 1 } });
+  await assert.rejects(nearBalanceReader("mainnet", [provider(FAST, rich, halted), provider(DRPC, rich, halted)], { first: () => 0, sleep: noSleep, tries: 1 })("usdc", U1), /FiatToken: paused/);
+  await assert.rejects(b(rich, rich)("gas" as "usdc", U1), /unknown read/);
 });
 
 // ---------- whole step 5 restores on failing providers (review 2, gap 2) ----------

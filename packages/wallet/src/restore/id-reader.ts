@@ -99,11 +99,8 @@ const amount = (x: unknown, what: string): bigint => {
   return BigInt(x);
 };
 
-/**
- * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
- * network (nearPairNetwork), in either order.
- */
-export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): IdReader {
+// the pair's checks, the network's token and one view on one provider retried with doubling backoff
+function setup(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts) {
   if (typeof network !== "string" || !Object.hasOwn(NEAR_NETWORKS, network)) throw new Error(`unknown network ${String(network)}`);
   if (nearPairNetwork(rpcs) !== network) throw new Error(nearPairRule(network));
   const token = NEAR_NETWORKS[network].usdc;
@@ -125,6 +122,15 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       }
     }
   };
+  return { token, retried, first };
+}
+
+/**
+ * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
+ * network (nearPairNetwork), in either order.
+ */
+export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): IdReader {
+  const { token, retried, first } = setup(network, rpcs, opts);
 
   // what one provider shows of U
   const readOn = async (rpc: NearRpc, u: string): Promise<IdState> => {
@@ -167,5 +173,48 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       }
     }
     return "unused";
+  };
+}
+
+/** What an account holds on one read (restore/arms.ts BalanceReader): only above 0 matters to step 5. */
+export type NearBalanceRead = "usdc" | "near" | "intents";
+
+/**
+ * Step 5's balance reads of R, V and A (./arms.ts restoreArmAccounts) on NEAR: "usdc" ft_balance_of on the network's
+ * token, "near" the account's own NEAR (view_account; none is 0), "intents" the sum of what intents.near lists for it.
+ * As nearIdReader: each view retried with backoff, the first provider drawn at random and the other read when it
+ * fails; a balance above 0 on either provider is enough, and 0 only when both answer 0, so a provider that hides money
+ * never makes the restore pass over it. A halt ("FiatToken: paused") fails the read.
+ */
+export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Omit<IdReaderOpts, "indexer"> = {}): (what: NearBalanceRead, account: string) => Promise<bigint> {
+  const { token, retried, first } = setup(network, rpcs, opts);
+  const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string): Promise<bigint> => {
+    if (what === "usdc") return amount(await retried(rpc, call(token, "ft_balance_of", { account_id: a }), "ft_balance_of"), `${rpc.name}: ft_balance_of`);
+    if (what === "near") {
+      const acct = await retried(rpc, { request_type: "view_account", account_id: a }, "view_account");
+      return acct === null ? 0n : amount((acct as Obj).amount, `${rpc.name}: view_account`);
+    }
+    const listed = await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: a }), "mt_tokens_for_owner");
+    if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
+    if (listed.length === 0) return 0n;
+    const ids = listed.map((t) => (t as { token_id: string }).token_id);
+    const held = await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: a, token_ids: ids }), "mt_batch_balance_of");
+    if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
+    return held.reduce((sum: bigint, x) => sum + amount(x, `${rpc.name}: mt_batch_balance_of`), 0n);
+  };
+  return async (what, a) => {
+    if (what !== "usdc" && what !== "near" && what !== "intents") throw new Error(`unknown read ${String(what)}`);
+    if (typeof a !== "string" || !HEX64.test(a)) throw new Error("an account is a 64-hex implicit account id");
+    const x = first() === 0 ? 0 : 1;
+    let p = x;
+    let v: bigint;
+    try {
+      v = await readOn(rpcs[x], what, a);
+    } catch {
+      p = 1 - x;
+      v = await readOn(rpcs[p], what, a);
+    }
+    if (v > 0n) return v;
+    return readOn(rpcs[1 - p], what, a);
   };
 }
