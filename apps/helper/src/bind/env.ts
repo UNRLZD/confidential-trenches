@@ -276,17 +276,30 @@ export function bindSenderFromEnv(
     },
     carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, net.account])),
     delivered(body) {
+      let who: string | null = null;
       try {
         const s = openIntents();
-        if (s !== null) onIntentsStatus(body, s);
+        if (s !== null) who = onIntentsStatus(body, s);
       } catch {
         console.error("helper: intents status_record_failed");
       }
+      // card intents-u-registered-first: the id the answer showed money to is registered on USDC now, before the
+      // device can sign its first intent (the signing page waits for that registration on two RPCs)
+      const own =
+        who === null || mainnet === undefined
+          ? Promise.resolve()
+          : Promise.resolve()
+              .then(() => intentsOf(mainnet).registerSeen(who!))
+              .then(
+                (c) => void (c !== "registered" && c !== "in_flight" && console.error(`helper: intents register ${c}`)),
+                () => console.error("helper: intents register upstream"),
+              );
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
-      return onStatusAnswer(body, nets).then(
+      const created = onStatusAnswer(body, nets).then(
         (a) => void ((l) => l !== null && console.log(l))(createLine(a)),
         () => console.error(CREATE_START_FAILED),
       );
+      return Promise.all([created, own]).then(() => undefined);
     },
     stop: () => {
       stopped = true;

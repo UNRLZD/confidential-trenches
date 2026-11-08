@@ -17,9 +17,17 @@
 //      spend the gas account's NEAR by sends that land;
 //   7. in_flight: the same intent (signer and nonce) while one send of it is out;
 //   8. simulation_refused: simulate_intents on both providers at one block, both ran it and their bytes agree;
-//   9. (ft_withdraw) the receiver's registration: storage_balance_of on both; null on both and the token the release's
+//   9. the signer's own registration on the release's USDC (card intents-u-registered-first): storage_balance_of(signer)
+//      on both; null gets one storage_deposit (registration_only, REGISTRATION_YOCTO) for the signer, sent before its
+//      intent and only once it ran, so every id leaves a lasting public trace on the token before its first intent
+//      (restore's storage rule reads that trace as used, whatever intents.near later deletes or prunes). A second
+//      intent of a registered signer sends none. The same registration also starts when a status answer first shows
+//      the signer money (registerSeen, from the proxy's status hook): the signing page signs no intent of U's until
+//      it reads U registered on two RPCs, so the device's first intent can only come after it;
+//  9b. (ft_withdraw) the receiver's registration: storage_balance_of on both; null on both and the token the release's
 //      USDC gets one storage_deposit (registration_only, REGISTRATION_YOCTO) per signer, sent before the intent and
-//      only once it ran; a second one, or another token, gets receiver_not_registered (409);
+//      only once it ran; a second one, or another token, gets receiver_not_registered (409). A receiver that is the
+//      signer itself on USDC is the signer's own registration (9);
 //  10. relayer_low (503): the gas account under INTENTS_FLOOR_YOCTO, 1 NEAR above the deposits' floor; then expired
 //      again, read after the registration (which can take until the deadline);
 //  11. the send: execute_intents with nothing attached. A send that fails on chain counts toward the signer's three, as
@@ -149,9 +157,24 @@ export function intentOf(x: Parsed, vault: string): Transfer | Withdraw | null {
 
 export type IntentsCarry = {
   carry(body: unknown): Promise<IntentsAnswer>;
+  /**
+   * A status answer showed money to `signer` (records.ts onStatusAnswer saw it): its own registration on USDC, as 9
+   * sends it, so the device can sign its first intent. Nothing for a signer not seen, struck, or read registered; the
+   * answer's code, "registered" when nothing is left to do. Never throws.
+   */
+  registerSeen(signer: string): Promise<IntentsCode | "registered">;
   /** Every send's background read done (a test's wait; a stop does not need it: the chain keeps the outcome). */
   idle(): Promise<void>;
 };
+
+/** How long a registration started by registerSeen is read (and resent) for: an id intent's own window (the signing
+ *  page's ID_INTENT_WINDOW_MS). One still unread after it stays pending under its transaction and is read first next time. */
+export const SEEN_REGISTER_MS = 120_000;
+
+/** Which registration of a signer's record: its one paid receiver's (9b) or its own on USDC (9). */
+type Slot = "registration" | "own";
+const slotOf = (rec: SignerRecord, slot: Slot): Registration | null => (slot === "own" ? (rec.own ?? null) : rec.registration);
+const withSlot = (rec: SignerRecord, slot: Slot, g: Registration | null): SignerRecord => (slot === "own" ? { ...rec, own: g } : { ...rec, registration: g });
 
 /** A send's outcome: ran when every receipt ran. */
 const ran = (out: TxOutcome) => out.kind === "final" && out.receipts.length > 0 && out.receipts.every((r) => r.ok);
@@ -163,9 +186,11 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
   /** The intents out: "<signer>/<nonce>". Set and read with no await between. */
   const out = new Set<string>();
   const tasks = new Set<Promise<void>>();
-  /** The signers whose registration this process is sending now. A pending claim with no transaction that no send here
-   *  holds was never signed (the process stopped before): free again. */
+  /** The registrations this process is sending now ("<slot>/<signer>"). A pending claim with no transaction that no send
+   *  here holds was never signed (the process stopped before): free again. */
   const registering = new Set<string>();
+  /** The signers read or seen registered on USDC here: their own registration is never read again. */
+  const ownDone = new Set<string>();
   const strike = (signer: string) => {
     const rec = store.signer(signer);
     store.putSigner({ ...rec, failed: rec.failed + 1 });
@@ -186,55 +211,62 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     return o;
   };
 
-  /** The receiver's registration, once per signer: null to go on, or the answer. */
-  const register = async (signer: string, w: Withdraw, untilMs: number): Promise<IntentsAnswer | null> => {
+  /**
+   * A registration on `token` of `account`, once per signer and slot: null to go on, or the answer. The receiver's (9b)
+   * or the signer's own on USDC (9, `account` the signer).
+   */
+  const register = async (signer: string, token: string, account: string, slot: Slot, untilMs: number): Promise<IntentsAnswer | null> => {
     let st: "registered" | "none";
     try {
-      st = await reads.storage(w.token, w.receiver_id);
+      st = await reads.storage(token, account);
     } catch {
       return no("upstream");
     }
     if (st === "registered") return null;
-    if (w.token !== usdc) return no("receiver_not_registered");
-    const used = (g: Registration | null) => g !== null && (g.receiver !== w.receiver_id || g.state === "landed");
-    const was = store.signer(signer).registration;
+    if (token !== usdc) return no("receiver_not_registered");
+    const was = slotOf(store.signer(signer), slot);
+    // the receiver's: one paid per signer, never a second receiver. The signer's own landed while the reads still say
+    // null: the providers' final block is behind its landing; read again later, never a second payment
+    if (slot === "own" && was !== null && was.state === "landed") return no("in_flight");
+    const used = (g: Registration | null) => g !== null && (g.receiver !== account || g.state === "landed");
     if (used(was)) return no("receiver_not_registered");
-    // an earlier registration of this receiver whose outcome was not read: read it before any new one
+    // an earlier registration of this account whose outcome was not read: read it before any new one
     if (was !== null && was.tx !== null) {
       const o = await relayer.resolve(was.tx, { resend: false });
       if (o.kind === "unknown") return no("in_flight");
       const r = store.signer(signer);
       if (ran(o)) {
-        store.putSigner({ ...r, registration: { ...was, state: "landed" } });
+        store.putSigner(withSlot(r, slot, { ...was, state: "landed" }));
         return null;
       }
-      store.putSigner({ ...r, registration: null, failed: r.failed + (o.kind === "final" ? 1 : 0) });
+      store.putSigner({ ...withSlot(r, slot, null), failed: r.failed + (o.kind === "final" ? 1 : 0) });
     }
     if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
     // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
     const rec: SignerRecord = store.signer(signer);
-    if (used(rec.registration)) return no("receiver_not_registered");
-    if (rec.registration !== null && (rec.registration.tx !== null || registering.has(signer))) return no("in_flight");
-    registering.add(signer);
+    const g = slotOf(rec, slot);
+    if (used(g)) return no("receiver_not_registered");
+    const key = `${slot}/${signer}`;
+    if (registering.has(key) || (g !== null && g.tx !== null)) return no("in_flight");
+    registering.add(key);
     try {
-      return await registerOnce(signer, w, untilMs, rec);
+      return await registerOnce(signer, token, account, slot, untilMs, rec);
     } finally {
-      registering.delete(signer);
+      registering.delete(key);
     }
   };
 
-  const registerOnce = async (signer: string, w: Withdraw, untilMs: number, rec: SignerRecord): Promise<IntentsAnswer | null> => {
-    store.putSigner({ ...rec, registration: { receiver: w.receiver_id, state: "pending", tx: null } });
+  const registerOnce = async (signer: string, token: string, account: string, slot: Slot, untilMs: number, rec: SignerRecord): Promise<IntentsAnswer | null> => {
+    store.putSigner(withSlot(rec, slot, { receiver: account, state: "pending", tx: null }));
     const sentTx: TxRef[] = [];
     let o: TxOutcome;
     try {
       const a = await relayer.send(
-        { kind: "call", receiver: w.token, method: "storage_deposit", args: JSON.stringify({ account_id: w.receiver_id, registration_only: true }), gas: REGISTER_GAS, deposit: REGISTRATION_YOCTO },
+        { kind: "call", receiver: token, method: "storage_deposit", args: JSON.stringify({ account_id: account, registration_only: true }), gas: REGISTER_GAS, deposit: REGISTRATION_YOCTO },
         async () => null,
         (tx) => {
           sentTx.push(tx);
-          const r = store.signer(signer);
-          store.putSigner({ ...r, registration: { receiver: w.receiver_id, state: "pending", tx } });
+          store.putSigner(withSlot(store.signer(signer), slot, { receiver: account, state: "pending", tx }));
         },
       );
       o = a.kind === "guarded" ? { kind: "dropped", tx_hash: "", why: "guarded" } : a;
@@ -246,13 +278,21 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (tx !== undefined && o.kind === "unknown") o = await settle(tx, o, untilMs);
     const r = store.signer(signer);
     if (ran(o)) {
-      store.putSigner({ ...r, registration: { receiver: w.receiver_id, state: "landed", tx: tx ?? null } });
+      store.putSigner(withSlot(r, slot, { receiver: account, state: "landed", tx: tx ?? null }));
       return null;
     }
     if (o.kind === "unknown") return no("in_flight"); // kept pending under its transaction: no second one meanwhile
     // failed or never landed: the registration is free again, and a failure on chain counts
-    store.putSigner({ ...r, registration: null, failed: r.failed + (o.kind === "final" ? 1 : 0) });
+    store.putSigner({ ...withSlot(r, slot, null), failed: r.failed + (o.kind === "final" ? 1 : 0) });
     return no("registration_failed");
+  };
+
+  /** The signer's own registration on USDC (9): null once it reads or lands registered. */
+  const registerOwn = async (signer: string, untilMs: number): Promise<IntentsAnswer | null> => {
+    if (ownDone.has(signer)) return null;
+    const a = await register(signer, usdc, signer, "own", untilMs);
+    if (a === null) ownDone.add(signer);
+    return a;
   };
 
   const carryOne = async (body: unknown): Promise<IntentsAnswer> => {
@@ -295,9 +335,12 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       // the intent can land until its deadline; a send's outcome is read until then (and a little past: the chain's
       // time runs behind the helper's)
       const untilMs = deadlineMs + 60_000;
-      // 9. the receiver's registration (ft_withdraw only)
-      if (i.intent === "ft_withdraw") {
-        const r = await register(x.signer, i, untilMs);
+      // 9. the signer's own registration on USDC, before its first intent: its lasting public trace
+      const own = await registerOwn(x.signer, untilMs);
+      if (own !== null) return own;
+      // 9b. the receiver's registration (ft_withdraw only); the signer itself on USDC is 9's
+      if (i.intent === "ft_withdraw" && !(i.receiver_id === x.signer && i.token === usdc)) {
+        const r = await register(x.signer, i.token, i.receiver_id, "registration", untilMs);
         if (r !== null) return r;
       }
       // 10. the gas account
@@ -352,6 +395,16 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         return await carryOne(body);
       } catch {
         return no("upstream");
+      }
+    },
+    async registerSeen(signer) {
+      try {
+        if (ownDone.has(signer)) return "registered";
+        if (!store.seen(signer) || store.signer(signer).failed >= STRUCK_AT) return "id_not_ours";
+        const a = await registerOwn(signer, now() + SEEN_REGISTER_MS);
+        return a === null ? "registered" : "error" in a.body ? a.body.error.code : "upstream";
+      } catch {
+        return "upstream";
       }
     },
     idle: async () => {

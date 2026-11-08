@@ -43,8 +43,9 @@ export const STRUCK_AT = 3;
 
 /** The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran. */
 export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null };
-/** `sent`: the execute_intents this endpoint sent for the signer, landed or not (carry.ts signer_cap). */
-export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number };
+/** `sent`: the execute_intents this endpoint sent for the signer, landed or not (carry.ts signer_cap). `own`: the
+ *  signer's own registration on the release's USDC (card intents-u-registered-first), its receiver the signer itself. */
+export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number; own?: Registration | null };
 
 export type IntentsStore = {
   quote(depositAddress: string): QuoteRecord | null;

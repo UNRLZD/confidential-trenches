@@ -156,7 +156,14 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   syncBuiltinESMExports();
   t.after(() => (t.mock.restoreAll(), syncBuiltinESMExports()));
   await s.quoted!(JSON.stringify(q)); // the quote record is written off the event loop
-  s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  // card intents-u-registered-first: the status that makes U seen also starts U's registration on USDC, which reads
+  // the chain first (here every read answers 500: nothing is sent, the hook logs upstream and resolves)
+  const errors: string[] = [];
+  t.mock.method(console, "error", (line: string) => void errors.push(line));
+  await s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  const seenReads = fetched;
+  assert.ok(seenReads > 0, "the seen id's registration read storage_balance_of");
+  assert.deepEqual(errors, ["helper: intents register upstream"]);
   const v = await s.intents!(body(MAINNET_VAULT));
   assert.deepEqual([v.status, code(v)], [403, "receiver_is_vault"]);
   // the gate's second path: a mainnet withdrawal landed to an arming account A (withdraw/send.ts onLanded)
@@ -165,7 +172,7 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   assert.equal(code(await s.intents!(bodyA)), "id_not_ours");
   s.armed!(armedA);
   assert.equal(code(await s.intents!(bodyA)), "receiver_is_vault");
-  assert.equal(fetched, 0, "no chain read and no relayer start");
+  assert.equal(fetched, seenReads, "no chain read and no relayer start by /v1/intents");
   s.stop();
 });
 
