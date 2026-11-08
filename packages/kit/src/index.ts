@@ -13,6 +13,7 @@ export {
   EVM_QUOTE_MAX_HINTS,
   EVM_SELL_PROBE_CODE,
   evmBuyRevertedPools,
+  evmBuySwapFitCall,
   evmIsDeviceQuote,
   evmIsDeviceSellQuote,
   evmPoolBuyQuote,

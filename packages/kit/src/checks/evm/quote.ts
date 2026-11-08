@@ -277,22 +277,41 @@ export const EVM_BUY_SWAP_GAS = 500_000n;
 // BUY_SWAP_GAS / 1.05, rounded down (GF5 holds the sum); literals, so a bundle that never quotes a buy drops them
 export const EVM_BUY_SWAP_FIT = 476_190n;
 const FIT_TEXT = "476190 gas (the pool guarantees 500000, less a 5% margin)";
-// keccak256("blindfill.buy.gas.v1")[12:]: an address no one holds a key to, with no balance of any token
-const GAS_W = "9116a1e7147d594ae107fe8b0e67f9d4de4b1e76";
+// The read's recipient: keccak256("blindfill.buy.gas.v1" || the agreed block's hash)[12:], an address no one holds a key
+// to and no one can send a token before that block, so its first balance write is the fresh W's (a recipient fixed in
+// advance takes dust, which makes that write 2,900 gas, not 20,000; review of 498eae83, L2), the same on both providers
+const FIT_TAG = new TextEncoder().encode("blindfill.buy.gas.v1");
+const fitTo = (blockHash: string) => {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(blockHash)) return refuse("bad_request", "the block hash is 32 bytes of hex");
+  const b = new Uint8Array(FIT_TAG.length + 32);
+  b.set(FIT_TAG);
+  for (let k = 0; k < 32; k++) b[FIT_TAG.length + k] = parseInt(blockHash.slice(2 + 2 * k, 4 + 2 * k), 16);
+  return hex(keccak_256(b)).slice(24);
+};
 
-/** The pool's own buySwap of `route` at `amount`, capped at EVM_BUY_SWAP_FIT, or null where the venue pins no adapter for
- *  the route's venue (no buy goes through it). */
-function fitRead(chain: EvmPoolChain, v: { pool: string | undefined; adapterV3: string | undefined; adapterV4: string | undefined }, route: EvmRoute, amount: bigint): Read | null {
+/** The pool's own buySwap of `route` at `amount` at the block `blockHash`, capped at EVM_BUY_SWAP_FIT, or null where the
+ *  venue pins no adapter for the route's venue (no buy goes through it). */
+function fitRead(chain: EvmPoolChain, v: { pool: string | undefined; adapterV3: string | undefined; adapterV4: string | undefined }, route: EvmRoute, amount: bigint, blockHash: string, exec = EVM_BUY_SWAP_FIT): Read | null {
   if (v.pool === undefined) return refuse("bad_request", `${chain} pins no pool`);
   const adapter = route.venue === "uniswap-v3" ? v.adapterV3 : v.adapterV4;
   if (adapter === undefined) return null;
   const { data, token } = evmPoolRouteDataQuoted(chain, route);
   const padded = hex(data).padEnd(Math.ceil(data.length / 32) * 64, "0");
-  const call = "0x" + SEL_BUY_SWAP + word(0x60n) + word(BigInt("0x" + GAS_W)) + word(amount) + word(BigInt(adapter)) + word(0x80n) + word(1n) + word(BigInt(token)) + word(BigInt(data.length)) + padded;
+  const call = "0x" + SEL_BUY_SWAP + word(0x60n) + word(BigInt("0x" + fitTo(blockHash))) + word(amount) + word(BigInt(adapter)) + word(0x80n) + word(1n) + word(BigInt(token)) + word(BigInt(data.length)) + padded;
   // the transaction's own cost before execution: 21,000 and each calldata byte's (16 a non-zero byte, 4 a zero one)
   let intrinsic = 21_000n;
   for (let k = 2; k < call.length; k += 2) intrinsic += call.slice(k, k + 2) === "00" ? 4n : 16n;
-  return { to: v.pool, data: call, override: { [v.pool]: { balance: "0x" + amount.toString(16) } }, tx: { from: v.pool, gas: "0x" + (intrinsic + EVM_BUY_SWAP_FIT).toString(16) }, oog: true };
+  return { to: v.pool, data: call, override: { [v.pool]: { balance: "0x" + amount.toString(16) } }, tx: { from: v.pool, gas: "0x" + (intrinsic + exec).toString(16) }, oog: true };
+}
+
+/** The eth_call the EVM buy quote sends to learn whether `route`'s swap at `amount` fits the pool's swap gas, at the
+ *  block `blockHash` (card evm-buy-gas-floor): the pool's own buySwap, from the pool, its execution capped at `exec`
+ *  (EVM_BUY_SWAP_FIT unless given), and its one state override, the pool's balance at the amount; null where `chain`
+ *  pins no adapter for the route's venue. A result is a fit; a revert or out of gas is none. */
+export function evmBuySwapFitCall(chain: EvmPoolChain, route: EvmRoute, amount: bigint, blockHash: string, exec: bigint = EVM_BUY_SWAP_FIT): { tx: { from: string; to: string; data: string; gas: string }; override: Record<string, { balance: string }> } | null {
+  const r = fitRead(chain, venue(chain), copyRoute(route), amount, blockHash, exec);
+  if (r === null) return null;
+  return { tx: { from: r.tx!.from, to: r.to, data: r.data, gas: r.tx!.gas }, override: r.override as Record<string, { balance: string }> };
 }
 
 // `group`: the one hook a read's override replaces; reads of the same group share that override in aggregate3 calls,
@@ -319,6 +338,13 @@ const SAFE_CAST_OVERFLOW = "93dafdf1";
 const overflowed = (d: string) =>
   d.startsWith(SAFE_CAST_OVERFLOW) || (d.startsWith(UNEXPECTED_REVERT_BYTES) && d.slice(8 + 128, 8 + 128 + 8) === SAFE_CAST_OVERFLOW);
 
+// The out-of-gas words of an eth_call, read 2026-11-08: reth's RpcInvalidTransactionError (paradigmxyz/reth at 46731e93,
+// crates/rpc/rpc-eth-types/src/error/mod.rs): BasicOutOfGas "out of gas: gas required exceeds: {0}" (:717),
+// MemoryOutOfGas "out of gas: gas exhausted during memory expansion: {0}" (:721), PrecompileOutOfGas "out of gas: gas
+// exhausted during precompiled contract execution: {0}" (:728), InvalidOperandOutOfGas "out of gas: invalid operand to
+// an opcode: {0}" (:732); geth's ErrOutOfGas "out of gas" (go-ethereum master, core/vm/errors.go:27)
+const OUT_OF_GAS_WORDS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
+
 /** One provider's answer to one eth_call: the quote's first word, a revert, or a refusal (`raw`: the whole result). */
 function answerOf(a: unknown, who: string, raw = false, oog = false): Answer | string {
   if (typeof a !== "object" || a === null) return refuse("rpc_error", `${who} answered no object`);
@@ -337,10 +363,9 @@ function answerOf(a: unknown, who: string, raw = false, oog = false): Answer | s
   if (Object.hasOwn(o, "error") && typeof o.error === "object" && o.error !== null) {
     const { code, message } = o.error as { code?: unknown; message?: unknown };
     if (code === 3 || (typeof message === "string" && /revert/i.test(message))) return { kind: "revert", partial: false };
-    // an eth_call whose own frame runs out of the gas it was given:
-    // geth's and reth's "out of gas" (-32000; Robinhood's two at 07:02Z), op-geth's behind publicnode and blastapi "out of
-    // gas: gas required exceeds: N" (-32003; Base's two at 07:02Z)
-    if (oog && typeof message === "string" && /^out of gas(: gas required exceeds:? \d+)?$/i.test(message)) return { kind: "revert", partial: false };
+    // an eth_call whose own frame runs out of the gas it was given: geth's "out of gas" (-32000; Robinhood's two at
+    // 07:02Z), and reth's four (-32003; Base's two answered the first at 07:02Z): OUT_OF_GAS_WORDS
+    if (oog && typeof message === "string" && OUT_OF_GAS_WORDS.test(message)) return { kind: "revert", partial: false };
     return refuse("rpc_error", `${who} answered error ${String(code).slice(0, 12)}: ${String(message).slice(0, 120)}`);
   }
   return refuse("rpc_error", `${who} answered no result and no error`);
@@ -1683,11 +1708,12 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   const lows = subsetsOf(unlisted).map((hs) => (hs.length === hooks.length ? hookless : at(route, amountIn, noopOf(hs))));
   // The pool's swap gas (audit I-4): the route's own swap, run as the pool runs it, is read in the first round
   const fitReads = new Map<EvmRoute, Read | null>();
+  let fitAt = "";
   const fitOf = (r: EvmRoute) => {
-    if (!fitReads.has(r)) fitReads.set(r, fitRead(chain, v, r, amountIn));
+    if (!fitReads.has(r)) fitReads.set(r, fitRead(chain, v, r, amountIn, fitAt));
     return fitReads.get(r)!;
   };
-  const ownFit = fitOf(route) === null ? -1 : reads.push(fitOf(route)!) - 1;
+  let ownFit = -1;
   const wethStart = !startsNative(route);
   const firstOut = route.venue === "uniswap-v3" ? route.tokens[1]! : route.hops[0]!.currency;
   const firstHop: { at: number; twice: number }[] = [];
@@ -1709,6 +1735,11 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
     watch,
     mono,
     start,
+    // the route's own swap, at the agreed block (its recipient is the block's), in the first round
+    atBlock: (b) => {
+      fitAt = b.hash;
+      if (fitOf(route) !== null) ownFit = reads.push(fitOf(route)!) - 1;
+    },
     beforeFound: () => {
       if (v.nativeFirst && wethStart && v.v4 !== undefined && lower(firstOut) !== lower(token)) {
         for (const key of V4_KEYS) {
@@ -1757,31 +1788,47 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
   // the quote names or prices it against (the reference, the best native route where WETH may not start, the best
   // through listed pools where the route has an unlisted hook) is the best that fits, so a route over the floor neither
   // sets a price no buy reaches nor is named to a caller who re-quotes it. The route's own swap was read in the first
-  // round, so a reference that is the route itself, as a device's re-quote of its own best route is, costs no round;
-  // any other is run best first, one per list a round, so the next fitting route is found in a few calls
+  // round, so a reference that is the route itself, as a device's re-quote of its own best route is, costs no round.
+  // The others are read at most two rounds more, never one route a round: each pool anyone seeds behind a hook that
+  // lets only the quoter through, priced above the route, would add a round to every quote, and some tens of them
+  // would age every quote past EVM_QUOTE_MAX_AGE_MS (review of 498eae83, M2). The first asks, of each list whose best
+  // is not known, every route that can change the verdict (`band`): the standard routes at or above the route's value
+  // (all of them where the route does not fit), the native ones at or above it, the listed ones within the slippage of
+  // it; a list still not known after it is asked whole in the second
   const fit = new Map<string, boolean>();
   if (ownFit >= 0) fit.set(reads[ownFit]!.data, out(ownFit) !== null);
   const fits = (r: EvmRoute) => {
     const x = fitOf(r);
     return x === null ? false : fit.get(x.data);
   };
-  const bestFits = async (lists: readonly (readonly Filled[])[]) => {
-    for (;;) {
+  const bestFits = async (lists: readonly { l: readonly Filled[]; band: (c: Filled) => boolean }[]) => {
+    for (let round = 0; ; round++) {
       const ask = new Map<string, Read>();
-      for (const l of lists) {
+      for (const { l, band } of lists) {
         const b = best(l.filter((c) => fits(c.route) !== false));
-        if (b !== null && fits(b.route) === undefined) ask.set(fitOf(b.route)!.data, fitOf(b.route)!);
+        if (b === null || fits(b.route) !== undefined) continue;
+        const unknown = l.filter((c) => fits(c.route) === undefined);
+        const first = unknown.filter(band);
+        for (const c of round === 0 && first.length > 0 ? first : unknown) ask.set(fitOf(c.route)!.data, fitOf(c.route)!);
       }
-      if (ask.size === 0) return lists.map((l) => bestOf(l.filter((c) => fits(c.route) === true)));
+      if (ask.size === 0) return lists.map(({ l }) => bestOf(l.filter((c) => fits(c.route) === true)));
       const asked = [...ask.values()];
       const a = await readBoth(rpcs, block.hash, asked);
       asked.forEach((r, i) => fit.set(r.data, a[i]!.kind === "out"));
     }
   };
-  // the native routes count only where a WETH start must beat them (native_first below)
-  const natives = v.nativeFirst && wethStart ? filled.filter((c) => startsNative(c.route)) : [];
-  const exits = unlisted.length > 0 ? filled.filter((r) => evmSellExits(chain, token, r.route)) : [];
-  const fitted = await bestFits([[{ route, amountOut: value }], filled, natives, exits]);
+  // the native routes count only where a WETH start must beat them (native_first below); a route that does not fit is
+  // refused whatever they are
+  const ownFits = fits(route) === true;
+  const natives = ownFits && v.nativeFirst && wethStart ? filled.filter((c) => startsNative(c.route)) : [];
+  const exits = ownFits && unlisted.length > 0 ? filled.filter((r) => evmSellExits(chain, token, r.route)) : [];
+  const all = () => true;
+  const fitted = await bestFits([
+    { l: [{ route, amountOut: value }], band: all },
+    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },
+    { l: natives, band: (c) => c.amountOut >= value },
+    { l: exits, band: (c) => c.amountOut * 10000n >= value * BigInt(10000 - slippageBps) },
+  ]);
   const own = fitted[0] ?? null;
   const reference = fitted[1] ?? null;
   const nativeBest = fitted[2] ?? null;
@@ -2028,6 +2075,8 @@ async function routeSet(a: {
   start: number;
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
+  /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
+  atBlock?: (block: Block) => void;
   /** the caller's refusals on the first round's answers, before any later round */
   firstRound?: (out: (i: number) => bigint | null, answer: (i: number) => Answer) => void;
   /** what a route must give to matter, read once the first round is in (the buy's own route's Q): a pool that cannot
@@ -2178,6 +2227,7 @@ async function routeSet(a: {
   for (const e of early) e?.catch(() => {});
   const scanned = await scanOf([lower(token)], "all");
   const { block, confirm } = await agreedOnce();
+  a.atBlock?.(block);
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
   // launchpad's own fee and tick spacing (evmHookListed, the one rule for both; card evm-route-parity); any other hook
   // is replaced in the reads that price the pool
