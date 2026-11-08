@@ -13,10 +13,11 @@
 //     is asked again, its own head read in the same batch), with its last block in the same batch, under INDEX_SPAN_LOGS logs, the
 //     same last-block hash on both (block N's is the pin) and the same pools on both (by pool id), at least one pool in
 //     all, each batch within the kit's RPC timeout (10 s);
-//   - each reader answers, within TRIES tries (a receipt answered null is asked again, as the kit asks it: review 3 of
-//     7f1ad79a, base.api.pocket.network answered null for 119 of 500 mined Initialize transactions), the receipt of the
-//     transaction of each span's first pool, in the span, holding the PoolManager's Initialize of that pool (the kit
-//     asks it of the reader that did not log a pool).
+//   - each reader answers, within TRIES tries, the receipts of the transactions of each span's first RECEIPTS pools,
+//     asked as the kit asks them (pool-index.ts: one batch of at most INDEX_RECEIPT_BATCH, 10; a request that throws
+//     and a receipt answered null or with a rate limit are asked again, anything else is final: review 3 of 7f1ad79a,
+//     base.api.pocket.network answered null for 119 of 500 mined Initialize transactions; review 4 of 43f8e45f), each
+//     in the span and holding the PoolManager's Initialize of its pool.
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
@@ -40,6 +41,10 @@ export const TIMEOUT_MS = 10_000;
 /** A span's tries on one reader (the kit's INDEX_TRIES) and the wait between them. */
 export const TRIES = 4;
 export const RETRY_MS = 1_500;
+/** Receipts read a span on each reader, in one batch: the kit's INDEX_RECEIPT_BATCH. */
+export const RECEIPTS = 10;
+/** A rate limit answered inside a batch, in the kit's words (pool-index.ts `limited`, which the kit does not export). */
+const LIMITED = /request limit|rate limit|too many requests|exceeded its compute units per second/i;
 const INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
 
 const operator = (u) => new URL(u).hostname.split(".").slice(-2).join(".");
@@ -84,8 +89,13 @@ export function judge(run) {
       say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS && (x.tries ?? 1) <= TRIES && (y.tries ?? 1) <= TRIES, `${chain} ${s.a}-${s.b}: answered in ${x.ms} and ${y.ms} ms, try ${x.tries ?? 1} and ${y.tries ?? 1}`);
       pools += x.ids.length;
       if (x.ids.length === 0) continue;
-      for (const [r, rc] of (s.receipt ?? []).entries()) say(rc?.block >= s.a && rc.block <= s.b && rc.init === true && rc.tries <= TRIES, `${chain} ${s.a}-${s.b}: reader ${r + 1} answered its first pool's receipt: ${rc ? `block ${rc.block}, Initialize ${rc.init}, try ${rc.tries}` : "not read"}`);
-      say(s.receipt?.length === 2, `${chain} ${s.a}-${s.b}: its first pool's receipt read on both readers`);
+      const want = Math.min(RECEIPTS, x.ids.length);
+      say(s.txs?.length === want && Array.isArray(s.receipts) && s.receipts.length === 2 && s.receipts.every((rs) => Array.isArray(rs) && rs.length === want), `${chain} ${s.a}-${s.b}: its first ${want} pools' receipts read on both readers`);
+      for (const [r, rs] of (s.receipts ?? []).entries()) {
+        const good = Array.isArray(rs) ? rs.filter((rc) => rc?.block >= s.a && rc.block <= s.b && rc.init === true && rc.tries <= TRIES).length : 0;
+        const tries = Array.isArray(rs) ? Math.max(0, ...rs.map((rc) => rc?.tries ?? 0)) : 0;
+        say(good === want, `${chain} ${s.a}-${s.b}: reader ${r + 1} answered ${good} of ${want} receipts in the span with their Initialize, try ${tries} at most${good === want ? "" : `: ${JSON.stringify((rs ?? []).find((rc) => !(rc?.init === true)) ?? null)}`}`);
+      }
     }
     say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * SPAN} blocks`);
   }
@@ -115,7 +125,7 @@ export async function readSpan(u, pm, a, b, fetchFn, sleep) {
       const logs = byId.get(0)?.result;
       const blk = byId.get(1)?.result;
       const head = byId.get(2)?.result;
-      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], tx: Array.isArray(logs) && typeof logs[0]?.transactionHash === "string" ? logs[0].transactionHash.toLowerCase() : null, last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
+      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], firsts: Array.isArray(logs) ? logs.slice(0, RECEIPTS).map((l) => ({ tx: String(l?.transactionHash).toLowerCase(), id: String(l?.topics?.[1]).toLowerCase() })) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
     } catch (e) {
       last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
     }
@@ -125,25 +135,35 @@ export async function readSpan(u, pm, a, b, fetchFn, sleep) {
   return last;
 }
 
-/** One reader's receipt of transaction `tx`: its block and whether it holds the PoolManager's Initialize of pool `id`,
- *  asked again up to TRIES times while it is answered null or not at all (the kit's receipt reads, pool-index.ts). */
-export async function readReceipt(u, pm, tx, id, fetchFn, sleep) {
-  let last = null;
-  for (let tries = 1; tries <= TRIES; tries++) {
+/** One reader's receipts of `firsts` ({ tx, id }), in one batch as the kit asks them: each one's block and whether it
+ *  holds the PoolManager's Initialize of its pool. A request that throws, and a receipt answered null or with a rate
+ *  limit, are asked again up to TRIES times; any other answer is final (pool-index.ts). */
+export async function readReceipts(u, pm, firsts, fetchFn, sleep) {
+  const out = firsts.map(() => null);
+  let left = firsts.map((_, i) => i);
+  for (let tries = 1; tries <= TRIES && left.length > 0; tries++) {
+    if (tries > 1) await sleep(RETRY_MS);
     try {
-      const { byId, ms } = await post(u, [{ jsonrpc: "2.0", id: 0, method: "eth_getTransactionReceipt", params: [tx] }], fetchFn);
-      const rc = byId.get(0)?.result;
-      if (rc && typeof rc === "object") {
-        const init = Array.isArray(rc.logs) && rc.logs.some((l) => String(l?.address).toLowerCase() === pm.toLowerCase() && String(l?.topics?.[0]).toLowerCase() === INITIALIZE && String(l?.topics?.[1]).toLowerCase() === id && String(l?.transactionHash).toLowerCase() === tx);
-        return { block: Number(rc.blockNumber), init, ms, tries };
+      const { byId, ms } = await post(u, left.map((i) => ({ jsonrpc: "2.0", id: i, method: "eth_getTransactionReceipt", params: [firsts[i].tx] })), fetchFn);
+      const again = [];
+      for (const i of left) {
+        const a = byId.get(i);
+        const rc = a?.result;
+        const { tx, id } = firsts[i];
+        if (rc === null || (rc === undefined && LIMITED.test(String(a?.error?.message ?? "")))) {
+          out[i] = { block: null, init: false, ms, tries, answer: rc === null ? "null" : "limited" };
+          again.push(i);
+        } else if (rc && typeof rc === "object" && !Array.isArray(rc)) {
+          const init = Array.isArray(rc.logs) && rc.logs.some((l) => String(l?.address).toLowerCase() === pm.toLowerCase() && String(l?.topics?.[0]).toLowerCase() === INITIALIZE && String(l?.topics?.[1]).toLowerCase() === id && String(l?.transactionHash).toLowerCase() === tx);
+          out[i] = { block: Number(rc.blockNumber), init, ms, tries };
+        } else out[i] = { block: null, init: false, ms, tries, answer: String(JSON.stringify(a?.error ?? rc ?? null)).slice(0, 120) };
       }
-      last = { block: null, init: false, ms, tries, answer: rc === null ? "null" : "none" };
+      left = again;
     } catch (e) {
-      last = { block: null, init: false, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
+      for (const i of left) out[i] = { block: null, init: false, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
     }
-    if (tries < TRIES) await sleep(RETRY_MS);
   }
-  return last;
+  return out;
 }
 
 /** One run's reads on the venue list `venues`. */
@@ -178,9 +198,9 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       const b = n - i * ix.span;
       const a = b - ix.span + 1;
       const on = await Promise.all(ix.readers.map((u) => readSpan(u, v.poolManager, a, b, fetchFn, sleep)));
-      const tx = on[0]?.tx;
-      const receipt = typeof tx === "string" ? await Promise.all(ix.readers.map((u) => readReceipt(u, v.poolManager, tx, on[0].ids[0], fetchFn, sleep))) : undefined;
-      spans.push({ a, b, on, ...(receipt ? { tx, receipt } : {}) });
+      const firsts = on[0]?.firsts ?? [];
+      const receipts = firsts.length > 0 ? await Promise.all(ix.readers.map((u) => readReceipts(u, v.poolManager, firsts, fetchFn, sleep))) : undefined;
+      spans.push({ a, b, on, ...(receipts ? { txs: firsts.map((f) => f.tx), receipts } : {}) });
     }
     chains[chain] = { index, preflight, heads, spans };
   }
