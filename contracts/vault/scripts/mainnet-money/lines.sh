@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # The owner's paste lines of the mainnet money run (card vault-mainnet-money), for the reviewed commit once it is merged
-# to main. The CO prints them, never the owner:
+# to main. The team prints them, never the owner:
 #   sh contracts/vault/scripts/mainnet-money/lines.sh <commit> <the account paste 1 pays>
 # Each line, pasted in any folder, reads nothing of the owner's checkout: with no environment but HOME and PATH and no
 # global or system git config (so no url.insteadOf, no status or index setting of anyone's applies), it clones the

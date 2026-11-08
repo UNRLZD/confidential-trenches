@@ -1,13 +1,13 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# The testnet rehearsal of the mainnet money run (card vault-mainnet-money), on the box through heavy.sh, the seed made
-# there and never moved, every step from a fresh clone as the mainnet pastes run. Two jobs, because U exists only once
+# The testnet rehearsal of the mainnet money run (card vault-mainnet-money), on a test machine of the team's, the seed
+# made there and never moved, every step from a fresh clone as the mainnet pastes run. Two jobs, because U exists only once
 # the run has planned and its test USDC comes from outside the job (nobody's key in the job holds any):
-#   HEAVY_REMOTE=1 scripts/heavy.sh vmm-rehearse-plan -- env PNPM=pnpm sh contracts/vault/scripts/mainnet-money/rehearse-testnet.sh plan
+#   env PNPM=pnpm sh contracts/vault/scripts/mainnet-money/rehearse-testnet.sh plan
 #     run (plans, writes the seed once, prints U, waits) stopped after PLAN_SECONDS: the rehearsal's stop; then open-u
 #     from P's key file (0.01 NEAR to U, U's registration) and, once, the named account's registration (--register);
 #     then check prints U's state. Fund U with at least 1 test USDC in one transfer, then:
-#   HEAVY_REMOTE=1 scripts/heavy.sh vmm-rehearse-finish -- env PNPM=pnpm sh contracts/vault/scripts/mainnet-money/rehearse-testnet.sh finish <fund-hash> <fund-signer>
+#   env PNPM=pnpm sh contracts/vault/scripts/mainnet-money/rehearse-testnet.sh finish <fund-hash> <fund-signer>
 #     resume (restores from the seed: the deposit, the withdrawal to the named account, its arrival), sweep-u (any USDC
 #     left at U, or "nothing to sweep"), then record --network testnet with the funding tx: every tx read back FINAL on
 #     both RPCs, into the run's folder, copied into this checkout's scripts/live-checks/ for the job's copy-back.

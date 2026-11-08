@@ -1077,7 +1077,7 @@ async function record(argv: string[]) {
   const os = await import("node:os");
   const lp = localProblems(text + JSON.stringify(runRec), [os.hostname(), os.hostname().split(".")[0]!, os.userInfo().username]);
   if (lp.length) throw new Error(`record: ${lp.join("; ")}`);
-  // beside the step state, never in the checkout: a later paste's clean-tree gate never meets them, and the CO commits
+  // beside the step state, never in the checkout: a later paste's clean-tree gate never meets them, and the team commits
   // them from there as scripts/live-checks/<name>
   const files = recordFiles(st.dir, o.network);
   writeFileSync(files.run, JSON.stringify(runRec, null, 2) + "\n");
