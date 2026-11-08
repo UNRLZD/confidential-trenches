@@ -56,8 +56,8 @@ const NEAR = 10n ** 24n;
 export const W_NEAR = NEAR / 100n;
 const ROUND_MS = 10_000;
 const TGAS = 10n ** 12n;
-/** The note D deposits for this run's words, in USDC base units. */
-export const NOTE = 500_000n;
+/** The note D deposits for this run's words, in USDC base units: the vault's MIN_DEPOSIT (contracts/vault/src/constants.rs). */
+export const NOTE = 1_000_000n;
 const GAS = { prepay: 30n * TGAS, deposit: 180n * TGAS };
 const PRICE_RPCS = ["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"];
 const DEFAULT_OUT = `scripts/live-checks/${CARD}.md`;
