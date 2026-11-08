@@ -40,7 +40,8 @@
 //   someone else (its address and lamports printed with U's); after the buy, S takes 1 unit of the coin from W (S pays
 //   the fee and its token account's rent, so W keeps exactly its sell's need); W then sells all it holds; once the sell
 //   reads confirmed on both RPCs and before the rent back's first read of W's accounts, S sends that unit back to W's
-//   token account. The rent back must then burn it, close the account and sweep W: the run is filled only when a
+//   token account. FLOW_STRANGER=<that file> uses a kept S again; FLOW_RESUME with FLOW_BUY_SIG=<the buy's signature>
+//   goes on from a run that stopped after its buy (no deposit, no buy: the dust step and the sell). The rent back must then burn it, close the account and sweep W: the run is filled only when a
 //   teardown frame burns exactly 1 and W, its token account and both volume accounts read null at finalized.
 // - Each kind is tapped once. A kind that does not land on its tap is a failed run, recorded as one: it is never tapped
 //   again (a re-tap would hide a page that gives up on a busy provider).
@@ -298,11 +299,13 @@ const transfer = (from, to, owner, signer) => {
   return { program: tokenProgram, accounts: [{ key: from, signer: false, writable: true }, { key: MINT, signer: false, writable: false }, { key: to, signer: false, writable: true }, { key: owner, signer, writable: false }], data };
 };
 if (DUST) {
-  const key = Uint8Array.from(randomBytes(32));
+  const kept = process.env.FLOW_STRANGER;
+  const key = kept ? Uint8Array.from(Buffer.from(readFileSync(kept, "utf8").trim(), "hex")) : Uint8Array.from(randomBytes(32));
+  if (key.length !== 32) throw new Error("the stranger's file holds no 32-byte key");
   const dir = join(homedir(), ".ct-devnet-runs");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const at = join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.stranger`);
-  writeFileSync(at, Buffer.from(key).toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+  const at = kept ?? join(dir, `run-${new Date().toISOString().replace(/[:.]/g, "-")}.stranger`);
+  if (!kept) writeFileSync(at, Buffer.from(key).toString("hex") + "\n", { mode: 0o600, flag: "wx" });
   const S = base58.encode(ed25519.getPublicKey(key));
   // S's token account (Token-2022's with ImmutableOwner is 170 bytes; 200 bounds it) and its two fees
   const need = solanaRentMin(rent, 200) + 2n * FEE;
@@ -345,7 +348,9 @@ if (RESUME) {
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
-if (landed) {
+// a run that stopped after its buy, resumed: its buy's signature, its note SPENT in the restored store
+if (RESUME && process.env.FLOW_BUY_SIG) buy = { answer: { result: { txs: [{ hash: process.env.FLOW_BUY_SIG }] } }, notes: await noteList(), resumedAfterBuy: true };
+else if (landed) {
   log("the proof queue's pass");
   const pass = await t.proofs();
   log(`pass ${JSON.stringify(pass, (k, v) => (typeof v === "bigint" ? String(v) : v))}`);
@@ -378,13 +383,12 @@ if (bought) {
       await sleep(10_000);
     }
     log("S funded");
-    // W's key from the seed as a restore finds W (its l and j), then S takes 1 unit: S pays, W only signs
-    const { solanaRestoreWallets, solanaHoldingsReader } = await import("../../wallet/src/pool/buy-wallets.ts");
+    // W's key from the seed: the spent note's label and j (buy-wallets.ts: each spent note names its W), then S takes
+    // 1 unit: S pays, W only signs
+    const { jOf } = await import("../../wallet/src/pool/queue.ts");
     const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
-    const found = (await solanaRestoreWallets({ seed64, program: SOL_POOLS.devnet.program, rpcs, holdings: solanaHoldingsReader(rpcs[0]) })).wallets.find((x) => x.address === W);
-    if (!found) throw new Error("W not found from the seed");
-    const fw = freshWallet(seed64, "sol", found.l, found.j);
-    if (base58.encode(fw.publicKey) !== W) throw new Error("W's key is not W");
+    const fw = (await ns.list()).filter((n) => n.state === "SPENT" && n.leaf).map((n) => freshWallet(seed64, "sol", n.leaf.label, jOf(n.ref))).find((x) => x.address === W);
+    if (!fw || base58.encode(fw.publicKey) !== W) throw new Error("W's key is not W");
     const wKey = fw.secretKey.slice(0, 32);
     fw.secretKey.fill(0);
     const sAta = solanaAta(dust.S, MINT, tokenProgram);
