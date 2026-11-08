@@ -5877,7 +5877,9 @@ test("review of 72e28658, H3 (sell) the same three hooks on a three-hop sale: th
 test("review of 72e28658, M2 (buy) a hooked reference its hook places at value / (1 - slippage) no longer sets the listed buy's minOut: minOut is the slippage off the listed route, and a 1 bp move still lands", async () => {
   const token = "0x00000000000000000000000000000000000d1d06";
   const market: ModelPool = { key: keyOf(token, NATIVE, 500, 10, NATIVE), give: (a) => a };
-  const hz: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(10)), give: (a) => (a * 102n) / 100n, lie: (a) => (a * 10000n) / 9900n, state: pricedAt(2n), exec: () => null };
+  // the hook pays its placed quote in the pool's own swap too, so its swap fits and it stays the reference (a hook whose
+  // swap reverts is no route at all since card evm-buy-gas-floor, and would leave this mutant's minOut unread)
+  const hz: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, RH(10)), give: (a) => (a * 102n) / 100n, lie: (a) => (a * 10000n) / 9900n, state: pricedAt(2n), exec: (a) => (a * 10000n) / 9900n };
   const logs = [{ key: market.key, at: 4_500_000 }, { key: hz.key, at: 4_500_001 }];
   const q = await hbQuote([market, hz], token, logs, marketRoute(token));
   assert.ok(!("code" in q), show(q));

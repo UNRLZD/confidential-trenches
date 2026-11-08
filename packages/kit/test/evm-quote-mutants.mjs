@@ -384,12 +384,12 @@ export const MUTANTS = [
   // native first
   [QUOTE, "  if (nativeExists && wethStart && (nativeBest === null || value <= nativeBest.amountOut)) {", "  if (false) {", Q, "Q6 "],
   [QUOTE, 'nativeFirst: Object.hasOwn(v, "nativeFirst") && v.nativeFirst === true', "nativeFirst: false", Q, "Q6 "],
-  [QUOTE, "const nativeBest = bestOf(filled.filter((c) => startsNative(c.route)));", "const nativeBest = bestOf(filled);", R, "N3a "],
+  [QUOTE, "const natives = ownFits && v.nativeFirst && wethStart ? filled.filter((c) => startsNative(c.route)) : [];", "const natives = ownFits && v.nativeFirst && wethStart ? filled : [];", R, "N3a "],
   // native when at least as good: a WETH route equal to the best native route still refuses
   [QUOTE, "value <= nativeBest.amountOut", "value < nativeBest.amountOut", R, "N3b "],
   [QUOTE, "value <= nativeBest.amountOut", "value <= nativeBest.amountOut && false", R, "N3b "],
   [QUOTE, "(nativeBest === null || value <= nativeBest.amountOut)", "(nativeBest !== null && value <= nativeBest.amountOut)", R, "R7 "],
-  [QUOTE, "  const reference = bestOf(filled);", "  const reference = bestOf(filled.filter((c) => !nativeExists || startsNative(c.route)));", R, "N1f "],
+  [QUOTE, "    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },", "    { l: filled.filter((c) => !v.nativeFirst || startsNative(c.route)), band: ownFits ? (c) => c.amountOut >= value : all },", R, "N1f "],
   [QUOTE, "|| firstHop.some((c) => fills(c)))", ")", R, "R7 "],
   // only a device quote builds, within 30 s, and W signs only that build
   [QUOTE, "QUOTED.add(quote);", "", Q, "Q7 "],
