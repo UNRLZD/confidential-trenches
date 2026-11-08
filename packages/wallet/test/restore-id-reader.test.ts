@@ -11,8 +11,8 @@ import { vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { depositAccount, NEAR_NETWORKS, type NearRpc } from "../src/deposit/account.ts";
 import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote } from "../src/notes/restore.ts";
-import { ID_READ_TRIES, nearBalanceReader, nearIdReader } from "../src/restore/id-reader.ts";
-import { DEPOSIT_ID_MARGIN, restoreDepositIds } from "../src/restore/wallets.ts";
+import { ID_READ_TRIES, nearBalanceReader as openBalanceReader, nearIdReader as openIdReader } from "../src/restore/id-reader.ts";
+import { afterRestore, DEPOSIT_ID_MARGIN, restoreDepositIds as depositIds, type IdReader } from "../src/restore/wallets.ts";
 
 const FAST = "https://rpc.mainnet.fastnear.com";
 const DRPC = "https://near.drpc.org";
@@ -24,6 +24,22 @@ const REC = JSON.parse(readFileSync(new URL("./vectors/id-reader-mainnet.json", 
   intents: Record<string, { tokens: unknown; held: unknown }>;
 };
 const noSleep = async (): Promise<void> => {};
+// the readers open with a floor read (review N1); these take each read through the opened reader, so an open that
+// fails fails every read, and a bad network or pair still throws at once
+const nearIdReader = (...a: Parameters<typeof openIdReader>): IdReader => {
+  const p = openIdReader(...a);
+  p.catch(() => {});
+  return (u) => p.then((f) => f(u));
+};
+const nearBalanceReader = (...a: Parameters<typeof openBalanceReader>) => {
+  const p = openBalanceReader(...a);
+  p.catch(() => {});
+  return (what: "usdc" | "near" | "intents", u: string) => p.then((f) => f(what, u));
+};
+const restoreDepositIds = async (...a: Parameters<typeof depositIds>) => (await depositIds(...a)).lanes;
+// the block each recorded hash names
+const HEIGHT = new Map<string, number>();
+for (const a of Object.values(REC.answers) as { result?: { block_hash?: string; block_height?: number } }[]) if (a.result?.block_hash) HEIGHT.set(a.result.block_hash, a.result.block_height!);
 const argsOf = (p: Record<string, unknown>): Record<string, unknown> => (typeof p.args_base64 === "string" ? JSON.parse(Buffer.from(p.args_base64, "base64").toString()) : {});
 
 // a provider that answers from the recorded mainnet answers, by its URL and the exact params
@@ -58,22 +74,22 @@ test("each rule on mainnet's answers: never used, used by storage on the token, 
   // never used: both providers read in full (storage, tokens, account on each); money: one provider, and no more
   const log: string[] = [];
   await nearIdReader("mainnet", [replay(FAST, log), replay(DRPC, log)], { first: () => 0, tries: 1 })(REC.ids.never_used!);
-  assert.deepEqual(log, ["rpc.mainnet.fastnear.com storage_balance_of", "rpc.mainnet.fastnear.com mt_tokens_for_owner", "rpc.mainnet.fastnear.com view_account", "near.drpc.org storage_balance_of", "near.drpc.org mt_tokens_for_owner", "near.drpc.org view_account"]);
+  assert.deepEqual(log, ["rpc.mainnet.fastnear.com view_account", "near.drpc.org view_account", "rpc.mainnet.fastnear.com storage_balance_of", "rpc.mainnet.fastnear.com mt_tokens_for_owner", "rpc.mainnet.fastnear.com view_account", "near.drpc.org storage_balance_of", "near.drpc.org mt_tokens_for_owner", "near.drpc.org view_account"]);
   log.length = 0;
   await nearIdReader("mainnet", [replay(FAST, log), replay(DRPC, log)], { first: () => 1, tries: 1 })(REC.ids.money_usdc!);
-  assert.deepEqual(log, ["near.drpc.org storage_balance_of", "near.drpc.org ft_balance_of"]);
+  assert.deepEqual(log, ["rpc.mainnet.fastnear.com view_account", "near.drpc.org view_account", "near.drpc.org storage_balance_of", "near.drpc.org ft_balance_of"], "the floor's two reads, then the id's");
 });
 
 test("the intents.near branch on mainnet's answers: tokens listed above zero are money", async () => {
   // never_used's token views and account, with money_intents's real intents.near answers in place of its own
   const u = REC.ids.never_used!;
   const intents = (url: string) => (p: Record<string, unknown>) => {
-    if (p.account_id !== "intents.near") return undefined;
+    if (p.account_id !== "intents.near" || p.request_type === "view_account") return undefined; // the floor's read is its own
     assert.deepEqual(argsOf(p).account_id, u);
     const rec = REC.intents[url]!;
     // recorded at their own block: served as of the block asked, as the reader pins every view of an id to one
-    const a = structuredClone(p.method_name === "mt_tokens_for_owner" ? rec.tokens : rec.held) as { result: { block_height: number } };
-    if (typeof p.block_id === "number") a.result.block_height = p.block_id;
+    const a = structuredClone(p.method_name === "mt_tokens_for_owner" ? rec.tokens : rec.held) as { result: { block_height: number; block_hash: string } };
+    if (typeof p.block_id === "string") Object.assign(a.result, { block_hash: p.block_id, block_height: HEIGHT.get(p.block_id) });
     return a;
   };
   assert.equal(await nearIdReader("mainnet", [replay(FAST, [], intents(FAST)), replay(DRPC, [], intents(DRPC))], { first: () => 0, tries: 1 })(u), "money");
@@ -81,13 +97,18 @@ test("the intents.near branch on mainnet's answers: tokens listed above zero are
 
 // ---------- a fake world ----------
 type Id = { storage?: boolean; usdc?: bigint; tokens?: Record<string, bigint>; account?: boolean };
-const view = (x: unknown, h = 1) => ({ jsonrpc: "2.0", result: { result: [...Buffer.from(JSON.stringify(x))], logs: [], block_height: h } });
+// a block hash per height, base58 (digits as letters, padded): hashOf(h) names block h of the fake chain
+const hashOf = (h: number): string => `H${[...String(h)].map((c) => "abcdefghij"[Number(c)]).join("")}`.padEnd(44, "z");
+const heightOf = (p: Record<string, unknown>, final = 1): number => (typeof p.block_id === "string" ? Number([...(p.block_id as string).slice(1).replace(/z+$/, "")].map((c) => "abcdefghij".indexOf(c)).join("")) : final);
+const view = (x: unknown, h = 1) => ({ jsonrpc: "2.0", result: { result: [...Buffer.from(JSON.stringify(x))], logs: [], block_height: h, block_hash: hashOf(h) } });
 const unknown = (id: string) => ({ jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: id } } } });
 function answer(world: Map<string, Id>, p: Record<string, unknown>): unknown {
   const args = argsOf(p);
   const u = (p.request_type === "view_account" ? p.account_id : args.account_id) as string;
   const x = world.get(u) ?? {};
-  if (p.request_type === "view_account") return x.account ? { jsonrpc: "2.0", result: { amount: "1", locked: "0", storage_usage: 182, block_height: 1 } } : unknown(u);
+  const acct = { jsonrpc: "2.0", result: { amount: "1", locked: "0", storage_usage: 182, block_height: 1, block_hash: hashOf(1) } };
+  if (p.request_type === "view_account" && u === "intents.near") return acct; // the floor's read
+  if (p.request_type === "view_account") return x.account ? acct : unknown(u);
   if (p.account_id === USDC && p.method_name === "storage_balance_of") return view(x.storage || (x.usdc ?? 0n) > 0n ? { total: "1250000000000000000000", available: "0" } : null);
   if (p.account_id === USDC && p.method_name === "ft_balance_of") return view(String(x.usdc ?? 0n));
   if (p.account_id === "intents.near" && p.method_name === "mt_tokens_for_owner") return view(Object.keys(x.tokens ?? {}).map((token_id) => ({ token_id })));
@@ -100,6 +121,8 @@ function provider(url: string, world: Map<string, Id>, fail: (p: Record<string, 
     name: url,
     query: async (params) => {
       count.n++;
+      // the floor's read answers: these tests fail id reads; the floor's own tests use their own providers
+      if (params.request_type === "view_account" && params.account_id === "intents.near") return answer(world, params);
       const f = fail(params);
       if (f instanceof Error) throw f;
       if (f !== undefined) return f;
@@ -138,12 +161,12 @@ test("hostile answers fail the read, never read as unused: a halt, an error, a m
   const empty = W({});
   const bad = (f: (p: Record<string, unknown>) => unknown) => nearIdReader("mainnet", [provider(FAST, empty, f), provider(DRPC, empty, f)], { first: () => 0, sleep: noSleep, tries: 2 })(U1);
   const on = (m: string, x: unknown) => (p: Record<string, unknown>) => (p.method_name === m || p.request_type === m ? x : undefined);
-  await assert.rejects(bad(on("storage_balance_of", { jsonrpc: "2.0", result: { error: "wasm execution failed with error: Smart contract panicked: FiatToken: paused", logs: [], block_height: 1 } })), /the token is halted \(FiatToken: paused\)/);
+  await assert.rejects(bad(on("storage_balance_of", { jsonrpc: "2.0", result: { error: "wasm execution failed with error: Smart contract panicked: FiatToken: paused", logs: [], block_height: 1, block_hash: hashOf(1) } })), /the token is halted \(FiatToken: paused\)/);
   await assert.rejects(bad(on("storage_balance_of", { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } })), /storage_balance_of: HANDLER_ERROR/);
   await assert.rejects(bad(on("storage_balance_of", view({ total: 5 }))), /neither null nor a balance/);
   await assert.rejects(bad(on("mt_tokens_for_owner", view({}))), /not a token list/);
-  await assert.rejects(bad(on("mt_tokens_for_owner", { jsonrpc: "2.0", result: { result: [0xff], block_height: 1 } })), /not JSON/);
-  await assert.rejects(bad(on("view_account", { jsonrpc: "2.0", result: { block_height: 1 } })), /not an account/);
+  await assert.rejects(bad(on("mt_tokens_for_owner", { jsonrpc: "2.0", result: { result: [0xff], block_height: 1, block_hash: hashOf(1) } })), /not JSON/);
+  await assert.rejects(bad(on("view_account", { jsonrpc: "2.0", result: { block_height: 1, block_hash: hashOf(1) } })), /not an account/);
   await assert.rejects(bad(on("view_account", { jsonrpc: "2.0", error: { name: "TIMEOUT_ERROR" } })), /view_account: TIMEOUT_ERROR/);
   await assert.rejects(bad(on("view_account", "nope")), /not a JSON-RPC answer/);
   const money = W({ [U1]: { storage: true, tokens: { "nep141:a": 1n } } });
@@ -197,18 +220,75 @@ test("one block per id: money moved out between two views still reads as money; 
   const chain = (url: string, skew = 0): NearRpc => ({
     name: url,
     query: async (params) => {
+      if (params.account_id === "intents.near" && params.request_type === "view_account") return { jsonrpc: "2.0", result: { amount: "1", block_height: 10, block_hash: hashOf(10) } };
       asked.push(params.block_id ?? params.finality);
-      const h = params.block_id === undefined ? tip : (params.block_id as number);
-      const a = answer(heights[h - 10]!, params) as { result?: { block_height?: number } };
-      if (a.result) a.result.block_height = h + skew;
+      const h = heightOf(params, tip);
+      const a = answer(heights[h - 10]!, params) as { result?: { block_height?: number; block_hash?: string } };
+      if (a.result) Object.assign(a.result, { block_height: h + skew, block_hash: hashOf(h + skew) });
       tip = 11; // the money moves right after the first view is answered
       return a;
     },
   });
   assert.equal(await nearIdReader("mainnet", [chain(FAST), chain(DRPC)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), "money");
-  assert.deepEqual(asked, ["final", 10], "the first view at final, the next at its block");
+  assert.deepEqual(asked, ["final", hashOf(10)], "the first view at final, the next at its block's hash");
   tip = 10;
-  await assert.rejects(nearIdReader("mainnet", [chain(FAST, 1), chain(DRPC, 1)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), /answered at block 12, not 11/);
+  await assert.rejects(nearIdReader("mainnet", [chain(FAST, 1), chain(DRPC, 1)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), new RegExp(`answered at block 12 ${hashOf(12)}, not 11 ${hashOf(11)}`));
+});
+
+// review N1: one lying provider drawn first must not pick an old block, at which the honest one then truthfully reads
+// U before its money landed. The floor (both finals within 120 blocks, the lower of the two) bounds the first view,
+// and every later view names the first one's hash, so the other provider confirms the very block.
+test("the floor and the pinned hash: a liar naming an old block, first or second, or a fake hash never makes money unused", async () => {
+  const FINAL = 1000;
+  // an honest chain: U's money landed at block 900
+  const honest = (url: string, final = FINAL, shows = W({ [U1]: { usdc: 9n, storage: true } })): NearRpc => ({
+    name: url,
+    query: async (params) => {
+      const h = heightOf(params, final);
+      if (typeof params.block_id === "string" && h > final) return { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } };
+      if (params.account_id === "intents.near" && params.request_type === "view_account") return { jsonrpc: "2.0", result: { amount: "1", block_height: h, block_hash: hashOf(h) } };
+      const a = answer(h >= 900 ? shows : W({}), params) as { result?: Record<string, unknown> };
+      if (a.result) Object.assign(a.result, { block_height: h, block_hash: hashOf(h) });
+      return a;
+    },
+  });
+  // the liar: honest answers, but every view it is asked at final it answers at block 800 (served back, a real block)
+  const liar = (url: string): NearRpc => {
+    const h = honest(url);
+    return { name: url, query: async (p) => h.query(p.finality === "final" && !(p.account_id === "intents.near" && p.request_type === "view_account") ? { ...p, finality: undefined, block_id: hashOf(800) } : p) };
+  };
+  for (const f of [0, 1]) {
+    const got = await nearIdReader("mainnet", [liar(FAST), honest(DRPC)], { first: () => f, sleep: noSleep, tries: 1 })(U1).then((x) => x, (e: Error) => e.message);
+    // the liar first: its block 800 is under the floor 1000, so its read fails; the honest one shows money, enough
+    // the honest first: its block 1000 is pinned, and the liar asked at that hash answers it, money
+    assert.equal(got, "money", `${f === 0 ? "the liar" : "the honest one"} first`);
+  }
+  // with nothing on the honest side but a trace, the liar first fails the id: a failed read, never unused
+  const trace = (url: string): NearRpc => ({ name: url, query: async (p) => {
+    if (p.account_id === "intents.near" && p.request_type === "view_account") return { jsonrpc: "2.0", result: { amount: "1", block_height: FINAL, block_hash: hashOf(FINAL) } };
+    const h = p.finality === "final" ? 800 : heightOf(p);
+    const a = answer(W({}), p) as { result?: Record<string, unknown> };
+    if (a.result) Object.assign(a.result, { block_height: h, block_hash: hashOf(h) });
+    return a;
+  } });
+  await assert.rejects(nearIdReader("mainnet", [trace(FAST), honest(DRPC, FINAL, W({ [U1]: { storage: true } }))], { first: () => 0, sleep: noSleep, tries: 1 })(U1), /rpc\.mainnet\.fastnear\.com: storage_balance_of: answered at block 800, below the restore's floor 1000/);
+  // a fake hash: the liar first answers "block 1000" with another block's views (U empty) under a hash that is not the
+  // chain's; the honest one, asked at that hash, does not hold it (UNKNOWN_BLOCK), so the id's read fails
+  const FAKE = "F".padEnd(44, "a");
+  const fakeBlock = (url: string): NearRpc => ({ name: url, query: async (p) => {
+    if (p.account_id === "intents.near" && p.request_type === "view_account") return honest(url).query(p);
+    const a = answer(W({}), p) as { result?: Record<string, unknown> };
+    if (a.result) Object.assign(a.result, { block_height: FINAL, block_hash: FAKE });
+    return a;
+  } });
+  const holdsChain = (url: string): NearRpc => ({ name: url, query: async (p) => (p.block_id === FAKE ? { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK" } } } : honest(url).query(p)) });
+  await assert.rejects(nearIdReader("mainnet", [fakeBlock(FAST), holdsChain(DRPC)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), /near\.drpc\.org: storage_balance_of: HANDLER_ERROR/);
+  // heads more than 120 blocks apart: the reader does not open, by name
+  await assert.rejects(openIdReader("mainnet", [honest(FAST, 1000), honest(DRPC, 1121)], { sleep: noSleep, tries: 1 }), /the RPCs' final heights 1000 and 1121 are over 120 blocks apart; the restore does not start/);
+  await assert.rejects(openBalanceReader("mainnet", [honest(FAST, 1121), honest(DRPC, 1000)], { sleep: noSleep, tries: 1 }), /over 120 blocks apart/);
+  assert.equal(typeof (await openIdReader("mainnet", [honest(FAST, 1000), honest(DRPC, 1120)], { sleep: noSleep, tries: 1 })), "function", "120 apart opens");
+  // the balance reader holds the same floor: a liar's old block fails its read, and the honest one's money is enough
+  assert.equal(await nearBalanceReader("mainnet", [liar(FAST), honest(DRPC)], { first: () => 0, sleep: noSleep, tries: 1 })("usdc", U1), 9n);
 });
 
 // ---------- step 5's R/V/A balances (restore/arms.ts BalanceReader) ----------
@@ -228,7 +308,7 @@ test("the R/V/A balance reader on mainnet's answers, and above 0 on either provi
   assert.equal(await b(empty, empty)("usdc", U1), 0n);
   await assert.rejects(b(empty, empty, () => new Error("HTTP 503"))("usdc", U1), /HTTP 503/, "a 0 needs both providers");
   assert.equal(await b(rich, rich, () => new Error("HTTP 503"))("usdc", U1), 7n, "the provider up shows money: enough");
-  const halted = () => ({ jsonrpc: "2.0", result: { error: "Smart contract panicked: FiatToken: paused", logs: [], block_height: 1 } });
+  const halted = () => ({ jsonrpc: "2.0", result: { error: "Smart contract panicked: FiatToken: paused", logs: [], block_height: 1, block_hash: hashOf(1) } });
   await assert.rejects(nearBalanceReader("mainnet", [provider(FAST, rich, halted), provider(DRPC, rich, halted)], { first: () => 0, sleep: noSleep, tries: 1 })("usdc", U1), /FiatToken: paused/);
   await assert.rejects(b(rich, rich)("gas" as "usdc", U1), /unknown read/);
 });
@@ -294,4 +374,16 @@ test("a provider always down ends the restore with the lane's named error; so do
       new RegExp(`^Error: lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index ${at(0, DEPOSIT_ID_MARGIN - 1)}: .*HTTP 503\\); the restore stops, to be retried$`),
     );
   }
+});
+
+// review N2 (the reviewer's Q3): one provider read first fakes money on a used, empty id; money ends the id's read, so
+// no second read outvotes it, and step 7 still re-reads the id on each open
+test("a faked money on a used, empty id keeps it in step 7's re-reads", async () => {
+  const u = at(3, 1);
+  const world = W({ [id(u)]: { storage: true } });
+  const fake = (p: Record<string, unknown>) => (argsOf(p).account_id === id(u) && p.method_name === "ft_balance_of" ? view("5") : undefined);
+  const lanes = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, sleep: noSleep, tries: 1 }));
+  assert.deepEqual(lanes[3]!.money, [u], "the faked money is taken (nothing outvotes money)");
+  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, 1_762_600_000_000);
+  assert.ok(plan.rereads.some((x) => x.i === u), "the id is re-read until its move lands");
 });

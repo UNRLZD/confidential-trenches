@@ -10,6 +10,8 @@ const P = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const WALK = "wallet/src/restore/walk.ts";
 const WAL = "wallet/src/restore/wallets.ts";
 const ARMS = "wallet/src/restore/arms.ts";
+const IDR = "wallet/src/restore/id-reader.ts";
+const ID = ["wallet", "test/restore-id-reader.test.ts"];
 const NR = ["wallet", "test/note-restore.test.ts"];
 const RW = ["wallet", "test/restore-wallets.test.ts"];
 const SENT = "precommitments: [...precommitments] };";
@@ -49,10 +51,16 @@ const M = [
   ["the walk's highest not checked against the notes", WAL, [["if (h !== (notes.length === 0 ? null : notes[notes.length - 1])) throw", "if (false) throw"]], RW, "step 5"],
   ["step 7 covers the highest plus one", WAL, [["x.highest + 2 * RESTORE_LANES", "x.highest + RESTORE_LANES"]], RW, "step 7"],
   ["step 7 covers an empty lane's first index only", WAL, [["x.highest === null ? x.lane + RESTORE_LANES :", "x.highest === null ? x.lane :"]], RW, "step 7"],
-  ["the re-reads take ids that hold a note or money", WAL, [["if (!held.has(i)) rereads.push", "rereads.push"]], RW, "step 7"],
+  ["the re-reads take ids that hold a note", WAL, [["if (!held.has(i)) rereads.push", "rereads.push"]], RW, "step 7"],
   ["the re-reads due at the window's end", WAL, [["return nowMs < plan.until ?", "return nowMs <= plan.until ?"]], RW, "step 7"],
   ["a 48 h window", WAL, [["export const REREAD_MS = 72 * 3_600_000;", "export const REREAD_MS = 48 * 3_600_000;"]], RW, "step 7"],
   ["W's secret key left in memory", WAL, [["    w.secretKey.fill(0);\n", ""]], ["wallet", "test/pool-zeroing.test.ts"], "restoreWallets zeroes"],
+  ["review N1: the first view's block not held to the floor", IDR, [["    if ((r.block_height as number) < at.floor) throw", "    if (false) throw"]], ID, "the floor and the pinned hash"],
+  ["review N1: the views pinned by height, not by the first view's hash", IDR, [["{ ...params, block_id: at.hash }", "{ ...params, block_id: at.h }"], ["r.block_hash !== at.hash || ", ""]], ID, "the floor and the pinned hash"],
+  ["review N1: the providers' final heights not held within 120 blocks", IDR, [["if (Math.abs(hs[0]! - hs[1]!) > VAULT_SYNC_LAG_MAX) throw", "if (false) throw"]], ID, "the floor and the pinned hash"],
+  ["review N2: an id read as money left out of step 7's re-reads", WAL, [["const held = new Set(x.notes);", "const held = new Set([...x.notes, ...x.money]);"]], RW, "step 7"],
+  ["review N3: step 7 takes a restore with a lane stopped at its reach", WAL, [["  if (stopped.length > 0)\n    throw", "  if (false)\n    throw"]], RW, "N3"],
+  ["review N3: an unfinished restore called complete", WAL, [["complete: out.every((x) => x.reach === null)", "complete: true"]], RW, "N3"],
   ["review F7: an R, V or A secret key left in memory", ARMS, [["  k.secretKey.fill(0);\n  return k.id;", "  return k.id;"]], ["wallet", "test/pool-zeroing.test.ts"], "restoreArmAccounts zeroes"],
   ["the counter raised from lane 0's highest", WAL, [["const mine = lanes[store.lane]!;", "const mine = lanes[0]!;"]], RW, "step 7"],
   ["R19: an unread id dropped from step 7's re-reads", WAL, [["const held = new Set([...x.notes, ...x.money]);", "const held = new Set([...x.notes, ...x.money, ...x.unread.map((u) => u.i)]);"]], RW, "step 7"],

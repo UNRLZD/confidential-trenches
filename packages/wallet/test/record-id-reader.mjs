@@ -25,21 +25,24 @@ const recording = (url) => {
   const live = nearRpc(url);
   return { name: url, query: async (params) => {
     const a = await live.query(params);
-    answers[`${url} ${JSON.stringify(params)}`] = a;
-    return a;
+    // the first answer of each request is kept (the readers' floor reads repeat; the replay serves the earliest, so
+    // every view recorded after it is at or past the floor it gives)
+    const k = `${url} ${JSON.stringify(params)}`;
+    if (!(k in answers)) answers[k] = a;
+    return answers[k];
   } };
 };
 const rpcs = [recording(URLS[0]), recording(URLS[1])];
 const states = {};
 for (const [name, id] of Object.entries(IDS)) {
   states[name] = [];
-  for (const f of [0, 1]) states[name].push(await nearIdReader("mainnet", rpcs, { first: () => f })(id));
+  for (const f of [0, 1]) states[name].push(await (await nearIdReader("mainnet", rpcs, { first: () => f }))(id));
 }
 // step 5's R/V/A balance reads (nearBalanceReader) the test replays
 const balances = {};
 for (const [what, name] of [["usdc", "money_usdc"], ["near", "used_account"], ["near", "never_used"], ["intents", "money_intents"]]) {
   balances[`${what} ${name}`] = [];
-  for (const f of [0, 1]) balances[`${what} ${name}`].push(String(await nearBalanceReader("mainnet", rpcs, { first: () => f })(what, IDS[name])));
+  for (const f of [0, 1]) balances[`${what} ${name}`].push(String(await (await nearBalanceReader("mainnet", rpcs, { first: () => f }))(what, IDS[name])));
 }
 // the intents branch: money_intents also holds USDC, so the reader stops at ft_balance_of; its intents.near views are
 // recorded on their own (the replay serves them for an id whose token views are never_used's)

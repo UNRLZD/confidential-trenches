@@ -12,7 +12,9 @@ import { depositAccount } from "../src/deposit/account.ts";
 import { RESTORE_GAP, RESTORE_LANES, type NoteRestore, type RestoredNote, type RestoredSpend } from "../src/notes/restore.ts";
 import { refKey } from "../src/notes/store.ts";
 import type { NoteRef } from "../src/notes/secrets.ts";
-import { afterRestore, ARM_TAGS, DEPOSIT_ID_MARGIN, HOP_TAGS, REREAD_MS, rereadsDue, restoreDepositIds, restoreWallets, type HistoryChain, type IdState, type LaneIds } from "../src/restore/wallets.ts";
+import { afterRestore, ARM_TAGS, DEPOSIT_ID_MARGIN, HOP_TAGS, REREAD_MS, rereadsDue, restoreDepositIds as depositIds, restoreWallets, type HistoryChain, type IdState, type LaneIds } from "../src/restore/wallets.ts";
+// step 5's lanes (its `complete` is read by its own tests below)
+const restoreDepositIds = async (...a: Parameters<typeof depositIds>): Promise<LaneIds[]> => (await depositIds(...a)).lanes;
 
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
 const SCOPE = vaultScopeOf(keccak_256, "vault.bf-restore.testnet", "usdc.fakes.testnet");
@@ -270,12 +272,13 @@ test("step 7: the new lane's counter goes past the lost store's possible index, 
     assert.deepEqual(asked, [[SCOPE, min]], `lane ${lane}`);
     assert.equal(plan.next, min);
     assert.equal(plan.until, T + 72 * 3_600_000, "72 h of NEAR block time (a deposit address's life, D44)");
-    // lane 0: 0, 8, 16 hold notes, so 24 and 32; an empty lane: its first two; lane 6: 6 a note, 22 money, so 14, 30, 38
+    // lane 0: 0, 8, 16 hold notes, so 24 and 32; an empty lane: its first two; lane 6: 6 a note, so 14, 22 (money, kept
+    // until its move lands: review N2), 30 and 38
     const of = (l: number) => plan.rereads.filter((x) => x.lane === l).map((x) => x.i);
     assert.deepEqual(of(0), [24, 32]);
     assert.deepEqual(of(1), [1, 9]);
     assert.deepEqual(of(3), [11, 19]);
-    assert.deepEqual(of(6), [14, 30, 38]);
+    assert.deepEqual(of(6), [14, 22, 30, 38]);
     assert.ok(plan.rereads.every((x) => x.id === id(x.i)));
     assert.deepEqual(rereadsDue(plan, T + REREAD_MS - 1), plan.rereads);
     assert.deepEqual(rereadsDue(plan, T + REREAD_MS), []);
@@ -318,4 +321,40 @@ test("step 5: a restore given the reach a lane named walks the lane to it and fi
   const reach = first.map((x) => x.reach);
   const got = await restoreDepositIds(SEED, SCOPE, { notes: [note(dep(0))], laneHighest: ONE, laneWalked: walkedTo(ONE, 3, reach) }, holds);
   assert.deepEqual([got[0]!.used, got[0]!.highest, got[0]!.readTo, got[0]!.reach], [[at(0, 3), at(0, 5)], at(0, 5), at(0, 5 + DEPOSIT_ID_MARGIN), null]);
+});
+
+// review N3: a lane stopped past its note walk's end (its reach set) was never read past its reach, so the restore is
+// unfinished: step 5 says so (`complete` false) and step 7 refuses it, raising no counter. The reviewer's lane 3: a note
+// at 3, its walk ended at 11, a used id at 19 stops it, and money sits at 75, never read.
+test("step 5 and 7 (N3): a lane stopped at its reach leaves the restore unfinished; step 7 raises no counter for it", async () => {
+  const high = [null, null, null, 3, null, null, null, null];
+  const r = { notes: [note(dep(3))], laneHighest: high, laneWalked: walkedTo(high).map((w, l) => (l === 3 ? 11 : w)) };
+  const { holds, log } = idReader([at(3, 9)], [], [at(3, 2)]);
+  const got = await depositIds(SEED, SCOPE, r, holds);
+  assert.equal(got.complete, false);
+  assert.deepEqual([got.lanes[3]!.reach, got.lanes[3]!.readTo, got.lanes[3]!.money], [19, 19, []]);
+  assert.ok(!log.includes(id(75)), "the money at 75 is never read");
+  const raised: number[] = [];
+  await assert.rejects(
+    afterRestore(SEED, { lane: 3, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000),
+    /^Error: the restore is unfinished: lane 3 stopped at 19, past the note walk's end; restore again with reach\[3\] = 19$/,
+  );
+  await assert.rejects(afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => (raised.push(m), m) }, SCOPE, got.lanes, 1_762_600_000_000), /the restore is unfinished/);
+  assert.deepEqual(raised, [], "no counter raised: lane 3's stays at 19 or below");
+  // the restore again with that reach reads on to the money, complete
+  const again = await depositIds(SEED, SCOPE, { ...r, laneWalked: walkedTo(high, RESTORE_GAP, got.lanes.map((x) => x.reach)) }, holds);
+  assert.equal(again.complete, true);
+  assert.deepEqual(again.lanes[3]!.money, [75]);
+  // a complete restore says so
+  assert.equal((await depositIds(SEED, SCOPE, LANES, idReader([]).holds)).complete, true);
+});
+
+// review N2: an id read as money stays in step 7's re-reads: one provider may fake money on a used, empty id, and no
+// second read outvotes money
+test("step 7 (N2): an id read as money is still re-read on each open until its move lands", async () => {
+  const lanes = await restoreDepositIds(SEED, SCOPE, LANES, idReader([at(1, 0)]).holds);
+  const plan = await afterRestore(SEED, { lane: 0, raiseDepositIndex: async (_s, m) => m }, SCOPE, lanes, 1_762_600_000_000);
+  assert.ok(plan.rereads.some((x) => x.i === at(1, 0) && x.id === id(at(1, 0))));
+  // an id with a note is the vault's, never re-read
+  assert.ok(!plan.rereads.some((x) => x.i === 0));
 });

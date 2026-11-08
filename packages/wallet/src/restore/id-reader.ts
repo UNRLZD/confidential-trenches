@@ -19,8 +19,15 @@
 //   read ends the id's read early, as no answer is stronger. A false money or used only reads the lane further
 //   (bounded by step 5's walk end). A listed intents.near token at 0 is no trace: intents.near at 16d04f6 deletes a
 //   balance that falls to 0 (core/src/amounts.rs:137-140, its entry_or_default; crates/map-utils/src/cleanup.rs:19-20).
-// - One block per id (review F6): the first view is read at the final block, and every other view of that id, on both
-//   providers, at that block's height (block_id), so money moving between two views can never read as used.
+// - One block per id (review F6), and that block confirmed by both (review N1): the first view is read at the final
+//   block, and every other view of that id, on both providers, at that block's hash (block_id), so money moving between
+//   two views can never read as used, and the other provider confirms the very block (a hash it does not hold,
+//   UNKNOWN_BLOCK, fails the id). The first view's block must be at or past the restore's floor: when a reader is
+//   opened, both providers' final heights are read (view_account of intents.near) and must be within
+//   VAULT_SYNC_LAG_MAX (120) blocks of each other, as the note restore's config read (notes/restore.ts readConfig), or
+//   the reader refuses to open; the floor is the lower of the two. A provider drawn first that names an old block (one
+//   from before money landed, which providers serve for 1-1.7 days) fails the id, which step 5 counts as failed, never
+//   as unused.
 // - An indexer (NearBlocks, the intents explorer) is a server's word: it may turn an id both providers see as unused
 //   into "used" (`indexer` answers true), never anything into "unused"; a failed or false answer changes nothing.
 //
@@ -43,6 +50,7 @@
 //
 // Each request names U or the token and nothing else (§2.9 row 8); the provider read first is drawn at random per id,
 // so the reads spread over both operators (l.322-324). Nothing here logs.
+import { VAULT_SYNC_LAG_MAX } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
 import type { IdReader, IdState } from "./wallets.ts";
@@ -55,6 +63,8 @@ export const ID_READ_BACKOFF_MS = 250;
 const HALT = "FiatToken: paused";
 const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;
+// a block hash: 32 bytes in base58 (43 or 44 characters)
+const HASH = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
 
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -66,14 +76,14 @@ export type IdIndexer = (id: string) => Promise<boolean>;
 export type IdReaderOpts = { tries?: number; backoffMs?: number; sleep?: (ms: number) => Promise<void>; first?: () => number; indexer?: IdIndexer };
 
 /**
- * The views of one read, all at one block: the first is asked at the final block and sets `at.h` from its answer; every
- * later one is asked at that height (block_id) and must answer from it.
+ * The views of one read, all at one block: the first is asked at the final block, must answer at or past `floor`, and
+ * sets `h` and `hash` from its answer; every later one is asked at that hash (block_id) and must answer from it.
  */
-export type At = { h?: number };
+export type At = { floor: number; h?: number; hash?: string };
 
 /** The view's answer, or null for an account the provider says does not exist (view_account only). */
 async function view(rpc: NearRpc, params: Obj, what: string, at: At): Promise<unknown> {
-  const a = await rpc.query(at.h === undefined ? { ...params, finality: "final" } : { ...params, block_id: at.h });
+  const a = await rpc.query(at.hash === undefined ? { ...params, finality: "final" } : { ...params, block_id: at.hash });
   if (!isObj(a)) throw new Error(`${rpc.name}: ${what}: not a JSON-RPC answer`);
   const text = JSON.stringify(a.error ?? (isObj(a.result) ? a.result.error : undefined) ?? "");
   if (text.includes(HALT)) throw new Error(`${rpc.name}: ${what}: the token is halted (${HALT})`);
@@ -83,9 +93,14 @@ async function view(rpc: NearRpc, params: Obj, what: string, at: At): Promise<un
     throw new Error(`${rpc.name}: ${what}: ${String(isObj(a.error) ? (a.error.name ?? a.error.message) : "an error")}`.slice(0, 200));
   }
   const r = a.result;
-  if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height) || (r.block_height as number) <= 0) throw new Error(`${rpc.name}: ${what}: not a view result`);
-  if (at.h === undefined) at.h = r.block_height as number;
-  else if (r.block_height !== at.h) throw new Error(`${rpc.name}: ${what}: answered at block ${String(r.block_height)}, not ${at.h}`);
+  if (!isObj(r) || r.error !== undefined || !Number.isSafeInteger(r.block_height) || (r.block_height as number) <= 0 || typeof r.block_hash !== "string" || !HASH.test(r.block_hash))
+    throw new Error(`${rpc.name}: ${what}: not a view result`);
+  if (at.hash === undefined) {
+    if ((r.block_height as number) < at.floor) throw new Error(`${rpc.name}: ${what}: answered at block ${String(r.block_height)}, below the restore's floor ${at.floor}`);
+    at.h = r.block_height as number;
+    at.hash = r.block_hash;
+  } else if (r.block_hash !== at.hash || r.block_height !== at.h)
+    throw new Error(`${rpc.name}: ${what}: answered at block ${String(r.block_height)} ${r.block_hash}, not ${String(at.h)} ${at.hash}`);
   if (params.request_type === "view_account") {
     if (typeof r.amount !== "string" || !DIGITS.test(r.amount)) throw new Error(`${rpc.name}: ${what}: not an account`);
     return r;
@@ -133,15 +148,29 @@ function setup(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Id
       }
     }
   };
-  return { token, retried, first };
+  // the floor (review N1): both providers' final heights, within VAULT_SYNC_LAG_MAX of each other; the lower of the two
+  const floor = async (): Promise<number> => {
+    const hs = await Promise.all(
+      rpcs.map(async (rpc) => {
+        const at: At = { floor: 1 };
+        await retried(rpc, { request_type: "view_account", account_id: INTENTS }, "the floor's view_account", at);
+        if (at.h === undefined) throw new Error(`${rpc.name}: the floor's view_account: no block`);
+        return at.h;
+      }),
+    );
+    if (Math.abs(hs[0]! - hs[1]!) > VAULT_SYNC_LAG_MAX) throw new Error(`the RPCs' final heights ${hs[0]} and ${hs[1]} are over ${VAULT_SYNC_LAG_MAX} blocks apart; the restore does not start`);
+    return Math.min(hs[0]!, hs[1]!);
+  };
+  return { token, retried, first, floor };
 }
 
 /**
  * The IdReader of step 5 on the network's token and intents.near, through one FastNEAR RPC and the dRPC RPC of that
- * network (nearPairNetwork), in either order.
+ * network (nearPairNetwork), in either order. Opening it reads the restore's floor (review N1): it rejects when the two
+ * final heights are over VAULT_SYNC_LAG_MAX apart. A bad network, pair or option throws at once.
  */
-export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): IdReader {
-  const { token, retried, first } = setup(network, rpcs, opts);
+export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: IdReaderOpts = {}): Promise<IdReader> {
+  const { token, retried, first, floor } = setup(network, rpcs, opts);
 
   // the strongest answer one provider gives of U at block at.h
   const readOn = async (rpc: NearRpc, u: string, at: At): Promise<IdState> => {
@@ -155,10 +184,10 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
   };
   const RANK: Record<IdState, number> = { unused: 0, used: 1, money: 2 };
 
-  return async (u: string): Promise<IdState> => {
+  return floor().then((f0): IdReader => async (u: string): Promise<IdState> => {
     if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
     const a = first() === 0 ? 0 : 1;
-    const at: At = {};
+    const at: At = { floor: f0 };
     const got: (IdState | Error)[] = [];
     for (const p of [a, 1 - a]) {
       try {
@@ -181,7 +210,7 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       }
     }
     return state;
-  };
+  });
 }
 
 type Retried = (rpc: NearRpc, params: Obj, what: string, at: At) => Promise<unknown>;
@@ -206,8 +235,8 @@ export type NearBalanceRead = "usdc" | "near" | "intents";
  * fails; a balance above 0 on either provider is enough, and 0 only when both answer 0, so a provider that hides money
  * never makes the restore pass over it. A halt ("FiatToken: paused") fails the read.
  */
-export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Omit<IdReaderOpts, "indexer"> = {}): (what: NearBalanceRead, account: string) => Promise<bigint> {
-  const { token, retried, first } = setup(network, rpcs, opts);
+export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], opts: Omit<IdReaderOpts, "indexer"> = {}): Promise<(what: NearBalanceRead, account: string) => Promise<bigint>> {
+  const { token, retried, first, floor } = setup(network, rpcs, opts);
   const readOn = async (rpc: NearRpc, what: NearBalanceRead, a: string, at: At): Promise<bigint> => {
     if (what === "usdc") return amount(await retried(rpc, call(token, "ft_balance_of", { account_id: a }), "ft_balance_of", at), `${rpc.name}: ft_balance_of`);
     if (what === "near") {
@@ -216,11 +245,11 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     }
     return intentsSum(retried, rpc, a, at);
   };
-  return async (what, a) => {
+  return floor().then((f0) => async (what: NearBalanceRead, a: string): Promise<bigint> => {
     if (what !== "usdc" && what !== "near" && what !== "intents") throw new Error(`unknown read ${String(what)}`);
     if (typeof a !== "string" || !HEX64.test(a)) throw new Error("an account is a 64-hex implicit account id");
     const x = first() === 0 ? 0 : 1;
-    const at: At = {};
+    const at: At = { floor: f0 };
     let failed: unknown;
     for (const p of [x, 1 - x]) {
       try {
@@ -233,5 +262,5 @@ export function nearBalanceReader(network: NearNetwork, rpcs: readonly [NearRpc,
     // 0 only when both answered 0
     if (failed !== undefined) throw failed;
     return 0n;
-  };
+  });
 }

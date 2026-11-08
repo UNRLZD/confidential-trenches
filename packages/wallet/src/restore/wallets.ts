@@ -26,8 +26,9 @@
 //   for the scope is raised past the lost store's possible index, to its lane's highest with a note or any history plus
 //   two of the lane (in an empty lane, its second index). For 72 h of NEAR block time after the restore, every open
 //   re-reads, in every lane, each deposit id up to that lane's highest plus two (in an empty lane, its first two) that
-//   holds no note and no money (a used id now empty and an id whose read failed included), so a late send to a quote
-//   the lost store named is found.
+//   holds no note (an id read as money, a used id now empty and an id whose read failed included: review N2, as one
+//   provider may fake money), so a late send to a quote the lost store named is found. A restore with a lane stopped
+//   past its note walk's end is unfinished (`complete` false): step 7 refuses it, raising no counter (review N3).
 import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
 import { RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
@@ -176,6 +177,13 @@ export type LaneIds = {
   reach: number | null;
 };
 
+/**
+ * Step 5's result: each lane's ids, and whether the restore is complete. `complete` is false when any lane stopped
+ * past its note walk's end (its `reach` set, review N3): notes may lie past it, so step 7 refuses the lanes and the
+ * user restores again with those reaches.
+ */
+export type DepositIds = { lanes: LaneIds[]; complete: boolean };
+
 /** Step 5, the deposit ids: every lane of the scope read to DEPOSIT_ID_MARGIN never-used ids past its highest with a note or history. */
 export async function restoreDepositIds(
   seed64: Uint8Array,
@@ -183,7 +191,7 @@ export async function restoreDepositIds(
   r: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked">,
   holds: IdReader,
   opts: { margin?: number } = {},
-): Promise<LaneIds[]> {
+): Promise<DepositIds> {
   const margin = opts.margin ?? DEPOSIT_ID_MARGIN;
   if (!Number.isSafeInteger(margin) || margin < 1) throw new Error("margin is a count above 0");
   if (!Array.isArray(r.laneHighest) || r.laneHighest.length !== RESTORE_LANES) throw new Error("laneHighest: one per lane");
@@ -241,7 +249,7 @@ export async function restoreDepositIds(
     }
     out.push({ lane, notes, money, used, unread, highest, readTo, reach });
   }
-  return out;
+  return { lanes: out, complete: out.every((x) => x.reach === null) };
 }
 
 /** Step 7's plan: the index the new lane's counter was raised to, and the ids every open re-reads until `until`. */
@@ -263,11 +271,18 @@ export async function afterRestore(
 ): Promise<AfterRestore> {
   if (!Number.isSafeInteger(atMs) || atMs <= 0) throw new Error("atMs is the restore's NEAR block time in ms");
   if (lanes.length !== RESTORE_LANES || !lanes.every((x, k) => x.lane === k)) throw new Error("lanes: one per lane, in order");
+  // an unfinished restore (review N3): a lane stopped past its note walk's end was never read past its reach, so no
+  // counter is raised and nothing is re-read on its word; the user restores again with the reaches named
+  const stopped = lanes.filter((x) => x.reach !== null);
+  if (stopped.length > 0)
+    throw new Error(`the restore is unfinished: ${stopped.map((x) => `lane ${x.lane} stopped at ${String(x.reach)}`).join(", ")}, past the note walk's end; restore again with ${stopped.map((x) => `reach[${x.lane}] = ${String(x.reach)}`).join(", ")}`);
   const mine = lanes[store.lane]!;
   const next = await store.raiseDepositIndex(scope, coverTo(mine));
   const rereads: AfterRestore["rereads"] = [];
   for (const x of lanes) {
-    const held = new Set([...x.notes, ...x.money]);
+    // ids with a note are the vault's; an id read as money stays in the re-reads until its move lands (review N2): one
+    // provider may fake money, which no second read outvotes
+    const held = new Set(x.notes);
     for (let i = x.lane; i <= coverTo(x) && i <= U32; i += RESTORE_LANES) if (!held.has(i)) rereads.push({ lane: x.lane, i, id: depositAccount(seed64, scope, i).account });
   }
   return { scope, lane: store.lane, next, until: atMs + REREAD_MS, rereads };
