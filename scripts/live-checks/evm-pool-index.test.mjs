@@ -3,7 +3,8 @@
 // venue list), fails; and the good run with one thing changed fails: the readers' block N differs (no pin), one reader
 // misses a pool, a span answered without its last block, two readers of one operator, a reader of ours, another margin.
 // The read itself, replayed from the good run: a reader one block behind on a span, then caught up, PASSES (asked
-// again, as the index asks it); one that stays behind past TRIES FAILS.
+// again, as the index asks it); one that stays behind past TRIES FAILS; a receipt answered null once, then present,
+// PASSES (review 3 of 7f1ad79a), and one null past TRIES FAILS.
 //   node --test scripts/live-checks/evm-pool-index.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -41,11 +42,17 @@ test("the good run with one thing changed fails", () => {
     bad(changed((r) => (r.chains[chain].index.readers[1] = "https://ct-api.unrealized.trade")), new RegExp(`${chain}: no reader is ours`));
     bad(changed((r) => (r.chains[chain].index.margin = 0)), new RegExp(`${chain}: span .*margin 0`));
     bad(changed((r) => (r.chains[chain].heads[1] = r.chains[chain].heads[0] + 50_000)), new RegExp(`${chain}: the two heads 50000 blocks apart`));
+    const s = A.good.chains[chain].spans.findIndex((x) => x.on[0].ids.length > 0);
+    bad(changed((r) => (r.chains[chain].spans[s].receipt[1].init = false)), new RegExp(`${chain} .*reader 2 answered its first pool's receipt`));
+    bad(changed((r) => (r.chains[chain].spans[s].receipt[0] = null)), new RegExp(`${chain} .*reader 1 answered its first pool's receipt: not read`));
+    bad(changed((r) => delete r.chains[chain].spans[s].receipt), new RegExp(`${chain} .*receipt read on both readers`));
   }
 });
 
-/** A fetch that answers as the good run's readers did; `behind(url, b)` true: that reader does not hold block b yet. */
-function replayFetch(run, behind = () => false) {
+const INIT = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
+/** A fetch that answers as the good run's readers did; `behind(url, b)` true: that reader does not hold block b yet;
+ *  `noReceipt(url, tx)` true: that reader answers the receipt of tx null. */
+function replayFetch(run, behind = () => false, noReceipt = () => false) {
   const byUrl = new Map();
   for (const c of Object.values(run.chains)) c.index?.readers.forEach((u, r) => byUrl.set(u, { c, r }));
   const res = (body, headers = {}) => ({ status: 200, ok: true, headers: { get: (k) => headers[k.toLowerCase()] ?? null }, json: async () => body, text: async () => JSON.stringify(body) });
@@ -55,13 +62,19 @@ function replayFetch(run, behind = () => false) {
     if (init.method === "OPTIONS") return { ...res(null, { "access-control-allow-origin": p.allow, "access-control-allow-headers": p.headers }), status: p.status };
     const body = JSON.parse(init.body);
     if (!Array.isArray(body)) return res({ jsonrpc: "2.0", id: 1, result: "0x1" }, { "access-control-allow-origin": p.post });
+    if (body.length === 1 && body[0].method === "eth_getTransactionReceipt") {
+      const tx = body[0].params[0];
+      const s = c.spans.find((x) => x.tx === tx);
+      const rc = s.receipt[r];
+      return res([{ jsonrpc: "2.0", id: 0, result: noReceipt(url, tx) ? null : { blockNumber: "0x" + rc.block.toString(16), logs: rc.init ? [{ address: "0x0", topics: [INIT, s.on[0].ids[0]], transactionHash: tx }] : [] } }]);
+    }
     if (body.length === 1) return res([{ jsonrpc: "2.0", id: 0, result: "0x" + c.heads[r].toString(16) }]);
     const b = Number(body[1].params[0]);
     const s = c.spans.find((x) => x.b === b);
     const on = s.on[r];
     const late = behind(url, b);
     return res([
-      { jsonrpc: "2.0", id: 0, result: late ? [] : on.ids.map((id) => ({ topics: ["0x", id] })) },
+      { jsonrpc: "2.0", id: 0, result: late ? [] : on.ids.map((id, i) => ({ topics: ["0x", id], ...(i === 0 && r === 0 && s.tx ? { transactionHash: s.tx } : {}) })) },
       { jsonrpc: "2.0", id: 1, result: late ? null : { number: "0x" + b.toString(16), hash: on.last } },
       { jsonrpc: "2.0", id: 2, result: "0x" + (late ? b - 1 : c.heads[r]).toString(16) },
     ]);
@@ -81,4 +94,18 @@ test("a reader one block behind on a span, then caught up, passes; one behind pa
   const stays = await read(venuesOf(A.good), replayFetch(A.good, (url, x) => url === u && x === b), async () => {});
   assert.equal(stays.chains.robinhood.spans[0].on[1].tries, TRIES);
   bad(stays, /robinhood .*with its last block in the same batch/);
+});
+
+test("a receipt answered null once, then present, passes; null past TRIES fails", async () => {
+  const u = A.good.chains.base.index.readers[1];
+  const i = A.good.chains.base.spans.findIndex((x) => x.tx);
+  const tx = A.good.chains.base.spans[i].tx;
+  let asked = 0;
+  const once = await read(venuesOf(A.good), replayFetch(A.good, () => false, (url, x) => url === u && x === tx && asked++ === 0), async () => {});
+  const v = judge(once);
+  assert.equal(v.pass, true, v.lines.filter((l) => l.startsWith("BAD")).join("\n"));
+  assert.equal(once.chains.base.spans[i].receipt[1].tries, 2);
+  const stays = await read(venuesOf(A.good), replayFetch(A.good, () => false, (url, x) => url === u && x === tx), async () => {});
+  assert.equal(stays.chains.base.spans[i].receipt[1].tries, TRIES);
+  bad(stays, /base .*reader 2 answered its first pool's receipt: block null/);
 });

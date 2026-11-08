@@ -12,7 +12,11 @@
 //   - every span is answered on both readers, within TRIES tries each (the kit's INDEX_TRIES: a reader a block behind
 //     is asked again, its own head read in the same batch), with its last block in the same batch, under INDEX_SPAN_LOGS logs, the
 //     same last-block hash on both (block N's is the pin) and the same pools on both (by pool id), at least one pool in
-//     all, each batch within the kit's RPC timeout (10 s).
+//     all, each batch within the kit's RPC timeout (10 s);
+//   - each reader answers, within TRIES tries (a receipt answered null is asked again, as the kit asks it: review 3 of
+//     7f1ad79a, base.api.pocket.network answered null for 119 of 500 mined Initialize transactions), the receipt of the
+//     transaction of each span's first pool, in the span, holding the PoolManager's Initialize of that pool (the kit
+//     asks it of the reader that did not log a pool).
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
 // After: app
@@ -79,6 +83,9 @@ export function judge(run) {
       say(same, `${chain} ${s.a}-${s.b}: the same ${x.ids.length} pools on both${same ? "" : ` (${y.ids.length} on the second)`}`);
       say(x.ms <= TIMEOUT_MS && y.ms <= TIMEOUT_MS && (x.tries ?? 1) <= TRIES && (y.tries ?? 1) <= TRIES, `${chain} ${s.a}-${s.b}: answered in ${x.ms} and ${y.ms} ms, try ${x.tries ?? 1} and ${y.tries ?? 1}`);
       pools += x.ids.length;
+      if (x.ids.length === 0) continue;
+      for (const [r, rc] of (s.receipt ?? []).entries()) say(rc?.block >= s.a && rc.block <= s.b && rc.init === true && rc.tries <= TRIES, `${chain} ${s.a}-${s.b}: reader ${r + 1} answered its first pool's receipt: ${rc ? `block ${rc.block}, Initialize ${rc.init}, try ${rc.tries}` : "not read"}`);
+      say(s.receipt?.length === 2, `${chain} ${s.a}-${s.b}: its first pool's receipt read on both readers`);
     }
     say(pools > 0, `${chain}: ${pools} pools in the newest ${SPANS * SPAN} blocks`);
   }
@@ -108,11 +115,32 @@ export async function readSpan(u, pm, a, b, fetchFn, sleep) {
       const logs = byId.get(0)?.result;
       const blk = byId.get(1)?.result;
       const head = byId.get(2)?.result;
-      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
+      last = { logs: Array.isArray(logs) ? logs.length : -1, ids: Array.isArray(logs) ? logs.map((l) => String(l?.topics?.[1]).toLowerCase()) : [], tx: Array.isArray(logs) && typeof logs[0]?.transactionHash === "string" ? logs[0].transactionHash.toLowerCase() : null, last: typeof blk?.hash === "string" && Number(blk.number) === b ? blk.hash.toLowerCase() : null, head: typeof head === "string" ? Number(head) : null, ms, tries };
     } catch (e) {
       last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
     }
     if (last.last !== null && last.logs >= 0) return last;
+    if (tries < TRIES) await sleep(RETRY_MS);
+  }
+  return last;
+}
+
+/** One reader's receipt of transaction `tx`: its block and whether it holds the PoolManager's Initialize of pool `id`,
+ *  asked again up to TRIES times while it is answered null or not at all (the kit's receipt reads, pool-index.ts). */
+export async function readReceipt(u, pm, tx, id, fetchFn, sleep) {
+  let last = null;
+  for (let tries = 1; tries <= TRIES; tries++) {
+    try {
+      const { byId, ms } = await post(u, [{ jsonrpc: "2.0", id: 0, method: "eth_getTransactionReceipt", params: [tx] }], fetchFn);
+      const rc = byId.get(0)?.result;
+      if (rc && typeof rc === "object") {
+        const init = Array.isArray(rc.logs) && rc.logs.some((l) => String(l?.address).toLowerCase() === pm.toLowerCase() && String(l?.topics?.[0]).toLowerCase() === INITIALIZE && String(l?.topics?.[1]).toLowerCase() === id && String(l?.transactionHash).toLowerCase() === tx);
+        return { block: Number(rc.blockNumber), init, ms, tries };
+      }
+      last = { block: null, init: false, ms, tries, answer: rc === null ? "null" : "none" };
+    } catch (e) {
+      last = { block: null, init: false, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
+    }
     if (tries < TRIES) await sleep(RETRY_MS);
   }
   return last;
@@ -150,7 +178,9 @@ export async function read(venues, fetchFn = fetch, sleep = (ms) => new Promise(
       const b = n - i * ix.span;
       const a = b - ix.span + 1;
       const on = await Promise.all(ix.readers.map((u) => readSpan(u, v.poolManager, a, b, fetchFn, sleep)));
-      spans.push({ a, b, on });
+      const tx = on[0]?.tx;
+      const receipt = typeof tx === "string" ? await Promise.all(ix.readers.map((u) => readReceipt(u, v.poolManager, tx, on[0].ids[0], fetchFn, sleep))) : undefined;
+      spans.push({ a, b, on, ...(receipt ? { tx, receipt } : {}) });
     }
     chains[chain] = { index, preflight, heads, spans };
   }
