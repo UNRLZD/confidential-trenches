@@ -385,6 +385,7 @@ export const MUTANTS = [
   [QUOTE, "    if (c.route?.venue === \"uniswap-v3\" && c.route.tokens.length === 2) return true;\n", "", S, "GS9 "],
   [QUOTE, "  if (value < reference.amountOut) ranOut(reference, \"the best route that fits\");\n", "", R, "GS7 "],
   [QUOTE, "  if (value < reference.amountOut) ranOut(reference, \"the best route that fits\");\n", "", R, "GS13 "],
+  [QUOTE, "    if (listed !== null && near(listed.amountOut, value)) ranOut(listed, \"the best route through listed pools within the slippage\");\n", "", R, "GS14 "],
   [QUOTE, "    { l: priced, band: ownFits ? (c) => c.amountOut >= value : all },", "    { l: filled, band: ownFits ? (c) => c.amountOut >= value : all },", R, "GS13 "],
   [QUOTE, "if (q2 === null && route.venue === \"uniswap-v3\" && gas2 && route.tokens.length > 2) return refuse(", "if (false) return refuse(", R, "GS7 "],
   [QUOTE, "    if (c.route !== undefined) outOfGas.set(c.at, { route: c.route, amountOut: x });\n", "", S, "GS10 "],
