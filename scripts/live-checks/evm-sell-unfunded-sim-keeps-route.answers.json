@@ -1,0 +1,43 @@
+{
+  "_note": "good: SIGN_HOST as served, read 8 Nov 06:13Z with --record (its bundle carries no EVM sell quote: the page's EVM flows land with signpage-evm-pool-trade, so nothing deployed runs this code yet). good_quote: the kit's sell quote (packages/kit/src/checks/evm/quote.ts evmPoolSellQuote as an entry, rolldown 1.2.15, minified) bundled at cf356527, this card's fix after its review, with an index pinning it: the quote and every line of the guard. bad: the same bundle at 3a57948a, the commit before this card: the balance read, its short branch dropping the routes that needed the sim, the sim at the keep-min value. bad_partial: the same at 1a8a3b98, the card's first fix: the skip kept, the sim still at the keep-min value (review of 1c31d81a, M1).",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Xt2b6zsAXb3RR6MMnyQTCXeG/lYS+gwFPR8pmYfoM6Ylm4j/ZC0/2ouqqopRL0qL",
+    "quotes": false,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": false,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": false,
+      "W's sim runs at one wei above the floor, so a route counts at what W gains, never dropped for a shortfall": false
+    }
+  },
+  "good_quote": {
+    "index": "<!doctype html>\n<script type=\"module\" src=\"/app.js\" integrity=\"sha384-ux1ZmOfcQmFAooo7C1W+fLZVVg2uGgRO+2Yd9Ew6YZkN07hFyu7efJtPkowSa+Nr\"></script>\n",
+    "sha384": "sha384-ux1ZmOfcQmFAooo7C1W+fLZVVg2uGgRO+2Yd9Ew6YZkN07hFyu7efJtPkowSa+Nr",
+    "quotes": true,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": true,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": true,
+      "W's sim runs at one wei above the floor, so a route counts at what W gains, never dropped for a shortfall": true
+    }
+  },
+  "bad": {
+    "index": "<!doctype html>\n<script type=\"module\" src=\"/app.js\" integrity=\"sha384-LLYOlz2PwEJkvH64N7JzOwYozX70lX/el6fe6kCXD3zWzxCmwSdVyD+R+cdkERuc\"></script>\n",
+    "sha384": "sha384-LLYOlz2PwEJkvH64N7JzOwYozX70lX/el6fe6kCXD3zWzxCmwSdVyD+R+cdkERuc",
+    "quotes": true,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": true,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": false,
+      "W's sim runs at one wei above the floor, so a route counts at what W gains, never dropped for a shortfall": false
+    }
+  },
+  "bad_partial": {
+    "index": "<!doctype html>\n<script type=\"module\" src=\"/app.js\" integrity=\"sha384-Hf+VbmTExw8I1xMf1iz2bZrVakQmL+lJoQ9VqBHmgiA6WrfnyLcqLKi0C2lOnAaf\"></script>\n",
+    "sha384": "sha384-Hf+VbmTExw8I1xMf1iz2bZrVakQmL+lJoQ9VqBHmgiA6WrfnyLcqLKi0C2lOnAaf",
+    "quotes": true,
+    "carries": {
+      "the quote reads the pinned sell sender's balance before W's sim": true,
+      "a sender too low to pay the sim keeps every route, none dropped, and the quote says the sim was skipped": true,
+      "W's sim runs at one wei above the floor, so a route counts at what W gains, never dropped for a shortfall": false
+    }
+  }
+}
