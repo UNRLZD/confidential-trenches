@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/signpage-pool-withdraw-form.test.mjs: the live check replays recorded answers
-// (signpage-pool-withdraw-form.answers.json). bad: a real devnet pool buy read in the withdraw's place: FAIL, a table
-// and no transfer named. none: no run recorded yet: FAIL. Planted on the bad one's SIGN_HOST read: a served /app.js
+// (signpage-pool-withdraw-form.answers.json). bad: a real devnet pool buy read in the release's place and its sell in
+// the onward send's: FAIL, a table and no transfer named. none: no run recorded yet: FAIL. Planted on the bad one's SIGN_HOST read: a served /app.js
 // that is not the pinned one: FAIL. good: the devnet withdraw run as recorded (signpage-pool-withdraw-form.md): PASS.
 // A synthesized good part (the release alone to W, then W's own transfer of the part to To, W at 0) must PASS and
 // each way a part can go wrong, planted on it, must FAIL (review #232b LOW 6).
@@ -19,12 +19,13 @@ test("recorded good answer: the devnet withdraw run, its part's release then W's
   assert.equal(ANSWERS.good.run[0].part, "2177099");
 });
 
-test("recorded bad answer: a devnet pool buy in the withdraw's place: FAIL, its table and its instructions named", () => {
+test("recorded bad answer: a devnet pool buy in the release's place and its sell in the onward send's: FAIL, its table and its instructions named", () => {
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.endsWith("loads a lookup table")), v.lines.join("\n"));
   assert.ok(v.lines.some((l) => l.endsWith(`not a tag 2 release of the pinned program ${devnetPin().program}`)), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => l.endsWith("(onward): not on both RPCs at finalized")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("(onward): not W's own send, W its one signer and fee payer")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("(onward): not one System transfer alone")), v.lines.join("\n"));
   assert.ok(!v.lines.some((l) => l.includes("SIGN_HOST")), "SIGN_HOST serves its pinned /app.js");
 });
 

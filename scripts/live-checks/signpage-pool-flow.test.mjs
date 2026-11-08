@@ -1,18 +1,18 @@
 // node --test scripts/live-checks/signpage-pool-flow.test.mjs: the live check replays recorded answers
 // (signpage-pool-flow.answers.json). good: the testnet build's devnet pin read on two devnet RPCs, and SIGN_HOST's
-// /app.js with no testnet pin: PASS. bad: the same reads for the helper's earlier devnet program in the pin's place:
+// /app.js with no testnet pin: PASS. bad: the same reads for the devnet program before the re-pin in the pin's place:
 // another code and none of the record's deposit: FAIL. bad_table: the pool account read in the table's place: FAIL.
 // Planted on the good one: SIGN_HOST serving a testnet pin, a pool account another program owns, an upgrade authority
 // set, the buy failed or another tx's bytes in its place, the sell not W's alone, and the helper naming another fee
 // payer: FAIL.
-// Card signpage-pool-flow-answers, each the good run's answers changed as it names: throttled (the recorded 429s with a
-// Retry-After): PASS after waiting it; null_behind (a null at a slot behind the other provider's value): read again,
+// Card signpage-pool-flow-answers, each the good run's answers changed as it names: throttled (nine of the second
+// provider's reads answering 429 with a Retry-After): PASS after waiting it; null_behind (a null at a slot behind the other provider's value): read again,
 // PASS; null_same_slot (a null at the other provider's own slot): FAIL, never read again, the line naming the answer.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { PIN, RUN, check, getRead } from "./signpage-pool-flow.mjs";
-import { REREADS, account, answerOf, behindOf, devnetPin, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
+import { REREADS, account, answerOf, b58decode, behindOf, devnetPin, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-pool-flow.answers.json", import.meta.url), "utf8"));
 /** The pin every recording is judged on: today's (pool-sol-deploy.devnet.json), as a live run reads it. */
@@ -34,14 +34,14 @@ function replay(answers, plant = (a) => a.json) {
   };
 }
 const run = (rec, plant, sign = rec.sign, helper = rec.helper, sleep = async () => {}) => check({ program: rec.program, table: rec.table, fetchFn: replay(rec.answers, plant), rpcs: rec.rpcs, sleep, sign, helper });
-/** A run the answers file keeps as changes on another (`from`): `set` gives the answer at index i a Retry-After or
- * another body, `copy` serves those answers again after the rest. */
+/** A run the answers file keeps as changes on another (`from`): `set` gives the answer at index i another status, a
+ * Retry-After or another body, `copy` serves those answers again after the rest. */
 function derived(name) {
   const d = A[name];
   const base = A[d.from];
   const answers = structuredClone(base.answers);
   for (const { i, ...change } of d.set ?? []) {
-    if (change.json) answers[i] = { ...answers[i], status: 200, json: change.json };
+    if (change.json) answers[i] = { ...answers[i], status: change.status ?? 200, json: change.json };
     if (change.retry_after) answers[i].retry_after = change.retry_after;
   }
   for (const i of d.copy ?? []) answers.push(structuredClone(base.answers[i]));
@@ -135,15 +135,19 @@ test("card signpage-pool-flow-answers, recorded null_behind run: a null at a slo
   assert.equal(r.ok, true, r.lines.join("\n"));
   const again = r.lines.filter((l) => l.startsWith("info ") && l.includes("answered behind"));
   assert.equal(again.length, 1, r.lines.join("\n"));
-  assert.ok(again[0].includes(`getAccountInfo "${OLD.pool}" null at slot 518538800, https://api.devnet.solana.com a value at slot 518538841`), again[0]);
-  assert.ok(r.lines.some((l) => l.startsWith(`ok   pool ${OLD.pool}`) && l.includes("onfinality")), r.lines.join("\n"));
+  const behind = A.null_behind.set[0].json.result.context.slot;
+  const ahead = A.good.answers.find((a) => a.url === A.good.rpcs[0] && a.method === "getAccountInfo" && a.params[0] === OLD.pool).json.result.context.slot;
+  assert.ok(behind < ahead, `${behind} is behind ${ahead}`);
+  assert.ok(again[0].includes(`getAccountInfo "${OLD.pool}" null at slot ${behind}, ${A.good.rpcs[0]} a value at slot ${ahead}`), again[0]);
+  assert.ok(r.lines.some((l) => l.startsWith(`ok   pool ${OLD.pool}`) && l.includes(A.good.rpcs[1])), r.lines.join("\n"));
 });
 
 test("card signpage-pool-flow-answers, recorded null_same_slot run: a null at the other provider's own slot FAILs, never read again, naming the answer", async () => {
   const w = waits();
   const r = await run(derived("null_same_slot"), undefined, A.good.sign, A.good.helper, w.sleep);
   assert.equal(r.ok, false);
-  assert.ok(r.lines.some((l) => l.startsWith(`BAD  pool ${OLD.pool}`) && l.endsWith("on https://solana-devnet.api.onfinality.io/public: missing (HTTP 200, null at slot 518538841)")), r.lines.join("\n"));
+  const slot = A.null_same_slot.set[0].json.result.context.slot;
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD  pool ${OLD.pool}`) && l.endsWith(`on ${A.good.rpcs[1]}: missing (HTTP 200, null at slot ${slot})`)), r.lines.join("\n"));
   assert.ok(!r.lines.some((l) => l.includes("answered behind")), r.lines.join("\n"));
 });
 
@@ -194,8 +198,23 @@ test("the pin is today's: the good recording names today's program, pool and tab
   assert.equal(A.good.pin_table, PIN.table);
   assert.equal(PIN.program, now.program);
   assert.equal(PIN.pool, now.pool);
-  // the same answers with every transaction on the pool before the re-pin (2S5wpE7U, its program 5V9iJECf)
-  const before = (a) => (a.method === "getTransaction" && a.json?.result ? JSON.parse(JSON.stringify(a.json).replaceAll(now.pool, BEFORE.pool).replaceAll(now.program, BEFORE.program)) : a.json);
+  // the same answers with every transaction on the pool before the re-pin (2S5wpE7U, its program 5V9iJECf): the keys in
+  // the base64 bytes and the logs both moved
+  const swap = (bytes) => {
+    const out = Buffer.from(bytes);
+    for (const [from, to] of [[now.pool, BEFORE.pool], [now.program, BEFORE.program]]) {
+      const f = Buffer.from(b58decode(from));
+      for (let i = out.indexOf(f); i >= 0; i = out.indexOf(f, i + 32)) Buffer.from(b58decode(to)).copy(out, i);
+    }
+    return out;
+  };
+  const before = (a) => {
+    if (a.method !== "getTransaction" || !a.json?.result) return a.json;
+    const j = JSON.parse(JSON.stringify(a.json).replaceAll(now.pool, BEFORE.pool).replaceAll(now.program, BEFORE.program));
+    const t = j.result.transaction;
+    if (Array.isArray(t) && t[1] === "base64") j.result.transaction = [swap(Buffer.from(t[0], "base64")).toString("base64"), "base64"];
+    return j;
+  };
   const r = await run(A.good, before);
   assert.equal(r.ok, false);
   for (const name of Object.keys(RUN)) assert.ok(r.lines.some((l) => l.startsWith(`BAD  ${name} ${RUN[name]}`)), `${name}\n${r.lines.join("\n")}`);

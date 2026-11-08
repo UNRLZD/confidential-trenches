@@ -29,11 +29,11 @@ export const TO = "3NSPoKXm5PNTLurbAcJiYRB6oEuK4dfrxJy26JvzMqKx";
 export const SYSTEM = "11111111111111111111111111111111";
 export const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 /** The run's parts (signpage-pool-withdraw-form.md): each part's release and onward signatures and the lamports it
- *  sends To. One part: the run of 2026-11-04 18:49-18:50Z on the deployed helper. */
+ *  sends To. One part: the run of 2026-11-08 04:49-04:50Z on today's devnet pool (92YuYhb4) and the deployed helper. */
 export const RUN = Object.freeze([
   Object.freeze({
-    release: "PxtcgoCUumR3YoQAbA2RXe1MasuWiPxWAvfvNmPccmwSrB43oamuy2qkSPE8ABHPNwaEnEUEsxvYo3y9N9LpZ8e",
-    onward: "5p4dXVDiCJ7ntFTXXaZPvBZeYP5gpgeHCucRxe1dcPzjmRojSMiRdrPHNmMgXgn3NnuActEYszjest2ssrANLMmW",
+    release: "53grhQn7ic5VJ9Z6bYu1rRutsY6LnxuP3QTTa4A5RstL4PzKerFeo9SfWH9XUMRcCacC6MnL5kasNuv9kxzAYE9Y",
+    onward: "625hqKpFwfVf6npcoqD1SfpCFS5CqMW5gho9y9537jCyap5h4wACq1X2DkxFMpF7mJi55qVK73Uajk71XS8QFnii",
     part: "2177099",
   }),
 ]);

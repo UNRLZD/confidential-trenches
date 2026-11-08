@@ -39,12 +39,12 @@ export const PIN = Object.freeze({
   /** DEVNET_TABLE (packages/signpage/src/pool-testnet.ts). */
   table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
 });
-/** Run 4's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
- *  flow. */
+/** Run 7's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
+ *  flow, on today's devnet pool (program 9Z6Yi2Vc, pool 92YuYhb4) and the helper serving it. */
 export const RUN = Object.freeze({
-  deposit: "63fqkqcKM2jQq7aPitYXUzeUWnm7FTyCMHMUhHVSrXbDQeZwHxkXBFUvkEzE5JVkAaspXqDUYc8hRBGh3R4Zkera",
-  buy: "2MbB4Fq7KU1TiSkYA1GpPYAUTTyt68Jz2quLfvsp5xP72yawSYG1E9D3bs9mBHirYar8UTLQm786CyfgUD5VPNua",
-  sell: "3ZMVTe6R7zXPpE76MC6oJCSXBUZT2XYH6kyrXhDGt4stS5U8WyPPKnzHWsXrrdD2RWSMW919DEhTqLptiX7myG3w",
+  deposit: "53ppgpzgRj1Ler5byRWVpUhxgXRizaEtnkYBuQjoSWXH1KAk9xyVkhrphgWkigWCVakKuEs1z2h7ErHXo2rr8jTx",
+  buy: "2r3panFRXsEE4K4duP9juAXpVjLpzQPNetEDUmyowJ8EbDq6wWbPPQs3eoRjBCSDoU5jrKbNZ14SQMtXv3wCWnD7",
+  sell: "2BATzt6gAKUzhgTUvoUs3keMEAyLZW3x1M3VeWzLNpqqnRjCEssGv3LzFmcZrSpueDVYdQgToYuDPAyztN87u3Ty",
 });
 export const ALT_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 export const PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
