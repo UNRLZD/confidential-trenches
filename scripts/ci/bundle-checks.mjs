@@ -121,6 +121,7 @@ export const OUT = {
   "app-legend-holds-still": "a browser and the helper",
   "app-discover-rows-hold": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
+  "verify-pools": "a browser and chain RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
   "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
