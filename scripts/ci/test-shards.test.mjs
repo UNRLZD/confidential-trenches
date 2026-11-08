@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { e2ePart, mutantCommands, mutantParts, mutantsPart, runPart, MUTANT_SECONDS, MUTANTS_ELSEWHERE, NEW_SWEEP_SECONDS, PART_BUDGET_SECONDS } from "./test-shards.mjs";
+import { e2ePart, mutantCommands, mutantParts, mutantsPart, runPart, MUTANT_SECONDS, NEW_SWEEP_SECONDS, PART_BUDGET_SECONDS } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CI = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -89,8 +89,8 @@ export function shardProblems(ci) {
 }
 
 // card ci-mutants-sharded: test-mutants runs the split across its matrix, enough parts that the heaviest is planned
-// inside PART_BUDGET_SECONDS, each package left out of the split runs its sweeps in its own job, and no line runs the
-// sweeps whole besides
+// inside PART_BUDGET_SECONDS, and no line runs a test:mutants script besides (card held-move-forgotten-tx: the wallet's,
+// run whole in test-wallet outside the split and its budget, took that job past its 15 minutes on PR #474)
 function mutantJobProblems(all, ci, commands) {
   const p = [];
   const mutants = all["test-mutants"];
@@ -109,12 +109,9 @@ function mutantJobProblems(all, ci, commands) {
       p.push(`test-mutants: ${e.message}`);
     }
   }
-  for (const [name, job] of Object.entries(MUTANTS_ELSEWHERE)) {
-    if (!new RegExp(`^ +run: pnpm --filter ${name} run test:mutants$`, "m").test(all[job] ?? "")) {
-      p.push(`${name}'s test:mutants runs nowhere: the split leaves it to ${job}, which does not run it`);
-    }
-  }
-  if (/^ +(- )?run: .*pnpm -r\b.*\brun test:mutants\b/m.test(ci)) p.push("a ci.yml line runs test:mutants with pnpm -r beside the split, so a sweep runs twice");
+  // any line that is not a comment, in any form a runner takes (pnpm --filter, pnpm -C, npm run, a run: | block):
+  // the split's own line names no test:mutants, so each such line runs sweeps twice (review 5, item 3)
+  if (ci.split(/\r?\n/).some((l) => !/^\s*#/.test(l) && /\btest:mutants\b/.test(l))) p.push("a ci.yml line runs a test:mutants script beside the split: its sweeps run twice, outside the split's budget");
   return p;
 }
 
@@ -136,11 +133,15 @@ const PLANTED = {
   "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: \|)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
   "the mutant sweeps run whole in every part": ['run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants", "test-mutants does not run scripts/ci/test-shards.mjs mutants"],
-  "the whole sweep run again beside the split": ["      - name: the wallet package's test:mutants script\n", "      - run: pnpm -r --filter '!@blindfill/wallet' --if-present run test:mutants\n      - name: the wallet package's test:mutants script\n", "a ci.yml line runs test:mutants with pnpm -r"],
-  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
-  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
-  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]", "test-mutants: the sweeps are"],
-  "the wallet's own sweep dropped": ["      - name: the wallet package's test:mutants script\n        run: pnpm --filter @blindfill/wallet run test:mutants\n", "", "@blindfill/wallet's test:mutants runs nowhere"],
+  "the whole sweep run again beside the split": ["      - name: the wallet package's test script\n", "      - run: pnpm -r --if-present run test:mutants\n      - name: the wallet package's test script\n", "a ci.yml line runs a test:mutants script beside the split"],
+  "the wallet's sweeps run again in test-wallet": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - name: the wallet package's test:mutants script\n        run: pnpm --filter @blindfill/wallet run test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
+  "the wallet's sweeps by pnpm --filter, no run": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm --filter @blindfill/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
+  "the wallet's sweeps by pnpm -C": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm -C packages/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
+  "the wallet's sweeps by npm in a run block": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: |\n          cd packages/wallet && npm run test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]", "test-mutants: the sweeps are"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
 };
@@ -209,7 +210,7 @@ function sweepsFromGit(root) {
   return files.flatMap((f) => {
     const { name, scripts } = JSON.parse(readFileSync(path.join(root, f), "utf8"));
     const script = scripts?.["test:mutants"];
-    if (!script || Object.hasOwn(MUTANTS_ELSEWHERE, name)) return [];
+    if (!script) return [];
     return script.split(" && ").map((command) => ({ dir: path.posix.dirname(f), name, command: command.trim() }));
   });
 }
@@ -242,7 +243,13 @@ function splitProblems(sweeps, split) {
 test("the mutant sweeps: the split reads every package's test:mutants, each command in its package's folder", () => {
   assert.ok(SWEEPS.length >= 2, "this tree has mutant sweeps to split");
   assert.deepEqual(mutantCommands(ROOT), SWEEPS);
-  assert.ok(!SWEEPS.some((c) => Object.hasOwn(MUTANTS_ELSEWHERE, c.name)), "a package left to its own job is not split");
+  // card held-move-forgotten-tx: the wallet's sweeps run in the split, under its budget, never whole in a job of their own
+  const wallet = JSON.parse(readFileSync(path.join(ROOT, "packages/wallet/package.json"), "utf8")).scripts["test:mutants"].split(" && ").map((c) => `packages/wallet: ${c.trim()}`);
+  assert.deepEqual(SWEEPS.filter((c) => c.dir === "packages/wallet").map(key), wallet);
+});
+
+test("the measured times: every sweep of this tree has one, so the budget check plans real seconds", () => {
+  assert.deepEqual(SWEEPS.map(key).filter((k) => !Object.hasOwn(MUTANT_SECONDS, k)), [], "a sweep with no MUTANT_SECONDS time: read it off its CI log and add it");
 });
 
 test("the mutant sweeps: the union of all parts is every command, each in exactly one part, for every count of parts", () => {
@@ -270,7 +277,7 @@ test("planted: a part added to the matrix drops nothing and doubles nothing; pas
     const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
     assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
   }
-  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5)\]/, `$1, 6]`);
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7)\]/, `$1, 8]`);
   assert.notEqual(more, CI);
   assert.deepEqual(shardProblems(more), []);
   assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);
@@ -294,7 +301,7 @@ test("planted: a split that misses a package, drops, doubles or moves a command 
   }
 });
 
-test("planted: the split's reader takes every workspace package's test:mutants but those left to their own job", () => {
+test("planted: the split's reader takes every workspace package's test:mutants", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "test-shards-mutants-"));
   try {
     const put = (f, text) => {
@@ -307,7 +314,7 @@ test("planted: the split's reader takes every workspace package's test:mutants b
     put("packages/a/package.json", pkg("@x/a", 'node --test "test/mutants/*.test.mjs" && node test/q-mutants.mjs'));
     put("apps/b/package.json", pkg("b", "node --test test/b-mutants.test.mjs"));
     put("packages/n/package.json", pkg("@x/n"));
-    put("packages/w/package.json", pkg(Object.keys(MUTANTS_ELSEWHERE)[0], "FULL_RUNS=1 node --test test/w.test.ts"));
+    put("packages/w/package.json", pkg("@blindfill/wallet", "FULL_RUNS=1 node --test test/w.test.ts"));
     put("other/c/package.json", pkg("c", "node c-mutants.mjs"));
     execFileSync("git", ["init", "-q"], { cwd: dir });
     execFileSync("git", ["add", "."], { cwd: dir });
@@ -315,13 +322,14 @@ test("planted: the split's reader takes every workspace package's test:mutants b
       { dir: "apps/b", name: "b", command: "node --test test/b-mutants.test.mjs" },
       { dir: "packages/a", name: "@x/a", command: 'node --test "test/mutants/*.test.mjs"' },
       { dir: "packages/a", name: "@x/a", command: "node test/q-mutants.mjs" },
+      { dir: "packages/w", name: "@blindfill/wallet", command: "FULL_RUNS=1 node --test test/w.test.ts" },
     ];
     assert.deepEqual(mutantCommands(dir), want);
     assert.deepEqual(sweepsFromGit(dir), want);
     // a command added to a package's script is read, and lands in exactly one part
     put("packages/a/package.json", pkg("@x/a", 'node --test "test/mutants/*.test.mjs" && node test/q-mutants.mjs && node test/r-mutants.mjs'));
     const more = mutantCommands(dir);
-    assert.deepEqual(more.map(key), [...want.map(key), "packages/a: node test/r-mutants.mjs"]);
+    assert.deepEqual(more.map(key), [...want.slice(0, 3).map(key), "packages/a: node test/r-mutants.mjs", key(want[3])]);
     assert.deepEqual(splitProblems(more, (i, n) => mutantsPart(more, i, n)), []);
     // a script the split cannot read whole is refused, never split wrong
     for (const bad of ["node a.mjs || node b.mjs", "node a.mjs; node b.mjs", "node a.mjs &&  && node b.mjs", ""]) {

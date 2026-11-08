@@ -115,6 +115,8 @@ export function loadRuns(dir) {
     }
     checkRecord(r, f);
     if (ids.has(r.id)) fail(f, `id ${r.id} is used twice`);
+    // docs/performance.md names perf/runs/<id>.json as the run's record, so that is the file's name
+    if (f !== `${r.id}.json`) fail(f, `holds id ${r.id}, so its file must be ${r.id}.json`);
     ids.add(r.id);
     return r;
   });
@@ -192,7 +194,7 @@ export function renderDoc(runs) {
   ];
   for (const r of [...runs].sort(byOrder)) {
     out.push(`## ${r.id}`, "");
-    out.push(`${CHAINS[r.chain]}, ${r.network}, ${r.date}, signed by: ${SIGNERS[r.signer]}. Record: \`${r.source}\`.`);
+    out.push(`${CHAINS[r.chain]}, ${r.network}, ${r.date}, signed by: ${SIGNERS[r.signer]}. Record: \`perf/runs/${r.id}.json\`.`);
     if (r.note) out.push("", r.note);
     out.push("", "| What | Measures | n | ok | p50 / p95 | max | Fee per sample |", "|---|---|---|---|---|---|---|");
     for (const s of r.series) {

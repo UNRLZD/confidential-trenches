@@ -1,0 +1,62 @@
+{
+ "good": {
+  "source": "a local build read from atr-dist; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T14:55:54.073Z",
+  "lists": {
+   "status": 200,
+   "chain": "solana",
+   "trending": 100,
+   "new": 30
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-Cy73_iqI.js",
+    "status": 200,
+    "found": [
+     "token-rail",
+     "rail-expand",
+     "tkr-row",
+     "tkr-chip"
+    ]
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DxcxAmCd.css",
+    "status": 200,
+    "found": [
+     ".tkr-row",
+     ".tkr-exp",
+     "1499.98px",
+     "1179.98px"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/; https://ct-api.unrealized.trade",
+  "at": "2026-11-08T14:55:57.652Z",
+  "lists": {
+   "status": 200,
+   "chain": "solana",
+   "trending": 100,
+   "new": 30
+  },
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-DZXi0M8L.js",
+    "status": 200,
+    "found": []
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-BtQBZemR.css",
+    "status": 200,
+    "found": []
+   }
+  ]
+ }
+}

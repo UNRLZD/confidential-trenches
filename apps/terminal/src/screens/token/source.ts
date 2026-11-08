@@ -2,7 +2,7 @@
 // GET /v1/market/token for that chain and id (the helper's apps/helper/src/data/solana/token.ts, 06b `TokenPage`) and
 // draws its `row`: an id the helper does not know (it answers 404) is the empty state, the page's not-found. / (card
 // app-no-test-token) draws the top of Discover's Trending column: one read of GET /v1/market/lists?chain=solana
-// (Discover's own read, ../discover/data.ts), the first row of the Trending column as Discover orders it (columnRows),
+// (Discover's own read, ../discover/data.ts, shared with the rail's read in flight: rail.ts sharedLists), the first row of the Trending column as Discover orders it (columnRows),
 // then the same token read for that mint. Display only: nothing here feeds a signature. A failed or wrong read is the
 // error state, never another token; an empty column is the empty state. The page (TokenPage.tsx) takes `TokenData`.
 //
@@ -14,11 +14,11 @@
 // Jupiter's or the page closes.
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
-import { readLists } from "../discover/data.ts";
 import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
 import { chainNamed } from "./model.ts";
+import { sharedLists } from "./rail.ts";
 
 /** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot).
  *  `filling`: the helper says the row's Jupiter fields are still coming (true only when it sends `filling: true`). */
@@ -61,7 +61,7 @@ export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof 
 /** The page's data: the top Trending token's row, the empty state when the column is empty, else the error state. */
 export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<TokenData> {
   try {
-    const top = columnRows(await readLists(fetchFn), "trending")[0];
+    const top = columnRows(await sharedLists(fetchFn), "trending")[0];
     if (!top) return { status: "empty" };
     return { status: "ready", ...(await readRow("solana", top.token, fetchFn)) };
   } catch {

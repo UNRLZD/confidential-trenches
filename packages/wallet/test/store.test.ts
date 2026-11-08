@@ -167,7 +167,7 @@ test("sign out broadcasts, closes the other tab and deletes the database", async
 // with and without Web
 // Locks. A run's reservations are checked across every tab and every reopen.
 // card fresh-run-margin: the default run takes the seeded sequence's first 1,000 runs; FULL_RUNS=1 (the package's
-// test:mutants script, CI's test-wallet job) all 10,000
+// test:mutants script, run by CI's test-mutants split) all 10,000
 const RUNS = process.env.FULL_RUNS === "1" ? 10_000 : 1_000;
 test(`WU-06: no deposit index is handed out twice in ${RUNS.toLocaleString("en-US")} random runs (stores closed, not crashed)`, async () => {
   let seed = 0x9e3779b9;

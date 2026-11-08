@@ -1,6 +1,6 @@
 // A timing record, not a gate (card wallet-restore-notes): the deposit index walk at RESTORE_GAP on this thread, and how
 // long it holds the thread in one piece. The proof pool's workers take the walk off the page's thread through
-// restoreNotes `walk` (card wallet-restore-wallets builds them and times the phone).
+// restoreNotes `walk` (card wallet-restore-wallets builds them). Its number is measured on a desktop, not on a phone.
 //   node test/restore-timing.ts      (from packages/wallet; about a minute)
 // Test secrets: the all-zero BIP-39 entropy, as test/note-restore.test.ts.
 import { keccak_256 } from "@noble/hashes/sha3.js";
