@@ -72,7 +72,7 @@ const M = [
   ["review P1: a pass exactly 120 below the finals refused", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h <= Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
   ["review P1 fold: freshness judged against the lower final", IDR, [["if (pass.h < Math.max(a.h, b.h) - VAULT_SYNC_LAG_MAX)", "if (pass.h < Math.min(a.h, b.h) - VAULT_SYNC_LAG_MAX)"]], ID, "a stale pass"],
   ["review P1: a scan's pass not held above its height", IDR, [["if (opts.after !== undefined && floor <= opts.after) throw", "if (false) throw"]], ID, "a stale pass"],
-  ["review P1: the second scan's pass at its bound height taken", ARMS, [["after: secondScanBoundHeight(at) }", "after: secondScanBoundHeight(at) - 1 }"]], ID, "a stale pass"],
+  ["review P1: the second scan's pass at its bound height taken", ARMS, [["after: secondScanBoundHeight(scan.at) }", "after: secondScanBoundHeight(scan.at) - 1 }"]], ID, "a stale pass"],
   ["review P2: a pass's providers matched by name", IDR, [["own[0] !== rpcs[0] || own[1] !== rpcs[1]", "own[0].name !== rpcs[0].name || own[1].name !== rpcs[1].name"]], ID, "a stale pass"],
   ["review R1: the re-reads take any reader", WAL, [['  readerPast(reader, plan.after, "the re-reads");\n', ""]], RW, "step 7"],
   ["review R1: the second scan takes any reader", ARMS, [["  return readerPast(reader, secondScanBoundHeight(scan.at), step);", "  return reader;"]], ID, "a reader carries its pass"],
