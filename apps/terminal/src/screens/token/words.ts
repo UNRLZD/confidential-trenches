@@ -6,6 +6,8 @@
 // assets/token.js U.header and U.about, token-390.html's tiles, bar and timeframes) and owner-words-pass
 // (docs/owner-decisions.md:351), and the new draft words (owner 1 Nov 16:45Z, keep).
 
+import { WORDS as DISCOVER } from "../discover/words.ts";
+
 export interface Word {
   text: string;
   source: string;
@@ -98,6 +100,12 @@ export const WORDS = {
   buys5m: { text: "Buys", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Buys\", \"CN-107\")", draft: true },
   sells5m: { text: "Sells", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Sells\", \"CN-107\")", draft: true },
   net5m: { text: "Net", source: "draft, card app-token-lower-panel: R5 token.js U.about P.dc(\"Net\", \"CN-107\")", draft: true },
+  // the left rail (card app-token-rail): Discover's own words for its lists and states, the same entries, so a pick
+  // changes both screens; the slim rail's button is R5's (trenches-1440.html rail-expand aria-label)
+  railTrending: DISCOVER.colTrending,
+  railNew: DISCOVER.colNew,
+  noTokens: DISCOVER.noTokens,
+  expand: ok("Expand", "R5 trenches-1440.html rail-expand aria-label"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
