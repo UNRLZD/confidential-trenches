@@ -15,7 +15,8 @@
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
 //     the expand button draws the full rail over the chart with the main column unmoved, and its row opens its token;
 //   - a refresh that lands a new token on top of Trending (signed out, full at 1600 and slim at 1440) shows it in the
-//     first row and moves no row already drawn: each row's element keeps its box, and no layout shift.
+//     first row and moves no row already drawn: each row's element keeps its box, no value is cut, and no element shifts
+//     (text re-aligned inside its own right-aligned cell is named on a NOTE line).
 //   node apps/terminal/test/token-rail/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,6 +64,7 @@ const TOPPED = (() => {
 })();
 
 const fails = [];
+const notes = [];
 const check = (ok, what) => {
   if (!ok) fails.push(what);
 };
@@ -95,7 +97,13 @@ async function open(browser, route, w, reads) {
     window.__cls = 0;
     try {
       new PerformanceObserver((l) => {
-        for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value;
+        for (const e of l.getEntries()) {
+          if (e.hadRecentInput) continue;
+          window.__cls += e.value;
+          // what moved, for the failure line: the element's tag and class, its box before and after
+          const r = (b) => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`;
+          for (const x of e.sources ?? []) (window.__clsSrc ??= []).push(`${x.node?.nodeName?.toLowerCase() ?? "?"}${x.node?.className ? `.${String(x.node.className).split(" ")[0]}` : ""} ${r(x.previousRect)} -> ${r(x.currentRect)}`);
+        }
       }).observe({ type: "layout-shift", buffered: true });
     } catch {}
   });
@@ -259,12 +267,17 @@ try {
             const b = e.getBoundingClientRect();
             return [b.x, b.y, b.width, b.height];
           };
-          return { n: els.length, kept: els.filter((e) => e.__slot !== undefined).map((e) => [e.__slot, box(e)]), cls: window.__cls ?? null };
+          return { n: els.length, kept: els.filter((e) => e.__slot !== undefined).map((e) => [e.__slot, box(e)]), cls: window.__cls ?? null, src: window.__clsSrc ?? [], cut: [...document.querySelectorAll('.tkp-desk [data-testid="token-rail"] .tkr-mc, .tkp-desk [data-testid="token-rail"] .tkr-c')].filter((e) => e.getClientRects().length && e.scrollWidth > e.clientWidth + 0.5).map((e) => e.textContent) };
         }, rowsSel);
         check(landed && after.n === TRENDING.length + 1, `${tag}: a refresh with a new top token: first row ${landed ? NEW_TOP : "not it"}, ${after.n} rows (want ${TRENDING.length + 1})`);
         const moved = after.kept.filter(([i, b]) => b.some((x, j) => Math.abs(x - before[i][j]) > 0.5));
         check(after.kept.length === before.length && moved.length === 0, `${tag}: the refresh moved drawn rows: ${after.kept.length}/${before.length} kept, ${moved.length} moved (${moved.slice(0, 3).map(([i, b]) => `row ${i} y ${before[i][1].toFixed(1)} -> ${b[1].toFixed(1)}`).join(", ")})`);
-        check(after.cls === 0, `${tag}: layout shift ${after.cls} after the refresh, want 0`);
+        check(after.cut.length === 0, `${tag}: rail values cut by the right column's width: ${JSON.stringify(after.cut.slice(0, 4))}`);
+        // no element moved: a shift's sources may only be text re-aligned inside its own fixed cell (R5 right-aligns the MC
+        // and change lines, so a value of another length starts elsewhere in its cell; Chrome counts that text)
+        const boxes = after.src.filter((x) => !x.startsWith("#text"));
+        check(boxes.length === 0, `${tag}: the refresh shifted ${boxes.length} element(s): ${boxes.slice(0, 6).join(" | ")}`);
+        if (after.cls) notes.push(`${tag}: text re-aligned in its cell after the refresh, layout shift ${after.cls.toExponential(1)}`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-refresh.png`) });
       }
       check(errors.length === 0, `${tag}: page errors ${errors.join(" | ")}`);
@@ -281,4 +294,5 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} checks over ${n} views`);
   process.exit(1);
 }
+for (const x of notes) console.log(`NOTE ${x}`);
 console.log(`PASS ${n} views (1600, 1440, 1280, 1180, 1179; signed in and out) from the built app at / inside the stand-in shell, Trending ${TRENDING.length} and New ${NEW.length} rows${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
