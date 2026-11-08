@@ -8,11 +8,16 @@
 //     then the good replay is skipped, never planted.
 // More are made here from the recorded bad answer, each changing one read: a key on the vault, other code on it, two
 // hosts of one operator, and a rate limit four times in a row (exit 2, never FAIL).
+// The money record vault-mainnet-money.md, once committed, is the card's real-money proof: the money gate reads any
+// record's testnet txs as "not real-money proof" and passes it, so this card's own rule is held here: that record
+// parses under the card's key and every Tx in it is on NEAR mainnet (a testnet rehearsal's record has its own key,
+// vault-mainnet-money-testnet).
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parseLive } from "../ci/money-gate.mjs";
 import { check, main, RUN } from "./vault-mainnet-money.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +36,32 @@ function replay(answers) {
 const bad = () => load("vault-mainnet-money.bad-pre-run.answers.json");
 const planted = load("vault-mainnet-money.bad-pre-run.json");
 const bads = (r) => r.lines.filter((l) => l.startsWith("BAD"));
+const MD = path.join(HERE, "vault-mainnet-money.md");
+/** Why `text` is not this card's real-money record: the money gate's parse under the card's key, then every Tx on near (mainnet). */
+function mainnetRecordProblems(text) {
+  const live = parseLive(text, "vault-mainnet-money");
+  if (live === null) return ["no live record"];
+  const p = [...live.problems];
+  if (live.moneyPath !== true) p.push("not a money-path record");
+  if (live.txs.length === 0) p.push("no Tx");
+  for (const t of live.txs) if (t.chain !== "near") p.push(`Tx ${t.hash} is on ${t.chain}, not near (mainnet)`);
+  return p;
+}
+
+test("the money record vault-mainnet-money.md, once written, lists NEAR mainnet txs only", () => {
+  if (existsSync(MD)) assert.deepEqual(mainnetRecordProblems(readFileSync(MD, "utf8")), []);
+  // the 05:18Z testnet rehearsal's record as the run first wrote it (line 1 the card's own key): refused, though the
+  // money gate's parse takes it
+  const original = readFileSync(path.join(HERE, "vault-mainnet-money-testnet.md"), "utf8").replace(/^CARD vault-mainnet-money-testnet \/ live: PASS\n/, "CARD vault-mainnet-money / live: PASS\n");
+  assert.deepEqual(parseLive(original, "vault-mainnet-money").problems, [], "the gate's parse takes the old header");
+  const p = mainnetRecordProblems(original);
+  assert.equal(p.length, 6, p.join("\n"));
+  assert.ok(p.every((x) => / is on near-testnet, not near \(mainnet\)$/.test(x)), p.join("\n"));
+  // one testnet Tx among mainnet ones is refused; mainnet only passes
+  const mainnet = original.replace(/^Tx: near-testnet /gm, "Tx: near ");
+  assert.deepEqual(mainnetRecordProblems(mainnet), []);
+  assert.equal(mainnetRecordProblems(mainnet.replace(/^Tx: near /m, "Tx: near-testnet ")).length, 1);
+});
 
 test("the recorded run passes", { skip: existsSync(RUN) && existsSync(GOOD) ? false : "the run has not landed: vault-mainnet-money.run.json and its answers are written by the run" }, async () => {
   const r = await check({ run: JSON.parse(readFileSync(RUN, "utf8")), fetchFn: replay(JSON.parse(readFileSync(GOOD, "utf8"))) });
