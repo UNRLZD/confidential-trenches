@@ -188,14 +188,24 @@ export function sweepProblems(a: { balance: bigint; toRegistered: boolean }): st
 }
 
 /**
- * The note the run withdraws next: the UNSPENT note of the run's deposit label with a value, the deposit note at index i
- * or a refund note of that label after a refunded payout; null when the deposit is not in the store or nothing of its
- * label is left (a zero change note is never withdrawn).
+ * The note the run withdraws next: the UNSPENT note with a value in the deposit's line, the deposit note at index i or a
+ * note born of it (store.add names each change and refund note's parent), followed by parent, never by label: the vault
+ * gives a refund note a fresh label (settle.rs). Null when the deposit is not in the store or nothing of its line is left
+ * (a zero change note is never withdrawn).
  */
-export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: number }; state: string; leaf?: { label: bigint; value: bigint } }>(notes: N[], i: number): N | null {
+export function noteToWithdraw<N extends { id: string; ref: { kind: string; i?: number }; state: string; parent?: string; leaf?: { label: bigint; value: bigint } }>(notes: N[], i: number): N | null {
   const dep = notes.find((n) => n.ref.kind === "deposit" && n.ref.i === i && n.leaf !== undefined);
   if (dep === undefined) return null;
-  return notes.find((n) => n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.label === dep.leaf!.label && n.leaf.value > 0n) ?? null;
+  const line = new Set([dep.id]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const n of notes)
+      if (n.parent !== undefined && line.has(n.parent) && !line.has(n.id)) {
+        line.add(n.id);
+        grew = true;
+      }
+  }
+  return notes.find((n) => line.has(n.id) && n.state === "UNSPENT" && n.leaf !== undefined && n.leaf.value > 0n) ?? null;
 }
 
 /** `fn` asked up to `tries` times (a provider a block behind the other, a dropped answer); null when every try failed. */
@@ -609,7 +619,7 @@ async function go(argv: string[], create: boolean) {
     st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
   }
 
-  // the note to withdraw: the run's UNSPENT note of its label, the deposit note or, after a refunded payout, its refund
+  // the note to withdraw: the run's UNSPENT note in the deposit's line (by parent), the deposit note or, after a refunded payout, its refund
   // note (settle writes it); none once the last one is spent, and the arrival read follows the note withdrawn last
   const pick = noteToWithdraw(await ns.list(), i);
   const last = st.read("withdraw");

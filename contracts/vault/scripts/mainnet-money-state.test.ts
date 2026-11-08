@@ -13,7 +13,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { feeProblems, fingerprintOf, registerProblems, retried, sendAnswerError, noteToWithdraw, recipientProblems, recordProblems, relayerTxProblems, replanAt, requestProblems, stateDir, storeOfLane, sweepProblems, uSigner } from "./mainnet-money.ts";
 import { createPublicKey, sign as edSign, verify as edVerify } from "node:crypto";
-import { noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets } from "../../../packages/wallet/src/notes/secrets.ts";
+import { restorePages, writeRestored } from "../../../packages/wallet/src/notes/restore.ts";
 import { depositAccount } from "../../../packages/wallet/src/deposit/account.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -268,16 +269,49 @@ test("M1: record takes --deposit-tx and --withdraw-tx, checks every relayer tx a
 test("L2: resume withdraws the run's UNSPENT note of its label (the deposit note, or its refund note after a refunded payout), never a zero change or another label's", () => {
   const leaf = (label: bigint, value: bigint) => ({ value, label, commitment: 1n, leafIndex: 0n });
   const dep = (state: string) => ({ id: "d", ref: { kind: "deposit", s: 1n, i: 3 }, state, leaf: leaf(7n, 5_000_000n) });
-  const refund = { id: "r", ref: { kind: "refund", l: 7n, j: 0 }, state: "UNSPENT", leaf: leaf(7n, 4_816_554n) };
-  const zero = { id: "c", ref: { kind: "change", l: 7n, j: 0 }, state: "UNSPENT", leaf: leaf(7n, 0n) };
+  // the vault gives a refund note a fresh label (settle.rs), so its leaf label is never the deposit's: it is found by its parent
+  const refund = { id: "r", ref: { kind: "refund", l: 7n, j: 0 }, state: "UNSPENT", parent: "d", leaf: leaf(8n, 4_816_554n) };
+  const zero = { id: "c", ref: { kind: "change", l: 7n, j: 0 }, state: "UNSPENT", parent: "d", leaf: leaf(7n, 0n) };
   const other = { id: "o", ref: { kind: "deposit", s: 1n, i: 11 }, state: "UNSPENT", leaf: leaf(9n, 1_000_000n) };
+  const stranger = { id: "x", ref: { kind: "refund", l: 9n, j: 0 }, state: "UNSPENT", parent: "o", leaf: leaf(8n, 2_000_000n) };
+  // a refund note's own refund (a second refunded payout) is still the run's
+  const refund2 = { id: "r2", ref: { kind: "refund", l: 8n, j: 0 }, state: "UNSPENT", parent: "r", leaf: leaf(6n, 4_600_000n) };
   assert.equal(noteToWithdraw([dep("UNSPENT"), other], 3)?.id, "d");
-  assert.equal(noteToWithdraw([dep("SPENT"), refund, zero, other], 3)?.id, "r");
-  assert.equal(noteToWithdraw([dep("SPENT"), zero, other], 3), null);
+  assert.equal(noteToWithdraw([dep("SPENT"), stranger, refund, zero, other], 3)?.id, "r");
+  assert.equal(noteToWithdraw([dep("SPENT"), stranger, { ...refund, state: "SPENT" }, zero, refund2, other], 3)?.id, "r2");
+  assert.equal(noteToWithdraw([dep("SPENT"), zero, other, stranger], 3), null);
   assert.equal(noteToWithdraw([other], 3), null);
   // the arrival read follows the note withdrawn last, and the request must spend the picked note
   assert.match(SRC, /const pick = noteToWithdraw\(/);
   assert.match(SRC, /req\.noteId !== pick\.id/);
+});
+
+test("MA: after a refunded and settled payout, the refund note the wallet restores (the vault's fresh label) is the one withdrawn next", async () => {
+  const seed64 = Uint8Array.from({ length: 64 }, (_, k) => (k * 7 + 3) & 255);
+  const scope = 12345n, i = 3, V = 5_000_000n;
+  const L = 777n, L2 = 888n; // the deposit's label; the vault's fresh label for the refund note
+  const dref = { kind: "deposit", s: scope, i } as const;
+  const { precommitment: P, nullifierHash: nf } = noteSecrets(seed64, dref);
+  const cP = noteSecrets(seed64, { kind: "change", l: L, j: 0 }).precommitment;
+  const rP = noteSecrets(seed64, { kind: "refund", l: L, j: 0 }).precommitment;
+  const U = depositAccount(seed64, scope, i).account;
+  const pages = {
+    deposits: [{ index: 0, precommitment: P, label: L, value: V, leafIndex: 0n, depositor: U }],
+    spends: [{ index: 0, nullifierHash: nf, withdrawn: V, newLeafIndex: 1n, refundPrecommitment: rP, refundValue: V, refundLabel: L2, refundLeafIndex: 2n, status: "settled", payer: "r.near", reserve: 0n, recipient: "owner.near", fee: 300_000n, context: 1n }],
+    leaves: [noteCommitment(V, L, P), noteCommitment(0n, L, cP), noteCommitment(V, L2, rP)],
+  };
+  const r = restorePages(seed64, scope, pages as any, { gap: 2 });
+  const { w, ns } = await storeOfLane(i % 8);
+  try {
+    await writeRestored(ns, r);
+    const pick = noteToWithdraw(await ns.list(), i);
+    assert.equal(pick?.ref.kind, "refund");
+    assert.equal(pick?.leaf?.label, L2);
+    assert.equal(pick?.leaf?.value, V);
+  } finally {
+    ns.close();
+    w.close();
+  }
 });
 
 test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * fee < the note (withdrawRequest's fee < amount, the vault's fee <= withdrawn / 2)", () => {
