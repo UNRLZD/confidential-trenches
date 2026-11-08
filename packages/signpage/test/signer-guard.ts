@@ -69,7 +69,7 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
     "solanaDepositRents", "checkSolanaSweep", "checkSolanaTeardownFrames", "signSolana", "checkEvmBuy", "checkEvmWithdraw", "checkEvmSell", "checkEvmSellSim", "checkEvmAuthorization",
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
-    "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX",
+    "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX", "solanaSellAfterFull",
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
   ],
 };
