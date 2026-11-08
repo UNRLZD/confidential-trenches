@@ -654,25 +654,39 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
   }
 }
 
-/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). */
+/** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). Devnet's program
+ *  may be a list, comma apart (solanaPoolPrograms). */
 export const POOL_SOLANA_ENV = {
   mainnet: ["POOL_SOLANA_PROGRAM_MAINNET", "POOL_SOLANA_FEE_PAYER_KEY_MAINNET", "POOL_SOLANA_FEE_MAINNET", "POOL_SOLANA_RPCS_MAINNET"],
   devnet: ["POOL_SOLANA_PROGRAM_DEVNET", "POOL_SOLANA_FEE_PAYER_KEY_DEVNET", "POOL_SOLANA_FEE_DEVNET", "POOL_SOLANA_RPCS_DEVNET"],
 } as const;
 
-/** The Solana pool senders the host's environment sets, by pool address; a cluster with none of its names set is off. */
+/** The pool programs a cluster's POOL_SOLANA_PROGRAM_* names: mainnet exactly one; devnet one or more, comma apart,
+ *  so a re-pinned devnet pool and the one before it are served side by side while the signing pages move from one to
+ *  the other (card pool-senders-next-page-helper, the expand). Each a program id, none twice, no empty entry. */
+export function solanaPoolPrograms(cluster: string, value: string, name: string): string[] {
+  const list = cluster === "devnet" ? value.split(",") : [value];
+  if (list.some((p) => !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p))) throw new Error(`${name} must be a program id${cluster === "devnet" ? ", or several comma apart" : ""}`);
+  if (new Set(list).size !== list.length) throw new Error(`${name} names a program twice`);
+  return list;
+}
+
+/** The Solana pool senders the host's environment sets, by pool address: one for each program a cluster lists, on that
+ *  cluster's one fee payer, fee and RPCs; a cluster with none of its names set is off. */
 export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>, fetchFn?: typeof fetch): Map<string, SolanaPoolSender> {
   const out = new Map<string, SolanaPoolSender>();
   for (const [cluster, names] of Object.entries(POOL_SOLANA_ENV)) {
     const [program, key, fee, rpcs] = names.map((n) => env[n] ?? "");
     if (program === "" && key === "" && fee === "" && rpcs === "") continue;
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(program!)) throw new Error(`${names[0]} must be a program id`);
+    const programs = solanaPoolPrograms(cluster, program!, names[0]);
     const urls = rpcs!.split(",");
     if (urls.length !== 2 || urls[0] === urls[1]) throw new Error(`${names[3]} must be two different RPC URLs`);
     const providers = urls.map((u) => solanaJsonRpc(u, fetchFn ? { fetch: fetchFn } : {})) as unknown as readonly [SolanaRpc, SolanaRpc];
     if (!/^[1-9][0-9]{0,18}$/.test(fee!)) throw new Error(`${names[2]} must be a whole number of lamports`);
-    const s = solanaPoolSender({ cluster, program: program!, feePayerSecret: key!, fee: fee! }, { providers });
-    out.set(s.pool, s);
+    for (const p of programs) {
+      const s = solanaPoolSender({ cluster, program: p, feePayerSecret: key!, fee: fee! }, { providers });
+      out.set(s.pool, s);
+    }
   }
   return out;
 }

@@ -20,7 +20,7 @@ import {
 import { base58 } from "../bind/checks.ts";
 import { solanaPoolFee, solanaPoolPageReserve, solanaPoolPriorityBudget, solanaPoolReleaseCost, solanaRentMin, type SolanaRent } from "@blindfill/kit";
 import { POOL_EPOCH_MS } from "./fee.ts";
-import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
+import { checkSolanaPoolTx, feePayerKey, solanaPoolSender, solanaPoolSendersFromEnv, type PoolSendAnswer } from "./solana.ts";
 
 const testKey = (name: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/test-key/${name}`).digest());
@@ -581,4 +581,23 @@ test("pool-senders-next-page: a tag 2 of 10 accounts, a tag 3 whose inner instru
   assert.equal(refusal(withNext(3, { innerNames: true })), "not_pool");
   // bit 1 set and nothing past the tip account: the next page the flag names is not there
   assert.equal(refusal(withNext(3, { noAccount: true })), "not_pool");
+});
+
+// card pool-senders-next-page-helper (the expand): POOL_SOLANA_PROGRAM_DEVNET may list several devnet programs, comma
+// apart, so the re-pinned devnet pool and the one before it are served side by side, each its own sender on the same fee
+// payer, fee and RPCs; mainnet takes exactly one program, and a list that names one twice or holds an empty entry is refused
+test("the devnet program list: one sender per listed program, keyed by its own pool; mainnet one program; a bad list refused at start", () => {
+  const OLD = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+  const NEW = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
+  const down = (async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
+  const env = (cluster: "DEVNET" | "MAINNET", program: string) => ({ [`POOL_SOLANA_PROGRAM_${cluster}`]: program, [`POOL_SOLANA_FEE_PAYER_KEY_${cluster}`]: FP.secret, [`POOL_SOLANA_FEE_${cluster}`]: "1300000", [`POOL_SOLANA_RPCS_${cluster}`]: "https://a.invalid,https://b.invalid" });
+  const two = solanaPoolSendersFromEnv(env("DEVNET", `${OLD},${NEW}`), down);
+  assert.deepEqual([...two.keys()].sort(), [solanaPoolAccount(OLD), solanaPoolAccount(NEW)].sort());
+  for (const p of [OLD, NEW]) assert.equal(two.get(solanaPoolAccount(p))!.program, p);
+  for (const s of two.values()) void s.ready.catch(() => {});
+  const one = solanaPoolSendersFromEnv(env("DEVNET", NEW), down);
+  assert.deepEqual([...one.keys()], [solanaPoolAccount(NEW)]);
+  for (const s of one.values()) void s.ready.catch(() => {});
+  for (const bad of [`${NEW},${NEW}`, `${NEW},`, `,${NEW}`, `${OLD} ,${NEW}`]) assert.throws(() => solanaPoolSendersFromEnv(env("DEVNET", bad), down), /POOL_SOLANA_PROGRAM_DEVNET/, bad);
+  assert.throws(() => solanaPoolSendersFromEnv(env("MAINNET", `${OLD},${NEW}`), down), /POOL_SOLANA_PROGRAM_MAINNET must be a program id/);
 });
