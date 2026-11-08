@@ -51,7 +51,7 @@ export async function readFinalBlock(rpcs: readonly string[], fetchFn: typeof fe
   for (const url of rpcs) {
     const t0 = clock();
     try {
-      const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(BLOCK_READ_MS) });
+      const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body, redirect: "error", signal: AbortSignal.timeout(BLOCK_READ_MS) });
       if (!res.ok) continue;
       const height = ((await res.json()) as { result?: { header?: { height?: unknown } } })?.result?.header?.height;
       if (typeof height === "number" && Number.isSafeInteger(height) && height > 0) return { height, ms: Math.round(clock() - t0) };

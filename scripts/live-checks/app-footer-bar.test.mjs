@@ -14,7 +14,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ROUTES as APP_ROUTES } from "../../apps/terminal/src/routes/routes.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
-import { judge, localChain, NEAR_RPCS, NEAR_SLACK, ROUTES } from "./app-footer-bar.mjs";
+import { judge, NEAR_RPCS, NEAR_SLACK, ROUTES } from "./app-footer-bar.mjs";
+import { nearChain } from "./app-in-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-footer-bar.answers.json"), "utf8"));
@@ -88,7 +89,7 @@ test("planted: one read only, outside the shell, signed in: FAIL", () => {
 
 test("the harness's local chain finalises one block per 600 ms", () => {
   let t = 0;
-  const c = localChain(100, () => t);
+  const c = nearChain(100, () => t);
   assert.equal(c.height(), 100);
   t = 1_199;
   assert.equal(c.height(), 101);

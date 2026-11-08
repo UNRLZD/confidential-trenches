@@ -114,11 +114,6 @@ export async function nearFinal(url = NEAR_RPCS[0]) {
   }
 }
 
-/** A local chain for the harness: its final block grows one per 600 ms from a mainnet-sized height. */
-export function localChain(start = 223_500_000, now = () => Date.now()) {
-  const t0 = now();
-  return { height: () => start + Math.floor((now() - t0) / 600) };
-}
 
 /** Every request in Chromium answered by `route` (the harness), or the deployed hosts when null. `near` reads the chain. */
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route = null, near = nearFinal, source = "live" } = {}) {
@@ -166,22 +161,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     let source = `live ${APP_HOST}`;
     if (a.includes("--harness")) {
       const build = path.resolve(opt("--build", path.join(REPO, "apps/terminal/dist")));
-      const { harnessRoute } = await import("./app-in-shell.mjs");
-      // the stand-in shell's signed-out state ("tap"), as a first visit is
-      const shell = await harnessRoute(build, "tap");
-      const chain = localChain();
-      const rpcs = new Set(NEAR_RPCS.map(originOf));
-      route = async (r) => {
-        const req = r.request();
-        let body = null;
-        try {
-          body = JSON.parse(req.postData() ?? "");
-        } catch {}
-        if (rpcs.has(originOf(req.url())) && body?.method === "block" && body?.params?.finality === "final") {
-          return r.fulfill({ status: 200, headers: { "access-control-allow-origin": APP_HOST, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { header: { height: chain.height() } } }) });
-        }
-        return shell(r);
-      };
+      const { harnessRoute, nearChain } = await import("./app-in-shell.mjs");
+      // the stand-in shell's signed-out state ("tap"), as a first visit is, and its local chain for the block read
+      const chain = nearChain();
+      route = await harnessRoute(build, "tap", { near: chain });
       near = async () => chain.height();
       source = `harness, terminal build ${named(build)}, signed out, a local chain at 600 ms blocks`;
     }

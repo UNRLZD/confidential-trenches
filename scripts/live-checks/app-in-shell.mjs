@@ -493,9 +493,27 @@ const verifyAnswer = (origin, body) => {
   return VERIFY_READ.answers.find((a) => new URL(a.url).origin === origin && JSON.stringify(a.params) === params) ?? null;
 };
 
+/** A local NEAR chain for the footer's block read (card app-footer-bar): its final block grows one per 600 ms, NEAR's
+ *  pace, from a mainnet-sized height. */
+export function nearChain(start = 223_500_000, now = () => Date.now()) {
+  const t0 = now();
+  return { height: () => start + Math.floor((now() - t0) / 600) };
+}
+/** The footer's read (apps/terminal/src/shell/footer.ts: `block` at finality final, id "ct-footer") on either network's
+ *  pair: the build's network picks the pair, so both are answered. */
+const FOOTER_ORIGINS = new Set(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org", "https://test.rpc.fastnear.com", "https://near-testnet.drpc.org"]);
+const footerRead = (body) => {
+  try {
+    const b = JSON.parse(body ?? "");
+    return b?.id === "ct-footer" && b.method === "block" && b.params?.finality === "final" ? b : null;
+  } catch {
+    return null;
+  }
+};
+
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
-export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {} } = {}) {
+export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, near = nearChain() } = {}) {
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
   const rulesOf = (text) => {
@@ -526,6 +544,10 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
     if (u.origin === HELPER_HOST && u.pathname === "/v1/market/token") {
       const known = u.searchParams.get("chain") === "solana" && u.searchParams.get("token") === TOKEN_ANSWER.row.token;
       return route.fulfill({ status: known ? 200 : 404, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(known ? TOKEN_ANSWER : { error: "unknown token" }) });
+    }
+    // the footer's block read: the local chain's final block, never an aborted load
+    if (FOOTER_ORIGINS.has(u.origin) && footerRead(route.request().postData?.())) {
+      return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ jsonrpc: "2.0", id: "ct-footer", result: { header: { height: near.height() } } }) });
     }
     if (VERIFY_ORIGINS.has(u.origin)) {
       const hit = verifyAnswer(u.origin, route.request().postData?.());
