@@ -19,8 +19,7 @@
 // quotes through the deployed helper and is pending (its Runs line), so it is not run here.
 //
 //   node scripts/ci/quote-speed.mjs <base> <head>   the change base..head, read in the working directory
-//   node scripts/ci/quote-speed.mjs --all           measures whatever changed (a push with no before, a dispatch, and a
-//                                                   pull request while main has no copy of this file)
+//   node scripts/ci/quote-speed.mjs --all           measures whatever changed (a push with no before, a dispatch)
 // PASS exit 0 (measured under the KPI, or no file under PATHS changed), FAIL exit 1, error exit 2.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";

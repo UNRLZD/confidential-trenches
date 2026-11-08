@@ -149,7 +149,7 @@ test("ci.yml runs the gate as main has it in the required deep-import job, every
   assert.match(step, /PR_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(step, /PR_HEAD: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   // the head's own copy only while main has none
-  assert.match(step, /\[ -e "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" \] \|\| \{[^}]*node scripts\/ci\/quote-speed\.mjs --all; exit; \}/);
+  assert.match(step, /\[ -e "\$RUNNER_TEMP\/base\/scripts\/ci\/quote-speed\.mjs" \] \|\| \{[^}]*node scripts\/ci\/quote-speed\.mjs "\$PR_BASE" "\$PR_HEAD"; exit; \}/);
   // a push measures its own change, or everything when it names no before; any other event measures
   assert.match(step, /node scripts\/ci\/quote-speed\.mjs "\$BEFORE" "\$AFTER"/);
   assert.match(step, /\*\) node scripts\/ci\/quote-speed\.mjs --all ;;/);

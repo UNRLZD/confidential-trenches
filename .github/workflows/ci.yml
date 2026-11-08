@@ -119,7 +119,7 @@ jobs:
       # second on two tries (public RPCs are noisy, so one rerun); a run that writes no record is refused. On a pull
       # request the gate and the check run as main has them, from the base's whole scripts/ tree (see verify-gate), and
       # measure the checkout's kit; scripts/ci/quote-speed.test.mjs and base-gate.test.mjs replay these lines. While main
-      # has no copy of the gate, this pull request's own copy measures.
+      # has no copy of the gate, this pull request's own copy decides on the same change.
       - name: a change to the EVM quote keeps its warm p95 under a second (evm-quote-warm-round on this kit)
         env:
           EVENT: ${{ github.event_name }}
@@ -132,7 +132,7 @@ jobs:
             pull_request)
               mkdir -p "$RUNNER_TEMP/base"
               git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
-              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy measures"; node scripts/ci/quote-speed.mjs --all; exit; }
+              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy decides"; node scripts/ci/quote-speed.mjs "$PR_BASE" "$PR_HEAD"; exit; }
               node "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" "$PR_BASE" "$PR_HEAD" ;;
             push)
               if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
