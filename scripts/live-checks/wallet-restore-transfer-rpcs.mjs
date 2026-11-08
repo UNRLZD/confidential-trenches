@@ -116,7 +116,11 @@ export function replayer(log) {
  * in a replay those times are the runner's, not the providers', so a loaded runner walked another way and asked a page
  * the recording never held (a recorded good run, its lists and cases shuffled and each answer held 0 to 2 ms: "no
  * recorded answer to eth_getLogs" on base-mainnet.public.blastapi.io). With the clock still, every call takes 0 ms and
- * no rest ends, on every runner; a live run keeps the real clock. */
+ * no rest ends, on every runner; a live run keeps the real clock. The clock alone did not hold it: when each answer
+ * reached the child set the walk too (main's runs 42449928067, 42450557518, 42450652755), so the child's bridge hands a
+ * replay's answers one at a time in the read's own order (packages/wallet/scripts/bridge-answers.ts). Every live check
+ * that runs one of the wallet's bridges gives its replay this clock (evm-pool-reads-throttle, notes-per-pool-evm,
+ * wallet-rpc-hex-case too). */
 export const STILL_CLOCK = Object.freeze(["--import", "data:text/javascript,const t=Date.now();Date.now=()=>t;"]);
 
 const host = (u) => new URL(u).host;

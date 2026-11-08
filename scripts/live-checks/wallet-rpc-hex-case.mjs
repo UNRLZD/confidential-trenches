@@ -16,6 +16,7 @@
 // Runs: once, it reads no host: the wallet parser at the checkout against two Robinhood testnet RPCs; the wallet tests hold the parse
 import "../net-window.mjs";
 import { spawn } from "node:child_process";
+import { STILL_CLOCK } from "./wallet-restore-transfer-rpcs.mjs";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,7 +86,7 @@ export function replayer(log) {
 function runCheck(transport, wait) {
   return new Promise((resolve, reject) => {
     const args = { chainId: CHAIN_ID.toString(), urls: RPCS, wait };
-    const child = spawn(process.execPath, [CHECK, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [...(wait ? [] : STILL_CLOCK), CHECK, JSON.stringify(args)], { cwd: REPO, stdio: ["pipe", "pipe", "pipe"] });
     let buf = "", err = "", settled = false;
     child.stdin.on("error", () => {}); // an answer after the check has exited
     const settle = (f, v) => (settled ? undefined : ((settled = true), f(v)));
