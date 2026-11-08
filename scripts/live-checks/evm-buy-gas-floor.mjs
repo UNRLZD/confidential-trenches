@@ -12,9 +12,9 @@
 //     route fits), and the same read capped at 20,000 answers out of gas in words the kit maps to "does not fit"
 //     (the kit's own evmIsOutOfGas, its answerOf's words), never another error the kit would refuse on.
 //   - the kit's public buy quote of the same routes on Node (card evm-buy-quote-ends-on-node's check, run here as
-//     well): on each chain it ends within EVM_QUOTE_MAX_AGE_MS plus 10 s, in at most 2,000 requests, with a quote or
-//     a refusal the kit names. No quote fitted the window when recorded (2026-11-08 12:13Z); card
-//     evm-buy-quote-in-window.
+//     well): on each chain it reads at its agreed block, and ends within EVM_QUOTE_MAX_AGE_MS plus 10 s, in at most
+//     2,000 requests, with a quote or a refusal the kit names. No quote fitted the window when recorded (see the good
+//     answer's `from`); card evm-buy-quote-in-window.
 // Nothing deployed quotes a buy yet: the signing page's bundle carries no EVM buy quote (build-app at 87f280e2 matches a
 // fresh build with this card in it). That the floor refuses, names the next route and prices against routes that fit
 // is the kit's test (test/evm-quote-attacks.test.ts GF1-GF9 and their mutants in test/evm-quote-mutants.mjs).

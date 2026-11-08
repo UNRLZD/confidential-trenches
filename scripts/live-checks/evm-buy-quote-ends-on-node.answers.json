@@ -1,23 +1,25 @@
 {
  "good": {
-  "at": "2026-11-08T11:55:21.838Z",
+  "at": "2026-11-08T13:13:52.023Z",
   "runs": [
    {
     "chain": "base",
-    "ms": 31234,
-    "requests": 313,
+    "ms": 31113,
+    "requests": 314,
+    "reads": 90,
     "end": "stale_quote",
     "message": "stale_quote: the quote's block is more than 30 s old: no more scans are sent"
    },
    {
     "chain": "robinhood",
-    "ms": 32985,
-    "requests": 700,
+    "ms": 31871,
+    "requests": 863,
+    "reads": 2303,
     "end": "rpc_error",
-    "message": "rpc_error: provider 2 answered the multicall with an error: historical state c493227977911af2359d195b917dc720651d7e5048b61130abaf2790ac6c0896 is not available"
+    "message": "rpc_error: provider 2 answered the multicall with an error: [0x56c960c03050772cadf80fbefda959d87ac3cfc095aa83c029bcf61d85defd65] layer stale\nmissing trie node b2f88317fda0e73d40c4e"
    }
   ],
-  "from": "a real run at 2af5db57 (the card's fix), 2026-11-08T11:55Z: both end in time and under the cap with a named refusal; no quote fitted the window (Base stale_quote at 31 s, its scans; Robinhood rpc_error at 33 s, a provider had dropped the block's state)"
+  "from": "a real run of the card's kit with the review fold (8a0fab87 and this commit's quote.ts), 2026-11-08T13:13Z: both quotes read at their agreed block and end in time and under the cap with a named refusal; no quote fitted the window (card evm-buy-quote-in-window)"
  },
  "bad": {
   "at": "2026-11-08T11:59:52.212Z",
@@ -38,5 +40,27 @@
    }
   ],
   "from": "the same check on a copy of the kit with quote.ts at 3a73b181 (before the card), 2026-11-08T11:59Z"
+ },
+ "atOnce": {
+  "at": "2026-11-08T13:13:36.885Z",
+  "runs": [
+   {
+    "chain": "base",
+    "ms": 3512,
+    "requests": 7,
+    "reads": 0,
+    "end": "rpc_error",
+    "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (fetch failed)"
+   },
+   {
+    "chain": "robinhood",
+    "ms": 3503,
+    "requests": 6,
+    "reads": 0,
+    "end": "rpc_error",
+    "message": "rpc_error: the scan provider refused 4 connections in a row: no connection (fetch failed)"
+   }
+  ],
+  "from": "the check's own collect() with every request failing to connect (fetch rejects), 2026-11-08T13:13:36.885Z: the kit refuses rpc_error in time and under the cap before any read; the read floor fails it"
  }
 }

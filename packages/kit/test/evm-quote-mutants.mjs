@@ -241,10 +241,10 @@ export const MUTANTS = [
   [QUOTE, "          if (!contested && got.length >= 2) start();", "", R, "V3 "],
   [QUOTE, "      if (x !== undefined && y !== undefined) {\n        try {", "      if (false) {\n        try {", R, "V2 "],
   [QUOTE, "          failed ??= { e };\n          if (done) return;\n          start();", "          failed ??= { e };\n          if (done) return;", R, "V1 "],
-  [QUOTE, "timer = setTimeout(fire, first < 0", "timer = setTimeout(() => undefined, first < 0", R, "V1 "],
+  [QUOTE, "        timer = setTimeout(fire, ms);", "        timer = setTimeout(() => undefined, ms);", R, "V1 "],
   [QUOTE, "first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));", "EVM_HEDGE_MS);", R, "V5 "],
   [QUOTE, "first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));", "first < 0 ? 4 * EVM_HEDGE_MS : EVM_HEDGE_MS);", R, "V5 "],
-  [QUOTE, "            first = performance.now() - t0[k]!;\n            arm();", "            first = performance.now() - t0[k]!;", R, "V1 "],
+  [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);\n            arm();", "            first = performance.now() - (sentAt[k] ?? t0[k]!);", R, "V1 "],
   [QUOTE, "        order.forEach((r, n) => ((rpcs as EvmRpc[])[n] = r));", "", R, "V1 "],
   [QUOTE, "        failed ??= { e };\n        if (n === 0) unsure = true;\n        continue;", "        throw e;", R, "V3 "],
   [QUOTE, "    return [slow, s?.ms ?? Number.MAX_VALUE, k] as const;", "    return [0, s?.ms ?? Number.MAX_VALUE, k] as const;", R, "V4 "],
@@ -293,7 +293,7 @@ export const MUTANTS = [
   [QUOTE, "    const enough = () => holds >= (strict() ? need : 2);", "    const enough = () => holds >= 2;", R, "V10 "],
   [QUOTE, "    if (enough()) return against.forEach((k) => HOLD.get(list[k]!)?.());", "    if (enough()) return;", R, "V7 "],
   [QUOTE, "        against.push(others[n]!);\n      } else holds++;", "        return refuse(\"rpc_disagree\", \"another block\");\n      } else holds++;", R, "V7 "],
-  [QUOTE, "            first = performance.now() - t0[k]!;", "            first = performance.now() - t0[0]!;", R, "V8 "],
+  [QUOTE, "            first = performance.now() - (sentAt[k] ?? t0[k]!);", "            first = performance.now() - (sentAt[0] ?? t0[0]!);", R, "V8 "],
   [QUOTE, "      if (started >= 2) arm();\n", "", R, "V8 "],
   [QUOTE, "return evmPoolBuyQuoteWith(asked, evmProviders(evmRanked(p), fetch),", "return evmPoolBuyQuoteWith(asked, evmProviders(p, fetch),", R, "V9 "],
   // the re-review of fd9dd16: no confirm from the other head's provider asks a majority (MEDIUM-1); a head is held only
@@ -370,7 +370,7 @@ export const MUTANTS = [
   [QUOTE, "    if (res.status === 429) throw new RateLimited(", "    if (false) throw new RateLimited(", R, "T7 "],
   [QUOTE, "      if (!(e instanceof RateLimited || e instanceof Unreachable) || i === 3) {", "      if (true) {", R, "T7 "],
   [QUOTE, "      if (i < 3 && Array.isArray(out) && out.some(limited)) throw", "      if (false) throw", R, "T7 "],
-  [QUOTE, "    const f = (calls: readonly EvmRpcCall[]) => g(() => rpc(calls));", "    const f = (calls: readonly EvmRpcCall[]) => rpc(calls);", R, "T8 "],
+  [QUOTE, "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      g(() => {", "    GATED.set(f as unknown as EvmRpc, (calls, gate) =>\n      ((x: () => Promise<readonly unknown[]>) => x())(() => {", R, "T8 "],
   [BUYU, "  if (!(quoted && route.venue === \"uniswap-v4\")) {", "  if (!quoted) {", R, "D1 "],
   [BUYU, "  return routeData(chain, route, true);", "  return routeData(chain, route, false);", R, "D1 "],
   [BUYU, "  const { data, token: buys } = routeData(chain, route, quoted);", "  const { data, token: buys } = routeData(chain, route, false);", R, "D1 "],
@@ -855,11 +855,13 @@ export const MUTANTS = [
   // review fold 1 M2 and L2: one deadline over the reads and the sleeps; the age at the clock after the wait
   [QUOTE, "    got = minBlock === 0n ? await round : await within(round, left(), late);", "    got = await round;", R, "M2 "],
   [QUOTE, "const left = () => EVM_MIN_BLOCK_WAIT_MS - (mono() - t0);", "const left = () => EVM_MIN_BLOCK_WAIT_MS;", R, "M2 "],
-  [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", R, "L2 "],
-  // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1)
-  [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs + Math.max(0, mono() - t0);", R, "LOW-1 "],
-  [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, undefined,", R, "LOW-1 "],
-  [QUOTE, "    watch,\n    mono,\n    start,\n", "    watch,\n    mono,\n", R, "LOW-1 "],
+  [QUOTE, "const atMs = nowMs + Math.max(0, mono() - start);", "const atMs = nowMs;", H, "held head: the watch counts the time its head reads took"],
+  // the age from the quote's entry, the scan's time included, on a sell and a buy (review fold 2, LOW-1): its three
+  // mutants are equivalent since card evm-buy-quote-ends-on-node and are left out. `start` is a quote's entry only on a
+  // quote's path (routeSet's fresh, evmPoolBuyQuoteWith's and evmPoolSellQuoteWith's routeSet args); the head watch calls
+  // agreedBlock with start = t0. On a quote's path, the deadline (gated's past, its `now` the quote's own entry clock,
+  // set at the block's agreement in agreedOnce) refuses stale_quote at the block's confirmation, before any request
+  // leaves its gate, wherever the age line would: the same code, and no request sent. LOW-1's tests still hold it.
   [QUOTE, "agreedBlock(on, v.maxLag, a.nowMs, a.minBlock, a.mono, a.start,", "agreedBlock(on, v.maxLag, a.nowMs, undefined, undefined, undefined,", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, mono, start });", R, "L5 "],
   [QUOTE, "sell: true, minBlock: boughtBlock, mono, start });", "sell: true, minBlock: boughtBlock - 1n, mono, start });", R, "L5 "],
@@ -944,7 +946,25 @@ export const MUTANTS = [
   [QUOTE, "data.slice(2 + 64 * 5 + 24, 2 + 64 * 6)", "data.slice(2 + 64 * 4 + 24, 2 + 64 * 5)", S, NR],
   // I-3: the Bought token in lower case, whatever the provider's hex
   [QUOTE, 'lower("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', '("0x" + data.slice(2 + 64 * 5 + 24, 2 + 64 * 6))', S, NR],
-  [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2)", "rpcs", S, NR],
+  [QUOTE, "poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "rpcs", S, NR],
+  // card evm-buy-quote-ends-on-node: each round's batches agreed one at a time; a late batch's spare budget; a stalled
+  // provider's queued requests moved, and dropped unsent; a request late only from its send; the quote's deadline, set
+  // at the block's agreement, held in the reads' gate, the scan provider's and the pool's releases read, and passed
+  // through ask unwrapped. Left out, as harmless: T4 (gated's plain call, \`f\`, which no request of a quote calls: ask
+  // sends a gated provider's through GATED) and A2 (ask's \`e === MOVED\`: a moved request's rejection is dropped by
+  // agreeing, which marks it moved before it rejects, as an rpc_error or MOVED alike).
+  [QUOTE, "    Array.from({ length: n }, async (_, n) => {\n      const c0 = n * CALLS_PER_BATCH;\n      const batch = calls.slice(c0, c0 + CALLS_PER_BATCH);", "    Array.from({ length: 1 }, async (_, n) => {\n      const c0 = n * CALLS_PER_BATCH;\n      const batch = calls.slice(c0);", R, "QE1 "],
+  [QUOTE, "        past();\n        gate?.sent();\n", "        past();\n", R, "QE1 "],
+  [QUOTE, "  const late = () => spares > 0 && (spares--, true);", "  const late = () => true;", R, "QE4 "],
+  [QUOTE, "() => flying > 0 && performance.now() - lastAt > 4 * EVM_HEDGE_MS);", "() => false);", R, "QE3 "],
+  [QUOTE, "          if (movedK[k]) return done ? undefined : end();\n", "", R, "QE5 "],
+  [QUOTE, "      if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);\n", "", R, "QE6 "],
+  [QUOTE, "        if (gate?.moved() === true) return Promise.reject(MOVED);\n        past();", "        if (gate?.moved() === true) return Promise.reject(MOVED);", R, "QE2 (buy) "],
+  [QUOTE, "        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;", "", R, "QE2 (buy) "],
+  [QUOTE, 'if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED) throw e;", R, "QE2 (buy) "],
+  [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
+  [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs))", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined)", R, "QE7 "],
+  [QUOTE, "gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs))", "gated(poolRpcs, v.scan?.parallel ?? 2)", R, "QE8 "],
 ];
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;

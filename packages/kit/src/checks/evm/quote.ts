@@ -613,11 +613,15 @@ function agreeing<T>(
       resolve({ a: g.v, b: h.v, i: g.k, j: h.k });
     };
     const t0: number[] = [];
-    // each request's state in `moving`: sent out of its gate, moved before it was, or settled
+    // each request's state in `moving`: sent out of its gate (and when), moved before it was, or settled. A request is
+    // late by the time since it was sent, never since it was queued (review of 2d9a7bd9, finding 4: timed from the
+    // queue, healthy providers answering in 250 ms asked a spare for 63 of 99 exact-out reads queued behind their gates)
     const sentK: boolean[] = [];
+    const sentAt: number[] = [];
     const movedK: boolean[] = [];
     const settledK: boolean[] = [];
     let first = -1;
+    const lateAfter = () => (first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
     const fire = () => {
       if (done) return;
       if (!moving) return start();
@@ -629,12 +633,16 @@ function agreeing<T>(
         return start();
       }
       if (ks.length > 0) return arm();
+      // every request out was sent: late once the newest of them has been out lateAfter()
+      const out = Array.from({ length: started }, (_, n) => n).filter((n) => sentK[n] && !settledK[n]);
+      const since = performance.now() - Math.max(...out.map((n) => sentAt[n]!));
+      if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);
       if (late?.() !== false) start();
     };
-    const arm = () => {
+    const arm = (ms = lateAfter()) => {
       clearTimeout(timer);
       if (started < list.length) {
-        timer = setTimeout(fire, first < 0 ? 4 * EVM_HEDGE_MS : Math.max(EVM_HEDGE_MS, first));
+        timer = setTimeout(fire, ms);
         (timer as { unref?: () => void }).unref?.();
       }
     };
@@ -642,7 +650,7 @@ function agreeing<T>(
       if (done || started >= list.length) return;
       const k = started++;
       t0[k] = performance.now();
-      const gate: Gated = { sent: () => void (sentK[k] = true), moved: () => movedK[k] === true };
+      const gate: Gated = { sent: () => void ((sentK[k] = true), (sentAt[k] = performance.now())), moved: () => movedK[k] === true };
       one(list[k]!, k, gate).then(
         (v) => {
           settled++;
@@ -659,7 +667,7 @@ function agreeing<T>(
           if (contested && peers.length >= need) return win(peers[0]!, peers[1]!);
           if (!contested && got.length >= 2) start();
           else if (first < 0) {
-            first = performance.now() - t0[k]!;
+            first = performance.now() - (sentAt[k] ?? t0[k]!);
             arm();
           }
           end();
@@ -2259,7 +2267,14 @@ async function routeSet(a: {
   picked.catch(() => {});
   const agreedOnce = () => {
     if (agreed === undefined) {
-      agreed = agreedAt();
+      // from the block's agreement no request is sent past its time plus EVM_QUOTE_MAX_AGE_MS (gated), the scans'
+      // catch-up to it included (review of 2d9a7bd9, finding 7: set once the token's scan returned, the catch-up ran
+      // without it)
+      agreed = agreedAt().then((x) => {
+        const deadline = DEADLINE.get(rpcs);
+        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;
+        return x;
+      });
       pick(agreed.then((x) => x.block));
     }
     return agreed;
@@ -2337,9 +2352,6 @@ async function routeSet(a: {
   for (const e of early) e?.catch(() => {});
   const scanned = await scanOf([lower(token)], "all");
   const { block, confirm } = await agreedOnce();
-  // from here no request is sent past the block's time plus EVM_QUOTE_MAX_AGE_MS (gated)
-  const deadline = DEADLINE.get(rpcs);
-  if (deadline !== undefined) deadline.until = Number(block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;
   a.atBlock?.(block);
   // a pool's hook is trusted as it is only where the sell builder takes it: a listed launchpad's hook with that
   // launchpad's own fee and tick spacing (evmHookListed, the one rule for both; card evm-route-parity); any other hook

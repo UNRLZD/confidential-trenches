@@ -1,6 +1,6 @@
 {
  "good": {
-  "at": "2026-11-08T12:13:44.039Z",
+  "at": "2026-11-08T13:15:03.185Z",
   "pools": [
    {
     "chain": "base",
@@ -65,8 +65,8 @@
     "reads": [
      {
       "provider": "base-rpc.publicnode.com",
-      "block": "0xc911fe7f18430dc184ae9ec14f451f1a0be3fff8e6f10b1689b1cf524bb71ab7",
-      "cap": "0x0000000000000000000000000000000000000000000000000000000001556063",
+      "block": "0x13c36065ee7ae27c03bdbed11b899d299ecd40f129ac08dbe7be5f12d7c1069c",
+      "cap": "0x000000000000000000000000000000000000000000000000000000000155d936",
       "low": {
        "error": {
         "code": -32003,
@@ -76,8 +76,8 @@
      },
      {
       "provider": "base-mainnet.public.blastapi.io",
-      "block": "0x4785bacce2513a439d5439575515f622030b8ec03d36477985e16745e75003be",
-      "cap": "0x0000000000000000000000000000000000000000000000000000000001556063",
+      "block": "0xe17fbe193d41d2d8d52896d9aab98c46f5fc7266cdf1839b38142785db3f435c",
+      "cap": "0x000000000000000000000000000000000000000000000000000000000155d936",
       "low": {
        "error": {
         "code": -32003,
@@ -92,8 +92,8 @@
     "reads": [
      {
       "provider": "robinhood-rpc.publicnode.com",
-      "block": "0xd45d408c317edd1a03c496e51511968eae75c52a7a1dad1811a7886294ebd498",
-      "cap": "0x000000000000000000000000000000000000000000000000000000000022209c",
+      "block": "0x9f589d0a6b8223d97509ab05ae8540ceb8a23620785c11a7c68eb66b91e5773f",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000000222df8",
       "low": {
        "error": {
         "code": -32000,
@@ -103,8 +103,8 @@
      },
      {
       "provider": "robinhood.drpc.org",
-      "block": "0x8949de737eefdae4fb01786ca586adf3caca4856f5de7c572b4a2b92d24f45f5",
-      "cap": "0x000000000000000000000000000000000000000000000000000000000022209c",
+      "block": "0xc785ae42119a16fb2d783c4e1b020b8391512f63ad89cc1c3fcdf64935ffc6e8",
+      "cap": "0x0000000000000000000000000000000000000000000000000000000000222df8",
       "low": {
        "error": {
         "code": -32000,
@@ -118,20 +118,22 @@
   "quotes": [
    {
     "chain": "base",
-    "ms": 31106,
-    "requests": 304,
+    "ms": 31681,
+    "requests": 300,
+    "reads": 90,
     "end": "stale_quote",
     "message": "stale_quote: the quote's block is more than 30 s old: no more scans are sent"
    },
    {
     "chain": "robinhood",
-    "ms": 31963,
-    "requests": 888,
+    "ms": 32675,
+    "requests": 708,
+    "reads": 1861,
     "end": "rpc_error",
-    "message": "rpc_error: provider 2 answered the multicall with an error: historical state 7162ca7f92988ba62248c41c34ce43101931a39ff30de3828e959a29d60362b8 is not available"
+    "message": "rpc_error: provider 2 answered the multicall with an error: historical state f7722fa20ed7a5b68814fc853bfe96befe92d26204f5f8105ae77095d99450a1 is not available"
    }
   ],
-  "from": "a real run at 8afd3083 (card evm-buy-quote-ends-on-node), 2026-11-08T12:13Z: the reads as before, and the kit's public quote on both chains ending in time with a named refusal; no quote fitted the window"
+  "from": "a real run with card evm-buy-quote-ends-on-node's review fold (8a0fab87 and this commit's quote.ts), 2026-11-08T13:15Z: the reads as before, and the kit's public quote on both chains reading at its agreed block and ending in time with a named refusal; no quote fitted the window"
  },
  "bad": {
   "at": "2026-11-08T08:37:27.226Z",

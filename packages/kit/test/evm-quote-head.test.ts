@@ -106,6 +106,17 @@ test("held head: the watch itself refuses a block more than 30 s behind the devi
   assert.equal(Number((await ok.head(at)).block.timestamp) * 1000, blockMs());
 });
 
+test("held head: the watch counts the time its head reads took in the block's age (a block 29.6 s old when asked, its heads answered 600 ms later, refuses)", async () => {
+  const c = chain();
+  const slow = c.rpcs.map((rpc): EvmRpc => async (calls) => {
+    if (calls[0]!.method === "eth_getBlockByNumber" && calls[0]!.params[0] === "latest") await new Promise((r) => setTimeout(r, 600));
+    return rpc(calls);
+  });
+  const now = blockMs() + 29_600;
+  const watch = evmHeadWatch(slow, MAX_LAG, () => now, false, () => now);
+  await assert.rejects(watch.head(now), (e: unknown) => e instanceof EvmQuoteError && e.code === "stale_quote");
+});
+
 test("held head: kept in the background, the first quote after it reads no head", async () => {
   const c = chain();
   const watch = evmHeadWatch(c.rpcs, MAX_LAG, () => C.now);

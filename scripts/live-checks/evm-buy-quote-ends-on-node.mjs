@@ -5,12 +5,15 @@
 // stale_quote (packages/kit/src/checks/evm/quote.ts). What it proves, and only that: the kit's public evmPoolBuyQuote,
 // run on Node against each chain's pinned public providers for a standard v3 route (WETH to USDC on Base, WETH to USDG
 // on Robinhood, 0.01%), ends within EVM_QUOTE_MAX_AGE_MS plus 10 s of its start, with at most 2,000 HTTP requests
-// counted and printed, with a quote above 0 or a refusal the kit names (an EvmQuoteError code). Today no quote fits the
+// counted and printed, after it agreed a block and read at it (an eth_call at that block's hash: a kit that refuses at
+// once, before any read, fails), with a quote above 0 or a refusal the kit names (an EvmQuoteError code). The judge
+// passed a named refusal from its first run, which no quote fitted (cd7daf7b; the card's end state is a quote or a
+// named refusal in the window); the floor of reads was added on review of 2d9a7bd9. Today no quote fits the
 // window on either chain (2026-11-08 11:55Z: Base stale_quote at 31 s, its scans; Robinhood rpc_error at 33 s, a
 // provider no longer holding the block's state); before this card both ran to the scan's 60 s bound. A quote inside
 // the window is card evm-buy-quote-in-window.
 // That each read is asked of two providers plus the budget's spares, and that nothing is sent past the deadline, is
-// the kit's test (test/evm-quote-attacks.test.ts QE1-QE4 and their mutants).
+// the kit's test (test/evm-quote-attacks.test.ts QE1-QE8 and their mutants in test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-buy-quote-ends-on-node.mjs [--record <file> --as good|bad [--from <note>]]
 //     [--answer <file> --as good|bad]
 // PASS exit 0, FAIL exit 1, error exit 2.
@@ -30,21 +33,32 @@ const ROUTES = Object.freeze({
   robinhood: { weth: "0x0bd7d308f8e1639fab988df18a8011f41eacad73", buys: "0x5fc5360d0400a0fd4f2af552add042d716f1d168", amount: 10n ** 15n },
 });
 
-/** One run of the kit's public quote on `chain`: its time, its HTTP requests and how it ended. */
+/** The eth_calls of a JSON-RPC body sent at a block's hash: the quote's reads at its agreed block. */
+const readsIn = (body) => {
+  try {
+    return [JSON.parse(String(body))].flat().filter((c) => c?.method === "eth_call" && typeof c.params?.[1]?.blockHash === "string").length;
+  } catch {
+    return 0;
+  }
+};
+/** One run of the kit's public quote on `chain`: its time, its HTTP requests, its reads at a block's hash and how it
+ *  ended. */
 async function run(chain) {
   const { weth, buys, amount } = ROUTES[chain];
   const real = globalThis.fetch;
   let requests = 0;
+  let reads = 0;
   globalThis.fetch = (url, init) => {
     requests++;
+    reads += readsIn(init?.body);
     return real(url, init);
   };
   const t0 = performance.now();
   try {
     const q = await evmPoolBuyQuote({ chain, token: buys, amountIn: amount, slippageBps: 100, route: { venue: "uniswap-v3", tokens: [weth, buys], fees: [100] } });
-    return { chain, ms: Math.round(performance.now() - t0), requests, end: "quote", amountOut: String(q.amountOut) };
+    return { chain, ms: Math.round(performance.now() - t0), requests, reads, end: "quote", amountOut: String(q.amountOut) };
   } catch (e) {
-    return { chain, ms: Math.round(performance.now() - t0), requests, end: e?.code ?? "error", message: String(e?.message ?? e).slice(0, 240) };
+    return { chain, ms: Math.round(performance.now() - t0), requests, reads, end: e?.code ?? "error", message: String(e?.message ?? e).slice(0, 240) };
   } finally {
     globalThis.fetch = real;
   }
@@ -69,6 +83,9 @@ export function judge(a) {
     say(inTime, `${chain}: the quote ended ${inTime ? "within" : "past"} ${BOUND_MS} ms (${r.ms} ms)`);
     const few = Number.isInteger(r.requests) && r.requests > 0 && r.requests <= MAX_REQUESTS;
     say(few, `${chain}: ${r.requests} HTTP requests, ${MAX_REQUESTS} at most`);
+    // the floor: an end counts only after the quote agreed a block and read at it
+    const read = Number.isInteger(r.reads) && r.reads > 0;
+    say(read, `${chain}: ${read ? `${r.reads} reads at its agreed block's hash` : "no read at an agreed block: it ended before quoting"}`);
     const named = r.end === "quote" ? /^\d+$/.test(r.amountOut ?? "") && BigInt(r.amountOut) > 0n : typeof r.end === "string" && /^[a-z_]+$/.test(r.end) && r.end !== "error";
     say(named, `${chain}: it ended ${r.end === "quote" ? `with a quote of ${r.amountOut}` : `${r.end}: ${r.message ?? ""}`}${named ? "" : ", neither a quote nor a refusal the kit names"}`);
   }
