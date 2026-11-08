@@ -14,7 +14,6 @@
 //     all, each batch within the kit's RPC timeout (10 s).
 // What it proves, and only that: the readers the deployed kit names serve the index's reads and agree. That quotes read
 // their pools from the index is card evm-pool-index-route's check.
-// Runs: after every app deploy, on the kit at the checkout (the app's build carries its venue list)
 // After: app
 //   node scripts/live-checks/evm-pool-index.mjs [--record <file>]
 // PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay (evm-pool-index.answers.json:
