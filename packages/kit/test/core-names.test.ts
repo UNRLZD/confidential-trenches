@@ -2,7 +2,7 @@
 // wallet names for packages/ tools, so it never gains or loses one silently, and the kit's public entry never reaches it.
 //   node --test test/core-names.test.ts      (from packages/kit)
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -47,23 +47,51 @@ test("core re-exports the wallet's own code by relative path, not a copy", () =>
   }
 });
 
-test("the kit's public entry never reaches core.ts or the wallet", () => {
-  // every relative import, export-from and import() of src/index.ts, followed file by file
-  const seen = new Set<string>();
+const PACKAGES = fileURLToPath(new URL("../../", import.meta.url));
+const RESOLVE: ts.CompilerOptions = { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, allowImportingTsExtensions: true, noEmit: true };
+
+/**
+ * Every file of packages/ that src/index.ts reaches, by every import, export-from and import() each file writes, each
+ * specifier resolved as TypeScript resolves it (relative, bare and the kit's own package name through its exports,
+ * `@blindfill/kit/core` included). A file in `planted` is read from there instead of from disk.
+ */
+function entryReach(planted: ReadonlyMap<string, string> = new Map()): Map<string, string> {
+  const from = new Map<string, string>(); // file -> the file and specifier it was reached by
   const todo = [path.join(SRC, "index.ts")];
+  from.set(todo[0]!, "the entry");
   while (todo.length > 0) {
     const f = todo.pop()!;
-    if (seen.has(f)) continue;
-    seen.add(f);
-    for (const r of ts.preProcessFile(readFileSync(f, "utf8"), true, true).importedFiles) {
-      if (!r.fileName.startsWith(".")) continue;
-      const to = path.resolve(path.dirname(f), r.fileName);
-      const file = [to, `${to}.ts`, path.join(to, "index.ts")].find((p) => existsSync(p) && p.endsWith(".ts"));
-      assert.ok(file, `${path.relative(SRC, f)}: ${r.fileName} does not resolve`);
-      assert.notEqual(file, CORE_FILE, `${path.relative(SRC, f)} reaches core.ts`);
-      assert.ok(!file.startsWith(WALLET), `${path.relative(SRC, f)} reaches the wallet: ${r.fileName}`);
+    for (const r of ts.preProcessFile(planted.get(f) ?? readFileSync(f, "utf8"), true, true).importedFiles) {
+      if (r.fileName.startsWith("node:")) continue;
+      const hit = ts.resolveModuleName(r.fileName, f, RESOLVE, ts.sys).resolvedModule;
+      assert.ok(hit, `${path.relative(PACKAGES, f)}: ${r.fileName} does not resolve`);
+      const file = realpathSync(hit.resolvedFileName);
+      if (!file.startsWith(PACKAGES) || file.includes(`${path.sep}node_modules${path.sep}`)) continue; // an npm package
+      if (from.has(file)) continue;
+      from.set(file, `${path.relative(PACKAGES, f)}: ${r.fileName}`);
       todo.push(file);
     }
   }
-  assert.ok(seen.size > 20, `the walk read ${seen.size} files`);
+  return from;
+}
+const offLimits = (reach: Map<string, string>) => [...reach].filter(([f]) => f === CORE_FILE || f.startsWith(WALLET)).map(([f, by]) => `${path.relative(PACKAGES, f)} (by ${by})`);
+
+test("the kit's public entry never reaches core.ts or the wallet", () => {
+  const reach = entryReach();
+  assert.deepEqual(offLimits(reach), []);
+  assert.ok(reach.size > 20, `the walk read ${reach.size} files`);
+});
+
+test("the walk sees core by the kit's own name, by relative path and by import() one file deeper (planted)", () => {
+  const plant = (file: string, line: string) => new Map([[path.join(SRC, file), `${readFileSync(path.join(SRC, file), "utf8")}${line}\n`]]);
+  const cases: [string, string, RegExp][] = [
+    ["index.ts", 'export { typedSeed } from "@blindfill/kit/core";', /^kit\/src\/core\.ts \(by kit\/src\/index\.ts: @blindfill\/kit\/core\)$/],
+    ["near/networks.ts", 'export const loadCore = () => import("@blindfill/kit/core");', /^kit\/src\/core\.ts \(by kit\/src\/near\/networks\.ts: @blindfill\/kit\/core\)$/],
+    ["index.ts", 'export { typedSeed } from "./core.ts";', /^kit\/src\/core\.ts \(by kit\/src\/index\.ts: \.\/core\.ts\)$/],
+    ["near/networks.ts", 'export type { NoteRef } from "../../../wallet/src/notes/secrets.ts";', /^wallet\/src\/notes\/secrets\.ts \(by kit\/src\/near\/networks\.ts: /],
+  ];
+  for (const [file, line, want] of cases) {
+    const got = offLimits(entryReach(plant(file, line)));
+    assert.ok(got.length > 0 && want.test(got[0]!), `${file} + ${line}: ${JSON.stringify(got)}`);
+  }
 });

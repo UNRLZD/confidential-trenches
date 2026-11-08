@@ -4,7 +4,9 @@
 // It re-exports the wallet's own code, by relative path and unchanged, so a packages/ tool runs the wallet's rule
 // itself and never a copy of it (card exit-note-scan: the exit tool runs the wallet's restore, vault paper 2.12 step 1,
 // "This paper does not copy that walk"). The names are pinned in test/core-names.test.ts, so core never grows silently.
-// The kit's public entry (./index.ts) never reaches this file.
+// No other file of the kit reaches this file or the wallet, by any path or by the kit's own name
+// (.dependency-cruiser.cjs kit-entry-never-core), so the public entry (./index.ts) never holds the seed tools.
+// Workspace only: the kit is never packed (every user takes it as workspace:*), so ../../wallet/src resolves in the tree.
 export {
   restoreNotes,
   restorePages,
