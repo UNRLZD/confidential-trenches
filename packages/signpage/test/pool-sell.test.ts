@@ -2777,3 +2777,14 @@ test("a W that fully sells a second mint keeps the first mint's accounts in its 
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.deepEqual(w.owed.get(W.address)?.mints.map((m) => m.mint), [first.mint, MINT]);
 });
+
+test("L3: a floor end keeps what W read as only when W stays under the floor at the cheapest deposit (both pages open): one under it only for a page's growth runs again", async () => {
+  const { w, loaded } = await floorWorld();
+  const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+  // over the floor by 1,000 at the mark's rent alone, under it once the pages' growth is paid
+  const acc = w.c.accounts.get(W.address)!;
+  w.c.accounts.set(W.address, { ...acc, lamports: Number(floor + BigInt(FEE) + rentMin(17) + solanaSweepKeep(rent, 0) + 1_000n) });
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.slice(-2)));
+  assert.equal(w.owed.get(W.address)?.seen, undefined);
+});
