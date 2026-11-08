@@ -55,6 +55,9 @@ svg { display: block; flex: none; }
 .ft .ticks { flex: 1 1 0; min-width: 0; height: 32px; overflow: hidden; display: flex; }
 .ft .tick { flex: none; height: 32px; margin-right: 18px; display: flex; align-items: center; gap: 7px; color: var(--text-2); }
 .ft .tick img { width: 14px; height: 14px; border-radius: 50%; display: block; }
+/* a price holds the room of the longest the ticker draws under $100,000 ($1,234.56 is drawn $1,235; $999.99 and $99,999
+   are 7 characters), so a tick that changes its length moves nothing after it (card app-legend-holds-still) */
+.ft .tick .v { display: inline-block; min-width: 7ch; font-kerning: none; }
 .ft .health { flex: none; display: flex; align-items: center; gap: 6px; color: var(--blue); }
 .ft .health .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px rgba(var(--blue-rgb), .5); }
 .ft .health.off { color: var(--sell); }

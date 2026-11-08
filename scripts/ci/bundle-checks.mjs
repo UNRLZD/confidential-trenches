@@ -112,6 +112,7 @@ export const OUT = {
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",
+  "app-legend-holds-still": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
