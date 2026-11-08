@@ -280,12 +280,13 @@ const FIT_TEXT = "476190 gas (the pool guarantees 500000, less a 5% margin)";
 // The read's recipient: keccak256("blindfill.buy.gas.v1" || the agreed block's hash)[12:], an address no one holds a key
 // to and no one can send a token before that block, so its first balance write is the fresh W's (a recipient fixed in
 // advance takes dust, which makes that write 2,900 gas, not 20,000; review of 498eae83, L2), the same on both providers
-const FIT_TAG = new TextEncoder().encode("blindfill.buy.gas.v1");
+// (the tag made in the call, not at the module's load, so a bundle that never quotes a buy drops it)
 const fitTo = (blockHash: string) => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(blockHash)) return refuse("bad_request", "the block hash is 32 bytes of hex");
-  const b = new Uint8Array(FIT_TAG.length + 32);
-  b.set(FIT_TAG);
-  for (let k = 0; k < 32; k++) b[FIT_TAG.length + k] = parseInt(blockHash.slice(2 + 2 * k, 4 + 2 * k), 16);
+  const tag = new TextEncoder().encode("blindfill.buy.gas.v1");
+  const b = new Uint8Array(tag.length + 32);
+  b.set(tag);
+  for (let k = 0; k < 32; k++) b[tag.length + k] = parseInt(blockHash.slice(2 + 2 * k, 4 + 2 * k), 16);
   return hex(keccak_256(b)).slice(24);
 };
 
