@@ -191,18 +191,26 @@ test("step 5: ids that were used and are now empty reset the margin as money doe
 });
 
 // the review's case: an RPC that keeps failing (or answering 429) moved the margin with every failure, so a lane read
-// on toward 2^32. Each read fails a macrotask later, so the test's own timeout ends a run that never stops.
+// on toward 2^32. Each read fails a macrotask later, and a run still going after 3 s fails the test and every later
+// read hangs, so a run that never stops ends as a failure, its process with it.
 test("step 5: margin id reads failed with no read showing history between them end the restore with an error", { timeout: 5_000 }, async () => {
-  const later = (f: () => IdState | Error) => new Promise<IdState>((res, rej) => setImmediate(() => { const x = f(); x instanceof Error ? rej(x) : res(x); }));
+  let halted = false;
+  const ends = <T>(p: Promise<T>): Promise<T> =>
+    new Promise<T>((res, rej) => {
+      const t = setTimeout(() => ((halted = true), rej(new Error("step 5 never ended"))), 3_000);
+      p.then((v) => (clearTimeout(t), res(v)), (e) => (clearTimeout(t), rej(e)));
+    });
+  const later = (f: () => IdState | Error) =>
+    halted ? new Promise<IdState>(() => {}) : new Promise<IdState>((res, rej) => setImmediate(() => { const x = f(); x instanceof Error ? rej(x) : res(x); }));
   let reads = 0;
   await assert.rejects(
-    restoreDepositIds(SEED, SCOPE, LANES, () => (reads++, later(() => new Error("HTTP 429")))),
+    ends(restoreDepositIds(SEED, SCOPE, LANES, () => (reads++, later(() => new Error("HTTP 429"))))),
     new RegExp(`lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index ${at(0, DEPOSIT_ID_MARGIN - 1)}: HTTP 429\\); the restore stops, to be retried`),
   );
   assert.equal(reads, DEPOSIT_ID_MARGIN, "lane 0 stops at its margin-th failed read, its ids read from index 0");
   // a read that shows history between failures starts the count again: margin 3, failures, money, failures
   const fails = new Set([at(1, 0), at(1, 1), at(1, 3), at(1, 4)].map(id));
-  const got = await restoreDepositIds(SEED, SCOPE, LANES, (u) => later(() => (fails.has(u) ? new Error("rpc down") : u === id(at(1, 2)) ? "money" : "unused")), { margin: 3 });
+  const got = await ends(restoreDepositIds(SEED, SCOPE, LANES, (u) => later(() => (fails.has(u) ? new Error("rpc down") : u === id(at(1, 2)) ? "money" : "unused")), { margin: 3 }));
   assert.deepEqual([got[1]!.unread.map((x) => x.i), got[1]!.money, got[1]!.highest, got[1]!.readTo], [[at(1, 0), at(1, 1), at(1, 3), at(1, 4)], [at(1, 2)], at(1, 4), at(1, 7)]);
 });
 
