@@ -578,14 +578,24 @@ export function solanaCompileV0(
   const at = (k: string): number => index.get(k) as number;
   const bytes: number[] = [0x80, group(true, true).length + group(true, false).length, group(true, false).length, group(false, false).length];
   bytes.push(...compact(staticKeys.length));
-  for (const k of staticKeys) bytes.push(...base58.decode(k));
-  bytes.push(...base58.decode(blockhash));
+  // every key and the blockhash are 32 bytes: another length would move each field after it (review 4 M1)
+  const b32 = (v: string, what: string): Uint8Array => {
+    let b: Uint8Array;
+    try {
+      b = base58.decode(v);
+    } catch {
+      return bad(`${what} is not base58`);
+    }
+    return b.length === 32 ? b : bad(`${what} is not 32 bytes`);
+  };
+  for (const k of staticKeys) bytes.push(...b32(k, `the key ${k}`));
+  bytes.push(...b32(blockhash, "the blockhash"));
   bytes.push(...compact(ixs.length));
   for (const ix of ixs) {
     bytes.push(at(ix.program), ...compact(ix.accounts.length), ...ix.accounts.map((a) => at(a.key)), ...compact(ix.data.length), ...ix.data);
   }
   bytes.push(...compact(lookups.length));
-  for (const l of lookups) bytes.push(...base58.decode(l.address), ...compact(l.writable.length), ...l.writable, ...compact(l.readonly.length), ...l.readonly);
+  for (const l of lookups) bytes.push(...b32(l.address, `the table ${l.address}`), ...compact(l.writable.length), ...l.writable, ...compact(l.readonly.length), ...l.readonly);
   return { message: Uint8Array.from(bytes), tablesUsed: lookups.map((l) => l.address) };
 }
 
