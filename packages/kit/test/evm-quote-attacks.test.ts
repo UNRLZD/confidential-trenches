@@ -7391,3 +7391,30 @@ test("QE10 scans that outlast the block: the quote goes on at a fresh block from
   assert.ok(clock.heads >= 4, `${clock.heads} head reads: a second block was agreed`);
   assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} scan requests sent past their block's deadline`);
 });
+
+test("QE11 the scan's catch-up past the agreed block keeps the deadline: a rate-limited catch-up is not asked again past it (review of 2f9a3ccc, finding 7)", { timeout: 30_000 }, async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0xb00);
+  const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
+  const rpcs = [ticking(pools, 0, RC_HEAD, clock, 0), ticking(pools, 1, RC_HEAD, clock, 0)];
+  const base = scanner(RC_HEAD, logs, [], 100_000);
+  const LAG = 500;
+  let catchUps = 0;
+  let catchUpsPast = 0;
+  const scan: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_blockNumber")) return calls.map((_, id) => ({ jsonrpc: "2.0", id, result: "0x" + (RC_HEAD - LAG).toString(16) }));
+    const up = calls.some((c) => c.method === "eth_getLogs" && Number((c.params[0] as { fromBlock: string }).fromBlock) > RC_HEAD - LAG);
+    if (up) {
+      catchUps++;
+      if (clock.ts > 0 && NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) catchUpsPast++;
+      clock.ms += 31_000;
+      // the first catch-up answers a rate limit: asked again whole
+      if (catchUps === 1) return calls.map((_, id) => ({ jsonrpc: "2.0", id, error: { code: -32005, message: "rate limit exceeded" } }));
+    }
+    return base(calls);
+  };
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scan, undefined, () => clock.ms));
+  console.log("QE11", JSON.stringify({ code: (v as { code?: string }).code, catchUps, catchUpsPast, ms: clock.ms }));
+  assert.ok(catchUps >= 1, "a catch-up ran");
+  assert.equal(catchUpsPast, 0, `${catchUpsPast} catch-up requests sent past the deadline`);
+  assert.equal((v as { code?: string }).code, "stale_quote");
+});

@@ -961,6 +961,9 @@ export const MUTANTS = [
   [QUOTE, "      if (out.length > 0 && since < lateAfter()) return arm(lateAfter() - since);\n", "", R, "QE6 "],
   [QUOTE, "        if (gate?.moved() === true) return Promise.reject(MOVED);\n        past();", "        if (gate?.moved() === true) return Promise.reject(MOVED);", R, "QE2 (buy) "],
   [QUOTE, "        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;", "", R, "QE2 (buy) "],
+  // no deadline at the block's agreement (as at 2d9a7bd9, where it was set once the token's scan returned): the scan's
+  // catch-up to the agreed block is asked again past it
+  [QUOTE, "        if (deadline !== undefined) deadline.until = Number(x.block.timestamp) * 1000 + EVM_QUOTE_MAX_AGE_MS;", "", R, "QE11 "],
   [QUOTE, 'if (e === MOVED || (e instanceof EvmQuoteError && e.code === "stale_quote")) throw e;', "if (e === MOVED) throw e;", R, "QE2 (buy) "],
   [QUOTE, "      if (left() < 0 || resumeAt - now > left()) throw stale();\n", "", R, "QE7 "],
   [QUOTE, "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs))", "scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined)", R, "QE7 "],
