@@ -2,38 +2,45 @@
 # Redeploys the helper on its server at one commit of the public repo (card helper-release-bump). Run on the server,
 # from the checkout it updates:
 #   apps/helper/deploy/redeploy.sh <40-hex commit>
-# In order, stopping at the first failure (the .env, the budgets and Caddy's admin socket are read before step 1, so a
-# refused one changes nothing):
-#   0. every RPC_BUDGET_* and PROXY_BUDGET_* compose may pass, from deploy/.env and from this shell, is checked with the
-#      rule the helper's start applies (src/limits/limits.ts budgetFromEnv): a value it would refuse stops here, naming
-#      the variable only, instead of leaving the container restarting; and each vendor's key (JUPITER_API_KEY,
-#      RELAY_API_KEY, LIFI_API_KEY, ONECLICK_JWT) is set, or its PROXY_BUDGET_<VENDOR> names the keyless plan, as the
-#      helper's start requires (src/proxy/proxy.ts checkVendorPlans);
-#   1. fetches the commit (depth 1) and checks it out, detached;
-#   2. in deploy/.env, next to compose.yaml: sets HELPER_COMMIT to the commit and HELPER_RELEASE to the release number
+# In order, stopping at the first failure (the commit, the .env, the budgets and Caddy's admin socket are read before step
+# 1, so a refused one changes nothing):
+#   0. fetches the repository's main (objects and refs/remotes/origin/main only, no checkout; the whole history the
+#      first time, as a shallow checkout is made complete) and refuses a commit that is not on it, a typo, a commit on
+#      another branch only, or an id that is not a commit, before deploy/.env is read (card
+#      redeploy-commit-first: on 7 Nov 03:40Z a mistyped commit printed "HELPER_RELEASE raised by one" before its fetch
+#      failed). Then every RPC_BUDGET_* and PROXY_BUDGET_* compose may pass, from deploy/.env and from this shell, is
+#      checked with the rule the helper's start applies (src/limits/limits.ts budgetFromEnv): a value it would refuse
+#      stops here, naming the variable only, instead of leaving the container restarting; and each vendor's key
+#      (JUPITER_API_KEY, RELAY_API_KEY, LIFI_API_KEY, ONECLICK_JWT) is set, or its PROXY_BUDGET_<VENDOR> names the
+#      keyless plan, as the helper's start requires (src/proxy/proxy.ts checkVendorPlans);
+#   1. checks the commit out, detached;
+#   2. builds the image (docker compose build helper) and runs its senders' settings check (src/env-check.ts, the
+#      start's own readers: the pool senders, the withdrawal relayer and the deposit carry, with the new image's mainnet
+#      vault pin) in a one-off container with the environment compose gives the helper: a network set only in part, a
+#      value the start would refuse, or a WITHDRAW_VAULT_MAINNET or BIND_VAULT_MAINNET left on the vault before
+#      (deploy/vault-lines.sh moves them), stops here with deploy/.env unchanged and no helper started or stopped, not
+#      after the bound below (compose takes HELPER_COMMIT and HELPER_RELEASE from this shell first). Only then, in
+#      deploy/.env next to compose.yaml, it sets HELPER_COMMIT to the commit and HELPER_RELEASE to the release number
 #      send.ts reads (a whole number that only goes up, one per release): kept when the commit is the one already
-#      there, one more when it is another (a rollback included), 1 when there was none. Every other line is kept byte
-#      for byte, the file is replaced in one rename and stays mode 600. A HELPER_COMMIT or HELPER_RELEASE line not in
-#      the plain NAME=value form, or written twice, is refused with nothing changed;
-#   3. swaps the helper with no gap, with those two values: builds the image (docker compose build helper) and runs its
-#      senders' settings check (src/env-check.ts, the start's own readers: the pool senders, the withdrawal relayer and
-#      the deposit carry, with the new image's mainnet vault pin) in a one-off container with the environment compose
-#      gives the helper: a network set only in part, a value the start would refuse, or a WITHDRAW_VAULT_MAINNET or
-#      BIND_VAULT_MAINNET left on the vault before (deploy/vault-lines.sh moves them), stops here, with no helper
-#      started or stopped, not after the bound below; with no helper
-#      running (a first deploy) docker compose up -d --wait brings the stack up; otherwise starts the new helper beside the
-#      old one (docker compose up --no-deps --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck
-#      (compose.yaml: /v1/health says ready), and only then stops (30 s) and removes each old container. Past the bound
-#      (REDEPLOY_READY_S seconds, default 300) the new container is removed, the old one keeps serving, and it exits 1;
+#      there, one more when it is another (a rollback included), 1 when there was none. So the two lines move only for
+#      a commit on main whose image builds and takes its settings. Every other line is kept byte for byte, the file is
+#      replaced in one rename and stays mode 600. A HELPER_COMMIT or HELPER_RELEASE line not in the plain NAME=value
+#      form, or written twice, is refused at step 0 with nothing changed;
+#   3. swaps the helper with no gap, with those two values: with no helper running (a first deploy) docker compose up
+#      -d --wait brings the stack up; otherwise starts the new helper beside the old one (docker compose up --no-deps
+#      --no-recreate --scale helper=<old + 1> --wait), waits for its healthcheck (compose.yaml: /v1/health says ready),
+#      and only then stops (30 s) and removes each old container. Past the bound (REDEPLOY_READY_S seconds, default
+#      300) the new container is removed, the old one keeps serving, and it exits 1;
 #   4. reloads Caddy with this checkout's Caddyfile through its admin socket inside the container (Caddyfile: admin
 #      unix//config/caddy-admin.sock): Caddy swaps to the new config with no gap and skips a config that is unchanged. The
 #      file goes in on stdin, since compose mounts the one file and a checkout writes a new one, which the running
 #      container's mount never sees. A Caddy that step 3 started (none ran before) read this checkout's file at its start
 #      and is not reloaded. A refused reload (a bad Caddyfile) leaves Caddy on the config it had and exits 1.
-#   Before step 1, once the commit is fetched (objects only: no checkout, no .env), the socket is read: a running Caddy
+#   Before step 1, once the commit is found on main (objects only: no checkout, no .env), the socket is read: a running Caddy
 #   with no socket (one started from a Caddyfile with `admin off`), or a helper running with no Caddy, is refused, naming
 #   the one command that fixes it, with nothing changed, so a redeploy never ends with a new helper behind the old Caddy.
-# It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local repository).
+# It prints names and container ids, never values. REDEPLOY_REMOTE replaces the repository URL (the test's local
+# repository), and a line names it, never its value.
 # The release is read, raised and written here rather than computed from the commit's place on main: the number orders
 # what this host ran, with its store, so a rollback gets the next number; a count on main would go down on a rollback.
 set -euo pipefail
@@ -55,13 +62,16 @@ main() {
   deploy="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   root="$(cd "$deploy/../../.." && pwd)"
   remote="${REDEPLOY_REMOTE:-https://github.com/UNRLZD/confidential-trenches.git}"
+  if [[ -n "${REDEPLOY_REMOTE:-}" ]]; then echo "redeploy: main is fetched from REDEPLOY_REMOTE, not the repository's URL"; fi
 
-  # the release is read first, so a refused .env changes nothing, the checkout included
+  # the commit first: one not on main never reaches the .env, so no release is read, named or written for it
+  on_main "$root" "$remote" "$sha" || exit 1
+
+  # the release is read next, so a refused .env changes nothing, the checkout included
   local env="$deploy/.env" release
   release="$(next_release "$env" "$sha")" || exit 1
   check_budgets "$env" || exit 1
 
-  git -C "$root" fetch -q --depth 1 "$remote" "$sha"
   local caddy_ran
   caddy_ran="$(cd "$deploy" && caddy_socket)" || exit 1
   git -C "$root" checkout -q --detach "$sha"
@@ -70,15 +80,37 @@ main() {
     exit 1
   fi
 
-  write_env "$env" "$sha" "$release"
-
   cd "$deploy"
   export HELPER_COMMIT="$sha" HELPER_RELEASE="$release"
+  build_helper
+  # the two lines move only for an image that built and takes its settings, and before the swap: a helper started
+  # with this release may mark a settle failed under it, and src/withdraw/send.ts:512 never signs again under a
+  # release that already failed, so a swap that fails after its start leaves this release recorded, the next one more
+  write_env "$env" "$sha" "$release"
   swap_helper "$wait_s" "$sha"
   if [[ "$caddy_ran" == yes ]]; then
     reload_caddy
   else
     echo "redeploy: Caddy started with this checkout's Caddyfile (none ran before); no reload"
+  fi
+}
+
+# Step 0. Fetches main whole into refs/remotes/origin/main (a shallow checkout, which every earlier depth-1 fetch left,
+# is made complete once, so no earlier commit cuts the history short) and holds the commit only when it is a commit
+# main descends from. No fetch by id: a remote may serve an id that is on no branch of it, so main itself is the check.
+on_main() {
+  local root="$1" remote="$2" sha="$3" whole=""
+  if [[ "$(git -C "$root" rev-parse --is-shallow-repository)" == true ]]; then whole=--unshallow; fi
+  # checked here: on_main runs under `|| exit 1`, where set -e is off, and a failed fetch would leave the old copy of
+  # main to judge the commit
+  git -C "$root" fetch -q --no-tags ${whole:+"$whole"} "$remote" "+refs/heads/main:refs/remotes/origin/main" || {
+    echo "redeploy: main of the repository could not be fetched (above); nothing changed" >&2
+    return 1
+  }
+  # the id itself is a commit (an annotated tag's id would peel to one), and main descends from it
+  if [[ "$(git -C "$root" cat-file -t "$sha" 2>/dev/null)" != commit ]] || ! git -C "$root" merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+    echo "redeploy: the commit is not on main of the repository (a typo, or a branch not merged); nothing changed" >&2
+    return 1
   fi
 }
 
@@ -110,6 +142,18 @@ reload_caddy() {
   echo "redeploy: Caddy reloaded the Caddyfile (unchanged: Caddy kept its config)"
 }
 
+# Step 2. The new image and its own readers, with the environment compose passes it (the reader names variables, never
+# values). A refusal exits before deploy/.env is written.
+build_helper() {
+  echo "redeploy: docker compose build helper"
+  docker compose build helper
+  echo "redeploy: docker compose run --rm --no-deps -T helper node src/env-check.ts"
+  if ! docker compose run --rm --no-deps -T helper node src/env-check.ts; then
+    echo "redeploy: the new helper refuses its senders' settings (above; a vault line on the vault before: apps/helper/deploy/vault-lines.sh); no helper was started or stopped" >&2
+    exit 1
+  fi
+}
+
 # Step 3. The new helper starts next to the old one (docker-rollout's pattern: --no-recreate keeps the running container
 # and --scale adds one from the new image), compose waits for its healthcheck up to the bound, and only then is each old
 # container stopped. Past the bound, or when what runs new is not this commit's image, the new container is removed and
@@ -117,14 +161,6 @@ reload_caddy() {
 # so a bind's answer (45 s) is never cut. Prints ids, never values.
 swap_helper() {
   local wait_s="$1" sha="$2" old new id count stale
-  echo "redeploy: docker compose build helper"
-  docker compose build helper
-  # the new image's own readers, with the environment compose passes it (the reader names variables, never values)
-  echo "redeploy: docker compose run --rm --no-deps -T helper node src/env-check.ts"
-  if ! docker compose run --rm --no-deps -T helper node src/env-check.ts; then
-    echo "redeploy: the new helper refuses its senders' settings (above; a vault line on the vault before: apps/helper/deploy/vault-lines.sh); no helper was started or stopped" >&2
-    exit 1
-  fi
   # a stopped container of the service (a start that failed, a crash) is counted by --scale and started again in place
   # of one from the new image, so the swap would report a helper that never came: each is removed first
   stale="$(docker compose ps -a -q --status exited --status created --status dead helper)"
