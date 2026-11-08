@@ -10,6 +10,7 @@
 // position's bought, sold and realized, its open time, its TP/SL and its held or reverted mark; the closed positions;
 // the value series; the fees paid; and each operation's time, USD size, token and units.
 import { moneyWallets, POOL_ASSET_DECIMALS } from "@blindfill/kit";
+import { small } from "../discover/format.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -58,10 +59,12 @@ export function pct(b: number | null): string {
   return `${b < 0 ? "−" : b > 0 ? "+" : ""}${Math.trunc(a / 100)}.${Math.trunc((a % 100) / 10)}%`;
 }
 
-/** Token units, short: 891.5K, 3.77B, 96.2. Display only; never summed. */
+/** Token units, short: 891.5K, 3.77B, 96.2. Under 0.01 the price's small-number form (0.004, 0.0₅123), cut and never
+ *  rounded up, so a holding is never drawn as 0. Display only; never summed. */
 export function units(s: string): string {
   const v = Number(s);
   if (!Number.isFinite(v)) return "—";
+  if (v > 0 && v < 0.01) return small({ n: v, s: /^\d+(\.\d+)?$/.test(s) ? s : v.toFixed(20) });
   const t = (x: number, k: string) => { const f = x < 10 ? 100 : 10; return `${(Math.floor(x * f) / f).toFixed(f === 100 ? 2 : 1).replace(/\.?0+$/, "")}${k}`; };
   if (v >= 1e9) return t(v / 1e9, "B");
   if (v >= 1e6) return t(v / 1e6, "M");
