@@ -148,9 +148,10 @@ export type StatusRead = { status: OneClickStatus; delivered: bigint | null } | 
 
 /**
  * 1Click's status of `address` through the helper, or null when it is no read: not 200, too big, not JSON, not one of
- * the seven statuses, or an answer for another address, recipient or refund than ours (U). A 429 answers its wait.
+ * the seven statuses, or an answer for another address, recipient or refund than ours (U; a pool quote's recipient U_X
+ * and its refund `refundTo`, U_{s,i}: card pool-deposit-follow). A 429 answers its wait.
  */
-export async function readDepositStatus(address: string, u: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal, nowMs: number = Date.now()): Promise<StatusRead | null> {
+export async function readDepositStatus(address: string, u: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal, nowMs: number = Date.now(), refundTo: string = u): Promise<StatusRead | null> {
   try {
     const timeout = AbortSignal.timeout(DEPOSIT_STATUS_TIMEOUT_MS);
     const res = await fetchFn(`${DEPOSIT_STATUS_URL}?depositAddress=${encodeURIComponent(address)}`, {
@@ -169,7 +170,7 @@ export async function readDepositStatus(address: string, u: string, fetchFn: typ
     const qr = isObj(body.quoteResponse) ? body.quoteResponse : undefined;
     const quote = qr && isObj(qr.quote) ? qr.quote : undefined;
     const req = qr && isObj(qr.quoteRequest) ? qr.quoteRequest : undefined;
-    if (!quote || !req || quote.depositAddress !== address || req.recipient !== u || req.refundTo !== u) return null;
+    if (!quote || !req || quote.depositAddress !== address || req.recipient !== u || req.refundTo !== refundTo) return null;
     const out = isObj(body.swapDetails) ? body.swapDetails.amountOut : undefined;
     const delivered = body.status === "SUCCESS" && typeof out === "string" && DIGITS.test(out) && out.length <= 30 ? BigInt(out) : null;
     return { status: body.status as OneClickStatus, delivered };
