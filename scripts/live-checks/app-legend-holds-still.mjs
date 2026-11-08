@@ -21,11 +21,12 @@ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, INIT, WIDTHS } from "./app-shell.mjs";
+import { INIT, WIDTHS } from "./app-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-legend-holds-still";
+export const APP_HOST = "https://ct-app.unrealized.trade";
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const HOLD_MS = 30_000;
 const MOVE_MS = 400;
