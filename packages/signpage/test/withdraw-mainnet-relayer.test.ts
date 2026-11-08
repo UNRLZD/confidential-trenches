@@ -37,7 +37,13 @@ export function plantMainnet(m) { RELEASE_WITHDRAW_RELAYER = Object.freeze({ ...
     return { format: "module", source, shortCircuit: true };
   },
 });
-const relay = (await import("../../wallet/src/withdraw/relay.ts")) as unknown as { plantMainnet(m: HelperReleaseRelayer | null): void; RELEASE_WITHDRAW_RELAYER: Record<string, HelperReleaseRelayer | null> };
+const relay = (await import("../../wallet/src/withdraw/relay.ts")) as unknown as {
+  plantMainnet(m: HelperReleaseRelayer | null): void;
+  RELEASE_WITHDRAW_RELAYER: Record<string, HelperReleaseRelayer | null>;
+  WITHDRAW_FEE_URL: string;
+};
+/** The release's own mainnet pair, as relay.ts writes it (read before any test plants another). */
+const RELEASED = relay.RELEASE_WITHDRAW_RELAYER.mainnet;
 const { vaultScope } = await import("../src/withdraw/checks.ts");
 const { withdrawFormDeps, withdrawHandoff } = await import("../src/withdraw/handoff.ts");
 if (typeof relay.plantMainnet !== "function") throw new Error("withdraw-mainnet-relayer.test.ts: relay.ts was loaded before the hook");
@@ -119,7 +125,20 @@ test("a mainnet relayer named: the hand-off is offered and the fee is the helper
   assert.equal(typeof d.handoff, "function");
   assert.equal(typeof withdrawHandoff(page, { network: "mainnet", rpcs: pair() }), "function");
   assert.equal(await d.fee(), RELAY_FEE);
-  assert.deepEqual(seen, [`https://api.confidential.unrealized.trade/v1/withdraw/fee?token=${MAIN.usdc}`]);
+  assert.deepEqual(seen, [`${relay.WITHDRAW_FEE_URL}?token=${MAIN.usdc}`]);
+});
+
+test("the release's own mainnet pair: the hand-off is offered, its fee answer taken, and one naming another relayer or fee recipient refused", async () => {
+  assert.ok(RELEASED !== null, "relay.ts names a mainnet withdrawal relayer");
+  assert.equal(RELEASED.fee_recipient, "fees.unrlzd.near");
+  relay.plantMainnet(RELEASED);
+  const own = { relayer_account: RELEASED.relayer_account, fee_recipient: RELEASED.fee_recipient };
+  const d = form(helper(feeAnswer(own), []));
+  assert.equal(typeof d.handoff, "function");
+  assert.equal(await d.fee(), RELAY_FEE);
+  await assert.rejects(form(helper(feeAnswer({ ...own, relayer_account: PLANTED.relayer_account }), [])).fee(), /not the release's/);
+  await assert.rejects(form(helper(feeAnswer({ ...own, relayer_account: THROWAWAY }), [])).fee(), /not the release's/);
+  await assert.rejects(form(helper(feeAnswer({ ...own, fee_recipient: "unrlzd.near" }), [])).fee(), /not the release's/);
 });
 
 test("a mainnet relayer named: an answer naming the throwaway relayer, another fee recipient or a fee above fee_max is refused", async () => {
