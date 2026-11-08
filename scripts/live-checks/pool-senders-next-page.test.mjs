@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/pool-senders-next-page.test.mjs: the live check replays its recorded answers
 // (pool-senders-next-page.answers.json). good: this card's SIGN_HOST build, release-92: PASS. bad: SIGN_HOST's
 // release-91 page: FAIL, each fact named. Planted on the good one: another /app.js, no pin, each mark taken away, a
-// bundle no release list from 92 on names: each FAIL. Planted in this tree's bundle: the window rule broken in place
+// bundle no release list from 92 on names: each FAIL. Planted in the bundle's own excerpt (pool-senders-next-page.excerpt.txt,
+// cut from release-92's public/app.js: from near() through the six after the fallback): the window rule broken in place
 // (either tree near, no keeps clause, another window) and the fallback broken in place (no catch, a catch of every
 // error, no six after it): each FAIL.
 import assert from "node:assert/strict";
@@ -42,12 +43,12 @@ test("the ledger: the good bundle is a release-92 list's, the bad one (release-9
   assert.deepEqual(judge({ ...A.good, sha384: A.bad.sha384, index: A.bad.index }, { ledger: false }).lines, []);
 });
 
-test("planted in this tree's bundle: the window rule or the fallback broken in place FAILs", () => {
-  const index = readFileSync(new URL("../../packages/signpage/index.html", import.meta.url), "utf8");
-  const js = readFileSync(new URL("../../packages/signpage/public/app.js", import.meta.url), "utf8");
+test("planted in the bundle's excerpt: the window rule or the fallback broken in place FAILs", () => {
+  const index = A.good.index;
+  const js = readFileSync(new URL("./pool-senders-next-page.excerpt.txt", import.meta.url), "utf8");
   const f = facts(index, js);
-  assert.equal(f.window, true, "this tree's bundle holds the window rule");
-  assert.equal(f.fallback, true, "this tree's bundle holds the fallback");
+  assert.equal(f.window, true, "the excerpt holds the window rule");
+  assert.equal(f.fallback, true, "the excerpt holds the fallback");
   const at = (re) => {
     const m = re.exec(js);
     assert.ok(m, `${re} is in the bundle`);
