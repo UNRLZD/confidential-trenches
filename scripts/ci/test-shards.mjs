@@ -59,6 +59,8 @@ export const MUTANT_SECONDS = {
   "packages/signpage: node --test test/kit-version-mutants.test.mjs": 20,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
   "packages/signpage: node scripts/held-mutants.mjs": 84,
+  // card sol-w-sweep: its pull request #469 at f1264afb, "ok in 411.7 s" (run 42501766705, job 128795848174)
+  "packages/signpage: node scripts/rent-back-mutants.mjs": 412,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 226,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 301,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 208,

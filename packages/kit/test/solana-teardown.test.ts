@@ -93,7 +93,7 @@ test("recorded: real wallets on both pump programs, two providers each", () => {
   const gatr = F.wallets.findIndex((w) => w.wallet === "GATRKVEPTF8smVdYcWVody5gUc768N2HxTfVDmcCb4zp");
   assert.ok(gatr >= 0);
   const uva = solanaVolumeAccumulator(F.wallets[gatr]!.wallet, SOLANA_PUMP_AMM_PROGRAM);
-  assert.deepEqual(plans[gatr]!.keep, [{ address: uva, why: "cashback 12742862 unclaimed (the volume account's So11111111111111111111111111111111111111112 account holds nothing read)" }]);
+  assert.deepEqual(plans[gatr]!.keep, [{ address: uva, why: "cashback 12742862 unclaimed (the volume account's So11111111111111111111111111111111111111112 account holds nothing read)", cashback: true }]);
   assert.ok(!plans[gatr]!.close.some((h) => h.address === uva));
 });
 

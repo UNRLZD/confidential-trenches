@@ -44,7 +44,9 @@ export const MARKS = Object.freeze({
   "the failing program's claim alone off when both providers name it": new RegExp(`(${I})=typeof (${I})==\`string\`&&\\2===(${I})&&(${I})\\.includes\\(\\2\\)\\?\\2:null,(${I})=\`its claim did not simulate on either provider: A \\$\\{${I}\\(${I}\\)\\}, B \\$\\{${I}\\(${I}\\)\\}\`,(${I})=\\{\\.\\.\\.${I}\\};for\\(let (${I}) of \\1===null\\?\\4:\\[\\1\\]\\)\\6\\[\\7\\]=\\5;`),
   "a teardown refused at SIM planned again at most twice, one more program's claims off each time": new RegExp(`for\\(let (${I})=0;\\1<2;\\1\\+\\+\\)\\{let (${I})=${I}\\((${I})\\.verdict,\\3\\.wires,\\3\\.reads\\.simulations,\\3\\.reads\\.unclaimed\\);if\\(\\2===null\\|\\|Object\\.keys\\(\\2\\)\\.length===Object\\.keys\\(\\3\\.reads\\.unclaimed\\?\\?\\{\\}\\)\\.length\\)return \\3;\\3=await ${I}\\(${I}\\(${I},${I},\\2\\),\\2\\)\\}`),
   "W left owed when the teardown keeps an unclaimed account": new RegExp(`return ${I}\\((${I})\\.ok\\.unclaimed===void 0\\?\`kept\`:\`owed\`,\\1\\.ok\\.keep\\.map`),
-  "an owed rent back keeps its record": /&&(\w+)!==`gave_up`&&\1!==`owed`\)return await [\w$]+\.owed\?\.drop\(/,
+  // card sol-w-sweep, the review of c1fd2d20 (2a): the record is dropped only when both RPCs read W empty, so an owed
+  // end (and every other) keeps it
+  "an owed rent back keeps its record": /\{try\{if\(([\w$]+)===`nothing`\)return await [\w$]+\.owed\?\.drop\(/,
   "the claim paid in full in the simulation": new RegExp(`if\\((${I})!==(${I})\\.fromAmount-\\2\\.amount&&${I}\\.push\\(\`\\$\\{${I}\\}: \\$\\{\\2\\.from\\} holds \\$\\{\\1\\?\\?\`nothing read\`\\} after the claim \\(want \\$\\{\\2\\.fromAmount-\\2\\.amount\\}\\)\`\\)`),
 });
 

@@ -842,3 +842,27 @@ test("an owed send with no release signature under 2,500 newer entries of W's hi
   assert.equal(((await wd.w.get("ops", "op-w")) as { stage: string }).stage, "sent");
   await end();
 });
+
+// Delta review 8 of 5697d7a1, F3: W's buy record goes through the page's wallet store, written by the buy host the page
+// wires into pool.buy and read by the sell host it wires into pool.sell (the rent back holds with none)
+test("the page's buy host writes W's buy record in the wallet store's meta/owed/buy-sol, and its sell host reads it back", async () => {
+  const { w } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  const { poolSellKind } = await import("../src/pool-sell.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  let sellHost: Parameters<typeof poolSellKind>[0] | undefined;
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)), sell: (mk) => ((sellHost = mk), poolSellKind(mk)) } });
+  const A = "CTsw1111111111111111111111111111111111111111";
+  const rec = { mint: "So11111111111111111111111111111111111111112", program: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" };
+  const b = buyHost!();
+  const s = sellHost!();
+  try {
+    assert.equal(await s.bought?.get(A), undefined, "no record yet");
+    await b.bought!.put(A, rec);
+    assert.deepEqual(await w.get("meta", "owed/buy-sol"), { [A]: rec });
+    assert.deepEqual(await s.bought!.get(A), rec);
+  } finally {
+    (b as { end?: () => void }).end?.();
+    (s as { end?: () => void }).end?.();
+  }
+});

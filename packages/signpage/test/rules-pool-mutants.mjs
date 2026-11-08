@@ -136,8 +136,10 @@ export const MUTANTS = [
   ['if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");', "", SELL],
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
   ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
-  ['if (typeof reserve !== "bigint" || reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return refuse("reserve");', "", SELL],
-  ["reserve > SOLANA_POOL_SELL_RESERVE_MAX || ", "", SELL],
+  // card sol-w-sweep: the reserve's bound on every path (the cap, less what the sweep carries on, and the pool's least
+  // deposit), the line that replaced the one these two planted
+  ['if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return refuse("reserve");', "", SELL],
+  ["reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || ", "", SELL],
   ["+ 2n * (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", "+ (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", SELL],
   ["export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;", "export const SOLANA_RENT_PER_BYTE_MAX = 6_961n;", SELL],
   // the EVM relay data
