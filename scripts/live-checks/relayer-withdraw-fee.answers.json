@@ -1,6 +1,105 @@
 {
  "good": {
-  "note": "apps/helper at card/relayer-withdraw-fee (f4c83b0 with its two-round-trip read; the test machine's snapshot 211cb29 is its X-Helper-Commit) run with node src/server.ts on a Linux test machine, no NEAR URL set, so it read rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org; WITHDRAW_RELAYER_* and WITHDRAW_FEE_RECIPIENT_* relayer.confidential.unrlzd.near on both networks (the wallet vectors' relayer; the release names none yet); the check's own device reads on the same pairs; read 2026-11-02T09:30:16.489Z (ct-api.unrealized.trade does not serve the route yet)",
+  "base": "https://ct-api.unrealized.trade",
+  "reads": [
+   {
+    "asked": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "readAt": "2026-11-08T11:52:45.612Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "234",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 08 Nov 2026 11:52:46 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "dfe122d26745cad69d5f354c75e9e7a5574e2871"
+    },
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"186926\",\"gp\":\"100000000\",\"px\":\"3.723749058999\",\"g_w\":\"92505000000000\",\"valid_until_block\":223612597}"
+   },
+   {
+    "asked": "bf-usdc-20261101t022248.testnet",
+    "readAt": "2026-11-08T11:52:46.583Z",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "234",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 08 Nov 2026 11:52:47 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "dfe122d26745cad69d5f354c75e9e7a5574e2871"
+    },
+    "body": "{\"relayer_account\":\"r-2b700409.bf-vt-20261102t071444.testnet\",\"fee_recipient\":\"f-2b700409.bf-vt-20261102t071444.testnet\",\"relay_fee\":\"186926\",\"gp\":\"100000000\",\"px\":\"3.723749058999\",\"g_w\":\"92505000000000\",\"valid_until_block\":276772233}"
+   },
+   {
+    "asked": "usdt.tether-token.near",
+    "readAt": "2026-11-08T11:52:47.472Z",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-length": "30",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Sun, 08 Nov 2026 11:52:47 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "dfe122d26745cad69d5f354c75e9e7a5574e2871"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  ],
+  "device": {
+   "mainnet": {
+    "height": "223612500",
+    "gasPrice": "100000000",
+    "poolToken": "973614737821",
+    "poolNear": "261460888581613327251976221210",
+    "registerDeposit": "1250000000000000000000"
+   },
+   "testnet": {
+    "height": "276772137",
+    "gasPrice": "100000000",
+    "poolToken": "973614737821",
+    "poolNear": "261460888581613327251976221210",
+    "registerDeposit": "1250000000000000000000"
+   }
+  },
+  "relayer": {
+   "mainnet": {
+    "relayer_account": "4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756",
+    "fee_recipient": "fees.unrlzd.near"
+   },
+   "testnet": {
+    "relayer_account": "r-2b700409.bf-vt-20261102t071444.testnet",
+    "fee_recipient": "f-2b700409.bf-vt-20261102t071444.testnet"
+   }
+  },
+  "pairs": {
+   "mainnet": [
+    "https://rpc.mainnet.fastnear.com",
+    "https://near.drpc.org"
+   ],
+   "testnet": [
+    "https://test.rpc.fastnear.com",
+    "https://near-testnet.drpc.org"
+   ]
+  },
+  "note": "HELPER_HOST https://ct-api.unrealized.trade at commit dfe122d2, read 2026-11-08 11:52Z by this check (no flags), with its own device reads on rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org: mainnet names relayer 4519129d... and fees.unrlzd.near, testnet r-2b700409... and f-2b700409..., the pairs packages/wallet/src/withdraw/relay.ts writes: PASS."
+ },
+ "bad_other_relayer": {
+  "note": "bad_other_relayer: a real helper answer that names another relayer and fee recipient than the release: apps/helper at card/relayer-withdraw-fee (f4c83b0 with its two-round-trip read; the test machine's snapshot 211cb29 is its X-Helper-Commit) run with node src/server.ts on a Linux test machine, no NEAR URL set, so it read rpc.mainnet.fastnear.com + near.drpc.org and test.rpc.fastnear.com + near-testnet.drpc.org; WITHDRAW_RELAYER_* and WITHDRAW_FEE_RECIPIENT_* relayer.confidential.unrlzd.near on both networks (the wallet vectors' relayer; the release names none yet); the check's own device reads on the same pairs; read 2026-11-02T09:30:16.489Z (ct-api.unrealized.trade does not serve the route yet)",
   "base": "http://127.0.0.1:18111",
   "reads": [
    {

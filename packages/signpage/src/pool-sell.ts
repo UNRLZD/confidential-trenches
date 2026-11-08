@@ -798,7 +798,10 @@ type RentBack = { rpcs: Rpcs; program: string; pool: string; scope: bigint; rent
  *    claims it; its note INCOMING with the send before it leaves, then the sell
  *    lock is free (review L6): the settle at the next state read (settlePoolSells) gives its verdict. Under the smallest
  *    note the device spends (solanaSweepFloor, review M1), nothing is sent: W keeps its lamports.
- * A W that holds another token runs neither: its volume accounts and lamports are what that token's sell needs.
+ * A mint the device never traded on W (an airdrop, a stranger's token, what the page's holdings show of any mint not in
+ * W's record) never holds the pass back: its account is not among the addresses the plan reads, so it is never burned or
+ * closed, its tokens stay W's under the 12 words, and W's SOL is swept as usual (review 6 of 13898c19, F2; after a
+ * restore that lost the trade record too, since nothing of such an account is touched).
  */
 async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ended> {
   const seeds: Uint8Array[] = [];
@@ -870,9 +873,6 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
     return null;
   };
   try {
-    // W holding another token (the page's holdings: a skip is the safe side) keeps everything its next sell needs
-    const mints = new Set(x.mints.map((m) => m.mint));
-    if ([...w.holdings.tokens].some(([mint, t]) => !mints.has(mint) && t.amount > 0n)) return end("holds", "W holds another token");
     const addresses = solanaTeardownAddresses(w.address, x.mints);
     // W's accounts and W, in one getMultipleAccounts call on each RPC (one slot each): the plan over them, and whether
     // W still holds a mint it traded (review M-B: an owed record from a sell that never filled, or not yet); planned with
@@ -1060,15 +1060,14 @@ export function owedOf(keep: readonly { cashback?: true }[]): number | null {
 }
 
 /** What W reads as for its rent back: W and its accounts of the record's mints, the same bytes on both RPCs (one
- *  getMultipleAccounts call on each), the tokens the page's holdings show on W, the rent both RPCs read this load and
+ *  getMultipleAccounts call on each), the rent both RPCs read this load and
  *  the rules' version (POOL_RENT_BACK_RULES; review 5 of 38e59182, L3); undefined when the two RPCs differ. Nothing is
  *  decided on it but whether a pass runs. */
 async function heldSeen(x: RentBack): Promise<string | undefined> {
   const addresses = [x.w.address, ...solanaTeardownAddresses(x.w.address, x.mints)];
   const [a, b] = (await both(x.rpcs, (r) => accountsOf(r, addresses))).map((reads) => reads.map((t) => (t === null ? "-" : `${t.owner}:${t.lamports}:${base64.encode(t.data)}`)).join("|"));
   if (a !== b) return undefined;
-  const tokens = [...x.w.holdings.tokens].filter(([, t]) => t.amount > 0n).map(([mint]) => mint).sort().join(",");
-  return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${tokens}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
+  return base64.encode(keccak_256(new TextEncoder().encode(`${a}#${x.rent.lamportsPerByte}:${x.rent.factor}#${POOL_RENT_BACK_RULES}`)));
 }
 
 /** A rent back, then its owed record: none when W reads as it did when its last pass ended on W's own state (review 3

@@ -282,7 +282,7 @@ test("a stale answer is never drawn: a check that answers after a newer keystrok
   assert.equal(f.go.disabled, true);
 });
 
-test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet relayer, no hand-off, and a settle pass with nothing RESERVED opens no seed", async () => {
+test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, the release's mainnet relayer and its hand-off, no testnet relayer, and a settle pass with nothing RESERVED opens no seed", async () => {
   assert.equal(PAGE_NETWORK, "mainnet");
   assert.equal(RELEASE_WITHDRAW_RELAYER.testnet, null, "the testnet relayer is the testnet build's only");
   let opened = 0;
@@ -306,9 +306,11 @@ test("SIGN_HOST's build (no __SIGN_NETWORK__): mainnet, its pair, no testnet rel
   const d = withdrawFormDeps(page);
   assert.equal(d.network, "mainnet");
   assert.deepEqual(d.rpcs.map((r) => r.name), [MAIN.fastnear[0], MAIN.drpc]);
-  assert.equal(d.handoff, undefined);
-  await assert.rejects(d.fee(), /no withdrawal relayer on mainnet/);
-  assert.equal(withdrawHandoff(page), null);
+  // the release names its mainnet withdrawal relayer (card wallet-mainnet-relayer-pins), so the form offers the hand-off;
+  // the build that names none is held in test/withdraw-mainnet-relayer.test.ts
+  assert.deepEqual({ ...RELEASE_WITHDRAW_RELAYER.mainnet }, { relayer_account: "4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756", fee_recipient: "fees.unrlzd.near" });
+  assert.equal(typeof d.handoff, "function");
+  assert.equal(typeof withdrawHandoff(page), "function");
   // the testnet release on this build names no relayer: nothing offered there either
   assert.equal(withdrawHandoff(page, { network: "testnet" }), null);
   assert.deepEqual(await withdrawSettle(page), { outcomes: {} });
