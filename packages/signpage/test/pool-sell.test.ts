@@ -155,7 +155,7 @@ type Plant = {
   ataLamports?: number;
   /** W's volume accounts the buy made, under each pump program named, at rent(137): owing nothing, or `owed` (its
    *  needs_claim byte set: incentive tokens to claim, so pump keeps it open) */
-  volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint }[];
+  volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint; stable?: bigint }[];
   /** PumpSwap's claim_cashback fails as the program refuses it (review L2 of 5592a871: cashback switched off, a layout
    *  the program no longer takes) */
   claimFails?: boolean;
@@ -231,6 +231,8 @@ function chain(plant: Plant = {}) {
       new DataView(d.buffer).setBigUint64(74, vol.cashback, true);
       accounts.set(solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(rentMin(165) + vol.cashback), data: nativeAccount(uva, vol.cashback) });
     }
+    // pump's stable cashback owed (stable_cashback_earned @90), with no USDC in the volume account's own account to pay it
+    if (vol.stable !== undefined && vol.program === SOLANA_PUMP_PROGRAM) new DataView(d.buffer).setBigUint64(90, vol.stable, true);
     accounts.set(uva, { owner: vol.program, lamports: Number(solanaRentMin(rent, 137)), data: d });
   }
   // W at 0 lamports has no account
@@ -652,7 +654,7 @@ const rentMin = (size: number): bigint => solanaRentMin(rent, size);
  *  surplus over the sell's fee, the mark's rent, both pages' growth and that. */
 const AFTER = solanaSellAfterFull(rent);
 // on a cashback coin, also a later claim's cost (card sol-w-sweep: solanaSweepKeep for one volume account)
-const AFTER_CB = solanaSellAfterFull(rent, true);
+const AFTER_CB = solanaSellAfterFull(rent, 1);
 const FULL = MIN_OUT + BigInt(ENOUGH) - BigInt(FEE) - rentMin(17) - 2n * 72n * rent.lamportsPerByte * rent.factor - AFTER;
 const sends = (w: World) => w.c.log.filter((x) => x.endsWith("sendTransaction"));
 /** The notes of W's sells, without its sweep's (card sol-buy-rent-back: after a full sell, every lamport W holds goes
@@ -1537,33 +1539,85 @@ test("a full sell whose PumpSwap cashback claim does not simulate: planned again
 });
 
 // Card sol-w-sweep: what a full sell keeps on W is exactly what lifts the sweep to the floor when the teardown closes
-// only W's token account (one frame, its fee, rent(165) back): the floor, the sweep's fee, mark and page growth, that
-// frame's fee, less rent(165); at mainnet's rent 2,589,680, and on a cashback coin a later claim's cost more.
-test("a full sell whose teardown closes W's token account alone: the sweep's note is exactly the floor and W ends at 0; the kept amount pinned at mainnet's rent", async () => {
+// only W's token account (one frame, its fee, rent(165) back) and the sweep opens a page on both trees: the floor, the
+// sweep's fee, mark and two pages' opening (rent(16 + 72) each), that frame's fee, less rent(165); at mainnet's rent
+// 4,052,720, and per volume account owed a claim, that claim's cost more. Review L2 of 38faee89: priced at one entry's
+// growth (72 bytes a tree), a sweep at a page boundary landed under the floor, ended "floor" and left ~4.07M on W.
+const FLOOR = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+test("a full sell whose teardown closes W's token account alone: the sweep's note is the floor and what a page's opening would cost over an entry's, exactly the floor when the sweep opens a page on both trees, and W ends at 0; the kept amount pinned at mainnet's rent", async () => {
   const mainnet = { lamportsPerByte: 5_080n, factor: 1n } as typeof rent;
-  assert.equal(solanaSellAfterFull(mainnet), 2_600_000n + 5_000n + 736_600n + 731_520n + 5_000n - 1_488_440n);
-  assert.equal(solanaSellAfterFull(mainnet), 2_589_680n);
-  assert.equal(solanaSellAfterFull(mainnet, true), 2_589_680n + 650_240n + 5_000n + 1_488_440n);
+  assert.equal(solanaSellAfterFull(mainnet), 2_600_000n + 5_000n + 736_600n + 2n * 1_097_280n + 5_000n - 1_488_440n);
+  assert.equal(solanaSellAfterFull(mainnet), 4_052_720n);
+  assert.equal(solanaSellAfterFull(mainnet, 1), 4_052_720n + 650_240n + 5_000n + 1_488_440n);
+  assert.equal(solanaSellAfterFull(mainnet, 2), 4_052_720n + 650_240n + 2n * (5_000n + 1_488_440n));
+  // off a page boundary: the sweep pays an entry's growth on each tree, the rest of a page's opening goes into its note
   const w = await world({ ataLamports: TOKEN_RENT });
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   assert.equal(w.c.accounts.has(ATA), false);
   assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(w.told));
-  const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
-  assert.deepEqual(w.c.deposits.filter((d) => d.sweep).map((d) => d.value), [floor]);
+  const margin = 2n * (rentMin(16 + 72) - 72n * rent.lamportsPerByte * rent.factor);
+  assert.deepEqual(w.c.deposits.filter((d) => d.sweep).map((d) => d.value), [FLOOR + margin]);
+  // read 65 entries from each page's end (outside the window, so the sell is priced at an entry's growth), then 64
+  // others' deposits land first: the sell takes entry 1,023 and the sweep opens page 1 on both trees, exactly the floor
+  const b = await world({ ataLamports: TOKEN_RENT, leaves: 959, labelLeaves: 959, insertFirst: true, insertKind: "deposit", insertCount: 64 });
+  const sb = await runPoolSell(b.host, ASK);
+  assert.equal("stage" in sb && sb.stage, "filled", JSON.stringify(sb));
+  assert.equal(b.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(b.told));
+  assert.deepEqual(b.c.deposits.filter((d) => d.sweep).map((d) => d.value), [FLOOR]);
+  assert.deepEqual(b.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+  for (const tree of [0, 1] as const) assert.ok(b.c.accounts.has(solanaPoolPage(PROGRAM, tree, 1_024)), `the sweep opened tree ${tree}'s page 1`);
 });
 
-// Card sol-w-sweep: owed cashback on a coin that is not a cashback coin (W's volume account earned it trading another),
-// so the sell kept no claim's cost: what the sweep would make after that cost is under the floor, so nothing is swept,
-// W keeps it all, and stays owed (never dropped as "floor" is) for the pass that claims it.
-test("owed cashback the teardown could not claim, with the rest under the floor once the claim's cost is kept: nothing swept, W keeps it all, owed for the next pass", async () => {
+// Card sol-w-sweep, review L3 of 38faee89: owed cashback on a coin that is not a cashback coin (W's volume account
+// earned it trading another). At 38faee89 the sell kept no claim's cost, so with the claim failing nothing was swept and
+// ~4.07M stayed on W. The sell reads W's volume accounts and keeps the cost of each claim owed: the sweep goes, W keeps
+// exactly that claim's cost, owed for the pass that claims it.
+test("owed cashback on a coin that is not a cashback coin, its claim failing: the sell kept the claim's cost, so the sweep goes and W keeps only that cost, owed for the next pass", async () => {
   const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true });
   const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
-  assert.equal(w.c.deposits.length, 1, "nothing swept");
-  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), AFTER + BigInt(TOKEN_RENT) - BigInt(FEE));
-  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:owed"]);
+  assert.equal(w.c.deposits.length, 2, "swept");
+  assert.ok(w.c.deposits[1]!.value >= FLOOR);
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), solanaSweepKeep(rent, 1));
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
   assert.equal(w.owed.get(W.address)?.passes, 1);
+});
+
+// Review L3 and Info of 38faee89: two volume accounts owed a claim neither can take this pass (PumpSwap's cashback, its
+// claim refused; pump's stable cashback, with no USDC in the volume account's own account to pay it): the sell keeps
+// both claims' cost, the sweep goes, and W keeps exactly solanaSweepKeep for two (the owedOf 2 -> 1 mutant survived,
+// since no run had two).
+test("two volume accounts owed claims that cannot go this pass: the sell keeps both claims' cost, the sweep goes, W keeps exactly two claims' cost, owed for the next pass", async () => {
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }, { program: SOLANA_PUMP_PROGRAM, stable: 3_000_000n }], claimFails: true });
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.deposits.length, 2, "swept");
+  assert.ok(w.c.deposits[1]!.value >= FLOOR);
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), solanaSweepKeep(rent, 2));
+  assert.ok(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)) && w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM)), "both owed volume accounts kept");
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+  assert.equal(w.owed.get(W.address)?.passes, 1);
+});
+
+// Review M1 of 38faee89: a full sell whose own note, after the keep for the sweep, lands under the floor keeps rent(0)
+// only, as before the card: its note stays one a withdraw spends. Mainnet's rent, W at what a curve buy leaves
+// (1,493,440), min out 4,000,000, six rents 1,468,120: at 38faee89 the note was 1,430,640 under a 2,600,000 floor.
+test("solanaSellReserve at mainnet's rent: a full sell whose note would land under the floor with the sweep's keep keeps rent(0) instead, its note 3,370,080", () => {
+  const mainnet = { lamportsPerByte: 5_080n, factor: 1n } as typeof rent;
+  const p = { fee: 5_000n, made: 0n, rents: 1_468_120n, lamports: 1_493_440n, minOut: 4_000_000n, keeps: false };
+  const full = solanaSellAfterFull(mainnet);
+  const r0 = solanaRentMin(mainnet, 0);
+  // min out 4,000,000: with the sweep's keep (4,052,720 since review L2) the reserve, 4,032,400, is over the min out;
+  // 6,000,000: the keep leaves a 1,967,600 note, over the pool's least deposit and under the floor
+  assert.deepEqual(solanaSellReserve({ ...p, after: full, swept: full - r0 }), { refused: "quote_check_failed" });
+  assert.deepEqual(solanaSellReserve({ ...p, minOut: 6_000_000n, after: full, swept: full - r0 }), { reserve: 4_032_400n, value: 1_967_600n });
+  // the device's pricing (pool-sell.ts form: base rent(0), floor the sweep's): rent(0), notes a withdraw spends
+  assert.deepEqual(solanaSellReserve({ ...p, after: full, swept: full - r0, base: r0, floor: 2_600_000n }), { reserve: 629_920n, value: 3_370_080n });
+  assert.deepEqual(solanaSellReserve({ ...p, minOut: 6_000_000n, after: full, swept: full - r0, base: r0, floor: 2_600_000n }), { reserve: 629_920n, value: 5_370_080n });
+  // a min out whose note clears the floor with the keep still keeps it
+  const big = solanaSellReserve({ ...p, minOut: 9_000_000n, after: full, swept: full - r0, base: r0, floor: 2_600_000n });
+  assert.ok(!("refused" in big) && big.value >= 2_600_000n && big.reserve === 5_000n + 1_468_120n + full - 1_493_440n);
 });
 
 // Review M1 of 11c963f9: one provider erring once on the claim's frame turned claims off for good (the fallback took

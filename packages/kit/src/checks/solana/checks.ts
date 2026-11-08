@@ -1211,6 +1211,15 @@ export function solanaTeardownAddresses(wallet: string, mints: readonly { mint: 
   return [...new Set(out)];
 }
 
+/** What a claim of a wallet's volume account (its UserVolumeAccumulator data, owned by `owner`) pays out: PumpSwap's
+ *  cashback (cashback_earned @74 over total_cashback_claimed @82, paid in WSOL) or pump's stable cashback
+ *  (stable_cashback_earned @90 over total_stable_cashback_claimed @98, paid in USDC); 0n for any other owner or a
+ *  shorter account. Pump's other cashback is paid from the account's own lamports, which its close returns. */
+export function solanaVolumeClaimable(owner: string, v: Uint8Array): bigint {
+  if (owner === SOLANA_PUMP_AMM_PROGRAM && v.length >= 90 && u64(v, 74) > u64(v, 82)) return u64(v, 74) - u64(v, 82);
+  if (owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98)) return u64(v, 90) - u64(v, 98);
+  return 0n;
+}
 /**
  * What the teardown closes and what stays, from the device's own reads of the wallet's accounts on two providers.
  * Throws when the providers disagree on any account (the caller re-reads) or an address is not the wallet's.
@@ -1253,9 +1262,8 @@ export function solanaTeardownPlan(wallet: string, accounts: Readonly<Record<str
       if (v[40] !== 0 || u64(v, 41) > 0n) other.push(`unclaimed incentive tokens ${u64(v, 41)}`);
       if (u64(v, 57) > 0n) other.push(`volume ${u64(v, 57)} not settled`);
       // What a claim pays: PumpSwap's cashback (WSOL), pump's stable cashback (USDC); resolved after every read.
-      const amm = a.owner === SOLANA_PUMP_AMM_PROGRAM && u64(v, 74) > u64(v, 82);
-      const stable = a.owner === SOLANA_PUMP_PROGRAM && v.length >= 106 && u64(v, 90) > u64(v, 98);
-      const amount = amm ? u64(v, 74) - u64(v, 82) : stable ? u64(v, 90) - u64(v, 98) : 0n;
+      const amount = solanaVolumeClaimable(a.owner, v);
+      const amm = a.owner === SOLANA_PUMP_AMM_PROGRAM && amount > 0n;
       owes.set(address, { program: a.owner, amount, why: amm ? `cashback ${amount} unclaimed` : `stable cashback ${amount} unclaimed`, other, lamports: a.lamports });
       continue;
     }

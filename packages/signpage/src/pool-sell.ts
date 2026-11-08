@@ -62,7 +62,7 @@ import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMa
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
+import { SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_SYSTEM_PROGRAM, SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaTeardownPlan, solanaVolumeAccumulator, solanaVolumeClaimable, type SolanaHeldRead, type SolanaTeardownSimulation, type SolanaTeardownUnclaimed } from "../../kit/src/checks/solana/checks.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import type { ErrorCode, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -74,7 +74,9 @@ import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync }
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+// the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
+export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** What a sell run needs from the page. */
@@ -521,9 +523,6 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     // venue the coin can reach, the buy's rule (solanaPoolBuySellNeed: a curve coin's PumpSwap need, cashback accounts
     // included), so no sell leaves tokens on a W that cannot pay to sell them (the re-review of 40cdc3e)
     const keeps = tokens.amount > amount;
-    // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
-    // sol-w-sweep): every lamport over it goes into this sell's note
-    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, venue.cashback);
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
     // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
     // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
@@ -533,8 +532,21 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
     const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
-    // the lamports the deposit's mark and both pages hold, read on both RPCs: the same for either form
-    const holds = await depositHeld(rpcs, program, sizes, pre, wait);
+    // the lamports the deposit's mark and both pages hold, read on both RPCs: the same for either form; with them, W's
+    // volume accounts owed a claim after the sell (review L3 of 38faee89): each pump program's whose claim pays out on
+    // either RPC's read (solanaVolumeClaimable: one RPC's word that nothing is owed never lowers what W keeps), or the
+    // venue's own on a cashback coin, whose sell earns cashback there
+    const venueProgram = venue.kind === "pumpswap" ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM;
+    const owesOn = async (vp: string): Promise<boolean> => {
+      if (venue.cashback && vp === venueProgram) return true;
+      const reads = await both(rpcs, (r) => account(r, solanaVolumeAccumulator(w.address, vp), "confirmed"));
+      return reads.some((a) => !("none" in a) && a.owner === vp && solanaVolumeClaimable(vp, a.data) > 0n);
+    };
+    const [holds, owed] = await Promise.all([depositHeld(rpcs, program, sizes, pre, wait), Promise.all([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].map(owesOn)).then((o) => o.filter(Boolean).length)]);
+    // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
+    // sol-w-sweep): every lamport over it goes into this sell's note
+    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
     /** The sell with the deposit in form `next` (the eight, or the six), its reserve priced for that form, checked by
      *  the sell's rule; refused (thrown) when it cannot go. Nothing is signed or sent here. */
@@ -553,14 +565,12 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
       // their rent at their new length, less what each holds (anyone may send lamports to one), read on both RPCs;
       // the eight priced at the kit's window (an insert landing first can carry an entry onto the next page, which the
       // deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
-      const priced = (keep: bigint) => solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after: keep, lamports, minOut, keeps });
-      let r = priced(after);
-      // a full sell too small to hold the sweep's share back keeps rent(0) only, as before: its rents then stay on W
-      if ("refused" in r && !keeps) r = priced(solanaRentMin(rent, 0));
+      const r0 = solanaRentMin(rent, 0);
+      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after, lamports, minOut, keeps, ...(keeps ? {} : { swept: after - r0, base: r0, floor }) });
       if ("refused" in r) return no(r.refused);
       const { reserve, value } = r;
       const { wire } = build(value);
-      checkSolanaSell(wire, ask, ctx, venue, quote, bh.slot, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, reserve, lamports);
+      checkSolanaSell(wire, ask, ctx, venue, quote, bh.slot, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, reserve, { full: !keeps, lamports, fee: fa, made, rent, held: holds, next, owed });
       return { wire, value };
     };
     // the eight first; refused before signing (its reserve, priced at the window, over min out or the cap, or under the
@@ -643,36 +653,27 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
  * to pay the fee, what the sell makes at W's cost (`made`), the deposit's rents for that form (`rents`,
  * solanaDepositRents) and what W must keep after (`after`). A partial sell (`keeps`) whose reserve passes the cap is
  * refused not_funded, never shrunk: the rest would be stranded on W, and selling more than the user asked is never the
- * device's call. A reserve over the cap, at or over the min out, or one that leaves the deposit under the program's
- * least deposit (lib.rs MIN_DEPOSIT, which the program refuses on chain) is refused quote_check_failed.
+ * device's call. A reserve over the cap (less `swept`, what of a full sell's keep the rent back's sweep carries into the
+ * user's note), at or over the min out, or one that leaves the deposit under the program's least deposit (lib.rs
+ * MIN_DEPOSIT, which the program refuses on chain) is refused quote_check_failed.
  */
-export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint; after: bigint; lamports: bigint; minOut: bigint; keeps: boolean }): { reserve: bigint; value: bigint } | { refused: "not_funded" | "quote_check_failed" } {
+export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint; after: bigint; lamports: bigint; minOut: bigint; keeps: boolean; swept?: bigint; base?: bigint; floor?: bigint }): { reserve: bigint; value: bigint } | { refused: "not_funded" | "quote_check_failed" } {
+  // a full sell too small to hold the sweep's keep back keeps `base` (rent(0)) only, as before: its rents then stay on
+  // W; so does one whose own note would land under `floor`, which no withdraw or buy could spend (review M1 of
+  // 38faee89: min out 4,000,000 from W at a curve buy's 1,493,440 made a 1,430,640 note; rent(0) makes it 3,370,080)
+  if (!p.keeps && p.base !== undefined) {
+    const r = solanaSellReserve({ ...p, base: undefined });
+    return "refused" in r || r.value < (p.floor ?? 0n) ? solanaSellReserve({ ...p, after: p.base, swept: 0n, base: undefined }) : r;
+  }
   const short = p.fee + p.made + p.rents + p.after - p.lamports;
   // a sell that empties W's holding deposits W's surplus too (a reserve under 0, card sol-w-sweep); a partial sell
   // leaves it on W for the next sell
   const reserve = short > 0n || !p.keeps ? short : 0n;
   if (p.keeps && reserve > SOLANA_POOL_SELL_RESERVE_MAX) return { refused: "not_funded" };
-  if (reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= p.minOut || p.minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };
+  // the cap bounds what is held out of the user's notes: of `after`, what the rent back's sweep carries into one
+  // (`swept`, a full sell's keep over rent(0)) is not
+  if (reserve - (p.swept ?? 0n) > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= p.minOut || p.minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };
   return { reserve, value: p.minOut - reserve };
-}
-
-/**
- * What a sell that empties W's holding leaves on W (card sol-w-sweep): enough that the rent back's sweep, once the
- * teardown has closed W's token account to W (its rent at least rent(165)), makes a note a withdraw can spend: the
- * sweep's floor (solanaSweepFloor, at least the program's least deposit), its own fee, its mark's rent and an entry on
- * each tree's page, and the first teardown frame's fee (every frame closes an account worth more than its fee, so each
- * later frame pays for itself); at least rent(0), the runtime's floor. Every lamport over it goes
- * into the sell's own note, and the rest, with the rents the teardown closes, into the sweep's: W ends at 0. At
- * mainnet's rent (5,080 a byte) 2,589,680. On a cashback coin (`cashback`), also what a later claim of cashback the
- * teardown could not take needs (solanaSweepKeep for one volume account), so the sweep still reaches the floor while W
- * keeps that claim's cost; when the claim goes, the sweep takes it too.
- */
-export function solanaSellAfterFull(rent: SolanaRent, cashback = false): bigint {
-  const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
-  const sweep = SOLANA_POOL_SELL_FEE + solanaRentMin(rent, 17) + 2n * 72n * rent.lamportsPerByte * rent.factor;
-  const need = floor + sweep + SOLANA_POOL_SELL_FEE - solanaRentMin(rent, 165) + solanaSweepKeep(rent, cashback ? 1 : 0);
-  const r0 = solanaRentMin(rent, 0);
-  return need > r0 ? need : r0;
 }
 
 /** A transaction error that is the pool program's WrongAccount at instruction `ix`. */

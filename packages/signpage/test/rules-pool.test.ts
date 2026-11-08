@@ -48,6 +48,10 @@ import {
   type SolanaOnwardReads,
   drawPool,
   SOLANA_POOL_SELL_RESERVE_MAX,
+  solanaDepositRents,
+  solanaSellAfterFull,
+  type SolanaDepositHeld,
+  type SolanaSellSurplus,
   evmWithdrawDigest,
   signEvmAuthorization,
   signEvmBuy,
@@ -449,15 +453,46 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   for (const r of [-1n, floor, floor + 1n, 5000 as never]) {
     assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, r), refusedAs("reserve"), String(r));
   }
-  // card sol-w-sweep: a reserve under 0 (W's surplus deposited too) only up to what W holds, as both RPCs read it
-  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n, 0n), refusedAs("reserve"));
-  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n), refusedAs("reserve"));
-  // W holding it: the reserve passes and the deposit must then be min out plus that surplus, exactly
-  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -1n, 1n), refusedAs("deposit_amount"));
+  // card sol-w-sweep, review L1 of 38faee89: a reserve under 0 (W's surplus deposited too) or over the cap only on a sell
+  // that empties W's holding, priced exactly from the device's reads: what W holds over the fee, what the sell makes,
+  // the deposit's rents and what W keeps for the rent back (solanaSellAfterFull for its owed claims, or rent(0) alone)
+  const rent = { lamportsPerByte: 5_080n, factor: 1n } as SolanaSellSurplus["rent"];
+  const none = [null, null] as const;
+  const held: SolanaDepositHeld = { mark: none, state: none, label: none };
+  const rents = solanaDepositRents(rent, SOL_READS, held, false);
+  const keep = solanaSellAfterFull(rent, 0);
+  const r0 = 650_240n;
   const surplus = 3_000_000n;
-  const withSurplus = checkSolanaSell(sellWire({ dep: { value: floor + surplus } }), ask, solCtx(), venue, reference, slot, SOL_READS, -surplus, surplus);
-  assert.equal(withSurplus.back, floor + surplus);
-  assert.throws(() => checkSolanaSell(sellWire({ dep: { value: floor + surplus } }), ask, solCtx(), venue, reference, slot, SOL_READS, -surplus, surplus - 1n), refusedAs("reserve"));
+  const P: SolanaSellSurplus = { full: true, lamports: 5_000n + rents + keep + surplus, fee: 5_000n, made: 0n, rent, held, next: false, owed: 0 };
+  const sell = (reserve: bigint, p?: SolanaSellSurplus) => checkSolanaSell(sellWire({ dep: { value: floor - reserve } }), ask, solCtx(), venue, reference, slot, SOL_READS, reserve, p);
+  assert.equal(sell(-surplus, P).back, floor + surplus);
+  // the same surplus over rent(0) alone (a note the sweep's keep would leave under the floor) passes too
+  assert.equal(sell(-surplus, { ...P, lamports: 5_000n + rents + r0 + surplus }).back, floor + surplus);
+  // the deposit must then be min out plus that surplus, exactly
+  assert.throws(() => checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, -surplus, P), refusedAs("deposit_amount"));
+  // planted: a full sell keeping nothing (after 0, every lamport of W in the note) and a partial sell's surplus
+  assert.throws(() => sell(-(surplus + keep), P), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, full: false }), refusedAs("reserve"));
+  // no reads, a lamport off, the owed claims miscounted or out of range, a bad shape: refused
+  assert.throws(() => sell(-1n), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, lamports: P.lamports - 1n }), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, owed: 1 }), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, owed: 3 }), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, made: -1n }), refusedAs("reserve"));
+  assert.throws(() => sell(-surplus, { ...P, lamports: 1 as never }), refusedAs("reserve"));
+  // over the cap: what the keep holds over rent(0) the rent back's sweep carries into the user's note, so the cap leaves it
+  // out, only when the reserve is priced exactly with that keep (two owed claims: 7,689,840 kept)
+  const keep2 = solanaSellAfterFull(rent, 2);
+  const over = SOLANA_POOL_SELL_RESERVE_MAX + 1_000n;
+  const P2 = { ...P, owed: 2, lamports: 5_000n + rents + keep2 - over };
+  assert.equal(sell(over, P2).back, floor - over);
+  assert.throws(() => sell(over), refusedAs("reserve"));
+  assert.throws(() => sell(over, { ...P2, full: false }), refusedAs("reserve"));
+  const past = SOLANA_POOL_SELL_RESERVE_MAX + keep2 - r0 + 1n;
+  assert.ok(past < floor, "refused for the cap, not the min out");
+  assert.throws(() => sell(past, { ...P2, lamports: 5_000n + rents + keep2 - past }), refusedAs("reserve"));
+  // priced with rent(0) alone, nothing is swept later: the cap holds as it is
+  assert.throws(() => sell(over, { ...P, lamports: 5_000n + rents + r0 - over }), refusedAs("reserve"));
 });
 
 // ---------- EVM ----------
