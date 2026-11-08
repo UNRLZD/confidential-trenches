@@ -15,6 +15,7 @@ const TEST = "rules-pool.test.ts";
 const ONWARD = "rules-pool-onward.test.ts";
 const ATTACKS = "rules-pool-attacks.test.ts";
 const DEPEVM = "rules-pool-deposit-evm.test.ts";
+const SELLT = "pool-sell.test.ts";
 const DROOM = "EVM deposit: the headroom is G(depth)";
 const testOf = (file) => fileURLToPath(new URL(`./${file}`, import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/rules/.pool-mutant-${process.pid}.ts`, import.meta.url));
@@ -26,6 +27,8 @@ const DEC = "a request's decimals";
 const DEPOK = "Solana deposit: the pinned pool's tag 1";
 const WDOK = "Solana withdraw: the device's release";
 const DEP = "Solana deposit: another program";
+const NEXT = "Solana deposit: each tree's next page";
+const SWEEP = "the sweep's rule: W the only signer";
 const WD = "Solana withdraw: another pool program";
 const BUY = "Solana buy: the kit's tag 3";
 const SELL = "Solana sell:";
@@ -81,6 +84,20 @@ export const MUTANTS = [
   ['if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");\n  const n = head(d.ixs);\n  if (d.ixs.length !== n + 1)', "const n = head(d.ixs);\n  if (d.ixs.length !== n + 1)", DEP],
   ['if (d.ixs.length !== n + 1) return refuse("instructions");', "", DEP],
   ['if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount) return refuse("amount");', "", DEP],
+  // each tree's next page (card pool-senders-next-page): the eight for a deposit and a sweep, six or eight for a sell
+  ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', 'if (x.accounts.length !== 8 && x.accounts.length !== 6) return refuse("deposit_accounts");', NEXT],
+  ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', 'if (x.accounts.length !== 8) return refuse("deposit_accounts");', SELL],
+  ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', "", NEXT],
+  ['if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount)', "if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads, true) !== ask.amount)", NEXT],
+  ["const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);", "const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads);", SELL],
+  ["const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);", "const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads, true);", SWEEP, SELLT],
+  ['if (x.accounts.length === 8 && !same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");', "", NEXT],
+  ['if (x.accounts.length === 8 && !same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");', "", NEXT],
+  ["same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)", "same(nextState, solanaPoolNextPage(pin.program, 0, reads.labelSize), false, true)", NEXT],
+  ["same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)", "same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.stateSize), false, true)", NEXT],
+  ["same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)", "nextState !== undefined && nextState.key === solanaPoolNextPage(pin.program, 0, reads.stateSize) && !nextState.signer", NEXT],
+  ["same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)", "nextLabel !== undefined && nextLabel.key === solanaPoolNextPage(pin.program, 1, reads.labelSize) && !nextLabel.signer", NEXT],
+  ["if (x.accounts.length === 8 && !same(nextState", "if (x.accounts.length === 9 && !same(nextState", SELL],
   // the withdraw (tag 2)
   ['if (d.signers.length !== 2 || d.signers[0] !== pin.feePayer || d.signers[1] !== ctx.wallet) return refuse("signers");', "", WD],
   ['if (!rel || rel.program !== pin.program) return refuse("program");', 'if (!rel) return refuse("program");', WD],
@@ -298,7 +315,7 @@ const run = (name, file) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const original = readFileSync(POOL, "utf8");
-  const files = [TEST, ONWARD, DEPEVM];
+  const files = [TEST, ONWARD, DEPEVM, SELLT];
   process.on("exit", () => { for (const f of files) rmSync(mutantTestOf(f), { force: true }); rmSync(MUTANT_SRC, { force: true }); });
   for (const f of files) {
     const test = readFileSync(testOf(f), "utf8");

@@ -36,7 +36,7 @@ import { TESTNET_RPCS, testnetRpc } from "../src/pool-testnet.ts";
 const OUT = process.argv[2];
 if (!OUT) throw new Error("usage: pool-deposit-taken-devnet.mjs <out.json>");
 // the devnet pin of the testnet build (src/pool-testnet.ts, ../../wallet/src/pool/solana.ts SOL_POOLS.devnet)
-const PIN = { program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
+const PIN = { program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" };
 // the page's own testnet pair (src/pool-testnet.ts TESTNET_RPCS.solana): the public devnet endpoint and the helper's
 // keyed /v1/rpc/solana-devnet, another operator's; onfinality's public route, at 1 request a second per IP, let a run's
 // blockhash run out between its reads
