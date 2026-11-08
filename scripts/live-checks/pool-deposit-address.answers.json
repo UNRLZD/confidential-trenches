@@ -1,17 +1,18 @@
 {
  "_note": {
-  "good": "facts() over this card's build (packages/signpage/index.html and public/app.js at 45fc7e2b, release-93): PASS",
+  "good": "facts() over this card's build (packages/signpage/index.html and public/app.js with the review fold): PASS",
   "bad": "facts() over main 7d70c9fd's build, before this card: FAIL, each mark named",
   "liveBefore": "SIGN_HOST read at 2026-11-08 before this card's deploy: FAIL, each mark named"
  },
  "good": {
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oEzg4g4748OzZSnyFRG3N5L9Xpt752hSUIQ8ixV68dMRmKCtr56it8YET9WYVgz0\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "sha384": "sha384-oEzg4g4748OzZSnyFRG3N5L9Xpt752hSUIQ8ixV68dMRmKCtr56it8YET9WYVgz0",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9kN6Q88+myM4chVOXusyEh3JtwU98Ao1o9hEAv6Iuitd3am8HC9uFydkEcgoxFcw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-9kN6Q88+myM4chVOXusyEh3JtwU98Ao1o9hEAv6Iuitd3am8HC9uFydkEcgoxFcw",
   "namerPools": true,
   "namesEach": true,
   "namesRecord": true,
   "sameChain": true,
-  "unfollowed": true
+  "unfollowed": true,
+  "floored": true
  },
  "bad": {
   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bYwgvT6OYlOb7rvKpE0ybi5ZHuBCkPiiYV9heAdPGLaqZgYAjyQEKKjCY4CW3KgI\"></script>\n  </head>\n  <body></body>\n</html>\n",

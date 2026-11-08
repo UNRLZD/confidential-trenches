@@ -226,7 +226,7 @@ else {
       ...depositReadHosts(),
       // where money for a pool goes (src/pool-deposit-address.ts): U_X from its scope's public record, named ahead by this
       // page; a quote from another chain waits for the follow that carries it into the pool (no `checked`: refused)
-      "pool.address": poolAddressHost({ pools: pagePoolScopes, read: fs.depositRead, named: () => namer.named() }),
+      "pool.address": poolAddressHost({ pools: pagePoolScopes, network: PAGE_NETWORK, read: fs.depositRead, named: () => namer.named() }),
       buy: trades,
       // the pool kinds (src/pool-kinds.ts): each checked by src/rules/pool.ts, answered only on a pool this page's
       // network pins (src/pool-testnet.ts, whose flow runs deposit, buy, sell and withdraw on every build; a network with

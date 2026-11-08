@@ -48,13 +48,14 @@ function answerFor(req: Record<string, string | number | boolean>, decimalsOut: 
   return a;
 }
 
-function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean } = {}) {
+function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet" } = {}) {
   const sent: Record<string, string | number | boolean>[] = [];
   const took: unknown[] = [];
   let reads = 0;
   const records = { ...RECORDS, ...(o.records ?? {}) };
   const deps: Deps = {
     pools: () => POOLS,
+    network: o.network ?? "mainnet",
     read: async (scope) => {
       reads++;
       const rec = records[scope.toString()];
@@ -158,4 +159,52 @@ test("no follow, no price reads or no request id: no quote asked; the helper's c
   const moved = world({ moveAfter: true });
   assert.deepEqual(await ask(moved, q), { error: "not_allowed" });
   assert.equal(moved.took.length, 0);
+});
+
+test("review F2: the testnet build answers the same-chain U_X but never quotes: 1Click pays out on mainnet only", async () => {
+  const w = world({ network: "testnet" });
+  assert.deepEqual(await ask(w, { chain: "solana" }), { result: { chain: "solana", address: SOL_U, asset: "SOL" } });
+  assert.deepEqual(await ask(w, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "not_allowed" });
+  assert.deepEqual(await ask(w, { chain: "base", origin_asset: BASE_USDC, amount: "25" }), { error: "not_allowed" });
+  assert.equal(w.sent.length, 0);
+  assert.equal(w.took.length, 0);
+});
+
+test("review F3: 0.5 and 0.1 USDC into the Solana pool are refused before any address goes out (under 0.01 SOL)", async () => {
+  for (const amount of ["0.5", "0.1"]) {
+    const w = world();
+    assert.deepEqual(await ask(w, { chain: "solana", origin_asset: BASE_USDC, amount }), { error: "not_allowed" }, amount);
+    assert.equal(w.took.length, 0, amount);
+  }
+});
+
+test("review F4: the cap's edge, unpriced reads, the decimals bound, USDC at other decimals, the time estimate", async () => {
+  const q = { chain: "solana", origin_asset: BASE_USDC, amount: "25" };
+  // A4: exactly 1000 USDC is asked; one base unit more is above_max (the other test)
+  const edge = world();
+  await ask(edge, { ...q, amount: "1000" });
+  assert.equal(edge.sent.length, 1, "1000 USDC is at the cap, not over it");
+  // A5: a price read that is not a price: no quote, nothing sent
+  const unpriced = world();
+  unpriced.deps.priced = () => ({ decimalsIn: 24, pricing: { in: ["x", "1"], out: ["150", "150.1"] } as never });
+  assert.deepEqual(await ask(unpriced, { chain: "solana", origin_asset: "nep141:wrap.near", amount: "1" }), { error: "not_allowed" });
+  assert.equal(unpriced.sent.length, 0);
+  // A18: decimals past 36, or below 0: no quote, nothing sent
+  for (const decimalsIn of [37, -1, 1.5]) {
+    const w = world();
+    w.deps.priced = () => ({ decimalsIn, pricing: PRICING });
+    assert.deepEqual(await ask(w, { chain: "solana", origin_asset: "nep141:wrap.near", amount: "1" }), { error: "not_allowed" }, String(decimalsIn));
+    assert.equal(w.sent.length, 0, String(decimalsIn));
+  }
+  // A14: a USDC origin read at decimals other than 6 is capped at its reads, never as USDC base units
+  const odd = world();
+  odd.deps.priced = () => ({ decimalsIn: 18, pricing: PRICING });
+  assert.notDeepEqual(await ask(odd, { ...q, amount: "1" }), { error: "above_max" });
+  assert.equal(odd.sent.length, 1, "1 at a $1 read is under the cap");
+  // A20: a signed time estimate that is not a whole number of seconds, or below 0: quote_check_failed
+  for (const t of [-1, 1.5]) {
+    const w = world({ change: (a) => { (a.quote as Record<string, unknown>).timeEstimate = t; } });
+    assert.deepEqual(await ask(w, q), { error: "quote_check_failed" }, String(t));
+    assert.equal(w.took.length, 0, String(t));
+  }
 });

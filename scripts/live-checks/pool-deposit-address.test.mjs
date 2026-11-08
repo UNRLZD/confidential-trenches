@@ -4,7 +4,7 @@
 // mark taken away: each FAIL. Planted in the bundle's own excerpt
 // (pool-deposit-address.excerpt.txt, cut from this build's public/app.js: the pools' list and the namer, the namer, the
 // record read, the host and its wiring): each rule the card adds taken away, and
-// pool.address wired with a follow: the mark it rests on FAILs.
+// pool.address wired with a follow, the network gate or the pool floor taken away (review F2, F3): the mark it rests on FAILs.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -52,9 +52,15 @@ const PLANTED = [
   ["the EVM record with no address", new RegExp(`,\\.\\.\\.${N}===void 0\\?\\{\\}:\\{evm:${N}\\}\\}\\)`), "})", ["namesRecord"]],
   ["a Solana wallet read from the record's EVM address", new RegExp(`\\?(${N})\\.evm===void 0\\?${N}\\.encode\\(${N}\\.decode\\(${N}\\.id\\)\\):null:`), "?$1.evm:", ["sameChain"]],
   ["the first pool, not the asked chain's", new RegExp(`\\.pools\\(\\)\\.find\\(${N}=>${N}\\.chain===${N}\\)`), ".pools()[0]", ["sameChain", "unfollowed"]],
-  ["no follow gate", new RegExp(`if\\(${N}===void 0\\|\\|${N}\\.checked===void 0\\)return;`), "", ["unfollowed"]],
+  ["no follow gate", new RegExp(`(if\\()${N}===void 0\\|\\|${N}\\.checked===void 0\\|\\|`), "$1", ["unfollowed"]],
   ["the answer starts down, not not_allowed", new RegExp(`=\\{error:\`not_allowed\`\\}(;return\\{after:\\(async\\(\\)=>\\{let ${N}=${N}\\.chain,${N}=${N}\\.pools\\(\\))`), "={error:`down`}$1", ["unfollowed"]],
-  ["pool.address wired with a follow", new RegExp(`("pool\\.address":${N}\\(\\{pools:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\))\\}\\)`), "$1,checked:()=>{}})", ["unfollowed"]],
+  ["pool.address wired with a follow", new RegExp(`("pool\\.address":${N}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\))\\}\\)`), "$1,checked:()=>{}})", ["unfollowed"]],
+  ["no network gate (review F2)", new RegExp(`\\|\\|${N}\\.network!==\`mainnet\`\\)return;`), ")return;", ["unfollowed"]],
+  ["the page's network not passed (review F2)", new RegExp(`(\\{pools:${N},)network:${N},(read:)`), "$1$2", ["unfollowed"]],
+  ["no pool floor (review F3)", new RegExp(`return (${N})\\.minAmountOut<${N}\\[${N}\\.chain\\]&&${N}\\(\`floor\`\\)`), "return $1", ["floored"]],
+  ["the vault's floor kept (review F3)", /intoVault:!1\}\);return/, "intoVault:!0});return", ["floored"]],
+  ["the Solana floor at the vault's 1,000,000 lamports (review F3)", /\{one:1000000n,min:10000000n\}/, "{one:1000000n,min:1000000n}", ["floored"]],
+  ["Robinhood's floor not the EVM ladder's (review F3)", new RegExp(`(robinhood:)${N}(\\.min\\})`), "$1other$2", ["floored"]],
 ];
 
 for (const [name, from, to, fails] of PLANTED) {

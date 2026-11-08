@@ -148,8 +148,10 @@ export interface SignpageParams {
   /**
    * Where money for chain X's pool goes (card pool-deposit-address): U_X, the chain's one-time deposit wallet the device
    * names ahead, and, with `origin_asset` and `amount` (both or neither, as deposit.quote's), a checked 1Click deposit
-   * address for money from another chain whose recipient is U_X and whose refund lands under U_X's own key. Money that
-   * reaches U_X goes into X's pool with no tap. The request's id is the deposit's op id in state.ops.
+   * address for money from another chain whose recipient is U_X and whose refund lands inside intents.near under
+   * U_{s,i}, the ed25519 one-time id of the same scope and index (on Solana U_X's own key; on Base and Robinhood the id
+   * beside U_X's EVM key). Until the follow is built (card pool-deposit-follow), a quote is refused not_allowed; that
+   * card carries money that reaches U_X on into X's pool with no tap. The request's id is the deposit's op id in state.ops.
    */
   "pool.address": { chain: PoolChain; origin_asset?: string; amount?: string };
 }

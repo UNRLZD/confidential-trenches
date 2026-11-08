@@ -1,6 +1,7 @@
 // The pool deposit quote rule (card pool-deposit-address; src/pool-deposit-quote.ts): a quote for money from another
-// chain into chain X's pool passes only when it sends X's coin to U_X and refunds under U_X's own key; a quote whose
-// recipient or refund is not U_X is refused, as is a request built for another wallet or chain.
+// chain into chain X's pool passes only when it sends X's coin to U_X and refunds under U_{s,i}, the scope's ed25519
+// one-time id (on Solana U_X's own key); a quote whose recipient is not U_X or whose refund is not U_{s,i} is refused, as
+// is a request built for another wallet or chain, and one whose min out is under the pool's smallest deposit.
 //   node --test test/pool-deposit-quote.test.ts
 /// <reference types="node" />
 import assert from "node:assert/strict";
@@ -115,4 +116,29 @@ test("an answer below the device's own floor, or priced past its two reads, is r
   refusedAnswer("floor", () => checkPoolDepositQuote(req, answerOf(req, 9, -10_000n), ctxOf("solana", SOL_U, 9)));
   const wide = { ...ctxOf("solana", SOL_U, 9), check: { ...ctxOf("solana", SOL_U, 9).check, pricing: { in: ["1", "1"], out: ["150", "160"] } as const } };
   refusedAnswer("price", () => checkPoolDepositQuote(req, answerOf(req, 9), wide));
+});
+
+test("review F3: a min out under the pool's smallest deposit is refused by the pool rule, never the vault's floor", async () => {
+  const { POOL_DEPOSIT_MIN_OUT } = await import("../../wallet/src/deposit/quote.ts");
+  assert.deepEqual([POOL_DEPOSIT_MIN_OUT.solana, POOL_DEPOSIT_MIN_OUT.base, POOL_DEPOSIT_MIN_OUT.robinhood], [10_000_000n, 1_000_000_000_000_000n, 1_000_000_000_000_000n]); // 0.01 SOL, 0.001 ETH
+  // 0.5 USDC into the Solana pool: min out about 3,286,000 lamports, under 0.01 SOL (the money would wait at U_X, short)
+  // 0.1 USDC: about 657,000 lamports, under even the 890,880 lamports of rent a fresh account needs, and under the
+  // vault's 1,000,000 floor: refused by the pool rule ("floor", DepositRuleRefused), so the pool floor is the one used
+  for (const amount of [500_000n, 100_000n]) {
+    const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, amount, NOW);
+    const ans = answerOf(req, 9);
+    assert.ok(BigInt(ans.quote.minAmountOut as string) < POOL_DEPOSIT_MIN_OUT.solana, String(amount));
+    refusedRule("floor", () => checkPoolDepositQuote(req, ans, ctxOf("solana", SOL_U, 9)));
+  }
+  // 0.1 USDC into the Base pool: under 0.001 ETH
+  const evm = poolDepositQuoteRequest("base", EVM_U, EVM_ID, BASE_USDC.replace("base-", "sol-"), 100_000n, NOW);
+  refusedRule("floor", () => checkPoolDepositQuote(evm, answerOf(evm, 18), ctxOf("base", EVM_U, 18)));
+  // 2 USDC into the Solana pool is about 13,000,000 lamports: over the floor, it passes
+  const two = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 2_000_000n, NOW);
+  assert.ok(checkPoolDepositQuote(two, answerOf(two, 9), ctxOf("solana", SOL_U, 9)).minAmountOut >= POOL_DEPOSIT_MIN_OUT.solana);
+});
+
+test("review F4 Q4: a request whose origin is the pool's own coin is refused originAsset", () => {
+  const req = poolDepositQuoteRequest("solana", SOL_U, SOL_ID, BASE_USDC, 25_000_000n, NOW);
+  refusedRule("originAsset", () => checkPoolDepositQuote({ ...req, originAsset: "nep141:sol.omft.near" }, answerOf(req, 9), ctxOf("solana", SOL_U, 9)));
 });

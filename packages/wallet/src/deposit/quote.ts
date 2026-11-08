@@ -12,6 +12,8 @@
 import { HELPER_FETCH_INIT, VAULT_CONSTANTS, type OneClickRequest } from "@blindfill/kit";
 import { base58, hex } from "@scure/base";
 import { toChecksum } from "../derive/keys.ts";
+import { EVM_LADDER } from "../pool/evm.ts";
+import { SOL_LADDER } from "../pool/solana.ts";
 
 /** The helper's 1Click proxy on HELPER_HOST (apps/helper/src/proxy/vendors.ts: oneclick, POST /v0/quote). */
 export const DEPOSIT_QUOTE_URL = "https://api.confidential.unrealized.trade/v1/proxy/oneclick/v0/quote";
@@ -67,6 +69,24 @@ export const POOL_DEPOSIT_DESTINATION: Readonly<Record<PoolDepositChain, string>
   solana: "nep141:sol.omft.near",
   base: "nep141:base.omft.near",
   robinhood: "nep141:hood.omft.near",
+});
+
+/**
+ * The network POOL_DEPOSIT_DESTINATION's assets pay out on: 1Click delivers to mainnet only (NEAR Intents has no
+ * testnet). A page whose pools are pinned on another network (the testnet build's Solana devnet, Base Sepolia,
+ * Robinhood testnet) gets no pool deposit quote, so no real money goes to a U_X its pool never reads.
+ */
+export const POOL_DEPOSIT_NETWORK = "mainnet";
+
+/**
+ * The least a pool deposit quote may deliver to U_X, in the pool coin's base units: the pool's own smallest deposit
+ * (its ladder's least rung: pool/solana.ts SOL_LADDER.min, 0.01 SOL, above the 890,880 lamports a fresh Solana account
+ * needs as rent; pool/evm.ts EVM_LADDER.min, 0.001 ETH), so money 1Click delivers is always enough for one note.
+ */
+export const POOL_DEPOSIT_MIN_OUT: Readonly<Record<PoolDepositChain, bigint>> = Object.freeze({
+  solana: SOL_LADDER.min,
+  base: EVM_LADDER.min,
+  robinhood: EVM_LADDER.min,
 });
 
 /**

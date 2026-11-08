@@ -9,14 +9,15 @@
 //   refund move signs with on every chain; ORIGIN_CHAIN, EXACT_INPUT, and no key the vault's request may not carry;
 // - then the answer through the kit's one 1Click check (signature under the pinned keys, every signed field equal to
 //   the request, a live request taking only a live answer, the signed deadline and timestamp fresh, the device's own
-//   floors at its own two price reads per asset), with the output into a pool, never the vault: no MIN_DEPOSIT floor
-//   (the pool's own least deposit is pool.deposit's to hold).
+//   floors at its own two price reads per asset), with the output into a pool, never the vault (no vault floor);
+// - then the pool's own floor: a min out under the pool's smallest deposit (POOL_DEPOSIT_MIN_OUT, the ladder's least
+//   rung) is refused "floor", since money 1Click delivers to U_X under it could make no note.
 // So a helper or 1Click that answers with another recipient or refund fails the echo, and a request built for another
 // wallet fails here before the answer is read. A refusal is DepositRuleRefused ("not_allowed") for the request, the
 // kit's OneClickQuoteError for the answer.
 import { checkOneClickQuote, type OneClickChecked, type OneClickRequest } from "../../kit/src/checks/oneclick.ts";
 import { backupFirst } from "../../wallet/src/store/index.ts";
-import { POOL_DEPOSIT_DESTINATION, checkPoolDepositWallet, type PoolDepositChain } from "../../wallet/src/deposit/quote.ts";
+import { POOL_DEPOSIT_DESTINATION, POOL_DEPOSIT_MIN_OUT, checkPoolDepositWallet, type PoolDepositChain } from "../../wallet/src/deposit/quote.ts";
 import { DepositRuleRefused, type DepositQuoteContext } from "./rules/deposit.ts";
 
 /** The request keys a pool deposit quote may carry: the vault's (rules/deposit.ts QUOTE_KEYS), no more. */
@@ -69,5 +70,7 @@ export function checkPoolDepositQuote(request: OneClickRequest, answer: unknown,
   if (req.recipientType !== "DESTINATION_CHAIN") refuse("recipientType");
   if (req.refundTo !== ctx.refundId) refuse("refundTo");
   if (req.refundType !== "INTENTS") refuse("refundType");
-  return checkOneClickQuote(req, answer, { ...ctx.check, intoVault: false });
+  const checked = checkOneClickQuote(req, answer, { ...ctx.check, intoVault: false });
+  if (checked.minAmountOut < POOL_DEPOSIT_MIN_OUT[ctx.chain]) refuse("floor");
+  return checked;
 }

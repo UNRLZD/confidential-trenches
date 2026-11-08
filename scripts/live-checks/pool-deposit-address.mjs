@@ -8,8 +8,12 @@
 //   - pool.address (pool-deposit-address.ts): wired on the page with the pools, the deposit record read and the namer's
 //     wait, and nothing more; it answers the asked chain's own pool, from that pool scope's record read back (the seed
 //     backed up), the address on Solana the one-time id's own key and on an EVM pool the record's EVM address;
-//   - a cross-chain quote (an origin asset or an amount) with no follow wired is refused: the answer starts not_allowed
-//     and the host returns before any quote is asked when the page passes no `checked`.
+//   - a cross-chain quote (an origin asset or an amount) with no follow wired, or on a page whose pools are not pinned on
+//     mainnet (the only network 1Click pays out on), is refused: the answer starts not_allowed and the host returns
+//     before any quote is asked when the page passes no `checked` or its network is not mainnet; the page passes its own
+//     network (review F2);
+//   - a pool quote whose min out is under the pool's smallest deposit is refused "floor" after the kit's check, at the
+//     ladders' least rungs: 0.01 SOL, 0.001 ETH on Base and Robinhood (review F3).
 // What each does is held by the card's tests (packages/signpage/test/deposit-name.test.ts and
 // pool-deposit-address.test.ts); the recorded answers are facts() over each tree's packages/signpage/index.html and
 // public/app.js (this file reaches no package code: the import check holds it).
@@ -48,8 +52,12 @@ const HOST_SRC = (h) =>
   `if\\(!\\6\\)return void\\(\\2=\\{result:\\{chain:\\4,address:\\7\\.wallet,asset:${N}\\}\\}\\);`;
 const HOST = (h) => new RegExp(HOST_SRC(h));
 // ...and then, with no follow (`checked`) passed, it returns before any quote is asked.
-const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|${N}\\.checked===void 0\\)return;`);
-const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\)\\}\\)`);
+const GATE = (h) => new RegExp(`${HOST_SRC(h)}if\\(\\1===void 0\\|\\|(${N})\\.checked===void 0\\|\\|\\9\\.network!==${Q}mainnet${Q}\\)return;`);
+const WIRED = (h) => new RegExp(`"pool\\.address":${esc(h)}\\(\\{pools:${N},network:${N},read:${N}\\.depositRead,named:\\(\\)=>${N}\\.named\\(\\)\\}\\)`);
+// pool-deposit-quote.ts: the kit's check with no vault floor, then the pool's own floor per chain, at the ladders' least rungs.
+const FLOOR = new RegExp(`let (${N})=${N}\\(${N},${N},\\{\\.\\.\\.${N}\\.check,intoVault:!1\\}\\);return \\1\\.minAmountOut<(${N})\\[${N}\\.chain\\]&&${N}\\(${Q}floor${Q}\\)`);
+const FLOOR_TABLE = (t) => new RegExp(`${esc(t)}=Object\\.freeze\\(\\{solana:(${N})\\.min,base:(${N})\\.min,robinhood:\\2\\.min\\}\\)`);
+const LADDER = (n, one, min) => new RegExp(`${esc(n)}=Object\\.freeze\\(\\{one:${one}n,min:${min}n\\}\\)`);
 const NAMER = (p) => new RegExp(`=${N}\\(\\{top:!${N},scope:${N},pools:${esc(p)},`);
 
 /** The facts the verdict reads, from SIGN_HOST's index.html and /app.js. */
@@ -58,6 +66,8 @@ export function facts(index, js) {
   const wallet = WALLET_FN.exec(js)?.[1];
   const read = wallet ? READ_FN(wallet).exec(js)?.[1] : undefined;
   const host = new RegExp(`"pool\\.address":(${N})\\(\\{pools:${N},`).exec(js)?.[1];
+  const table = FLOOR.exec(js)?.[2];
+  const ladders = table ? FLOOR_TABLE(table).exec(js) : null;
   return {
     index,
     sha384: sha384(js),
@@ -66,6 +76,7 @@ export function facts(index, js) {
     namesRecord: PLAN.test(js) && EVM_NAME.test(js),
     sameChain: !!read && HOST(host ?? "").exec(js)?.[8] === read,
     unfollowed: !!host && WIRED(host).test(js) && GATE(host).exec(js)?.[3] === "not_allowed",
+    floored: !!ladders && LADDER(ladders[1], "1000000", "10000000").test(js) && LADDER(ladders[2], "100000000000000", "1000000000000000").test(js),
   };
 }
 
@@ -74,7 +85,8 @@ export const WHY = {
   namesEach: "the namer does not name each pool's scope (an EVM pool as Base or Robinhood), or one scope that fails stops the rest",
   namesRecord: "a pool's record is not written from its scope's planned index and one-time id, or an EVM pool's carries no EVM address (or its key is not zeroed)",
   sameChain: "pool.address does not answer the asked chain's own pool from that scope's record read back (Solana: the one-time id's key; EVM: the record's address)",
-  unfollowed: "a cross-chain quote with no follow wired is not refused not_allowed before any quote is asked, or pool.address is wired with more than its pools, read and wait",
+  unfollowed: "a cross-chain quote with no follow wired, or on a page not pinned on mainnet, is not refused not_allowed before any quote is asked, or pool.address is wired with more than its pools, network, read and wait",
+  floored: "a pool quote whose min out is under the pool's smallest deposit (0.01 SOL; 0.001 ETH on Base and Robinhood) is not refused floor",
 };
 
 /** The verdict on an answer (facts()). */

@@ -357,6 +357,17 @@ test("a landing names each pool's planned index too: U_{s,i} on Solana; on an EV
   assert.equal((await deposits(ns)).length, 3);
 });
 
+test("review F4 N1: a Robinhood pool is named as an EVM pool: its record carries U^evm_{s,i} beside U_{s,i}'s id", async () => {
+  const HOOD_SCOPE = 6161n;
+  const { w, ns } = await signedIn();
+  const n = namerOn(w, { scope: () => null, pools: () => [{ chain: "robinhood", scope: HOOD_SCOPE }] });
+  n.name(ENTROPY());
+  await n.named();
+  const at = indexOf((await deposits(ns)).find((x) => x.scope === HOOD_SCOPE)!.ref);
+  assert.deepEqual(await w.get("meta", `deposit/${HOOD_SCOPE}`),
+    { v: 1, scope: HOOD_SCOPE.toString(), index: at, id: idOf(HOOD_SCOPE, at), evm: evmOf(HOOD_SCOPE, at) });
+});
+
 test("a pool's U_X moves on once money reached it, as the vault's; pools are named with no vault on the network", async () => {
   const { w, ns } = await signedIn();
   const n = namerOn(w, { scope: () => null, pools: () => [{ chain: "base", scope: BASE_SCOPE }] });

@@ -15,12 +15,15 @@
 //   the address (not_allowed). An address goes out only under a request id and once `checked` took it (the follow that
 //   carries the money on into X's pool): with no `checked`, a quote is refused not_allowed, so no address is shown
 //   that nothing follows. A read that throws is down (not kept for the id, so the same request runs again).
+// - A quote only when the page's pools are pinned on the network 1Click pays out on (POOL_DEPOSIT_NETWORK, mainnet):
+//   the testnet build gives the same-chain U_X but refuses a quote not_allowed, nothing sent.
+// - A quote whose min out is under the pool's smallest deposit is refused not_allowed (pool-deposit-quote.ts "floor").
 import { base58, hex } from "@scure/base";
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { askDepositQuote, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
+import { POOL_DEPOSIT_NETWORK, askDepositQuote, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote } from "./pool-deposit-quote.ts";
@@ -40,6 +43,8 @@ export interface PoolQuotePricing {
 export interface PoolAddressDeps {
   /** The pools the page's network pins (src/pools.ts PAGE_POOLS), each under its scope. */
   pools(): readonly { chain: PoolChain; scope: bigint }[];
+  /** The network those pools are pinned on (src/pools.ts PAGE_POOLS: the build's). A quote only on POOL_DEPOSIT_NETWORK. */
+  network: "mainnet" | "testnet";
   /** Reads the public records of `scope` (src/state.ts depositRead); never the seed. */
   read(scope: bigint): Promise<DepositPublic | null>;
   /** Settles once the top-level page's naming in flight is done (src/deposit-name.ts named). */
@@ -118,6 +123,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
 
       // a quote: only under a request id, with a follow to carry the money on, and the device's own price reads
       if (ctx === undefined || deps.checked === undefined) return;
+      if (deps.network !== POOL_DEPOSIT_NETWORK) return; // 1Click pays out on mainnet only: never to a devnet pool's U_X
       const origin = params.origin_asset;
       if (typeof origin !== "string") return;
       const priced = deps.priced?.(chain, origin) ?? null;
