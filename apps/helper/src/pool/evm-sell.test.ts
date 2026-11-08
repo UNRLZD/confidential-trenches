@@ -1155,6 +1155,11 @@ test("at a steady base fee, a stuck sale priced under 2 x base + tip is replaced
   // the sale's watch ended when the replacement took its nonce: its hash is read only by the lane's tends (a send it
   // replaced may yet be the one mined), at most once per EVM_SELL_DROP_MARGIN_MS on each provider
   assert.ok(saleReads() - readsThen <= 2 * Math.ceil(200_000 / 60_000), `the sale's hash read ${saleReads() - readsThen} times in 200 s`);
+  // and with the clock standing still nothing reads it: a tend reads it at most once per margin, and the sale's own
+  // watch, ended, reads it no more (one that read on past the replacement read it at every poll, about 5 times here)
+  const readsNow = saleReads();
+  await r.step({ atMs: deadlineMs + 400_000 });
+  assert.equal(saleReads(), readsNow, "the sale's own watch ended when the replacement took its nonce");
   const [sale, repl] = r.raws as [ReturnType<typeof fieldsOf>, ReturnType<typeof fieldsOf>];
   // the providers' tip now the replacement's own: 2 x base + tip is exactly its maxFeePerGas, which it covers
   await r.step({ atMs: deadlineMs + 500_000, tip: repl.tip });
