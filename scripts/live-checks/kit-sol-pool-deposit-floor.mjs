@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Live check of card kit-sol-pool-deposit-floor (audit S-01) on SIGN_HOST (https://confidential.unrealized.trade). What
-// it holds, and only that: the served /app.js is the one index.html pins (its sha384), and the kit's Solana pool deposit
-// builder in it (packages/kit/src/trade/solana/pool-deposit.ts solanaPoolDepositIx), as minified, refuses a note under
+// it holds, and only that: the served /app.js is the one index.html pins (its sha384) and the /app.js of a written
+// release list from this card's release on (packages/signpage/releases/release-<N>.json, N >= FIRST_RELEASE), so its
+// bytes are a build of source whose tests ran; and the kit's Solana pool deposit builder in it (packages/kit/src/trade/solana/pool-deposit.ts solanaPoolDepositIx), as minified, refuses a note under
 // the release floor at the rent read, naming the floor (its refusal `the value ... is under the release floor of ...
 // lamports at this rent`), and refuses a rent that is no Rent sysvar read. The builder is not deployed on its own: the
 // signing page's pool deposit (packages/signpage/src/pool-deposit.ts) is where it runs. What the floor is (twice the
-// larger of a relayer's cost on a release that opens a page and the kit's epoch fee, from the rent read; 3,647,120 at
-// mainnet rent) is held by the kit's tests (packages/kit/test/pool-deposit.test.ts "S-01") and their mutants
+// larger of rent(0) plus the kit's epoch fee and twice that fee, from the rent read; 2,600,000 at mainnet rent) is held by the kit's tests (packages/kit/test/pool-deposit.test.ts "S-01") and their mutants
 // (packages/kit/test/pool-deposit-mutants.mjs).
 // The recorded answers are facts() over packages/signpage/index.html and public/app.js as build-app.mjs wrote them in
 // each tree (mainnet, as SIGN_HOST serves; this file reaches no package code: the import check holds it).
@@ -15,11 +15,27 @@
 // PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "kit-sol-pool-deposit-floor";
 export const SIGN = "https://confidential.unrealized.trade";
+/** This card's release: the first list whose signing page holds the floor. */
+export const FIRST_RELEASE = 101;
+// the lists are data read from the checkout, as signpage-release reads them; no package code is imported
+const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
+/** The SIGN_HOST /app.js of every written release list from FIRST_RELEASE on: its sha384 to its release. */
+export function releasedAppJs(dir = RELEASES) {
+  const out = new Map();
+  for (const f of readdirSync(dir)) {
+    const n = /^release-(\d+)\.json$/.exec(f)?.[1];
+    if (n === undefined || Number(n) < FIRST_RELEASE) continue;
+    const app = JSON.parse(readFileSync(path.join(dir, f), "utf8")).hosts?.SIGN_HOST?.files?.find((x) => x.path === "/app.js");
+    if (typeof app?.sha384 === "string") out.set(app.sha384, `release-${n}`);
+  }
+  return out;
+}
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 /** The minified marks, as the bundle spells them: the floor's refusal with the value and the floor in it, and the
@@ -32,13 +48,14 @@ export function facts(index, js) {
   return { index, sha384: sha384(js), floor: FLOOR.test(js), rent: RENT.test(js) };
 }
 
-/** The verdict on an answer { index, sha384, floor, rent }. */
-export function judge(a) {
+/** The verdict on an answer { index, sha384, floor, rent }, against the release lists' /app.js files. */
+export function judge(a, released = releasedAppJs()) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
+  if (!released.has(a?.sha384)) bad(`SIGN_HOST's served /app.js is the /app.js of no release list from release-${FIRST_RELEASE} on: bytes no tested source built`);
   if (a?.floor !== true) bad("the bundle's Solana pool deposit builds a note under the release floor: one that costs more to release than it holds");
   if (a?.rent !== true) bad("the bundle's Solana pool deposit takes no rent read: its floor cannot follow the rent");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
