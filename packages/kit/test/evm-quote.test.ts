@@ -9,9 +9,12 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
-import { evmPoolBuyQuoteWith, evmProviders, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
+import { evmPoolBuyQuoteWith, evmProviders, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
 import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
+// the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
+// for call: these replays send 6 a call (Robinhood's venue sends 64, card evm-buy-quote-in-window: QE9)
+evmReadsPerCall(6);
 // the module path as a string: the red run before card evm-buy-hookdata-fee's fold 1 reads it where quoted.ts is not there yet
 const QUOTED_TS: string = "../src/trade/evm/quoted.ts";
 
@@ -25,9 +28,29 @@ const CLANKER_HOOK = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 
 /** The answers a provider gave to exactly these calls; `edit` changes a copy of them. */
 type Edit = (answers: Answer[], calls: readonly EvmRpcCall[]) => void;
+// A batch the recording holds as sent, or else each call answered as the recording answered that same call (the kit
+// cuts a Base batch at its venue's 24,000 request bytes, review of 2c02f7df: a call holding a hook's code override goes
+// alone where the recording sent it with two others; every call is still matched byte for byte).
+const byCall = (ex: Exchange[], calls: readonly EvmRpcCall[]): Answer[] | undefined => {
+  const out: Answer[] = [];
+  for (const c of calls) {
+    const k = JSON.stringify(c);
+    let found: Answer | undefined;
+    for (const x of ex) {
+      const j = x.calls.findIndex((y) => JSON.stringify(y) === k);
+      if (j >= 0 && x.answers[j] !== undefined) {
+        found = x.answers[j];
+        break;
+      }
+    }
+    if (found === undefined) return undefined;
+    out.push(found);
+  }
+  return out;
+};
 const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (calls) => {
   const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
-  const a = e !== undefined ? structuredClone(e.answers) : (gasRoundAnswers(ex, calls) as Answer[] | undefined);
+  const a = e !== undefined ? structuredClone(e.answers) : (structuredClone(byCall(ex, calls)) ?? (gasRoundAnswers(ex, calls) as Answer[] | undefined));
   if (a === undefined) throw new Error("no recorded answer for these calls");
   if (edit !== undefined) edit(a, calls);
   return a;
