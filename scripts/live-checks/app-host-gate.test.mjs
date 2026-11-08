@@ -53,7 +53,7 @@ test("recorded bad answer: the good build before card verify-pools (no Solana pa
   const r = judge(await read(undefined, replay(ANSWERS.beforeSolana)));
   assert.equal(r.ok, false);
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${connectOf(ANSWERS.beforeSolana)}", want "${WANT_CONNECT}"`]);
-  assert.ok(WANT_CONNECT.includes(" https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com https://rpc.mainnet.fastnear.com "));
+  assert.ok(WANT_CONNECT.includes(" https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com "));
 });
 
 test("recorded bad answer: the live APP_HOST before app-in-shell (not frameable by the shell, frames SIGN_HOST): FAIL", async () => {

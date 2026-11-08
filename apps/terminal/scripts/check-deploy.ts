@@ -25,7 +25,7 @@ export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.ne
 // the origin of every provider in the kit's EVM venue lists, read from the kit (card page-evm-rpc-csp)
 export const EVM_RPCS: string[] = evmOrigins();
 // the Solana pair Verify reads the pool program on, from the device (card verify-pools; release.ts mainnet pools.solana)
-export const SOLANA_RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+export const SOLANA_RPCS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"];
 
 const HELPER = [`https://${HELPER_HOST}`, `wss://${HELPER_HOST}`];
 

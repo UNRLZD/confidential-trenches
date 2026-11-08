@@ -25,7 +25,7 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 // a testnet build swaps as the connect-src's last sources (apps/terminal/build/network.mjs)
 const EVM = evmOrigins().join(" ");
 // the Solana pair Verify reads the pool program on (card verify-pools), after the EVM providers
-const SOLANA = "https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com";
+const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network";
 
 // the app paper's block (app.md 2.3) with HELPER_HOST, SIGN_HOST, the kit's EVM providers and RPC_A, RPC_B, RPC_C put in
 export const CSP = [

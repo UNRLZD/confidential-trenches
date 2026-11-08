@@ -10,9 +10,12 @@
 // programdata, codeLen = so_len, codeSha256 = so_sha256) and contracts/pool-evm/deployments/<chain>.json (address =
 // contracts.PrivacyPoolSimple.address); each EVM code hash is the keccak256 of that address's eth_getCode in
 // scripts/live-checks/pool-evm-deploy-mainnet.answers.json (the deploy's read-back), the same on both of its RPCs.
-// scripts/live-checks/verify-pools.test.mjs holds every pin to those files. Each pair is two operators the kit lists
-// for the chain: Solana's public RPC (the kit's SOLANA_PUBLIC_RPC_URL) and publicnode, the pair the pool's deploy check
-// reads (pool-sol-deploy.mjs MAINNET_RPCS); each EVM chain's feeProviders (evmPoolVenues()), which keep state back.
+// scripts/live-checks/verify-pools.test.mjs holds every pin to those files. Each pair is two operators, each answering a
+// browser on the app's origin: Solana's publicnode (the signing page's SOLANA_PROVIDER_A, a side of the pool deploy
+// check's pair) and Pocket's gateway (whose Base and Robinhood gateways are in the kit's lists); Solana's own
+// api.mainnet-beta.solana.com answers any request with an Origin header 403 "Access forbidden" (read 2026-11-08 20:10Z
+// from the app's origin and in the harness), so a page cannot read it. Each EVM chain's pair is its feeProviders
+// (evmPoolVenues()), which keep state back.
 import { VAULT_TOKEN_CODE_HASH, type NearNetwork } from "@blindfill/kit";
 import type { PoolPins } from "./pools.ts";
 import type { VerifyPins } from "./read.ts";
@@ -45,7 +48,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
     pools: {
       solana: {
         chain: "solana",
-        rpcs: ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"],
+        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"],
         pin: {
           program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // gitleaks:allow (a public program id)
           programdata: "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM", // gitleaks:allow (a public account id)

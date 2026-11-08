@@ -35,7 +35,7 @@ test("the recorded mainnet reads: every pool row ok, each check ok", async () =>
   for (const c of ["base", "robinhood"] as const) assert.deepEqual(status(await row(c)), ["ok", { owner: "ok", proxy: "ok", poolCode: "ok" }], c);
   const s = await row("solana");
   assert.deepEqual(s.checks[0]!.values, [{ k: "authority", v: "—" }]);
-  assert.deepEqual(s.rpcs, ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"]);
+  assert.deepEqual(s.rpcs, ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"]);
   assert.match(s.height, /^\d{1,3}(,\d{3})+$/);
   assert.deepEqual(s.explorers.map((e) => e.href), ["https://solscan.io/account/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", "https://explorer.solana.com/address/EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF"]);
   assert.deepEqual((await row("base")).explorers.map((e) => e.href), ["https://basescan.org/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf", "https://base.blockscout.com/address/0xaa080e74ec99cf5c684548c77ca145edfcf899cf"]);
