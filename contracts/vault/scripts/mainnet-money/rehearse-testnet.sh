@@ -65,6 +65,6 @@ case "$1" in
     $D resume $NET --state "$STATE" --to "$TO"
     $D sweep-u $NET --state "$STATE"
     $D record $NET --state "$STATE" --fund-tx "$2" "$3"
-    cp "$STATE/vault-mainnet-money.testnet.run.json" "$STATE/vault-mainnet-money.testnet.md" "$ROOT/scripts/live-checks/"
+    cp "$STATE/vault-mainnet-money-testnet.run.json" "$STATE/vault-mainnet-money-testnet.md" "$ROOT/scripts/live-checks/"
     ;;
 esac

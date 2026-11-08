@@ -444,13 +444,45 @@ test("M1 (review 5): every path to the prover holds the run's deposit leaf to a 
   assert.match(String((await bindProblem("deposited", { rows: [], want, amount: 5_000_000n, txs: [], readTx: reads({}) })).why), stop("5000000"));
   // the driver: one leafProblem right before the prover's gate, on every path, with every tx the run holds for the
   // deposit (the note's calls, the deposit step's, the heard and the named); the restored step only after it passes
-  assert.match(SRC, /const why = await leafProblem\(\{ notes: await ns\.list\(\), i, want: wantOf\(\), txs: \[\.\.\.noteTxs, \.\.\.\(st\.read\("deposit"\)\?\.txs \?\? \[\]\), \.\.\.depositTxs\(\)\], readTx \}\);\n\s+if \(why !== null\) throw[^\n]*\n\s+if \(st\.read\("deposit"\) === undefined && note\.leaf !== undefined\)/);
+  assert.match(SRC, /const why = await leafProblem\(\{ notes: await ns\.list\(\), i, want: wantOf\(\), txs: \[\.\.\.noteTxs, \.\.\.\(st\.read\("deposit"\)\?\.txs \?\? \[\]\), \.\.\.depositTxs\(\)\], readTx \}\);\n\s+if \(why !== null\) throw[^\n]*\n(\s*\/\/[^\n]*\n)*\s+const held = st\.read\("deposit"\);\n\s+if \(held === undefined && note\.leaf !== undefined\)/);
   const prover = SRC.indexOf('sourceGate("the prover loads');
   assert.ok(SRC.indexOf("await leafProblem(") > 0 && SRC.indexOf("await leafProblem(") < prover, "the check stands before the prover's gate");
   assert.equal(SRC.split("await leafProblem(").length, 2, "one check, every path through it");
   // the stop's way out is pasteable: line 1 again with --deposit-tx <hash> at its end
   assert.match(SRC, /paste line 1 again with --deposit-tx <hash> at its end/);
   assert.doesNotMatch(SRC, /resume \.\.\. --deposit-tx/);
+});
+
+test("N3 (R7, review 6): the leaf held to U's tx is the deposit note of the run's own index, never another deposit note in the store", async () => {
+  const leafProblem = (MM as any).leafProblem;
+  const want = { ...RUN, value: undefined } as never;
+  const reads = (byHash: Record<string, unknown>) => async (h: string) => {
+    if (!(h in byHash)) throw new Error(`${h}: not a success on both RPCs`);
+    return byHash[h];
+  };
+  // another deposit note first (index 9, U's 5 USDC, its tx landed), the run's index 2 a stranger's 1 USDC row
+  const notes = [{ ref: { kind: "deposit", i: 9 }, leaf: { value: 5_000_000n } }, { ref: { kind: "deposit", i: 2 }, leaf: { value: 1_000_000n } }];
+  assert.match(String(await leafProblem({ notes, i: 2, want, txs: ["h1"], readTx: reads({ h1: depTx() }) })), /^no deposit tx of U for P with 1000000 reads back/);
+  assert.equal(await leafProblem({ notes, i: 9, want, txs: ["h1"], readTx: reads({ h1: depTx() }) }), null);
+});
+
+test("N2 (review 6): the deposit step keeps every tx that may have proved the leaf, a --deposit-tx included, so a later resume and paste 3 need no retyped hash", () => {
+  assert.match(SRC, /st\.write\("deposit", \{ amount: String\(note\.leaf\.value\), txs: \[\.\.\.new Set\(\[\.\.\.noteTxs, \.\.\.depositTxs\(\)\]\)\], relayer: relayers\.bind, restored: true,/);
+  assert.match(SRC, /else if \(held !== undefined && named !== undefined && !\(held\.txs \?\? \[\]\)\.includes\(named\)\) st\.write\("deposit", \{ \.\.\.held, txs: \[\.\.\.\(held\.txs \?\? \[\]\), named\] \}\);/);
+  assert.doesNotMatch(SRC, /txs: \[\], relayer: relayers\.bind, restored: true/);
+});
+
+test("record key (review 6): the testnet record is its own key, vault-mainnet-money-testnet, that the money gate parses; the mainnet record stays vault-mainnet-money", async () => {
+  const { parseLive } = await import("../../../scripts/ci/money-gate.mjs");
+  const { recordFiles, recordText } = MM as any;
+  const txs = [{ hash: "9ogyXiM7VWYUR34XzeZL6jRs2cFXcpNwKLwTncYdKmYd", signer: "p.testnet" }];
+  const t = parseLive(recordText(txs, ["prose"], "testnet"), "vault-mainnet-money-testnet");
+  assert.deepEqual(t?.problems, []);
+  assert.equal(t?.txs.length, 1);
+  const m = parseLive(recordText([{ ...txs[0], signer: "p.near" }], ["prose"], "mainnet"), "vault-mainnet-money");
+  assert.deepEqual(m?.problems, []);
+  assert.deepEqual(recordFiles("/s", "testnet"), { run: "/s/vault-mainnet-money-testnet.run.json", md: "/s/vault-mainnet-money-testnet.md" });
+  assert.deepEqual(recordFiles("/s", "mainnet"), { run: "/s/vault-mainnet-money.run.json", md: "/s/vault-mainnet-money.md" });
 });
 
 test("L3 (review 5): the code a wait or a resume reads txs with is loaded before the seed, so no code loads with seed64 in memory but under a gate", () => {

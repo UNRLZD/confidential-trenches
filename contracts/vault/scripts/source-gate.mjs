@@ -179,12 +179,17 @@ export function cloneProblems({ root, commit, onMain = true, installed = true, r
 /** [] when `commit` is an ancestor of main as `remote` answers it now: its sha read by ls-remote, fetched when the clone lacks it. */
 function mainProblems(git, commit, remote) {
   const no = (why) => [`commit ${commit} is not on ${REPO}'s main (${why}): the paste runs only a reviewed, merged commit`];
-  let main;
+  let lines;
   try {
-    main = git("ls-remote", "--", remote, "refs/heads/main").split("\t")[0].trim();
+    lines = git("ls-remote", "--", remote, "refs/heads/main").split("\n").filter(Boolean);
   } catch (e) {
     return [`${REPO}'s main was not read (git ls-remote: ${String(e.stderr || e.message).trim().split("\n")[0]}): nothing signed, paste the line again`];
   }
+  // ls-remote matches the pattern at a ref's tail (a pushed a/refs/heads/main is listed too): main is the one line whose
+  // ref is exactly refs/heads/main
+  const exact = lines.map((l) => l.split("\t")).filter((f) => f.length === 2 && f[1] === "refs/heads/main");
+  if (exact.length !== 1) return no(`ls-remote names ${exact.length} refs/heads/main`);
+  const main = exact[0][0];
   if (!/^[0-9a-f]{40}$/.test(main)) return no("ls-remote names no main");
   const has = () => {
     try {

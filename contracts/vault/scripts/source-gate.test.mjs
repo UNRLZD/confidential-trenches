@@ -281,6 +281,15 @@ test("L2 (review 5): every link under node_modules resolves inside the clone", (
   refuses(a2, o.head, /node_modules\/\.pnpm\/snarkjs@1\/node_modules\/evil links outside the clone/);
 });
 
+test("N3 (R1, review 6): a node_modules link through .git (which the walk skips) to a folder outside is refused: the link's target is read by realpath", () => {
+  const o = origin();
+  const a = clone(o);
+  mkdirSync(path.join(o.root, "evil-dir"), { recursive: true });
+  symlinkSync(path.join(o.root, "evil-dir"), path.join(a, ".git/y"));
+  symlinkSync("../.git/y", path.join(a, "node_modules/x"));
+  refuses(a, o.head, /node_modules\/x links outside the clone/);
+});
+
 test("L2 (review 5): a forged tree object is refused: the commit and every tree of it are hashed against their ids", () => {
   const o = origin();
   // a loose subtree object forged under its id (bind.ts's folder holding other bytes): git reads it unchecked, the gate hashes it
@@ -317,6 +326,21 @@ test("L2 (review 5): main is read from the remote, not the clone's own refs", ()
   git(src, "commit", "-q", "-am", "later");
   git(src, "push", "-q", o.bare, "main");
   assert.deepEqual(gate({ root: c, commit: o.head }), []);
+});
+
+test("N1 (review 6): main is the remote's refs/heads/main exactly: a pushed branch ending in /refs/heads/main is not read as main", () => {
+  const o = origin();
+  const src = path.join(o.root, "src");
+  git(src, "push", "-q", o.bare, `${o.card}:refs/heads/a/refs/heads/main`);
+  git(src, "push", "-q", o.bare, `${o.card}:refs/heads/cards/refs/heads/main`);
+  refuses(clone(o, o.card), o.card, /is not on https:\/\/github\.com\/UNRLZD\/confidential-trenches's main/);
+  assert.deepEqual(gate({ root: clone(o), commit: o.head }), [], "main itself still passes beside them");
+  // a remote with no refs/heads/main (only a branch ending in it) names no main: refused
+  const bare2 = path.join(o.root, "nomain.git");
+  git(o.root, "init", "-q", "--bare", bare2);
+  git(src, "push", "-q", bare2, `${o.head}:refs/heads/x/refs/heads/main`);
+  const c = clone(o);
+  assert.match(cloneProblems({ root: c, commit: o.head, remote: bare2 }).join("\n"), /names no main|not on/);
 });
 
 test("L2 (review 5): the config is read with -z: a value holding a newline is one value", () => {

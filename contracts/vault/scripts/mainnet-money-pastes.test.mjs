@@ -275,7 +275,7 @@ test("rehearse-testnet.sh finish: resume, sweep-u and the record with the fundin
   assert.equal(rehearse(w, []).status, 1);
   assert.deepEqual(calls(w), []);
   mkdirSync(st, { recursive: true });
-  for (const f of ["vault-mainnet-money.testnet.run.json", "vault-mainnet-money.testnet.md"]) writeFileSync(path.join(st, f), `${f}\n`);
+  for (const f of ["vault-mainnet-money-testnet.run.json", "vault-mainnet-money-testnet.md"]) writeFileSync(path.join(st, f), `${f}\n`);
   mkdirSync(path.join(w.src, "scripts", "live-checks"), { recursive: true });
   const r = rehearse(w, ["finish", "9".repeat(44), "sender.testnet"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -287,7 +287,7 @@ test("rehearse-testnet.sh finish: resume, sweep-u and the record with the fundin
     `${D} sweep-u ${NET} --state ${st}`,
     `${D} record ${NET} --state ${st} --fund-tx ${"9".repeat(44)} sender.testnet`,
   ]);
-  for (const f of ["vault-mainnet-money.testnet.run.json", "vault-mainnet-money.testnet.md"]) assert.equal(readFileSync(path.join(w.src, "scripts", "live-checks", f), "utf8"), `${f}\n`);
+  for (const f of ["vault-mainnet-money-testnet.run.json", "vault-mainnet-money-testnet.md"]) assert.equal(readFileSync(path.join(w.src, "scripts", "live-checks", f), "utf8"), `${f}\n`);
 });
 
 test("no paste names a package runner, a downloaded CLI or a loose state file; pnpm only installs from the lockfile", () => {

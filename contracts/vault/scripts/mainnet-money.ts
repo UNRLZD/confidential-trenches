@@ -752,10 +752,13 @@ async function go(argv: string[], create: boolean) {
   const noteTxs: string[] = ((await ns.get(note.id))?.calls ?? []).flatMap((c: { tx_hashes?: string[] }) => c.tx_hashes ?? []);
   const why = await leafProblem({ notes: await ns.list(), i, want: wantOf(), txs: [...noteTxs, ...(st.read("deposit")?.txs ?? []), ...depositTxs()], readTx });
   if (why !== null) throw new Error(`deposit: ${why}; the USDC is at U or in the vault: sweep-u sends what is at U to ${to}`);
-  if (st.read("deposit") === undefined && note.leaf !== undefined) {
+  // the txs that may have proved it are kept in the deposit step (a --deposit-tx too), so a later resume and paste 3
+  // need no retyped hash
+  const held = st.read("deposit");
+  if (held === undefined && note.leaf !== undefined) {
     // landed in an earlier attempt whose step file was not written: the record takes the leaf from the chain
-    st.write("deposit", { amount: String(note.leaf.value), txs: [], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
-  }
+    st.write("deposit", { amount: String(note.leaf.value), txs: [...new Set([...noteTxs, ...depositTxs()])], relayer: relayers.bind, restored: true, leaf: { value: String(note.leaf.value), label: String(note.leaf.label), commitment: String(note.leaf.commitment), leaf_index: String(note.leaf.leafIndex) } });
+  } else if (held !== undefined && named !== undefined && !(held.txs ?? []).includes(named)) st.write("deposit", { ...held, txs: [...(held.txs ?? []), named] });
 
   // the note to withdraw: the run's UNSPENT note in the deposit's line (by parent), the deposit note or, after a refunded payout, its refund
   // note (settle writes it); none once the last one is spent, and the arrival read follows the note withdrawn last
@@ -1016,7 +1019,7 @@ async function sweepU(argv: string[]) {
 
 /** The record the money gate reads: Money path, one Tx line per transaction, then the prose. */
 export function recordText(txs: { hash: string; signer: string }[], prose: string[], network: Network = "mainnet"): string {
-  return [`CARD ${CARD} / live: PASS`, "Money path: yes", ...txs.map((t) => `Tx: ${network === "mainnet" ? "near" : "near-testnet"} ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
+  return [`CARD ${recordKey(network)} / live: PASS`, "Money path: yes", ...txs.map((t) => `Tx: ${network === "mainnet" ? "near" : "near-testnet"} ${t.hash} ${t.signer}`), "", ...prose, ""].join("\n");
 }
 
 /**
@@ -1119,9 +1122,14 @@ async function record(argv: string[]) {
 }
 
 /** Where record writes: the run's folder, named as the money gate's records are (scripts/live-checks/<card>[.testnet].{run.json,md}). */
+/** The record's key: the card's on mainnet, its own on testnet (the rehearsal), so the money gate reads each under its own name. */
+export function recordKey(network: Network): string {
+  return network === "mainnet" ? CARD : `${CARD}-testnet`;
+}
+
 export function recordFiles(dir: string, network: Network) {
-  const suffix = network === "mainnet" ? "" : ".testnet";
-  return { run: path.join(dir, `${CARD}${suffix}.run.json`), md: path.join(dir, `${CARD}${suffix}.md`) };
+  const key = recordKey(network);
+  return { run: path.join(dir, `${key}.run.json`), md: path.join(dir, `${key}.md`) };
 }
 
 function flags(argv: string[], required: string[], optional: string[] = [], booleans: string[] = []): Record<string, string> {
