@@ -14,7 +14,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   deposit: ok("Deposit", "R5 app.js:626 (dseg); src/screens/signin/words.ts"),

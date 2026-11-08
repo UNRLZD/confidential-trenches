@@ -16,7 +16,6 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
-const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   discover: ok("Discover", "R5 app.js nav (S1 top bar) and discover-1440.html title"),
