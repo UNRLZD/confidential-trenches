@@ -7744,3 +7744,16 @@ test("GS13 a route above the hidden two-hop whose swap does not fit hides it fro
   // control: the two-hop's twice answered, it fills and is the best that fits, so the 0.3% is held below it
   assert.deepEqual(await buy(v3at(3000), noFit(spammed(price, () => false)), noFit(spammed(price, () => false))), below);
 });
+
+test("GS14 a hidden listed two-hop within the slippage of a route through an unlisted hook refuses it by name", async () => {
+  // delta review of 7904e159: the listed-within-slippage check sees the routes dropped as out of gas. The bought route
+  // goes through a hook the venue does not list at 3 a wei; the listed two-hop through USDC gives a hair under it and its
+  // read at twice runs out of gas alone, so it may be a partial fill: whether a listed route is within the slippage is
+  // not known, and the buy is refused out_of_gas (before: below_reference, as if the two-hop filled)
+  const hooked: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: TOKEN, fee: 3000, tickSpacing: 60, hooks: UNPINNED, hookData: "0x" }] };
+  const price = (p: Pool) => (p.venue === "v4" && p.hops === 1 && p.hooks[0]?.toLowerCase() === UNPINNED.toLowerCase() ? 3n * p.amount : p.venue === "v3" && p.hops === 2 ? 3n * p.amount - p.amount / 1000n : null);
+  const twoHop = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  assert.deepEqual(await buy(hooked, spammed(price, twoHop), spammed(price, twoHop)), { accepted: false, code: "out_of_gas" });
+  // control: the two-hop's twice answered, it fills, and the listed route within the slippage holds the hooked one
+  assert.deepEqual(await buy(hooked, spammed(price, () => false), spammed(price, () => false)), below);
+});

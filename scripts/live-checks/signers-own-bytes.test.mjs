@@ -71,6 +71,11 @@ test("facts reads each line by the bundle's shape, with the registry's own names
     assert.ok(all.includes(from), from);
     assert.equal(facts("", all.replace(from, to)).carries[TEARDOWN], false, to);
   }
+  // the teardown taking the burn list (card sol-rent-back-dust-burn: a seventh argument, an empty list by default, put
+  // in the reads only when it names an account) carries every line
+  const burnt = all.replace("async function J(e,t,n,r,i,a){", "async function J(e,t,n,r,i,a,b=[]){").replace("...o===void 0?{}:{unclaimed:o}};", "...o===void 0?{}:{unclaimed:o},...b.length?{burn:b}:{}};");
+  assert.notEqual(burnt, all);
+  assert.deepEqual(Object.values(facts("", burnt).carries), MARKS.map(() => true));
   // the rent back checking or signing the frames' own wires (main 53921971's shape), or not checking again: its line FAILs
   for (const [from, to] of [["return KE(l.wires,p,l.reads),{keep:l.plan.keep,signed:await a(l.wires),", "return KE(l.frames.map(e=>e.wire),p,l.reads),{keep:l.plan.keep,signed:await a(l.frames.map(e=>e.wire)),"], ["signed:await a(l.wires),", "signed:await a(l.frames.map(e=>e.wire)),"], ["return KE(l.wires,p,l.reads),{", "return{"], ["l=await J(", "l=await Q("]]) {
     assert.ok(all.includes(from), from);

@@ -46,9 +46,9 @@ const COPY = (own) =>
 const LEG = (reg) => new RegExp(`,(${I})\\.ok\\?\\(${esc(reg)}\\((${I}),(${I})\\),\\{leg:${I},rec:${I},assembled:\\2,checked:\\3,`);
 // the teardown: the kit's checked teardown copies each frame's wire before it simulates, refuses a frame whose wire the
 // simulation changed (review 5 F6), checks those copies and returns them as wires; the flow registers those copies,
-// after the checks pass, before it signs
+// after the checks pass, before it signs; its seventh argument, the burn list (card sol-rent-back-dust-burn), is optional
 const TEARDOWN_CHECKED = new RegExp(
-  `async function (${I})\\(${I},${I},(${I}),(${I}),${I},(${I})\\)\\{let ${I}=async\\((${I}),(${I})\\)=>\\{let (${I})=${I}\\(${I},\\5,${I}\\),(${I})=\\7\\.map\\((${I})=>Uint8Array\\.from\\(\\9\\.wire\\)\\),(${I})=\\{accounts:\\2,wallet:\\3,simulations:await \\4\\(\\7\\)` +
+  `async function (${I})\\(${I},${I},(${I}),(${I}),${I},(${I})(?:,${I}=\\[\\])?\\)\\{let ${I}=async\\((${I}),(${I})\\)=>\\{let (${I})=${I}\\(${I},\\5,${I}\\),(${I})=\\7\\.map\\((${I})=>Uint8Array\\.from\\(\\9\\.wire\\)\\),(${I})=\\{accounts:\\2,wallet:\\3,simulations:await \\4\\(\\7\\)` +
     `[^;]{0,80}?\\};return \\7\\.forEach\\(\\((${I}),(${I})\\)=>\\{let (${I})=\\11\\.wire,(${I})=\\8\\[\\12\\];\\13 instanceof Uint8Array&&\\13\\.length===\\14\\.length&&\\13\\.every\\(\\((${I}),(${I})\\)=>\\15===\\14\\[\\16\\]\\)\\|\\|${I}\\(\`teardown frame \\$\\{\\12\\} changed while it simulated\`\\)\\}\\),` +
     `\\{plan:\\5,frames:\\7,wires:\\8,reads:\\10,verdict:${I}\\(\\8,${I},\\10\\)\\}\\}`,
 );

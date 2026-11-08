@@ -4,7 +4,10 @@
 // 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), dark and light colour schemes (the terminal is dark only). Per shot:
 // the state's marker is on screen, no horizontal scroll, no request off the page's host, no row wider than its column,
 // hostile token text drawn as text, and the draft words drawn are listed. At 1440 each column shows 9 full rows (S5.7).
-// Behaviour: the phone tabs switch the one list; Retry on S5.5 asks the caller to read again.
+// Behaviour: the phone tabs switch the one list; Retry on S5.5 asks the caller to read again; a refresh that puts a new
+// token on top of every column (page.tsx __reorder) draws it first and moves no drawn row: each row's element keeps its
+// box, and no row, row link or element outside the rows shifts, in all four columns at 1440 and on each of the four
+// tabs at 390 (card app-discover-rows-hold; a slot's content re-laid out for its new token is the update, on a NOTE line).
 //   node apps/terminal/test/discover-screens/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -69,6 +72,7 @@ function serve(dir) {
 }
 
 const fails = [];
+const notes = [];
 const drafts = new Map();
 const check = (ok, what) => {
   if (!ok) fails.push(what);
@@ -82,6 +86,64 @@ async function openAt(browser, w, scheme, f) {
   await page.goto(`${BASE}/?f=${f}`);
   await page.waitForSelector(".dsc");
   return { ctx, page, external };
+}
+
+// the reordered read's new top token (page.tsx TOP_TOKEN)
+const TOP_TOKEN = "TopNewRow1111111111111111111111111111111111";
+
+/** Opens the rows fixture (on `tab` at 390), lets the refresh draw the reordered read, and checks no drawn row moved. */
+async function reorderCheck(browser, w, tab) {
+  const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
+  await ctx.addInitScript(() => {
+    window.__shifts = [];
+    try {
+      new PerformanceObserver((l) => {
+        const r = (b) => `${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`;
+        // a source inside a row's own content (not the row, not its link) is that slot's new token laid out: a cell
+        const cell = (n) => {
+          const el = n?.nodeType === 1 ? n : n?.parentElement;
+          const item = el?.closest('[role="listitem"]');
+          return !!item && el !== item && el.parentElement !== item;
+        };
+        for (const e of l.getEntries()) for (const x of e.sources ?? []) window.__shifts.push({ cell: cell(x.node), text: `${x.node?.nodeName?.toLowerCase() ?? "?"}${x.node?.className ? `.${String(x.node.className).split(" ")[0]}` : ""} ${r(x.previousRect)} -> ${r(x.currentRect)}` });
+      }).observe({ type: "layout-shift", buffered: true });
+    } catch {}
+  });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/?f=rows`);
+  await page.waitForSelector(`${box(w.name)} [data-state="S5.2"] [role="listitem"]`);
+  if (tab) await page.locator(`.dsc-tab[data-tab="${tab}"]`).click();
+  // past the browser's 500 ms input window, so a shift after the refresh is never discounted as following the tap
+  await page.waitForTimeout(700);
+  const rowsSel = `${box(w.name)} [role="listitem"]`;
+  const before = await page.evaluate((sel) => {
+    window.__shifts = [];
+    return [...document.querySelectorAll(sel)].map((e, i) => {
+      e.__slot = i;
+      const b = e.getBoundingClientRect();
+      return [b.x, b.y, b.width, b.height];
+    });
+  }, rowsSel);
+  await page.evaluate(() => window.__reorder());
+  await page.waitForTimeout(400);
+  const after = await page.evaluate((sel) => ({
+    kept: [...document.querySelectorAll(sel)].filter((e) => e.__slot !== undefined).map((e) => [e.__slot, (({ x, y, width, height }) => [x, y, width, height])(e.getBoundingClientRect())]),
+    firsts: [...document.querySelectorAll(`${sel.split(" ")[0]} .dsc-rows`)].filter((c) => c.getClientRects().length).map((c) => c.querySelector('[role="listitem"]')?.getAttribute("data-token") ?? null),
+    shifts: window.__shifts,
+  }), rowsSel);
+  const tag = `@${w.name}${tab ? ` tab ${tab}` : ""} refresh`;
+  const want = w.name === "390" ? 1 : 4;
+  check(after.firsts.length === want && after.firsts.every((t) => t === TOP_TOKEN), `${tag}: the new top token drawn first in ${after.firsts.filter((t) => t === TOP_TOKEN).length} of ${want} list(s) (${JSON.stringify(after.firsts)})`);
+  const moved = after.kept.filter(([i, b]) => b.some((x, j) => Math.abs(x - before[i][j]) > 0.5));
+  check(before.length > 0 && after.kept.length === before.length && moved.length === 0, `${tag}: the refresh moved drawn rows: ${after.kept.length}/${before.length} kept, ${moved.length} moved (${moved.slice(0, 3).map(([i, b]) => `row ${i} y ${before[i][1].toFixed(1)} -> ${b[1].toFixed(1)}`).join(", ")})`);
+  // no row, no row's link and nothing outside the rows moved; content inside a slot that now holds another token (its
+  // name after a shorter symbol, its pills after another age) is the update, named on a NOTE line
+  const els = after.shifts.filter((x) => !x.cell && !x.text.startsWith("#text"));
+  check(els.length === 0, `${tag}: the refresh shifted ${els.length} element(s): ${els.slice(0, 5).map((x) => x.text).join(" | ")}`);
+  const cells = [...new Set(after.shifts.filter((x) => x.cell).map((x) => x.text.split(" ")[0]))];
+  if (cells.length) notes.push(`${tag}: the slots' new content re-laid out in its cells: ${cells.join(", ")}`);
+  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `refresh-${w.name}${tab ? `-${tab}` : ""}.png`) });
+  await ctx.close();
 }
 
 let BASE = "";
@@ -143,6 +205,8 @@ try {
       check(calls.length === 1 && calls[0].kind === "retry", `@${w.name}: Retry posted ${JSON.stringify(calls)}`);
       await ctx.close();
     }
+    // behaviour: a refresh that reorders every list moves no drawn row (all four columns; each tab on the phone)
+    for (const tab of w.name === "390" ? ["new", "trending", "hot", "graduating"] : [null]) await reorderCheck(browser, w, tab);
     // behaviour: the phone tabs hold one list at a time, each its column's rows
     if (w.name === "390") {
       const { ctx, page } = await openAt(browser, w, "dark", "rows");
@@ -162,6 +226,7 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
+for (const x of notes) console.log(`NOTE ${x}`);
 for (const [d, ids] of [...drafts].sort()) console.log(`draft copy on screen: ${d} (${[...ids].join(", ")})`);
 if (fails.length) {
   for (const f of fails) console.log(`FAIL ${f}`);

@@ -12,6 +12,9 @@
 //   label (w), the program's optional pair since d3edab1 (deposit.rs:72-76).
 // - the program refuses a value below MIN_DEPOSIT (lib.rs:78), a precommitment at or above p or 0, and a precommitment
 //   whose mark exists; the builder refuses the first three itself, so it never hands out a message that cannot land.
+// - the builder also refuses a value under solanaPoolNoteFloor at the rent read (audit S-01): the program takes any
+//   note from MIN_DEPOSIT, but one under the smallest release costs more to get out than it holds, and with no ragequit
+//   and no merge it would stay in the pool at a loss.
 // - the builder passes all 8 accounts: a deposit planned at a page's last slot (size 1023 mod 1024) that an insert
 //   overtakes writes its entry on the next page and lands (state::page_for takes the next page only when the page the
 //   size named is not the entry's).
@@ -26,7 +29,7 @@ import { solanaProgramAddress } from "../../checks/solana/message.ts";
 import { SOLANA_SYSTEM_PROGRAM } from "../../checks/solana/checks.ts";
 import { VAULT_FIELD_P } from "../../vault/shapes.ts";
 import { solanaCompileV0, type SolanaApiInstruction } from "./build.ts";
-import { solanaPoolAccount, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
+import { solanaPoolAccount, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE_ENTRIES, solanaRentMin, type SolanaRent } from "./pool-buy.ts";
 
 /**
  * How near its page's end (entries from the size read to the page's last slot, inclusive: 1 at slot 1,023) a tree's
@@ -50,6 +53,22 @@ export const SOLANA_POOL_MIN_DEPOSIT = 1_000_000n;
 export const SOLANA_POOL_PRE_MARK_LEN = 17;
 export const SOLANA_POOL_PAGE_ENTRY = 72;
 export const SOLANA_POOL_PAGE_HEADER = 16;
+
+/**
+ * The smallest note the kit builds a deposit of (audit S-01), at `rent` (the Rent sysvar read on two RPCs,
+ * readSolanaRent): the smallest chunk one release can take whole at the kit's relay fee F (solanaPoolFee, the fee our
+ * relay path charges on every release, page opening or not: the page reserve inside it pays for openings), as
+ * contracts/pool-solana/src/lib.rs:52-57 puts it, max(rent(0) + F, 2 x F): W left rent-exempt, and the backstop's
+ * withdrawnValue >= 2 x relay_fee met. Under it a note costs more to get out than it holds. The exact cost at the rent
+ * read, no headroom added: read from the rent, never a constant, so a rent change moves it. Never under MIN_DEPOSIT.
+ * 2,600,000 lamports at mainnet rent (5,080 a byte, read 2 Nov 2026: F 1,300,000), the signing page's withdrawNoteFloor.
+ */
+export function solanaPoolNoteFloor(rent: SolanaRent): bigint {
+  const fee = solanaPoolFee(rent);
+  const kept = solanaRentMin(rent, 0) + fee;
+  const chunk = 2n * fee > kept ? 2n * fee : kept;
+  return chunk > SOLANA_POOL_MIN_DEPOSIT ? chunk : SOLANA_POOL_MIN_DEPOSIT;
+}
 
 // the pool account (src/state.rs Pool::store): "bfpool01", then the trees, each size u64 LE ‖ depth u8 ‖ 33 x 32
 const POOL_LEN = 2179;
@@ -126,10 +145,14 @@ function checkPrecommitment(p: unknown): bigint {
 }
 
 /** The tag 1 instruction of one note by `depositor` into the pool of `program`, at the trees' sizes now, naming each
- *  tree's next page. */
-export function solanaPoolDepositIx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }): SolanaApiInstruction {
+ *  tree's next page. A value under solanaPoolNoteFloor at `rent` (the Rent sysvar read on two RPCs) is refused,
+ *  naming the floor. */
+export function solanaPoolDepositIx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }, rent: SolanaRent): SolanaApiInstruction {
   const { value, precommitment } = note;
   if (typeof value !== "bigint" || value < SOLANA_POOL_MIN_DEPOSIT || value >= U64) refuse(`the value is not a u64 at or above ${SOLANA_POOL_MIN_DEPOSIT}`);
+  if (rent === null || typeof rent !== "object" || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) refuse("the rent is not a Rent sysvar read");
+  const floor = solanaPoolNoteFloor(rent);
+  if (value < floor) refuse(`the value ${value} is under the release floor of ${floor} lamports at this rent: the note would cost more to release than it holds`);
   const pre = be32(checkPrecommitment(precommitment));
   return {
     program,
@@ -148,9 +171,10 @@ export function solanaPoolDepositIx(program: string, depositor: string, note: So
 }
 
 /** The deposit as an unsigned v0 transaction, `depositor` its one signer and fee payer: the wire bytes with its
- *  signature slot zeroed, for the depositor to sign and the caller to simulate on two RPCs first. */
-export function solanaPoolDepositTx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }, blockhash: string): { message: Uint8Array; wire: Uint8Array } {
-  const { message } = solanaCompileV0(depositor, [solanaPoolDepositIx(program, depositor, note, sizes)], blockhash, []);
+ *  signature slot zeroed, for the depositor to sign and the caller to simulate on two RPCs first. `rent` is
+ *  solanaPoolDepositIx's: a value under its floor is refused. */
+export function solanaPoolDepositTx(program: string, depositor: string, note: SolanaPoolDepositNote, sizes: { stateSize: number; labelSize: number }, blockhash: string, rent: SolanaRent): { message: Uint8Array; wire: Uint8Array } {
+  const { message } = solanaCompileV0(depositor, [solanaPoolDepositIx(program, depositor, note, sizes, rent)], blockhash, []);
   const wire = new Uint8Array(1 + 64 + message.length);
   wire[0] = 1;
   wire.set(message, 65);

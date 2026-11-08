@@ -40,18 +40,24 @@
 //   no-prf run (hasPrf false; card wallet-typed-words, 06b ses.4, ses.5, ses.12, W:914): Create passkey stores a random
 //     seed, wrapped, with code_saved false and goes on in the same visit to the backup screen (data-signin="backup")
 //     with its account and 12 words drawn (counted, never read). Copy, Saved and Backup take Sign out's activation
-//     guard: a mouse press on Copy and one on Saved, each within 500 ms of it drawn, do nothing (no clipboard write,
+//     guard: a mouse press on Copy (on that screen) and one on Saved (on a backup screen drawn anew: a reload, then
+//     Backup), each within 500 ms of it drawn, do nothing (no clipboard write,
 //     counted by a wrapper on writeText that never reads the text); after the window Copy writes once and Saved signs
 //     in as the same account with code_saved true and Sign out drawn. On the reload with a planted unsaved seed, a press
 //     on Backup within 500 ms of it drawn draws no words, and one after the window opens the backup with 12 words. In a fresh store, Recovery code with words that fail the BIP-39 checksum shows
 //     "invalid-code" and stores nothing; the 12 words of A.8's seed (16 zero bytes, built from the pinned BIP-39 list)
 //     sign in as A.8's T_0, the check's own derivation, with code_saved true.
+//   Every press meant to land within 500 ms (Sign out's mouse press and Tab then Enter, the three triggers, the burst,
+//     the phone's tap, Copy, Saved, Backup) that lands at or past it tested nothing, so it is made again on a fresh draw
+//     (its own setup: a reload, a new trigger, a backup screen drawn anew), 3 tries at most (card live-press-window-retry,
+//     sign live run 42499353181: Backup pressed at 547 ms). A try inside the window is the step's, held or not; one that
+//     never lands inside ends the check INCONCLUSIVE with each try's ms, unless a line is BAD.
 // After: sign
 //   node scripts/live-checks/wallet-passkey-prf.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-passkey-prf.mjs --harness [--site <dir>] ...   the same steps on the app's browser
 //     harness (apps/terminal/test/harness) with SIGN_HOST's real name mapped to it, serving SIGN_HOST's build
 //     (index.html and public/, as the deploy copies them) or <dir>, under that build's own _headers
-//   PASS exit 0, FAIL exit 1, error exit 2
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // Records hold public values only (states, the public account ids, rp ids): never the PRF output, the entropy, the
 // words or a key. Every seed is a throwaway virtual authenticator's, never funded and never printed.
 import "../net-window.mjs";
@@ -139,11 +145,43 @@ const DRAWN = () => {
   }).observe(document, { childList: true, subtree: true });
 };
 
+// ------------------------------------------------------------------------------------------------ the windows
+// A press meant to land inside the guard's 500 ms, by what its window reads (card live-press-window-retry). One that
+// lands at or past it tests nothing, held or not, so the probe presses it again on a fresh draw, TRIES times at most,
+// and the judge reads one that never landed inside as INCONCLUSIVE, naming each try's ms. The probe and the judge share
+// these: only a press that missed the window is pressed again, and a try inside it is the step's, whatever it did.
+export const TRIES = 3;
+const r0 = (x) => Math.round(x);
+export const WINDOW = Object.freeze({
+  // withinMs: the press from its control drawn (an upper bound of its distance from the page's guard time)
+  press: { keys: ["withinMs"], inside: (t) => t.withinMs < PROTECT_MS, ms: (t) => `${r0(t.withinMs)} ms` },
+  // withinMs: the press from the trigger; sinceDrawMs: the trigger from Sign out drawn
+  trigger: { keys: ["withinMs", "sinceDrawMs"], inside: (t) => t.withinMs < PROTECT_MS && t.sinceDrawMs >= PROTECT_MS, ms: (t) => `${r0(t.withinMs)} ms, drawn ${r0(t.sinceDrawMs)} ms before` },
+  // the burst's two clicks from Sign out drawn, and the gap between them
+  burst: { keys: ["firstMs", "secondMs", "gapMs"], inside: (t) => t.firstMs < PROTECT_MS && t.secondMs >= PROTECT_MS && t.gapMs < PROTECT_MS, ms: (t) => `${r0(t.firstMs)} ms, ${r0(t.secondMs)} ms, gap ${r0(t.gapMs)} ms` },
+});
+/** A step holds its window's times; and its press was made, on its control, with them read. */
+const read = (kind, t) => WINDOW[kind].keys.every((k) => Number.isFinite(t?.[k]));
+const timed = (kind, t, on) => t?.pressed === true && t?.pressOn === on && read(kind, t);
+
 // ------------------------------------------------------------------------------------------------ the verdict
 const HEX64 = /^[0-9a-f]{64}$/;
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as app-chart-live's. */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+/** The check on one recorded run: { verdict: PASS | FAIL | INCONCLUSIVE, pass, lines }. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  // a press meant for the window: inside it, held(t) is the line as before; made on its control but never inside in
+  // its tries, INCONCLUSIVE with each try's ms; not made, or not on its control, BAD. state: what the page showed after.
+  const windowed = (kind, t, on, held, text, state) => {
+    const w = WINDOW[kind];
+    if (timed(kind, t, on) && !w.inside(t)) {
+      const tries = [...(t.missed ?? []), t];
+      const n = tries.length;
+      lines.push(`INCONCLUSIVE ${text}: no press landed inside the 500 ms window in ${n} ${n === 1 ? "try" : "tries"} (${tries.map(w.ms).join("; ")}), so the guard was not tested (${state})`);
+    } else say(timed(kind, t, on) && w.inside(t) && held(t), `${text} (${read(kind, t) ? w.ms(t) : "no press"}, ${state})`);
+  };
   const p = rec.prf ?? {};
   const s = p.steps ?? {};
   const A = s.create?.account;
@@ -172,29 +210,25 @@ export function judge(rec) {
   const rps = p.credentials ?? [];
   say(rps.length === 1 && rps[0].rpId === SIGN_HOST, `prf: one passkey, rp.id ${rps.map((c) => c.rpId).join(", ") || "none"}`);
   say(p.prfOk === true && HEX64.test(p.expected ?? "") && p.expected === A, `prf: the account is T_0 of the passkey's PRF output, derived apart from the kit (${p.expected === A ? "equal" : "differs"})`);
-  const ignored = (t, who) => t?.pressed === true && t?.pressOn === "signout" && t?.withinMs < PROTECT_MS && t?.after?.state === "signed-in" && t?.after?.account === who && HEX64.test(who ?? "");
-  const ms = (t) => (typeof t?.withinMs === "number" ? `${Math.round(t.withinMs)} ms` : "no press");
-  const pr = p.protect ?? {};
-  say(ignored(pr.mouse, A), `prf: a mouse press within 500 ms of Sign out shown does nothing (${ms(pr.mouse)}, ${pr.mouse?.after?.state})`);
-  say(ignored(pr.enter, A), `prf: Tab then Enter within 500 ms of Sign out shown does nothing (${ms(pr.enter)}, ${pr.enter?.after?.state})`);
-  const tg = p.triggers ?? {};
-  for (const k of ["visibilitychange", "pageshow", "focus"]) {
-    const t = tg[k];
-    say(ignored(t, A) && t?.sinceDrawMs >= PROTECT_MS,
-      `prf: a press within 500 ms after ${k} does nothing (${ms(t)}${t?.kind ? `, ${t.kind}` : ""}, drawn ${typeof t?.sinceDrawMs === "number" ? Math.round(t.sinceDrawMs) : "?"} ms before, ${t?.after?.state})`);
-  }
   // a press on Sign out that left the same account signed in
   const kept = (t, who) => t?.pressed === true && t?.pressOn === "signout" && t?.after?.state === "signed-in" && t?.after?.account === who && HEX64.test(who ?? "");
+  const pr = p.protect ?? {};
+  windowed("press", pr.mouse, "signout", (t) => kept(t, A), "prf: a mouse press within 500 ms of Sign out shown does nothing", pr.mouse?.after?.state);
+  windowed("press", pr.enter, "signout", (t) => kept(t, A), "prf: Tab then Enter within 500 ms of Sign out shown does nothing", pr.enter?.after?.state);
+  const tg = p.triggers ?? {};
+  for (const k of ["visibilitychange", "pageshow", "focus"])
+    windowed("trigger", tg[k], "signout", (t) => kept(t, A), `prf: a press within 500 ms after ${k} does nothing`, `${tg[k]?.kind ? `${tg[k].kind}, ` : ""}${tg[k]?.after?.state}`);
   const bu = p.burst ?? {};
-  say(kept(bu, A) && bu.firstMs < PROTECT_MS && bu.secondMs >= PROTECT_MS && bu.gapMs < PROTECT_MS && bu.presses === 2,
-    `prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing (${typeof bu.secondMs === "number" ? `${Math.round(bu.firstMs)} ms, ${Math.round(bu.secondMs)} ms` : "no press"}, ${bu.after?.state})`);
+  windowed("burst", bu, "signout", (t) => kept(t, A) && t.presses === 2,
+    "prf: a burst's second click, past 500 ms from Sign out drawn and within 500 ms of the first, does nothing", bu.after?.state);
   const rp = p.repeat ?? {};
   say(kept(rp, A) && rp.presses === 1 && rp.repeat === true && rp.sinceDrawMs >= PROTECT_MS && (rp.sincePrevMs === null || rp.sincePrevMs >= PROTECT_MS),
     `prf: a repeated Enter on a focused Sign out does nothing (repeat ${rp.repeat}, ${typeof rp.sincePrevMs === "number" ? `${Math.round(rp.sincePrevMs)} ms after the input before` : "no input before"}, ${rp.after?.state})`);
   const ph = rec.phone ?? {};
   const P = ph.create?.account;
   say(ph.create?.state === "signed-in" && HEX64.test(P ?? "") && ph.reload?.account === P, `phone: Create passkey signs in by a tap (${ph.create?.state})`);
-  say(ignored(ph.tap, P), `phone: a tap within 500 ms of Sign out shown does nothing (${ms(ph.tap)}, ${ph.tap?.after?.state})`);
+  windowed("press", ph.tap, "signout", (t) => kept(t, P), "phone: a tap within 500 ms of Sign out shown does nothing", ph.tap?.after?.state);
+  const ms = (t) => (typeof t?.withinMs === "number" ? `${Math.round(t.withinMs)} ms` : "no press");
   const st = ph.still ?? {};
   say(st.pressed === true && st.pressOn === "signout" && st.withinMs >= PROTECT_MS && st.after?.state === "signed-out" && !st.after?.account && st.after?.db === false,
     `phone: a still tap after 500 ms signs out (${ms(st)}, ${st.after?.state}, store ${st.after?.db ? "kept" : "gone"})`);
@@ -205,19 +239,18 @@ export function judge(rec) {
   const c = n.create ?? {};
   say(c.state === "backup" && HEX64.test(c.account ?? "") && c.seed === true && c.seedWrapped === true && c.codeSaved === "false" && c.words === 12,
     `no-prf: Create passkey stores a random seed and opens the backup screen with its 12 words (${c.state}, account ${c.account ? "shown" : "none"}, seed ${c.seed ? "stored" : "none"}, code_saved ${c.codeSaved}, ${c.words ?? 0} words)`);
-  const inWindow = (x, a) => x.pressed === true && x.pressOn === a && typeof x.withinMs === "number" && x.withinMs < PROTECT_MS;
   const ce = n.copyEarly ?? {};
-  say(inWindow(ce, "copy") && ce.after?.copies === 0 && ce.after?.state === "backup",
-    `no-prf: a press on Copy within 500 ms of it drawn copies nothing (${ms(ce)}, ${ce.after?.copies ?? "no"} clipboard write(s))`);
+  windowed("press", ce, "copy", (t) => t.after?.copies === 0 && t.after?.state === "backup",
+    "no-prf: a press on Copy within 500 ms of it drawn copies nothing", `${ce.after?.copies ?? "no"} clipboard write(s)`);
   const se = n.savedEarly ?? {};
-  say(inWindow(se, "saved") && se.after?.state === "backup" && se.after?.codeSaved === "false",
-    `no-prf: a press on Saved within 500 ms of it drawn does nothing (${ms(se)}, ${se.after?.state}, code_saved ${se.after?.codeSaved})`);
+  windowed("press", se, "saved", (t) => t.after?.state === "backup" && t.after?.codeSaved === "false",
+    "no-prf: a press on Saved within 500 ms of it drawn does nothing", `${se.after?.state}, code_saved ${se.after?.codeSaved}`);
   const cl = n.copyLate ?? {};
   say(cl.pressed === true && cl.copies === 1 && cl.state === "backup",
     `no-prf: Copy after the window writes the words to the clipboard once (${cl.copies ?? "no"} write(s), ${cl.state})`);
   const be = n.backupEarly ?? {};
-  say(inWindow(be, "backup") && be.after?.state === "signed-in" && be.after?.words === 0,
-    `no-prf: a press on Backup within 500 ms of it drawn draws no words (${ms(be)}, ${be.after?.state}, ${be.after?.words ?? "no"} words)`);
+  windowed("press", be, "backup", (t) => t.after?.state === "signed-in" && t.after?.words === 0,
+    "no-prf: a press on Backup within 500 ms of it drawn draws no words", `${be.after?.state}, ${be.after?.words ?? "no"} words`);
   const bl = n.backupLate ?? {};
   say(bl.state === "backup" && bl.words === 12 && HEX64.test(bg.account ?? "") && bl.account === bg.account,
     `no-prf: Backup after the window draws the 12 words of the account shown (${bl.state}, ${bl.words ?? 0} words)`);
@@ -231,7 +264,8 @@ export function judge(rec) {
   say(ty.state === "signed-in" && HEX64.test(ty.expected ?? "") && ty.account === ty.expected && ty.codeSaved === "true" && ty.seedWrapped === true,
     `no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true (${ty.state}, ${ty.account === ty.expected ? "equal to the check's own" : "differs"}, code_saved ${ty.codeSaved})`);
   say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})${(rec.errors ?? []).length ? `: ${rec.errors.join("; ")}` : ""}`);
-  return { pass: lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
+  return { verdict, pass: verdict === "PASS", lines };
 }
 
 // ------------------------------------------------------------------------------------------------ the derivation
@@ -350,21 +384,50 @@ async function settled(page) {
     return { state: m.dataset.signin, account: m.dataset.account ?? null, codeSaved: m.dataset.codeSaved ?? null, db, seed, kWrap, seedWrapped, seedIv, localStorage: localStorage.length };
   });
 }
-// A mouse press on each guarded control in turn, at once: each press's time from its control drawn and where it landed,
-// then the page 300 ms after the last (its state, the 12 words drawn, the clipboard writes made so far), shared by all.
-async function earlyPresses(page, actions) {
-  const out = {};
-  for (const action of actions) {
-    const pressed = await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS }).then(() => true, () => false);
-    const t = await page.evaluate((a) => ({ at: globalThis.__ctPresses?.at(-1)?.at ?? null, drawn: globalThis.__ctDrawnAt?.[a] ?? null, pressOn: globalThis.__ctPressOn ?? null }), action);
-    out[action] = { pressed, pressOn: t.pressOn, withinMs: pressed && t.at !== null && t.drawn !== null ? t.at - t.drawn : null };
+// Runs attempt(i), each try on a fresh draw its own setup makes, until its press lands inside the guard's window, TRIES
+// times at most (card live-press-window-retry): only a press made and timed but landed at or past the window is pressed
+// again, so a try inside it is the step's whatever the page did. The step is the last try's, with the earlier tries'
+// times (missed) for the INCONCLUSIVE line.
+async function inWindow(kind, attempt) {
+  const w = WINDOW[kind];
+  const missed = [];
+  for (let i = 0; ; i++) {
+    const t = await attempt(i);
+    if (t.pressed !== true || !w.keys.every((k) => Number.isFinite(t[k])) || w.inside(t) || i === TRIES - 1) return { ...t, missed };
+    missed.push(Object.fromEntries(w.keys.map((k) => [k, t[k]])));
   }
+}
+// The page's seed record, raw: with no argument it is read ({ iv, ct } as byte arrays, or null), with one it is written
+// back as read. Never decrypted; the bytes stay in the check's process and never reach a record.
+function seedRecord(put) {
+  return new Promise((ok, no) => {
+    const r = indexedDB.open("ct-wallet");
+    r.onerror = () => no(r.error);
+    r.onsuccess = () => {
+      const db = r.result;
+      if (put === null) {
+        const g = db.transaction("meta").objectStore("meta").get("seed");
+        g.onsuccess = () => (db.close(), ok(g.result ? { iv: Array.from(g.result.iv), ct: Array.from(new Uint8Array(g.result.ct)) } : null));
+        g.onerror = () => (db.close(), no(g.error));
+        return;
+      }
+      const tx = db.transaction("meta", "readwrite");
+      tx.objectStore("meta").put({ iv: new Uint8Array(put.iv), ct: new Uint8Array(put.ct).buffer }, "seed");
+      tx.oncomplete = () => (db.close(), ok(true));
+      tx.onerror = () => (db.close(), no(tx.error));
+    };
+  });
+}
+// A mouse press on a guarded control at once: its time from the control drawn and where it landed, then the page 300 ms
+// after (its state, the 12 words drawn, the clipboard writes made on this load).
+async function earlyPress(page, action) {
+  const pressed = await page.click(`[data-action="${action}"]`, { timeout: WAIT_MS }).then(() => true, () => false);
+  const t = await page.evaluate((a) => ({ at: globalThis.__ctPresses?.at(-1)?.at ?? null, drawn: globalThis.__ctDrawnAt?.[a] ?? null, pressOn: globalThis.__ctPressOn ?? null }), action);
   await page.waitForTimeout(300);
   const after = await settled(page);
   after.words = await page.locator("[data-words] li").count();
   after.copies = await page.evaluate(() => globalThis.__ctCopies ?? null);
-  for (const action of actions) out[action].after = after;
-  return out;
+  return { pressed, pressOn: t.pressOn, withinMs: pressed && t.at !== null && t.drawn !== null ? t.at - t.drawn : null, after };
 }
 async function click(page, action) {
   const before = await page.evaluate(() => document.getElementById("signin").dataset.signin);
@@ -387,11 +450,10 @@ export function watch(page, errors) {
 }
 
 // Reloads until Sign out is drawn, runs press(at) at once and reads how long after the draw it ended (an upper bound of
-// the press's distance from the page's guard time); a run that ended past 400 ms is tried again, three times at most.
-// A page that signed out is signed in again with the same passkey, so the next step starts signed in.
-async function early(page, press) {
-  let t = {};
-  for (let i = 0; i < 3; i++) {
+// the press's distance from the page's guard time); a press that ended at or past 500 ms is made again on a new reload
+// (inWindow). A page that signed out is signed in again with the same passkey, so the next try starts signed in.
+const early = (page, press) =>
+  inWindow("press", async () => {
     await page.reload();
     const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
     if (!b) return { pressed: false, after: await settled(page) };
@@ -399,17 +461,17 @@ async function early(page, press) {
     const read = await press({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
     const { withinMs, pressOn } = await page.evaluate(() => ({ withinMs: performance.now() - globalThis.__ctDrawn, pressOn: globalThis.__ctPressOn ?? null }));
     await page.waitForTimeout(1_000);
-    t = { pressed: true, withinMs, pressOn, ...read, after: await settled(page) };
+    const t = { pressed: true, withinMs, pressOn, ...read, after: await settled(page) };
     if (t.after.state === "signed-out") await click(page, "use");
-    if (withinMs < 400) break;
-  }
-  return t;
-}
+    return t;
+  });
 
 // With Sign out drawn more than 600 ms ago, fires trigger() (which sets __ctTrig, the trigger's time on the page's
 // clock), then a mouse click on Sign out at once; reads the press's distance from the trigger (an upper bound) and from
-// the draw. A page that signed out is signed in again with the same passkey.
-async function afterTrigger(page, trigger) {
+// the draw. A page that signed out is signed in again with the same passkey. A press that landed at or past 500 ms from
+// the trigger is made again after a new trigger (inWindow).
+const afterTrigger = (page, trigger) => inWindow("trigger", () => afterTriggerOnce(page, trigger));
+async function afterTriggerOnce(page, trigger) {
   const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
   if (!b) return { pressed: false, after: await settled(page) };
   await page.waitForFunction(() => performance.now() - globalThis.__ctDrawn > 600, null, { timeout: WAIT_MS });
@@ -424,11 +486,10 @@ async function afterTrigger(page, trigger) {
 }
 
 // A burst: reload, a click on Sign out 300 ms after the draw (inside the drawn window), then a second once 560 ms have
-// passed since the draw, about 260 ms after the first; tried again (three times at most) when the first landed past
-// 450 ms or the gap reached 400 ms. A page that signed out is signed in again with the same passkey.
-async function burst(page) {
-  let t = {};
-  for (let i = 0; i < 3; i++) {
+// passed since the draw, about 260 ms after the first; made again on a new reload (inWindow) when the first landed at or
+// past 500 ms or the gap reached 500 ms. A page that signed out is signed in again with the same passkey.
+const burst = (page) =>
+  inWindow("burst", async () => {
     await page.reload();
     const b = await page.waitForSelector('[data-action="signout"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
     if (!b) return { pressed: false, after: await settled(page) };
@@ -445,12 +506,10 @@ async function burst(page) {
       return { presses: p.length, firstMs: p[0]?.at - d, secondMs: p[p.length - 1]?.at - d, gapMs: p[p.length - 1]?.at - p[p.length - 2]?.at, pressOn: globalThis.__ctPressOn ?? null };
     });
     await page.waitForTimeout(1_000);
-    t = { pressed: true, ...m, after: await settled(page) };
+    const t = { pressed: true, ...m, after: await settled(page) };
     if (t.after.state === "signed-out") await click(page, "use");
-    if (m.firstMs < 450 && m.gapMs < 400) break;
-  }
-  return t;
-}
+    return t;
+  });
 
 // A repeated Enter: Sign out focused by script (no input event), drawn and with no input for more than 600 ms, then one
 // CDP keyDown Enter with autoRepeat (the page sees e.repeat true) and its keyUp. A page that signed out is signed in again.
@@ -726,10 +785,33 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       record.noPrf.open = await settled(page);
       record.noPrf.create = await click(page, "create");
       record.noPrf.create.words = await page.locator("[data-words] li").count();
-      // a press on Copy, then one on Saved, at once: inside the guard's 500 ms from each drawn, nothing happens
-      const early = await earlyPresses(page, ["copy", "saved"]);
-      record.noPrf.copyEarly = early.copy;
-      record.noPrf.savedEarly = early.saved;
+      // A fresh backup screen of this seed: a reload (signed in, Backup drawn, the 12 words not saved), then Backup once
+      // its window has passed, which draws the 12 words, Copy and Saved anew.
+      const reopen = async () => {
+        await page.reload();
+        await page.waitForSelector('[data-action="backup"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+        await page.waitForTimeout(PROTECT_MS + 200);
+        await page.click('[data-action="backup"]', { timeout: WAIT_MS }).catch(() => {});
+      };
+      // a press on Copy at once on the backup screen Create opened, then on a fresh one while it lands past the window:
+      // inside the guard's 500 ms from Copy drawn, no clipboard write
+      record.noPrf.copyEarly = await inWindow("press", async (i) => {
+        if (i > 0) await reopen();
+        return earlyPress(page, "copy");
+      });
+      // The seed record as stored now, code_saved false (Copy writes nothing to it): its raw { iv, ct }, never decrypted,
+      // kept in this process only and never in the record. Written back before each Saved press, so one that landed past
+      // the window and marked the words saved is undone before Saved is pressed again.
+      const raw = await page.evaluate(seedRecord, null);
+      const unsaved = () => page.evaluate(seedRecord, raw);
+      // a press on Saved at once, each on a fresh backup screen of the seed not saved: inside its 500 ms, nothing happens
+      record.noPrf.savedEarly = await inWindow("press", async () => {
+        await unsaved();
+        await reopen();
+        return earlyPress(page, "saved");
+      });
+      // a last press past the window that marked the words saved: the seed as it was, on a fresh backup screen
+      if (record.noPrf.savedEarly.after?.state !== "backup") (await unsaved(), await reopen());
       // past the window from the draw and from those presses: Copy writes once, then Saved
       await page.waitForTimeout(PROTECT_MS + 200);
       const copied = await page.click('[data-action="copy"]', { timeout: WAIT_MS }).then(() => true, () => false);
@@ -760,8 +842,16 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const gate = await settled(page);
       gate.signoutButtons = await page.locator('[data-action="signout"]').count();
       record.noPrf.backupGate = gate;
-      // Backup on that page: a press at once draws nothing; one after the window draws the 12 words
-      record.noPrf.backupEarly = (await earlyPresses(page, ["backup"])).backup;
+      // Backup on that seed: a press at once after a reload draws nothing (a new reload while it lands past the window);
+      // one after the window draws the 12 words, on a reload when a last press past the window drew them already
+      record.noPrf.backupEarly = await inWindow("press", async () => {
+        await page.reload();
+        return earlyPress(page, "backup");
+      });
+      if (record.noPrf.backupEarly.after?.state !== "signed-in") {
+        await page.reload();
+        await page.waitForSelector('[data-action="backup"]', { state: "attached", timeout: WAIT_MS }).catch(() => null);
+      }
       await page.waitForTimeout(PROTECT_MS + 200);
       record.noPrf.backupLate = await click(page, "backup");
       record.noPrf.backupLate.words = await page.locator("[data-words] li").count();
@@ -795,11 +885,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const origin = opt("--url");
     const { record } = await probe({ harness, site: opt("--site"), url: origin ? `${origin.replace(/\/$/, "")}/` : undefined });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify(record, null, 1) + "\n");
-    const { pass, lines } = judge(record);
+    const { verdict, lines } = judge(record);
     for (const l of lines) console.log(l);
     for (const e of record.errors) console.log(`    ${e}`);
-    console.log(`${KEY}: ${pass ? "PASS" : "FAIL"} (${record.browser})`);
-    process.exit(pass ? 0 : 1);
+    console.log(`${KEY}: ${verdict} (${record.browser})`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);

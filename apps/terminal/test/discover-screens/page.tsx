@@ -2,7 +2,7 @@
 // snapshot (snapshots.ts) instead of the helper. ?f=<fixture> picks the state; Retry is recorded in window.__calls.
 // Test only.
 import type { SignpageClientSnapshot } from "@blindfill/kit";
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { Discover } from "../../src/screens/discover/Discover.tsx";
@@ -30,9 +30,29 @@ const FIXTURES: Record<string, DiscoverData> = {
   old: { status: "ready", snapshot: { ...solana, as_of_ms: NOW_MS - 2 * 3_600_000 } },
 };
 
+/** A later read of the rows fixture: a new token on top of every column (the newest, the most 1h and 5m volume, the
+ *  furthest on its curve), so each column's drawn rows would each move down a slot if they were keyed by token. */
+const TOP_TOKEN = "TopNewRow1111111111111111111111111111111111";
+const L = solana.lists;
+const reordered: DiscoverData = {
+  status: "ready",
+  snapshot: {
+    ...solana,
+    lists: {
+      new: [{ ...L.new[0]!, token: TOP_TOKEN, symbol: "TOPNEW", created_s: Math.max(...L.new.map((r) => r.created_s ?? 0)) + 1 }, ...L.new],
+      trending: [{ ...L.trending_1h![0]!, token: TOP_TOKEN, symbol: "TOPNEW", vol_1h_usd: "999999999.0" }, ...L.trending_1h!],
+      trending_1h: [{ ...L.trending_1h![0]!, token: TOP_TOKEN, symbol: "TOPNEW", vol_1h_usd: "999999999.0" }, ...L.trending_1h!],
+      trending_5m: [{ ...L.trending_5m![0]!, token: TOP_TOKEN, symbol: "TOPNEW", vol_5m_usd: "999999999.0" }, ...L.trending_5m!],
+      graduating: [{ ...L.graduating![0]!, token: TOP_TOKEN, symbol: "TOPNEW", curve_bps: 9950 }, ...L.graduating!],
+    },
+  },
+};
+
 declare global {
   interface Window {
     __calls: unknown[];
+    /** Draws the reordered read, as Discover's 12 s refresh would (card app-discover-rows-hold). */
+    __reorder?: () => void;
   }
 }
 window.__calls = [];
@@ -48,6 +68,10 @@ const src: SigninSource = { snapshot: signedIn, moneyOn: true, locked: null, hop
 document.documentElement.dataset.fixture = f;
 
 function App() {
+  const [data, setData] = useState<DiscoverData>(FIXTURES[f]!);
+  useEffect(() => {
+    window.__reorder = () => setData(reordered);
+  }, []);
   return (
     <SigninSourceProvider value={src}>
       <SigninSheetProvider>
@@ -55,7 +79,7 @@ function App() {
           <Header />
           <PhoneHeader />
           <main className="screen" data-route="discover">
-            <Discover data={FIXTURES[f]!} nowMs={NOW_MS} onRetry={() => void window.__calls.push({ kind: "retry" })} />
+            <Discover data={data} nowMs={NOW_MS} onRetry={() => void window.__calls.push({ kind: "retry" })} />
           </main>
           <Footer read={FOOTER_READ} />
           <TabBar />
