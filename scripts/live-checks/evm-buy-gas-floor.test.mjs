@@ -1,6 +1,6 @@
 // Replays card evm-buy-gas-floor's live check on its recorded answers (evm-buy-gas-floor.answers.json).
-// Good: `good`, a real run (2026-11-08 07:47Z) of the check: every pinned pool reads BUY_SWAP_GAS() 500000 on two
-// providers, and the kit's swap read, from the pool at the 476,190 cap, fits on Base's and Robinhood's two providers,
+// Good: `good`, a real run (2026-11-08T08:37Z) of the check: every pinned pool reads BUY_SWAP_GAS() 500000 on two
+// providers, and the kit's swap read (its evmBuySwapFitCall at each provider's latest block), from the pool at the 476,190 cap, fits on Base's and Robinhood's two providers,
 // while at 20,000 it runs out of gas in the words the kit maps. Bad: `bad`, the same run with the read sent from
 // 0x...dEaD instead of the pool, as a kit that sent it as any account would: buySwap reverts OnlyPool (0x4b602735) on
 // every provider at both caps.
