@@ -270,6 +270,10 @@ jobs:
   # Eight parts (card sol-rent-back-dust-burn): the signing page's rent back sweep grew to 66 plants, ran 643 s unsplit
   # and was cancelled at the job's limit on pull request #482 (job 128793441224); it runs as three commands of 22
   # plants, each planned at 240 s, and eight plan the heaviest part at 505 s (seven would plan 584 s).
+  # Nine parts (card sol-sell-deposit-back-floor): the rent back's sweep grew to 86 plants, each running the card's
+  # added tests; part 1 of 3 ran 480 s on pull request #501 (job 128896591277) and that job, with part 3 after it, hit
+  # its limit. It runs as six commands of 14 or 15 plants, each planned at CI's 16.6 s a plant, and nine plan the
+  # heaviest part at 536 s (eight would plan 616 s).
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   test-mutants:
     if: github.event_name != 'schedule'
@@ -278,7 +282,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6, 7, 8]
+        part: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

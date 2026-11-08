@@ -59,14 +59,17 @@ export const MUTANT_SECONDS = {
   "packages/signpage: node --test test/kit-version-mutants.test.mjs": 20,
   "packages/signpage: node --test test/pool-price-mutants.test.mjs": 15,
   "packages/signpage: node scripts/held-mutants.mjs": 84,
-  // card sol-rent-back-dust-burn: the rent back's plants in three parts, mutant i in part (i % 3) + 1. CI timed them on
-  // #482 with 22 plants a part (run 42505633746, jobs 128807530871 and 128807530932: 172, 306 and 182 s); card
-  // sol-sell-deposit-back-floor's plants make them 29, 28 and 28 (its run on a local machine, the parts in
-  // series, all 85 killed: 230, 220 and 212 s). Each part is the larger of CI's time a plant times its plants now and
-  // that run's time, rounded up; the plan's heaviest of eight parts 516 s, under 540
-  "packages/signpage: node scripts/rent-back-mutants.mjs 1/3": 230,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 2/3": 390,
-  "packages/signpage: node scripts/rent-back-mutants.mjs 3/3": 232,
+  // card sol-rent-back-dust-burn: the rent back's plants in parts, mutant i in part (i % n) + 1. Card
+  // sol-sell-deposit-back-floor's 86 plants, each running its added tests, took 480 s for part 1/3 (29 plants) and
+  // 404 s for 2/3 on CI (PR #501, run 42534763044, jobs 128896591277 and 128896591441), where main f0c99b56's 22
+  // plants a part took 199, 305 and 197 s (run 42533405288); two parts in one job ran past its 15 minutes. Six parts
+  // of 14 or 15 plants, each at CI's slowest time a plant (16.6 s) times its plants, rounded up
+  "packages/signpage: node scripts/rent-back-mutants.mjs 1/6": 250,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 2/6": 250,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 3/6": 233,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 4/6": 233,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 5/6": 233,
+  "packages/signpage: node scripts/rent-back-mutants.mjs 6/6": 233,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 1/3": 226,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 2/3": 301,
   "apps/helper: node test/pool-evm/sell-mutants.mjs 3/3": 208,
