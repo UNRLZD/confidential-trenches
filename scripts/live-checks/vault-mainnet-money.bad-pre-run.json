@@ -1,0 +1,10 @@
+{
+  "note": "planted, not a run: the shape of vault-mainnet-money.run.json with placeholder values, for the check's bad answer recorded before any deposit (vault-mainnet-money.bad-pre-run.answers.json, real reads of the vault)",
+  "card": "vault-mainnet-money",
+  "network": "mainnet",
+  "vault": "vault.confidential.unrlzd.near",
+  "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "accounts": { "U": "0000000000000000000000000000000000000000000000000000000000000000", "to": "owner.near", "F": "fees.unrlzd.near", "R": "planted.near", "G": "planted.near" },
+  "deposit": { "value": "5000000", "precommitment": "1", "label": "1", "leaf_index": "0", "commitment": "1" },
+  "withdraw": { "withdrawn": "5000000", "relay_fee": "300000", "nullifier_hash": "1", "change_leaf_index": "1", "change_commitment": "1" }
+}
