@@ -119,10 +119,13 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's forty-eight checks (signpage-shell runs four ways, hosts-main-on-top, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's fifty-one checks (signpage-shell runs four ways, hosts-main-on-top, held-deposit-way-out, pool-deposit-follow, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 48);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 51);
+  assert.ok(sign.include.some((e) => e.key === "pool-senders-next-page" && !e.chrome && e.args === ""), "pool-senders-next-page runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "held-deposit-way-out" && !e.chrome && e.args === ""), "held-deposit-way-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-address" && !e.chrome && e.args === ""), "pool-deposit-address runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "pool-deposit-follow" && !e.chrome && e.args === ""), "pool-deposit-follow runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-withdraw-move-out" && !e.chrome && e.args === ""), "wallet-withdraw-move-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-near-prepay-taken" && !e.chrome && e.args === ""), "wallet-near-prepay-taken runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "evm-sell-no-release-in-flight" && !e.chrome && e.args === ""), "evm-sell-no-release-in-flight runs after every sign deploy");
@@ -152,8 +155,9 @@ test("the signing page's forty-eight checks (signpage-shell runs four ways, host
   assert.deepEqual(sign.include.filter((e) => e.key === "signpage-shell").map((e) => e.args).sort(), ["--engine chromium --live --width desktop", "--engine chromium --live --width phone", "--engine firefox --live --width desktop", "--engine firefox --live --width phone"]);
   const app = await planFor("app", { commit: COMMIT });
   assert.equal(app.include.length, listOf("app", ROOT, { commit: COMMIT, network: "mainnet" }).checks.length, "each app check is one job");
-  assert.equal(app.include.length, 37, "the app's thirty-seven checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock, app-quick-buy-one-tap, app-toast-clears-sheet-head and app-chart-controls the newest");
+  assert.equal(app.include.length, 38, "the app's thirty-eight checks, app-deposit-mount, page-evm-rpc-csp, evm-sell-hook-intrablock, app-quick-buy-one-tap, app-toast-clears-sheet-head, app-chart-controls and deposit-to-pool the newest");
   assert.ok(app.include.some((e) => e.key === "app-deposit-mount" && e.chrome && e.args === ""), "app-deposit-mount runs on APP_HOST in Chrome");
+  assert.ok(app.include.some((e) => e.key === "deposit-to-pool" && e.chrome && e.args === ""), "deposit-to-pool runs on APP_HOST in Chrome");
   assert.ok(app.include.some((e) => e.key === "page-evm-rpc-csp" && !e.chrome && e.args === "--host app"), "page-evm-rpc-csp reads APP_HOST alone after every app deploy");
   assert.ok(app.include.some((e) => e.key === "rh-cold-quote" && e.args === ""), "rh-cold-quote runs after every app deploy");
   assert.ok(app.include.some((e) => e.key === "token-page-fills-after" && e.chrome && e.args === ""), "token-page-fills-after runs after every app deploy, in Chrome");
@@ -231,7 +235,7 @@ test("a check's usage line says the flags it needs: outside [...], with a value 
   assert.deepEqual(missingFor(pool, ""), [{ flag: "--pool", value: true }]);
   assert.deepEqual(missingFor(pool, "--pool"), [{ flag: "--pool", value: true }], "a flag without its value");
   assert.deepEqual(missingFor(pool, "--pool --base x"), [{ flag: "--pool", value: true }]);
-  assert.deepEqual(missingFor(pool, "--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"), []);
+  assert.deepEqual(missingFor(pool, "--pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"), []);
   assert.deepEqual(missingFor([[{ flag: "--host", value: true }], [{ flag: "--release", value: true }]], "--release release-3"), [], "any one form met is enough");
   assert.deepEqual(missingFor([[]], ""), []);
 });
@@ -265,14 +269,14 @@ test("planted: a check that needs --pool listed bare, or with --pool and no valu
   const noUsage = fixture((r) => writeFileSync(path.join(r, "scripts/live-checks/helper-rpc-proxy.mjs"), "console.log('PASS');\n"));
   const good = fixture((r) => {
     withPoolCheck(r);
-    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), runsFile(["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]));
+    writeFileSync(path.join(r, "scripts/ci/helper-live-checks.mjs"), runsFile(["scripts/live-checks/helper-pool-senders.mjs --pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"]));
   });
   try {
     await assert.rejects(planFor("helper", { commit: COMMIT, root: bare }), /runs helper-pool-senders without --pool <value>, which its usage needs/);
     assert.ok(has(await planProblems("helper", bare), /helper: .*runs helper-pool-senders without --pool/));
     await assert.rejects(planFor("helper", { commit: COMMIT, root: noValue }), /without --pool <value>/);
     await assert.rejects(planFor("helper", { commit: COMMIT, root: noUsage }), /helper-rpc-proxy\.mjs has no usage line/);
-    assert.deepEqual((await planFor("helper", { commit: COMMIT, root: good })).include.map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
+    assert.deepEqual((await planFor("helper", { commit: COMMIT, root: good })).include.map((e) => e.args), ["--pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"]);
   } finally {
     for (const r of [bare, noValue, noUsage, good]) rmSync(r, { recursive: true, force: true });
   }
@@ -298,8 +302,8 @@ test("the helper's list gives helper-pool-senders the pool each cluster's deploy
   };
   try {
     assert.deepEqual(poolSenderPlan(root), { runs: [], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist; no Solana devnet pool is deployed: scripts/live-checks/pool-sol-deploy.devnet.json does not exist" });
-    rec("devnet", { cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" });
-    assert.deepEqual(poolSenderPlan(root), { runs: ["scripts/live-checks/helper-pool-senders.mjs --pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist" });
+    rec("devnet", { cluster: "devnet", pool: "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr" });
+    assert.deepEqual(poolSenderPlan(root), { runs: ["scripts/live-checks/helper-pool-senders.mjs --pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"], notApplicable: "no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist" });
     rec("mainnet", { cluster: "mainnet", pool: "D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef" });
     assert.deepEqual(poolSenderPlan(root).runs.length, 2);
     assert.equal(poolSenderPlan(root).notApplicable, null);
@@ -324,13 +328,13 @@ test("the plan runs helper-pool-senders on each cluster with a record and lists 
       edit(r);
     });
   const none = real(() => {});
-  const devnet = real((r) => writeFileSync(path.join(r, "scripts/live-checks/pool-sol-deploy.devnet.json"), JSON.stringify({ cluster: "devnet", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" })));
+  const devnet = real((r) => writeFileSync(path.join(r, "scripts/live-checks/pool-sol-deploy.devnet.json"), JSON.stringify({ cluster: "devnet", pool: "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr" })));
   try {
     const a = await planFor("helper", { commit: COMMIT, root: none });
     assert.ok(!a.include.some((e) => e.key === "helper-pool-senders"), "no pool: no run, so nothing crashes on a missing --pool");
     assert.match(a.skipped.find((s) => s.key === "helper-pool-senders" && s.reason === "not-applicable")?.detail ?? "", /no Solana mainnet pool .* no Solana devnet pool/);
     const b = await planFor("helper", { commit: COMMIT, root: devnet });
-    assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr"]);
+    assert.deepEqual(b.include.filter((e) => e.key === "helper-pool-senders").map((e) => e.args), ["--pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"]);
     assert.deepEqual(b.skipped.filter((s) => s.key === "helper-pool-senders").map((s) => s.detail), ["no Solana mainnet pool is deployed: scripts/live-checks/pool-sol-deploy.mainnet.json does not exist"]);
     assert.deepEqual(b.skipped.map((s) => s.key).sort(), ["helper-bind-relayer-mainnet", "helper-pool-senders", "helper-proxy", "relayer-withdraw-fee"], "the whole skips stay skipped");
   } finally {

@@ -6,14 +6,15 @@
 // its 429s, tap to sent 19.88 s, past the kit client's 10 s), and the helper's route refused five reads the pool path
 // makes. With Origin SIGN_HOST it passes only when:
 //   - devnet: getAccountInfo of the devnet pool's account answers 200 owned by the devnet pool program (the route reads
-//     devnet, not mainnet);
+//     devnet, not mainnet); both are today's deploy record's (pool-sol-deploy.devnet.json, read by devnetPin), for a
+//     replay too, so a recording of another program or pool FAILs;
 //   - on both routes, each read the pool path makes beyond the original list (getSlot, getBlockTime,
 //     getSignaturesForAddress, getFeeForMessage) is forwarded: 200 with a JSON-RPC answer for its own id, never 400
 //     method_not_allowed (a provider's JSON-RPC error for the planted arguments still counts);
 //   - on both routes, a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp)
 //     is refused 400 method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with
 //     a dataSize and a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
-//   - devnet: the note restore's exact scan (RESTORE_SCAN, packages/wallet/src/pool/solana-restore.ts solanaMarks: the
+//   - devnet: the note restore's exact scan (restoreScan, packages/wallet/src/pool/solana-restore.ts solanaMarks: the
 //     spent marks' bucket 0 of the devnet pool program) is forwarded: 200 with { context, value: [...] } for its own id
 //     (the box's POOL_SOLANA_PROGRAM_DEVNET is the devnet pool program, else the helper refuses it 400);
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
@@ -23,13 +24,11 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
+import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const KEY = "pool-buy-send-fast";
 export const BASE = "https://ct-api.unrealized.trade";
 export const SIGN = "https://confidential.unrealized.trade";
-/** The devnet pool (scripts/live-checks/pool-sol-deploy.devnet.json) and its program. */
-export const DEVNET_POOL = "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr";
-export const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
 export const PACE_READS = 6;
 /** [design: 1 s: a public endpoint at 1 request a second answers every other read of a run like this 429, and a
  *  keyed provider answers a getSlot in tens of ms; the median keeps one slow read from deciding.] */
@@ -41,17 +40,19 @@ const FEE_MESSAGE = Buffer.concat([Buffer.from([1, 0, 0, 1]), Buffer.alloc(32, 1
 /** The reads the pool path makes beyond the route's first list (packages/signpage/src/pool-buy.ts getSlot, pool-spend.ts
  *  getSignaturesForAddress, pool-deposit.ts getFeeForMessage, wallet pool/solana.ts getBlockTime), each with arguments
  *  that answer small, and a getProgramAccounts scan the helper must refuse (`refused`: an open scan, dataSize alone). */
-export const POOL_READS = [
+export const poolReads = (pin) => [
   { method: "getSlot", params: [{ commitment: "finalized" }] },
   { method: "getBlockTime", params: [1] },
-  { method: "getSignaturesForAddress", params: [DEVNET_POOL, { limit: 1, commitment: "finalized" }] },
+  { method: "getSignaturesForAddress", params: [pin.pool, { limit: 1, commitment: "finalized" }] },
   { method: "getFeeForMessage", params: [FEE_MESSAGE, { commitment: "confirmed" }] },
-  { method: "getProgramAccounts", params: [DEVNET_PROGRAM, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
+  { method: "getProgramAccounts", params: [pin.program, { encoding: "base64", commitment: "finalized", filters: [{ dataSize: 1 }] }], refused: true },
 ];
+/** Today's: the reads a live run makes. */
+export const POOL_READS = poolReads(devnetPin());
 export const ROUTES = ["solana-devnet", "solana"];
 /** The restore's request for the devnet pool's spent marks, bucket 0, as solanaMarks sends it (no minContextSlot on a
  *  first read). */
-export const RESTORE_SCAN = [DEVNET_PROGRAM, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
+export const restoreScan = (pin) => [pin.program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
 
 const json = (t) => {
   try {
@@ -62,8 +63,11 @@ const json = (t) => {
 };
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor((xs.length - 1) / 2)];
 
-/** The check on one recorded run: { reads: [{ route, kind: "pool" | "owner" | "pace" | "restore", method, id, ms, status, headers, body }] }. */
+/** The check on one recorded run: { deployment, reads: [{ route, kind: "pool" | "owner" | "pace" | "restore", method, id, ms, status, headers, body }] },
+ *  against today's devnet pin (devnetPin()), the one a live run reads: a recorded run is judged on it too, so reads of
+ *  another program or pool FAIL; its own `deployment` is what it was read for, never its judge. */
 export function judge({ reads }) {
+  const pin = devnetPin();
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const headersOk = (r, tag) => {
@@ -75,7 +79,7 @@ export function judge({ reads }) {
   if (!owner) say(false, "[solana-devnet getAccountInfo] no read");
   else {
     const b = json(owner.body);
-    say(owner.status === 200 && b?.id === owner.id && b?.result?.value?.owner === DEVNET_PROGRAM, `[solana-devnet getAccountInfo] the devnet pool, owned by ${DEVNET_PROGRAM}: ${owner.status} ${String(b?.result?.value?.owner ?? owner.body.slice(0, 100))}`);
+    say(owner.status === 200 && b?.id === owner.id && b?.result?.value?.owner === pin.program, `[solana-devnet getAccountInfo] the devnet pool ${pin.pool}, owned by ${pin.program}: ${owner.status} ${String(b?.result?.value?.owner ?? owner.body.slice(0, 100))}`);
     headersOk(owner, "[solana-devnet getAccountInfo]");
   }
   for (const route of ROUTES)
@@ -108,7 +112,9 @@ export function judge({ reads }) {
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
+/** The run's reads on HELPER_HOST `base` for today's devnet pin (devnetPin()), as judge reads them. */
 export async function read(base = BASE, fetchFn = fetch) {
+  const pin = devnetPin();
   const reads = [];
   let id = 1;
   const one = async (route, kind, method, params) => {
@@ -128,11 +134,11 @@ export async function read(base = BASE, fetchFn = fetch) {
     reads.push({ route, kind, method, id, readAt: new Date().toISOString(), ms, status: r.status, headers, body: body.length > keep ? body.slice(0, keep) : body });
     id++;
   };
-  await one("solana-devnet", "owner", "getAccountInfo", [DEVNET_POOL, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 } }]);
+  await one("solana-devnet", "owner", "getAccountInfo", [pin.pool, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 } }]);
   for (let i = 0; i < PACE_READS; i++) await one("solana-devnet", "pace", "getSlot", [{ commitment: "confirmed" }]);
-  for (const route of ROUTES) for (const { method, params } of POOL_READS) await one(route, "pool", method, params);
-  await one("solana-devnet", "restore", "getProgramAccounts", RESTORE_SCAN);
-  return { base, reads };
+  for (const route of ROUTES) for (const { method, params } of poolReads(pin)) await one(route, "pool", method, params);
+  await one("solana-devnet", "restore", "getProgramAccounts", restoreScan(pin));
+  return { base, deployment: pin.record, reads };
 }
 
 if (import.meta.main) {

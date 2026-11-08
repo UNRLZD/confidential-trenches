@@ -1,6 +1,6 @@
 // node --test scripts/live-checks/signpage-pool-withdraw-form.test.mjs: the live check replays recorded answers
-// (signpage-pool-withdraw-form.answers.json). bad: a real devnet pool buy read in the withdraw's place: FAIL, a table
-// and no transfer named. none: no run recorded yet: FAIL. Planted on the bad one's SIGN_HOST read: a served /app.js
+// (signpage-pool-withdraw-form.answers.json). bad: a real devnet pool buy read in the release's place and its sell in
+// the onward send's: FAIL, a table and no transfer named. none: no run recorded yet: FAIL. Planted on the bad one's SIGN_HOST read: a served /app.js
 // that is not the pinned one: FAIL. good: the devnet withdraw run as recorded (signpage-pool-withdraw-form.md): PASS.
 // A synthesized good part (the release alone to W, then W's own transfer of the part to To, W at 0) must PASS and
 // each way a part can go wrong, planted on it, must FAIL (review #232b LOW 6).
@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { COMPUTE_BUDGET, judge, PIN, SYSTEM, TO } from "./signpage-pool-withdraw-form.mjs";
+import { devnetPin } from "./pool-sol-deploy.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./signpage-pool-withdraw-form.answers.json", import.meta.url), "utf8"));
 
@@ -18,12 +19,13 @@ test("recorded good answer: the devnet withdraw run, its part's release then W's
   assert.equal(ANSWERS.good.run[0].part, "2177099");
 });
 
-test("recorded bad answer: a devnet pool buy in the withdraw's place: FAIL, its table and its instructions named", () => {
+test("recorded bad answer: a devnet pool buy in the release's place and its sell in the onward send's: FAIL, its table and its instructions named", () => {
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.endsWith("loads a lookup table")), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => l.endsWith("not a tag 2 release of the pinned program")), v.lines.join("\n"));
-  assert.ok(v.lines.some((l) => l.endsWith("(onward): not on both RPCs at finalized")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith(`not a tag 2 release of the pinned program ${devnetPin().program}`)), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("(onward): not W's own send, W its one signer and fee payer")), v.lines.join("\n"));
+  assert.ok(v.lines.some((l) => l.endsWith("(onward): not one System transfer alone")), v.lines.join("\n"));
   assert.ok(!v.lines.some((l) => l.includes("SIGN_HOST")), "SIGN_HOST serves its pinned /app.js");
 });
 
@@ -59,13 +61,15 @@ const wire = (signers, ixs) => {
 };
 const u64 = (v) => Array.from({ length: 8 }, (_, i) => Number((v >> BigInt(8 * i)) & 255n));
 const transfer = (from, to, v) => ({ program: SYSTEM, accounts: [from, to], data: [2, 0, 0, 0, ...u64(v)] });
-const release = { program: PIN.program, accounts: [OTHER, W, PIN.feePayer], data: [2, 0, 0] };
+// today's pin: the synthesized parts are releases on today's devnet pool
+const NOW = devnetPin();
+const release = { program: NOW.program, accounts: [NOW.pool, W, PIN.feePayer], data: [2, 0, 0] };
 const cu = { program: COMPUTE_BUDGET, accounts: [], data: [2, 0, 0x1a, 6, 0] };
 const read = (b64, pre, post) => ({ transaction: [b64, "base64"], meta: { err: null, preBalances: pre, postBalances: post } });
 const both = (r) => [r, structuredClone(r)];
 const relPart = { signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, release]), [], [])) };
 const onPart = (b64, pre = [5_005_000, 0, 1], post = [0, 5_000_000, 1]) => ({ signature: "O".repeat(88), reads: both(read(b64, pre, post)) });
-const GOOD = { sign: ANSWERS.bad.sign, run: [{ part: String(PART), release: relPart, onward: onPart(wire([W], [transfer(W, TO, PART)])) }] };
+const GOOD = { deployment: NOW.record, sign: ANSWERS.bad.sign, run: [{ part: String(PART), release: relPart, onward: onPart(wire([W], [transfer(W, TO, PART)])) }] };
 const failsWith = (a, end) => {
   const v = judge(a);
   assert.equal(v.ok, false, v.lines.join("\n"));
@@ -88,6 +92,10 @@ test("planted on the good part, each way a withdraw part goes wrong: FAIL, named
   failsWith({ ...GOOD, run: [{ ...p, onward: onPart(wire([W], [transfer(W, TO, PART)]), [5_010_000, 0, 1], [5_000, 5_000_000, 1]) }] }, "(onward): W kept lamports");
   // To not the one typed
   failsWith({ ...GOOD, run: [{ ...p, onward: onPart(wire([W], [transfer(W, OTHER, PART)])) }] }, "(onward): the transfer is not from W to To");
+  // the release on another pool than the pin's, or of another program
+  const elsewhere = (r) => ({ signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, r]), [], [])) });
+  failsWith({ ...GOOD, run: [{ ...p, release: elsewhere({ ...release, accounts: [OTHER, W, PIN.feePayer] }) }] }, `(release): the release is not on the pinned pool ${NOW.pool}`);
+  failsWith({ ...GOOD, run: [{ ...p, release: elsewhere({ ...release, program: OTHER }) }] }, `(release): not a tag 2 release of the pinned program ${NOW.program}`);
   // the onward from another wallet than the release's W
   failsWith({ ...GOOD, run: [{ ...p, onward: onPart(wire([OTHER], [transfer(OTHER, TO, PART)])) }] }, "(onward): not W's own send, W its one signer and fee payer");
 });
@@ -112,9 +120,26 @@ test("card live-check-devnet-pair: the second provider answering 503 moves read(
   const run = g.run.map((p) => ({ part: p.part, release: p.release.signature, onward: p.onward.signature }));
   const a = await read(run, fetchFn, [solana, second, helper], async () => {});
   assert.deepEqual(a.run[0].release.on, [solana, helper]);
-  const v = judge(a);
+  // a live read carries today's record; these are the recording's transactions, so its own record judges them
+  assert.deepEqual(a.deployment, NOW.record);
+  const v = judge({ ...a, deployment: g.deployment });
   assert.equal(v.ok, true, v.lines.join("\n"));
-  const one = judge(await read(run, fetchFn, [solana, second], async () => {}));
+  const one = judge({ ...(await read(run, fetchFn, [solana, second], async () => {})), deployment: g.deployment });
   assert.equal(one.ok, false);
   assert.ok(one.lines.some((l) => l.endsWith("(release): not on both RPCs at finalized")), one.lines.join("\n"));
+});
+
+test("the pin is today's: the good recording is on today's pool; a release on the pool before the re-pin (2S5wpE7U) FAILs, whatever deploy record the answer carries", () => {
+  assert.equal(ANSWERS.good.deployment.program_id, NOW.program);
+  assert.equal(ANSWERS.good.deployment.pool, NOW.pool);
+  assert.equal(judge(GOOD).ok, true, judge(GOOD).lines.join("\n"));
+  const BEFORE = { program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" };
+  const old = { program: BEFORE.program, accounts: [BEFORE.pool, W, PIN.feePayer], data: [2, 0, 0] };
+  const before = { signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, old]), [], [])) };
+  // the answer naming the deploy record of that pool, as a recording on it would: still judged on today's pin
+  const oldRecord = { ...NOW.record, program_id: BEFORE.program, pool: BEFORE.pool };
+  for (const deployment of [NOW.record, oldRecord, undefined]) failsWith({ ...GOOD, deployment, run: [{ ...GOOD.run[0], release: before }] }, `(release): not a tag 2 release of the pinned program ${NOW.program}`);
+  // today's program on the pool before the re-pin: refused on the pool
+  const otherPool = { ...release, accounts: [BEFORE.pool, W, PIN.feePayer] };
+  failsWith({ ...GOOD, run: [{ ...GOOD.run[0], release: { signature: "R".repeat(88), reads: both(read(wire([PIN.feePayer, W], [cu, otherPool]), [], [])) } }] }, `(release): the release is not on the pinned pool ${NOW.pool}`);
 });

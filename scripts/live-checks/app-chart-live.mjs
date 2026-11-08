@@ -7,7 +7,10 @@
 //   2. Pick: the candidates' newest 15m bars (the chart's default timeframe; GET /v1/market/candles, limit 2, the
 //      page's own live read) read round after round for PROBE_MS; of the answers that are the helper's own chain reads
 //      (own_from_s: a token the helper opens on its first read has none yet), the token whose last bar changed most
-//      often, at least once.
+//      often, at least once; with none, a token whose tape (GET /v1/market/trades, limit 1, read at the probe's start
+//      and end) took a trade, so a helper whose candles stand while its tape moves is watched and fails. A read the
+//      helper refuses (429) holds that token's reads for its Retry-After. The probe keeps its counts (rounds, reads, the
+//      helper's own answers, answers with none of its own yet, refusals and their longest Retry-After, failed reads).
 //   3. Watch: headless Chromium opens APP_HOST/token/<chain>/<token> at 1440 x 900 and 390 x 844 (dpr 2, touch), finds
 //      the terminal's frame inside SIGN_HOST's shell and reads the library's own last bar (data-last: time and close)
 //      every 250 ms until it changes or WATCH_MAX_MS passes, while Node reads the helper's newest bars each second and
@@ -18,13 +21,17 @@
 //        second cannot hold every bar the page drew); a wrong fold's price fails;
 //      - the helper's bars moved after the chart was ready and the page drew none: FAIL, the page's;
 //      - the helper's bars did not move but its tape took new trades: FAIL, the helper's (candles behind its tape);
-//      - nothing moved: no verdict on the page, pick again, at most TRIES picks; all silent is a FAIL that names the
-//        helper as silent.
+//      - nothing moved, or the probe found no token that moved: no verdict on the page, pick again, at most TRIES picks;
+//        all of them quiet is INCONCLUSIVE, with what the probe read (card app-chart-live-flake: run 42453338800 failed
+//        "the helper was silent in all 3 picks" on three probes that found nothing and watched nothing, 0 s; at 06:12Z a
+//        new Solana token's trades and 15m candles moved within 10 s on the helper, and a probe from the Mac at 06:3xZ
+//        had 16 of 100 candle reads refused 429 with Retry-After 50 to 75 s and 35 answered with none of the helper's
+//        own bars yet). A quiet probe says nothing about the page or the helper, so it is never a FAIL.
 //      At both widths in a watch with a verdict: no reload (one time origin), live reads (limit 2) made, at most one
 //      full read (limit 500) a minute after the first, no console error and no page error in the terminal's frame.
 // A screenshot of every load is kept.
 //   node scripts/live-checks/app-chart-live.mjs [--build <dir>] [--shots <dir>] [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
@@ -74,10 +81,21 @@ export function classify(a) {
   return "silent";
 }
 
-/** The check on one recorded run. */
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2). */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+
+/** What a probe read, as a line says it. */
+export function probeSaid(s) {
+  if (!s) return "the probe kept no counts (a record from before card app-chart-live-flake)";
+  const ra = s.refused ? `, Retry-After up to ${s.retryAfterMaxS ?? "none"} s` : "";
+  return `the probe read candles ${s.reads} times in ${s.rounds} rounds over ${Math.round(s.ms / 1000)} s: ${s.own} the helper's own bars, ${s.vendor} with none of its own yet, ${s.refused} refused (429${ra}), ${s.failed} failed; ${s.tapeMoved} tokens' tape took a trade`;
+}
+
+/** The check on one recorded run: { verdict: PASS | FAIL | INCONCLUSIVE, ok, lines }. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const attempts = rec.attempts ?? [];
   say((rec.candidates ?? []).length > 0 && attempts.length > 0, `${(rec.candidates ?? []).length} listed candidates on ${CHAINS.join(" and ")}; ${attempts.length} picks`);
   for (const [n, a] of attempts.entries()) {
@@ -86,7 +104,9 @@ export function judge(rec) {
     const tag = p ? `pick ${n + 1} ${p.chain}/<token> (${p.symbol}, ${p.changes} changes in the probe)` : `pick ${n + 1}: no candidate's bars moved in the ${PROBE_MS / 1000} s probe`;
     if (kind === "silent") {
       const last = n === attempts.length - 1;
-      say(!last, `${tag}: the helper's own bars and tape did not move in ${Math.round((a.loads?.[0]?.watchedMs ?? 0) / 1000)} s: no verdict on the page${last ? `; the helper was silent in all ${attempts.length} picks` : ", picked again"}`);
+      const what = p ? `the helper's own bars and tape did not move in the ${Math.round((a.loads?.[0]?.watchedMs ?? 0) / 1000)} s watch` : probeSaid(a.probe);
+      if (!last) say(true, `${tag}: ${what}: no verdict on the page, picked again`);
+      else (quiet = true), lines.push(`INCONCLUSIVE ${tag}: ${what}: no verdict on the page or the helper in ${attempts.length} picks`);
       continue;
     }
     if (n !== attempts.length - 1) say(false, `${tag}: a watch with a verdict (${kind}) was followed by another pick`);
@@ -113,7 +133,9 @@ export function judge(rec) {
       say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error`}`);
     }
   }
-  return { ok: lines.every((x) => x.startsWith("ok ")), lines };
+  const bad = lines.some((x) => x.startsWith("BAD"));
+  const verdict = bad ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 // ------------------------------------------------------------------------------------------------ the live read
@@ -121,7 +143,7 @@ const headers = { origin: APP_HOST, "cache-control": "no-cache" };
 const getJson = async (url) => {
   try {
     const r = await fetch(url, { headers });
-    return { status: r.status, body: await r.json().catch(() => null) };
+    return { status: r.status, retryAfter: r.headers.get("retry-after"), body: await r.json().catch(() => null) };
   } catch {
     return { status: 0, body: null };
   }
@@ -131,7 +153,7 @@ const tradesUrl = (chain, token) => `${HELPER_HOST}/v1/market/trades?chain=${cha
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The first PER_CHAIN listed tokens of each chain. */
-async function candidates() {
+export async function candidates() {
   const out = [];
   for (const chain of CHAINS) {
     const l = await getJson(`${HELPER_HOST}/v1/market/lists?chain=${chain}`);
@@ -148,22 +170,71 @@ async function candidates() {
   return out;
 }
 
-/** The candidate whose own newest bar changed most often over PROBE_MS, at least once; null when none moved. */
-async function probe(cands) {
+/** The pick from a probe's counts: the candidate whose own newest bar changed most often, at least once; else the
+ * first whose tape took a trade (`tape`: [newest trade's ms at the start, at the end]); else null. */
+export function pickOf(cands, changes, tape) {
+  let best = null;
+  for (const c of cands) {
+    const n = changes.get(c) ?? 0;
+    if (n > 0 && n > (best?.changes ?? 0)) best = { ...c, changes: n };
+  }
+  if (best) return best;
+  const moved = cands.find((c) => {
+    const [a, b] = tape.get(c) ?? [];
+    return Number.isFinite(a) && Number.isFinite(b) && b > a;
+  });
+  return moved ? { ...moved, changes: 0 } : null;
+}
+
+const newestTrade = async (c) => {
+  const t = await getJson(tradesUrl(c.chain, c.token));
+  return t.status === 200 ? (t.body?.trades?.[0]?.t_ms ?? null) : null;
+};
+
+/** The probe: { pick (pickOf), stats } over PROBE_MS. A refused read (429) holds that token's reads for its Retry-After. */
+export async function probe(cands) {
   const last = new Map();
   const changes = new Map(cands.map((c) => [c, 0]));
-  for (const t0 = Date.now(); Date.now() - t0 < PROBE_MS; await sleep(500)) {
+  const tape = new Map();
+  const held = new Map();
+  const stats = { rounds: 0, reads: 0, own: 0, vendor: 0, refused: 0, retryAfterMaxS: null, failed: 0, tapeMoved: 0, ms: 0 };
+  const t0 = Date.now();
+  for (const c of cands) tape.set(c, [await newestTrade(c)]);
+  for (; Date.now() - t0 < PROBE_MS; await sleep(500)) {
+    stats.rounds++;
     for (const c of cands) {
+      if ((held.get(c) ?? 0) > Date.now()) continue;
       const r = await getJson(candlesUrl(c.chain, c.token, 2));
-      const k = r.status === 200 && Number.isSafeInteger(r.body?.own_from_s) ? keyOf(r.body?.candles?.at(-1)) : null;
-      if (k === null) continue;
+      stats.reads++;
+      if (r.status === 429) {
+        const s = Number(r.retryAfter);
+        const wait = Number.isFinite(s) && s > 0 ? s : 1;
+        stats.refused++;
+        stats.retryAfterMaxS = Math.max(stats.retryAfterMaxS ?? 0, wait);
+        held.set(c, Date.now() + wait * 1000);
+        continue;
+      }
+      if (r.status !== 200) {
+        stats.failed++;
+        continue;
+      }
+      const k = Number.isSafeInteger(r.body?.own_from_s) ? keyOf(r.body?.candles?.at(-1)) : null;
+      if (k === null) {
+        stats.vendor++;
+        continue;
+      }
+      stats.own++;
       if (last.has(c) && last.get(c) !== k) changes.set(c, changes.get(c) + 1);
       last.set(c, k);
     }
   }
-  let best = null;
-  for (const [c, n] of changes) if (n > 0 && n > (best?.changes ?? 0)) best = { ...c, changes: n };
-  return best;
+  for (const c of cands) tape.get(c).push(await newestTrade(c));
+  stats.tapeMoved = cands.filter((c) => {
+    const [a, b] = tape.get(c);
+    return Number.isFinite(a) && Number.isFinite(b) && b > a;
+  }).length;
+  stats.ms = Date.now() - t0;
+  return { pick: pickOf(cands, changes, tape), stats };
 }
 
 const MEASURE = () => {
@@ -275,13 +346,13 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   try {
     const left = [...cands];
     for (let n = 0; n < TRIES && left.length; n++) {
-      const pick = await probe(left);
+      const { pick, stats } = await probe(left);
       if (!pick) {
-        rec.attempts.push({ pick: null, helper: [], tape: [], loads: [] });
+        rec.attempts.push({ pick: null, probe: stats, helper: [], tape: [], loads: [] });
         continue;
       }
       left.splice(left.findIndex((c) => c.token === pick.token), 1);
-      const a = await watch(browser, pick, harness, shots, n);
+      const a = { ...(await watch(browser, pick, harness, shots, n)), probe: stats };
       rec.attempts.push(a);
       if (classify(a) !== "silent") break;
     }
@@ -299,11 +370,11 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
-    const { ok, lines } = judge(rec);
+    const { verdict, lines } = judge(rec);
     for (const x of lines) console.log(x);
     console.log(`screenshots: ${rec.shots}`);
-    console.log(`CARD ${KEY} / live: ${ok ? "PASS" : "FAIL"}`);
-    process.exit(ok ? 0 : 1);
+    console.log(`CARD ${KEY} / live: ${verdict}`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`CARD ${KEY} / live: ERROR ${e?.stack ?? e}`);
     process.exit(2);

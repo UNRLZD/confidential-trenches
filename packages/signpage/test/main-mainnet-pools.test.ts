@@ -18,7 +18,7 @@ import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 
-const DEVNET_PROGRAM = "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ";
+const DEVNET_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const DEVNET_FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
 const SOL_LINE = `  POOL_TESTNET ? { devnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) } : {},`;
 const TABLE_LINE = "export const MAINNET_TABLE: string | null = null;";

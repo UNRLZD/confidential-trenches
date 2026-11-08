@@ -36,7 +36,7 @@ test("recorded bad answer: SIGN_HOST serving the bundle from before this card: F
 });
 
 test("planted: a testnet pin served, a failed or one-sided Rent read, another pair, a CSP without the helper", () => {
-  fails(mut((r) => (r.signBundle.testnet = ["5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ"])), /mainnet table/);
+  fails(mut((r) => (r.signBundle.testnet = ["9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8"])), /mainnet table/);
   fails(mut((r) => (r.rent = { rpcs: r.rent.rpcs, error: "the two providers' Rent differ" })), /agrees on the Rent sysvar: the two providers/);
   fails(mut((r) => (r.rent.rpcs = [r.rent.rpcs[0], r.rent.rpcs[0]])), /page's Solana pair/);
   fails(mut((r) => (r.signCsp = r.signCsp.replace("https://ct-api.unrealized.trade", ""))), /connect-src names both: not https:\/\/ct-api\./);

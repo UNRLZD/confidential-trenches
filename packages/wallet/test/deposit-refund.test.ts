@@ -43,10 +43,10 @@ test("the payload is one spelling: the five keys in order, one transfer of one a
 });
 
 /** A run with stand-in checks: each step logged in order. */
-function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () => unknown } = {}) {
+function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () => unknown; request?: (u: string, asset: string, amount: bigint, now: number) => import("@blindfill/kit").OneClickRequest; sent?: unknown[] } = {}) {
   const log: string[] = [];
   const check: RefundMoveCheck<{ q: true }, { i: true }> = {
-    quote: (req) => (log.push(`check ${req.depositType}`), (o.quote?.() as { q: true }) ?? { q: true }),
+    quote: (req) => (log.push(`check ${req.depositType}`), o.sent?.push(req), (o.quote?.() as { q: true }) ?? { q: true }),
     read: () => ({ depositAddress: "ab".repeat(32), amountIn: 25_000_000n, deadlineMs: NOW + 72 * 3_600_000 }),
     intent: (payload, _q, _reads, prior) => (log.push(`intent ${prior}`), (o.intent?.() as { i: true }) ?? (JSON.parse(payload), { i: true })),
     sign: () => (log.push("sign"), { standard: "raw_ed25519", payload: "{}", public_key: "ed25519:1", signature: "ed25519:1" }),
@@ -55,7 +55,7 @@ function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () =>
   const held = o.held ?? [25_000_000n, 25_000_000n];
   const p = runRefundMove(
     { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5_000_000n, held: held[1] }], salt: "252812b3", priorMs: null, height: 223_478_949 },
-    { check, fetchFn, now: () => NOW, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record") },
+    { check, fetchFn, now: () => NOW, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record"), ...(o.request ? { request: o.request } : {}) },
   );
   return { p, log };
 }
@@ -154,4 +154,21 @@ test("pin (delta): the relayer's answer is read up to INTENTS_ANSWER_MAX_BYTES (
     const out = await r.p;
     assert.deepEqual(out.kind === "sent" && out.code, code, `${n} B`);
   }
+});
+
+test("card pool-deposit-follow: a pool refund's move asks the request it is given (to X's coin, to U_X), the vault's otherwise", async () => {
+  const { poolRefundMoveRequest } = await import("../src/deposit/refund.ts");
+  const { depositId } = await import("../src/derive/keys.ts");
+  const { base58 } = await import("@scure/base");
+  const k = depositId(new Uint8Array(64), 777n, 0); // the all-zero published test seed
+  const wallet = base58.encode(k.publicKey), id = k.id;
+  k.secretKey.fill(0);
+  const sent: { destinationAsset?: string; recipient?: string }[] = [];
+  const r = run({ sent, request: (_u, asset, amount, now) => poolRefundMoveRequest("solana", wallet, id, asset, amount, now) });
+  assert.equal((await r.p).kind, "sent");
+  assert.equal(sent[0]!.destinationAsset, "nep141:sol.omft.near");
+  assert.equal(sent[0]!.recipient, wallet);
+  const v: { destinationAsset?: string }[] = [];
+  await run({ sent: v }).p;
+  assert.equal(v[0]!.destinationAsset, refundMoveRequest(U, ASSET, 1n, NOW).destinationAsset);
 });

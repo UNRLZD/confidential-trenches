@@ -93,8 +93,8 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
 });
 
 test("the testnet build pins the devnet pool's lookup table, so its pool.buy runs (card signpage-pool-flow-run)", async () => {
-  // created by devnet tx 4K48NMp5…, read back the same on both devnet RPCs at finalized 4 Nov 09:30Z
-  assert.equal(DEVNET_TABLE, "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy");
+  // created by devnet tx 4M7F8EG1… for the pool 92YuYhb4…, read back the same on both devnet RPCs at finalized 7 Nov
+  assert.equal(DEVNET_TABLE, "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ");
   let opened = 0;
   const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }).flow;
   const r = poolKinds(testnetPoolDeps(flow))["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };

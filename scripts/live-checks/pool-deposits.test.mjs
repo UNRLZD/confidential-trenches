@@ -102,3 +102,17 @@ test("planted on the good answer: the deposit failed, the mark another value, a 
   bad(await run(A.good, account((d) => d.subarray(0, 8).toString() === "bfpage01" && d[8] === 0, (d) => (d[o + 31] ^= 1))), "state page ");
   bad(await run(A.good, (a) => (a.method === "getBalance" ? ((a.json.result.value = 1), a.json) : a.json)), "U ");
 });
+
+test("the pin is today's: the good recording names today's pool; a run on the old pool 2S5wpE7U, or a deploy record handed in, FAILs", async () => {
+  const { devnetPin } = await import("./pool-sol-deploy.mjs");
+  const now = devnetPin();
+  assert.equal(A.good.deployment.program_id, now.program);
+  assert.equal(A.good.deployment.pool, now.pool);
+  assert.equal(R.program, now.program);
+  assert.equal(R.pool, now.pool);
+  // the same reads for a run on the pool before the re-pin: refused on the run line, whatever the answers say
+  const old = await check({ run: { ...R, program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, ...(A.good.evm ? { evm: A.good.evm } : {}) }).catch((e) => ({ ok: false, lines: [`BAD  ${e.message}`] }));
+  bad(old, "the run is on the pinned devnet pool 92YuYhb4");
+  // a replay may not hand the check its recording's deploy record: the check reads today's alone
+  await assert.rejects(check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign }), /today's devnet pin only/);
+});

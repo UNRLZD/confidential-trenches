@@ -48,7 +48,7 @@ function answerFor(req: Record<string, string | number | boolean>, decimalsOut: 
   return a;
 }
 
-function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet" } = {}) {
+function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet"; floor?: bigint | null | "throws" | "none" } = {}) {
   const sent: Record<string, string | number | boolean>[] = [];
   const took: unknown[] = [];
   let reads = 0;
@@ -66,6 +66,8 @@ function world(o: { records?: Record<string, unknown>; status?: unknown; status_
     now: () => NOW,
     ...(o.priced === false ? {} : { priced: () => ({ decimalsIn: 6, pricing: PRICING }) }),
     ...(o.checked === false ? {} : { checked: async (id, chain, quote, u) => void took.push({ id, chain, quote, u }) }),
+    // the device's quote-time floor read (card pool-deposit-follow): the rung unless a test names it
+    ...(o.floor === "none" ? {} : { floor: async (chain: string) => { if (o.floor === "throws") throw new TypeError("fetch failed"); return o.floor !== undefined ? (o.floor as bigint | null) : chain === "solana" ? 10_000_000n : 1_000_000_000_000_000n; } }),
     fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
       if (o.throws) throw new TypeError("fetch failed");
       const req = JSON.parse(String(init?.body));
@@ -207,4 +209,49 @@ test("review F4: the cap's edge, unpriced reads, the decimals bound, USDC at oth
     assert.deepEqual(await ask(w, q), { error: "quote_check_failed" }, String(t));
     assert.equal(w.took.length, 0, String(t));
   }
+});
+
+test("pool-deposit-follow floor: the quote is held to the device's own floor read; none, null or a failed read gives no address", async () => {
+  const q = { chain: "solana", origin_asset: BASE_USDC, amount: "25" };
+  // 25 USDC at 150 USD/SOL is about 0.166 SOL of min out: a floor over it refuses, one under it passes
+  const high = world({ floor: 200_000_000n });
+  assert.deepEqual(await ask(high, q), { error: "not_allowed" });
+  assert.equal(high.took.length, 0);
+  const ok = world({ floor: 13_586_400n });
+  assert.ok("result" in ((await ask(ok, q)) as object));
+  assert.equal(ok.took.length, 1);
+  for (const [floor, code] of [["none", "not_allowed"], [null, "not_allowed"], ["throws", "down"]] as const) {
+    const w = world({ floor });
+    assert.deepEqual(await ask(w, q), { error: code }, String(floor));
+    assert.equal(w.sent.length, 0, String(floor));
+    assert.equal(w.took.length, 0, String(floor));
+  }
+});
+
+test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs and takes the higher deposit fee", async () => {
+  const { readSolanaPoolFloor } = await import("../src/pool-deposit-address.ts");
+  const { SOL_MAINNET_DEPLOY } = await import("../../wallet/src/pool/solana.ts");
+  const program = SOL_MAINNET_DEPLOY?.program ?? base58.encode(new Uint8Array(32).fill(7));
+  // the Rent sysvar's 17 bytes: 5,080 lamports a byte, factor 1.0, burn 50
+  const rentData = new Uint8Array(17);
+  new DataView(rentData.buffer).setBigUint64(0, 5_080n, true);
+  new DataView(rentData.buffer).setFloat64(8, 1, true);
+  rentData[16] = 50;
+  const rpcOf = (url: string, fee: number | null, lpb = 5_080n) => {
+    const data = rentData.slice();
+    new DataView(data.buffer).setBigUint64(0, lpb, true);
+    const f = (async (method: string) => {
+      if (method === "getAccountInfo") return { context: { slot: 1 }, value: { owner: "Sysvar1111111111111111111111111111111111111", data: [Buffer.from(data).toString("base64"), "base64"], lamports: 1 } };
+      if (method === "getLatestBlockhash") return { context: { slot: 1 }, value: { blockhash: base58.encode(new Uint8Array(32).fill(3)), lastValidBlockHeight: 10 } };
+      if (method === "getFeeForMessage") return { context: { slot: 1 }, value: fee };
+      throw new Error(method);
+    }) as unknown as import("../../kit/src/trade/solana/send.ts").SolanaRpc;
+    Object.defineProperty(f, "url", { value: url });
+    return f;
+  };
+  assert.equal(await readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 10_000)], program, SOL_U), 13_591_400n);
+  // a blockhash one RPC does not know (fee null), rents that differ, or one provider twice: no floor
+  await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", null)], program, SOL_U));
+  await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
+  await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
 });

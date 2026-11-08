@@ -22,7 +22,7 @@
 import { HELPER_FETCH_INIT, HELPER_INTENTS_CODES, type HelperIntentsCode, type HelperSignedIntent, type OneClickRequest } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { readCapped } from "./capped.ts";
-import { askDepositQuote, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, type DepositQuoteReply } from "./quote.ts";
+import { askDepositQuote, checkPoolDepositWallet, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_DESTINATION, type DepositQuoteReply, type PoolDepositChain } from "./quote.ts";
 
 /** The release's relayer for an id's intents: POST /v1/intents on HELPER_HOST (kit helper/v1.ts HelperIntentsRequest). */
 export const RELEASE_INTENTS_URL = "https://ct-api.unrealized.trade/v1/intents";
@@ -58,6 +58,17 @@ export function refundMoveRequest(u: string, asset: string, amount: bigint, now:
     recipientType: "DESTINATION_CHAIN",
     deadline: new Date(now + REFUND_QUOTE_DEADLINE_MS).toISOString(),
   };
+}
+
+/**
+ * The pool refund carry's request (card pool-deposit-follow): a pool deposit quote 1Click refunded lands under U_{s,i}
+ * (`u`) inside intents.near; it goes back to X's coin (POOL_DEPOSIT_DESTINATION), delivered to U_X (`wallet`) on X
+ * (DESTINATION_CHAIN), refunded again under U_{s,i} (INTENTS), so the same signer moves it and the pool follow carries
+ * it on. Throws unless `wallet` is the id's own U_X (checkPoolDepositWallet).
+ */
+export function poolRefundMoveRequest(chain: PoolDepositChain, wallet: string, u: string, asset: string, amount: bigint, now: number): OneClickRequest {
+  checkPoolDepositWallet(chain, wallet, u);
+  return { ...refundMoveRequest(u, asset, amount, now), destinationAsset: POOL_DEPOSIT_DESTINATION[chain], recipient: wallet };
 }
 
 /** A V1 versioned nonce (base64 of 32 bytes) under intents.near's current `salt` (8 hex), dying at `deadlineMs`. */
@@ -140,6 +151,9 @@ export interface RefundMoveAsk {
 
 export interface RefundMoveDeps<Q, I> {
   check: RefundMoveCheck<Q, I>;
+  /** The quote request for what U holds (refundMoveRequest, the vault's, unless given: poolRefundMoveRequest's for a
+   *  pool quote's refund). */
+  request?: (u: string, asset: string, amount: bigint, now: number) => OneClickRequest;
   /** Opens U's secret key for `fn` only (SIGN_HOST: the seed under its lock, U checked), zeroing it after. */
   openKey<T>(fn: (secretKey: Uint8Array) => T): Promise<T>;
   /** Writes the move into U's ops before it is sent. */
@@ -198,7 +212,7 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
   // 1. the quote for all U holds of the asset, through the helper, checked as a deposit quote (no key open)
   let request: OneClickRequest;
   try {
-    request = refundMoveRequest(ask.u, ask.asset, held, now());
+    request = (deps.request ?? refundMoveRequest)(ask.u, ask.asset, held, now());
   } catch {
     return { kind: "refused", why: "request" };
   }

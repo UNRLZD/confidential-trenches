@@ -82,8 +82,8 @@ test("planted: a record naming another deposit's leaf (the deploy run's, state l
 // 42201131294) moves the reads to the next operator on the list, here the helper's route serving the same answers: PASS;
 // with no other operator answering, two stay required: FAIL.
 test("card live-check-devnet-pair: the second provider answering 503 moves the read to the next operator: PASS; one operator answering: FAIL", async () => {
-  const [solana, second] = A.good.rpcs;
-  const helper = "https://ct-api.unrealized.trade/v1/rpc/solana-devnet";
+  // the list's third operator (DEVNET_PROVIDERS) serves the second's answers once the second is out
+  const [solana, second, helper] = A.good.rpcs;
   const answers = [...A.good.answers.filter((a) => a.url === solana), ...A.good.answers.filter((a) => a.url === second).map((a) => ({ ...a, url: helper }))];
   const down = (inner = replay(answers)) => async (url, init) => (url === second ? { ok: false, status: 503, json: async () => null } : inner(url, init));
   const r = await check({ run: R, precommitment: A.good.precommitment, fetchFn: down(), rpcs: [solana, second, helper], sleep: async () => {}, sign: A.good.sign });
@@ -125,4 +125,18 @@ test("card signpage-pool-flow-answers, planted on the good answer: the deposit, 
   namesNull(r, "mark ", slots);
   namesNull(r, "label page ", slots);
   namesNull(r, "state page ", slots);
+});
+
+test("the pin is today's: the good recording names today's pool; a run on the old pool 2S5wpE7U, or a deploy record handed in, FAILs", async () => {
+  const { devnetPin } = await import("./pool-sol-deploy.mjs");
+  const now = devnetPin();
+  assert.equal(A.good.deployment.program_id, now.program);
+  assert.equal(A.good.deployment.pool, now.pool);
+  assert.equal(R.program, now.program);
+  assert.equal(R.pool, now.pool);
+  // the same reads for a run on the pool before the re-pin: refused on the run line, whatever the answers say
+  const old = await check({ run: { ...R, program: "5V9iJECfs9q9zZTXvNco7oREqkZFvrtuKqKm74GgJWMZ", pool: "2S5wpE7U7GoJRVqox1dXmTQm38SmseG8A4F9eReWwYwr" }, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign, ...(A.good.evm ? { evm: A.good.evm } : {}) }).catch((e) => ({ ok: false, lines: [`BAD  ${e.message}`] }));
+  bad(old, "the run is on the pinned devnet pool 92YuYhb4");
+  // a replay may not hand the check its recording's deploy record: the check reads today's alone
+  await assert.rejects(check({ run: R, deployment: A.good.deployment, precommitment: A.good.precommitment, fetchFn: replay(A.good.answers), rpcs: A.good.rpcs, sleep: async () => {}, sign: A.good.sign }), /today's devnet pin only/);
 });
