@@ -7197,10 +7197,39 @@ test("QE2 (sell) a sell quote whose reads tick past its block's time plus EVM_QU
 // holds its gate; the round's batches queued behind them still end, on a spare, as a whole round did (V1).
 test("QE3 a second provider that never answers the exact-out reads: the round's batches queued behind it end on a spare", { timeout: 20_000 }, async () => {
   const { pools, logs, req } = qeCase(freshToken(), 0x600);
-  const hung = (rpc: EvmRpc): EvmRpc => (calls) => (/58733073/.test(JSON.stringify(calls)) ? new Promise(() => {}) : rpc(calls));
-  const rpcs = [chain(pools, 0, RC_HEAD), hung(chain(pools, 1, RC_HEAD)), chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)];
+  const asks = [0, 0, 0, 0];
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const counted = (rpc: EvmRpc, k: number): EvmRpc => (calls) => ((asks[k]! += per(calls)), k === 1 && per(calls) > 0 ? new Promise(() => {}) : rpc(calls));
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
   const t = performance.now();
   const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
   assert.ok(performance.now() - t < 10_000, `${Math.round(performance.now() - t)} ms`);
+  // the hung provider holds 2 batches (its gate): those two ask a spare, every batch queued behind them moves to the
+  // next provider once, and no batch is asked of a fourth
+  const distinct = asks[0]!;
+  assert.ok(asks[1]! <= 2 * 18, `the hung provider was sent ${asks[1]} exact-out reads, its gate's 2 batches at most`);
+  assert.ok(asks[2]! + asks[3]! <= distinct, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads of ${distinct}`);
+});
+
+// Card evm-buy-quote-ends-on-node: the second provider answers every exact-out batch late but answers. Each late batch
+// sent may ask a spare only within the round's budget (2, plus 1 per 5 batches): the spares are asked no more.
+test("QE4 a second provider late on every exact-out batch: the spares are asked only the round's budget of batches", async () => {
+  const { pools, logs, req } = qeCase(freshToken(), 0x700);
+  const asks = [0, 0, 0, 0];
+  let batches = 0;
+  const per = (calls: readonly EvmRpcCall[]) => (JSON.stringify(calls).match(/58733073/g) ?? []).length;
+  const counted = (rpc: EvmRpc, k: number, slow = false): EvmRpc => async (calls) => {
+    asks[k]! += per(calls);
+    if (k === 0 && per(calls) > 0) batches++;
+    if (slow && per(calls) > 0) await new Promise((r) => setTimeout(r, 900));
+    return rpc(calls);
+  };
+  const rpcs = [counted(chain(pools, 0, RC_HEAD), 0), counted(chain(pools, 1, RC_HEAD), 1, true), counted(chain(pools, 0, RC_HEAD), 2), counted(chain(pools, 1, RC_HEAD), 3)];
+  const v = await verdict(evmPoolBuyQuoteWith(req, rpcs, NOW, scanner(RC_HEAD, logs, [], 100_000)));
+  assert.equal(v.accepted, true, String((v as { code?: string }).code));
+  const budget = 2 + Math.ceil(batches / 5);
+  assert.ok(batches > budget, `${batches} exact-out batches, more than the budget of ${budget}`);
+  // a batch is 3 calls of 6 reads
+  assert.ok(asks[2]! + asks[3]! <= budget * 18, `the spares are asked ${asks[2]! + asks[3]!} exact-out reads, ${budget} batches at most`);
 });
