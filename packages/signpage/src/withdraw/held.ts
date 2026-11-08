@@ -10,7 +10,10 @@
 //   data-outcome: moved, sent, gas (U's NEAR is short: the amount to send to U from the typed account is drawn, and a
 //   tap reads again), empty, unread, failed.
 // - A move the op already holds (a reload, another tab) is drawn at once with its recorded account, the field read-only,
-//   and resumed: the same signed bytes, never a new signature.
+//   and resumed: the same signed bytes, never a new signature. The resume runs as soon as the page is drawn, on its own
+//   (main.ts's run() drops a step while its opening step is busy: review of d791adda, H1), and the tap waits for it.
+// - Every answer that names an account (moved, sent, failed) writes that account into the field, read-only: the move's
+//   account is the one shown, whatever was typed (a reload, another tab). After failed, the tap signs anew to it.
 // - Every word is a draft until the owner picks it (data-draft-copy names its key in HELD_WORDS or WITHDRAW_WORDS).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import type { NearNetwork, NearRpc } from "../../../kit/src/near/networks.ts";
@@ -24,7 +27,7 @@ export const HELD_WORDS = {
   link: "This links your deposit to this account.", // W:469: the move links the 1Click send to the typed account
   moved: "Moved",
   sent: "Sending",
-  gas: "Send NEAR to the deposit account first:", // followed by the amount and U's id
+  gas: "Send NEAR to the deposit account from the account you typed:", // then the amount and U's id (W:469, W:934: from the typed account only)
   empty: "Nothing to move",
   failed: "Not moved · Retry",
 } as const;
@@ -82,7 +85,11 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
   let seq = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let ready: string | null = null;
-  let resuming = false;
+  // the account a move names: drawn read-only, the only one a tap goes on with
+  let fixed: string | null = null;
+  // the page's own step in flight (the resume): the tap waits for it
+  let busy = false;
+  const resuming = () => fixed !== null;
   const refuse = (code: AddressCode | null): void => {
     line.hidden = code === null;
     if (code === null) return void (delete line.dataset.refusal, line.replaceChildren());
@@ -92,9 +99,9 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
   };
   const draw = (c: RecipientCheck | null, blank: boolean): void => {
     ready = c?.ok ? c.recipient : null;
-    page.dataset.state = resuming ? "resume" : blank ? "empty" : c === null ? "typing" : c.ok ? "ready" : "refused";
+    page.dataset.state = resuming() ? "resume" : blank ? "empty" : c === null ? "typing" : c.ok ? "ready" : "refused";
     refuse(c && !c.ok ? c.code : null);
-    go.disabled = !resuming && ready === null;
+    go.disabled = busy || (!resuming() && ready === null);
   };
   const check = async (): Promise<RecipientCheck | null> => {
     const at = ++seq;
@@ -110,7 +117,16 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     draw(null, blank);
     if (!blank) timer = setTimeout(() => void check(), CHECK_IDLE_MS);
   });
+  const fix = (to: string): void => {
+    clearTimeout(timer);
+    seq += 1;
+    fixed = to;
+    input.value = to;
+    input.readOnly = true;
+    draw(null, false);
+  };
   const shown = (o: MoveOutOutcome): void => {
+    if (o.kind === "moved" || o.kind === "sent" || o.kind === "failed") fix(o.to);
     page.dataset.outcome = o.kind;
     outcome.hidden = false;
     outcome.replaceChildren();
@@ -128,27 +144,36 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     outcome.textContent = o.kind === "unread" ? WITHDRAW_WORDS.busy : HELD_WORDS[o.kind];
   };
 
-  // the tap: the account checked again; only the same answer goes on (a resume goes on with the recorded one)
+  // the tap: the account checked again; only the same answer goes on (a move's account, fixed, is checked again too)
   async function move(): Promise<void> {
-    if (resuming) return shown(await deps.moveOut(null));
+    if (busy) return;
+    if (fixed !== null) {
+      const to = fixed;
+      const c = await checkRecipient(to, deps.network, deps.rpcs).catch(() => ({ ok: false, code: "unread" }) as const);
+      if (!c.ok || c.recipient !== to) return refuse(c.ok ? null : c.code);
+      return shown(await deps.moveOut(to));
+    }
     const before = ready;
     if (before === null) return;
     clearTimeout(timer);
     const c = await check();
     if (!c?.ok || c.recipient !== before) return;
-    const o = await deps.moveOut(c.recipient);
-    if (o.kind === "moved" || o.kind === "sent") (resuming = true), (input.readOnly = true);
-    shown(o);
+    shown(await deps.moveOut(c.recipient));
   }
-  // a move the op holds: its account, read-only, resumed now
-  run(async () => {
+  // a move the op holds: its account, read-only, resumed now (never a new signature: moveOut(null))
+  const resume = async (): Promise<void> => {
     const r = await deps.recorded();
     if (r === undefined) return;
-    resuming = true;
-    input.value = r.to;
-    input.readOnly = true;
-    draw(null, false);
+    fix(r.to);
     shown(await deps.moveOut(null));
-  });
+  };
+  busy = true;
+  go.disabled = true;
+  void resume()
+    .catch(() => shown({ kind: "unread" }))
+    .finally(() => {
+      busy = false;
+      go.disabled = !resuming() && ready === null;
+    });
   return page;
 }

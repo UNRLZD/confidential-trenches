@@ -680,13 +680,22 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       }
     };
     // The SHORT_READ_CALLS-th amount_above_balance (review wnpt3 I2): the call is settled before the bind holds, and
-    // nothing is signed. The pages at a block past its window: P held lands the note; P absent with U's key nonce read
-    // there holds it (the call never ran, or ran and was refunded to U). A bind that ends on this wait settles here again.
+    // nothing is signed. The pages at a block past its window: P held lands the note; P absent holds it only when the
+    // call never ran (U's key nonce there one below the call's) or ran and was refunded (U's nonce past it and U's USDC
+    // at that block back to what the call was signed from, as afterRefusal reads it); a call that ran and has not
+    // landed yet is waited for (review of d791adda, L3). A bind that ends on this wait settles here again.
     const shortHeld = async (out: SignedDepositDelegate): Promise<BindOutcome> => {
       for (;;) {
         const pages = await watch.read(signal, lapsed(out));
         if (pages.state === "held") return land(pages.row);
-        if (pages.state === "absent" && (await readU(U, rpcs, pages.height)) !== null) return { kind: "refused", code: "amount_above_balance" };
+        if (pages.state === "absent") {
+          const u = await readU(U, rpcs, pages.height);
+          if (u !== null && u.nonce + 1n === out.nonce) return { kind: "refused", code: "amount_above_balance" };
+          if (u !== null && u.nonce >= out.nonce) {
+            const balance = await balanceAt(U, token, rpcs, pages.height);
+            if (balance !== null && balance >= out.balance) return { kind: "refused", code: "amount_above_balance" };
+          }
+        }
         await pause("lapse");
       }
     };

@@ -41,7 +41,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settle = () => sleep(CHECK_IDLE_MS + 60);
 
 function drawn(answer: (to: string | null) => MoveOutOutcome, recorded?: MoveOutRecord) {
-  const rpc = (name: string): NearRpc => ({ name, query: async (p) => (p.account_id === "alice.near" ? VIEW : UNKNOWN) });
+  const rpc = (name: string): NearRpc => ({ name, query: async (p) => (p.account_id === "alice.near" || p.account_id === "bob.near" ? VIEW : UNKNOWN) });
   const calls: (string | null)[] = [];
   const steps: Promise<void>[] = [];
   const doc = { createElement: (tag: string) => new El(tag) } as unknown as Document;
@@ -59,7 +59,8 @@ function drawn(answer: (to: string | null) => MoveOutOutcome, recorded?: MoveOut
     page, go, input, calls,
     type: (v: string) => ((input.value = v), input.fire("input")),
     tap: async () => (go.fire("click"), await Promise.all(steps.splice(0))),
-    steps: () => Promise.all(steps.splice(0)),
+    // the page's own resume runs outside main.ts's run(): a turn for it, then any step handed to run()
+    steps: async () => (await sleep(20), await Promise.all(steps.splice(0))),
   };
 }
 
@@ -120,6 +121,31 @@ test("a move the op already holds is resumed at once with its recorded account, 
   assert.equal(f.input.value, "alice.near");
   assert.equal(f.input.readOnly, true);
   assert.equal(f.page.dataset.outcome, "sent");
+  // the tap goes on with the recorded account only, checked again (the wallet follows the record, never re-signing it)
   await f.tap();
-  assert.deepEqual(f.calls, [null, null]);
+  assert.deepEqual(f.calls, [null, "alice.near"]);
+});
+
+test("H1: an answer naming another account than the one typed (a reload, another tab) draws the move's account, read-only", async () => {
+  const f = drawn(() => ({ kind: "sent", to: "alice.near", amount: 2_499_999n, hash: "h" }));
+  await f.steps();
+  f.type("bob.near");
+  await settle();
+  await f.tap();
+  assert.deepEqual(f.calls, ["bob.near"]);
+  assert.equal(f.input.value, "alice.near", "the field shows where the money goes");
+  assert.equal(f.input.readOnly, true);
+  assert.equal(f.page.dataset.outcome, "sent");
+});
+
+test("L6: a resume that answers failed signs nothing; the tap (Not moved · Retry) signs anew to the move's account only", async () => {
+  const rec: MoveOutRecord = { to: "alice.near", amount: "2499999", nonce: "8", height: 1, register: false, hash: "h", signed: "AA==" };
+  const f = drawn((to) => (to === null ? { kind: "failed", to: "alice.near", amount: 2_499_999n, hash: "h" } : { kind: "sent", to, amount: 2_499_999n, hash: "h2" }), rec);
+  await f.steps();
+  assert.deepEqual(f.calls, [null]);
+  assert.equal(f.page.dataset.outcome, "failed");
+  assert.equal(f.go.disabled, false, "Retry is offered");
+  await f.tap();
+  assert.deepEqual(f.calls, [null, "alice.near"]);
+  assert.equal(f.page.dataset.outcome, "sent");
 });

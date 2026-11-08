@@ -11,22 +11,28 @@
 //   [storage_deposit(the typed account, registration_only)] then ft_transfer(the typed account, amount) with 1 yocto and
 //   no memo, the typed account never U itself.
 // - Every read at one block on both RPCs of the release pair, all equal, or nothing is signed: the block's hash, U's key
-//   list (exactly its own key) and nonce, U's NEAR and storage, U's USDC, storage_balance_of(the typed account) and the
-//   gas price. amount = U's USDC less one base unit (restore still finds U by ft_balance_of, W:929). The registration
+//   list (exactly its own key) and nonce, U's NEAR and storage, the token's code hash (the kit's pin, W:928), U's USDC,
+//   storage_balance_of(the typed account) and the gas price. amount = U's USDC less one base unit (restore still finds U by ft_balance_of, W:929). The registration
 //   rides in the same transaction when the typed account reads null on both (both actions in one receipt, which rolls
 //   back whole), its deposit the token's storage minimum (arming/accounts.ts readTokenStorageMin, the same read).
 // - U's NEAR pays the gas (W:934: what it holds, or a plain Transfer from the typed account, never another account of the
 //   seed). U is created with its storage only (apps/helper/src/bind/create.ts CREATE_YOCTO), so the first answer is
 //   usually `gas`: how much NEAR U needs, sent from the typed account.
 // - Never twice: the signed bytes are written into the op (follow.out) by a compare-and-set before they are sent; an op
-//   that holds one signs nothing new. A reload sends the same bytes again and reads them. A new transaction only once the
-//   recorded one reads FINAL and failed on both RPCs (nothing moved), or can never land: U's key nonce below it at heights
-//   past its block + TX_VALIDITY_BLOCKS on both, and then at the same nonce, so at most one of the two can land.
+//   that holds one signs nothing new. A reload sends the same bytes again and reads them. A record is gone, never to land,
+//   only when it reads FINAL and failed on both RPCs (nothing moved); or unknown on both and either expired (U's key nonce
+//   below it at a height past its block + TX_VALIDITY_BLOCKS) or taken (U's key nonce at or past it SETTLE_BLOCKS below
+//   the read height too: nearcore refuses a nonce at or below the key's, so those bytes never land, and a tx included
+//   that far back has run every receipt). A gone record goes to follow.out_past, and a new transaction is signed only on
+//   the user's tap (a typed account), never on a resume (null): review of d791adda, M1 and L6.
+// - One move of U at a time: the read, the signature and the compare-and-set run under deps.uLock (the page's
+//   FOLLOW_LOCK/<network>/<U>, taken only if free, so no deposit follow of U binds U's USDC meanwhile), and while another
+//   op of U holds a live record, that record is followed and nothing is signed.
 // - The end: the transaction FINAL on both RPCs with every receipt a success, then the op is held with why "moved_out".
 // - U's key: depositId(seed, s, i), the derivation the refund move opens (follow.ts openKey), under deps.seedLock, checked
 //   to be U and zeroed at once. Nothing here logs. Each read names U, the token or the typed account; the send carries
 //   the signed bytes alone.
-import { HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
@@ -55,7 +61,7 @@ export type MoveOutOutcome =
   | { kind: "moved"; to: string; amount: bigint; hash: string }
   /** Sent (or sent again), not yet read FINAL on both: a later call reads it again and signs nothing. */
   | { kind: "sent"; to: string; amount: bigint; hash: string }
-  /** FINAL and failed on both RPCs: nothing moved; the next call signs again. */
+  /** The record can never land (FINAL and failed on both RPCs, expired, or its nonce taken): the next tap signs anew. */
   | { kind: "failed"; to: string; amount: bigint; hash: string }
   /** U's NEAR is short of the transaction's cost: `need` yocto more, from the typed account. */
   | { kind: "gas"; need: bigint; u: string }
@@ -120,6 +126,21 @@ const decodeView = (r: Obj | undefined): unknown => {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes as number[])));
 };
 
+const ownKey = (u: string) => `ed25519:${base58.encode(Uint8Array.from(u.match(/../g)!, (h) => parseInt(h, 16)))}`;
+/** U's key nonce from a view_access_key_list answer at `at`: the list is exactly U's own key, else null. */
+function keyNonce(keys: unknown, at: number, own: string): bigint | null {
+  const k = resultAt(keys, at);
+  const list = k?.keys;
+  if (!Array.isArray(list) || list.length !== 1 || !isObj(list[0]) || list[0].public_key !== own || !isObj(list[0].access_key)) return null;
+  return big(list[0].access_key.nonce);
+}
+/** U's key nonce at block `at` on both RPCs, equal, else null. */
+async function keyNonceAt(u: string, at: number, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<bigint | null> {
+  const own = ownKey(u);
+  const [a, b] = await Promise.all(rpcs.map((r) => r.query({ request_type: "view_access_key_list", account_id: u, block_id: at }).then((k) => keyNonce(k, at, own), () => null)));
+  return a === null || b === null || a !== b ? null : a;
+}
+
 /** What the move needs read, at one block on both RPCs. */
 export interface MoveOutRead {
   height: number;
@@ -135,10 +156,11 @@ export interface MoveOutRead {
 /**
  * U's state and the typed account's registration at one block on both RPCs: each RPC's final, the heights within
  * HEIGHT_SPREAD_MAX, then everything at the lower height on both, equal. null when anything fails or differs, U's key
- * list is not exactly U's own key, or USDC's view fails (a halt is never a zero).
+ * list is not exactly U's own key, the token's code hash is not the kit's pin, or USDC's view fails (a halt is never a
+ * zero).
  */
 export async function readMoveOut(u: string, to: string, token: string, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<MoveOutRead | null> {
-  const own = `ed25519:${base58.encode(Uint8Array.from(u.match(/../g)!, (h) => parseInt(h, 16)))}`;
+  const own = ownKey(u);
   const finals = await Promise.all(rpcs.map(async (r) => {
     try {
       const a = await r.block({ finality: "final" });
@@ -152,20 +174,19 @@ export async function readMoveOut(u: string, to: string, token: string, rpcs: re
   const at = Math.min(...(finals as number[]));
   const side = async (r: MoveOutRpc) => {
     try {
-      const [b, keys, acct, bal, reg, gp] = await Promise.all([
+      const [b, keys, acct, code, bal, reg, gp] = await Promise.all([
         r.block({ block_id: at }),
         r.query({ request_type: "view_access_key_list", account_id: u, block_id: at }),
         r.query({ request_type: "view_account", account_id: u, block_id: at }),
+        r.query({ request_type: "view_account", account_id: token, block_id: at }),
         r.query({ request_type: "call_function", account_id: token, method_name: "ft_balance_of", args_base64: viewArgs({ account_id: u }), block_id: at }),
         r.query({ request_type: "call_function", account_id: token, method_name: "storage_balance_of", args_base64: viewArgs({ account_id: to }), block_id: at }),
         r.call("gas_price", [at]),
       ]);
       const head = isObj(b) && isObj(b.result) && isObj(b.result.header) ? b.result.header : undefined;
       if (!head || head.height !== at || typeof head.hash !== "string") return null;
-      const k = resultAt(keys, at);
-      const list = k?.keys;
-      if (!Array.isArray(list) || list.length !== 1 || !isObj(list[0]) || list[0].public_key !== own || !isObj(list[0].access_key)) return null;
-      const nonce = big(list[0].access_key.nonce);
+      const nonce = keyNonce(keys, at, own);
+      if (resultAt(code, at)?.code_hash !== VAULT_TOKEN_CODE_HASH) return null; // the token's code is the pin (W:928)
       const a = resultAt(acct, at);
       const amount = big(a?.amount), usage = big(a?.storage_usage);
       const usdc = decodeView(resultAt(bal, at));
@@ -214,9 +235,17 @@ export function moveCalls(to: string, amount: bigint, register: boolean, storage
   return register ? [{ method: "storage_deposit", args: { account_id: to, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: storageMin }, send] : [send];
 }
 
-/** The payload rule (WU-05's plain move rows): what is signed is exactly this shape, or it is refused. */
+/** intents.near: nothing sent to it is the user's (signpage withdraw/checks.ts INTENTS, W:930). */
+const INTENTS = "intents.near";
+/**
+ * The payload rule (WU-05's plain move rows): what is signed is exactly this shape, or it is refused. The typed account
+ * is never U, the token, the token's network's vault or intents.near, whoever calls (review of d791adda, L1).
+ */
 export function checkMoveCalls(u: string, to: string, token: string, calls: readonly MoveCall[], usdc: bigint, storageMin: bigint): void {
   if (!IMPLICIT.test(u) || to === u || to === token) throw new MoveOutRefused("the typed account is U or the token");
+  const net = Object.values(NEAR_NETWORKS).find((n) => n.usdc === token);
+  if (net === undefined) throw new MoveOutRefused("the token is no release's USDC");
+  if (to === net.vault || to === INTENTS) throw new MoveOutRefused("the typed account is the vault or intents.near: nothing sent there is the user's");
   const last = calls.at(-1);
   if (calls.length < 1 || calls.length > 2 || !last || last.method !== "ft_transfer" || last.deposit !== 1n || last.gas !== MOVE_GAS.ft_transfer) throw new MoveOutRefused("one ft_transfer with 1 yocto, last");
   if (Object.keys(last.args).join() !== "receiver_id,amount" || last.args.receiver_id !== to) throw new MoveOutRefused("ft_transfer names the typed account and an amount, no memo");
@@ -256,9 +285,10 @@ async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "
     return "unknown";
   }
 }
-async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "unknown"> {
+/** The tx on both RPCs: ok, failed or unknown when both read the same; split when they differ (then nothing is decided). */
+async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "unknown" | "split"> {
   const [a, b] = await Promise.all(rpcs.map((r) => txState(r, hash, u)));
-  return a === b ? a! : "unknown";
+  return a === b ? a! : "split";
 }
 const sendBoth = (rpcs: readonly [MoveOutRpc, MoveOutRpc], signed: string) =>
   Promise.all(rpcs.map((r) => r.call("send_tx", { signed_tx_base64: signed, wait_until: "NONE" }).catch(() => null)));
@@ -274,11 +304,13 @@ function shortOf(answers: unknown[]): bigint | null {
 }
 
 export interface MoveOutDeps {
-  ops: Pick<WalletStore, "get" | "update">;
+  ops: Pick<WalletStore, "get" | "update" | "keys">;
   rpcs: readonly [MoveOutRpc, MoveOutRpc];
   /** Opens the seed for the signature only: a fresh copy each call, zeroed here once U's key is derived. */
   seed64: () => Promise<Uint8Array>;
   seedLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** U's own lock (the page's FOLLOW_LOCK/<network>/<U>, exclusive), taken only if free: null when another holds it. */
+  uLock?: <T>(fn: () => Promise<T>) => Promise<T | null>;
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
 }
@@ -293,33 +325,57 @@ export async function heldOpOf(ops: Pick<WalletStore, "get">, opId: string): Pro
   return op;
 }
 
+/** How far below the read height U's key nonce must already be at or past a record's nonce for the record to be taken. */
+export const SETTLE_BLOCKS = 100;
+
+/** A record that is gone (can never land): why, with U's USDC when it was read. */
+type Gone = { gone: "failed" | "expired" | "taken"; usdc: bigint | null };
+/** Whether record `had` of U can still land (live: follow it), or is gone, read on both RPCs. */
+async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<"live" | Gone> {
+  const st = await readBoth(rpcs, had.hash, U);
+  if (st === "failed") return { gone: "failed", usdc: null };
+  if (st !== "unknown") return "live";
+  const r = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
+  if (r === null) return "live";
+  if (r.nonce < BigInt(had.nonce) && BigInt(r.height) > BigInt(had.height) + TX_VALIDITY_BLOCKS) return { gone: "expired", usdc: r.usdc };
+  if (r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {
+    const past = await keyNonceAt(U, r.height - SETTLE_BLOCKS, rpcs).catch(() => null);
+    if (past !== null && past >= BigInt(had.nonce)) return { gone: "taken", usdc: r.usdc };
+  }
+  return "live";
+}
+
 /**
  * Moves what held op `opId`'s U holds on the token, less one base unit, to `to` (checked by the page's checkRecipient),
- * or resumes the move the op already holds (then `to` is not used: the recorded one is). Answers how far it got.
+ * or resumes the move the op already holds (then `to` is not used: the recorded one is). With `to` null it only
+ * resumes: it sends recorded bytes again and reads them, and never signs. Answers how far it got.
  */
 export async function moveOutHeld(opId: string, to: string | null, deps: MoveOutDeps): Promise<MoveOutOutcome> {
   const { ops, rpcs } = deps;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const seedLock = deps.seedLock ?? (<T>(fn: () => Promise<T>) => fn());
+  const uLock = deps.uLock ?? (<T>(fn: () => Promise<T>) => fn());
   let op = await heldOpOf(ops, opId);
   const network = op.follow.network as NearNetwork;
   if (nearPairNetwork(rpcs) !== network) throw new MoveOutRefused("the RPCs are not the op's network's release pair");
   const U = op.follow.u;
   const token = NEAR_NETWORKS[network].usdc;
+  const shownOf = (r: MoveOutRecord) => ({ to: r.to, amount: BigInt(r.amount), hash: r.hash });
 
-  const follow = async (r: MoveOutRecord, resend: boolean): Promise<MoveOutOutcome> => {
-    const shown = { to: r.to, amount: BigInt(r.amount), hash: r.hash };
+  // record r of op `owner`: its same bytes again, read until FINAL on both
+  const follow = async (r: MoveOutRecord, owner: string): Promise<MoveOutOutcome> => {
+    const shown = shownOf(r);
     for (let k = 0; k < FINAL_TRIES; k++) {
       const st = await readBoth(rpcs, r.hash, U);
       if (st === "ok") {
-        await ops.update("ops", opId, (v) => {
+        await ops.update("ops", owner, (v) => {
           const o = v as DepositOp | undefined;
           return isObj(o) && o.follow.out?.hash === r.hash && o.follow.why !== "moved_out" ? { ...o, follow: { ...o.follow, why: "moved_out" } } : undefined;
         });
         return { kind: "moved", ...shown };
       }
       if (st === "failed") return { kind: "failed", ...shown };
-      if (resend && k === 0) {
+      if (k === 0) {
         // the same bytes; refused by both for U's NEAR: kept, sent again once U holds the cost (never signed anew)
         const lack = shortOf(await sendBoth(rpcs, r.signed));
         if (lack !== null) return { kind: "gas", need: lack, u: U };
@@ -328,63 +384,77 @@ export async function moveOutHeld(opId: string, to: string | null, deps: MoveOut
     }
     return { kind: "sent", ...shown };
   };
+  // a gone record of op `id` leaves follow.out for follow.out_past (a compare-and-set on its hash)
+  const clear = (id: string, r: MoveOutRecord) =>
+    ops.update("ops", id, (v) => {
+      const o = v as DepositOp | undefined;
+      if (!isObj(o) || o.follow.out?.hash !== r.hash) return undefined;
+      const { out: _gone, ...rest } = o.follow;
+      return { ...o, follow: { ...rest, out_past: [...(o.follow.out_past ?? []), r] } };
+    });
 
   // a move already written: its bytes again, never a new signature while they can land
   const had = op.follow.out;
   if (had !== undefined) {
-    if (op.follow.why === "moved_out") return { kind: "moved", to: had.to, amount: BigInt(had.amount), hash: had.hash };
-    const st = await readBoth(rpcs, had.hash, U);
-    if (st !== "failed") {
-      const r = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
-      const dead = st === "unknown" && r !== null && r.nonce < BigInt(had.nonce) && BigInt(r.height) > BigInt(had.height) + TX_VALIDITY_BLOCKS;
-      if (!dead) return follow(had, true);
-    }
-    // FINAL and failed on both (nothing moved), or never landable: cleared, and signed again below
-    await ops.update("ops", opId, (v) => {
-      const o = v as DepositOp | undefined;
-      if (!isObj(o) || o.follow.out?.hash !== had.hash) return undefined;
-      const { out: _gone, ...rest } = o.follow;
-      return { ...o, follow: rest };
-    });
-    op = await heldOpOf(ops, opId);
-    if (op.follow.out !== undefined) return follow(op.follow.out, true);
-    to ??= had.to;
+    if (op.follow.why === "moved_out") return { kind: "moved", ...shownOf(had) };
+    const st = await recordState(U, token, had, rpcs);
+    if (st === "live") return follow(had, opId);
+    // gone: a new signature only on the user's tap
+    if (to === null) return st.gone === "taken" && st.usdc !== null && st.usdc <= 1n ? { kind: "empty" } : { kind: "failed", ...shownOf(had) };
+    await clear(opId, had);
   }
   if (to === null) throw new MoveOutRefused("no typed account");
+  const typed = to;
 
-  const read = await readMoveOut(U, to, token, rpcs);
-  if (read === null) return { kind: "unread" };
-  if (read.usdc <= 1n) return { kind: "empty" };
-  const storageMin = read.registered ? 0n : await readTokenStorageMin(network, rpcs);
-  const calls = moveCalls(to, read.usdc - 1n, !read.registered, storageMin);
-  checkMoveCalls(U, to, token, calls, read.usdc, storageMin);
-  const gas = calls.reduce((a, c) => a + c.gas, MOVE_GAS.send);
-  const need = gas * read.gasPrice * GAS_PRICE_MARGIN + calls.reduce((a, c) => a + c.deposit, 0n);
-  if (read.free < need) return { kind: "gas", need: need - read.free, u: U };
-  const nonce = read.nonce + 1n;
-
-  const tx = await seedLock(async () => {
-    const seed = await deps.seed64();
-    try {
-      if (!(seed instanceof Uint8Array) || seed.length !== 64) throw new MoveOutRefused("seed64 must be 64 bytes");
-      const k = depositId(seed, BigInt(op.follow.s), op.follow.i);
-      try {
-        if (k.id !== U) throw new MoveOutRefused("the seed's U_{s,i} is not the op's U");
-        return signMoveTx(U, k.publicKey, k.secretKey, nonce, token, read.blockHash, calls);
-      } finally {
-        k.secretKey.fill(0);
-      }
-    } finally {
-      seed.fill(0);
+  type Signed = { follow: MoveOutRecord; owner: string } | { outcome: MoveOutOutcome };
+  const signed = await uLock(async (): Promise<Signed> => {
+    op = await heldOpOf(ops, opId);
+    if (op.follow.out !== undefined) return { follow: op.follow.out, owner: opId }; // another tab wrote one meanwhile
+    // another op of U with a live record: that move is U's one move; gone ones are cleared
+    for (const k of await ops.keys("ops")) {
+      if (k === opId) continue;
+      const o = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+      const r = isObj(o) && o.kind === "deposit" && isObj(o.follow) && o.follow.u === U && o.follow.network === network && o.follow.why !== "moved_out" ? o.follow.out : undefined;
+      if (r === undefined) continue;
+      if ((await recordState(U, token, r, rpcs)) === "live") return { follow: r, owner: k };
+      await clear(k, r);
     }
+    const read = await readMoveOut(U, typed, token, rpcs);
+    if (read === null) return { outcome: { kind: "unread" } };
+    if (read.usdc <= 1n) return { outcome: { kind: "empty" } };
+    const storageMin = read.registered ? 0n : await readTokenStorageMin(network, rpcs);
+    const calls = moveCalls(typed, read.usdc - 1n, !read.registered, storageMin);
+    checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);
+    const gas = calls.reduce((a, c) => a + c.gas, MOVE_GAS.send);
+    const need = gas * read.gasPrice * GAS_PRICE_MARGIN + calls.reduce((a, c) => a + c.deposit, 0n);
+    if (read.free < need) return { outcome: { kind: "gas", need: need - read.free, u: U } };
+    const nonce = read.nonce + 1n;
+
+    const tx = await seedLock(async () => {
+      const seed = await deps.seed64();
+      try {
+        if (!(seed instanceof Uint8Array) || seed.length !== 64) throw new MoveOutRefused("seed64 must be 64 bytes");
+        const k = depositId(seed, BigInt(op.follow.s), op.follow.i);
+        try {
+          if (k.id !== U) throw new MoveOutRefused("the seed's U_{s,i} is not the op's U");
+          return signMoveTx(U, k.publicKey, k.secretKey, nonce, token, read.blockHash, calls);
+        } finally {
+          k.secretKey.fill(0);
+        }
+      } finally {
+        seed.fill(0);
+      }
+    });
+    const record: MoveOutRecord = { to: typed, amount: (read.usdc - 1n).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed };
+    // written before it is sent; of two writers only the first sends, the other follows it
+    await ops.update("ops", opId, (v) => {
+      const o = v as DepositOp | undefined;
+      return isObj(o) && o.stage === "held" && o.follow.out === undefined ? { ...o, follow: { ...o.follow, out: record } } : undefined;
+    });
+    const now = await heldOpOf(ops, opId);
+    if (now.follow.out === undefined) throw new MoveOutRefused("the move could not be written");
+    return { follow: now.follow.out, owner: opId };
   });
-  const record: MoveOutRecord = { to, amount: (read.usdc - 1n).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed };
-  // written before it is sent; of two writers only the first sends, the other follows it
-  await ops.update("ops", opId, (v) => {
-    const o = v as DepositOp | undefined;
-    return isObj(o) && o.stage === "held" && o.follow.out === undefined ? { ...o, follow: { ...o.follow, out: record } } : undefined;
-  });
-  const now = await heldOpOf(ops, opId);
-  if (now.follow.out === undefined) throw new MoveOutRefused("the move could not be written");
-  return follow(now.follow.out, true);
+  if (signed === null) return { kind: "unread" }; // U's lock is held: another op of U is being followed
+  return "outcome" in signed ? signed.outcome : follow(signed.follow, signed.owner);
 }

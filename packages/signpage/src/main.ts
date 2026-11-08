@@ -66,7 +66,7 @@ import { startApi } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { depositFollows } from "./deposit-follow.ts";
+import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -482,6 +482,10 @@ function withdrawsSignedOut(): void {
 let heldOp: string | null = null;
 const heldRpcs = () => [moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] as const;
 const heldSeedLock = <T,>(fn: () => Promise<T>): Promise<T> => (navigator.locks ? (navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn) as Promise<T>) : fn());
+// U's own lock, the deposit follow's (deposit-follow.ts FOLLOW_LOCK/<network>/<U>), only if free: while a follow of U runs
+// (it may bind U's USDC), no move of U is signed (review of d791adda, M1)
+const heldULock = (u: string) => <T,>(fn: () => Promise<T>): Promise<T | null> =>
+  navigator.locks ? (navigator.locks.request(`${FOLLOW_LOCK}${PAGE_NETWORK}/${u}`, { mode: "exclusive", ifAvailable: true }, (lock) => (lock === null ? null : fn())) as Promise<T | null>) : fn();
 async function heldOpFor(u: string): Promise<string | null> {
   const ops = await open();
   for (const k of await ops.keys("ops")) {
@@ -496,16 +500,21 @@ function heldDeps(opId: string): HeldDeps {
     network: PAGE_NETWORK,
     rpcs,
     recorded: async () => ((await (await open()).get("ops", opId)) as DepositOp | undefined)?.follow?.out,
-    moveOut: async (to) => moveOutHeld(opId, to, { ops: await open(), rpcs, seed64: () => openSeed64(), seedLock: heldSeedLock }),
+    moveOut: async (to) => {
+      const ops = await open();
+      const u = ((await ops.get("ops", opId)) as DepositOp | undefined)?.follow?.u ?? "";
+      return moveOutHeld(opId, to, { ops, rpcs, seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(u) });
+    },
   };
 }
 // a move a closed or reloaded page left out is resumed once per sign-in: its same signed bytes, never a new signature
+// (moveOutHeld with null never signs: a record that can no longer land waits for the user's tap, review of d791adda L6)
 async function settleHeld(): Promise<void> {
   const ops = await open();
   for (const k of await ops.keys("ops")) {
     const op = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
     if (op?.kind === "deposit" && op.stage === "held" && op.follow?.out !== undefined && op.follow.why !== "moved_out" && op.follow.network === PAGE_NETWORK)
-      await moveOutHeld(k, null, { ops, rpcs: heldRpcs(), seed64: () => openSeed64(), seedLock: heldSeedLock }).catch(() => {});
+      await moveOutHeld(k, null, { ops, rpcs: heldRpcs(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(op.follow.u) }).catch(() => {});
   }
 }
 // The vault withdrawals a closed or reloaded page left RESERVED, followed to settled once per sign-in (src/withdraw/

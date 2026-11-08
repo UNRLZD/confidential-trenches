@@ -6,10 +6,11 @@ import { after, test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
+import { VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, MoveOutRefused, type MoveOutRpc, moveOutHeld, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -35,8 +36,17 @@ class Chain {
   usdc = 2_500_000n;
   registered = new Set<string>();
   keys = 1;
+  /** U's one key is another key (not U's own) */
+  foreignKey: string | null = null;
   sent: string[] = [];
   txs = new Map<string, "ok" | "failed">();
+  /** U's key nonce at a height (default: the current one at every height) */
+  nonceAt: (h: number) => bigint = () => this.nonce;
+  /** what the second RPC answers differently, at the same height */
+  skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string }> = {};
+  /** the second RPC's own tx states (default: the same as the first's) */
+  txsB: Map<string, "ok" | "failed"> | null = null;
+  code = VAULT_TOKEN_CODE_HASH;
   /** what a send does: lands (the default), fails, or is lost */
   onSend: (signed: string, hash: string) => void = (_s, h) => this.land(h);
   land(hash: string) {
@@ -47,35 +57,37 @@ class Chain {
   rpc(name: string, k: "a" | "b"): MoveOutRpc {
     const at = (p: Record<string, unknown>) => (p.block_id as number | undefined) ?? this[k].height;
     const view = (v: unknown, h: number) => ({ result: { block_height: h, result: [...Buffer.from(JSON.stringify(v))] } });
+    const sk = k === "b" ? this.skewB : {};
     return {
       name,
       block: async (p) => {
         const h = "block_id" in p ? p.block_id : this[k].height;
-        return { result: { header: { height: h, hash: base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
+        return { result: { header: { height: h, hash: sk.hash ?? base58.encode(sha256(new TextEncoder().encode(`b${h}`))), timestamp_nanosec: "1" } } };
       },
       query: async (p) => {
         const h = at(p);
         if (p.request_type === "view_access_key_list") {
           const own = `ed25519:${base58.encode(Uint8Array.from(U.match(/../g)!, (x) => parseInt(x, 16)))}`;
-          const keys = [{ public_key: own, access_key: { nonce: Number(this.nonce), permission: "FullAccess" } }];
+          const keys = [{ public_key: this.foreignKey ?? own, access_key: { nonce: Number(sk.nonce ?? this.nonceAt(h)), permission: "FullAccess" } }];
           if (this.keys > 1) keys.push({ public_key: "ed25519:11111111111111111111111111111111", access_key: { nonce: 0, permission: "FullAccess" } });
           return { result: { block_height: h, keys } };
         }
-        if (p.request_type === "view_account") return { result: { block_height: h, amount: this.near.toString(), locked: "0", storage_usage: Number(this.usage), code_hash: "11111111111111111111111111111111" } };
+        if (p.request_type === "view_account" && p.account_id === TOKEN) return { result: { block_height: h, amount: "1", locked: "0", storage_usage: 1, code_hash: sk.code ?? this.code } };
+        if (p.request_type === "view_account") return { result: { block_height: h, amount: (sk.near ?? this.near).toString(), locked: "0", storage_usage: Number(this.usage), code_hash: "11111111111111111111111111111111" } };
         const args = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
-        if (p.method_name === "ft_balance_of") return view(this.usdc.toString(), h);
-        if (p.method_name === "storage_balance_of") return view(this.registered.has(args.account_id) ? { total: STORAGE_MIN.toString(), available: "0" } : null, h);
+        if (p.method_name === "ft_balance_of") return view((sk.usdc ?? this.usdc).toString(), h);
+        if (p.method_name === "storage_balance_of") return view((sk.registered ?? this.registered.has(args.account_id)) ? { total: STORAGE_MIN.toString(), available: "0" } : null, h);
         if (p.method_name === "storage_balance_bounds") return view({ min: STORAGE_MIN.toString(), max: STORAGE_MIN.toString() }, h);
         throw new Error(`unexpected ${String(p.method_name)}`);
       },
       tx: async ({ tx_hash, sender_account_id }) => {
-        const st = this.txs.get(tx_hash);
+        const st = (k === "b" && this.txsB !== null ? this.txsB : this.txs).get(tx_hash);
         if (st === undefined) return { error: { cause: { name: "UNKNOWN_TRANSACTION" } } };
         const status = st === "ok" ? { SuccessValue: "" } : { Failure: { ActionError: {} } };
         return { result: { final_execution_status: "FINAL", status, transaction: { hash: tx_hash, signer_id: sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status } }] } };
       },
       call: async (method, params) => {
-        if (method === "gas_price") return { result: { gas_price: GAS_PRICE.toString() } };
+        if (method === "gas_price") return { result: { gas_price: (sk.gas ?? GAS_PRICE).toString() } };
         if (method === "send_tx") {
           const signed = (params as { signed_tx_base64: string }).signed_tx_base64;
           this.sent.push(signed);
@@ -284,4 +296,210 @@ test("bytes both RPCs refuse for U's NEAR answer gas and are kept: once U holds 
   assert.equal((await moveOutHeld("op1", TO, d0)).kind, "moved");
   assert.equal(seedOpens, 0);
   assert.ok(chain.sent.every((s) => s === bytes));
+});
+
+// ---------- review of d791adda: M1 (a record whose nonce is taken), M2 (the token's code hash), M3 (a test per rule),
+// L1 (the vault and intents.near), L6 (a resume never signs) ----------
+
+test("M3 every read must agree on both RPCs at the one height: one RPC's other nonce, USDC, registration, gas price, block hash, NEAR or code hash signs nothing", async () => {
+  const plants: Chain["skewB"][] = [{ nonce: 9n }, { usdc: 2_400_000n }, { registered: false }, { gas: GAS_PRICE * 2n }, { hash: base58.encode(sha256(new TextEncoder().encode("other"))) }, { near: NEAR }, { code: "11111111111111111111111111111111" }];
+  for (const skew of plants) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.skewB = skew;
+    seedOpens = 0;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" }, JSON.stringify(skew, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+    assert.equal(chain.sent.length, 0);
+    assert.equal(seedOpens, 0);
+  }
+});
+
+test("M2 the token's code is not the kit's pin on both RPCs: nothing signed (W:928)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.code = "11111111111111111111111111111111";
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" });
+  assert.equal(chain.sent.length, 0);
+});
+
+test("M3 U's one key is not U's own key: nothing signed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.foreignKey = "ed25519:11111111111111111111111111111111";
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(await heldOp("sender_struck"), chain)), { kind: "unread" });
+  assert.equal(chain.sent.length, 0);
+});
+
+test("M3 the tx FINAL on one RPC and unknown on the other is not moved: the op is not marked moved_out", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  chain.txsB = new Map(); // the second RPC knows nothing of it
+  chain.txs.set((first as { hash: string }).hash, "ok");
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "sent");
+  assert.notEqual(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+  // and failed on one, unknown on the other: not failed either (nothing re-signed on a tap)
+  chain.txs.set((first as { hash: string }).hash, "failed");
+  seedOpens = 0;
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  assert.equal(seedOpens, 0);
+  // a split read is never "unknown on both": with U's nonce taken long ago the record is still followed, not settled
+  chain.nonce = 8n;
+  chain.a.height = chain.b.height = 1000 + 2 * SETTLE_BLOCKS;
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "sent");
+  assert.equal(seedOpens, 0);
+});
+
+test("M1 a taken record past the validity window too is taken, not expired: a resume with U empty answers empty", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  chain.nonce = 9n; // two more txs of U since
+  chain.usdc = 1n;
+  chain.a.height = chain.b.height = 1000 + Number(TX_VALIDITY_BLOCKS) + 1;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
+});
+
+// another tab's record written between this call's signature and its compare-and-set
+function racing(ops: WalletStore, competitor: MoveOutRecord): WalletStore {
+  let planted = false;
+  return new Proxy(ops, {
+    get(t, p) {
+      if (p !== "update") return (t as unknown as Record<string | symbol, unknown>)[p] instanceof Function ? ((t as unknown as Record<string | symbol, (...a: unknown[]) => unknown>)[p] as (...a: unknown[]) => unknown).bind(t) : (t as unknown as Record<string | symbol, unknown>)[p];
+      return async (store: "ops", key: string, change: (v: unknown) => unknown) => {
+        if (!planted) {
+          const cur = (await t.get(store, key)) as DepositOp | undefined;
+          const probe = change(cur) as DepositOp | undefined;
+          if (cur?.follow.out === undefined && probe?.follow?.out !== undefined) {
+            planted = true;
+            await t.update(store, key, (v) => ({ ...(v as DepositOp), follow: { ...(v as DepositOp).follow, out: competitor } }));
+          }
+        }
+        return t.update(store, key, change);
+      };
+    },
+  });
+}
+
+test("M3 the compare-and-set: another tab's record written first wins; this call sends only that record's bytes and names its account", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  chain.onSend = () => {};
+  const signed = base64.encode(new Uint8Array(120).fill(7));
+  const competitor: MoveOutRecord = { to: "bob.testnet", amount: "2499999", nonce: "8", height: 1000, register: false, hash: base58.encode(sha256(new Uint8Array(55).fill(7))), signed };
+  const ops = await heldOp("sender_struck");
+  const out = await moveOutHeld("op1", TO, deps(racing(ops, competitor), chain));
+  assert.equal(out.kind, "sent");
+  assert.equal((out as { to: string }).to, "bob.testnet");
+  assert.ok(chain.sent.length > 0 && chain.sent.every((x) => x === signed), "only the winner's bytes are sent");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out?.hash, competitor.hash, "the stored record is the winner's");
+});
+
+test("M3 two calls at once, two typed accounts: one set of bytes sent, both answers name the same account", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const [a, b] = await Promise.all([moveOutHeld("op1", TO, deps(ops, chain)), moveOutHeld("op1", "bob.testnet", deps(ops, chain))]);
+  assert.equal(new Set(chain.sent).size, 1);
+  assert.equal((a as { to: string }).to, (b as { to: string }).to);
+});
+
+test("M1 a record whose nonce another tx of U took: settled once the nonce is taken SETTLE_BLOCKS back; a resume answers empty, a tap signs anew for new USDC", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  // another tx of U used nonce 8 just now and took U's USDC: too recent to settle (its receipts may still run)
+  chain.nonce = 8n;
+  chain.usdc = 0n;
+  chain.nonceAt = (h) => (h >= 1050 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1060;
+  seedOpens = 0;
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent", "a nonce taken within SETTLE_BLOCKS: still followed");
+  // SETTLE_BLOCKS later the record is settled: a resume answers empty and signs nothing
+  chain.a.height = chain.b.height = 1050 + SETTLE_BLOCKS + 1;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
+  assert.equal(seedOpens, 0);
+  assert.ok(((await ops.get("ops", "op1")) as DepositOp).follow.out !== undefined, "a resume clears nothing");
+  // new USDC reaches U: a resume answers failed (Retry), and the tap signs anew at U's next nonce
+  chain.usdc = 5_000_000n;
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "failed");
+  assert.equal(seedOpens, 0);
+  chain.onSend = (_s, h) => chain.land(h);
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  const op = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op.follow.out_past?.length, 1, "the taken record is kept as history");
+  assert.deepEqual([...new Set(chain.sent)].map((x) => decode(x).nonce), [8n, 9n]);
+});
+
+test("M1 a never-landable record (expired): a resume answers failed and signs nothing; only the tap signs again (L6)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  chain.a.height = chain.b.height = 1000 + Number(TX_VALIDITY_BLOCKS) + 1;
+  seedOpens = 0;
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "failed");
+  assert.equal(seedOpens, 0);
+  // FINAL failed on both: the same, a resume never signs
+  const c2 = new Chain();
+  c2.registered.add(TO);
+  c2.onSend = (_s, h) => (c2.txs.set(h, "failed"), (c2.nonce += 1n));
+  const ops2 = await heldOp("sender_struck");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops2, c2))).kind, "failed");
+  const n = c2.sent.length;
+  assert.equal((await moveOutHeld("op1", null, deps(ops2, c2))).kind, "failed");
+  assert.equal(c2.sent.length, n, "nothing sent on a resume");
+});
+
+test("M1 two held ops of one U: the second op's tap follows the first's live record, one set of bytes, its account named", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  seedOpens = 0;
+  const b = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
+  assert.equal(b.kind, "sent");
+  assert.equal((b as { to: string }).to, TO);
+  assert.equal(seedOpens, 0);
+  assert.equal(new Set(chain.sent).size, 1);
+  // it lands: the first op ends moved_out, and the second finds nothing to move
+  chain.txs.set((b as { hash: string }).hash, "ok");
+  chain.usdc = 1n;
+  assert.equal((await moveOutHeld("op2", "bob.testnet", deps(ops, chain))).kind, "moved");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+  assert.deepEqual(await moveOutHeld("op2", "bob.testnet", deps(ops, chain)), { kind: "empty" });
+});
+
+test("M1 U's lock held elsewhere (a deposit follow of U): nothing read for a signature, nothing signed", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  seedOpens = 0;
+  const out = await moveOutHeld("op1", TO, { ...deps(await heldOp("sender_struck"), chain), uLock: async () => null });
+  assert.deepEqual(out, { kind: "unread" });
+  assert.equal(chain.sent.length, 0);
+  assert.equal(seedOpens, 0);
+});
+
+test("L1 the payload rule refuses the vault and intents.near, called straight", async () => {
+  for (const to of [NET.vault!, "intents.near"]) {
+    assert.throws(() => checkMoveCalls(U, to, TOKEN, moveCalls(to, 1n, false, 0n), 2_500_000n, 0n), MoveOutRefused);
+    const chain = new Chain();
+    chain.registered.add(to);
+    await assert.rejects(moveOutHeld("op1", to, deps(await heldOp("sender_struck"), chain)), MoveOutRefused);
+    assert.equal(chain.sent.length, 0);
+  }
 });
