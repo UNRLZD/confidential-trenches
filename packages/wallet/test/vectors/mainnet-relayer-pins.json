@@ -1,0 +1,331 @@
+{
+  "recorded_at": "2026-11-08T12:55:55.610Z",
+  "helper": {
+    "health": {
+      "status": 200,
+      "commit": "dfe122d26745cad69d5f354c75e9e7a5574e2871",
+      "bind": {
+        "mainnet": "f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc",
+        "testnet": "g-2b700409.bf-vt-20261102t071444.testnet"
+      }
+    },
+    "fee": {
+      "path": "/v1/withdraw/fee",
+      "asset": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "status": 200,
+      "commit": "dfe122d26745cad69d5f354c75e9e7a5574e2871",
+      "body": {
+        "relayer_account": "4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756",
+        "fee_recipient": "fees.unrlzd.near",
+        "relay_fee": "185617",
+        "gp": "100000000",
+        "px": "3.697689295407",
+        "g_w": "92505000000000",
+        "valid_until_block": 223619279
+      }
+    }
+  },
+  "bind": {
+    "id": "f874a24241077a92d78daebf0e20585b2b6c89f7da30b05a67fb1969f70388cc",
+    "view_account": [
+      {
+        "url": "https://rpc.mainnet.fastnear.com",
+        "status": 200,
+        "json": {
+          "jsonrpc": "2.0",
+          "result": {
+            "amount": "1000000000000000000000000",
+            "block_hash": "CF9UJw6QPbhvXomugSpTwGMuiCbjdKngoTfSQPRAfJfV",
+            "block_height": 223619180,
+            "code_hash": "11111111111111111111111111111111",
+            "locked": "0",
+            "storage_paid_at": 0,
+            "storage_usage": 182
+          },
+          "id": "wallet-mainnet-relayer-pins"
+        }
+      },
+      {
+        "url": "https://near.drpc.org",
+        "status": 200,
+        "json": {
+          "id": "wallet-mainnet-relayer-pins",
+          "jsonrpc": "2.0",
+          "result": {
+            "amount": "1000000000000000000000000",
+            "block_hash": "CF9UJw6QPbhvXomugSpTwGMuiCbjdKngoTfSQPRAfJfV",
+            "block_height": 223619180,
+            "code_hash": "11111111111111111111111111111111",
+            "locked": "0",
+            "storage_paid_at": 0,
+            "storage_usage": 182
+          }
+        }
+      }
+    ],
+    "view_access_key_list": [
+      {
+        "url": "https://rpc.mainnet.fastnear.com",
+        "status": 200,
+        "json": {
+          "jsonrpc": "2.0",
+          "result": {
+            "block_hash": "CF9UJw6QPbhvXomugSpTwGMuiCbjdKngoTfSQPRAfJfV",
+            "block_height": 223619180,
+            "keys": [
+              {
+                "access_key": {
+                  "nonce": 223529510000000,
+                  "permission": "FullAccess"
+                },
+                "public_key": "ed25519:HisG7d9D3eQBP8sDw3oLpJDrSrxiqTTgDh2Cwuxv8rEo"
+              }
+            ]
+          },
+          "id": "wallet-mainnet-relayer-pins"
+        }
+      },
+      {
+        "url": "https://near.drpc.org",
+        "status": 200,
+        "json": {
+          "id": "wallet-mainnet-relayer-pins",
+          "jsonrpc": "2.0",
+          "result": {
+            "block_hash": "H9EsXdUBpDEAvA9xigcWZMuL1EpGDXqWWekRj7dQen6x",
+            "block_height": 223619181,
+            "keys": [
+              {
+                "access_key": {
+                  "nonce": 223529510000000,
+                  "permission": "FullAccess"
+                },
+                "public_key": "ed25519:HisG7d9D3eQBP8sDw3oLpJDrSrxiqTTgDh2Cwuxv8rEo"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "withdraw_relayer": {
+    "id": "4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756",
+    "view_account": [
+      {
+        "url": "https://rpc.mainnet.fastnear.com",
+        "status": 200,
+        "json": {
+          "jsonrpc": "2.0",
+          "result": {
+            "amount": "1000000000000000000000000",
+            "block_hash": "H9EsXdUBpDEAvA9xigcWZMuL1EpGDXqWWekRj7dQen6x",
+            "block_height": 223619181,
+            "code_hash": "11111111111111111111111111111111",
+            "locked": "0",
+            "storage_paid_at": 0,
+            "storage_usage": 182
+          },
+          "id": "wallet-mainnet-relayer-pins"
+        }
+      },
+      {
+        "url": "https://near.drpc.org",
+        "status": 200,
+        "json": {
+          "id": "wallet-mainnet-relayer-pins",
+          "jsonrpc": "2.0",
+          "result": {
+            "amount": "1000000000000000000000000",
+            "block_hash": "H9EsXdUBpDEAvA9xigcWZMuL1EpGDXqWWekRj7dQen6x",
+            "block_height": 223619181,
+            "code_hash": "11111111111111111111111111111111",
+            "locked": "0",
+            "storage_paid_at": 0,
+            "storage_usage": 182
+          }
+        }
+      }
+    ],
+    "view_access_key_list": [
+      {
+        "url": "https://rpc.mainnet.fastnear.com",
+        "status": 200,
+        "json": {
+          "jsonrpc": "2.0",
+          "result": {
+            "block_hash": "H9EsXdUBpDEAvA9xigcWZMuL1EpGDXqWWekRj7dQen6x",
+            "block_height": 223619181,
+            "keys": [
+              {
+                "access_key": {
+                  "nonce": 223591067000000,
+                  "permission": "FullAccess"
+                },
+                "public_key": "ed25519:5ejJiy2xPjpXfu1pGLvvkRsqvgWrXJk5sstze8G7WBsK"
+              }
+            ]
+          },
+          "id": "wallet-mainnet-relayer-pins"
+        }
+      },
+      {
+        "url": "https://near.drpc.org",
+        "status": 200,
+        "json": {
+          "id": "wallet-mainnet-relayer-pins",
+          "jsonrpc": "2.0",
+          "result": {
+            "block_hash": "G1z3QyxxakdiNqcpag2WZ4dV29Qgr85bDWp9j9nnieaC",
+            "block_height": 223619182,
+            "keys": [
+              {
+                "access_key": {
+                  "nonce": 223591067000000,
+                  "permission": "FullAccess"
+                },
+                "public_key": "ed25519:5ejJiy2xPjpXfu1pGLvvkRsqvgWrXJk5sstze8G7WBsK"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "fee_recipients": [
+    {
+      "id": "fees.unrlzd.near",
+      "storage_balance_of": [
+        {
+          "url": "https://rpc.mainnet.fastnear.com",
+          "status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "result": {
+              "block_hash": "G1z3QyxxakdiNqcpag2WZ4dV29Qgr85bDWp9j9nnieaC",
+              "block_height": 223619182,
+              "logs": [],
+              "result": [
+                123,
+                34,
+                116,
+                111,
+                116,
+                97,
+                108,
+                34,
+                58,
+                34,
+                49,
+                50,
+                53,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                34,
+                44,
+                34,
+                97,
+                118,
+                97,
+                105,
+                108,
+                97,
+                98,
+                108,
+                101,
+                34,
+                58,
+                34,
+                48,
+                34,
+                125
+              ]
+            },
+            "id": "wallet-mainnet-relayer-pins"
+          }
+        },
+        {
+          "url": "https://near.drpc.org",
+          "status": 200,
+          "json": {
+            "id": "wallet-mainnet-relayer-pins",
+            "jsonrpc": "2.0",
+            "result": {
+              "block_hash": "G1z3QyxxakdiNqcpag2WZ4dV29Qgr85bDWp9j9nnieaC",
+              "block_height": 223619182,
+              "logs": [],
+              "result": [
+                123,
+                34,
+                116,
+                111,
+                116,
+                97,
+                108,
+                34,
+                58,
+                34,
+                49,
+                50,
+                53,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                48,
+                34,
+                44,
+                34,
+                97,
+                118,
+                97,
+                105,
+                108,
+                97,
+                98,
+                108,
+                101,
+                34,
+                58,
+                34,
+                48,
+                34,
+                125
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

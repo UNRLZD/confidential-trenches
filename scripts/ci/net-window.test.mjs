@@ -28,6 +28,7 @@ export const CHANGED = [
   "scripts/live-checks/app-chart-controls.mjs",
   "scripts/live-checks/app-chart-live.mjs",
   "scripts/live-checks/app-console-429.mjs",
+  "scripts/live-checks/app-footer-bar.mjs",
   "scripts/live-checks/app-harness-signin-e2e.mjs",
   "scripts/live-checks/app-host-gate.mjs",
   "scripts/live-checks/app-list-age.mjs",
@@ -182,6 +183,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-passkey-prf.mjs",
   "scripts/live-checks/wallet-rpc-hex-case.mjs",
   "scripts/live-checks/wallet-withdraw-move-out.mjs",
+  "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
 ];
