@@ -23,9 +23,9 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "sol-sell-deposit-back-floor";
 export const SIGN = "https://confidential.unrealized.trade";
-/** This card's release: the first list whose signing page refuses a sell's deposit back under the floor. The number is
- *  set when the release is cut; until then no list holds it and the live run FAILs. */
-export const FIRST_RELEASE = Number.POSITIVE_INFINITY;
+/** This card's release: the first list whose signing page refuses a sell's deposit back under the floor (release-107,
+ *  cut at 6d3509b8). */
+export const FIRST_RELEASE = 107;
 const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
 /** The SIGN_HOST /app.js of every written release list from FIRST_RELEASE on: its sha384 to its release. */
 export function releasedAppJs(dir = RELEASES, from = FIRST_RELEASE) {

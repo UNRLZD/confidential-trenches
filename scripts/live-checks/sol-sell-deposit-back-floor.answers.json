@@ -1,6 +1,6 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 1cc3585b (this card merged with main 610143c2): the sell's rule refuses a deposit back under the kit's release floor at the rent read, by name: PASS against a release list holding it (release-107)",
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 6d3509b8: the sell's rule refuses a deposit back under the kit's release floor at the rent read, by name: PASS against a release list holding it (release-107)",
     "bad": "87c410c4's build (mainnet; the floor card kit-sol-pool-deposit-floor merged with main 999e1826): the sell's rule refuses only a deposit back under the pool's least deposit: FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-08T19:23Z, before this card's deploy: FAIL",
     "unreached": "this card's bundle with !1&& planted in front of the floor's refusal (never reached) and index.html pinning it: FAIL, its mark gone and its bytes in no release list"

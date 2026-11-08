@@ -13,8 +13,8 @@ import { FIRST_RELEASE, facts, judge, releasedAppJs } from "./sol-sell-deposit-b
 const ANSWERS = JSON.parse(readFileSync(new URL("./sol-sell-deposit-back-floor.answers.json", import.meta.url), "utf8"));
 const NO_FLOOR = "BAD the bundle's Solana sell signs a deposit back under the kit's release floor: a note no release can take whole";
 const UNRELEASED = "BAD SIGN_HOST's served /app.js is the /app.js of no release list of this card's on: bytes no tested source built";
-/** The release list this card's release writes: until its number is set, the test names it. */
-const LISTED = new Map([[ANSWERS.good.sha384, "release-this-card"]]);
+/** The release list this card's release wrote (release-107): the planted cases judge against it alone. */
+const LISTED = new Map([[ANSWERS.good.sha384, "release-107"]]);
 
 test("recorded good answer: this card's build refuses a deposit back under the floor by name: PASS", () => {
   const v = judge(ANSWERS.good, { released: LISTED });
@@ -39,13 +39,15 @@ test("recorded bad answer unreached (the refusal behind !1&&): FAIL, its mark go
   assert.deepEqual(v.lines, [UNRELEASED, NO_FLOOR]);
 });
 
-test("the release lists read: none holds this card's build until its release is cut, so the live run FAILs until then", () => {
-  assert.equal(FIRST_RELEASE, Number.POSITIVE_INFINITY);
-  assert.equal(releasedAppJs().size, 0);
-  assert.deepEqual(judge(ANSWERS.good).lines, [UNRELEASED]);
+test("the release lists read: release-107's /app.js is the good answer's; a list before release-107 is not read", () => {
+  assert.equal(FIRST_RELEASE, 107);
+  const r = releasedAppJs();
+  assert.equal(r.get(ANSWERS.good.sha384), "release-107");
+  assert.ok([...r.values()].every((x) => Number(x.slice(8)) >= FIRST_RELEASE));
+  assert.deepEqual(judge(ANSWERS.good).lines, []);
   // from release-1 every written list is read, each its own /app.js
   const all = releasedAppJs(undefined, 1);
-  assert.ok(all.size > 50 && !all.has(ANSWERS.good.sha384) && !all.has(ANSWERS.bad.sha384), String(all.size));
+  assert.ok(all.size > 50 && all.get(ANSWERS.good.sha384) === "release-107" && !all.has(ANSWERS.bad.sha384), String(all.size));
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
