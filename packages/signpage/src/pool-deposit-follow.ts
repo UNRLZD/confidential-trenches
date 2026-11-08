@@ -17,16 +17,23 @@
 //   read again next round; only the signal (a sign out) ends a follow early. A quote with nothing seen sent by its
 //   deadline shows expired and is read on (a late send is refunded by 1Click and carried); a stale status never shows
 //   it live again.
-// - REFUNDED: refunded is shown; the money is under U_{s,i} inside intents.near, and the refund carry (`refund`: moved
-//   with the same signer back to X's coin, to U_X, and carried on by the rounds above) is asked once per round while the
-//   status reads REFUNDED. With no `refund` given the stage stays refunded and the follow does not end (followed on at
+// - REFUNDED: refunded is shown; the money is under U_{s,i} inside intents.near, and the refund carry (`refund`,
+//   poolRefundMover below: moved with the same signer back to X's coin, to U_X, and carried on by the rounds above) is
+//   asked once per round while the status reads REFUNDED. With no `refund` given the stage stays refunded and the follow does not end (followed on at
 //   every landing), so no refund is left as if done.
 // - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS.
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
 import type { PoolChain } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
-import type { OneClickStatus, StatusRead } from "../../wallet/src/deposit/follow.ts";
+import type { MoveRead, OneClickStatus, StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { hex } from "@scure/base";
+import type { OneClickPricing } from "../../kit/src/checks/oneclick.ts";
+import type { HelperSignedIntent } from "../../kit/src/helper/v1.ts";
+import { depositId } from "../../wallet/src/derive/keys.ts";
+import { type MoveRecord, poolRefundMoveRequest, runRefundMove } from "../../wallet/src/deposit/refund.ts";
+import { DEPOSIT_QUOTE_PATH } from "./rules/deposit-dry.ts";
+import { checkIdTransferIntent, checkPoolRefundQuote, signIdIntent, type IdIntent, type RefundQuote } from "./rules/refund.ts";
 
 /** What a reload needs to follow the quote again (written in the op under `follow`; nothing secret). */
 export interface PoolFollowRecord {
@@ -315,4 +322,94 @@ export function depositToEnd(
       () => fin("down"),
     );
   });
+}
+
+// ------------------------------------------------------------------------------------------------ the refund carry
+
+/**
+ * The refund carry for one pool op (the follow's `refund`): what U_{s,i} holds of the quote's origin inside intents.near,
+ * read at one block on NEAR's two RPCs (the wallet's readMoveAt), moved by the wallet's runRefundMove with U_{s,i} as
+ * the signer under this page's rules: the request poolRefundMoveRequest's (X's coin, to U_X, refunded under the id),
+ * its quote checkPoolRefundQuote's (min out over the pool's floor read now), its intent checkIdTransferIntent's, signed
+ * by signIdIntent with the key opened only for the signature (the seed under its lock, U_{s,i} checked, both zeroed).
+ * - The move is recorded in the op (`record`) before it is sent. While a recorded move's nonce reads unused at a block
+ *   inside its deadline, nothing new is signed ("wait"); its nonce read used, the money is on its way to U_X ("moved",
+ *   the rounds carry it); past its deadline unused, a new move may go, the earlier deadline handed to the rule.
+ * - Nothing held: "none". A read that does not agree, a quote that fails a check (one under the pool's floor among
+ *   them: it waits under U_{s,i}), or a relayer that refuses: "wait", read again next round.
+ */
+export interface PoolRefundHost {
+  /** NEAR mainnet's two RPCs (FastNEAR and dRPC) and intents.near. */
+  read(f: PoolFollowRecord, nonce: string | null): Promise<MoveRead | null>;
+  /** The pool's floor now (solanaPoolDepositFloor or evmPoolDepositFloor at reads made now). */
+  floor(f: PoolFollowRecord): Promise<bigint>;
+  /** The device's own two price reads of the origin and X's coin, and the origin's decimals; null when it has none. */
+  priced(f: PoolFollowRecord): { decimalsIn: number; pricing: Exclude<OneClickPricing, "usdc"> } | null;
+  decimals(chain: PoolChain): number;
+  /** The 64-byte seed, opened under the wallet's seed lock (shared), zeroed here. */
+  seed64(): Promise<Uint8Array>;
+  seedLock<T>(fn: () => Promise<T>): Promise<T>;
+  /** The op's recorded move, and its write (before the send). */
+  move(): MoveRecord | undefined;
+  record(m: MoveRecord): Promise<void>;
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal: AbortSignal) => Promise<"moved" | "none" | "wait"> {
+  const now = h.now ?? Date.now;
+  return async (f, signal) => {
+    const m = h.move();
+    const r = await h.read(f, m?.nonce ?? null);
+    if (r === null) return "wait";
+    let prior: number | null = null;
+    if (m !== undefined) {
+      // through on its nonce: that money is on its way to U_X (the rounds carry it); anything held now is other money
+      // (a second refund), moved by a new move
+      if (r.used !== true) {
+        if (r.timeMs <= m.deadline_ms) return "wait"; // in its window: never a second intent for the same money
+        prior = m.deadline_ms;
+      }
+    }
+    if (r.held === 0n) return "none";
+    const priced = h.priced(f);
+    if (priced === null) return "wait";
+    const floor = await h.floor(f);
+    const signer = { role: "U" as const, id: f.refund_id, publicKey: hex.decode(f.refund_id) };
+    const decimalsOut = h.decimals(f.chain);
+    const res = await runRefundMove<RefundQuote, IdIntent>(
+      { u: f.refund_id, asset: f.origin, reads: r.reads, height: r.height, salt: r.salt, priorMs: prior },
+      {
+        request: (u, asset, amount, at) => poolRefundMoveRequest(f.chain, f.u, u, asset, amount, at),
+        check: {
+          quote: (request, answer) =>
+            checkPoolRefundQuote(request, answer, { network: "mainnet", signer, origin: f.origin, chain: f.chain, wallet: f.u, floor, check: { path: DEPOSIT_QUOTE_PATH, pricing: priced.pricing, decimalsIn: priced.decimalsIn, decimalsOut, now: now() } }),
+          read: (q) => ({ depositAddress: q.depositAddress as string, amountIn: q.amountIn, deadlineMs: Date.parse(q.deadline as string) }),
+          intent: (payload, q, reads, priorDeadline) => checkIdTransferIntent(payload, q, { network: "mainnet", signer, reads, priorDeadline }),
+          sign: (secretKey, intent) => signIdIntent(secretKey, intent) as HelperSignedIntent,
+        },
+        openKey: <T,>(fn: (secretKey: Uint8Array) => T) =>
+          h.seedLock(async () => {
+            const seed = await h.seed64();
+            try {
+              if (!(seed instanceof Uint8Array) || seed.length !== 64) throw new Error("seed64 must be 64 bytes");
+              const k = depositId(seed, BigInt(f.s), f.i);
+              try {
+                if (k.id !== f.refund_id) throw new Error("the seed's U_{s,i} is not the op's refund id");
+                return fn(k.secretKey);
+              } finally {
+                k.secretKey.fill(0);
+              }
+            } finally {
+              seed.fill(0);
+            }
+          }),
+        record: (mv) => h.record(mv),
+        now,
+        signal,
+        ...(h.fetch ? { fetchFn: h.fetch } : {}),
+      },
+    );
+    return res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "wait";
+  };
 }
