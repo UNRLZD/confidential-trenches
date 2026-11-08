@@ -1561,9 +1561,17 @@ test("R3-2b the stale free as a loop: a signer that owns its receiver (registere
   }
   s.r.resolve = resolve;
   s.r.send = send;
+  // the last registration is still tracked: a request at the same moment pays nothing new
+  const paid = regsOf(s);
+  await s.carry.carry(signedIntent(u, withdraw("fresh.near"), D));
+  await s.carry.idle();
+  assert.equal(regsOf(s), paid, "no claim lost: no second payment for it");
   const regs = regsOf(s);
+  const rec = s.store.signer(u);
   s.store.close();
   assert.ok(regs <= INTENTS_SENDS_MAX - 1, `${regs} receiver registrations paid for one signer: ${trail.join(", ")}`);
+  // the slots: every signed one counted, plus the live reservation (no stale free took a newer claim's)
+  assert.equal(rec.sent, s.r.sent.length + (rec.registration?.reserved === true ? 1 : 0) + (rec.taking ?? []).length, `sent ${rec.sent} for ${s.r.sent.length} signed: ${trail.join(", ")}`);
 });
 
 test("R3-6 reclaim at step 6 never frees a live take: an intent waiting in the relayer's queue (in taking) and a receiver claim waiting there (no tx yet) keep their slots", async () => {
