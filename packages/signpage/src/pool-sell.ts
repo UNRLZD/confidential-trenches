@@ -57,8 +57,8 @@
 import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
-import { solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
+import { readSolanaPoolBuyVenue, readSolanaRent, SOLANA_POOL_PAGE_ENTRIES, SOLANA_POOL_SELL_FEE, solanaPoolNextPage, solanaPoolPage, solanaPoolSellMinOut, solanaPoolBuySellNeed, solanaPoolSellNeed, solanaPoolSellSteps, solanaRentMin, type SolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolPreMarkOf, type SolanaPoolPreMark } from "../../kit/src/trade/solana/pool-deposit.ts";
 import { solanaDecodeTokenAccount } from "../../kit/src/trade/solana/pool.ts";
 import { pageReference } from "./page-rpc.ts";
 import { SOLANA_MAX_TX_BYTES, solanaAta, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
@@ -513,40 +513,58 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     // the transaction: the venue's sell, then last the deposit of `value` with the note's precommitment, W the payer
     const steps = solanaPoolSellSteps(venue, w.address, amount, minOut);
     const pre = be32(precommitment);
-    // the deposit names each tree's next page when the transaction still fits 1,232 bytes with them (a PumpSwap cashback
-    // sell with no lookup table does not: it keeps the six, as before d3edab1); the size does not depend on the value
-    const next = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
-    const build = (value: bigint): { message: Uint8Array; wire: Uint8Array } => {
-      const { message } = solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)], bh.blockhash, []);
-      return { message, wire: wireOf(message) };
-    };
-    // the fee both RPCs price the message at: per signature, with no compute budget, so the deposit's value (the one
-    // thing the reserve changes) changes nothing it prices
-    const [fa, fb] = await both(rpcs, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(build(minOut).message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
-    if (fa !== fb) return no();
-    // the need again at the fee both RPCs price this very message at
-    if (lamports < need - SOLANA_POOL_SELL_FEE + fa) return no("not_funded");
     // what W holds after the sell, at least: rent(0), the runtime's floor, when the sell empties W's holding; while W
     // keeps any of the token (the amount both RPCs read), what the next sell of it needs up front on every
     // venue the coin can reach, the buy's rule (solanaPoolBuySellNeed: a curve coin's PumpSwap need, cashback accounts
     // included), so no sell leaves tokens on a W that cannot pay to sell them (the re-review of 40cdc3e)
     const keeps = tokens.amount > amount;
     const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaRentMin(rent, 0);
-    // the rents the deposit takes from W, as the program prices them (review L1): its mark and both pages topped up to
-    // their rent at their new length, less what each holds (anyone may send lamports to one), read on both RPCs
-    // with the next pages named, priced at the kit's window (an insert landing first can carry the entries onto the next
-    // page, which the deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
-    const rents = solanaDepositRents(rent, sizes, await depositHeld(rpcs, program, sizes, pre, wait), next);
-    const short = fa + made + rents + after - lamports;
-    const reserve = short > 0n ? short : 0n;
-    // a partial sell whose reserve passes the cap is refused, never shrunk: the rest would be stranded on W; selling more
-    // than the user asked is never the device's call (a sell of the whole holding needs only rent(0))
-    if (keeps && reserve > SOLANA_POOL_SELL_RESERVE_MAX) return no("not_funded");
-    if (reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= minOut) return no("quote_check_failed");
-    const value = minOut - reserve;
-    const { wire } = build(value);
+    // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
+    // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
+    // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
+    // does not; the size does not depend on the value), and on a partial sell only when both trees sit within
+    // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
+    // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
+    const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
+    const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
+    const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
+    // the lamports the deposit's mark and both pages hold, read on both RPCs: the same for either form
+    const holds = await depositHeld(rpcs, program, sizes, pre, wait);
     const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: w.address, feeCap: 0n, solana: h.pin, precommitment };
-    checkSolanaSell(wire, ask, ctx, venue, quote, bh.slot, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, reserve);
+    /** The sell with the deposit in form `next` (the eight, or the six), its reserve priced for that form, checked by
+     *  the sell's rule; refused (thrown) when it cannot go. Nothing is signed or sent here. */
+    const form = async (next: boolean): Promise<{ wire: Uint8Array; value: bigint }> => {
+      const build = (value: bigint): { message: Uint8Array; wire: Uint8Array } => {
+        const { message } = solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, value, next)], bh.blockhash, []);
+        return { message, wire: wireOf(message) };
+      };
+      // the fee both RPCs price the message at: per signature, with no compute budget, so the deposit's value (the one
+      // thing the reserve changes) changes nothing it prices
+      const [fa, fb] = await both(rpcs, async (r) => BigInt(int(((await r("getFeeForMessage", [base64.encode(build(minOut).message), { commitment: "confirmed" }])) as { value?: unknown })?.value)));
+      if (fa !== fb) return no();
+      // the need again at the fee both RPCs price this very message at
+      if (lamports < need - SOLANA_POOL_SELL_FEE + fa) return no("not_funded");
+      // the rents the deposit takes from W, as the program prices them (review L1): its mark and both pages topped up to
+      // their rent at their new length, less what each holds (anyone may send lamports to one), read on both RPCs;
+      // the eight priced at the kit's window (an insert landing first can carry an entry onto the next page, which the
+      // deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
+      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after, lamports, minOut, keeps });
+      if ("refused" in r) return no(r.refused);
+      const { reserve, value } = r;
+      const { wire } = build(value);
+      checkSolanaSell(wire, ask, ctx, venue, quote, bh.slot, { blockhash: bh.blockhash, tables: {}, stateSize: sizes.stateSize, labelSize: sizes.labelSize }, reserve);
+      return { wire, value };
+    };
+    // the eight first; refused before signing (its reserve, priced at the window, over min out or the cap, or under the
+    // program's least deposit), the six priced exactly, so no sell the six carries is refused (review LOW 3)
+    let built: { wire: Uint8Array; value: bigint } | null = null;
+    if (eight)
+      try {
+        built = await form(true);
+      } catch (e) {
+        if (!(e instanceof Refused || e instanceof PoolRuleRefused)) throw e;
+      }
+    const { wire, value } = built ?? (await form(false));
     // unsigned: an RPC cannot send what it simulates
     const sims = await both(rpcs, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } } | null)?.value);
     if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return no();
@@ -610,6 +628,22 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     for (const x of seeds) x.fill(0);
     key?.fill(0);
   }
+}
+
+/**
+ * A sell's reserve for one deposit form and the deposit's value (review LOW 3): what W lacks, on top of what it holds,
+ * to pay the fee, what the sell makes at W's cost (`made`), the deposit's rents for that form (`rents`,
+ * solanaDepositRents) and what W must keep after (`after`). A partial sell (`keeps`) whose reserve passes the cap is
+ * refused not_funded, never shrunk: the rest would be stranded on W, and selling more than the user asked is never the
+ * device's call. A reserve over the cap, at or over the min out, or one that leaves the deposit under the program's
+ * least deposit (lib.rs MIN_DEPOSIT, which the program refuses on chain) is refused quote_check_failed.
+ */
+export function solanaSellReserve(p: { fee: bigint; made: bigint; rents: bigint; after: bigint; lamports: bigint; minOut: bigint; keeps: boolean }): { reserve: bigint; value: bigint } | { refused: "not_funded" | "quote_check_failed" } {
+  const short = p.fee + p.made + p.rents + p.after - p.lamports;
+  const reserve = short > 0n ? short : 0n;
+  if (p.keeps && reserve > SOLANA_POOL_SELL_RESERVE_MAX) return { refused: "not_funded" };
+  if (reserve > SOLANA_POOL_SELL_RESERVE_MAX || reserve >= p.minOut || p.minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };
+  return { reserve, value: p.minOut - reserve };
 }
 
 /** A transaction error that is the pool program's WrongAccount at instruction `ix`. */

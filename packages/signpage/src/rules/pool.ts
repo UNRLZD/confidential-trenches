@@ -17,7 +17,8 @@
 //   the pinned program and pool, W the depositor and the only signer, the value the request's, the precommitment the
 //   device's, the pages at the tree sizes read and the next pages after them (state.rs page_for: an insert that lands
 //   first and turns a page carries the entry there). A deposit and a sweep take the eight only; a sell's deposit back
-//   takes the six too, when its transaction would pass 1,232 bytes with the eight.
+//   takes the six too: the sell builds it when its transaction would pass 1,232 bytes with the eight, on a partial sell
+//   with a tree outside the next-page window, or when the eight's reserve is refused (src/pool-sell.ts).
 // - Solana withdraw, tag 2 (src/release.rs): the device's own release, byte for byte, through the pinned program and
 //   pool, paid to W, the pinned fee payer and W the only signers, the relay fee within its cap and the cap within the
 //   device's, the deadline ahead; then exactly one transfer, from W to the address typed on SIGN_HOST, of the release's
@@ -371,7 +372,8 @@ function depositOf(x: Ix, pin: SolanaPin & { pool: string }, depositor: string, 
   if (x.program !== pin.program) return refuse("program");
   if (x.data.length !== SOLANA_POOL_DEPOSIT_LEN || x.data[0] !== SOLANA_POOL_TAG_DEPOSIT) return refuse("deposit_data");
   // tag 1: the six, then each tree's next page (deposit.rs:72-76 since d3edab1, state.rs page_for); the six alone only
-  // where the caller takes them (`six`: a sell's deposit back, whose largest transaction does not fit the eight)
+  // where the caller takes them (`six`: a sell's deposit back, which src/pool-sell.ts sends as the six when it does not
+  // fit, sits outside the next-page window on a partial sell, or its eight's reserve is refused)
   if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");
   const [pool, from, statePage, labelPage, mark, system, nextState, nextLabel] = x.accounts;
   if (!same(pool, pin.pool, false, true)) return refuse("pool");

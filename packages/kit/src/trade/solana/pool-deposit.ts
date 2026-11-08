@@ -32,8 +32,11 @@ import { solanaPoolAccount, solanaPoolNextPage, solanaPoolPage, SOLANA_POOL_PAGE
  * How near its page's end (entries from the size read to the page's last slot, inclusive: 1 at slot 1,023) a tree's
  * size must be for a deposit to be priced at the next page's opening: within it, inserts that land between the read and
  * the deposit can carry its entry onto the next page (src/state.rs page_for). Outside it the price is exact, and a
- * deposit that more inserts than this overtake fails on chain as before, losing only its fee. Whatever a deposit priced
- * this way does not spend stays in U for its next deposit (M350 (4), packages/wallet/src/pool/same-chain.ts).
+ * deposit that more inserts than this overtake fails on chain as before, losing only its fee: U and a sweep's W hold
+ * exactly the deposit's priced cost, so they cannot pay a next page's opening; a partial sell's W holds what its next
+ * sell needs on top, so the sell names the next pages only when both trees are within this window and its six-account
+ * deposit fails WrongAccount and is built again outside it (packages/signpage/src/pool-sell.ts). Whatever a deposit
+ * priced this way does not spend stays in U for its next deposit (M350 (4), packages/wallet/src/pool/same-chain.ts).
  */
 export const SOLANA_POOL_NEXT_PAGE_WINDOW = 64;
 

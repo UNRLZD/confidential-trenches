@@ -31,10 +31,10 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_PASSES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_PASSES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, solanaSellReserve, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
-import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, solanaDepositRents, solanaSweepFloor, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
+import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
 import { tradeLock, type TradeStore } from "../src/trade.ts";
 
 const SEED64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -168,6 +168,10 @@ type Plant = {
   /** one state leaf (a release's change note) lands after the sell's reads and before the sell itself (card
    *  pool-senders-next-page): at a page's last slot it carries the sell's state entry onto the next page */
   insertFirst?: boolean;
+  /** With insertFirst: how many land (1 when not given), and what each is: "release" (a change note, one state leaf) or
+   *  "deposit" (another's deposit, a leaf on both trees) (the delta review of 5059541a, T1 and T2) */
+  insertCount?: number;
+  insertKind?: "release" | "deposit";
 };
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
@@ -314,6 +318,12 @@ function chain(plant: Plant = {}) {
     const value = new DataView(ix.data.buffer, ix.data.byteOffset + 1, 8).getBigUint64(0, true);
     const pre = beInt(ix.data.subarray(9, 41));
     if (accounts.get(markOf(pre))?.owner === PROGRAM) throw new Error("PrecommitmentAlreadyUsed");
+    // state.rs page_for (since d3edab1): each tree's entry goes on the page its size now names, which the deposit names
+    // as account 2 or 3, or as account 6 or 7 when it names the next pages; any other page fails WrongAccount
+    for (const tree of [0, 1] as const) {
+      const at = solanaPoolPage(PROGRAM, tree, Number(pv.getBigUint64(tree === 0 ? 49 : 49 + 1065, true)));
+      if (keys[2 + tree] !== at && !(keys.length === 8 && keys[6 + tree] === at)) throw new Error("WrongAccount");
+    }
     const cost = BigInt(FEE) + rentsOf(pre);
     // the venue's sell first: what W gets, less the cashback accounts it makes at W's cost
     const sellIx = m.instructions.find((x) => x.data.length === 24);
@@ -479,23 +489,35 @@ function chain(plant: Plant = {}) {
           }
           if (plant.insertFirst && !insertDone && sm.staticKeys[sm.instructions.at(-1)!.programIndex] === PROGRAM) {
             insertDone = true;
-            // a release's change note: one state leaf at the state tree's size, its page topped up by its payer
-            const size = Number(pv.getBigUint64(49, true));
-            const at = solanaPoolPage(PROGRAM, 0, size);
-            const pg = accounts.get(at) ?? { owner: PROGRAM, lamports: 0, data: pageBytes(0, [], Math.floor(size / 1024)) };
-            const data = new Uint8Array(pg.data.length + 72);
-            data.set(pg.data);
-            data.set(be32(777_777n), pg.data.length);
-            new DataView(data.buffer).setBigInt64(pg.data.length + 64, BigInt(size + 1), true);
-            accounts.set(at, { ...pg, data, lamports: Math.max(pg.lamports, Number(solanaRentMin(rent, data.length))) });
-            pv.setBigUint64(49, BigInt(size + 1), true);
+            for (let k = 0; k < (plant.insertCount ?? 1); k++) {
+              // another's deposit: a leaf on both trees, on another precommitment
+              if (plant.insertKind === "deposit") {
+                deposit(900_000n + BigInt(k), 1_000_000n);
+                continue;
+              }
+              // a release's change note: one state leaf at the state tree's size, its page topped up by its payer
+              const size = Number(pv.getBigUint64(49, true));
+              const at = solanaPoolPage(PROGRAM, 0, size);
+              const pg = accounts.get(at) ?? { owner: PROGRAM, lamports: 0, data: pageBytes(0, [], Math.floor(size / 1024)) };
+              const data = new Uint8Array(pg.data.length + 72);
+              data.set(pg.data);
+              data.set(be32(777_777n), pg.data.length);
+              new DataView(data.buffer).setBigInt64(pg.data.length + 64, BigInt(size + 1), true);
+              accounts.set(at, { ...pg, data, lamports: Math.max(pg.lamports, Number(solanaRentMin(rent, data.length))) });
+              pv.setBigUint64(49, BigInt(size + 1), true);
+            }
           }
           if (!txs.has(sig) && plant.lands !== false) {
             try {
               apply(tx, false);
               txs.set(sig, { tx, err: null });
             } catch (e) {
-              txs.set(sig, { tx, err: { InstructionError: [0, String(e)] } });
+              // the program's WrongAccount (Custom 22) at the deposit, the last instruction: W pays its fee, nothing else moves
+              if (String(e).includes("WrongAccount")) {
+                txs.set(sig, { tx, err: { InstructionError: [sm.instructions.length - 1, { Custom: 22 }] } });
+                const payer = accounts.get(sm.staticKeys[0]!)!;
+                accounts.set(sm.staticKeys[0]!, { ...payer, lamports: payer.lamports - FEE });
+              } else txs.set(sig, { tx, err: { InstructionError: [0, String(e)] } });
             }
           }
           return sig;
@@ -1831,6 +1853,133 @@ test("a partial sell at a page's last slots, with one insert between its read an
   assert.ok(w.c.accounts.has(solanaPoolPage(PROGRAM, 0, 1024)), "the sell's state entry opened the next page");
   const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
   assert.ok(left >= need, `W keeps ${left}, short of ${need} by ${need - left}`);
+});
+
+// The delta review of 5059541a. The sell's sent deposits, in order: each its account count and whether it landed.
+const sellDeposits = (w: World) =>
+  [...new Set(w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => c.params[0] as string))]
+    .map((b) => base64.decode(b))
+    .map((tx) => ({ sig: base58.encode(tx.subarray(1, 65)), m: solanaDecodeMessage(tx.subarray(65)) }))
+    .filter(({ m }) => m.instructions.length > 1 && m.staticKeys[m.instructions.at(-1)!.programIndex] === PROGRAM)
+    .map(({ sig, m }) => ({ keys: m.instructions.at(-1)!.accounts.length, err: w.c.txs.has(sig) ? w.c.txs.get(sig)!.err : "unsent" }));
+const partialAtNeed = async (plant: Plant) => {
+  const probe = await world({});
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT), rent);
+  const w = await world({ ...plant, held: 2n * AMOUNT, lamports: Number(need) }, [wallet(2n * AMOUNT)]);
+  return { w, need, a: await runPoolSell(w.host, ASK) };
+};
+
+// T1 (kills M1d and M1e, one tree priced exactly): both trees at their page's last slot and another's deposit, a leaf on
+// both, landing between the read and the sell, so both entries go on the next pages: the eight lands at once, both next
+// pages opened, and W keeps the next sell's need; priced for one tree alone, W would end one page's opening short.
+test("T1: both trees at 1,023 and a deposit landing first: the partial sell's eight lands at once, both next pages opened, W keeps the next sell's need", async () => {
+  const { w, need, a } = await partialAtNeed({ leaves: 1023, labelLeaves: 1023, insertFirst: true, insertKind: "deposit" });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(sellDeposits(w), [{ keys: 8, err: null }]);
+  for (const tree of [0, 1] as const) assert.ok(w.c.accounts.has(solanaPoolPage(PROGRAM, tree, 1024)), `tree ${tree}'s next page opened`);
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.ok(left >= need, `W keeps ${left}, short of ${need} by ${need - left}`);
+});
+
+// M1c (the window's boundary): at size % 1,024 = 960 a tree is 64 entries from its page's end, inside the window, so the
+// partial sell names the next pages and prices both openings; 64 deposits landing first carry both entries onto them.
+test("the window's edge: both trees at 960 (64 from the page's end) and 64 deposits landing first: the eight, priced at both openings, lands at once and W keeps the need", async () => {
+  const { w, need, a } = await partialAtNeed({ leaves: 960, labelLeaves: 960, insertFirst: true, insertKind: "deposit", insertCount: 64 });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.deepEqual(sellDeposits(w), [{ keys: 8, err: null }]);
+  for (const tree of [0, 1] as const) assert.ok(w.c.accounts.has(solanaPoolPage(PROGRAM, tree, 1024)), `tree ${tree}'s next page opened`);
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.ok(left >= need, `W keeps ${left}, short of ${need} by ${need - left}`);
+});
+
+// T2 (LOW 1): a tree outside the window (state 959, 65 from its page's end; label 500) on a partial sell: the six, priced
+// exactly; 65 releases landing first carry the state entry onto the next page, so the six fails WrongAccount, W paying
+// its fee alone, and the sell is built again from new reads and lands; W keeps the next sell's need. Named as the eight,
+// it landed and W paid the page's opening out of that need, ending 731,520 short at 5,080 a byte.
+test("T2: a partial sell with a tree outside the window sends the six; 65 releases landing first fail it WrongAccount, it is built again and W keeps the need", async () => {
+  const { w, need, a } = await partialAtNeed({ leaves: 959, labelLeaves: 500, insertFirst: true, insertCount: 65 });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sent = sellDeposits(w);
+  assert.equal(sent.length, 2, JSON.stringify(sent));
+  assert.deepEqual(sent[0], { keys: 6, err: { InstructionError: [sent[0]!.err && (sent[0]!.err as { InstructionError: [number] }).InstructionError[0], { Custom: 22 }] } });
+  assert.equal(sent[1]!.err, null);
+  const left = BigInt(w.c.accounts.get(W.address)?.lamports ?? 0);
+  assert.ok(left >= need, `W keeps ${left}, short of ${need} by ${need - left}`);
+});
+
+// LOW 1, each tree: one tree inside the window and the other out (1,023/500, 500/1,023): a partial sell sends the six.
+test("a partial sell with one tree inside the window and the other out sends the six; a full sell there still sends the eight", async () => {
+  for (const [leaves, labelLeaves] of [[1023, 500], [500, 1023]] as const) {
+    const { w, a } = await partialAtNeed({ leaves, labelLeaves });
+    assert.equal("stage" in a && a.stage, "filled", `${leaves}/${labelLeaves} ${JSON.stringify(a)}`);
+    assert.deepEqual(sellDeposits(w), [{ keys: 6, err: null }], `${leaves}/${labelLeaves}`);
+    const full = await world({ leaves, labelLeaves, ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] });
+    const f = await runPoolSell(full.host, ASK);
+    assert.equal("stage" in f && f.stage, "filled", JSON.stringify(f));
+    assert.equal(sellDeposits(full)[0]!.keys, 8, `${leaves}/${labelLeaves} full`);
+  }
+});
+
+// LOW 3: the window raises the eight's reserve by both openings (1,463,040 at 5,080 a byte). The least min out with W at
+// exactly what it keeps after: 2,473,120 for the six at any size, 3,936,160 for the eight inside the window. In between,
+// the eight is refused and the six carries the sell, as on main; under 2,473,120 both are refused.
+test("LOW 3: the reserve's band edges at 5,080 a byte: the eight from 3,936,160 min out, the six from 2,473,120, nothing under", () => {
+  assert.equal(rent.lamportsPerByte * rent.factor, 5_080n, "the fixture's rent");
+  const after = 1_493_440n;
+  const at = (n: number) => ({ mark: [null, null] as const, state: [solanaRentMin(rent, 16 + (n % 1024) * 72), solanaRentMin(rent, 16 + (n % 1024) * 72)] as const, label: [solanaRentMin(rent, 16 + (n % 1024) * 72), solanaRentMin(rent, 16 + (n % 1024) * 72)] as const });
+  const price = (size: number, next: boolean, minOut: bigint) => solanaSellReserve({ fee: 5_000n, made: 0n, rents: solanaDepositRents(rent, { stateSize: size, labelSize: size }, at(size), next), after, lamports: after, minOut, keeps: true });
+  for (const size of [960, 1023]) {
+    assert.deepEqual(price(size, true, 3_936_160n), { reserve: 2_936_160n, value: SOLANA_POOL_MIN_DEPOSIT }, `${size} eight at its edge`);
+    assert.deepEqual(price(size, true, 3_936_159n), { refused: "quote_check_failed" }, `${size} eight under its edge`);
+    assert.deepEqual(price(size, false, 3_936_159n), { reserve: 1_473_120n, value: 2_463_039n }, `${size} six in the band`);
+    assert.deepEqual(price(size, false, 2_473_120n), { reserve: 1_473_120n, value: SOLANA_POOL_MIN_DEPOSIT }, `${size} six at its edge`);
+    assert.deepEqual(price(size, false, 2_473_119n), { refused: "quote_check_failed" }, `${size} six under its edge`);
+  }
+  // outside the window the eight is priced as the six
+  assert.deepEqual(price(500, true, 2_473_120n), price(500, false, 2_473_120n));
+  // the cap: a partial sell's reserve over it is not_funded, a full sell's quote_check_failed
+  assert.deepEqual(solanaSellReserve({ fee: 0n, made: 0n, rents: 0n, after: SOLANA_POOL_SELL_RESERVE_MAX + 1n, lamports: 0n, minOut: 10n ** 9n, keeps: true }), { refused: "not_funded" });
+  assert.deepEqual(solanaSellReserve({ fee: 0n, made: 0n, rents: 0n, after: SOLANA_POOL_SELL_RESERVE_MAX + 1n, lamports: 0n, minOut: 10n ** 9n, keeps: false }), { refused: "quote_check_failed" });
+});
+
+// LOW 3 on the sell: both trees inside the window and W at exactly what it keeps after; a sell of fewer tokens, so its
+// min out (the curve's, less the slippage) falls in the band the window opened, is sent as the six, as on main, and
+// lands; one at the eight's edge or above goes as the eight; one under the six's edge is refused before signing.
+/** The least amount whose min out (the sell's own: the reference's expected out less SLIPPAGE) is at least `target`. */
+const amountFor = async (target: bigint): Promise<{ amount: bigint; minOut: bigint }> => {
+  const minOutOf = async (amount: bigint) => ((await readSolanaReference(providers("pump"), { side: "sell", token: MINT, amount }))!.pools.find((p) => p.venue === "pump-curve")!.expectedOut * BigInt(10_000 - SLIPPAGE)) / 10_000n;
+  let [lo, hi] = [1n, AMOUNT];
+  while (lo < hi) {
+    const mid = (lo + hi) / 2n;
+    if ((await minOutOf(mid)) >= target) hi = mid;
+    else lo = mid + 1n;
+  }
+  return { amount: lo, minOut: await minOutOf(lo) };
+};
+test("LOW 3: inside the window with W at what it keeps, a sell whose min out falls in the window's band goes as the six and lands; at the eight's edge, the eight; under the six's edge, refused", async () => {
+  const probe = await world({});
+  const need = solanaPoolBuySellNeed(await readSolanaPoolBuyVenue(probe.host.rpcs, "pump-curve", MINT), rent);
+  assert.equal(need, 1_493_440n, "what W keeps after, at 5,080 a byte");
+  const sell = async (target: bigint) => {
+    const { amount, minOut } = await amountFor(target);
+    const w = await world({ leaves: 1023, labelLeaves: 1023, held: 2n * amount, lamports: Number(need) }, [wallet(2n * amount)]);
+    return { minOut, w, a: await runPoolSell(w.host, { ...ASK, amount }) };
+  };
+  // in the band: the eight's reserve leaves the deposit under the least deposit, the six's does not
+  const band = await sell(3_000_000n);
+  assert.ok(band.minOut > 2_473_120n && band.minOut < 3_936_160n, String(band.minOut));
+  assert.equal("stage" in band.a && band.a.stage, "filled", JSON.stringify(band.a));
+  assert.deepEqual(sellDeposits(band.w), [{ keys: 6, err: null }]);
+  // at the eight's edge or above: the eight
+  const edge = await sell(3_936_160n);
+  assert.ok(edge.minOut >= 3_936_160n, String(edge.minOut));
+  assert.equal("stage" in edge.a && edge.a.stage, "filled", JSON.stringify(edge.a));
+  assert.deepEqual(sellDeposits(edge.w), [{ keys: 8, err: null }]);
+  // under the six's edge: refused before anything is signed, as on main
+  const { amount } = await amountFor(2_400_000n);
+  const under = await world({ leaves: 1023, labelLeaves: 1023, held: 2n * amount, lamports: Number(need) }, [wallet(2n * amount)]);
+  assert.deepEqual(await runPoolSell(under.host, { ...ASK, amount }), { error: "quote_check_failed" });
+  assert.deepEqual(sellDeposits(under), []);
 });
 
 // Review of 14b04117, M2: the trees sit on different pages (releases grow the state tree alone), so each tree's next
