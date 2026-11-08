@@ -700,3 +700,25 @@ test("card evm-sell-no-release-in-flight: the builder takes only the quote's own
   assert.equal(ok.releases.finalBlock, 224n);
   assert.ok(Object.isFrozen(ok.releases) && Object.isFrozen(ok.releases.pending));
 }));
+
+// Card evm-quote-read-gas-starve, review of fe9f5ec3 finding 1: spam past the 1x price makes a v3 route's read at twice
+// the amount run out of gas, alone too (the code's success word 2). Through one pool the 1x filled whole and counts;
+// through two the route is dropped, never blocking the sale, and named in the quote's outOfGas
+test("GS9 a sale's single-hop v3 route whose read at twice runs out of gas alone counts at its 1x and is picked", async () => {
+  const price = (p: Pool) => (p.venue === "v3" && p.hops === 1 && p.fees[0] === 500 ? 3n * p.amount : flat(p));
+  const ranOut = (p: Pool) => p.venue === "v3" && p.hops === 1 && p.fees[0] === 500 && p.amount === 2n * AMOUNT;
+  const q = await sellQuoteWith(req(), [provider({ price, ranOut }), provider({ price, ranOut })], Date.now());
+  assert.deepEqual(q.route, { venue: "uniswap-v3", tokens: [TOKEN, evmPoolVenues().base.weth.toLowerCase()], fees: [500] });
+  assert.equal(q.amountOut, 3n * AMOUNT);
+  assert.deepEqual(q.outOfGas, []);
+});
+
+test("GS10 a sale's v3 route of two hops whose read at twice runs out of gas alone is dropped and named, and the sale goes on", async () => {
+  const price = (p: Pool) => (p.venue === "v3" && p.hops === 2 ? 3n * p.amount : flat(p));
+  const ranOut = (p: Pool) => p.venue === "v3" && p.hops === 2 && p.amount === 2n * AMOUNT;
+  const q = await sellQuoteWith(req(), [provider({ price, ranOut }), provider({ price, ranOut })], Date.now());
+  assert.equal(q.route.venue, "uniswap-v4");
+  assert.equal(q.amountOut, 2n * AMOUNT);
+  assert.ok(q.outOfGas.length >= 1 && new Set(q.outOfGas.map((c) => JSON.stringify(c.route))).size === q.outOfGas.length && q.outOfGas.every((c) => c.route.venue === "uniswap-v3" && c.route.tokens.length === 3 && c.amountOut === 3n * AMOUNT), `${q.outOfGas.length} named`);
+  assert.ok(Object.isFrozen(q.outOfGas));
+});

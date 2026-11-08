@@ -42,18 +42,22 @@ const BH = base58.encode(new Uint8Array(32).fill(7));
 
 test("moveout.ts exports exactly these, and no signer", () => {
   assert.deepEqual(Object.keys(moveout).sort(), [
+    "ARCHIVAL_ASKS",
+    "ARCHIVAL_WAIT_MAX_MS",
     "FINAL_TRIES",
     "GAS_PRICE_MARGIN",
     "MOVE_GAS",
     "MoveOutRefused",
     "SETTLE_BLOCKS",
     "TX_VALIDITY_BLOCKS",
+    "archivalRpc",
     "checkMoveCalls",
     "heldOpOf",
     "moveCalls",
     "moveOutHeld",
     "moveOutRpc",
     "readMoveOut",
+    "signedBlockHash",
   ]);
 });
 

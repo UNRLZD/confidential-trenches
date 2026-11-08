@@ -1,0 +1,380 @@
+{
+ "good": {
+  "source": "harness: the build apps/terminal/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-08T17:35:48.446Z",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "width": "phone",
+    "rows": 30,
+    "heldMs": 40135,
+    "samples": 40,
+    "reorders": 3,
+    "shifts": [
+     {
+      "at": 12819,
+      "value": 0.002630586202304541,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 168,821 71x17 -> 130,821 171x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 139,178 68x17 -> 120,178 72x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 133,454 60x17 -> 139,454 68x17",
+        "cell": true
+       },
+       {
+        "text": "span 230,296 44x15 -> 252,296 44x15",
+        "cell": true
+       },
+       {
+        "text": "span 230,663 44x15 -> 252,663 44x15",
+        "cell": true
+       }
+      ]
+     },
+     {
+      "at": 24696,
+      "value": 0.002751191370715505,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 130,821 171x17 -> 136,821 94x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 135,362 40x17 -> 117,362 116x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 133,729 60x17 -> 183,729 34x17",
+        "cell": true
+       },
+       {
+        "text": "span 252,296 44x15 -> 230,296 44x15",
+        "cell": true
+       },
+       {
+        "text": "span 230,204 44x15 -> 252,204 44x15",
+        "cell": true
+       }
+      ]
+     },
+     {
+      "at": 36538,
+      "value": 0.0035807804183420862,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 139,270 132x17 -> 124,270 76x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 139,454 101x17 -> 149,454 132x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 183,729 34x17 -> 139,729 132x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 136,821 94x17 -> 117,821 116x17",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 117,362 116x17 -> 128,362 30x17",
+        "cell": true
+       }
+      ]
+     }
+    ],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "rows": 258,
+    "heldMs": 40166,
+    "samples": 40,
+    "reorders": 3,
+    "shifts": [
+     {
+      "at": 12800,
+      "value": 0.0018001128020109956,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 483,359 69x13 -> 475,359 136x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 129,359 99x13 -> 108,359 97x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 826,216 60x13 -> 839,216 107x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 112,216 57x13 -> 108,216 100x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 107,645 87x13 -> 112,645 57x13",
+        "cell": true
+       }
+      ]
+     },
+     {
+      "at": 24682,
+      "value": 0.0016640469774787806,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 108,216 100x13 -> 158,216 63x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 129,788 99x13 -> 117,788 49x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 106,430 52x13 -> 110,430 95x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 843,573 80x13 -> 825,573 32x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 108,359 97x13 -> 110,359 95x13",
+        "cell": true
+       }
+      ]
+     },
+     {
+      "at": 36511,
+      "value": 0.001947729391718107,
+      "input": false,
+      "sources": [
+       {
+        "text": "span.dsc-name 475,359 136x13 -> 483,359 69x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 485,430 49x13 -> 475,430 136x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 110,430 95x13 -> 158,430 63x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 134,573 55x13 -> 110,573 95x13",
+        "cell": true
+       },
+       {
+        "text": "span.dsc-name 123,645 65x13 -> 110,645 95x13",
+        "cell": true
+       }
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-08T17:37:12.649Z",
+  "browser": "156.0.8078.79",
+  "loads": [
+   {
+    "width": "phone",
+    "rows": 30,
+    "heldMs": 40136,
+    "samples": 40,
+    "reorders": 3,
+    "shifts": [
+     {
+      "at": 12912,
+      "value": 0.6147618429891232,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 0,162 390x92 -> 0,805 390x39",
+        "cell": false
+       },
+       {
+        "text": "div 0,530 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,254 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,346 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,438 390x92 -> 0,0 0x0",
+        "cell": false
+       }
+      ]
+     },
+     {
+      "at": 24780,
+      "value": 0.35129248170807037,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 0,162 390x92 -> 0,530 390x92",
+        "cell": false
+       },
+       {
+        "text": "div 0,254 390x92 -> 0,621 390x92",
+        "cell": false
+       },
+       {
+        "text": "div 0,346 390x92 -> 0,713 390x92",
+        "cell": false
+       },
+       {
+        "text": "div 0,438 390x92 -> 0,805 390x39",
+        "cell": false
+       },
+       {
+        "text": "div 0,530 390x92 -> 0,0 0x0",
+        "cell": false
+       }
+      ]
+     },
+     {
+      "at": 36631,
+      "value": 0.7025849634161407,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 0,162 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,254 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,346 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,438 390x92 -> 0,0 0x0",
+        "cell": false
+       },
+       {
+        "text": "div 0,530 390x92 -> 0,0 0x0",
+        "cell": false
+       }
+      ]
+     }
+    ],
+    "errors": []
+   },
+   {
+    "width": "desktop",
+    "rows": 256,
+    "heldMs": 40196,
+    "samples": 40,
+    "reorders": 3,
+    "shifts": [
+     {
+      "at": 12931,
+      "value": 0.16667678915895062,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 7,133 351x72 -> 7,634 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,205 351x72 -> 7,705 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,276 351x72 -> 7,777 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 366,705 351x72 -> 366,634 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 366,634 351x72 -> 366,562 351x72",
+        "cell": false
+       }
+      ]
+     },
+     {
+      "at": 24793,
+      "value": 0.1308684011702675,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 7,133 351x72 -> 7,562 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,205 351x72 -> 7,634 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,276 351x72 -> 7,705 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,348 351x72 -> 7,777 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 366,348 351x72 -> 366,419 351x72",
+        "cell": false
+       }
+      ]
+     },
+     {
+      "at": 36707,
+      "value": 0.09288042481138546,
+      "input": false,
+      "sources": [
+       {
+        "text": "div 7,133 351x72 -> 7,348 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,205 351x72 -> 7,419 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,276 351x72 -> 7,491 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,348 351x72 -> 7,562 351x72",
+        "cell": false
+       },
+       {
+        "text": "div 7,419 351x72 -> 7,634 351x72",
+        "cell": false
+       }
+      ]
+     }
+    ],
+    "errors": []
+   }
+  ]
+ }
+}

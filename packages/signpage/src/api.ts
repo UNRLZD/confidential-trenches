@@ -254,7 +254,7 @@ export function startApi(host: ApiHost): { idle(): Promise<void>; ready(): void 
     if ("ok" in msg) return msg.ok && kind !== undefined ? { ...msg, result: resultFor(level, kind, msg.result) } : msg;
     if (msg.type === "state") return { ...msg, state: stateFor(level, msg.state) };
     if (msg.type !== "progress") return msg;
-    if (!("stage" in msg)) return level === "current" ? msg : null;
+    if (!("stage" in msg)) return level !== "1.4" ? msg : null;
     const stage = stageFor(level, msg.stage);
     return stage === null ? null : stage === msg.stage ? msg : { ...msg, stage };
   };

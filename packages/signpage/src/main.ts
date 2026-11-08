@@ -85,7 +85,7 @@ import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pag
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm } from "./withdraw/form.ts";
 import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
-import { heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
+import { archivalRpc, heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
 import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/handoff.ts";
 import { proverHost } from "./prover-host.ts";
@@ -535,6 +535,9 @@ function withdrawsSignedOut(): void {
 // wallet's (moveOutHeld), U's key opened under the wallet's seed lock, shared, as the deposit follow opens it.
 let heldOp: string | null = null;
 const heldRpcs = () => [moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] as const;
+// the network's archival RPCs, every one, read only for a recorded move both of the pair forgot (card held-move-forgotten-tx),
+// each asked again after a throttle (archivalRpc)
+const heldArchival = () => NEAR_NETWORKS[PAGE_NETWORK].archival.map((u) => archivalRpc(u));
 const heldSeedLock = <T,>(fn: () => Promise<T>): Promise<T> => (navigator.locks ? (navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn) as Promise<T>) : fn());
 // U's own lock, the deposit follow's (deposit-follow.ts FOLLOW_LOCK/<network>/<U>), only if free: while a follow of U runs
 // (it may bind U's USDC), no move of U is signed (review of d791adda, M1)
@@ -557,7 +560,7 @@ function heldDeps(opId: string): HeldDeps {
     moveOut: async (to) => {
       const ops = await open();
       const u = ((await ops.get("ops", opId)) as DepositOp | undefined)?.follow?.u ?? "";
-      return moveOutHeld(opId, to, { ops, rpcs, seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(u) });
+      return moveOutHeld(opId, to, { ops, rpcs, archival: heldArchival(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(u) });
     },
   };
 }
@@ -567,8 +570,9 @@ async function settleHeld(): Promise<void> {
   const ops = await open();
   for (const k of await ops.keys("ops")) {
     const op = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
-    if (op?.kind === "deposit" && op.stage === "held" && op.follow?.out !== undefined && op.follow.why !== "moved_out" && op.follow.network === PAGE_NETWORK)
-      await moveOutHeld(k, null, { ops, rpcs: heldRpcs(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(op.follow.u) }).catch(() => {});
+    // a moved one too: a later deposit in its U is open again (moveOutHeld reads U for it; card held-move-forgotten-tx)
+    if (op?.kind === "deposit" && op.stage === "held" && op.follow?.out !== undefined && op.follow.network === PAGE_NETWORK)
+      await moveOutHeld(k, null, { ops, rpcs: heldRpcs(), archival: heldArchival(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(op.follow.u) }).catch(() => {});
   }
 }
 // The vault withdrawals a closed or reloaded page left RESERVED, followed to settled once per sign-in (src/withdraw/

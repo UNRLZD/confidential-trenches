@@ -19,15 +19,17 @@
 // - A send owed whose network fee rose past the Max fee drawn (card signpage-withdraw-own-spend): the screen shows the
 //   fee it needs now and one button that draws the Max fee again at exactly that fee (owedFees, redraw); the press hands
 //   over the fee shown, never one read after.
-// - Every word is a draft until the owner picks it (data-draft-copy names its key in POOL_WITHDRAW_WORDS).
+// - Every word but To and Amount was kept as drafted (owner 8 Nov 07:55Z, the 8 Nov words page: pw.*) and carries no
+//   data-draft-copy; those two keep it (POOL_DRAFT).
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
 import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
 import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
-import { CHECK_IDLE_MS, WITHDRAW_WORDS } from "./form.ts";
+import { CHECK_IDLE_MS, markDraft, WITHDRAW_WORDS } from "./form.ts";
 
-// DRAFT COPY: every word here is drawn with data-draft-copy until the owner picks it.
+// Kept as drafted, owner 8 Nov 07:55Z: withdraw, invalid-address, invalid-amount, insufficient, busy (the vault form's own),
+// min, max-fee, try and or, fee-rose and fee-redraw. DRAFT COPY: To and Amount, the two labels the page does not hold.
 export const POOL_WITHDRAW_WORDS = {
   to: WITHDRAW_WORDS.to,
   amount: WITHDRAW_WORDS.amount,
@@ -35,16 +37,19 @@ export const POOL_WITHDRAW_WORDS = {
   "invalid-address": WITHDRAW_WORDS["invalid-address"],
   "invalid-amount": WITHDRAW_WORDS["invalid-amount"],
   insufficient: WITHDRAW_WORDS.insufficient,
-  min: "Min ", // the vault form's "Min $X" with the pool asset's amount: Min 0.00189 SOL
+  min: "Min ", // the vault form's "Min $X" with the pool asset's amount: Min 0.00189 SOL; owner 8 Nov 07:55Z, kept
   busy: WITHDRAW_WORDS.busy,
-  "max-fee": "Max fee", // the signing page's line for a checked pool payload (rules/pool.ts drawPool)
+  "max-fee": "Max fee", // the signing page's line for a checked pool payload (rules/pool.ts drawPool); owner 8 Nov 07:55Z, kept
   // an amount no plan sends exactly: the nearest that can be, "Try 0.5 or 0.6 SOL" (one side alone: "Try 0.5 SOL")
-  try: "Try ",
-  or: " or ",
+  try: "Try ", // owner 8 Nov 07:55Z, kept (pw.tryOne, pw.tryTwo)
+  or: " or ", // owner 8 Nov 07:55Z, kept
   // a send owed whose fee rose past the Max fee drawn: "Network fee rose. New max fee: 0.000015 SOL." and its button
-  "fee-rose": "Network fee rose. New max fee: ",
-  "fee-redraw": "Send at new fee",
+  "fee-rose": "Network fee rose. New max fee: ", // owner 8 Nov 07:55Z, kept (pw.feeRose)
+  "fee-redraw": "Send at new fee", // owner 8 Nov 07:55Z, kept (pw.feeRoseSend)
 } as const;
+
+/** The keys of POOL_WITHDRAW_WORDS the owner has not picked: their elements keep data-draft-copy. */
+export const POOL_DRAFT: ReadonlySet<string> = new Set(["to", "amount"]);
 
 /** Each chain's pool asset, as the screen names it. */
 export const POOL_ASSET: Readonly<Record<PoolChain, { symbol: string; decimals: number }>> = Object.freeze({
@@ -172,7 +177,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     const label = doc.createElement("label");
     const name = doc.createElement("span");
     name.textContent = POOL_WITHDRAW_WORDS[key];
-    name.dataset.draftCopy = key;
+    markDraft(name, key, POOL_DRAFT);
     const input = doc.createElement("input");
     input.type = "text";
     input.dataset.input = key;
@@ -194,7 +199,6 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   shown.dataset.lines = "pool-withdraw";
   shown.hidden = true;
   const go = button("withdraw", POOL_WITHDRAW_WORDS.withdraw, () => run(withdraw));
-  go.dataset.draftCopy = "withdraw";
   if (!deps.handoff) go.dataset.pending = "pool-withdraw";
   // a send owed whose fee rose: its line and its button, above the fields, once read
   const rose = doc.createElement("div");
@@ -215,7 +219,6 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       }
       const p = doc.createElement("p");
       p.textContent = `${POOL_WITHDRAW_WORDS["fee-rose"]}${formatUnits(first.need, decimals)} ${symbol}.`;
-      p.dataset.draftCopy = "fee-rose";
       const again = button("fee-redraw", POOL_WITHDRAW_WORDS["fee-redraw"], () => {
         if (again.disabled) return;
         again.disabled = true;
@@ -230,7 +233,6 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
           }
         });
       });
-      again.dataset.draftCopy = "fee-redraw";
       rose.replaceChildren(p, again);
       rose.hidden = false;
     };
@@ -252,7 +254,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       return void p.replaceChildren();
     }
     p.dataset.refusal = code;
-    p.dataset.draftCopy = code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "address" ? "invalid-address" : code === "unplannable" ? "try" : code;
+    markDraft(p, code === "unread" ? "busy" : code === "amount" ? "invalid-amount" : code === "address" ? "invalid-address" : code === "unplannable" ? "try" : code, POOL_DRAFT);
     const min = c && !c.ok && "min" in c ? c.min : undefined;
     const near = c && !c.ok && c.code === "unplannable" ? (c as { below?: bigint; above?: bigint }) : {};
     if (code !== "unread") return void (p.textContent = poolRefusalWords(chain, code, min, near));
@@ -277,7 +279,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
       for (const [key, value] of [["to", v.ready.to], ["max-fee", `${formatUnits(v.ready.maxFee, decimals)} ${symbol}`]] as const) {
         const dt = doc.createElement("dt");
         dt.textContent = POOL_WITHDRAW_WORDS[key];
-        dt.dataset.draftCopy = key;
+        markDraft(dt, key, POOL_DRAFT);
         const dd = doc.createElement("dd");
         dd.textContent = value;
         dd.dataset.line = key;

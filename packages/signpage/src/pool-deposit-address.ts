@@ -135,7 +135,7 @@ export async function readSolanaPoolCosts(rpcs: readonly [SolanaRpc, SolanaRpc],
     const bh = (await rpc("getLatestBlockhash", [{ commitment: "confirmed" }])) as { value?: { blockhash?: unknown } } | null;
     const blockhash = bh?.value?.blockhash;
     if (typeof blockhash !== "string") throw new Error("no blockhash");
-    const { message } = solanaPoolDepositTx(program, wallet, { value: SOL_LADDER.min, precommitment: 1n }, { stateSize: 0, labelSize: 0 }, blockhash);
+    const { message } = solanaPoolDepositTx(program, wallet, { value: SOL_LADDER.min, precommitment: 1n }, { stateSize: 0, labelSize: 0 }, blockhash, rent);
     const v = ((await rpc("getFeeForMessage", [base64.encode(message), { commitment: "confirmed" }])) as { value?: unknown } | null)?.value;
     if (!Number.isSafeInteger(v) || (v as number) < 0) throw new Error("no fee for the deposit message");
     return BigInt(v as number);

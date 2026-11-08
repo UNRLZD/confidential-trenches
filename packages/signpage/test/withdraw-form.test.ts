@@ -191,6 +191,27 @@ test("Withdraw is disabled until both fields pass, and with no hand-off it stays
   assert.equal(none.go.dataset.pending, "withdraw-relay");
 });
 
+// owner 8 Nov 07:55Z kept Withdraw, Invalid address, Invalid amount, Insufficient and Busy · Retry (pw.*): no draft mark on
+// their elements. To, Amount and Min $ (this form's own, not on the page) keep theirs.
+test("no draft mark on the kept words: Withdraw and each refusal; To, Amount and Min $ keep theirs", async () => {
+  const f = drawn();
+  assert.equal(f.go.dataset.draftCopy, undefined);
+  const marks = () => f.form.children.filter((e) => e.tag === "p" && !e.hidden && e.dataset.for).map((e) => [e.dataset.refusal, e.dataset.draftCopy]);
+  assert.deepEqual(f.form.children.filter((e) => e.tag === "label").map((l) => l.children[0]!.dataset.draftCopy), ["to", "amount"]);
+  f.type("to", "not an account!");
+  f.type("amount", "abc");
+  await settle();
+  assert.deepEqual(marks(), [["not-account", undefined], ["amount", undefined]]);
+  f.type("to", "alice.near");
+  f.type("amount", "0.1");
+  await settle();
+  assert.deepEqual(marks(), [["min", "min"]], "Min $X is this form's own word, still a draft");
+  f.type("amount", "50");
+  await settle();
+  assert.deepEqual(marks(), [["insufficient", undefined]]);
+  assert.equal(f.go.dataset.draftCopy, undefined);
+});
+
 test("the tap gives the hand-off the fee it drew; a hand-off that finds the relayer's fee higher has the form draw it and stop", async () => {
   const f = drawn();
   f.type("to", "alice.near");

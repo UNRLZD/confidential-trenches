@@ -1507,6 +1507,7 @@ const GOOD_FACTS = [
   { stage: "done", since_ms: 1762400000000, amount_usd: "73.18" },
   { stage: "done", refunded: true, amount_usd: "72.9" },
   { stage: "held", held_id: U },
+  { stage: "held", held_id: U, since_ms: 1762400000000, moved_out: true },
   { stage: "halted", hold: "halted", held_id: U },
   { stage: "halted", hold: "not_caught_up" },
   { stage: "halted", hold: "vault_blocked", held_id: U, since_ms: 1762400000000 },
@@ -1524,6 +1525,9 @@ const BAD_FACTS = [
   [{ stage: "done", since_ms: -1 }, "a negative time"],
   [{ stage: "done", refunded: "yes" }, "a refunded flag that is not a boolean"],
   [{ stage: "done", note: "x" }, "a field the deposit op does not have"],
+  [{ stage: "halted", hold: "halted", moved_out: true }, "a move out on a deposit that is not held (card held-move-forgotten-tx)"],
+  [{ stage: "done", amount_usd: "1", moved_out: true }, "a move out on a deposit credited into the vault"],
+  [{ stage: "held", held_id: U, moved_out: false }, "a moved_out that is not true"],
 ];
 
 test("kit-deposit-calls: the kit names every stage a deposit can reach and the three hold reasons", () => {
@@ -1580,7 +1584,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.5");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.6");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();

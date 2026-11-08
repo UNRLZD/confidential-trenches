@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
 import type { MarketSnapshot } from "./fields.ts";
@@ -9,12 +9,17 @@ import type { WordId } from "./words.ts";
 import "./discover.css";
 import { Avatar } from "../market/Avatar.tsx";
 import { useDiscoverData } from "./data.ts";
+import { ColSearch, Dock, Ic, PadChip, PauseIcon, Presets, QuickBuyField, T } from "./Toolbar.tsx";
+import { narrowed, padEntries, pendingNew, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
+import type { View } from "./view.ts";
 
 // S5 Discover (A2.1, app.md:1454; 09-design-brief S5), drawn after R5's discover-1440.html and discover-390.html
 // (design-lock-r5) from a 06b snapshot: four columns from 768 px, one list with tabs on the phone (S5.18). States:
 // S5.1 skeleton rows, S5.2 rows, S5.3 No tokens, S5.5 Offline with Retry. The snapshot comes from the caller;
-// DiscoverRoute reads it from the helper (data.ts, card app-discover-live). Not here yet, each on its own card: the quick
-// buy, the toolbar's presets, chips and filters, search, pause, the watchlist and the stale pill.
+// DiscoverRoute reads it from the helper (data.ts, card app-discover-live). The toolbar (card app-discover-toolbar,
+// view.ts and Toolbar.tsx): the presets, the MC chip, the launchpad menu, each column's search, the phone's chips and
+// Pause, and the Quick buy amount. Not here yet, each on its own card: the row's quick buy, the column filter panel,
+// Following, the watchlist and the stale pill.
 
 export type DiscoverData = { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: MarketSnapshot };
 
@@ -175,7 +180,7 @@ function Skeleton({ phone }: { phone: boolean }) {
   );
 }
 
-function Body({ data, k, win, phone, nowMs, onRetry }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void }) {
+function Body({ data, k, win, phone, nowMs, onRetry, view, q }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void; view: View; q: string }) {
   if (data.status === "loading")
     return (
       <div className="dsc-rows" role="list" aria-busy="true" aria-label={WORDS.loading.text} data-state="S5.1">
@@ -189,60 +194,167 @@ function Body({ data, k, win, phone, nowMs, onRetry }: { data: DiscoverData; k: 
         <button type="button" className="dsc-retry" onClick={onRetry}>{WORDS.retry.text}</button>
       </div>
     );
-  const rows = columnRows(data.snapshot, k);
-  if (!rows.length)
+  const all = columnRows(data.snapshot, k);
+  if (!all.length)
     return (
       <div className="dsc-rows dsc-msg" data-state="S5.3">
         <W id="noTokens" />
       </div>
     );
+  const rows = viewRows(all, view, q);
+  // nothing left under the toolbar's view (R5 S5.13 `No results`, CN-95) or the column's search (R5 S5.14 `No tokens`)
+  if (!rows.length)
+    return q.trim() && viewRows(all, view).length > 0 ? (
+      <div className="dsc-rows dsc-msg" data-state="S5.14">
+        <W id="noTokens" />
+      </div>
+    ) : (
+      <div className="dsc-rows dsc-msg" data-state="S5.13">
+        <W id="noResults" />
+      </div>
+    );
+  // the rows are fixed slots, keyed by their place: a refresh that adds, drops or reorders tokens redraws each slot in
+  // place with its new token, so no drawn row slides (a row keyed by its token moved a slot each time one ranked above it)
   return (
     <div className="dsc-rows" role="list" data-state="S5.2">
-      {rows.map((r) => (phone ? <PhoneRow key={r.token} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={r.token} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
+      {rows.map((r, i) => (phone ? <PhoneRow key={i} v={rowView(r, win, nowMs)} href={tokenHref(r.chain, r.token)} /> : <Row key={i} v={rowView(r, win, nowMs)} win={win} href={tokenHref(r.chain, r.token)} />))}
     </div>
   );
 }
 
-const countOf = (data: DiscoverData, k: ColumnKey) => (data.status === "ready" ? String(columnRows(data.snapshot, k).length) : "—");
+const countOf = (data: DiscoverData, k: ColumnKey, view: View, q: string) => (data.status === "ready" ? String(viewRows(columnRows(data.snapshot, k), view, q).length) : "—");
+
+/** A value kept on this device (the toolbar's view, the Quick buy amount); blocked storage keeps it for the visit only. */
+function useKept<T>(key: string, read: (raw: unknown) => T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return read(raw === null ? undefined : JSON.parse(raw));
+    } catch {
+      return read(undefined);
+    }
+  });
+  const set = useCallback(
+    (n: T) => {
+      setV(n);
+      try {
+        localStorage.setItem(key, JSON.stringify(n));
+      } catch {}
+    },
+    [key],
+  );
+  return [v, set];
+}
+
+const readAmount = (raw: unknown): string => (typeof raw === "string" && qbAmount(raw) !== null ? raw : QB_DEFAULT);
 
 /** S5. `nowMs` is the clock ages are drawn against; `onRetry` asks the caller to read again. */
 export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: number; onRetry: () => void }) {
   const [tab, setTab] = useState<ColumnKey>("new");
   const tabWin = COLUMNS.find((c) => c.key === tab)!.win;
+  const [view, setView] = useKept<View>("ct.discover.view", readView);
+  const [amount, setAmount] = useKept<string>("ct.discover.quickbuy", readAmount);
+  // each column's search: open with its text, or closed (absent)
+  const [search, setSearch] = useState<Partial<Record<ColumnKey, string>>>({});
+  // Pause (the phone): the list holds the read it showed when paused; Resume draws the live one again
+  const [held, setHeld] = useState<DiscoverData | null>(null);
+  const phoneData = held ?? data;
+  const pending = held?.status === "ready" && data.status === "ready" ? pendingNew(data.snapshot, held.snapshot, tab) : 0;
+  const entries = data.status === "ready" ? padEntries(data.snapshot) : [];
   // a list the helper served from an older read says how old it is (card app-list-age); a fresh one says nothing
   const age = data.status === "ready" ? listAge(data.snapshot.as_of_ms, nowMs) : null;
+  const togglePause = () => setHeld((h) => (h ? null : data));
   return (
-    <section className="dsc" data-discover={data.status}>
-      <div className="dsc-bar">
+    <section className="dsc" data-discover={data.status} data-narrowed={narrowed(view)}>
+      <div className="dsc-bar" data-testid="discover-toolbar">
         <h1 className="dsc-title"><W id="discover" /></h1>
+        <span className="dsc-divider dsc-desk" aria-hidden="true" />
+        <span className="dsc-desk dsc-tools">
+          <Presets view={view} onView={setView} />
+          <span className="dsc-chips">
+            <button type="button" className="dsc-chip" data-on={view.mc10k} aria-pressed={view.mc10k} data-testid="chip-minMc" onClick={() => setView({ ...view, mc10k: !view.mc10k })}>
+              <Ic k="shield" />
+              <T id="mc10k" />
+            </button>
+          </span>
+          <PadChip entries={entries} view={view} onView={setView} title={<W id="padMenuTitle" />} />
+        </span>
         {age && (
-          <span className="dsc-age" data-testid="list-age" data-age={age}>
+          <span className="dsc-listage" data-testid="list-age" data-age={age}>
             <W id="updated" age={age} />
           </span>
         )}
+        <span className="dsc-desk dsc-qbw">
+          <QuickBuyField amount={amount} onAmount={setAmount} />
+        </span>
+        <button type="button" className="dsc-mpause" data-on={held !== null} aria-pressed={held !== null} data-testid="m-pause" onClick={togglePause}>
+          <PauseIcon on={held !== null} />
+          <T id={held ? "resume" : "pause"} />
+        </button>
       </div>
       <div className="dsc-grid">
-        {COLUMNS.map((c) => (
-          <section key={c.key} className="dsc-col" data-col={c.key} aria-labelledby={`dsc-h-${c.key}`}>
-            <div className="dsc-head">
-              <Glyph k={c.key} />
-              <span className="dsc-ht" id={`dsc-h-${c.key}`}><W id={TITLE[c.key]} /></span>
-              <span className="dsc-count">{countOf(data, c.key)}</span>
-            </div>
-            <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} />
-          </section>
-        ))}
+        {COLUMNS.map((c) => {
+          const q = search[c.key];
+          const title = WORDS[TITLE[c.key]].text;
+          return (
+            <section key={c.key} className="dsc-col" data-col={c.key} aria-labelledby={`dsc-h-${c.key}`}>
+              <div className="dsc-head">
+                {q === undefined ? (
+                  <>
+                    <Glyph k={c.key} />
+                    <span className="dsc-ht" id={`dsc-h-${c.key}`}><W id={TITLE[c.key]} /></span>
+                    <span className="dsc-count">{countOf(data, c.key, view, "")}</span>
+                    <span className="dsc-grow" />
+                    <button type="button" className="dsc-hb" aria-label={`${WORDS.search.text} ${title}`} data-testid={`col-search-${c.key}`} onClick={() => setSearch((s) => ({ ...s, [c.key]: "" }))}>
+                      <Ic k="search" size={14} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="dsc-sr" id={`dsc-h-${c.key}`}><W id={TITLE[c.key]} /></span>
+                    <ColSearch
+                      title={title}
+                      q={q}
+                      onQ={(t) => setSearch((s) => ({ ...s, [c.key]: t }))}
+                      onClose={() =>
+                        setSearch((s) => {
+                          const n = { ...s };
+                          delete n[c.key];
+                          return n;
+                        })
+                      }
+                    />
+                  </>
+                )}
+              </div>
+              <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} view={view} q={q ?? ""} />
+            </section>
+          );
+        })}
       </div>
       <div className="dsc-phone">
         <div className="dsc-tabs" role="tablist">
           {COLUMNS.map((c) => (
             <button key={c.key} type="button" role="tab" aria-selected={tab === c.key} className="dsc-tab" data-tab={c.key} onClick={() => setTab(c.key)}>
               <W id={TITLE[c.key]} />
-              <span className="dsc-count">{countOf(data, c.key)}</span>
+              <span className="dsc-count">{countOf(phoneData, c.key, view, "")}</span>
             </button>
           ))}
         </div>
-        <Body data={data} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} />
+        <div className="dsc-mfilters" data-testid="m-discover-filters">
+          <Presets view={view} onView={setView} phone />
+          <PadChip entries={entries} view={view} onView={setView} phone title={<W id="padMenuTitle" />} />
+        </div>
+        {held && (
+          <div className="dsc-mpend">
+            <button type="button" className="dsc-ppill" data-testid="m-paused" onClick={togglePause}>
+              <Ic k="pause" />
+              {pending > 0 ? WORDS.pausedNew.text.replace("{n}", String(pending)) : WORDS.paused.text}
+            </button>
+          </div>
+        )}
+        <Body data={phoneData} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} view={view} q="" />
+        <Dock amount={amount} onAmount={setAmount} />
       </div>
     </section>
   );

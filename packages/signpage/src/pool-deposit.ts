@@ -527,7 +527,7 @@ export async function runPoolDeposit(h: PoolDepositHost, ask: PoolAsk | null, fi
       const [h0, h1] = await both(h, async (r) => BigInt(int(await r("getBlockHeight", [{ commitment: "confirmed" }]))));
       const own0 = said < h0 + 2n * BLOCKHASH_LIFE ? said : h0 + 2n * BLOCKHASH_LIFE;
       const lastValid = own0 > h1 + BLOCKHASH_LIFE ? own0 : h1 + BLOCKHASH_LIFE;
-      const { message, wire } = solanaPoolDepositTx(h.pin.program, u.address, { value, precommitment }, st.sizes, blockhash);
+      const { message, wire } = solanaPoolDepositTx(h.pin.program, u.address, { value, precommitment }, st.sizes, blockhash, st.rent);
       checkSolanaDeposit(
         wire,
         { ...(ask ?? { kind: "pool.deposit", chain: "solana", token: null, slippageBps: 0, decimals: 9 }), amount: value } as PoolAsk,

@@ -9,7 +9,7 @@
  *  https://www.apache.org/licenses/LICENSE-2.0. NOTICE: KLineChart, Copyright (c) 2019 lihu. TradingView Lightweight
  *  Charts, Copyright (c) 2019 TradingView, Inc. https://www.tradingview.com */
 import { dispose, init } from "klinecharts";
-import type { Chart, DeepPartial, KLineData, PeriodType, Styles } from "klinecharts";
+import type { Chart, Crosshair, DeepPartial, KLineData, PeriodType, Point, Styles } from "klinecharts";
 import { sameBar } from "./candles.ts";
 import type { Bar, ChartTf } from "./candles.ts";
 import { valueText, volumeIn } from "./units.ts";
@@ -88,8 +88,15 @@ export function mountChart(el: HTMLElement, phone: boolean, onBar: (b: KLineData
   chart.setOffsetRightDistance(phone ? 16 : 40);
   // the price range starts under the legend (its rows: two on desktop, three on the phone), in px
   chart.overrideYAxis({ paneId: "candle_pane", gap: gapOf(phone) });
+  // the library hands this action the pointer's own coordinates, never the bar under them (klinecharts 10.0.3
+  // index.esm.js:14092-14093 passes setCrosshair's argument on): the bar is read from x, clamped to the bars drawn as
+  // the crosshair's own is (index.esm.js:14071-14079)
   chart.subscribeAction("onCrosshairChange", (d) => {
-    const k = (d as { kLineData?: KLineData } | undefined)?.kLineData;
+    const x = (d as Crosshair | undefined)?.x;
+    if (x === undefined) return;
+    const [p] = chart.convertFromPixel([{ x }], { paneId: "candle_pane" }) as Partial<Point>[];
+    const list = chart.getDataList();
+    const k = list[Math.min(Math.max(p?.dataIndex ?? 0, 0), list.length - 1)];
     if (k) onBar(k);
   });
   // one loader for the chart's life: it hands over the bars `drawBars` set, all at once, with no older page to ask for,

@@ -1,4 +1,5 @@
-// node packages/signpage/scripts/rent-back-mutants.mjs (card sol-w-sweep, delta reviews 5 and 6 of 38e59182 and 6 of 13898c19): plants
+// node packages/signpage/scripts/rent-back-mutants.mjs (card sol-w-sweep, delta reviews 5 and 6 of 38e59182 and 6 of
+// 13898c19; card sol-rent-back-dust-burn): plants
 // one mutant at a time in the signing page's rent back (src/pool-sell.ts) and the kit's teardown plan
 // (packages/kit/src/checks/solana/checks.ts), runs the test that holds it, expects it to fail, puts the source back.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -7,8 +8,11 @@ import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
 const KIT = `${W}/../kit/src/checks/solana/checks.ts`;
+const FLOW = `${W}/../kit/src/trade/solana/flow.ts`;
 const BUY = `${W}/src/pool-buy.ts`;
 const T = "test/pool-sell.test.ts";
+const K = "../kit/test/solana-teardown-rules.test.ts";
+const KF = "../kit/test/solana-flow.test.ts";
 const KC = "../kit/test/solana-teardown-cashback.test.ts";
 const TB = "test/pool-buy.test.ts";
 const TESTNET = `${W}/src/pool-testnet.ts`;
@@ -31,6 +35,43 @@ const M = [
   ["L3 a floor end always W's own state", SELL, T, "steady: cheapest < floor,", "steady: true,"],
   ["info the sell's record replaces the mints a prior one kept", SELL, T, "      owedRec.mints = mintsOf(prior?.mints, owedRec.mints);\n", ""],
   ["info a pass's end replaces the record's mints", SELL, T, "mints: mintsOf(now.mints, o.mints), ", ""],
+  // card sol-rent-back-dust-burn: what a stranger's balance is, and the burn the kit's plan and check allow. Left out as
+  // equivalent: the mixed read's throw (an "ok" beside a "none", "failed" or "other" read leaves a meta that is not one
+  // or reads a different balance, so the alike-meta throw below it refuses it the same), and the burn count's "at
+  // least once" (FRAME takes a burn only right before its account's close, which runs once, so no account burns twice)
+  // D1 inverted by the review of bf467ae7, F1: a full sell never leaves W's own units, so a balance it left is a
+  // stranger's; holding it as W's own stranded W for good (a hostile RPC front-running 1 unit)
+  ["D1 a balance a full sell left held as W's own", SELL, T, 'what W\'s account held after it");\n      return "yes";', 'what W\'s account held after it");\n      if (a !== 0n) return "no";\n      return "yes";'],
+  ["D2 the RPCs' metas may differ", SELL, T, "if (a === null || b === null || a !== b) throw", "if (a === null || b === null) throw"],
+  ["D3 a meta that does not say it taken", SELL, T, "if (a === null || b === null || a !== b) throw", "if (a !== b) throw"],
+  ["D4 a sell not read yet taken as sold", SELL, T, '? "no" : "unsure";', '? "no" : "yes";'],
+  ["D5 an unsure read stored as W's own state", SELL, T, 'steady: sold === "no" }', "steady: true }"],
+  ["D6 a failed sell taken as sold", SELL, T, 'if (got.every((g) => g.got === "failed")) return "no";', 'if (got.every((g) => g.got === "failed")) return "yes";'],
+  ["D7 a sell past its blockhash taken as sold", SELL, T, '(await pastOnBoth(rpcs, by.last)) ? "no" : "unsure"', '(await pastOnBoth(rpcs, by.last)) ? "yes" : "unsure"'],
+  // D8 (soldOne's own `by === undefined` taken as sold) is left out as equivalent since the review of bf467ae7's F5:
+  // readW asks soldOne only of a mint with a recorded sell; D8b holds a held mint with none
+  ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
+  ["D9 the burn list dropped", SELL, T, "const burn = holding.map((t) => t.ata);", "const burn: string[] = [];"],
+  ["D10 the sell not recorded", SELL, T, "      owedRec.sell = { ...prior?.sell, [token]: { tx: base64.encode(signed), last: bh.lastHeight } };\n", ""],
+  ["D11 a load passes no sell on", SELL, T, "mints: o.mints, wait, ...(o.sell ? { sell: o.sell } : {}) }", "mints: o.mints, wait }"],
+  // the review of bf467ae7's named ones: X2 (F3), Y2, Y3, Y4, Y7 (F4), its read order and commitment (F5), and the
+  // armed path's burn list (F6); and a sell read's fault counted for a mint W no longer holds
+  ["review X2 a burn's next close of another account", KIT, K, " && next.data[0] === 9 && next.accounts[0]?.key === h?.address;\n          if (!h || h.kind !== \"token\" || h.burn", " && next.data[0] === 9;\n          if (!h || h.kind !== \"token\" || h.burn"],
+  ["review Y2 leftAfter counts another owner's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.mint !== mint) continue;"],
+  ["review Y3 leftAfter counts another mint's account", SELL, T, "if (b.mint !== mint || b.owner !== owner) continue;", "if (b.owner !== owner) continue;"],
+  ["review Y4 a list with no W entry read as 0", SELL, T, "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total;", "    total = (total ?? 0n) + BigInt(amount);\n  }\n  return total ?? 0n;"],
+  ["review Y7 another mint's sell used", SELL, T, "const by = x.sell?.[m];", "const by = Object.values(x.sell ?? {})[0];"],
+  ["review F5a the sell read at confirmed", SELL, T, 'signed, "finalized"));', "signed));"],
+  ["review F5b the sell read after W's accounts", SELL, T, [["      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n", "      const held = await both(rpcs, (r) => accountsOf(r, [w.address, ...addresses]));\n      for (const m of x.mints) if (x.sell?.[m.mint] !== undefined) sells.set(m.mint, await soldOne(m.mint).catch((e: unknown) => ({ fault: e })));\n"]]],
+  ["review F5c a sell read's fault for a mint W no longer holds", SELL, T, "await soldOne(m.mint).catch((e: unknown) => ({ fault: e }))", "await soldOne(m.mint)"],
+  ["review F6 the armed path passes a burn list", FLOW, KF, "    plan = solanaTeardownPlan(w, accounts);", "    plan = solanaTeardownPlan(w, accounts, undefined, addresses);"],
+  ["K1 a Token-2022 extension burned", KIT, K, "burn.includes(address) && other === undefined &&", "burn.includes(address) &&"],
+  ["K2 the burn's amount unchecked", KIT, K, "|| u64(d, 1) !== h.burn ", ""],
+  ["K3 the burn's mint unchecked", KIT, K, "|| a[1]?.key !== h.mint ", ""],
+  ["K4 a burn anywhere in the frame", KIT, K, "|| !a[1]?.writable || !nextCloses)", "|| !a[1]?.writable)"],
+  ["K6 a claim's destination burned", KIT, K, " && ![...cash.values()].some((c) => c.to === address);", ";"],
+  ["K7 a native account burned", KIT, K, "const burns = !native && amount", "const burns = amount"],
+  ["K8 the burn's signer unchecked", KIT, K, "|| a[2]?.key !== wallet || !a[2]?.signer ", ""],
   // delta review 6 of 13898c19's named ones (its runner's plants, byte for byte)
   ["review 6 N6b-sameRead-no-lamports", SELL, T, "a.owner === b.owner && a.lamports === b.lamports && a.data.length", "a.owner === b.owner && a.data.length"],
   // N8 (the again loop's `if (e === BUSY) throw e` taken out) is left out as equivalent: a try's body never sleeps, the
@@ -64,7 +105,16 @@ const M = [
 ];
 // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
 const only = process.env.ONLY;
-const run = only ? M.filter(([name]) => name.includes(only)) : M;
+// <k>/<n>: part k of n only, mutant i in part (i % n) + 1, as the helper's sweeps split (apps/helper/test/pool-evm/
+// mutant-sweep.mjs partOf); test:mutants runs the parts, one command each, so ci.yml's split shares them out
+const arg = process.argv.slice(2);
+const part = /^(\d+)\/(\d+)$/.exec(arg[0] ?? "");
+if (arg.length > 1 || (arg.length === 1 && (!part || Number(part[1]) < 1 || Number(part[1]) > Number(part[2])))) {
+  console.log(`FAIL the part is <k>/<n> with 1 <= k <= n, one at most, not ${JSON.stringify(arg)}`);
+  process.exit(1);
+}
+const inPart = (i) => !part || i % Number(part[2]) === Number(part[1]) - 1;
+const run = (only ? M.filter(([name]) => name.includes(only)) : M).filter((_, i) => inPart(i));
 let killed = 0;
 for (const [name, file, test, from, to] of run) {
   const src = readFileSync(file, "utf8");

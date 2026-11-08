@@ -139,7 +139,7 @@ test("curve rule on the fixtures: the curve token has a bar; graduated, listed a
 });
 
 test("words: every word has its source, and the only drafts are the chart menus' rows R5 does not draw (owner 1 Nov 16:45Z, keep; the chart's empty state owner 3 Nov 20:26Z; card app-chart-controls) and the lower panel's and About's words R5 marks as draft copy (card app-token-lower-panel)", () => {
-  assert.deepEqual([...DRAFTS].sort(), ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "gridLines", "indBOLL", "indEMA", "indMA", "indMACD", "indRSI", "lastLine", "net5m", "sells5m", "vol5m"]);
+  assert.deepEqual([...DRAFTS].sort(), ["about", "buys5m", "colAge", "colAmount", "colBs", "colPosition", "colShare", "colTotal", "colTrader", "colType", "creatorTag", "net5m", "sells5m", "vol5m"]);
   for (const w of Object.values(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0);
 });
 

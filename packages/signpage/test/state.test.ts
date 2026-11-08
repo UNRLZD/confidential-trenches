@@ -356,3 +356,23 @@ test("kit-deposit-calls: a deposit record with a fact on the wrong stage, or a f
   // a buy record's since_ms is not copied (no kind but a deposit has facts)
   assert.deepEqual(opOf(id, { kind: "buy", stage: "filled", txs: [], since_ms: 1 }), { id, kind: "buy", stage: "filled", txs: [] });
 });
+
+test("held-move-forgotten-tx: a held deposit whose move out landed (follow.why moved_out) is sent with moved_out, and only that one", () => {
+  const id = crypto.randomUUID();
+  const held = { kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1 };
+  const out = { to: "alice.near", amount: "1", nonce: "8", height: 1, register: false, hash: "h", signed: "s" };
+  const moved = opOf(id, { ...held, follow: { why: "moved_out", u: "u.near", out } });
+  assert.deepEqual(moved, { id, kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1, moved_out: true });
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [moved!])), true, "the kit's client takes it");
+  // follow.ts's moved_out with no move of this op's own (review M2: a withdraw.open took the money, its USDC may still
+  // reach U): still Held, its Withdraw kept
+  assert.deepEqual(opOf(id, { ...held, follow: { why: "moved_out", u: "u.near" } }), { id, kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1 });
+  assert.deepEqual(opOf(id, { ...held, follow: { why: "moved_out", u: "u.near", out: "h" } }), { id, kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1 }, "an out that is no record");
+  // still held (why under_min, or no follow): no moved_out; a record's own moved_out field is never copied
+  assert.deepEqual(opOf(id, { ...held, follow: { why: "under_min" } }), { id, kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1 });
+  assert.deepEqual(opOf(id, { ...held, moved_out: true }), { id, kind: "deposit", stage: "held", txs: [], held_id: "u.near", since_ms: 1 });
+  // moved_out on another stage is no op the kit reads
+  assert.deepEqual(opOf(id, { kind: "deposit", stage: "done", txs: [], since_ms: 1, follow: { why: "moved_out", out } }), { id, kind: "deposit", stage: "done", txs: [], since_ms: 1 });
+  for (const stage of ["halted", "done", "refunded", "waiting"]) assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [{ id, kind: "deposit", stage, txs: [], moved_out: true } as never])), false, stage);
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [{ id, kind: "deposit", stage: "held", txs: [], moved_out: false } as never])), false, "moved_out is true or absent");
+});
