@@ -591,26 +591,31 @@ export function checkSolanaSell(
     if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
   }
   if (typeof reserve !== "bigint" || reserve >= minOut) return refuse("reserve");
-  // A reserve under 0 (W's own surplus deposited with the proceeds) or over the cap is only a sell that empties W's
-  // holding (card sol-w-sweep), priced exactly as solanaSellReserve prices it: what W holds (`lamports`, the lower of
-  // both RPCs) against the fee, what the sell makes, the deposit's rents and what W keeps for the rent back
-  // (solanaSellAfterFull for the volume accounts owed a claim, or rent(0) alone when that would leave the sell's note
-  // under the floor). Review L1 of 38faee89: the old bound, -reserve <= lamports, passed a sell keeping nothing and a
-  // partial sell's surplus. What the keep holds over rent(0) the rent back's sweep carries into the user's note, so the
-  // cap, which bounds what is held out of the user's notes, leaves it out.
+  // A sell that empties W's holding (card sol-w-sweep; `surplus.full`) is priced exactly as the device prices it
+  // (solanaSellReserve), at any reserve: what W holds (`lamports`, the lower of both RPCs) against the fee, what the
+  // sell makes, the deposit's rents and what W keeps for the rent back, solanaSellAfterFull for the volume accounts owed
+  // a claim; rent(0) instead only where the device falls back, re-derived here: that keep's reserve over the cap (less
+  // what the sweep carries on), at or over the min out, or leaving the note under the sweep's floor (at least the pool's
+  // least deposit). A reserve under 0 (W's surplus in the note) is only that. What the keep holds over rent(0) the rent
+  // back's sweep carries into the user's note, so the cap, which bounds what is held out of the user's notes, leaves it
+  // out. Review L1 of 38faee89: the old bound, -reserve <= lamports, passed a sell keeping nothing and a partial sell's
+  // surplus; review 2 L1 of 911d7e25: exact only outside [0, cap] passed a full sell held back a million more, and
+  // rent(0) far over the floor; L2: the rent rate is the cap's at most, so what is held back stays bounded.
   let swept = 0n;
-  if (reserve < 0n || reserve > SOLANA_POOL_SELL_RESERVE_MAX) {
-    const p = surplus;
-    if (p === undefined || p.full !== true) return refuse("reserve");
+  const p = surplus;
+  if (p !== undefined && p.full === true) {
     if (typeof p.lamports !== "bigint" || typeof p.fee !== "bigint" || typeof p.made !== "bigint" || p.fee < 0n || p.made < 0n || typeof p.next !== "boolean") return refuse("reserve");
-    if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n) return refuse("reserve");
+    if (typeof p.rent?.lamportsPerByte !== "bigint" || typeof p.rent.factor !== "bigint" || p.rent.lamportsPerByte < 0n || p.rent.factor < 0n || p.rent.lamportsPerByte * p.rent.factor > SOLANA_RENT_PER_BYTE_MAX) return refuse("reserve");
     if (!Number.isSafeInteger(p.owed) || p.owed < 0 || p.owed > SOLANA_SWEEP_OWED_MAX) return refuse("reserve");
     const short = p.fee + p.made + solanaDepositRents(p.rent, reads, p.held, p.next) - p.lamports;
     const full = solanaSellAfterFull(p.rent, p.owed);
     const r0 = solanaRentMin(p.rent, 0);
-    if (reserve === short + full) swept = full - r0;
-    else if (reserve !== short + r0) return refuse("reserve");
-  }
+    const floor = solanaSweepFloor(p.rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(p.rent) : SOLANA_POOL_MIN_DEPOSIT;
+    const keep = short + full;
+    const keeps = keep - (full - r0) <= SOLANA_POOL_SELL_RESERVE_MAX && keep < minOut && minOut - keep >= floor;
+    if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
+    if (keeps) swept = full - r0;
+  } else if (reserve < 0n) return refuse("reserve");
   if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");
   const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");

@@ -1,11 +1,11 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) on card/sol-w-sweep with review 1 of 38faee89 folded (9081a03c): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's build (mainnet) on card/sol-w-sweep with review 2 of 911d7e25 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-4Wq2S5VcMGnpdu23vuq2IuF0P6ZtBhGREyMkxEhKw6Z9wOy5ZrZiVEB7f7wP+6yY\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-4Wq2S5VcMGnpdu23vuq2IuF0P6ZtBhGREyMkxEhKw6Z9wOy5ZrZiVEB7f7wP+6yY",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7WdhXaIMoqGXrK4KtHXmhc8Kgd9dOZbAXZ9Rey1Qc5fC+POTbRY7K/SDsbyrMrYi\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-7WdhXaIMoqGXrK4KtHXmhc8Kgd9dOZbAXZ9Rey1Qc5fC+POTbRY7K/SDsbyrMrYi",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -13,11 +13,12 @@
       "rent(0) only when a full sell's keep is refused or leaves its note under the floor": true,
       "the sell prices a full sell with that fallback, at the sweep's floor": true,
       "the reserve cap leaves out what the sweep carries on": true,
-      "the sell's rule prices a reserve under 0 or over the cap exactly, full sells only": true,
+      "the sell's rule prices a full sell exactly, rent(0) only where the device falls back, at a rent the cap bounds": true,
       "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
       "the sweep's rule leaves exactly that, for at most two": true,
       "the sweep goes on when only owed-cashback accounts are kept": true,
       "W owed, not dropped, when the rest is under the floor": true,
+      "a sweep ending under the floor keeps W's record": true,
       "the plan marks a volume account owed only cashback": true
     }
   },
@@ -31,11 +32,12 @@
       "rent(0) only when a full sell's keep is refused or leaves its note under the floor": false,
       "the sell prices a full sell with that fallback, at the sweep's floor": false,
       "the reserve cap leaves out what the sweep carries on": false,
-      "the sell's rule prices a reserve under 0 or over the cap exactly, full sells only": false,
+      "the sell's rule prices a full sell exactly, rent(0) only where the device falls back, at a rent the cap bounds": false,
       "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": false,
       "the sweep's rule leaves exactly that, for at most two": false,
       "the sweep goes on when only owed-cashback accounts are kept": false,
       "W owed, not dropped, when the rest is under the floor": false,
+      "a sweep ending under the floor keeps W's record": false,
       "the plan marks a volume account owed only cashback": false
     }
   }

@@ -155,7 +155,10 @@ type Plant = {
   ataLamports?: number;
   /** W's volume accounts the buy made, under each pump program named, at rent(137): owing nothing, or `owed` (its
    *  needs_claim byte set: incentive tokens to claim, so pump keeps it open) */
-  volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint; stable?: bigint }[];
+  volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint; stable?: bigint; claimed?: bigint }[];
+  /** RPC 1 alone, until the sell lands, shows both of W's volume accounts owed a claim (pump's stable cashback, PumpSwap's
+   *  cashback) where the chain has none (review 2 L4 of 911d7e25: one lying RPC lifts the sell's owed count) */
+  owedOn1BeforeSell?: boolean;
   /** PumpSwap's claim_cashback fails as the program refuses it (review L2 of 5592a871: cashback switched off, a layout
    *  the program no longer takes) */
   claimFails?: boolean;
@@ -227,10 +230,14 @@ function chain(plant: Plant = {}) {
     const uva = solanaVolumeAccumulator(W.address, vol.program);
     // PumpSwap cashback owed (card solana-teardown-cashback): cashback_earned @74, its WSOL in the account's own WSOL
     // account, a native SPL Token account of the volume account holding it on top of its rent
+    // cashback_claimed @82 (pump's stable_cashback_claimed @98): what was claimed already, so what is owed is the rest
     if (vol.cashback !== undefined && vol.program === SOLANA_PUMP_AMM_PROGRAM) {
       new DataView(d.buffer).setBigUint64(74, vol.cashback, true);
-      accounts.set(solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(rentMin(165) + vol.cashback), data: nativeAccount(uva, vol.cashback) });
+      const left = vol.cashback - (vol.claimed ?? 0n);
+      if (vol.claimed !== undefined) new DataView(d.buffer).setBigUint64(82, vol.claimed, true);
+      accounts.set(solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(rentMin(165) + left), data: nativeAccount(uva, left) });
     }
+    if (vol.claimed !== undefined && vol.program === SOLANA_PUMP_PROGRAM) new DataView(d.buffer).setBigUint64(98, vol.claimed, true);
     // pump's stable cashback owed (stable_cashback_earned @90), with no USDC in the volume account's own account to pay it
     if (vol.stable !== undefined && vol.program === SOLANA_PUMP_PROGRAM) new DataView(d.buffer).setBigUint64(90, vol.stable, true);
     accounts.set(uva, { owner: vol.program, lamports: Number(solanaRentMin(rent, 137)), data: d });
@@ -430,6 +437,12 @@ function chain(plant: Plant = {}) {
     const answer = (address: string): unknown => {
       if (p === 1 && plant.hideOn1 === address) return null;
       if (p === 1 && plant.ammHiddenOn1 && (address === ammVol || address === ammAta)) return null;
+      if (p === 1 && plant.owedOn1BeforeSell && deposits.length === 0 && (address === ammVol || address === solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM))) {
+        const d = new Uint8Array(137);
+        d.set(base58.decode(W.address), 8);
+        new DataView(d.buffer).setBigUint64(address === ammVol ? 74 : 90, 12_742_862n, true);
+        return { owner: address === ammVol ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM, lamports: Number(solanaRentMin(rent, 137)), data: [base64.encode(d), "base64"], executable: false, rentEpoch: 0, space: 137 };
+      }
       const held = accounts.get(address);
       if (!held) return null;
       const a = plant.mapOn ? plant.mapOn(p, address, held) : held;
@@ -1594,6 +1607,69 @@ test("the sell counts a volume account owed a claim when either RPC reads it owe
   const sell = w.c.deposits[0]!;
   const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
   assert.equal(afterSell, solanaSellAfterFull(rent, 1));
+});
+
+// Review 2 L3 of 911d7e25: the mirror, RPC A reading W's PumpSwap volume account owing nothing and RPC B its cashback
+// (owesOn reading RPC A alone survived the one above).
+test("the sell counts a volume account owed a claim when RPC B alone reads it owed: what W keeps holds the claim's cost", async () => {
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const zeroed = (a: Acc): Acc => { const d = Uint8Array.from(a.data); new DataView(d.buffer).setBigUint64(74, 0n, true); return { ...a, data: d }; };
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n }], claimFails: true, mapOn: (p, address, a) => (p === 0 && address === vol ? zeroed(a) : a) });
+  await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  const sell = w.c.deposits[0]!;
+  const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  assert.equal(afterSell, solanaSellAfterFull(rent, 1));
+});
+
+// Review 2 L3 of 911d7e25: what is owed is what was earned less what was claimed (cashback_claimed @82, pump's
+// stable_cashback_claimed @98); a claimed amount read a byte off (@83, @97) survived, every fixture claiming nothing.
+test("a volume account's claimed cashback is taken off what it earned: all of it claimed owes nothing, part of it owes the claim's cost", async () => {
+  const after = async (plant: Plant, venue: Venue) => {
+    const w = await world({ venue, ataLamports: TOKEN_RENT, claimFails: true, ...plant });
+    const a = await runPoolSell(w.host, { ...ASK, token: VF[venue].mint });
+    assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+    return BigInt(ENOUGH) + VF[venue].minOut - w.c.deposits[0]!.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  };
+  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n, claimed: 12_742_862n }] }, "pumpswap"), solanaSellAfterFull(rent, 0));
+  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: 12_742_862n, claimed: 12_742_861n }] }, "pumpswap"), solanaSellAfterFull(rent, 1));
+  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_PROGRAM, stable: 3_000_000n, claimed: 3_000_000n }] }, "pump"), solanaSellAfterFull(rent, 0));
+  assert.equal(await after({ volumes: [{ program: SOLANA_PUMP_PROGRAM, stable: 3_000_000n, claimed: 1_000_000n }] }, "pump"), solanaSellAfterFull(rent, 1));
+});
+
+// Review 2 L3 and L4 of 911d7e25, end to end: W at what a curve buy leaves (1,493,440), a full sell whose note with the
+// sweep's keep would be over the pool's least deposit and under the floor keeps rent(0) instead (the device's fallback,
+// its floor the sweep's: one priced at SOLANA_POOL_MIN_DEPOSIT keeps the sweep's keep and the rule refuses it); the
+// sweep then ends "floor", and W's record stays for a later pass.
+test("a full sell whose note with the sweep's keep lands under the floor keeps rent(0), fills, and the sweep under the floor keeps W's record", async () => {
+  const lamports = 1_493_440n;
+  const { amount, minOut } = await amountFor(5_800_000n);
+  const r0 = solanaRentMin(rent, 0);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const a = await runPoolSell(w.host, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sell = w.c.deposits[0]!;
+  const short = minOut - sell.value - r0; // the fee and the rents less W's lamports
+  const kept = minOut - (short + solanaSellAfterFull(rent, 0));
+  assert.ok(kept >= SOLANA_POOL_MIN_DEPOSIT && kept < FLOOR, `with the keep: ${kept}`);
+  assert.equal(short, BigInt(FEE) + 1_468_120n - lamports);
+  assert.equal(w.c.deposits.length, 1, "nothing swept");
+  assert.ok(w.owed.has(W.address), "W's record kept");
+});
+
+// Review 2 L4 of 911d7e25: RPC B reads W's two volume accounts owed claims until the sell lands, the chain owing none:
+// the sell keeps two claims' cost, its note under the floor with it, so it keeps rent(0); the sweep ends "floor". At
+// 911d7e25 a "floor" end dropped W's record, so one lying RPC made the device forget W; kept, a later sweep retries.
+test("one RPC's lie of two claims owed forces the rent(0) sell: the sweep ends under the floor and W's record is kept", async () => {
+  const lamports = 1_493_440n;
+  const { amount, minOut } = await amountFor(8_000_000n);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT, owedOn1BeforeSell: true }, [wallet(amount)]);
+  const a = await runPoolSell(w.host, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const short = BigInt(FEE) + 1_468_120n - lamports;
+  assert.ok(minOut - (short + solanaSellAfterFull(rent, 0)) >= FLOOR, "honest, the keep would have gone");
+  assert.equal(w.c.deposits[0]!.value, minOut - short - solanaRentMin(rent, 0));
+  assert.equal(w.c.deposits.length, 1, "nothing swept");
+  assert.ok(w.owed.has(W.address), "W's record kept");
 });
 
 // Review L3 and Info of 38faee89: two volume accounts owed a claim neither can take this pass (PumpSwap's cashback, its
