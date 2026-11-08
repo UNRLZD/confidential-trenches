@@ -6,11 +6,11 @@ import { after, test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
-import { VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
+import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -52,6 +52,11 @@ class Chain {
   skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string }> = {};
   /** the second RPC's own tx states (default: the same as the first's) */
   txsB: Map<string, "ok" | "failed"> | null = null;
+  /** txs both of the pair no longer keep (they answer them as unknown); the archival RPC keeps every one */
+  forgot = new Set<string>();
+  /** the archival RPC's own tx states (default: every tx in txs, forgotten or not), or no answer there at all */
+  archTxs: Map<string, "ok" | "failed"> | null = null;
+  archDown = false;
   code = VAULT_TOKEN_CODE_HASH;
   /** what a send does: lands (the default), fails, or is lost */
   onSend: (signed: string, hash: string) => void = (_s, h) => this.land(h);
@@ -89,7 +94,7 @@ class Chain {
       // the release RPCs, read 8 Nov 2026: a hash nobody sent answers UNKNOWN_TRANSACTION (HTTP 200) only to wait_until
       // NONE; to FINAL fastnear times out (10 s, or no answer in 30 s) and dRPC answers HTTP 408, which the client throws
       tx: async ({ tx_hash, sender_account_id, wait_until }) => {
-        const st = (k === "b" && this.txsB !== null ? this.txsB : this.txs).get(tx_hash);
+        const st = this.forgot.has(tx_hash) ? undefined : (k === "b" && this.txsB !== null ? this.txsB : this.txs).get(tx_hash);
         if (st === undefined) {
           if (wait_until === "NONE") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
           throw new Error("HTTP 408");
@@ -114,18 +119,48 @@ class Chain {
   rpcs(): readonly [MoveOutRpc, MoveOutRpc] {
     return [this.rpc(NET.fastnear[0], "a"), this.rpc(NET.drpc, "b")];
   }
+  /** the network's archival RPC: every tx ever (UNKNOWN_TRANSACTION to NONE for one never sent), or no answer when down */
+  archival(name: string = NET.archival[0]): MoveOutRpc {
+    const base = this.rpc(name, "a");
+    return {
+      ...base,
+      tx: async (p) => {
+        if (this.archDown) throw new Error("HTTP 503");
+        const st = (this.archTxs ?? this.txs).get(p.tx_hash);
+        if (st === undefined) {
+          if (p.wait_until === "NONE") return { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+          throw new Error("HTTP 408");
+        }
+        const status = st === "ok" ? { SuccessValue: "" } : { Failure: { ActionError: {} } };
+        return { result: { final_execution_status: "FINAL", status, transaction: { hash: p.tx_hash, signer_id: p.sender_account_id }, receipts_outcome: [{ id: "r", outcome: { status } }] } };
+      },
+    };
+  }
 }
 
 async function heldOp(why: string, extra: Partial<FollowRecord> = {}) {
   const ops = await openWalletStore({ indexedDB: new IDBFactory() });
   opened.push(ops);
-  const follow: FollowRecord = { network: "testnet", s: "1", i: 0, u: U, address: "dep-addr", deadline_ms: 1, origin: "nep141:x", min_out: "1000000", why, ...extra };
+  // 1Click delivered it: its money is in U (follow.ts needOf)
+  const follow: FollowRecord = { network: "testnet", s: "1", i: 0, u: U, address: "dep-addr", deadline_ms: 1, origin: "nep141:x", min_out: "1000000", delivered: "2500000", why, ...extra };
   const op: DepositOp = { kind: "deposit", stage: "held", txs: [], created_ms: 1, follow, held_id: U };
   await ops.put("ops", "op1", op);
   return ops;
 }
 let seedOpens = 0;
-const deps = (ops: WalletStore, chain: Chain) => ({ ops, rpcs: chain.rpcs(), seed64: async () => (seedOpens++, SEED.slice()), sleep: async () => {}, pollMs: 0 });
+// the helper's 1Click status read at the tap (moveout.ts reread): each deposit address's answer, or HTTP 503 (a failed
+// read) for one not listed; every address asked, in order
+const statusReads: string[] = [];
+const oneClick = (answers: Record<string, [string, string?]> = {}) =>
+  (async (url: string) => {
+    const address = decodeURIComponent(url.split("depositAddress=")[1] ?? "");
+    statusReads.push(address);
+    const a = answers[address];
+    if (a === undefined) return new Response("{}", { status: 503 });
+    const swapDetails = a[1] === undefined ? {} : { amountOut: a[1] };
+    return Response.json({ status: a[0], quoteResponse: { quote: { depositAddress: address }, quoteRequest: { recipient: U, refundTo: U } }, swapDetails });
+  }) as typeof fetch;
+const deps = (ops: WalletStore, chain: Chain, status: Record<string, [string, string?]> = {}) => ({ ops, rpcs: chain.rpcs(), archival: NET.archival.map((n) => chain.archival(n)), seed64: async () => (seedOpens++, SEED.slice()), sleep: async () => {}, pollMs: 0, fetchFn: oneClick(status) });
 
 // A signed transaction decoded (nearcore Transaction V0 then a Signature), for the checks below.
 function decode(signed: string) {
@@ -440,11 +475,17 @@ test("M3 the tx FINAL on one RPC and unknown on the other is not moved: the op i
   seedOpens = 0;
   assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
   assert.equal(seedOpens, 0);
-  // a split read is never "unknown on both": with U's nonce taken long ago the record is still followed, not settled
+  // U's nonce settled past it on both RPCs, U still holding its 2,500,000: whatever the split says of the tx, the money
+  // in U is open and a tap moves it (delta review 2 of c3e71713, M1)
   chain.nonce = 8n;
   chain.a.height = chain.b.height = 1000 + 2 * SETTLE_BLOCKS;
-  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "sent");
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" });
   assert.equal(seedOpens, 0);
+  chain.onSend = (_s, h) => chain.land(h);
+  chain.txsB = null; // both RPCs read the new move
+  const tap = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal(decode(chain.sent.at(-1)!).nonce, 9n);
 });
 
 test("M1 a taken record past the validity window too is taken, not expired: a resume with U empty answers empty", async () => {
@@ -506,7 +547,7 @@ test("M3 two calls at once, two typed accounts: one set of bytes sent, both answ
   assert.equal((a as { to: string }).to, (b as { to: string }).to);
 });
 
-test("M1 a record whose nonce another tx of U took: settled once the nonce is taken SETTLE_BLOCKS back; a resume answers empty, a tap signs anew for new USDC", async () => {
+test("M1 a record whose nonce another tx of U took (unknown on the archival RPC too: replaced): settled once the nonce is taken SETTLE_BLOCKS back; a resume answers empty, then open (never failed) for new USDC, and a tap signs anew", async () => {
   const chain = new Chain();
   chain.registered.add(TO);
   chain.onSend = () => {};
@@ -524,10 +565,12 @@ test("M1 a record whose nonce another tx of U took: settled once the nonce is ta
   assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
   assert.equal(seedOpens, 0);
   assert.ok(((await ops.get("ops", "op1")) as DepositOp).follow.out !== undefined, "a resume clears nothing");
-  // new USDC reaches U: a resume answers failed (Retry), and the tap signs anew at U's next nonce
+  // new USDC reaches U: a resume answers open (the replaced record is history, the account typed again; never "not
+  // moved"), and the tap signs anew at U's next nonce
   chain.usdc = 5_000_000n;
-  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "failed");
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" });
   assert.equal(seedOpens, 0);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out, undefined, "the replaced record is cleared");
   chain.onSend = (_s, h) => chain.land(h);
   assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
   const op = (await ops.get("ops", "op1")) as DepositOp;
@@ -556,13 +599,18 @@ test("M1 a never-landable record (expired): a resume answers failed and signs no
   assert.equal(c2.sent.length, n, "nothing sent on a resume");
 });
 
-test("M1 two held ops of one U: the second op's tap follows the first's live record, one set of bytes, its account named", async () => {
+test("M1 two held ops of one U: the second op's tap follows the first's live record, one set of bytes, its account named; once it lands both ops read moved (delta review item 8)", async () => {
   const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
   chain.registered.add(TO);
   chain.registered.add("bob.testnet");
   chain.onSend = () => {};
   const ops = await heldOp("note");
   await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  // a held op of another U, and one of U on mainnet: never marked by U's move
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  await ops.put("ops", "op3", { ...one, follow: { ...one.follow, i: 1, u: depositId(SEED, 1n, 1).id } });
+  await ops.put("ops", "op4", { ...one, follow: { ...one.follow, network: "mainnet" } });
   assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
   seedOpens = 0;
   const b = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
@@ -570,12 +618,24 @@ test("M1 two held ops of one U: the second op's tap follows the first's live rec
   assert.equal((b as { to: string }).to, TO);
   assert.equal(seedOpens, 0);
   assert.equal(new Set(chain.sent).size, 1);
-  // it lands: the first op ends moved_out, and the second finds nothing to move
+  // it lands: both ops end moved_out on the one record, and the second's next tap reads moved (never an empty Withdraw)
   chain.txs.set((b as { hash: string }).hash, "ok");
   chain.usdc = 1n;
   assert.equal((await moveOutHeld("op2", "bob.testnet", deps(ops, chain))).kind, "moved");
-  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
-  assert.deepEqual(await moveOutHeld("op2", "bob.testnet", deps(ops, chain)), { kind: "empty" });
+  for (const k of ["op1", "op2"]) {
+    const o = (await ops.get("ops", k)) as DepositOp;
+    assert.equal(o.follow.why, "moved_out", k);
+    assert.equal(o.follow.out?.hash, (b as { hash: string }).hash, k);
+  }
+  for (const k of ["op3", "op4"]) {
+    const o = (await ops.get("ops", k)) as DepositOp;
+    assert.equal(o.follow.why, "note", k);
+    assert.equal(o.follow.out, undefined, k);
+  }
+  const again = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
+  assert.equal(again.kind, "moved");
+  assert.equal((again as { to: string }).to, TO);
+  assert.equal(seedOpens, 0);
 });
 
 test("M1 U's lock held elsewhere (a deposit follow of U): nothing read for a signature, nothing signed", async () => {
@@ -669,6 +729,7 @@ test("D3 the token's code hash read with no answer on one RPC: nothing signed", 
 
 test("D4 another op of U holds a gone record (FINAL failed): the tap clears it to that op's out_past and signs this op's own move", async () => {
   const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
   chain.registered.add(TO);
   chain.registered.add("bob.testnet");
   chain.onSend = (_s, h) => (chain.txs.set(h, "failed"), (chain.nonce += 1n));
@@ -681,8 +742,9 @@ test("D4 another op of U holds a gone record (FINAL failed): the tap clears it t
   assert.equal(b.kind, "moved");
   assert.equal((b as { to: string }).to, "bob.testnet", "op2's own account, not op1's");
   const op1 = (await ops.get("ops", "op1")) as DepositOp;
-  assert.equal(op1.follow.out, undefined, "op1's gone record is cleared");
-  assert.deepEqual(op1.follow.out_past?.map((r) => r.hash), [(first as { hash: string }).hash], "and kept as op1's history");
+  assert.deepEqual(op1.follow.out_past?.map((r) => r.hash), [(first as { hash: string }).hash], "op1's gone record is cleared to its history");
+  assert.equal(op1.follow.out?.hash, (b as { hash: string }).hash, "op2's move took all of U: op1 reads it as its move (delta review item 8)");
+  assert.equal(op1.follow.why, "moved_out");
   assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.out?.to, "bob.testnet");
   assert.deepEqual([...new Set(chain.sent)].map((x) => decode(x).nonce), [8n, 9n]);
 });
@@ -703,7 +765,7 @@ test("L1 an expired record read absent on one RPC and with no answer on the othe
   assert.equal(chain.sent.length, n, "nothing sent");
 });
 
-test("L1 taken needs UNKNOWN_TRANSACTION on both RPCs: absent on one and a 408 on the other, U's nonce taken long ago, the record stays followed", async () => {
+test("L1 U empty, its nonce settled past the record, absent on one RPC and a 408 on the other: only an equal archival word settles it; with none listed it stays followed", async () => {
   const chain = new Chain();
   chain.registered.add(TO);
   chain.onSend = () => {};
@@ -716,14 +778,20 @@ test("L1 taken needs UNKNOWN_TRANSACTION on both RPCs: absent on one and a 408 o
   const [a, b] = chain.rpcs();
   const mute: MoveOutRpc = { ...b, tx: async () => { throw new Error("HTTP 408"); } };
   seedOpens = 0;
-  assert.equal((await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: [a, mute] })).kind, "sent", "one RPC's UNKNOWN_TRANSACTION alone never settles a record");
+  const { archival: _none, ...bare } = deps(ops, chain);
+  assert.equal((await moveOutHeld("op1", null, { ...bare, rpcs: [a, mute] })).kind, "sent", "one RPC's UNKNOWN_TRANSACTION alone never settles a record");
   assert.equal(seedOpens, 0);
   assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past, undefined);
-  // both answer UNKNOWN_TRANSACTION: taken, a resume answers empty
+  // both archival hosts answer UNKNOWN_TRANSACTION, serving its block: replaced, and with U empty a resume answers empty
+  assert.deepEqual(await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: [a, mute] }), { kind: "empty" });
   assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
 });
 
-test("L1 one RPC reads the tx ok, the other absent, and both read U's nonce below it past the window (hostile reads): never settled, the record stays followed", async () => {
+// Flipped by delta review 5, item 2: L1 held such a record followed, so one lying RPC (a fake FINAL ok or failed, the
+// other UNKNOWN_TRANSACTION) held it at Sending forever. U's nonce below the record's, read equal on the pair past the
+// validity window, says no side's word can be true: the tx was never included and never can be. It expires; the tap
+// signs at that same nonce, so of the old bytes (past their window) and the new at most one can land.
+test("L1 one RPC reads the tx ok, the other absent, and both read U's nonce below it past the window (hostile reads): expired, and the tap signs at the same nonce", async () => {
   const chain = new Chain();
   chain.registered.add(TO);
   chain.txsB = new Map();
@@ -731,9 +799,1175 @@ test("L1 one RPC reads the tx ok, the other absent, and both read U's nonce belo
   const ops = await heldOp("sender_struck");
   const first = await moveOutHeld("op1", TO, deps(ops, chain));
   assert.equal(first.kind, "sent");
+  const had = ((await ops.get("ops", "op1")) as DepositOp).follow.out!;
   chain.a.height = chain.b.height = 1000 + Number(TX_VALIDITY_BLOCKS) + 1;
   seedOpens = 0;
-  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "sent", "a tx one RPC reads is never settled as expired");
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "failed", "a tx U's nonce never reached is expired, whatever one RPC reads");
+  assert.equal(seedOpens, 0, "a resume never signs");
+  chain.onSend = () => {};
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  assert.equal(seedOpens, 1);
+  const now = ((await ops.get("ops", "op1")) as DepositOp).follow;
+  assert.equal(now.out?.nonce, had.nonce, "the same nonce: at most one of the two lands");
+  assert.notEqual(now.out?.hash, had.hash);
+  assert.deepEqual(now.out_past?.map((x) => x.hash), [had.hash]);
+});
+
+// ---- card held-move-forgotten-tx: a landed move both of the pair no longer keep (review 4 of held-deposit-way-out, L1) ----
+// Read 8 Nov 2026 (wait_until NONE): a FINAL mainnet tx 180,000 blocks old answers UNKNOWN_TRANSACTION on
+// rpc.mainnet.fastnear.com, 230,000 blocks old (about 37 h) on near.drpc.org too; the testnet pair forgets 2Q4pYKQ9...
+// (2 Nov) while archival-rpc.testnet.fastnear.com reads it FINAL SuccessValue.
+const landedThenForgotten = async (usdcNow: bigint, archival: "keeps" | "down" | "failed" = "keeps", needless = false) => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {}; // the page closed before the tx read FINAL: the first call answers sent
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  const hash = (first as { hash: string }).hash;
+  chain.land(hash); // it landed: U's key nonce 7 -> 8, U holds 1 base unit, the typed account got the rest
+  if (needless) {
+    // the op 1Click REFUNDED, its delivered never read: the move took none of its money
+    const o = (await ops.get("ops", "op1")) as DepositOp;
+    const { delivered: _d, ...rest } = o.follow;
+    await ops.put("ops", "op1", { ...o, follow: { ...rest, sent: true, status: "REFUNDED" } });
+  }
+  chain.usdc = usdcNow;
+  chain.nonceAt = (h) => (h >= 1001 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1000 + 230_000; // the user signs in again ~37 h later on mainnet's pace
+  chain.forgot.add(hash); // both of the pair forgot it: UNKNOWN_TRANSACTION to NONE
+  if (archival === "down") chain.archDown = true;
+  if (archival === "failed") chain.archTxs = new Map([[hash, "failed"]]);
+  seedOpens = 0;
+  const n = chain.sent.length;
+  const again = await moveOutHeld("op1", null, deps(ops, chain));
+  return { chain, ops, hash, again, op: (await ops.get("ops", "op1")) as DepositOp, sentAfter: chain.sent.length - n };
+};
+
+// Delta review 7, item 4: an op the move took none of stays held, its record history; the page answers the move its
+// record landed, which carried money, so never empty (delta review 8, point 3 fold)
+test("R7-RESUME a forgotten landed record whose op needs nothing of it: the resume answers that move, the op held, the record history", async () => {
+  const r = await landedThenForgotten(1n, "keeps", true);
+  assert.deepEqual(r.again, { kind: "moved", to: TO, amount: 2_499_999n, hash: r.hash });
+  assert.notEqual(r.op.follow.why, "moved_out");
+  assert.equal(r.op.follow.out, undefined);
+  assert.deepEqual(r.op.follow.out_past?.map((x) => x.hash), [r.hash]);
+  assert.equal(r.sentAfter, 0);
   assert.equal(seedOpens, 0);
-  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past, undefined);
+});
+
+test("R4a a landed move both of the pair forgot, U holds 1: the archival RPC reads it FINAL success, the resume answers moved and the op ends moved_out", async () => {
+  const r = await landedThenForgotten(1n);
+  assert.equal(r.again.kind, "moved");
+  assert.equal((r.again as { hash: string }).hash, r.hash);
+  assert.equal(r.sentAfter, 0, "nothing sent");
+  assert.equal(seedOpens, 0, "no seed opened");
+  assert.equal(r.op.follow.why, "moved_out", "the op ends moved_out");
+  assert.equal(r.op.follow.out?.hash, r.hash);
+  assert.equal(r.op.follow.out_past, undefined);
+});
+
+test("R4b a landed move both of the pair forgot, U now holds more than it moved (new USDC): open, never failed and never Moved; a tap moves what U holds", async () => {
+  const r = await landedThenForgotten(5_000_000n);
+  assert.deepEqual(r.again, { kind: "open" }, "the page never draws 'Not moved · Retry', and never hides U's USDC behind Moved");
+  assert.equal(r.sentAfter, 0);
+  assert.equal(seedOpens, 0);
+  assert.notEqual(r.op.follow.why, "moved_out");
+  assert.equal(r.op.follow.out, undefined, "the record is history");
+  assert.equal(r.op.follow.out_past?.[0]?.hash, r.hash);
+  r.chain.onSend = (_s, h) => r.chain.land(h);
+  const tap = await moveOutHeld("op1", TO, deps(r.ops, r.chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 4_999_999n, "what U holds, less one base unit");
+  assert.equal(seedOpens, 1);
+});
+
+test("M1 archival FINAL success is landed only while the pair reads U at most 1 base unit (a move leaves exactly 1): U holding what it moved, or 2, is open", async () => {
+  // delta review item 2: money in U is always movable; the archival word only names an empty U's end
+  assert.equal((await landedThenForgotten(1n)).again.kind, "moved");
+  for (const usdc of [2n, 2_499_999n, 2_500_000n]) {
+    const r = await landedThenForgotten(usdc);
+    assert.deepEqual(r.again, { kind: "open" }, `U at ${usdc}`);
+    assert.notEqual(r.op.follow.why, "moved_out");
+    assert.equal(r.op.follow.out_past?.[0]?.hash, r.hash, "the record is history");
+  }
+});
+
+test("F3 a forgotten landed move, then a late 2,000,000 reaches U: open, and a tap moves it", async () => {
+  const r = await landedThenForgotten(2_000_001n);
+  assert.deepEqual(r.again, { kind: "open" });
+  r.chain.onSend = (_s, h) => r.chain.land(h);
+  const tap = await moveOutHeld("op1", TO, deps(r.ops, r.chain));
+  // the late 2,000,000 is under op1's need (2,500,000), so the tap's move, which took it, marks no op: op1 stays held, the
+  // record its history (the X8 limit of delta review 6); the tap moved money, so the page answers moved, never empty
+  // (delta review 8, point 3 fold)
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  assert.notEqual(await whyOf(r.ops, "op1"), "moved_out");
+  assert.equal(((await r.ops.get("ops", "op1")) as DepositOp).follow.out_past?.at(-1)?.amount, "2000000");
+  assert.equal(seedOpens, 1);
+});
+
+test("F3 an op already moved_out, then a late 2,000,000 reaches U: a resume answers open (the record is history), a tap moves it; while U holds 1, or with no equal read of U, it stays moved", async () => {
+  const r = await landedThenForgotten(1n);
+  assert.equal(r.again.kind, "moved");
+  assert.equal((await moveOutHeld("op1", null, deps(r.ops, r.chain))).kind, "moved", "U at 1: moved");
+  r.chain.usdc = 2_000_001n;
+  r.chain.skewB = { usdc: 1n };
+  assert.equal((await moveOutHeld("op1", null, deps(r.ops, r.chain))).kind, "moved", "no equal read of U: kept moved");
+  r.chain.skewB = {};
+  assert.deepEqual(await moveOutHeld("op1", null, deps(r.ops, r.chain)), { kind: "open" });
+  const op = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op.follow.out, undefined);
+  assert.equal(op.follow.out_past?.[0]?.hash, r.hash);
+  r.chain.onSend = (_s, h) => r.chain.land(h);
+  const tap = await moveOutHeld("op1", TO, deps(r.ops, r.chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  const after = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.equal(after.follow.why, "moved_out");
+  assert.equal(after.follow.out?.hash, (tap as { hash: string }).hash);
+});
+
+test("F3 a move the pair still keeps FINAL success, with U holding more than 1 when it is read (a late deposit): open, its op reopened (follow, delta review item 2; delta review 8, ruling 2)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  chain.land((first as { hash: string }).hash);
+  chain.usdc = 2_000_001n;
+  chain.skewB = { usdc: 1n };
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "unread" }, "no equal read of U: no word yet");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out?.hash, (first as { hash: string }).hash, "the record kept");
+  assert.notEqual(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+  chain.skewB = {};
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" });
+  // the record carried op1's money: landed() marks op1, then it reopens (delta review 8, ruling 2): its why kept, no
+  // record, so it reads Held with its Withdraw while the late deposit is in U, and its next tap carries `later`
+  const op = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op.follow.why, "moved_out");
+  assert.equal(op.follow.out, undefined);
+  assert.equal(op.follow.out_past?.[0]?.hash, (first as { hash: string }).hash);
+});
+
+// delta review item 1: a record that never landed and whose nonce another tx of U took, U holding money
+const takenWithMoney = async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+  chain.nonce = 8n; // another tx of U used nonce 8; U still holds 2,500,000
+  chain.nonceAt = (h) => (h >= 1050 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1050 + SETTLE_BLOCKS + 1;
+  return { chain, ops };
+};
+
+test("F1 never landed, nonce used, U at 2,500,000; one archival host answers 429, the other UNKNOWN_TRANSACTION serving the block: open, and the tap signs", async () => {
+  const { chain, ops } = await takenWithMoney();
+  const archival = [{ ...chain.archival(), tx: async () => Promise.reject(new Error("HTTP 429")) }, chain.archival(NET.archival[1])];
+  seedOpens = 0;
+  assert.deepEqual(await moveOutHeld("op1", null, { ...deps(ops, chain), archival }), { kind: "open" });
+  assert.equal(seedOpens, 0);
+  chain.onSend = (_s, h) => chain.land(h);
+  const tap = await moveOutHeld("op1", TO, { ...deps(ops, chain), archival });
+  assert.equal(tap.kind, "moved");
+  assert.equal(seedOpens, 1);
+  assert.deepEqual([...new Set(chain.sent)].map((x) => decode(x).nonce), [8n, 9n]);
+});
+
+test("F1b the same with no archival RPC listed: open, and the tap signs", async () => {
+  const { chain, ops } = await takenWithMoney();
+  const { archival: _none, ...bare } = deps(ops, chain);
+  assert.deepEqual(await moveOutHeld("op1", null, bare), { kind: "open" });
+  chain.onSend = (_s, h) => chain.land(h);
+  assert.equal((await moveOutHeld("op1", TO, bare)).kind, "moved");
+});
+
+test("F2 an op follow.ts ended moved_out with no move of its own: its tap's send is lost, and a resume follows that move (sends the same bytes again), never moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("moved_out");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, undefined, "held again from this move on");
+  const n = chain.sent.length;
+  seedOpens = 0;
+  const again = await moveOutHeld("op1", null, deps(ops, chain));
+  assert.equal(again.kind, "sent");
+  assert.ok(chain.sent.length > n && chain.sent.slice(n).every((x) => x === chain.sent[0]), "the same bytes sent again");
+  assert.equal(seedOpens, 0);
+  chain.onSend = (_s, h) => chain.land(h);
+  chain.land((first as { hash: string }).hash);
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "moved");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+  // any other held reason is kept while its move is followed
+  const c2 = new Chain();
+  c2.registered.add(TO);
+  c2.onSend = () => {};
+  const ops2 = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops2, c2))).kind, "sent");
+  assert.equal(((await ops2.get("ops", "op1")) as DepositOp).follow.why, "note");
+});
+
+test("a forgotten record with no archival answer stays as it is: followed, never settled", async () => {
+  const r = await landedThenForgotten(1n, "down");
+  assert.equal(r.again.kind, "sent");
+  assert.equal(seedOpens, 0);
+  assert.notEqual(r.op.follow.why, "moved_out");
+  assert.equal(r.op.follow.out?.hash, r.hash);
+  assert.equal(r.op.follow.out_past, undefined);
+  // no archival RPC given at all: the same
+  const { archival: _none, ...bare } = deps(r.ops, r.chain);
+  assert.equal((await moveOutHeld("op1", null, bare)).kind, "sent");
+});
+
+test("a forgotten record the archival RPC reads FINAL failed, U empty: failed, and only the tap signs again; with U holding more it is open whatever the archival hosts say", async () => {
+  const r = await landedThenForgotten(1n, "failed");
+  assert.equal(r.again.kind, "failed");
+  assert.equal(seedOpens, 0);
+  assert.notEqual(r.op.follow.why, "moved_out");
+  const more = await landedThenForgotten(5_000_000n, "failed");
+  assert.deepEqual(more.again, { kind: "open" });
+});
+
+test("another op's forgotten record that landed: that op ends moved_out (not cleared), and so does this op, whose tap reads moved and signs nothing (delta review item 8)", async () => {
+  const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  const hash = (first as { hash: string }).hash;
+  chain.land(hash);
+  chain.nonceAt = (h) => (h >= 1001 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1000 + 230_000;
+  chain.forgot.add(hash);
+  seedOpens = 0;
+  const tap = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { hash: string }).hash, hash);
+  assert.equal(seedOpens, 0);
+  const op2 = (await ops.get("ops", "op2")) as DepositOp;
+  assert.equal(op2.follow.why, "moved_out", "the tapped op reads Moved too");
+  assert.equal(op2.follow.out?.hash, hash);
+  const op1 = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op1.follow.why, "moved_out", "op1's landed move is kept as moved, not cleared as gone");
+  assert.equal(op1.follow.out?.hash, hash);
+  assert.equal(op1.follow.out_past, undefined);
+});
+
+test("each archival RPC must be one of the op's network's: another is refused before anything is read", async () => {
+  const chain = new Chain();
+  const other = { ...chain.archival(), name: "https://archival-rpc.mainnet.fastnear.com" };
+  const [h0, h1] = [chain.archival(), chain.archival(NET.archival[1])];
+  // delta review L4: none, or exactly the network's list, each host once; a part of it settles on fewer words
+  for (const archival of [[h0, other], [h0], [h1], [h0, h0], [h0, h1, h1], [h0, h1, other]]) {
+    await assert.rejects(moveOutHeld("op1", TO, { ...deps(await heldOp("note"), chain), archival }), /an archival RPC is not the op's network's/, archival.map((h) => h.name).join(" "));
+  }
+  assert.equal(chain.sent.length, 0);
+  for (const pick of [[0, 1], [1, 0], []]) {
+    const c = new Chain();
+    c.registered.add(TO);
+    const archival = pick.map((i) => c.archival(NET.archival[i]));
+    assert.equal((await moveOutHeld("op1", TO, { ...deps(await heldOp("note"), c), archival })).kind, "moved", pick.join(" "));
+  }
+});
+
+// M1 (review of ff7fcc56): every listed archival host is asked, and only an equal word from all settles the record
+const twoHosts = (r: Awaited<ReturnType<typeof landedThenForgotten>>, first: (p: Parameters<MoveOutRpc["tx"]>[0]) => Promise<unknown>) => {
+  r.chain.archDown = false;
+  const keeps = { ...r.chain.archival(), name: NET.archival[1] };
+  return [{ ...r.chain.archival(), tx: first }, keeps] as MoveOutRpc[];
+};
+const UNKNOWN_TX = { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } } };
+
+test("M1 both archival hosts read the forgotten move FINAL success: moved", async () => {
+  const r = await landedThenForgotten(1n, "down");
+  r.chain.archDown = false;
+  const out = await moveOutHeld("op1", null, { ...deps(r.ops, r.chain), archival: [r.chain.archival(), { ...r.chain.archival(), name: NET.archival[1] }] });
+  assert.equal(out.kind, "moved");
+  assert.equal(((await r.ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+});
+
+test("M1 the first archival host gives no answer, the next reads FINAL success: the record stays as it is", async () => {
+  const r = await landedThenForgotten(1n, "down");
+  const out = await moveOutHeld("op1", null, { ...deps(r.ops, r.chain), archival: twoHosts(r, async () => Promise.reject(new Error("HTTP 503"))) });
+  assert.equal(out.kind, "sent");
+  const op = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.notEqual(op.follow.why, "moved_out");
+  assert.equal(op.follow.out?.hash, r.hash);
+});
+
+test("M1 the first archival host answers UNKNOWN_TRANSACTION (serving the record's block), the next FINAL success: never replaced, never moved; the record stays", async () => {
+  const r = await landedThenForgotten(1n, "down");
+  const out = await moveOutHeld("op1", null, { ...deps(r.ops, r.chain), archival: twoHosts(r, async () => UNKNOWN_TX) });
+  assert.equal(out.kind, "sent");
+  const op = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.notEqual(op.follow.why, "moved_out");
+  assert.equal(op.follow.out?.hash, r.hash, "not cleared as replaced");
+  assert.equal(op.follow.out_past, undefined);
+  // the other order too
+  const r2 = await landedThenForgotten(1n, "down");
+  const [first, second] = twoHosts(r2, async () => UNKNOWN_TX);
+  assert.equal((await moveOutHeld("op1", null, { ...deps(r2.ops, r2.chain), archival: [second!, first!] })).kind, "sent");
+});
+
+test("M1 an archival UNKNOWN_TRANSACTION counts only from a host that serves the record's block: another header hash, another height or no block answer leaves the record as it is", async () => {
+  // a record no tx of U ever landed with: the archival host keeps no such tx (replaced, when its word counts)
+  const fresh = async () => {
+    const r = await landedThenForgotten(1n, "down");
+    r.chain.archDown = false;
+    r.chain.archTxs = new Map();
+    return r;
+  };
+  const r = await fresh();
+  assert.deepEqual(await moveOutHeld("op1", null, deps(r.ops, r.chain)), { kind: "empty" }, "both hosts' word counts: replaced, U holds 1");
+  for (const [why, block] of [
+    ["another hash", async (p: { block_id?: number }) => ({ result: { header: { height: p.block_id, hash: "11111111111111111111111111111111" } } })],
+    ["another height", async (p: { block_id?: number }) => ({ result: { header: { height: (p.block_id ?? 0) + 1, hash: base58.encode(sha256(new TextEncoder().encode(`b${p.block_id}`))) } } })],
+    ["no block", async () => Promise.reject(new Error("HTTP 422"))],
+  ] as const) {
+    const q = await fresh();
+    const pruned = { ...q.chain.archival(), block: block as MoveOutRpc["block"] };
+    assert.equal((await moveOutHeld("op1", null, { ...deps(q.ops, q.chain), archival: [pruned, q.chain.archival(NET.archival[1])] })).kind, "sent", why);
+    const op = (await q.ops.get("ops", "op1")) as DepositOp;
+    assert.equal(op.follow.out?.hash, q.hash, `${why}: the record is kept`);
+    assert.equal(op.follow.out_past, undefined, why);
+  }
+});
+
+test("signedBlockHash reads the block hash a move's signed bytes name, for their own signer only", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  await moveOutHeld("op1", TO, deps(ops, chain));
+  const rec = ((await ops.get("ops", "op1")) as DepositOp).follow.out!;
+  assert.equal(signedBlockHash(rec.signed, U), base58.encode(sha256(new TextEncoder().encode(`b${rec.height}`))));
+  assert.equal(signedBlockHash(rec.signed, "b".repeat(64)), null, "another signer");
+  assert.equal(signedBlockHash("AAAA", U), null, "not a transaction");
+  assert.equal(signedBlockHash("AA==", U), null, "one byte (the real vector's)");
+  // crafted bytes (delta review L5): the key type byte, a secp256k1 key, the block hash's bounds
+  const b = base64.decode(rec.signed);
+  const keyAt = 4 + U.length;
+  const typed = b.slice();
+  typed[keyAt] = 1;
+  assert.equal(signedBlockHash(base64.encode(typed), U), null, "key type 1 with the ed25519 layout");
+  const secp = new Uint8Array(b.length + 32);
+  secp.set(b.subarray(0, keyAt));
+  secp[keyAt] = 1;
+  secp.set(new Uint8Array(64).fill(9), keyAt + 1);
+  secp.set(b.subarray(keyAt + 33), keyAt + 65);
+  assert.equal(signedBlockHash(base64.encode(secp), U), null, "a secp256k1 signer key (64 bytes)");
+  const rcv = keyAt + 33 + 8;
+  const hashAt = rcv + 4 + new DataView(b.buffer, b.byteOffset).getUint32(rcv, true);
+  for (const cut of [hashAt, hashAt + 1, hashAt + 31]) assert.equal(signedBlockHash(base64.encode(b.subarray(0, cut)), U), null, `cut at ${cut}: no whole block hash`);
+  assert.equal(signedBlockHash(base64.encode(b.subarray(0, hashAt + 32)), U), base58.encode(sha256(new TextEncoder().encode(`b${rec.height}`))), "the 32 bytes are enough");
+});
+
+test("B6 a record whose signed bytes do not decode (the real vector's AA==): an archival UNKNOWN_TRANSACTION is no word, the record stays", async () => {
+  const r = await landedThenForgotten(1n, "down");
+  r.chain.archDown = false;
+  r.chain.archTxs = new Map();
+  await r.ops.update("ops", "op1", (v) => ({ ...(v as DepositOp), follow: { ...(v as DepositOp).follow, out: { ...(v as DepositOp).follow.out!, signed: "AA==" } } }));
+  const out = await moveOutHeld("op1", null, deps(r.ops, r.chain));
+  assert.equal(out.kind, "sent");
+  const op = (await r.ops.get("ops", "op1")) as DepositOp;
+  assert.equal(op.follow.out?.hash, r.hash, "never replaced on a host's UNKNOWN with no block to check it against");
+  assert.equal(op.follow.out_past, undefined);
+});
+
+// ---- delta review 2 of c3e71713: the split window, one tap signs, item 8's scope (the reviewer's X1-X9, as tests) ----
+const landedMove = async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  const hash = (first as { hash: string }).hash;
+  chain.land(hash);
+  chain.nonceAt = (h) => (h >= 1001 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1000 + 150_000; // one of the pair has forgotten it, the other not yet
+  return { chain, ops, hash };
+};
+
+test("X1 the split window: the move landed long ago, one RPC forgot it, the other reads it FINAL success; a late 2,000,000 in U: open, and the tap moves it", async () => {
+  const { chain, ops, hash } = await landedMove();
+  chain.txsB = new Map();
+  chain.usdc = 2_000_001n;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" });
+  assert.deepEqual(((await ops.get("ops", "op1")) as DepositOp).follow.out_past?.map((r) => r.hash), [hash]);
+  chain.txsB = null;
+  chain.onSend = (_s, h) => chain.land(h);
+  seedOpens = 0;
+  const tap = await moveOutHeld("op1", TO, deps(ops, chain));
+  // the late 2,000,000 is under op1's need (2,500,000), so the tap's move, which took it, marks no op: op1 stays held, the
+  // record its history (the X8 limit of delta review 6); the tap moved money, so the page answers moved, never empty
+  // (delta review 8, point 3 fold)
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  assert.notEqual(await whyOf(ops, "op1"), "moved_out");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out_past?.at(-1)?.amount, "2000000");
+  assert.equal(seedOpens, 1);
+  // U at 1 in the same split: the archival hosts' word settles it as moved
+  const q = await landedMove();
+  q.chain.txsB = new Map();
+  assert.equal((await moveOutHeld("op1", null, deps(q.ops, q.chain))).kind, "moved");
+  assert.equal(((await q.ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+});
+
+test("X2 both of the pair forgot it, one RPC's tx read fails (429) while its other reads work; a late 2,000,000 in U: open", async () => {
+  const { chain, ops, hash } = await landedMove();
+  chain.forgot.add(hash);
+  chain.usdc = 2_000_001n;
+  const [a, b] = chain.rpcs();
+  const rpcs = [a, { ...b, tx: async () => Promise.reject(new Error("HTTP 429")) }] as const;
+  assert.deepEqual(await moveOutHeld("op1", null, { ...deps(ops, chain), rpcs }), { kind: "open" });
+});
+
+test("X3 both ops of U read Moved on one record; 2,000,000 more reaches U: each op's resume is open, a tap moves it, and the other op reads that move", async () => {
+  const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.why, "moved_out");
+  chain.usdc = 2_000_001n;
+  assert.deepEqual(await moveOutHeld("op2", null, deps(ops, chain)), { kind: "open" }, "op2 resume");
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" }, "op1 resume");
+  for (const k of ["op1", "op2"]) assert.equal(((await ops.get("ops", k)) as DepositOp).follow.out, undefined, k);
+  const tap = await moveOutHeld("op2", TO, deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.out?.hash, (tap as { hash: string }).hash, "op1 marked by op2's landed move");
+});
+
+test("X4 an op with its own moved record is never overwritten by another op's landed move", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.registered.add("bob.testnet");
+  const ops = await heldOp("note");
+  const m1 = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(m1.kind, "moved");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { out: _o, why: _w, ...rest } = one.follow;
+  await ops.put("ops", "op2", { ...one, created_ms: 2, follow: { ...rest, why: "note" } });
+  chain.usdc = 3_000_001n;
+  const m2 = await moveOutHeld("op2", "bob.testnet", deps(ops, chain));
+  assert.equal(m2.kind, "moved");
+  const o1 = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(o1.follow.out?.hash, (m1 as { hash: string }).hash, "op1 keeps its own record");
+  assert.equal(o1.follow.why, "moved_out");
+});
+
+test("X5 an op follow.ts ended moved_out with no move, marked by another op's landed move, then a later deposit: its resume is open and a tap signs", async () => {
+  const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  await ops.put("ops", "op2", { ...one, created_ms: 2, follow: { ...one.follow, why: "moved_out" } });
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  assert.ok(((await ops.get("ops", "op2")) as DepositOp).follow.out);
+  chain.usdc = 2_000_001n;
+  assert.deepEqual(await moveOutHeld("op2", null, deps(ops, chain)), { kind: "open" });
+  assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.out, undefined);
+  const tap = await moveOutHeld("op2", TO, deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal(((await ops.get("ops", "op2")) as DepositOp).follow.out?.hash, (tap as { hash: string }).hash);
+});
+
+test("X6 (L5) one tap signs: the pair keeps the op's record FINAL success and a late 2,000,000 sits in U; the first tap moves it", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  chain.land((first as { hash: string }).hash);
+  chain.usdc = 2_000_001n;
+  chain.onSend = (_s, h) => chain.land(h);
+  seedOpens = 0;
+  const tap = await moveOutHeld("op1", TO, deps(ops, chain));
+  // the first record landed with the late 2,000,000 in U: it marks op1, which reopens (delta review 8, ruling 2), so this
+  // tap signs the late money with `later` and op1 reads Moved on it, never Held forever
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  assert.equal(seedOpens, 1);
+  const o1 = ((await ops.get("ops", "op1")) as DepositOp).follow;
+  assert.equal(o1.why, "moved_out");
+  assert.equal(o1.out?.hash, (tap as { hash: string }).hash);
+  assert.equal(o1.out?.later, true);
+  assert.deepEqual(o1.out_past?.map((r) => r.hash), [(first as { hash: string }).hash]);
+  // a pair that keeps reading every new move landed with U full again signs once more at most, never in a loop
+  const c2 = new Chain();
+  c2.registered.add(TO);
+  c2.onSend = (_s, h) => void c2.txs.set(h, "ok"); // reads FINAL success, U's USDC never moves
+  const ops2 = await heldOp("note");
+  await moveOutHeld("op1", TO, deps(ops2, c2));
+  seedOpens = 0;
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(ops2, c2)), { kind: "open" });
+  assert.equal(seedOpens, 1, "one new signature per tap");
+});
+
+test("X7 item 8's scope: an op inside intents.near, an op whose money never reached U (1Click not yet delivered), an op whose refund move is through but whose USDC never read in U, and a done op of U are never marked by U's move", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...undelivered } = one.follow;
+  await ops.put("ops", "op3", { ...one, created_ms: 0, follow: { ...one.follow, why: "sender_struck", intents_struck: true } });
+  await ops.put("ops", "op4", { ...one, created_ms: 0, follow: { ...undelivered, why: "under_min" } });
+  await ops.put("ops", "op5", { ...one, created_ms: 0, stage: "done" });
+  await ops.put("ops", "op6", { ...one, created_ms: 0, follow: { ...undelivered, why: "note", moved: true } });
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  // op6 (delta review 3, F3): follow.moved is set once the refund intent's debit inside intents.near lands, before its
+  // USDC reaches U, and a swap held in flight may yet be refunded there: it stays held, what reaches U later is open to
+  // a tap (delta review 5, item 1: R5-MOVED-INFLIGHT)
+  for (const k of ["op3", "op4", "op5", "op6"]) {
+    const o = (await ops.get("ops", k)) as DepositOp;
+    assert.notEqual(o.follow.why, "moved_out", k);
+    assert.equal(o.follow.out, undefined, k);
+  }
+  assert.equal(((await ops.get("ops", "op6")) as DepositOp).follow.why, "note", "op6 stays held as it was");
+});
+
+// Delta review 5, item 1 (reopens delta review 3, F3): a refund move's follow.moved is set on its debit inside
+// intents.near; 1Click delivers its USDC to U in its own later tx (a quote lives 30 minutes, refund.ts), or refunds it
+// into intents.near if the swap fails, so no count of blocks since says its USDC was in U when U's move took all of it.
+// Such an op is never marked Moved by another op's move (R4-MOVED marked it at SETTLE_BLOCKS); an op 1Click delivered
+// to U is. Once its USDC does reach U, a tap on it moves it and it reads Moved on its own record.
+test("R5-MOVED-INFLIGHT a held op whose refund move is through, its swap still in flight, never reads Moved with U's move; once its USDC reaches U a tap moves it and it reads Moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...undelivered } = one.follow;
+  // through 100 blocks before U's move (R4-MOVED's line), and long before (prior_height 0): neither says the USDC arrived
+  await ops.put("ops", "op7", { ...one, created_ms: 0, follow: { ...undelivered, why: "leaf", moved: true, prior_height: 1000 - SETTLE_BLOCKS } });
+  await ops.put("ops", "op8", { ...one, created_ms: 0, follow: { ...undelivered, why: "leaf", moved: true, prior_height: 0 } });
+  // U holds op1's 2,500,000 only
+  const moved = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(moved.kind, "moved");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
+  for (const k of ["op7", "op8"]) {
+    const o = (await ops.get("ops", k)) as DepositOp;
+    assert.equal(o.follow.why, "leaf", `${k} stays held as it was`);
+    assert.equal(o.follow.out, undefined, k);
+  }
+  // op7's swap delivers to U after the move: a tap on op7 moves it, on op7's own record
+  chain.usdc = 2_000_001n;
+  const tap = await moveOutHeld("op7", TO, deps(ops, chain));
+  // no status read (none): op7 and op8 are walked at their min_out after the delivered and in-flight ops (delta review
+  // 8, ruling 1); the 2,000,000 carried both floors, so both read Moved on op7's record and the page answers moved
+  assert.equal(tap.kind, "moved");
+  for (const k of ["op7", "op8"]) {
+    const o = (await ops.get("ops", k)) as DepositOp;
+    assert.equal(o.follow.why, "moved_out", k);
+    assert.equal(o.follow.out?.hash, (tap as { hash: string }).hash, k);
+  }
+});
+
+// Delta review 8, ruling 1, with R5's ops as holdAll now stores them: a refund move through, its status read REFUNDED (the
+// USDC went into intents.near; delta review 3, F3; delta review 5, item 1) needs nothing, whatever its move's height:
+// never Moved by U's move, nor by a tap on its own record, which stays its history.
+test("R8-REFUNDED a held op whose refund move is through and whose status read REFUNDED never reads Moved with U's move, even on its own tap, which answers moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...undelivered } = one.follow;
+  const refunded = { ...undelivered, why: "leaf", sent: true, status: "REFUNDED" as const, moved: true };
+  await ops.put("ops", "op7", { ...one, created_ms: 0, follow: { ...refunded, prior_height: 1000 - SETTLE_BLOCKS } });
+  await ops.put("ops", "op8", { ...one, created_ms: 0, follow: { ...refunded, prior_height: 0 } });
+  chain.usdc = 4_500_000n; // op1's 2,500,000 and 2,000,000 more: room for both floors past op1's need
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  assert.equal(await whyOf(ops, "op1"), "moved_out");
+  for (const k of ["op7", "op8"]) assert.equal(await whyOf(ops, k), "leaf", `${k} stays held`);
+  chain.usdc = 2_000_001n;
+  // no op of U reads this move, but the tap moved money: the page answers moved, never empty (delta review 8, point 3
+  // fold)
+  const tap = await moveOutHeld("op7", TO, deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  const o7 = (await ops.get("ops", "op7")) as DepositOp;
+  assert.equal(o7.follow.why, "leaf");
+  assert.deepEqual(o7.follow.out_past?.map((r) => r.amount), ["2000000"], "its own move's record, history");
+});
+
+// the boundary of the point 3 fold: a tap at U 2 moves 1 base unit, which marks no op (op1 needs 2,500,000); a move of
+// at most 1 carried nothing to show, so the page answers nothing to move
+test("R8-DUST a landed tap move of 1 base unit that marks no op answers empty", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 2n;
+  const ops = await heldOp("note");
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(ops, chain)), { kind: "empty" });
+  assert.equal(chain.sent.length > 0, true, "the 1 base unit move was sent");
+  assert.equal(chain.usdc, 1n);
+  assert.notEqual(await whyOf(ops, "op1"), "moved_out");
+});
+
+// Delta review 10, F1: a stranger's 3 base units in U, op1's own delivery still in flight: the tap moves 2, which marks
+// no op and is under MIN_DEPOSIT, so the page answers nothing to move, never Moved while op1 stays held
+test("R8-DUST3 a landed tap move of 2 base units (a stranger's dust) that marks no op answers empty", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 3n;
+  const ops = await heldOp("sender_struck", { sent: true, status: "PROCESSING" });
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...f } = one.follow;
+  await ops.put("ops", "op1", { ...one, follow: f });
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(ops, chain)), { kind: "empty" });
+  assert.equal(chain.usdc, 1n, "the 2 base units moved");
+  const o = ((await ops.get("ops", "op1")) as DepositOp).follow;
+  assert.equal(o.why, "sender_struck");
+  assert.equal(o.out, undefined);
+});
+
+// Delta review 11, F1: the floor is on what U held (the move's amount + 1), as the cap and follow.ts needOf's floor
+// are. An op whose status reads REFUNDED (a refund-moved op, or a paid op the helper calls REFUNDED: delta review 9,
+// ruling 3) needs nothing, so its tap marks no op: with exactly MIN_DEPOSIT in U the tap moves MIN_DEPOSIT - 1 and the
+// page answers moved; with MIN_DEPOSIT - 1 in U it is a stranger's dust, nothing to move
+test("R11-FLOOR U held exactly MIN_DEPOSIT, no op marked: the landed tap answers moved; MIN_DEPOSIT - 1 answers empty", async () => {
+  for (const moved of [true, false])
+    for (const [usdc, kind] of [[VAULT_CONSTANTS.MIN_DEPOSIT, "moved"], [VAULT_CONSTANTS.MIN_DEPOSIT - 1n, "empty"]] as const) {
+      const at = `U ${usdc}, moved ${moved}`;
+      const chain = new Chain();
+      chain.registered.add(TO);
+      chain.usdc = usdc;
+      const ops = await heldOp("sender_struck");
+      const one = (await ops.get("ops", "op1")) as DepositOp;
+      const { delivered: _d, ...rest } = one.follow;
+      await ops.put("ops", "op1", { ...one, follow: { ...rest, sent: true, status: "REFUNDED", ...(moved ? { moved: true } : {}) } });
+      const t = await moveOutHeld("op1", TO, deps(ops, chain));
+      assert.equal(chain.usdc, 1n, `${at}: the move landed`);
+      const o = ((await ops.get("ops", "op1")) as DepositOp).follow;
+      assert.notEqual(o.why, "moved_out", `${at}: no op marked`);
+      const r = o.out_past?.at(-1);
+      assert.equal(r?.amount, (usdc - 1n).toString(), `${at}: its own move, history`);
+      assert.deepEqual(t, kind === "moved" ? { kind, to: TO, amount: usdc - 1n, hash: r!.hash } : { kind }, at);
+    }
+});
+
+// Delta review 10, F3 (the reviewer's PROBE-F7J): the resume of a forgotten landed record of 1 base unit (U held 2 when
+// it was signed) whose op needs none of it answers nothing to move, never Moved
+test("R10-F7J a forgotten landed record of 1 base unit, its op needing none of it: the resume answers empty", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 2n;
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const o0 = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...rest } = o0.follow;
+  await ops.put("ops", "op1", { ...o0, follow: { ...rest, sent: true, status: "REFUNDED" } });
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  const hash = (first as { hash: string }).hash;
+  chain.land(hash);
+  chain.nonceAt = (h) => (h >= 1001 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1000 + 230_000;
+  chain.forgot.add(hash);
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "empty" });
+});
+
+// Delta review 10, F2: the tap's re-reads run at once under one budget, inside U's lock: ten stale ops whose reads stall
+// until their signal aborts (the budget cut to 50 ms here) all end within one budget, each a failed read, and the tap
+// signs with the ranks it has
+test("R10-BUDGET ten stale ops whose status reads stall: read at once, all within one budget, and the tap signs", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("sender_struck", { sent: true, status: "SUCCESS" });
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  for (let k = 2; k <= 11; k++) await ops.put("ops", `op${k}`, { ...one, created_ms: k, follow: (({ delivered: _x, sent: _s, ...r }) => ({ ...r, address: `dep-addr-${k}`, status: "PENDING_DEPOSIT" as const }))(one.follow) });
+  let inFlight = 0;
+  let most = 0;
+  const stall = (async (_url: string, init?: RequestInit) => {
+    // as fetch does: an aborted signal rejects at once, a later abort rejects the stalled read
+    const signal = init!.signal!;
+    if (signal.aborted) throw signal.reason;
+    most = Math.max(most, ++inFlight);
+    await new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true }));
+  }) as unknown as typeof fetch;
+  // only the first timeout made is cut: the tap's budget, made before any read's own 10 s timeout (follow.ts
+  // readDepositStatus), which stays as it is (delta review 11, F2)
+  const timeout = AbortSignal.timeout;
+  let made = 0;
+  AbortSignal.timeout = (ms: number) => (made++ === 0 ? timeout(50) : timeout(ms));
+  let held = 0;
+  try {
+    const uLock = async <T,>(fn: () => Promise<T>) => {
+      const t0 = Date.now();
+      try {
+        return await fn();
+      } finally {
+        held = Date.now() - t0;
+      }
+    };
+    assert.equal((await moveOutHeld("op1", TO, { ...deps(ops, chain), fetchFn: stall, uLock })).kind, "moved");
+  } finally {
+    AbortSignal.timeout = timeout;
+  }
+  assert.equal(most, 10, "the ten reads at once");
+  assert.ok(held < 400, `U's lock held ${held} ms: one budget, not ten`);
+  for (let k = 2; k <= 11; k++) assert.equal(((await ops.get("ops", `op${k}`)) as DepositOp).follow.status, "PENDING_DEPOSIT", `op${k}: a failed read keeps it`);
+});
+
+// Delta review 10, F2: a tap that follows another op's record and runs again (`again`, delta review 2 of c3e71713, L5)
+// reads each stale op once in all, never once a pass
+test("R10-ONCE a tap's two passes read each stale op once", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await twoOps({ status: "PENDING_DEPOSIT" }, { sent: true, status: "SUCCESS", delivered: "2500000" });
+  const r = await moveOutHeld("op2", TO, deps(ops, chain));
+  assert.equal(r.kind, "sent");
+  chain.land((r as { hash: string }).hash);
+  chain.usdc = 2_000_001n; // a later deposit: op2's followed record turns out landed with money in U, so the tap runs again
+  chain.onSend = (_s, h) => chain.land(h);
+  statusReads.length = 0;
+  const t = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(t.kind, "moved");
+  assert.deepEqual(statusReads, ["dep-addr"], "op1, the one stale op, read once over both passes");
+});
+
+// Delta review 11, F2: one budget over both of a tap's passes. Pass 1 reads op1 (stale) until the budget ends (only the
+// first timeout made, the budget, is cut to 50 ms; each read's own 10 s timeout stays); op3, written while pass 1 reads
+// (INCOMPLETE_DEPOSIT: pass 1's walk needs nothing of it), is new by pass 2 and read on the same budget, already ended,
+// so its read aborts at once, never on a fresh budget or its own 10 s alone
+test("R11-BUDGET2 a stale op new on a tap's second pass is read on the tap's one budget, already ended: it aborts at once", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await twoOps({ status: "PENDING_DEPOSIT" }, { sent: true, status: "SUCCESS", delivered: "2500000" });
+  const r = await moveOutHeld("op2", TO, deps(ops, chain));
+  assert.equal(r.kind, "sent");
+  chain.land((r as { hash: string }).hash);
+  chain.usdc = 2_000_001n; // a later deposit: op2's followed record turns out landed with money in U, so the tap runs again
+  chain.onSend = (_s, h) => chain.land(h);
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const asked: [string, boolean][] = [];
+  const stall = (async (url: string, init?: RequestInit) => {
+    const address = decodeURIComponent(url.split("depositAddress=")[1] ?? "");
+    const signal = init!.signal!;
+    asked.push([address, signal.aborted]);
+    if (signal.aborted) throw signal.reason;
+    if (address === "dep-addr-3") throw new Error("op3 read on a signal not yet ended"); // never a 10 s wait under a plant
+    await ops.put("ops", "op3", { ...one, created_ms: 3, follow: { ...one.follow, address: "dep-addr-3", status: "INCOMPLETE_DEPOSIT" } });
+    await new Promise((_, no) => signal.addEventListener("abort", () => no(signal.reason), { once: true }));
+  }) as unknown as typeof fetch;
+  const timeout = AbortSignal.timeout;
+  let made = 0;
+  AbortSignal.timeout = (ms: number) => (made++ === 0 ? timeout(50) : timeout(ms));
+  try {
+    assert.equal((await moveOutHeld("op1", TO, { ...deps(ops, chain), fetchFn: stall })).kind, "moved");
+  } finally {
+    AbortSignal.timeout = timeout;
+  }
+  assert.deepEqual(asked, [["dep-addr", false], ["dep-addr-3", true]], "op1 on pass 1, op3 on pass 2 with the budget already ended");
+  assert.equal(((await ops.get("ops", "op3")) as DepositOp).follow.status, "INCOMPLETE_DEPOSIT", "a failed read keeps it");
+});
+
+// Delta review 10, F4: the re-read happens inside U's lock: a tap that cannot take it (another tab follows U) reads no
+// status and signs nothing
+test("R10-LOCK a tap whose U lock is held elsewhere reads no status", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await twoOps({ status: "PENDING_DEPOSIT" }, {});
+  statusReads.length = 0;
+  assert.deepEqual(await moveOutHeld("op1", TO, { ...deps(ops, chain), uLock: async () => null }), { kind: "unread" });
+  assert.deepEqual(statusReads, []);
+  assert.equal(chain.sent.length, 0);
+});
+
+// Delta review 10, order: the re-read runs before the other ops' records are read, so landed() at the tap walks fresh
+// ranks: op2's own landed record (2,499,999), op2 stored INCOMPLETE_DEPOSIT (no need) but 1Click delivered its top-up;
+// op1's tap reads op2 again first, so op2 reads Moved on its record instead of keeping it as history
+test("R10-ORDER the tap's re-read comes before another op's landed record is walked", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await twoOps({ sent: true, status: "REFUNDED" }, { sent: true, status: "INCOMPLETE_DEPOSIT" });
+  const r = await moveOutHeld("op2", TO, deps(ops, chain));
+  assert.equal(r.kind, "sent");
+  const hash = (r as { hash: string }).hash;
+  chain.land(hash);
+  assert.equal(chain.usdc, 1n);
+  statusReads.length = 0;
+  const t = await moveOutHeld("op1", TO, deps(ops, chain, { "dep-addr-2": ["SUCCESS", "2500000"] }));
+  assert.deepEqual(t, { kind: "moved", to: TO, amount: 2_499_999n, hash }, "the tap follows op2's record: it reads Moved on it");
+  assert.deepEqual(statusReads, ["dep-addr-2"]);
+  const o2 = ((await ops.get("ops", "op2")) as DepositOp).follow;
+  assert.equal(o2.why, "moved_out", "op2 reads Moved on its own landed record");
+  assert.equal(o2.out?.hash, hash);
+  assert.equal(await whyOf(ops, "op1"), "sender_struck");
+});
+
+// Delta review 6, F1: the page picks the owner by key order (heldOpFor), not by whose money is in U. op7's refund move
+// is through (moved, no delivered), op1 was delivered and its USDC is in U: Withdraw from op7 moves op1's USDC, and
+// op1 reads Moved, never op7 (ZZ-OWNER).
+test("R6-OWNER a tap from an op with no need moves the money of the op that has it: that op reads Moved, the owner stays held", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("note");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...undelivered } = one.follow;
+  await ops.put("ops", "op7", { ...one, created_ms: 0, follow: { ...undelivered, why: "leaf", moved: true, prior_height: 1000 - SETTLE_BLOCKS } });
+  const t = await moveOutHeld("op7", TO, deps(ops, chain));
+  // the tap marked op1 Moved: the page answers moved, as the app's rows show it (delta review 8, ruling 3)
+  assert.equal(t.kind, "moved");
+  const o7 = (await ops.get("ops", "op7")) as DepositOp;
+  assert.notEqual(o7.follow.why, "moved_out", "op7's money was never in U");
+  assert.equal(o7.follow.out, undefined);
+  assert.equal(o7.follow.out_past?.length, 1);
+  const moved = o7.follow.out_past![0]!;
+  const o1 = (await ops.get("ops", "op1")) as DepositOp;
+  assert.equal(o1.follow.why, "moved_out");
+  assert.equal(o1.follow.out?.hash, moved.hash, "op1 reads the move op7's tap signed");
+  assert.equal((t as { hash: string }).hash, moved.hash, "the page's answer is the app's row");
+});
+
+// Delta review 6, F2: `delivered` is 1Click's status through the helper, so it never marks an op past what U's move
+// carried: op9 says delivered 2,500,000, U holds op1's 2,500,000 only, and op9 stays held; with both in U (5,000,000)
+// both read Moved.
+test("R6-CAP an op 1Click names delivered reads Moved with U's move only while the move carried every op's need, oldest first", async () => {
+  // U at 4,999,999: one base unit short of both needs, the move's amount + 1 its cap
+  for (const [usdc, nine] of [[2_500_000n, false], [4_999_999n, false], [5_000_000n, true]] as const) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.usdc = usdc;
+    const ops = await heldOp("note");
+    const one = (await ops.get("ops", "op1")) as DepositOp;
+    await ops.put("ops", "op9", { ...one, created_ms: 9, follow: { ...one.follow, why: "leaf" } });
+    const m = await moveOutHeld("op1", TO, deps(ops, chain));
+    assert.equal(m.kind, "moved", `U ${usdc}`);
+    assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out", `U ${usdc}: op1, the oldest`);
+    const o9 = (await ops.get("ops", "op9")) as DepositOp;
+    assert.equal(o9.follow.why === "moved_out", nine, `U ${usdc}: op9`);
+    assert.equal(o9.follow.out?.hash, nine ? (m as { hash: string }).hash : undefined, `U ${usdc}`);
+  }
+});
+
+// Delta review 7, item 1 and delta review 8, ruling 1: holdAll reads every op's status before it holds it, and an op
+// with no delivered needs its min_out while its last status read a send in flight (sent, KNOWN_DEPOSIT_TX or
+// PROCESSING), or, walked last, while it reads none or PENDING_DEPOSIT (a read that never came); one REFUNDED (into
+// intents.near), FAILED or INCOMPLETE_DEPOSIT needs nothing and never reads Moved.
+// A: the older op; B: the younger, PROCESSING when U's bind stopped, its real delivery in U.
+async function twoOps(aExtra: Partial<FollowRecord>, bExtra: Partial<FollowRecord>) {
+  const ops = await heldOp("sender_struck");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...undelivered } = one.follow;
+  await ops.put("ops", "op1", { ...one, created_ms: 1, follow: { ...undelivered, ...aExtra } });
+  await ops.put("ops", "op2", { ...one, created_ms: 2, follow: { ...undelivered, address: "dep-addr-2", ...bExtra } });
+  return ops;
+}
+const whyOf = async (ops: WalletStore, k: string) => ((await ops.get("ops", k)) as DepositOp).follow.why;
+for (const owner of ["op1", "op2"])
+  test(`Q1a the older op REFUNDED, the younger in flight with 1,100,000 in U, the tap from ${owner}: the younger reads Moved, the refunded one stays held`, async () => {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.usdc = 1_100_000n;
+    const ops = await twoOps({ sent: true, status: "REFUNDED" }, { sent: true, status: "PROCESSING" });
+    const m = await moveOutHeld(owner, TO, deps(ops, chain));
+    // the tap marked op2 Moved: the page answers moved whichever op it tapped from (delta review 8, ruling 3)
+    assert.equal(m.kind, "moved");
+    assert.equal(await whyOf(ops, "op1"), "sender_struck", "the refunded op: its money waits inside intents.near");
+    assert.equal(await whyOf(ops, "op2"), "moved_out");
+    assert.equal((await moveOutHeld("op2", TO, deps(ops, chain))).kind, "moved", "the paid op's next tap reads Moved, never empty");
+  });
+// Delta review 11 (R8i re-killed): a move under the floor that marks another op of U answers moved from any op's tap.
+// U holds 600,000 (under MIN_DEPOSIT); op2's send is in flight at min_out 500,000, within the cap (599,999 + 1); the tap
+// from op1 (REFUNDED, no need) marks op2 alone, so the page answers moved by op2's mark, never by the floor or by
+// whether its own op ended marked (delta review 8, ruling 3)
+test("R11-MARKED a tap's move under MIN_DEPOSIT that marks another op of U answers moved, the tapped op left held", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 600_000n;
+  const ops = await twoOps({ sent: true, status: "REFUNDED" }, { sent: true, status: "PROCESSING", min_out: "500000" });
+  const m = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(chain.usdc, 1n, "the move landed");
+  const o2 = ((await ops.get("ops", "op2")) as DepositOp).follow;
+  assert.equal(o2.why, "moved_out", "op2 reads Moved");
+  assert.deepEqual(m, { kind: "moved", to: TO, amount: 599_999n, hash: o2.out!.hash });
+  assert.equal(await whyOf(ops, "op1"), "sender_struck", "the tapped op stays held");
+});
+test("Q1b the older op REFUNDED, the younger in flight, 2,100,000 in U: only the younger reads Moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 2_100_000n;
+  const ops = await twoOps({ sent: true, status: "REFUNDED" }, { sent: true, status: "PROCESSING" });
+  assert.equal((await moveOutHeld("op2", TO, deps(ops, chain))).kind, "moved");
+  assert.equal(await whyOf(ops, "op1"), "sender_struck");
+  assert.equal(await whyOf(ops, "op2"), "moved_out");
+});
+test("Q1c the older quote never paid (PENDING_DEPOSIT, nothing sent), the younger in flight with 1,000,000 in U: only the younger reads Moved", async () => {
+  for (const a of [{ status: "PENDING_DEPOSIT" }, {}, { sent: true, status: "FAILED" }, { sent: true, status: "INCOMPLETE_DEPOSIT" }, { status: "PROCESSING" }] as Partial<FollowRecord>[]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.usdc = 1_000_000n;
+    const ops = await twoOps(a, { sent: true, status: "PROCESSING" });
+    assert.equal((await moveOutHeld("op2", TO, deps(ops, chain))).kind, "moved", JSON.stringify(a));
+    assert.equal(await whyOf(ops, "op1"), "sender_struck", JSON.stringify(a));
+    assert.equal(await whyOf(ops, "op2"), "moved_out", JSON.stringify(a));
+  }
+  // a known send in flight counts as PROCESSING does
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 1_000_000n;
+  const ops = await twoOps({ status: "PENDING_DEPOSIT" }, { sent: true, status: "KNOWN_DEPOSIT_TX" });
+  assert.equal((await moveOutHeld("op2", TO, deps(ops, chain))).kind, "moved");
+  assert.equal(await whyOf(ops, "op2"), "moved_out");
+});
+
+// Delta review 6: an op 1Click named delivered is walked before any op held while its send was in flight, whatever their
+// ages, so a min_out floor never takes the cap before a delivered need: the older in-flight op (1,000,000) and the
+// younger delivered one (2,500,000), with U at 2,500,000: the delivered one reads Moved, the in-flight one stays held
+test("R7-ORDER an op 1Click named delivered takes the cap before an older op held with its send in flight", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await twoOps({ sent: true, status: "PROCESSING" }, { sent: true, status: "SUCCESS", delivered: "2500000" });
+  assert.equal((await moveOutHeld("op2", TO, deps(ops, chain))).kind, "moved");
+  assert.equal(await whyOf(ops, "op2"), "moved_out");
+  assert.equal(await whyOf(ops, "op1"), "sender_struck");
+});
+
+// Delta review 8, ruling 1: holdAll holds an op the moment U's bind stops, often before any status read past
+// PENDING_DEPOSIT, and a failed read there keeps the stored status (follow.ts holdAll; deposit-follow.test.ts R8-HOLD):
+// the only op of U, its own USDC in U, reads none or PENDING_DEPOSIT. Its tap moves its money, it reads Moved on that
+// move, the page answers moved, and every next tap and resume reads the same.
+for (const extra of [{ status: "PENDING_DEPOSIT" }, {}] as Partial<FollowRecord>[])
+  test(`R8 the only op of U, its USDC in U, held with status ${JSON.stringify(extra)}: its tap reads Moved, never Held`, async () => {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    const ops = await heldOp("sender_struck");
+    const one = (await ops.get("ops", "op1")) as DepositOp;
+    const { delivered: _d, ...undelivered } = one.follow;
+    await ops.put("ops", "op1", { ...one, follow: { ...undelivered, ...extra } });
+    const t = await moveOutHeld("op1", TO, deps(ops, chain));
+    assert.equal(t.kind, "moved", "the page answers moved");
+    assert.equal(chain.usdc, 1n, "U's money moved");
+    const o1 = ((await ops.get("ops", "op1")) as DepositOp).follow;
+    assert.equal(o1.why, "moved_out", "op1 reads Moved");
+    assert.equal(o1.out?.hash, (t as { hash: string }).hash);
+    const sent = chain.sent.length;
+    assert.deepEqual(await moveOutHeld("op1", TO, deps(ops, chain)), t, "the next tap reads the same move");
+    assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), t, "the resume reads the same move");
+    assert.equal(chain.sent.length, sent, "no new send");
+  });
+
+// Delta review 8, ruling 2 (X6, X8): the page closes before FINAL, the move lands, a later 2,000,000 reaches U before
+// the next sign-in. The resume finds U above 1: landed() marks op1 on the landed record, which reopens (no record, why
+// kept); the next tap moves the later money with `later` and op1 reads Moved on it. No op is Held forever, and no tap
+// answers empty while U held money.
+test("R8-X6 a landed move read with a later 2,000,000 in U: the resume is open, the next tap moves it, and op1 reads Moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(first.kind, "sent");
+  chain.land((first as { hash: string }).hash);
+  chain.usdc = 2_000_001n;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" }, "the resume at the next sign-in");
+  const open = ((await ops.get("ops", "op1")) as DepositOp).follow;
+  assert.equal(open.why, "moved_out");
+  assert.equal(open.out, undefined, "reopened: Held with its Withdraw while U holds money");
+  assert.deepEqual(open.out_past?.map((r) => r.hash), [(first as { hash: string }).hash]);
+  chain.onSend = (_s, h) => chain.land(h);
+  const tap = await moveOutHeld("op1", TO, deps(ops, chain));
+  assert.equal(tap.kind, "moved");
+  assert.equal((tap as { amount: bigint }).amount, 2_000_000n);
+  assert.equal(chain.usdc, 1n);
+  const o1 = ((await ops.get("ops", "op1")) as DepositOp).follow;
+  assert.equal(o1.why, "moved_out", "op1 reads Moved");
+  assert.equal(o1.out?.hash, (tap as { hash: string }).hash);
+  assert.equal(o1.out?.later, true);
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(ops, chain)), tap, "the next tap reads the same move");
+  assert.equal([...chain.txs.values()].filter((v) => v === "ok").length, 2, "two moves landed, no third");
+});
+
+// Delta review 9, ruling 1: holdAll's one status read failed, so the paid op reads PENDING_DEPOSIT or none as the
+// unpaid older quote does (S1), or stays INCOMPLETE_DEPOSIT after 1Click delivered its top-up (S2). The tap reads each
+// such op of U once again before it signs: the paid op reads Moved, the unpaid one stays held, whichever op taps.
+for (const b of [{ status: "PENDING_DEPOSIT" }, {}] as Partial<FollowRecord>[])
+  test(`S1 the older quote unpaid, the younger paid with its holdAll read failed (${JSON.stringify(b)}), U at its 1,000,000: the tap reads both again, the paid one reads Moved`, async () => {
+    for (const owner of ["op1", "op2"]) {
+      const chain = new Chain();
+      chain.registered.add(TO);
+      chain.usdc = 1_000_000n;
+      const ops = await twoOps({ status: "PENDING_DEPOSIT" }, b);
+      statusReads.length = 0;
+      const t = await moveOutHeld(owner, TO, deps(ops, chain, { "dep-addr-2": ["SUCCESS", "1000000"] }));
+      assert.equal(t.kind, "moved", owner);
+      // the unpaid quote's read fails (HTTP 503): it keeps PENDING_DEPOSIT, and the paid op is still read
+      assert.deepEqual(statusReads, ["dep-addr", "dep-addr-2"], `${owner}: each read once`);
+      assert.equal(await whyOf(ops, "op1"), "sender_struck", `${owner}: the unpaid quote stays held`);
+      assert.equal(await whyOf(ops, "op2"), "moved_out", `${owner}: the paid op reads Moved`);
+      const o2 = ((await ops.get("ops", "op2")) as DepositOp).follow;
+      assert.deepEqual([o2.status, o2.sent, o2.delivered], ["SUCCESS", true, "1000000"]);
+    }
+  });
+test("S2 the only op stored INCOMPLETE_DEPOSIT, its top-up then delivered, holdAll's read failed: the tap reads it again and it reads Moved", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  const ops = await heldOp("sender_struck");
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  const { delivered: _d, ...u } = one.follow;
+  await ops.put("ops", "op1", { ...one, follow: { ...u, sent: true, status: "INCOMPLETE_DEPOSIT" } });
+  statusReads.length = 0;
+  const t = await moveOutHeld("op1", TO, deps(ops, chain, { "dep-addr": ["SUCCESS", "2500000"] }));
+  assert.equal(t.kind, "moved");
+  assert.deepEqual(statusReads, ["dep-addr"]);
+  assert.equal(await whyOf(ops, "op1"), "moved_out");
+  assert.deepEqual(await moveOutHeld("op1", TO, deps(ops, chain)), t, "the next tap reads the same move");
+});
+test("S1b the tap's read fails (HTTP 503) or the op is not stale: the tap signs with the ranks it has, each stale op asked once", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 1_000_000n;
+  const ops = await twoOps({ status: "PENDING_DEPOSIT" }, { sent: true, status: "PROCESSING" });
+  statusReads.length = 0;
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  assert.deepEqual(statusReads, ["dep-addr"], "PROCESSING is never asked; the failed read once");
+  assert.equal(await whyOf(ops, "op2"), "moved_out");
+  assert.equal(await whyOf(ops, "op1"), "sender_struck");
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.status, "PENDING_DEPOSIT", "a failed read keeps it");
+});
+
+// Delta review 7, item 2: a second landed() on one record (two SIGN_HOST tabs, settleHeld on every load) counts the ops
+// this record already marked at their own needs, never at 0: three ops of 1,000,000, one move of 2,000,000, a tab whose
+// tx read lags until the other tab's landed() is done: two read Moved, never three
+test("Q3c two tabs land one record: the lagging tab's landed() never marks past the move's amount", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.usdc = 2_000_001n;
+  chain.onSend = () => {};
+  const ops = await heldOp("sender_struck", { delivered: "1000000" });
+  const one = (await ops.get("ops", "op1")) as DepositOp;
+  await ops.put("ops", "op2", { ...one, created_ms: 2 });
+  await ops.put("ops", "op3", { ...one, created_ms: 3 });
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  chain.land((first as { hash: string }).hash);
+  let gate!: () => void;
+  const open = new Promise<void>((ok) => (gate = ok));
+  const slow = chain.rpcs().map((r) => ({ ...r, tx: async (p: Parameters<MoveOutRpc["tx"]>[0]) => (await open, r.tx(p)) })) as unknown as readonly [MoveOutRpc, MoveOutRpc];
+  const tabB = moveOutHeld("op1", null, { ...deps(ops, chain), rpcs: slow });
+  await new Promise((ok) => setTimeout(ok, 20)); // tab B has read op1 and waits on its tx read
+  assert.equal((await moveOutHeld("op1", null, deps(ops, chain))).kind, "moved");
+  gate();
+  assert.equal((await tabB).kind, "moved");
+  assert.deepEqual(await Promise.all(["op1", "op2", "op3"].map((k) => whyOf(ops, k))), ["moved_out", "moved_out", "sender_struck"]);
+});
+
+// Delta review 7, item 3: the marking write re-checks the walk's filter, so an op a follower moved on between the walk's
+// read and the write (follow.ts:934, held to in_transit) never gets moved_out and the record
+test("Q4 an op moved on by its follower between the walk and the write is never marked", async () => {
+  const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U
+  chain.registered.add(TO);
+  // their status read SUCCESS, so the tap reads neither again (delta review 9, ruling 1): op2's first write is the mark
+  const base = await heldOp("note", { sent: true, status: "SUCCESS" });
+  await base.put("ops", "op2", { ...((await base.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  let moved = false;
+  const ops = new Proxy(base, {
+    get(t, k) {
+      if (k !== "update") return Reflect.get(t, k).bind(t);
+      return async (store: string, key: string, fn: (v: unknown) => unknown) => {
+        if (key === "op2" && !moved) {
+          moved = true;
+          await t.update("ops", "op2", (v) => ({ ...(v as DepositOp), stage: "in_transit" }));
+        }
+        return t.update(store as never, key, fn as never);
+      };
+    },
+  }) as WalletStore;
+  assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "moved");
+  assert.ok(moved, "the follower's write ran inside the walk");
+  const o2 = (await base.get("ops", "op2")) as DepositOp;
+  assert.equal(o2.stage, "in_transit");
+  assert.notEqual(o2.follow.why, "moved_out");
+  assert.equal(o2.follow.out, undefined);
+});
+
+test("X8 a tap that follows another op's landed record with a late 2,000,000 in U: that owner's record is history and the same tap signs", async () => {
+  const chain = new Chain();
+  chain.usdc = 5_000_000n; // both ops' 2,500,000 in U: U's move carries both (delta review 6, F2: Moved capped by it)
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  await ops.put("ops", "op2", { ...((await ops.get("ops", "op1")) as DepositOp), created_ms: 2 });
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  const hash = (first as { hash: string }).hash;
+  chain.land(hash);
+  chain.usdc = 2_000_001n;
+  chain.onSend = (_s, h) => chain.land(h);
+  seedOpens = 0;
+  const t = await moveOutHeld("op2", TO, deps(ops, chain));
+  // op1's record landed with the late deposit in U: it carried both ops' money, so it marks both, which reopen (delta
+  // review 8, ruling 2); op2's tap signs the late 2,000,000 with `later` and both read Moved on it
+  assert.equal(t.kind, "moved");
+  assert.equal((t as { amount: bigint }).amount, 2_000_000n);
+  assert.equal(seedOpens, 1);
+  for (const k of ["op1", "op2"]) {
+    const o = ((await ops.get("ops", k)) as DepositOp).follow;
+    assert.equal(o.why, "moved_out", k);
+    assert.equal(o.out?.hash, (t as { hash: string }).hash, k);
+    assert.deepEqual(o.out_past?.map((r) => r.hash), [hash], k);
+  }
+});
+
+test("X9 the boundary: U at 2 after a landed move is open in follow() and in a moved op's resume", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  chain.land((first as { hash: string }).hash);
+  chain.usdc = 2n;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops, chain)), { kind: "open" }, "follow()");
+  const c2 = new Chain();
+  c2.registered.add(TO);
+  const ops2 = await heldOp("note");
+  assert.equal((await moveOutHeld("op1", TO, deps(ops2, c2))).kind, "moved");
+  c2.usdc = 2n;
+  assert.deepEqual(await moveOutHeld("op1", null, deps(ops2, c2)), { kind: "open" }, "moved op's resume");
+});
+
+test("the tap keeps every held reason but moved_out (sender_struck, under_min)", async () => {
+  for (const why of ["sender_struck", "under_min"]) {
+    const chain = new Chain();
+    chain.registered.add(TO);
+    chain.onSend = () => {};
+    const ops = await heldOp(why);
+    assert.equal((await moveOutHeld("op1", TO, deps(ops, chain))).kind, "sent");
+    assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, why);
+  }
+});
+
+test("a move both of the pair read FINAL success is moved on their word, its nonce long settled: the archival hosts are never asked (their UNKNOWN never reads it empty)", async () => {
+  const chain = new Chain();
+  chain.registered.add(TO);
+  chain.onSend = () => {};
+  const ops = await heldOp("note");
+  const first = await moveOutHeld("op1", TO, deps(ops, chain));
+  chain.land((first as { hash: string }).hash);
+  chain.nonceAt = (h) => (h >= 1001 ? 8n : 7n);
+  chain.a.height = chain.b.height = 1000 + 10 * SETTLE_BLOCKS;
+  chain.archTxs = new Map(); // the archival hosts answer UNKNOWN_TRANSACTION, serving its block
+  let asked = 0;
+  const archival = NET.archival.map((n) => {
+    const h = chain.archival(n);
+    return { ...h, tx: async (p: Parameters<MoveOutRpc["tx"]>[0]) => (asked++, h.tx(p)) };
+  });
+  const out = await moveOutHeld("op1", null, { ...deps(ops, chain), archival });
+  assert.equal(out.kind, "moved");
+  assert.equal(asked, 0);
+  assert.equal(((await ops.get("ops", "op1")) as DepositOp).follow.why, "moved_out");
 });

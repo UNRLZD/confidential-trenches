@@ -62,6 +62,7 @@ const STATES = [
   ["refund-move", true, "refund-move"],
   ["refund-done", true, "S4.16"],
   ["held", true, "held"],
+  ["moved", true, "moved"],
   ["held-halted", true, "held-halted"],
   ["held-not-caught-up", true, "held-not-caught-up"],
   ["held-vault-blocked", true, "held-vault-blocked"],
@@ -237,6 +238,13 @@ try {
       await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
       const q = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "deposit.quote");
       check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
+      await ctx.close();
+    }
+    {
+      // card held-move-forgotten-tx: a moved-out deposit draws Moved, no Held mark and no withdraw
+      const { ctx, page } = await open(browser, w, "moved", { tap: true });
+      check((await page.locator('[data-control="deposit-held-withdraw"]').count()) === 0, `@${w.name} moved: a withdraw drawn`);
+      check(!(await page.locator(".dep").innerText()).includes("Held"), `@${w.name} moved: Held drawn`);
       await ctx.close();
     }
     for (const f of ["held", "held-halted", "held-not-caught-up", "held-vault-blocked"]) {

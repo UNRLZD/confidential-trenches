@@ -124,6 +124,19 @@ export function drawHeldMoveOut(doc: Document, deps: HeldDeps, button: Button, r
     draw(null, false);
   };
   const shown = (o: MoveOutOutcome): void => {
+    if (o.kind === "open") {
+      // a replaced record (it never ran; card held-move-forgotten-tx): no outcome line, never "not moved"; the account
+      // is typed again, its last value checked as if typed
+      fixed = null;
+      input.readOnly = false;
+      page.dataset.outcome = "open";
+      outcome.hidden = true;
+      outcome.replaceChildren();
+      delete outcome.dataset.draftCopy;
+      draw(null, input.value.trim() === "");
+      if (input.value.trim() !== "") void check();
+      return;
+    }
     if (o.kind === "moved" || o.kind === "sent" || o.kind === "failed") fix(o.to);
     page.dataset.outcome = o.kind;
     outcome.hidden = false;

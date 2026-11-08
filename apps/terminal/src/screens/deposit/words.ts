@@ -48,6 +48,7 @@ export const WORDS = {
   refunded: ok("Refunded", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.17 [draft copy: Refunded · $X]"),
   refundedLine: ok("Refunded to this account, not to the wallet it came from.", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D1 (S4.17's facts, CH-032)"),
   held: ok("Held", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D3 and CH-119 (NEW state)"),
+  moved: ok("Moved", "owner 8 Nov 07:50Z, Moved; card held-move-forgotten-tx: a held deposit moved out, the signing page's own word for that move (packages/signpage/src/withdraw/held.ts HELD_WORDS.moved)"),
   heldLine: ok("This deposit couldn't reach your balance, so withdraw it to an address you choose.", "owner 2 Nov 06:08Z, all approved; drafted from app.md FR-D3 and CH-119"),
   recent: ok("Recent", "R5 app.js:641 (drecent), R5's own label in the picked design (card app-deposit-mount)"),
   noActivity: ok("No activity", "owner 2 Nov 06:08Z, all approved; the same word as src/screens/portfolio/words.ts noActivity"),
