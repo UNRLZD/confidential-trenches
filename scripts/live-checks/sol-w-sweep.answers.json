@@ -1,11 +1,11 @@
 {
   "_note": {
-    "good": "this card's build (mainnet) on card/sol-w-sweep with review 2 of 911d7e25 folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "this card's build (mainnet) on card/sol-w-sweep with review 3 of 446d830f folded: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
     "bad": "11c963f9's build (mainnet), the committed packages/signpage/index.html and public/app.js there: W's surplus left on W, no sweep past a kept account: FAIL"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-7WdhXaIMoqGXrK4KtHXmhc8Kgd9dOZbAXZ9Rey1Qc5fC+POTbRY7K/SDsbyrMrYi\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-7WdhXaIMoqGXrK4KtHXmhc8Kgd9dOZbAXZ9Rey1Qc5fC+POTbRY7K/SDsbyrMrYi",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9KL6+ukzoMZ7kbSmjagrF9WVpRpB7N4XICIk7L22pM61KwDpcNfHTZQfi17Vy4W0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-9KL6+ukzoMZ7kbSmjagrF9WVpRpB7N4XICIk7L22pM61KwDpcNfHTZQfi17Vy4W0",
     "carries": {
       "a full sell deposits W's surplus": true,
       "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": true,
@@ -13,12 +13,12 @@
       "rent(0) only when a full sell's keep is refused or leaves its note under the floor": true,
       "the sell prices a full sell with that fallback, at the sweep's floor": true,
       "the reserve cap leaves out what the sweep carries on": true,
-      "the sell's rule prices a full sell exactly, rent(0) only where the device falls back, at a rent the cap bounds": true,
+      "the sell's rule prices a full sell exactly from the signed min out, rent(0) only where the device falls back, every note at least the pool's least deposit, at a rent and a cap of their own constants": true,
       "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": true,
       "the sweep's rule leaves exactly that, for at most two": true,
       "the sweep goes on when only owed-cashback accounts are kept": true,
       "W owed, not dropped, when the rest is under the floor": true,
-      "a sweep ending under the floor keeps W's record": true,
+      "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": true,
       "the plan marks a volume account owed only cashback": true
     }
   },
@@ -32,12 +32,12 @@
       "rent(0) only when a full sell's keep is refused or leaves its note under the floor": false,
       "the sell prices a full sell with that fallback, at the sweep's floor": false,
       "the reserve cap leaves out what the sweep carries on": false,
-      "the sell's rule prices a full sell exactly, rent(0) only where the device falls back, at a rent the cap bounds": false,
+      "the sell's rule prices a full sell exactly from the signed min out, rent(0) only where the device falls back, every note at least the pool's least deposit, at a rent and a cap of their own constants": false,
       "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": false,
       "the sweep's rule leaves exactly that, for at most two": false,
       "the sweep goes on when only owed-cashback accounts are kept": false,
       "W owed, not dropped, when the rest is under the floor": false,
-      "a sweep ending under the floor keeps W's record": false,
+      "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": false,
       "the plan marks a volume account owed only cashback": false
     }
   }

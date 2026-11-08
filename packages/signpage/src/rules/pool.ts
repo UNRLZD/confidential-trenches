@@ -108,8 +108,9 @@ export const SOLANA_POOL_CU_LIMIT_MAX = 1_400_000;
 /** The most one transaction W signs alone can cost W: one signature and the priority fee at the compute and price caps
  *  above (5,000 + 1,400,000 lamports). */
 export const SOLANA_POOL_TX_FEE_MAX = SOLANA_LAMPORTS_PER_SIGNATURE + (BigInt(SOLANA_POOL_CU_LIMIT_MAX) * SOLANA_CU_PRICE_MAX) / 1_000_000n;
-/** The most rent per byte the sell's reserve cap allows: the Rent sysvar's long-standing rate, 3,480 lamports a
- *  byte-year exempt at 2 years (6,960 lamports a byte; devnet asks less). */
+/** The most rent per byte the sell's reserve cap allows (the rule refuses a rate over it): 3,480 lamports a byte-year
+ *  exempt at 2 years, 6,960 a byte. The Rent sysvar read 5,080 a byte on mainnet and devnet alike (review 3 of
+ *  446d830f, 8 Nov), 27% under it. */
 export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;
 /** The most a sell may keep on W, out of the pool: its worst legitimate cost on W beyond what W holds as the buy and
  *  sell rules leave it (src/pool-sell.ts: W holds the sell's own need before it, and keeps at least rent(0) after a
@@ -616,7 +617,9 @@ export function checkSolanaSell(
     if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
     if (keeps) swept = full - r0;
   } else if (reserve < 0n) return refuse("reserve");
-  if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");
+  // the note is one the pool takes, on every path (review 3 L-a of 446d830f: on the fallback a 999,999 note passed
+  // here, refused by the device and the program, deposit.rs's least deposit)
+  if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return refuse("reserve");
   const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);

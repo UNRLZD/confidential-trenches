@@ -1656,6 +1656,37 @@ test("a full sell whose note with the sweep's keep lands under the floor keeps r
   assert.equal(w.owed.get(W.address)?.passes, 0, "W's record kept, no pass spent");
 });
 
+// Review 3 L-b of 446d830f: a W left under the floor is never forgotten. Its record, after the floor end, met five loads
+// with both RPCs down: each a pass, so the bound dropped it ("owed no more after 5 passes") with 2,133,680 left on W
+// and no load ever looked again. A floor end resets the passes and marks the record; the bound never drops a marked
+// one, so only fault ends since the last floor end count, and the next load that reads W sweeps it again.
+test("a W left under the floor keeps its record through any run of faulted loads: the floor end resets its passes and the bound never drops it", async () => {
+  const lamports = 1_493_440n;
+  const { amount } = await amountFor(5_800_000n);
+  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const a = await runPoolSell(w.host, { ...ASK, amount });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const onW = w.c.accounts.get(W.address)?.lamports ?? 0;
+  assert.ok(onW > 0);
+  const s0 = sends(w).length;
+  const loaded: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(amount), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }]]), unreadable: [] } }] };
+  // a floor end resets what faults counted before it
+  await w.host.owed!.put({ ...w.owed.get(W.address)!, passes: POOL_RENT_BACK_PASSES - 1 });
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.owed.get(W.address)?.passes, 0, "the floor end resets the passes");
+  // the loads' own reads fail (both providers down at page load): twice the bound's passes, and the record stays
+  const down: PoolSellHost = { ...loaded, rpcs: [async () => { throw new Error("down"); }, async () => { throw new Error("down"); }] as never };
+  for (let i = 0; i < 2 * POOL_RENT_BACK_PASSES; i++) await resumeRentBacks(down, fakeLocks());
+  assert.ok(w.owed.has(W.address), "W's record kept");
+  // each faulted load tells its own reads failed; none says W is owed no more
+  assert.equal(w.told.filter((t) => t.detail.startsWith("owed no more")).length, 0);
+  // the next healthy load reads W again: under the floor, nothing signed, the passes reset
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.equal(w.owed.get(W.address)?.passes, 0);
+  assert.equal(sends(w).length - s0, 0, "a floor pass signs nothing");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, onW);
+});
+
 // Review 2 L4 of 911d7e25: RPC B reads W's two volume accounts owed claims until the sell lands, the chain owing none:
 // the sell keeps two claims' cost, its note under the floor with it, so it keeps rent(0); the sweep ends "floor". At
 // 911d7e25 a "floor" end dropped W's record, so one lying RPC made the device forget W; kept, a later sweep retries.

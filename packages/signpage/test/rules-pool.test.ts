@@ -21,8 +21,10 @@ import {
   solanaPoolPage,
   solanaPoolReleaseAccounts,
   solanaPoolSellSteps,
+  solanaRentMin,
   type SolanaPoolRelease,
 } from "../../kit/src/trade/solana/pool-buy.ts";
+import { solanaSellReserve } from "../src/pool-sell.ts";
 import { evmPoolVenues, pinnedBuild, type EvmPoolVenue } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildSimSellUnpinned, pinnedBuildSell } from "../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmPoolBuyQuoteWith, type EvmPoolBuyQuote, type EvmRpc, type EvmRpcCall } from "../../kit/src/checks/evm/quote.ts";
@@ -48,6 +50,8 @@ import {
   type SolanaOnwardReads,
   drawPool,
   SOLANA_POOL_SELL_RESERVE_MAX,
+  SOLANA_POOL_MIN_DEPOSIT,
+  solanaSweepFloor,
   solanaDepositRents,
   solanaSellAfterFull,
   type SolanaDepositHeld,
@@ -777,4 +781,95 @@ test("no rule reads a field from a server: the rule file imports no fetch, helpe
   // pure builders with no reader
   assert.deepEqual(imports.filter((p) => !/^@noble\/|^@scure\//.test(p!) && !/(checks\/solana\/(message|checks)|trade\/solana\/pool-(buy|deposit)|trade\/evm\/(buy|sell)-unpinned|trade\/evm\/quoted|wallet\/src\/pool\/evm)\.ts$/.test(p!)), []);
   assert.deepEqual([...code.matchAll(/\b(evmQuoted\w*|evmIsQuoted\w*)\b/g)].map((m) => m[1]).filter((n) => !/^evmIsQuoted(Buy|Sell)$/.test(n!)), [], "the rules call quoted.ts's predicates only, never its builders");
+});
+
+// Review 3 of 446d830f (its fuzz, kept at a fixed seed): on a full sell the rule passes exactly the reserve the device
+// prices (solanaSellReserve, pool-sell.ts's form: the keep, or rent(0) as its fallback) and nothing else, so no sell the
+// device builds is refused (stuck) and no other reserve passes (extra). L-a: on the fallback the rule did not hold the
+// note to the pool's least deposit: at 216 x 2 a byte with two owed, reserve 5,420,920 (short + rent(0)) left a note of
+// 999,999, which the device refuses and the program (deposit.rs) too; the rule passed it.
+test("Solana full sell: the rule passes exactly the device's reserve, a note under the pool's least deposit never", async () => {
+  const { venue, ref, reads } = await setup("pump");
+  const amount = 5_000_000n;
+  // a reference whose expected out is small, so min outs of a few million lamports (where the fallback and the floor
+  // matter) clear the venue's floor
+  const reference = { amount, ref: { ...ref, pools: ref.pools.map((p) => ({ ...p, expectedOut: 1_000n })) }, slippageBps: 300 };
+  const ask: PoolAsk = { kind: "pool.sell", chain: "solana", token: venue.mint, amount, slippageBps: 300, decimals: 6 };
+  const rule = (minOut: bigint, reserve: bigint, p: SolanaSellSurplus): boolean => {
+    try {
+      checkSolanaSell(wire(SOL_W, [...(solanaPoolSellSteps(venue, SOL_W, amount, minOut) as Ixx[]), depositIx({ value: minOut - reserve })]), ask, solCtx(), venue, reference, reads.slot, SOL_READS, reserve, p);
+      return true;
+    } catch (e) {
+      if (e instanceof PoolRuleRefused) return false;
+      throw e;
+    }
+  };
+  type Case = { rent: SolanaSellSurplus["rent"]; owed: number; next: boolean; held: SolanaDepositHeld; fee: bigint; made: bigint; lamports: bigint; minOut: bigint };
+  const run = (c: Case): { stuck: string[]; extra: string[] } => {
+    const rents = solanaDepositRents(c.rent, SOL_READS, c.held, c.next);
+    const full = solanaSellAfterFull(c.rent, c.owed);
+    const r0 = solanaRentMin(c.rent, 0);
+    const floor = solanaSweepFloor(c.rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(c.rent) : SOLANA_POOL_MIN_DEPOSIT;
+    const short = c.fee + c.made + rents - c.lamports;
+    const P: SolanaSellSurplus = { full: true, lamports: c.lamports, fee: c.fee, made: c.made, rent: c.rent, held: c.held, next: c.next, owed: c.owed };
+    const dev = solanaSellReserve({ fee: c.fee, made: c.made, rents, after: full, lamports: c.lamports, minOut: c.minOut, keeps: false, swept: full - r0, base: r0, floor });
+    const out = { stuck: [] as string[], extra: [] as string[] };
+    for (const r of new Set([short + r0, short + full, short + full + 1n, short + full - 1n, short + r0 + 1n, short + r0 - 1n, 0n, -1n, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_POOL_SELL_RESERVE_MAX + full - r0])) {
+      if (r >= c.minOut) continue;
+      const made = !("refused" in dev) && dev.reserve === r;
+      const got = rule(c.minOut, r, P);
+      if (made && !got) out.stuck.push(`${r}`);
+      if (!made && got) out.extra.push(`${r} note ${c.minOut - r}`);
+    }
+    return out;
+  };
+  // L-a's case, pinned: the device refuses it, the rule refuses it
+  const nothing = { mark: [null, null], state: [null, null], label: [null, null] } as unknown as SolanaDepositHeld;
+  const r216 = { lamportsPerByte: 216n, factor: 2n } as SolanaSellSurplus["rent"];
+  const la = { rent: r216, owed: 2, next: false, held: nothing, fee: 5_000n, made: 0n, lamports: 0n, minOut: 0n };
+  const laShort = 5_420_920n - solanaRentMin(r216, 0);
+  la.made = laShort - 5_000n - solanaDepositRents(r216, SOL_READS, nothing, false);
+  la.minOut = 5_420_920n + 999_999n;
+  assert.ok(la.made >= 0n);
+  assert.deepEqual(run(la), { stuck: [], extra: [] }, "216 x 2, owed 2, a 999,999 note");
+  // the fuzz: rents, owed counts, held lamports, fees and the cost of made accounts drawn at a fixed seed, each min out
+  // anchored at an edge (the floor, the least deposit, the fallback's note at the least deposit, 0, the cap)
+  let s = 7;
+  const rnd = () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const ri = (a: bigint, b: bigint) => a + BigInt(Math.floor(rnd() * Number(b - a + 1n)));
+  const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
+  let n = 0;
+  const bad: string[] = [];
+  for (let it = 0; it < 300; it++) {
+    const rent = pick([{ lamportsPerByte: 5_080n, factor: 1n }, { lamportsPerByte: 6_960n, factor: 1n }, { lamportsPerByte: 3_480n, factor: 2n }, { lamportsPerByte: 1n, factor: 1n }, { lamportsPerByte: ri(1n, 6_960n), factor: 1n }, { lamportsPerByte: ri(1n, 3_480n), factor: 2n }]) as SolanaSellSurplus["rent"];
+    const owed = Number(ri(0n, 2n));
+    const next = rnd() < 0.5;
+    const pair = () => { const v = rnd() < 0.5 ? null : ri(0n, 3_000_000n); return [v, v] as const; };
+    const held: SolanaDepositHeld = { mark: pair(), state: pair(), label: pair() };
+    const fee = rnd() < 0.5 ? 5_000n : ri(0n, 1_405_000n);
+    let made = rnd() < 0.5 ? 0n : ri(0n, 3_000_000n);
+    const rents = solanaDepositRents(rent, SOL_READS, held, next);
+    const full = solanaSellAfterFull(rent, owed);
+    const r0 = solanaRentMin(rent, 0);
+    const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
+    const lamports = rnd() < 0.2 ? 0n : ri(0n, 8_000_000n);
+    let minOut: bigint;
+    if (rnd() < 0.25) {
+      // short + rent(0) at the cap, give or take: made fitted to it
+      const want = SOLANA_POOL_SELL_RESERVE_MAX - r0 + ri(-3n, 3n) + (rnd() < 0.5 ? 0n : ri(-500_000n, 500_000n));
+      minOut = want + full + pick([floor, SOLANA_POOL_MIN_DEPOSIT - (full - r0), 0n, floor + 5_000_000n]) + ri(-3n, 3n);
+      made = want - fee - rents + lamports;
+      if (made < 0n) continue;
+    } else {
+      const anchor = pick([floor, SOLANA_POOL_MIN_DEPOSIT, 0n, SOLANA_POOL_MIN_DEPOSIT - (full - r0), floor + 3_000_000n, -1_000_000n]);
+      minOut = anchor + ri(-3n, 3n) + (rnd() < 0.5 ? 0n : ri(-1_500_000n, 1_500_000n)) + fee + made + rents + full - lamports;
+    }
+    if (minOut < 970n) continue; // the venue's floor for this reference
+    n++;
+    const r = run({ rent, owed, next, held, fee, made, lamports, minOut });
+    for (const x of r.stuck) bad.push(`stuck it=${it} ${x}`);
+    for (const x of r.extra) bad.push(`extra it=${it} ${x}`);
+  }
+  assert.ok(n > 200, String(n));
+  assert.deepEqual(bad.slice(0, 10), []);
 });

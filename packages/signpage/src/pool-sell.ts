@@ -387,8 +387,9 @@ export async function settlePoolSells(h: Pick<PoolSellHost, "pin" | "rpcs" | "no
  *  deposit having met a page another deposit filled first. */
 type Later = { back?: () => Promise<void>; rebuild?: true };
 
-/** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far. */
-export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number };
+/** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `floor`
+ *  once a pass left W under the floor (lamports on W the pass bound never forgets). */
+export type OwedRentBack = { address: string; l: string; j: number; mints: { mint: string; program: string }[]; passes: number; floor?: true };
 export type OwedRentBacks = { list(): Promise<OwedRentBack[]>; put(r: OwedRentBack): Promise<void>; drop(address: string): Promise<void> };
 /** How a rent back ended: its sweep sent; nothing left on W; W under the smallest note (solanaSweepFloor), its lamports
  *  kept on W; an account the plan keeps (so W keeps the fee to close it later); W holding a token; or it gave up. */
@@ -968,16 +969,18 @@ const sellOwner = (ref: NoteRef, l: bigint, j: number): boolean => (ref.kind ===
 
 /** The owed record after a pass that ended `e`: dropped once nothing is left to do for W (or after
  *  POOL_RENT_BACK_PASSES passes, told), kept with one pass more while its sweep is unconfirmed or it gave up, so the
- *  next load runs it again; under the floor kept as it is; a W that holds is kept as it is while its sell note is INCOMING (`sending`), and dropped
+ *  next load runs it again; under the floor kept with its passes reset and never dropped by the bound; a W that holds is kept as it is while its sell note is INCOMING (`sending`), and dropped
  *  once that note is PLANNED again (its sell never landed: W's next sell owes its own). */
 async function owedAfter(h: PoolSellHost, o: OwedRentBack, e: RentBackEnd, sending?: () => Promise<boolean>): Promise<void> {
   try {
     if (e === "holds" && (await sending?.())) return;
     // W under the floor (review 2 L4 of 911d7e25: a lying RPC's owed count can force the sell's rent(0) fallback, and
-    // what is left on W, ~2.13M, was forgotten): kept as it is, never dropped by the pass bound, so every load sweeps it
-    // again once it can make a note (lamports sent to W)
-    if (e === "floor") return await h.owed?.put({ ...o });
+    // what is left on W, ~2.13M, was forgotten): kept with its passes reset and marked, so only fault ends since this
+    // count, and the bound never drops it (review 3 L-b of 446d830f: five loads with both RPCs down did); every load
+    // sweeps it again once it can make a note (lamports sent to W)
+    if (e === "floor") return await h.owed?.put({ ...o, passes: 0, floor: true });
     if (e !== "sent" && e !== "gave_up" && e !== "owed") return await h.owed?.drop(o.address);
+    if (o.passes + 1 >= POOL_RENT_BACK_PASSES && o.floor === true) return await h.owed?.put({ ...o, passes: 0 });
     if (o.passes + 1 >= POOL_RENT_BACK_PASSES) {
       h.told?.({ address: o.address, step: "rent_back", state: "gave_up", detail: `owed no more after ${POOL_RENT_BACK_PASSES} passes: what is left stays on W` });
       return await h.owed?.drop(o.address);

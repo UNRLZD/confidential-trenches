@@ -10,12 +10,15 @@
 //     each claim owed by W's volume accounts as the sell reads them, or the venue's own on a cashback coin; rent(0) only
 //     when that is refused or would leave the sell's note under the floor; the reserve cap leaves out what the sweep
 //     carries on;
-//   - the sell's rule: a full sell priced exactly from the device's reads, its keep or rent(0) only where the device
-//     falls back (the rule's own floor), at a rent rate the cap bounds; a reserve under 0 only on a full sell;
+//   - the sell's rule: a full sell priced exactly from the device's reads and the min out the sell's bytes sign, its
+//     keep or rent(0) only where the device falls back (the rule's own floor), at a rent rate the cap bounds, the cap
+//     SOLANA_POOL_SELL_RESERVE_MAX's own value; every note at least the pool's least deposit; a reserve under 0 only on
+//     a full sell;
 //   - a sweep that leaves W exactly what each owed cashback claim costs later (rent(0), a frame's fee, the claim
 //     account's rent), at most two, checked by the sweep's rule;
 //   - the sweep goes on when every account kept is a volume account owed cashback only (the kit's plan marks them),
-//     W ending "owed" (its record kept) when the rest is under the floor; a sweep ending "floor" keeps W's record too.
+//     W ending "owed" (its record kept) when the rest is under the floor; a sweep ending "floor" keeps W's record too,
+//     its passes reset, and the pass bound never drops it.
 // It does not prove those lines run: that is the signing page's tests at the released commit (test/pool-sell.test.ts,
 // rules-pool.test.ts), and that the served files are that commit's build is signpage-release's.
 //   node scripts/live-checks/sol-w-sweep.mjs [--record <file>] [--answer <file>]
@@ -30,20 +33,30 @@ export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name
+const esc = (n) => n.replace(/\$/g, "\\$");
+/** A mark whose named group `cap` must be SOLANA_POOL_SELL_RESERVE_MAX as the bundle defines it: the transaction fee's
+ *  most, 145 bytes' rent and two pages' 216 at SOLANA_RENT_PER_BYTE_MAX, that rate 6,960 (rules/pool.ts). */
+const capOf = (re) => ({
+  test(js) {
+    const cap = re.exec(js)?.groups?.cap;
+    const rate = cap && new RegExp(`[,;]${esc(cap)}=${I}\\+145n\\*(${I})\\+2n\\*216n\\*\\1[,;]`).exec(js)?.[1];
+    return Boolean(rate) && new RegExp(`[,;]${esc(rate)}=6960n[,;]`).test(js);
+  },
+});
 /** Each rule's mark in the bundle, by what it holds. */
 export const MARKS = Object.freeze({
   "a full sell deposits W's surplus": new RegExp(`(${I})=(${I})\\.fee\\+\\2\\.made\\+\\2\\.rents\\+\\2\\.after-\\2\\.lamports,${I}=\\1>0n\\|\\|!\\2\\.keeps\\?\\1:0n`),
   "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": new RegExp(`function ${I}\\((${I}),(${I})=0\\)\\{let (${I})=${I}\\(\\1\\)>1000000n\\?${I}\\(\\1\\):${I},(${I})=(${I})\\(\\1,88\\),${I}=\\3\\+\\((${I})\\+\\5\\(\\1,${I}\\)\\+2n\\*\\4\\)\\+\\6-\\5\\(\\1,165\\)\\+${I}\\(\\1,\\2\\)`),
   "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read": new RegExp(`\\.map\\(async (${I})=>(${I})\\.cashback&&\\1===${I}\\?!0:\\(await ${I}\\(${I},${I}=>${I}\\(${I},${I}\\(${I}\\.address,\\1\\),\`confirmed\`\\)\\)\\)\\.some\\((${I})=>!\\(\`none\`in \\3\\)&&\\3\\.owner===\\1&&${I}\\(\\1,\\3\\.data\\)>0n\\)\\)\\)\\.then\\((${I})=>\\4\\.filter\\(Boolean\\)\\.length\\)\\]\\),${I}=${I}\\?${I}\\(${I},${I}\\):${I}\\(${I},${I}\\)`),
   "rent(0) only when a full sell's keep is refused or leaves its note under the floor": new RegExp(`function (${I})\\((${I})\\)\\{if\\(!\\2\\.keeps&&\\2\\.base!==void 0\\)\\{let (${I})=\\1\\(\\{\\.\\.\\.\\2,base:void 0\\}\\);return\`refused\`in \\3\\|\\|\\3\\.value<\\(\\2\\.floor\\?\\?0n\\)\\?\\1\\(\\{\\.\\.\\.\\2,after:\\2\\.base,swept:0n,base:void 0\\}\\):\\3\\}`),
-  "the sell prices a full sell with that fallback, at the sweep's floor": new RegExp(`(${I})=(${I})\\((${I})\\)>1000000n\\?\\2\\(\\3\\):${I},[\\s\\S]{0,3000}?\\.\\.\\.${I}\\?\\{\\}:\\{swept:${I}-(${I}),base:\\4,floor:\\1\\}`),
+  "the sell prices a full sell with that fallback, at the sweep's floor": new RegExp(`(?<f>${I})=(?<he>${I})\\((?<rent>${I})\\)>1000000n\\?\\k<he>\\(\\k<rent>\\):${I},[\\s\\S]{0,3000}?let (?<r0>${I})=${I}\\(\\k<rent>,0\\),${I}=${I}\\(\\{[^{}]*?\\.\\.\\.${I}\\?\\{\\}:\\{swept:${I}-\\k<r0>,base:\\k<r0>,floor:\\k<f>\\}`),
   "the reserve cap leaves out what the sweep carries on": new RegExp(`(${I})-\\((${I})\\.swept\\?\\?0n\\)>${I}\\|\\|\\1>=\\2\\.minOut`),
-  "the sell's rule prices a full sell exactly, rent(0) only where the device falls back, at a rent the cap bounds": new RegExp(`let (${I})=0n,(${I})=${I};if\\(\\2!==void 0&&\\2\\.full===!0\\)\\{if\\([^{}]*?\\|\\|\\2\\.rent\\.lamportsPerByte\\*\\2\\.rent\\.factor>6960n\\|\\|[^{}]*?\\|\\|\\2\\.owed>2\\)return (${I})\\(\`reserve\`\\);let (${I})=\\2\\.fee\\+\\2\\.made\\+${I}\\(\\2\\.rent,${I},\\2\\.held,\\2\\.next\\)-\\2\\.lamports,(${I})=${I}\\(\\2\\.rent,\\2\\.owed\\),(${I})=${I}\\(\\2\\.rent,0\\),(${I})=(${I})\\(\\2\\.rent\\)>1000000n\\?\\8\\(\\2\\.rent\\):${I},(${I})=\\4\\+\\5,(${I})=\\9-\\(\\5-\\6\\)<=(${I})&&\\9<(${I})&&\\12-\\9>=\\7;if\\((${I})!==\\(\\10\\?\\9:\\4\\+\\6\\)\\)return \\3\\(\`reserve\`\\);\\10&&\\(\\1=\\5-\\6\\)\\}else if\\(\\13<0n\\)return \\3\\(\`reserve\`\\);if\\(\\13-\\1>\\11\\)return \\3\\(\`reserve\`\\)`),
+  "the sell's rule prices a full sell exactly from the signed min out, rent(0) only where the device falls back, every note at least the pool's least deposit, at a rent and a cap of their own constants": capOf(new RegExp(`let (?<mo>${I})=${I}\\(${I}\\.data,16\\);if\\(\\k<mo><${I}\\)return (?<x>${I})\\(\`min_out\`\\);[\\s\\S]{0,800}?if\\(typeof (?<s>${I})!=\`bigint\`\\|\\|\\k<s>>=\\k<mo>\\)return \\k<x>\\(\`reserve\`\\);let (?<y>${I})=0n,(?<b>${I})=${I};if\\(\\k<b>!==void 0&&\\k<b>\\.full===!0\\)\\{if\\([^{}]*?\\|\\|\\k<b>\\.rent\\.lamportsPerByte\\*\\k<b>\\.rent\\.factor>6960n\\|\\|[^{}]*?\\|\\|\\k<b>\\.owed>2\\)return \\k<x>\\(\`reserve\`\\);let (?<e>${I})=\\k<b>\\.fee\\+\\k<b>\\.made\\+${I}\\(\\k<b>\\.rent,${I},\\k<b>\\.held,\\k<b>\\.next\\)-\\k<b>\\.lamports,(?<t>${I})=${I}\\(\\k<b>\\.rent,\\k<b>\\.owed\\),(?<n>${I})=${I}\\(\\k<b>\\.rent,0\\),(?<r>${I})=(?<he>${I})\\(\\k<b>\\.rent\\)>1000000n\\?\\k<he>\\(\\k<b>\\.rent\\):${I},(?<i>${I})=\\k<e>\\+\\k<t>,(?<a>${I})=\\k<i>-\\(\\k<t>-\\k<n>\\)<=(?<cap>${I})&&\\k<i><\\k<mo>&&\\k<mo>-\\k<i>>=\\k<r>;if\\(\\k<s>!==\\(\\k<a>\\?\\k<i>:\\k<e>\\+\\k<n>\\)\\)return \\k<x>\\(\`reserve\`\\);\\k<a>&&\\(\\k<y>=\\k<t>-\\k<n>\\)\\}else if\\(\\k<s><0n\\)return \\k<x>\\(\`reserve\`\\);if\\(\\k<s>-\\k<y>>\\k<cap>\\|\\|\\k<mo>-\\k<s><1000000n\\)return \\k<x>\\(\`reserve\`\\);let (?<d>${I})=${I}\\([^()]*\\);return \\k<d>===\\k<mo>-\\k<s>\\?`)),
   "an owed claim's cost: rent(0), a frame's fee and the claim account's rent": new RegExp(`(${I})=\\((${I}),(${I})\\)=>\\3===0\\?0n:${I}\\(\\2,0\\)\\+BigInt\\(\\3\\)\\*\\(${I}\\+${I}\\(\\2,165\\)\\)`),
   "the sweep's rule leaves exactly that, for at most two": new RegExp(`\\|\\|(${I})<0\\|\\|\\1>2\\?${I}\\(\`sweep_reads\`\\):${I}\\+5000n\\+${I}\\(${I},${I},${I}\\)\\+${I}\\(${I},\\1\\)===`),
   "the sweep goes on when only owed-cashback accounts are kept": new RegExp(`function ${I}\\((${I})\\)\\{return \\1\\.length>2\\|\\|\\1\\.some\\((${I})=>\\2\\.cashback!==!0\\)\\?null:\\1\\.length\\}`),
   "W owed, not dropped, when the rest is under the floor": new RegExp(`\\{end:(${I})>0\\?\`owed\`:\`floor\`,`),
-  "a sweep ending under the floor keeps W's record": new RegExp(`if\\((${I})===\`floor\`\\)return await (${I})\\.owed\\?\\.put\\(\\{\\.\\.\\.(${I})\\}\\);if\\(\\1!==\`sent\`&&\\1!==\`gave_up\`&&\\1!==\`owed\`\\)return await \\2\\.owed\\?\\.drop\\(\\3\\.address\\)`),
+  "a sweep ending under the floor keeps W's record, its passes reset, past the pass bound": new RegExp(`if\\((?<n>${I})===\`floor\`\\)return await (?<h>${I})\\.owed\\?\\.put\\(\\{\\.\\.\\.(?<o>${I}),passes:0,floor:!0\\}\\);if\\(\\k<n>!==\`sent\`&&\\k<n>!==\`gave_up\`&&\\k<n>!==\`owed\`\\)return await \\k<h>\\.owed\\?\\.drop\\(\\k<o>\\.address\\);if\\(\\k<o>\\.passes\\+1>=5&&\\k<o>\\.floor===!0\\)return await \\k<h>\\.owed\\?\\.put\\(\\{\\.\\.\\.\\k<o>,passes:0\\}\\);if\\(\\k<o>\\.passes\\+1>=5\\)`),
   "the plan marks a volume account owed only cashback": new RegExp(`\\.\\.\\.(${I})\\.other\\.length===0&&\\1\\.amount>0n\\?\\{cashback:!0\\}:\\{\\}`),
 });
 
