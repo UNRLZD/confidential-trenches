@@ -1686,7 +1686,8 @@ test("a full sell whose note with the sweep's keep lands under the floor keeps r
 test("a W left under the floor keeps its record through any run of faulted loads, and a load that reads W the same runs no pass", async () => {
   const lamports = 1_493_440n;
   const { amount } = await amountFor(5_800_000n);
-  const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
+  const plant: Plant = { held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT };
+  const w = await world(plant, [wallet(amount)]);
   const a = await runPoolSell(w.host, { ...ASK, amount });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   const onW = w.c.accounts.get(W.address)?.lamports ?? 0;
@@ -1711,6 +1712,11 @@ test("a W left under the floor keeps its record through any run of faulted loads
   assert.equal(w.owed.get(W.address)?.passes, passes);
   assert.deepEqual([...new Set(w.c.calls.slice(calls).filter((c) => c.method === "getMultipleAccounts" && (c.params[0] as string[]).includes(W.address)).map((c) => c.p))].sort(), [0, 1]);
   assert.equal(sends(w).length - s0, 0, "a floor pass signs nothing");
+  // what W reads as is both RPCs' word: RPC B reading W otherwise (a lamport more) is no match, and the pass runs
+  plant.mapOn = (p, address, acc) => (p === 1 && address === W.address ? { ...acc, lamports: acc.lamports + 1 } : acc);
+  await resumeRentBacks(loaded, fakeLocks());
+  assert.ok(w.told.length > told, "a pass ran");
+  plant.mapOn = undefined;
   // lamports sent to W: W reads otherwise, so the pass runs again (and sweeps once the note clears the floor)
   w.c.accounts.set(W.address, { ...w.c.accounts.get(W.address)!, lamports: onW + 3_000_000 });
   await resumeRentBacks(loaded, fakeLocks());
