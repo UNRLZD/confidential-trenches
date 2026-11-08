@@ -11,6 +11,7 @@ import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, evmProviders, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
+import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
 // the module path as a string: the red run before card evm-buy-hookdata-fee's fold 1 reads it where quoted.ts is not there yet
 const QUOTED_TS: string = "../src/trade/evm/quoted.ts";
 
@@ -26,8 +27,8 @@ const CLANKER_HOOK = "0xb429d62f8f3bffb98cdb9569533ea23bf0ba28cc";
 type Edit = (answers: Answer[], calls: readonly EvmRpcCall[]) => void;
 const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (calls) => {
   const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
-  if (e === undefined) throw new Error("no recorded answer for these calls");
-  const a = structuredClone(e.answers);
+  const a = e !== undefined ? structuredClone(e.answers) : (gasRoundAnswers(ex, calls) as Answer[] | undefined);
+  if (a === undefined) throw new Error("no recorded answer for these calls");
   if (edit !== undefined) edit(a, calls);
   return a;
 };
@@ -117,10 +118,10 @@ const plant = (f: (r: Read, el: El) => El | undefined): Edit => (a, calls) => {
     a[i]!.result = encode(els.map((el, k) => f(reads[k]!, el) ?? el));
   });
 };
-/** Edits the hookless read (the one call with a state override). */
+/** Edits the hookless read (the one call with a state override but the swap-gas read, the pool's own buySwap). */
 const hookless = (f: (a: Answer) => Answer): Edit => (a, calls) => {
   calls.forEach((c, i) => {
-    if (c.method === "eth_call" && c.params.length === 3) a[i] = f(a[i]!);
+    if (c.method === "eth_call" && c.params.length === 3 && !String((c.params[0] as { data?: unknown }).data).startsWith("0x25faf2a3")) a[i] = f(a[i]!);
   });
 };
 const outOf = (x: El) => BigInt("0x" + x.data.slice(0, 64));
