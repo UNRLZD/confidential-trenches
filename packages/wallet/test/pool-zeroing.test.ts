@@ -28,6 +28,9 @@ const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore
 const { buyWallets, solanaSpentNotes } = await import("../src/pool/buy-wallets.ts");
 const { evmRestore } = await import("../src/pool/evm-restore.ts");
 const { restoreWallets } = await import("../src/restore/wallets.ts");
+const { quietArms } = await import("../src/restore/arms.ts");
+const d = await import("../src/derive/keys.ts");
+const { armAccount } = d;
 const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
 const { vaultLabelOf } = await import("@blindfill/kit");
 const { keccak_256 } = await import("@noble/hashes/sha3.js");
@@ -131,6 +134,25 @@ test("restoreWallets zeroes every W secret key it derives, on all six chain tags
   const r = await restoreWallets(SEED, { notes: [], spends }, async () => true);
   assert.equal(r.wallets.length, 12);
   assert.equal(calls.length - at, 12, "one W derived per arm and tag");
+  for (const c of calls.slice(at)) assert.ok(zero(c.out.secretKey), "W's secret key is left in memory");
+  assert.ok(!zero(SEED), "never the caller's seed");
+});
+
+test("quietArms zeroes every W secret key it derives once it has the address (card wallet-restore-id-reader)", () => {
+  const a = armAccount(SEED, 33n, 1);
+  a.secretKey.fill(0);
+  const row = { index: 0, nullifierHash: 1n, withdrawn: 10n, newLeafIndex: 1n, refundPrecommitment: 2n, refundValue: 0n, refundLabel: 0n, refundLeafIndex: 0n, status: "paid", payer: "relayer.testnet", reserve: 0n, recipient: a.id, fee: 0n, context: 1n };
+  const spends = [{ l: 33n, j: 1, note: "c", spend: row }] as unknown as Parameters<typeof quietArms>[1]["spends"];
+  const arms = { accounts: [{ kind: "V" as const, l: 33n, j: 1, account: "", holds: [] }, { kind: "A" as const, l: 33n, j: 1, account: a.id, holds: [] }], unread: [] };
+  // quietArms matches A and V by account: give V's own id
+  const { refundId } = d;
+  const v = refundId(SEED, 33n, 1);
+  v.secretKey.fill(0);
+  arms.accounts[0]!.account = v.id;
+  const at = calls.length;
+  const q = quietArms(SEED, { spends }, arms, { wallets: [], unread: [] });
+  assert.equal(q.length, 1);
+  assert.equal(calls.length - at, 3, "the arm's own three W derived");
   for (const c of calls.slice(at)) assert.ok(zero(c.out.secretKey), "W's secret key is left in memory");
   assert.ok(!zero(SEED), "never the caller's seed");
 });
