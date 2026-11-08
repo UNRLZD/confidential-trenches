@@ -10,7 +10,7 @@
 //     block: the pool's own buySwap through the pinned v3 adapter, from the pool, to the block's fresh recipient, the
 //     pool's balance set to the amount, its execution capped at 476,190: both providers answer a result above 0 (the
 //     route fits), and the same read capped at 20,000 answers out of gas in words the kit maps to "does not fit"
-//     (OUT_OF_GAS below, the kit's answerOf), never another error the kit would refuse on.
+//     (the kit's EVM_OUT_OF_GAS_WORDS, its answerOf's), never another error the kit would refuse on.
 // Nothing deployed quotes a buy yet: the signing page's bundle carries no EVM buy quote (build-app at 87f280e2 matches a
 // fresh build with this card in it). The kit's public buy quote is not run here: on Node it does not end (it asked 583
 // requests in 45 s on Base before this card too, at 7b4e5113), a finding for the CO. That the floor refuses, names the
@@ -22,14 +22,14 @@
 // Runs: once, it reads what a host deploy cannot change: the pinned pools' BUY_SWAP_GAS (a pool deploy) and the providers' answers to the kit's swap read (the kit's buy quote ships in no host's bundle yet)
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { evmBuySwapFitCall, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EVM_OUT_OF_GAS_WORDS, evmBuySwapFitCall, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-buy-gas-floor";
 /** BUY_SWAP_GAS() (PrivacyPoolSimple.sol) and buySwap((address,bytes,uint256,address),address,uint256) */
 const SEL_GAS = "0xa27a797e";
 const FLOOR = "0x" + (500_000).toString(16).padStart(64, "0");
-/** the kit's out-of-gas words (quote.ts OUT_OF_GAS_WORDS: geth's and reth's) */
-const OUT_OF_GAS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
+/** the kit's own out-of-gas words (geth's and reth's), imported so the two cannot drift */
+const OUT_OF_GAS = EVM_OUT_OF_GAS_WORDS;
 const CAP = 476_190n;
 /** A standard v3 route per mainnet chain: [WETH, buys], 0.01%, at the amount (test/evm-quote-record.ts's cases; "buys",
  *  not "token": gitleaks' generic-api-key rule reads a "token" key with a hex value as a secret) */
