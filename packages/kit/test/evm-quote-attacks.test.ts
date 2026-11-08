@@ -7356,42 +7356,6 @@ test("QE9 a round's exact-out reads are sent 64 to a call: the cold case's in tw
   assert.equal(sizes.length, Math.ceil(reads / 64), `${reads} reads in ${sizes.length} calls`);
 });
 
-// Card evm-buy-quote-in-window: discovery outside the window. The scan provider is slow (each scan request after the
-// first block ticks the device's clock 4 s, as RX2), so the scans outlast that block; the chain's head moves on with
-// the clock. The quote agrees a fresh block, goes on from the spans its first attempt kept, and quotes; no request is
-// sent past its own block's time plus EVM_QUOTE_MAX_AGE_MS. At 2b194f7c it refused stale_quote.
-test("QE10 scans that outlast the block: the quote goes on at a fresh block from the spans kept, and quotes", { timeout: 20_000 }, async () => {
-  const { pools, logs, req } = qeCase(freshToken(), 0xc00);
-  const clock = { ms: 0, ts: 0, past: 0, sent: 0, heads: 0 };
-  // the head's time: the clock's, read again once the head held is 20 s old (one per attempt here)
-  const headTs = () => {
-    if (clock.ts === 0 || NOW + clock.ms - clock.ts * 1000 > 20_000) clock.ts = Math.floor((NOW + clock.ms) / 1000);
-    return clock.ts;
-  };
-  const moving = (rpc: EvmRpc): EvmRpc => async (calls) => {
-    if (calls.some((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest")) clock.heads++;
-    const out = await rpc(calls);
-    return out.map((a) => {
-      const r = (a as { result?: { timestamp?: unknown } } | null)?.result;
-      return r !== null && typeof r === "object" && typeof r.timestamp === "string" ? { ...(a as object), result: { ...r, timestamp: "0x" + headTs().toString(16) } } : a;
-    });
-  };
-  const scan = scanner(RC_HEAD, logs, [], 100_000);
-  const slow: EvmRpc = async (calls) => {
-    if (clock.ts > 0 && calls.some((c) => c.method === "eth_getLogs")) {
-      clock.sent++;
-      if (NOW + clock.ms > clock.ts * 1000 + quoteMod.EVM_QUOTE_MAX_AGE_MS) clock.past++;
-      clock.ms += 4_000;
-    }
-    return scan(calls);
-  };
-  const v = await verdict(evmPoolBuyQuoteWith(req, [moving(chain(pools, 0, RC_HEAD)), moving(chain(pools, 1, RC_HEAD))], NOW, slow, undefined, () => clock.ms));
-  assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  assert.ok(clock.ms > quoteMod.EVM_QUOTE_MAX_AGE_MS, `the scans ran ${clock.ms} ms of the device's clock`);
-  assert.ok(clock.heads >= 4, `${clock.heads} head reads: a second block was agreed`);
-  assert.equal(clock.past, 0, `${clock.past} of ${clock.sent} scan requests sent past their block's deadline`);
-});
-
 test("QE11 the scan's catch-up past the agreed block keeps the deadline: a rate-limited catch-up is not asked again past it (review of 2f9a3ccc, finding 7)", { timeout: 30_000 }, async () => {
   const { pools, logs, req } = qeCase(freshToken(), 0xb00);
   const clock = { ms: 0, ts: 0, past: 0, sent: 0 };
@@ -7417,4 +7381,39 @@ test("QE11 the scan's catch-up past the agreed block keeps the deadline: a rate-
   assert.ok(catchUps >= 1, "a catch-up ran");
   assert.equal(catchUpsPast, 0, `${catchUpsPast} catch-up requests sent past the deadline`);
   assert.equal((v as { code?: string }).code, "stale_quote");
+});
+
+// Card evm-buy-quote-in-window: past the scan's bound the whole scan stops. A cold Robinhood scan's first provider
+// holds every getLogs past the bound; as a plain rpc_error, each refused 10M-block request was asked as its halves
+// down to the smallest span and then handed whole to the spare in its 2,000-block spans, every one refused at once:
+// thousands of requests' work per refused request, which ran a live cold-then-warm Robinhood run out of its 4 GB heap
+// (2026-11-08 13:5xZ). Now the scan ends at the first refusal past the bound, with no request asked after it.
+test("QE12 a scan held past its bound stops whole: no halves and no spare's spans are asked past it", { timeout: 30_000 }, async () => {
+  const { evmScanAsks } = quoteMod as unknown as { evmScanAsks: () => number };
+  const { pools, logs, req } = qeCase(freshToken(), 0xd00);
+  const base = scanner(RC_HEAD, logs, [], 100_000);
+  let held = 0;
+  let spare = 0;
+  // the first provider answers its head and holds every getLogs until the bound aborts it
+  const first: EvmRpc = (calls, signal) => {
+    if (!calls.some((c) => c.method === "eth_getLogs")) return base(calls);
+    held++;
+    return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason)));
+  };
+  const second: EvmRpc = async (calls) => {
+    if (calls.some((c) => c.method === "eth_getLogs")) spare++;
+    return base(calls);
+  };
+  evmScanBound?.(1_000);
+  const asks0 = evmScanAsks();
+  try {
+    const v = await verdict(evmPoolBuyQuoteWith(req, [chain(pools, 0, RC_HEAD), chain(pools, 1, RC_HEAD)], NOW, [first, second]));
+    const asks = evmScanAsks() - asks0;
+    console.log("QE12", JSON.stringify({ code: (v as { code?: string }).code, held, spare, asks }));
+    assert.equal((v as { code?: string }).code, "rpc_error");
+    assert.ok(held > 0, "the first provider was asked");
+    assert.ok(asks <= 2 * held + 8, `${asks} scan requests asked for ${held} held past the bound`);
+  } finally {
+    evmScanBound?.();
+  }
 });

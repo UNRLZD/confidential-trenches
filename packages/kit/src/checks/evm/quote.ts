@@ -1162,6 +1162,10 @@ export const EVM_SCAN_BOUND_MS = 60_000;
 let scanBoundMs = EVM_SCAN_BOUND_MS;
 /** For the tests: the scan's bound in ms (no argument: EVM_SCAN_BOUND_MS). Not in the index. */
 export const evmScanBound = (ms = EVM_SCAN_BOUND_MS) => void (scanBoundMs = ms);
+/** The scan requests asked of any provider's gate so far, every one counted once whatever its end: for the tests that
+ *  count a scan's work past its bound (not in the index). */
+let scanAsks = 0;
+export const evmScanAsks = (): number => scanAsks;
 /** The wait after a throttle that named no Retry-After: 0.5 s, doubled for each throttle since an answer, to 8 s. */
 const SCAN_BACKOFF_MS = 500;
 /** Where the chain pins a second scan provider (the venue's `scan.spares`, cards evm-scan-second-provider and
@@ -1206,31 +1210,6 @@ class NotHeldYet extends EvmQuoteError {}
  *    alone (one 429 with a Retry-After of 120 s handed Robinhood's spare the whole cold depth);
  *  - one block whose logs its provider does not answer (too_many_pools; `short` in scanPools). */
 class ScanStop extends EvmQuoteError {}
-/** Discovery outside the window (card evm-buy-quote-in-window). A quote's scans may outlast its block: a cold Base
- *  USDC quote's discovery is about 700 getLogs, and base-rpc.publicnode.com answers about 4.5 a second once it limits
- *  (2026-11-08 13:5xZ: four quotes in a row each refused stale_quote at 27-31 s, each keeping more spans). Where an
- *  attempt ends stale_quote at a scan stop and its scans kept new blocks, the quote agrees a fresh block and goes on
- *  from the spans kept: every block it prices at is at most EVM_QUOTE_MAX_AGE_MS old, and the call's scans keep the
- *  one bound, EVM_SCAN_BOUND_MS from the call's start. Any other end, or a stop that kept nothing new, ends the call. */
-async function continued<T>(attempt: (at: (nowMs: number) => number, scanT0: number) => Promise<T>, mono: () => number): Promise<T> {
-  const m0 = mono();
-  const scanT0 = performance.now();
-  for (;;) {
-    const before = scannedBlocks();
-    try {
-      // the device's clock at this attempt: the call's, and the time since its start
-      return await attempt((nowMs) => nowMs + Math.max(0, mono() - m0), scanT0);
-    } catch (e) {
-      if (!(e instanceof ScanStop) || e.code !== "stale_quote" || scannedBlocks() <= before || performance.now() - scanT0 >= scanBoundMs) throw e;
-    }
-  }
-}
-/** The blocks the kept scans hold, every chain's, currency's and kind's. */
-const scannedBlocks = () => {
-  let n = 0;
-  for (const e of SCANS.values()) for (const [a, b] of e.spans) n += b - a + 1;
-  return n;
-};
 /** The scan provider answered, short of the logs: an error in the answer, an HTTP status other than 429 or 5xx, a body
  *  that is not a batch or past its size (BadAnswer). The scan asks its halves on the same provider, never the next. */
 class ScanAnswered extends EvmQuoteError {}
@@ -1318,6 +1297,7 @@ function scanGateOf(parallel: number, untilMs: number, spareNext = false, deadli
   };
   return {
     async ask(rpc, calls, tries, fast = false) {
+      scanAsks++;
       fast &&= spareNext;
       let refused = 0;
       for (let i = 0; ; ) {
@@ -1823,9 +1803,6 @@ const scansOf = (s: EvmPoolVenue["scan"]): EvmRpc[] | undefined =>
 /** evmPoolBuyQuote on the providers `rpcs`, with the device's clock at `nowMs`: what the kit's index exports runs this
  *  with the pinned providers and Date.now(); the tests run it on recorded and planted answers. Not in the index. */
 export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], watch?: EvmHeadWatch, mono: () => number = monotonic): Promise<EvmPoolBuyQuote> {
-  return continued((at, scanT0) => buyQuoteAt(req, rpcsIn, at(nowMs), scan, watch, mono, scanT0), mono);
-}
-async function buyQuoteAt(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, watch: EvmHeadWatch | undefined, mono: () => number, scanT0: number): Promise<EvmPoolBuyQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "the request is an object");
   const { chain, token, amountIn, slippageBps } = req;
@@ -1894,7 +1871,6 @@ async function buyQuoteAt(req: EvmPoolBuyQuoteRequest, rpcsIn: readonly EvmRpc[]
     watch,
     mono,
     start,
-    scanT0,
     // the route's own swap, at the agreed block (its recipient is the block's), in the first round
     atBlock: (b) => {
       fitAt = b.hash;
@@ -2233,9 +2209,6 @@ async function routeSet(a: {
   mono?: (() => number) | undefined;
   /** `mono` at the quote's entry, where `nowMs` was read: a new agreed block's age counts every ms since */
   start: number;
-  /** performance.now() at the call's start: its scans' bound, EVM_SCAN_BOUND_MS, runs from it over every block the call
-   *  agrees (continued) */
-  scanT0?: number;
   /** the caller's reads after the standard pools' (the buy's first-hop reads, in the order its recorded reads hold) */
   beforeFound?: () => void;
   /** called once the block is agreed, before the first round's reads are sent: the caller's reads of that block */
@@ -2362,7 +2335,7 @@ async function routeSet(a: {
   // another behind it has its share of the bound and passes a request it fails to the next, and the last has the whole
   // bound (cards evm-scan-second-provider, evm-rpc-spare-list)
   const scanRpcs = scan === undefined ? [] : typeof scan === "function" ? [scan] : scan;
-  const t0 = a.scanT0 ?? performance.now();
+  const t0 = performance.now();
   const firstOn = (v.scan === undefined ? [] : [v.scan, ...(v.scan.spares ?? [])])
     .slice(0, scanRpcs.length)
     .reduceRight<ScanOn | undefined>((next, c, i) => ({ rpc: scanRpcs[i]!, gate: scanGateOf(c.parallel, t0 + scanBoundMs, next !== undefined, DEADLINE.get(rpcs)), span: c.span, parallel: c.parallel, orSpan: c.orSpan, next }), undefined);
@@ -2990,9 +2963,6 @@ export async function evmPoolSellQuote(req: EvmPoolSellQuoteRequest): Promise<Ev
  *  and `mono`, the monotonic clock of the wait for the buy's block: tests only), and `poolRpcs`, the pool's list W's
  *  releases are read on (by default `rpcsIn`). Not in the index. */
 export async function evmPoolSellQuoteWith(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan?: EvmRpc | readonly EvmRpc[], venues?: EvmPoolVenueList, mono: () => number = monotonic, poolRpcs: readonly EvmRpc[] = rpcsIn): Promise<EvmPoolSellQuote> {
-  return continued((at, scanT0) => sellQuoteAt(req, rpcsIn, at(nowMs), scan, venues, mono, poolRpcs, scanT0), mono);
-}
-async function sellQuoteAt(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc[], nowMs: number, scan: EvmRpc | readonly EvmRpc[] | undefined, venues: EvmPoolVenueList | undefined, mono: () => number, poolRpcs: readonly EvmRpc[], scanT0: number): Promise<EvmPoolSellQuote> {
   const start = mono();
   if (typeof req !== "object" || req === null) return refuse("bad_request", "a request is an object");
   if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");
@@ -3029,7 +2999,7 @@ async function sellQuoteAt(req: EvmPoolSellQuoteRequest, rpcsIn: readonly EvmRpc
   const reads: Read[] = [];
   const factory = v.v3 !== undefined && router !== undefined ? reads.push({ to: v.v3, data: "0x" + SEL_FACTORY }) - 1 : -1;
   const exits = evmSellExits(chain, t, bought, true) ? bought : undefined;
-  const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start, scanT0 });
+  const { block, out, filled: found } = await routeSet({ chain, v, token: t, amountIn, nowMs, rpcs, scan, reads, bought: exits, seen: [], banned, hints: undefined, sell: true, minBlock: boughtBlock, mono, start });
   // W's releases at the agreed block, read beside the rest of the quote and awaited before it is made
   const releasesP = sellReleasesRead(chain, v.pool, lower(w), poolRpcs === rpcsIn ? rpcs : gated(poolRpcs, v.scan?.parallel ?? 2, DEADLINE.get(rpcs)), block, v.maxLag, sent, { token: t, block: boughtBlock }, () => nowMs + Math.max(0, mono() - start));
   releasesP.catch(() => {});

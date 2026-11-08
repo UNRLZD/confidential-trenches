@@ -23,8 +23,8 @@ test("the good answer (the kit's read, from the pool) passes: four pools at 5000
 test("the bad answer (the read sent from another account) fails: OnlyPool at both caps on every provider", () => {
   const r = judge(A.bad);
   assert.equal(r.ok, false);
-  // the swap reads (8), and each chain's quote with no read counted (2; recorded before reads were counted)
-  assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 8 + 2, r.lines.join("\n"));
+  // the swap reads (8), and each chain's quote past the bound with no read counted (2 x 2)
+  assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 8 + 4, r.lines.join("\n"));
   assert.ok(A.bad.swaps.every((s) => s.reads.every((x) => x.cap?.error?.data === "0x4b602735")), "OnlyPool()");
 });
 
@@ -43,7 +43,7 @@ test("planted: a pool past 500000, one provider, a swap that answers nothing, an
   assert.equal(plant((a) => (a.swaps[0].reads[1].low = { error: { code: -32000, message: "gas exhausted" } })), false, "words the kit does not map");
   assert.equal(plant((a) => (a.swaps = a.swaps.filter((s) => s.chain !== "robinhood"))), false, "no Robinhood read");
   assert.equal(plant((a) => (a.quotes = a.quotes.filter((q) => q.chain !== "base"))), false, "no Base quote");
-  assert.equal(plant((a) => (a.quotes[1].ms = 70_001)), false, "a quote past the bound");
+  assert.equal(plant((a) => (a.quotes[1].ms = 60_000)), false, "a quote past the bound");
   assert.equal(plant((a) => (a.quotes[0].reads = 0)), false, "a quote that refused before any read");
   assert.equal(judge({}).ok, false, "an empty answer");
 });

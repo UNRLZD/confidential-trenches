@@ -4,8 +4,7 @@
 // next unsent), and past its block's time plus EVM_QUOTE_MAX_AGE_MS it sends no read or scan request and refuses
 // stale_quote (packages/kit/src/checks/evm/quote.ts). What it proves, and only that: the kit's public evmPoolBuyQuote,
 // run on Node against each chain's pinned public providers for a standard v3 route (WETH to USDC on Base, WETH to USDG
-// on Robinhood, 0.01%), ends within EVM_SCAN_BOUND_MS plus 10 s of its start (EVM_QUOTE_MAX_AGE_MS plus 10 s before card
-// evm-buy-quote-in-window, whose quote goes on at a fresh block while its scans keep new spans), with at most 2,000 HTTP requests
+// on Robinhood, 0.01%), ends within EVM_QUOTE_MAX_AGE_MS plus 10 s of its start, with at most 2,000 HTTP requests
 // counted and printed, after it agreed a block and read at it (an eth_call at that block's hash: a kit that refuses at
 // once, before any read, fails), with a quote above 0 or a refusal the kit names (an EvmQuoteError code). The judge
 // passed a named refusal from its first run, which no quote fitted (cd7daf7b; the card's end state is a quote or a
@@ -21,13 +20,11 @@
 // Runs: once, the kit's buy quote ships in no host's bundle yet: it runs the kit's own quote against the chains' public providers
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { EVM_SCAN_BOUND_MS, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
+import { EVM_QUOTE_MAX_AGE_MS, evmPoolBuyQuote } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-buy-quote-ends-on-node";
-/** The longest a quote may run, from its start: its scans' bound, over every block it agrees (card
- *  evm-buy-quote-in-window: a quote whose scans outlast its block goes on at a fresh one), and 10 s for the requests in
- *  flight at its end. Each block it prices at is still at most EVM_QUOTE_MAX_AGE_MS old (the kit's test, QE10). */
-export const BOUND_MS = EVM_SCAN_BOUND_MS + 10_000;
+/** The longest a quote may run, from its start: the window, and 10 s for the requests in flight at its end */
+export const BOUND_MS = EVM_QUOTE_MAX_AGE_MS + 10_000;
 export const MAX_REQUESTS = 2_000;
 /** The route per chain: [WETH, buys], 0.01%, at the amount ("buys", not "token": gitleaks' generic-api-key rule reads
  *  a "token" key with a hex value as a secret) */
