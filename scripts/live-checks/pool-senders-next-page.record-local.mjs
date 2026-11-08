@@ -4,6 +4,7 @@
 // simulation the way a cluster does for a blockhash it never made (err "BlockhashNotFound") and a blockhash read. Each answer carries the
 // tree's commit in X-Helper-Commit, as server.ts sets it.
 //   node scripts/live-checks/pool-senders-next-page.record-local.mjs <commit> > <file>
+// Runs: once, it records the check's good answer from this tree's helper in process; the check itself runs after every helper deploy
 import { generateKeyPairSync, createPublicKey } from "node:crypto";
 import { solanaPoolSender } from "../../apps/helper/src/pool/solana.ts";
 import { solanaPoolAccount } from "../../packages/kit/src/index.ts";
