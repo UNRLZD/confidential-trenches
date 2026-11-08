@@ -291,6 +291,7 @@ function chain(plant: Plant = {}) {
         if (at !== solanaAta(owner, mint, keys[5]!)) throw new Error("InvalidSeeds");
         if (on.has(at)) continue;
         const r = Number(rentMin(165));
+        if (on.get(payer)!.lamports < r) throw new Error("InsufficientFunds");
         on.set(payer, { ...on.get(payer)!, lamports: on.get(payer)!.lamports - r });
         on.set(at, { owner: keys[5]!, lamports: r, data: mint === SOLANA_SOL_MINT ? nativeAccount(owner, 0n) : new Uint8Array(165) });
         continue;
@@ -1384,8 +1385,9 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
 }
 
 // Card solana-teardown-cashback: W's PumpSwap volume account owed cashback (12,742,862, the mainnet GATRKVEP…'s) after
-// a full sell: the S-5 frame claims it to W's own WSOL account, opened for it and closed to W right after, before the
-// volume close, so the sweep carries the claim into W's next return note and W still ends at 0.
+// a full sell: the teardown's one frame closes W's token account, then claims to W's own WSOL account (opened with
+// that rent, closed to W right after), then closes the volume account, so the sweep carries the claim into W's next
+// return note and W still ends at 0.
 test("a full sell whose PumpSwap volume account is owed cashback: the teardown claims it to W before the close, and the sweep carries it into the pool, W at 0", async () => {
   const CASHBACK = 12_742_862n;
   const back: string[] = [];
@@ -1402,13 +1404,15 @@ test("a full sell whose PumpSwap volume account is owed cashback: the teardown c
   assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), 0n);
   assert.equal(w.c.accounts.get(solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), undefined);
   assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
-  // the sweep: as a full sell's, plus the claim
+  // the sweep: as a full sell's (one teardown frame here, so one frame's fee), plus the claim
   const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
-  const swept = afterSell + BigInt(TOKEN_RENT) + VOLUME_RENT + CASHBACK - 2n * BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH);
+  const swept = afterSell + BigInt(TOKEN_RENT) + VOLUME_RENT + CASHBACK - BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH);
   assert.deepEqual(w.c.deposits[1], { pre: preOf(SECOND(0)), value: swept, sweep: true });
-  // the S-5 frame: compute limit, W's WSOL account opened, the claim, its close to W, then the volume close
-  const s5 = solanaDecodeMessage(w.c.txs.get(back[1]!)!.tx.subarray(65));
-  assert.deepEqual(s5.instructions.map((x) => s5.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]);
+  // the one frame: compute limit, W's token account closed, W's WSOL account opened, the claim, its close to W, then
+  // the volume close; then the sweep
+  assert.equal(back.length, 2);
+  const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
+  assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner, SOLANA_ATA_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]);
   assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
 });
 

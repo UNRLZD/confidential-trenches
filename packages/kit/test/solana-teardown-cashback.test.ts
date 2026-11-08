@@ -33,7 +33,7 @@ import {
   type SolanaTeardownReads,
   type SolanaTeardownSimulation,
 } from "../src/checks/solana/checks.ts";
-import { SOLANA_ATA_PROGRAM, solanaAta } from "../src/checks/solana/message.ts";
+import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage } from "../src/checks/solana/message.ts";
 import { buildSolanaTeardown, simulateSolanaTeardown, solanaCompileV0, type SolanaApiInstruction } from "../src/trade/solana/build.ts";
 import type { SolanaRpc } from "../src/trade/solana/send.ts";
 
@@ -349,5 +349,29 @@ test("the reads: one traded mint's teardown accounts and the wallet fit in one g
   for (const p of [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]) {
     const c = solanaCashbackAccounts(W, p);
     assert.ok(list.includes(c.from) && list.includes(c.to));
+  }
+});
+
+test("funding: a wallet a pool sell left at rent(0) opens its WSOL account with the rent of a close in the same frame: the claim rides after the frame's closes, the owed close after it", () => {
+  // GATRKVEP…'s PumpSwap reads with its pump volume account gone and a token account of the wallet's to close (the
+  // pool sell's own: SPL Token, no tokens, rent 2,039,280); the wallet holds rent(0), 890,880, under one open's rent.
+  const mint = STRANGER;
+  const ata = solanaAta(W, mint, SOLANA_TOKEN_PROGRAM);
+  const tok = tokenAccount(mint, W, 0n);
+  const accounts = { ...ACCOUNTS, [UVA_P]: [null, null] as const, [ata]: [tok, tok] as const };
+  const plan = solanaTeardownPlan(W, accounts);
+  assert.deepEqual(plan.close.map((h) => h.address).sort(), [ata, UVA_A].sort());
+  const frames = buildSolanaTeardown(W, plan, R.chain);
+  assert.equal(frames.length, 1, "the claim in the frame whose close funds its open");
+  // the order, read back from the frame's own message
+  const msg = solanaDecodeMessage(frames[0]!.message);
+  const order = msg.instructions.map((x) => msg.staticKeys[x.programIndex]);
+  assert.deepEqual(order, [SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_ATA_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]);
+  // simulated as the runtime runs it from 890,880: the token close first (+2,039,280), then the open (-2,039,280),
+  // the claim, the unwrap (+2,039,280 + the claim), the volume close: the wallet never goes under 0
+  let lamports = 890_880n - 5_000n;
+  for (const step of [2_039_280n, -2_039_280n, 0n, 2_039_280n + 12_742_862n, plan.close.find((h) => h.address === UVA_A)!.lamports]) {
+    lamports += step;
+    assert.ok(lamports >= 0n);
   }
 });
