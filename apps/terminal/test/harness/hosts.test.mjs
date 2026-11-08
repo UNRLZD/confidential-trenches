@@ -74,12 +74,22 @@ test("every host serves over TLS with a certificate valid for its name, under it
   assert.deepEqual(new Set(server.log.map((e) => e.host)), new Set(Object.values(HOSTS)));
 });
 
-test("an unmapped host, a path out of the build and the _headers file are refused", async () => {
+test("an unmapped host and a path out of the build are refused; the _headers file is never served", async () => {
   // the certificate covers *.ct.test, so the TLS check passes and the server refuses the name
   assert.equal((await get("nothere.ct.test")).status, 421);
   assert.equal((await get(HOSTS.sibling, "/../../harness.mjs")).status, 404);
   assert.equal((await get(HOSTS.sibling, "/..%2F..%2Fharness.mjs")).status, 404);
-  assert.equal((await get(HOSTS.sign, "/_headers")).status, 404);
+  // SIGN_HOST answers a path with no file, /_headers included, with its index (Pages with no 404.html; read live
+  // 8 Nov 07:31Z: /favicon.ico, /_headers and /no-such-path each 200 text/html, the 382-byte index), so the harness does
+  // too (card terminal-harness-sign-spa); the _headers file itself is never served
+  const index = (await get(HOSTS.sign, "/")).body;
+  for (const p of ["/_headers", "/favicon.ico", "/no-such-path"]) {
+    const r = await get(HOSTS.sign, p);
+    assert.equal(r.status, 200, `sign ${p}`);
+    assert.match(r.headers["content-type"] ?? "", /^text\/html/, `sign ${p}`);
+    assert.equal(r.body, index, `sign ${p} is the index`);
+    assert.doesNotMatch(r.body, /^\/\*\s*$/m, `sign ${p} is not the _headers file`);
+  }
   assert.equal((await get(HOSTS.sign, "/%E0%A4%A")).status, 400);
   // a name the certificate does not cover fails the TLS check
   await assert.rejects(get("app.ct.example"), /altnames|Hostname\/IP does not match/);
