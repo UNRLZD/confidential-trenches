@@ -6,6 +6,8 @@ import * as kit from "../src/index.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
 import type { EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
+const { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE } = quoteMod;
+const MULTICALL3_ADDR = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
 export const W = (v: bigint) => v.toString(16).padStart(64, "0");
 export const NATIVE = "0x0000000000000000000000000000000000000000";
@@ -148,7 +150,10 @@ export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmR
       const override = c.params[2] as Record<string, { code: string }> | undefined;
       let out: bigint | null;
       if (to.toLowerCase() === "0xca11bde05977b3631167028862be2a173976ca11") {
-        assert.equal(override, undefined);
+        // every aggregate3 call runs the per-read gas code with the call's gas (card evm-quote-read-gas-starve), and no other
+        // override: the sell's reads have no hook replaced
+        assert.deepEqual(override, { [MULTICALL3_ADDR]: { code: EVM_READ_GAS_CODE } });
+        assert.equal((c.params[0] as { gas?: string }).gas, "0x" + EVM_READ_CALL_GAS.toString(16));
         return { jsonrpc: "2.0", id, result: encodeAggregate(decodeAggregate(data).map(one)) };
       }
       if (override !== undefined) {

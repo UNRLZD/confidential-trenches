@@ -330,7 +330,9 @@ type Read = { to: string; data: string; override?: Record<string, Override> | un
 // a call's sender and gas, with the sale's fees (a sim) or none (tx.gasprice 0: a gas check)
 type SimTx = { from: string; gas: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
 // `overflow`: the revert is SafeCastOverflow (card rh-cold-quote, the X prune)
-type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean; overflow?: true };
+// `gas`: the read failed having used half its gas or more, or was not run for want of it (EVM_READ_GAS_CODE), even when
+// read alone: it is no evidence of a revert, never a partial fill or an overflow, and prices nothing
+type Answer = { kind: "out"; amountOut: bigint } | { kind: "revert"; partial: boolean; overflow?: true; gas?: true };
 // V4Quoter's revert when a hookless hop runs out of liquidity: NotEnoughLiquidity(bytes32 poolId), wrapped in
 // UnexpectedRevertBytes(bytes) (read 2026-11-03 on Base: 1e20 wei into the ETH pool of 0xf6e5…dfe5, 0.3%)
 const NOT_ENOUGH_LIQUIDITY = "7a5ed734";
@@ -389,6 +391,47 @@ const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const SEL_AGGREGATE3 = "82ad56cb"; // aggregate3((address,bool,bytes)[])
 const SEL_ETH_BALANCE = "4d2301cc"; // getEthBalance(address)
 
+// Each read's own gas (card evm-quote-read-gas-starve). Multicall3's aggregate3 gives each read all the gas the call has
+// left (less 1/64), so one heavy read, which a pool built to burn gas makes, starves the reads after it: they fail as if
+// they reverted, and a revert prices its route at nothing (Card 0's money review, finding 5; publicnode and Pocket,
+// 50M caps, answered a starved read with data where blastapi, 550M, answered it empty, Base block 54,819,255). So
+// every aggregate3 call runs this code at Multicall3's address (eth_call's state override), with the call's gas set to
+// EVM_READ_CALL_GAS, under every pinned provider's cap: aggregate3's calldata and answer as Multicall3 has them, each
+// read run with the same gas, L = ((gas at the start - 100,000) / n - 30,000) x 63/64, the per-call gas limit of
+// Uniswap's UniswapInterfaceMulticall (its multicall((address,uint256,bytes)[])), and its success word:
+//   1  the read returned;
+//   0  it reverted having used less than L/2;
+//   2  it failed having used L/2 or more, or was not run because less than L + L/63 + 10,000 gas was left (a provider
+//      that gave the call less gas than it was sent with): a read that may have run out of gas. An out-of-gas frame
+//      inside the read, given all but 1/64 of its caller's gas as the quoters and the PoolManager give it, leaves the
+//      read d/64 of L at most at depth d, so it uses L/2 or more down to a depth of 32;
+// and its return data cut to 96 bytes (a quote's first word, and NotEnoughLiquidity or SafeCastOverflow inside
+// UnexpectedRevertBytes, the 72 bytes ranOut and overflowed read), so no read's answer grows another's memory cost.
+// Multicall3.getEthBalance(address) answers as Multicall3's (BALANCE), any other selector reverts. A read answered 2 in
+// a call of several is read again alone at the same block (readBoth), with all of the call's gas; one answered 2 alone
+// prices nothing (`gas`). Assembled (two-pass, labels as PUSH2) from:
+//   dispatch    selector 4d2301cc: mstore(0, balance(calldataload(4))), return 32; 82ad56cb: aggregate; else revert
+//   aggregate   m[0] = n (1 to 1,024, else revert); revert unless gas >= 100,000 and S = (gas - 100,000) / n >= 30,000;
+//               m[0x20] = L; the answer at 0x100: 0x20, n, n offsets (32n + 192i), n elements of 192 bytes each
+//               (success, 0x40, length, three words); m[0x80] = the read's calldata at 0x140 + 224n
+//   each read   calldatacopy its data to m[0x80]; if gas < L + L/63 + 10,000: success 2, length 0; else
+//               g = gas, ok = call(L, target, 0, data), used = g - gas; success = ok ? 1 : used >= L/2 ? 2 : 0;
+//               length = min(returndatasize, 96), returndatacopy(element + 96, 0, length)
+//   end         return(0x100, 64 + 224n)
+// Run 2026-11-08 16:4xZ (eth_call with code overrides, read only) on base-rpc.publicnode.com, base.api.pocket.network,
+// mainnet.base.org, base-mainnet.public.blastapi.io, rpc.mainnet.chain.robinhood.com, robinhood-rpc.publicnode.com,
+// robinhood.drpc.org, robinhood.api.pocket.network and robinhood.daybreak-rpc.network, the same answers on all nine at
+// 40,000,000 gas: [returns 7, loops forever, returns 7, reverts 0xaa, calls the loop with all its gas then reverts 0xee,
+// returns 7] answered [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7] (through Multicall3 itself the loop and the 0xee read
+// answered 0); 64 reads, the loop first, answered 2 then 63 of 1; the loop alone 2; getEthBalance(0x…dEaD) as
+// Multicall3's; selector 12345678 reverted.
+export const EVM_READ_GAS_CODE =
+  "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d57610178565b506004353160005260206000f35b60243560005260005115610178576104006000511161017857620186a05a1061017857600051620186a05a03048061753011610178576175309003603f0260061c6020526020610100526000516101205260005160e0026101400160805260006040525b600051604051101561016a5760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a1061013d575a606052600060008260805160008735602051f15a60605103906101265760205160011c111560011b61012a565b5060015b3d80606111610137575060605b90610142565b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610091565b60005160e002604001610100f35b600080fd";
+/** The gas every aggregate3 call is sent with: under the 50,000,000 cap of base-rpc.publicnode.com and the Pocket
+ *  gateways (geth and reth cut a call's gas to their cap without an error, review of 2c02f7df). */
+export const EVM_READ_CALL_GAS = 40_000_000n;
+const READ_CALL_GAS_HEX = "0x" + EVM_READ_CALL_GAS.toString(16);
+
 /** aggregate3's calldata: every read with allowFailure, so a reverting quote is an answer, not a failed batch. */
 function aggregate(reads: readonly Read[]): string {
   const elems = reads.map((r) => {
@@ -420,10 +463,12 @@ function unaggregate(a: unknown, n: number, who: string): Answer[] {
   for (let i = 0; i < n; i++) {
     const e = 64 + at(64 + 32 * i);
     const ok = at(e);
-    if ((ok !== 0 && ok !== 1) || at(e + 32) !== 0x40) return refuse("rpc_error", `${who} answered a malformed multicall result`);
+    if ((ok !== 0 && ok !== 1 && ok !== 2) || at(e + 32) !== 0x40) return refuse("rpc_error", `${who} answered a malformed multicall result`);
     const dl = at(e + 64);
     if (e + 96 + dl > len) return refuse("rpc_error", `${who} answered a multicall result outside it`);
-    if (ok === 0) {
+    // a read that may have run out of its gas (EVM_READ_GAS_CODE): no revert, whatever its data
+    if (ok === 2) out.push({ kind: "revert", partial: false, gas: true });
+    else if (ok === 0) {
       const d = r.slice(2 + 2 * (e + 96), 2 + 2 * (e + 96 + dl)).toLowerCase();
       out.push({ kind: "revert", partial: ranOut(d), ...(overflowed(d) ? { overflow: true as const } : {}) });
     }
@@ -485,8 +530,9 @@ const SLOTS_PER_CALL = 500;
  *  aggregate3 calls of the venue's perCall, the grouped reads of each hook in their own aggregate3 calls with that hook's
  *  override alone, any other read with one in its own call, sent in batches of CALLS_PER_BATCH at once; each call and
  *  each batch kept to the venue's maxBytes (a call holding one read past it is sent alone). */
-async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits): Promise<Answer[]> {
-  const perCall = readsOverride ?? lim.perCall;
+async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly Read[], lim: ReadLimits, alone = false): Promise<Answer[]> {
+  // `alone`: each read in its own call (a read answered `gas` in a call of several, read again)
+  const perCall = alone ? 1 : (readsOverride ?? lim.perCall);
   const at = { blockHash: hash, requireCanonical: true };
   const plain = reads.flatMap((r, i) => (r.override === undefined && r.state !== true ? [i] : []));
   const one = (r: Read) => r.override === undefined && r.state === true && r.data.length === 74 && r.data.startsWith("0x" + SEL_EXTSLOAD);
@@ -504,10 +550,10 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     if (r.override !== undefined && r.group !== undefined) append(groups, r.group, i);
   });
   const lone = reads.flatMap((r, i) => (r.override !== undefined && r.group === undefined ? [i] : []));
+  // every aggregate3 call runs EVM_READ_GAS_CODE with EVM_READ_CALL_GAS, beside the hook's override where it has one
   const callOf = (part: number[]): EvmRpcCall => {
     const o = reads[part[0]!]!.override;
-    const p: unknown[] = [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)) }, at];
-    return { method: "eth_call", params: o === undefined ? p : [...p, o] };
+    return { method: "eth_call", params: [{ to: MULTICALL3, data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o, [MULTICALL3]: { code: EVM_READ_GAS_CODE } }] };
   };
   // a part whose call is past maxBytes is sent as its halves, down to one read
   const parts: number[][] = [];
@@ -519,7 +565,7 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     } else parts.push(part);
   };
   for (let k = 0; k < plain.length; k += perCall) fit(plain.slice(k, k + perCall));
-  for (let k = 0; k < state.length; k += STATE_READS_PER_CALL) fit(state.slice(k, k + STATE_READS_PER_CALL));
+  for (let k = 0; k < state.length; k += alone ? 1 : STATE_READS_PER_CALL) fit(state.slice(k, k + (alone ? 1 : STATE_READS_PER_CALL)));
   for (const g of groups.values()) for (let k = 0; k < g.length; k += perCall) fit(g.slice(k, k + perCall));
   const calls: EvmRpcCall[] = [
     ...parts.map(callOf),
@@ -536,6 +582,8 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
     ...lone.map((i) => (raw: unknown, who: string): [number, Answer][] => [[i, answerOf(raw, who, false, reads[i]!.oog === true) as Answer]]),
   ];
   const same = (a: Answer, b: Answer) => (a.kind === "out" ? b.kind === "out" && a.amountOut === b.amountOut : b.kind === "revert" && a.partial === b.partial && a.overflow === b.overflow);
+  // a read that may have run out of gas on one provider and reverted on another is not the same answer
+  const agreed = (a: Answer, b: Answer) => same(a, b) && (a.kind === "out" || a.gas === (b as { gas?: true }).gas);
   // Each batch is agreed on its own (card evm-buy-quote-ends-on-node): its two answers from the first two providers,
   // and the next provider asked only for a batch whose own answer is late or failed. Agreed a round at a time, one slow
   // batch sent the whole round to the next spare: a cold Robinhood WETH-USDG quote asked each of its 4,130 reads 5.3
@@ -572,8 +620,8 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
       const { a } = await agreeing(
         rpcs,
         answersOf,
-        (x, y) => x.length === y.length && x.every(([i, v], k) => i === y[k]![0] && same(v, y[k]![1])),
-        (x, y) => refuse("rpc_disagree", `the providers answer read ${x.find(([, v], k) => !same(v, y[k]![1]))?.[0] ?? -1} differently at block ${hash}`),
+        (x, y) => x.length === y.length && x.every(([i, v], k) => i === y[k]![0] && agreed(v, y[k]![1])),
+        (x, y) => refuse("rpc_disagree", `the providers answer read ${x.find(([, v], k) => !agreed(v, y[k]![1]))?.[0] ?? -1} differently at block ${hash}`),
         true,
         undefined,
         true,
@@ -582,6 +630,15 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
       for (const [i, v] of a) all[i] = v;
     }),
   );
+  // a read that may have run out of gas in a call of several (EVM_READ_GAS_CODE's 2) is read again alone, at the same
+  // block, with all of a call's gas: no read is priced on gas another read in its call took (card
+  // evm-quote-read-gas-starve). One answered 2 alone keeps `gas` and prices nothing, and a read alone is never read again
+  const shared = new Set(parts.flatMap((part) => (part.length > 1 ? part : [])));
+  const again = reads.flatMap((_, i) => (shared.has(i) && (all[i] as { gas?: true }).gas === true ? [i] : []));
+  if (!alone && again.length > 0) {
+    const a = await readBoth(rpcs, hash, again.map((i) => reads[i]!), lim, true);
+    again.forEach((i, k) => (all[i] = a[k]!));
+  }
   return all;
 }
 
@@ -1932,6 +1989,7 @@ export async function evmPoolBuyQuoteWith(req: EvmPoolBuyQuoteRequest, rpcsIn: r
       const q = out(main);
       const m = answer(main);
       if (m.kind === "revert" && m.partial) return refuse("partial_fill", "a hookless hop runs out of liquidity (NotEnoughLiquidity)");
+      if (m.kind === "revert" && m.gas === true) return refuse("no_quote", `the route's quote runs out of its gas read alone (${EVM_READ_CALL_GAS} gas a call)`);
       if (q === null || q === 0n) return refuse("no_quote", "the route reverts or quotes nothing");
       const q2 = out(twice);
       if (q2 !== null && q2 <= q) return refuse("partial_fill", `twice the amount quotes ${q2}, not more than ${q}: a pool runs out`);

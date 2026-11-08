@@ -11,7 +11,7 @@ import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, evmProviders, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
-import { gasRoundAnswers } from "./evm-quote-gas-fx.ts";
+import { asRecorded, gasRoundAnswers } from "./evm-quote-gas-fx.ts";
 // the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
 // for call: these replays send 6 a call (Robinhood's venue sends 64, card evm-buy-quote-in-window: QE9)
 evmReadsPerCall(6);
@@ -48,7 +48,8 @@ const byCall = (ex: Exchange[], calls: readonly EvmRpcCall[]): Answer[] | undefi
   }
   return out;
 };
-const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (calls) => {
+const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (sent) => {
+  const calls = asRecorded(sent);
   const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
   const a = e !== undefined ? structuredClone(e.answers) : (structuredClone(byCall(ex, calls)) ?? (gasRoundAnswers(ex, calls) as Answer[] | undefined));
   if (a === undefined) throw new Error("no recorded answer for these calls");
