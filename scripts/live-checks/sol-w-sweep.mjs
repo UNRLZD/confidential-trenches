@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Live check of card sol-w-sweep on SIGN_HOST (https://sign.confidential.unrealized.trade). The signing page's pool sell
+// Live check of card sol-w-sweep on SIGN_HOST (https://confidential.unrealized.trade). The signing page's pool sell
 // (packages/signpage/src/pool-sell.ts, checked by rules/pool.ts) empties a fresh Solana wallet W into the user's pool
 // balance, so what SIGN_HOST serves is what a device signs. What it proves, and only that: the served /app.js is the one
 // index.html pins (its sha384), and its text carries the card's rules, each found by a mark of the bundle's shape (the
@@ -25,7 +25,7 @@ import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const KEY = "sol-w-sweep";
-export const SIGN = "https://sign.confidential.unrealized.trade";
+export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name
