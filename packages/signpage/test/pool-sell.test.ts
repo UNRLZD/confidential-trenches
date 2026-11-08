@@ -1755,22 +1755,23 @@ test("a rent back that faults on every load keeps W's record: no pass bound, W's
   assert.ok(w.owed.has(W.address));
 });
 
-// The review of c1fd2d20, probe 2: one reader's word dropped W. The page's holdings (the helper's one-reader route) show
-// W holding another token (a broken-in helper, an airdrop of any mint): the pass ends "holds", and a W under the floor
-// was dropped after one load. Every end but "nothing" (both RPCs reading W empty) keeps the record.
-test("a W the page's holdings show holding another token keeps its record: one reader's word never drops it", async () => {
+// The review of c1fd2d20, probe 2: one reader's word dropped W. Review 6 of 13898c19, F2: the page's holdings (the
+// helper's one-reader route) are no part of the pass, so their word on another token (a broken-in helper, an airdrop
+// of any mint) neither holds W nor drops it: the pass runs on both RPCs' reads of W, and every end but "nothing" (both
+// RPCs reading W empty) keeps the record.
+test("a W the page's holdings show holding another token runs its pass on W's own reads: the floor end as without it, the record kept", async () => {
   const lamports = 1_493_440n;
   const { amount } = await amountFor(5_800_000n);
   const w = await world({ held: amount, lamports: Number(lamports), ataLamports: TOKEN_RENT }, [wallet(amount)]);
   const a = await runPoolSell(w.host, { ...ASK, amount });
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.told.at(-1)?.state, "floor", JSON.stringify(w.told.at(-1)));
   const spam = "So11111111111111111111111111111111111111112";
   const lying: PoolSellHost = { ...w.host, wallets: async () => [{ ...wallet(amount), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }], [spam, { amount: 1n, frozen: false }]]), unreadable: [] } }] };
-  await resumeRentBacks(lying, fakeLocks());
-  assert.equal(w.told.at(-1)?.state, "holds");
-  assert.ok(w.owed.has(W.address), "W's record kept");
+  const told = w.told.length;
   for (let i = 0; i < 3; i++) await resumeRentBacks(lying, fakeLocks());
-  assert.ok(w.owed.has(W.address));
+  assert.deepEqual(w.told.slice(told).filter((t) => t.state === "holds"), [], "the helper's word held W");
+  assert.ok(w.owed.has(W.address), "W's record kept");
 });
 
 // Review 2 L4 of 911d7e25: RPC B reads W's two volume accounts owed claims until the sell lands, the chain owing none:
@@ -2056,17 +2057,23 @@ test("a partial sell closes nothing and sweeps nothing: W keeps its token accoun
   assert.deepEqual((await ours(w.ns)).map((n) => n.ref), [RETURN]);
 });
 
-test("a full sell from a W that holds another token closes nothing and sweeps nothing: what that token's sell needs stays on W", async () => {
-  const back: string[] = [];
-  const other = "So11111111111111111111111111111111111111112";
+// Review 6 of 13898c19, F2: a mint the device never traded on W never holds the sweep back. Its account is left as
+// it is (no burn, no close: its tokens stay W's under the 12 words), and W's SOL is swept as usual.
+test("a full sell from a W that also holds a mint it never traded: that account untouched, the traded one closed, W swept to 0", async () => {
+  const other = VF.pumpswap.mint;
+  const at = solanaAta(W.address, other, TOKEN_PROGRAM);
   const holding: BuyWallet = { ...wallet(AMOUNT), holdings: { native: 0n, tokens: new Map([[MINT, { amount: AMOUNT, frozen: false }], [other, { amount: 5n, frozen: false }]]), unreadable: [] } };
   const w = await world({ ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_PROGRAM }] }, [holding]);
-  w.host.back = (s) => void back.push(s);
+  const before = { owner: TOKEN_PROGRAM, lamports: TOKEN_RENT, data: tokenAccount(5n, 1, other) };
+  w.c.accounts.set(at, before);
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled");
-  assert.deepEqual(back, []);
-  assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), true);
-  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 0);
+  assert.deepEqual(w.c.accounts.get(at), before, "the never-traded mint's account as it was");
+  assert.deepEqual(w.told.filter((t) => t.step === "rent_back").map((t) => t.state), ["sent"]);
+  assert.equal(w.c.accounts.has(ATA), false);
+  assert.equal(w.c.accounts.has(solanaVolumeAccumulator(W.address, SOLANA_PUMP_PROGRAM)), false);
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1, "W swept");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
 });
 
 test("the sweep's rule: W the only signer, the deposit alone, its value exactly W's lamports less the fee and the deposit's rents, at least the pool's least deposit", async () => {
@@ -2606,12 +2613,13 @@ test("M1: a plan refusal both RPCs read alike ends the pass at once, refused, W 
   assert.deepEqual(both.told.filter((t) => t.state === "fault"), [], "no try again");
   assert.equal(both.told.at(-1)?.state, "refused", JSON.stringify(both.told));
   assert.match(both.told.at(-1)!.detail, /is not the wallet's/);
-  // the sell's own pass stores what W read as; the next load reads the same and runs no pass
+  // the sell's own pass stores what W read as; every next load reads the same and runs no pass (review 6 of 13898c19,
+  // F2: the page's holdings, which differ from the sell's, are no part of it)
   const told = both.told.length;
-  await resumeRentBacks(loadedOf(both), fakeLocks());
   assert.equal(typeof both.owed.get(W.address)?.seen, "string");
   await resumeRentBacks(loadedOf(both), fakeLocks());
-  assert.equal(both.told.length, told + 1, JSON.stringify(both.told.slice(told)));
+  await resumeRentBacks(loadedOf(both), fakeLocks());
+  assert.equal(both.told.length, told, JSON.stringify(both.told.slice(told)));
   const one = await world({ ataLamports: TOKEN_RENT, mapOn: stranger(1) });
   await runPoolSell(one.host, ASK);
   assert.ok(one.told.filter((t) => t.state === "fault").length > 1, JSON.stringify(one.told.slice(0, 3)));
@@ -2700,18 +2708,22 @@ test("L3: a load where both RPCs read another rent runs the floor W's pass again
   assert.ok(w.told.length > told, "the rent the floor end was priced at changed, and no pass ran");
 });
 
-test("L4 B2: a helper's token W turns out not to hold, then an honest helper: the pass runs (PROBE-3)", async () => {
+// Review 6 of 13898c19, F2: the helper's word on W's tokens decides nothing, so it is no part of what W reads as: a load
+// after a floor end, the page's holdings now showing a token, runs no pass; W's own reads changing runs one.
+test("L4 B2: the page's holdings changing alone runs no pass after a floor end; W's own reads changing does", async () => {
   const { amount } = await amountFor(5_800_000n);
   const w = await world({ held: amount, lamports: 1_493_440, ataLamports: TOKEN_RENT }, [wallet(amount)]);
   await runPoolSell(w.host, { ...ASK, amount });
+  assert.equal(w.told.at(-1)?.state, "floor");
   const spam = "So11111111111111111111111111111111111111112";
   const holds = (extra: boolean): PoolSellHost => ({ ...w.host, wallets: async () => [{ ...wallet(amount), holdings: { native: 1n, tokens: new Map([[MINT, { amount: 0n, frozen: false }], ...(extra ? [[spam, { amount: 1n, frozen: false }] as const] : [])]), unreadable: [] } }] });
-  await resumeRentBacks(holds(true), fakeLocks());
-  assert.equal(w.told.at(-1)?.state, "holds");
-  const told = w.told.length;
   await resumeRentBacks(holds(false), fakeLocks());
-  assert.ok(w.told.length > told, "the helper's word changed and no pass ran");
-  assert.equal(w.told.at(-1)?.state, "floor");
+  const told = w.told.length;
+  await resumeRentBacks(holds(true), fakeLocks());
+  assert.equal(w.told.length, told, "a pass ran on the helper's word alone");
+  w.c.accounts.set(W.address, { ...w.c.accounts.get(W.address)!, lamports: w.c.accounts.get(W.address)!.lamports + 1 });
+  await resumeRentBacks(holds(true), fakeLocks());
+  assert.ok(w.told.length > told, "W's lamports changed and no pass ran");
 });
 
 test("L4 A10: RPC A alone reads W at 0 at the sweep: a fault, the record kept", async () => {
