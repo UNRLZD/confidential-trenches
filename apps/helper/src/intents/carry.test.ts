@@ -1310,6 +1310,10 @@ test("PROBE-7: a receiver registration one lookup reads ran, while the receiver 
   await s.carry.idle();
   assert.deepEqual(s.r.sent.map((x) => x.action.method), ["storage_deposit"], "no execute_intents");
   assert.equal(s.store.signer(u).registration?.state, "pending", "never landed on one lookup's word");
+  // a retry within the settle time: it may still read registered, so in flight, nothing paid
+  s.clock.ms = NOW + 1_000;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near")))), "in_flight");
+  assert.equal(s.r.sent.length, 1);
   // past the settle time still unregistered: a failure, the reserved slot back, no strike; free for a new one
   s.clock.ms = NOW + OWN_SETTLE_MS + 1;
   assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("fresh.near"), { deadline: "2026-11-07T18:10:00.000Z" }))), "registration_failed");
@@ -1367,6 +1371,7 @@ test("survivor pins: two intents at once to one unregistered receiver pay one st
   assert.equal(code(await one), "sent");
   await s.carry.idle();
   assert.equal(s.r.sent.filter((x) => x.action.method === "storage_deposit").length, 1);
+  assert.equal(s.store.signer(u).sent, s.r.sent.length, "slots: the registration's and its intent's, as signed");
   // another token to U itself: U's own on USDC does not cover it; that token's registration is not ours to pay
   s.chain.storage.set(`other.near/${u}`, "null");
   const a = await s.carry.carry(signedIntent(u, { intent: "ft_withdraw", token: "other.near", receiver_id: u, amount: "5" }));
