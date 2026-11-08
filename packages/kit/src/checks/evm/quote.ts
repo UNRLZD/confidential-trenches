@@ -348,7 +348,10 @@ const overflowed = (d: string) =>
 // MemoryOutOfGas "out of gas: gas exhausted during memory expansion: {0}" (:721), PrecompileOutOfGas "out of gas: gas
 // exhausted during precompiled contract execution: {0}" (:728), InvalidOperandOutOfGas "out of gas: invalid operand to
 // an opcode: {0}" (:732); geth's ErrOutOfGas "out of gas" (go-ethereum master, core/vm/errors.go:27)
-export const OUT_OF_GAS_WORDS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
+const OUT_OF_GAS_WORDS = /^out of gas(: (gas required exceeds:?|gas exhausted during memory expansion:|gas exhausted during precompiled contract execution:|invalid operand to an opcode:) \d+)?$/i;
+/** True when an eth_call's error message is one of the out-of-gas words above (geth's and reth's), which the buy quote
+ *  reads as a swap that does not fit; a function, not the pattern, so the kit's frozen exports hold nothing rewritable */
+export const evmIsOutOfGas = (message: string): boolean => typeof message === "string" && OUT_OF_GAS_WORDS.test(message);
 
 /** One provider's answer to one eth_call: the quote's first word, a revert, or a refusal (`raw`: the whole result). */
 function answerOf(a: unknown, who: string, raw = false, oog = false): Answer | string {

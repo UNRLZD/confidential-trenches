@@ -10,7 +10,7 @@
 //     block: the pool's own buySwap through the pinned v3 adapter, from the pool, to the block's fresh recipient, the
 //     pool's balance set to the amount, its execution capped at 476,190: both providers answer a result above 0 (the
 //     route fits), and the same read capped at 20,000 answers out of gas in words the kit maps to "does not fit"
-//     (the kit's EVM_OUT_OF_GAS_WORDS, its answerOf's), never another error the kit would refuse on.
+//     (the kit's own evmIsOutOfGas, its answerOf's words), never another error the kit would refuse on.
 // Nothing deployed quotes a buy yet: the signing page's bundle carries no EVM buy quote (build-app at 87f280e2 matches a
 // fresh build with this card in it). The kit's public buy quote is not run here: on Node it does not end (it asked 583
 // requests in 45 s on Base before this card too, at 7b4e5113), an open finding. That the floor refuses, names the
@@ -22,14 +22,12 @@
 // Runs: once, it reads what a host deploy cannot change: the pinned pools' BUY_SWAP_GAS (a pool deploy) and the providers' answers to the kit's swap read (the kit's buy quote ships in no host's bundle yet)
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { EVM_OUT_OF_GAS_WORDS, evmBuySwapFitCall, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmBuySwapFitCall, evmIsOutOfGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-buy-gas-floor";
 /** BUY_SWAP_GAS() (PrivacyPoolSimple.sol) and buySwap((address,bytes,uint256,address),address,uint256) */
 const SEL_GAS = "0xa27a797e";
 const FLOOR = "0x" + (500_000).toString(16).padStart(64, "0");
-/** the kit's own out-of-gas words (geth's and reth's), imported so the two cannot drift */
-const OUT_OF_GAS = EVM_OUT_OF_GAS_WORDS;
 const CAP = 476_190n;
 /** A standard v3 route per mainnet chain: [WETH, buys], 0.01%, at the amount (test/evm-quote-record.ts's cases; "buys",
  *  not "token": gitleaks' generic-api-key rule reads a "token" key with a hex value as a secret) */
@@ -98,7 +96,7 @@ export function judge(a) {
       const fits = typeof r.cap === "string" && /^0x[0-9a-f]{64}$/i.test(r.cap) && BigInt(r.cap) > 0n;
       say(fits, `${chain} ${r.provider}: the swap at the cap ${fits ? `fits, ${BigInt(r.cap)} out` : `does not fit: ${JSON.stringify(r.cap).slice(0, 120)}`}`);
       const m = r.low?.error?.message;
-      const oog = typeof m === "string" && OUT_OF_GAS.test(m);
+      const oog = typeof m === "string" && evmIsOutOfGas(m);
       say(oog, `${chain} ${r.provider}: the swap at 20,000 ${oog ? `runs out of gas in words the kit maps ("${m}")` : `answers what the kit would refuse on: ${JSON.stringify(r.low).slice(0, 120)}`}`);
     }
   }
