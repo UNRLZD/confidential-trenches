@@ -19,9 +19,9 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
-import { SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
-import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolBuySellNeed, solanaPoolFee, solanaPoolNextPage, solanaPoolPage, solanaPoolSellNeed, solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_ATA_PROGRAM, solanaAta, solanaDecodeMessage, solanaProgramAddress } from "../../kit/src/checks/solana/message.ts";
+import { SOLANA_CLAIM_CASHBACK, SOLANA_CLOSE_VOLUME_ACCUMULATOR, SOLANA_COMPUTE_BUDGET_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_PUMP_PROGRAM, SOLANA_SOL_MINT, SOLANA_TOKEN_2022_PROGRAM as TOKEN_2022, SOLANA_TOKEN_PROGRAM, solanaTeardownAddresses, solanaVolumeAccumulator } from "../../kit/src/checks/solana/checks.ts";
+import { readSolanaPoolBuyVenue, solanaPoolAccount, solanaPoolFee, solanaPoolPage, solanaPoolSellNeed, solanaRentMin, solanaPoolBuySellNeed, solanaPoolNextPage } from "../../kit/src/trade/solana/pool-buy.ts";
 import { readSolanaReference } from "../../kit/src/trade/solana/pool.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pairDown } from "./outage.ts";
@@ -82,6 +82,16 @@ for (const v of ["pump", "pumpswap"] as const) {
 }
 
 type Acc = { owner: string; lamports: number; data: Uint8Array };
+/** A native (WSOL) SPL Token account of `owner` holding `amount` wrapped. */
+const nativeAccount = (owner: string, amount: bigint): Uint8Array => {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(SOLANA_SOL_MINT), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = 1;
+  new DataView(d.buffer).setUint32(109, 1, true);
+  return d;
+};
 const tokenAccount = (amount: bigint, state = 1, mint = MINT): Uint8Array => {
   const d = new Uint8Array(165);
   d.set(base58.decode(mint), 0);
@@ -145,7 +155,13 @@ type Plant = {
   ataLamports?: number;
   /** W's volume accounts the buy made, under each pump program named, at rent(137): owing nothing, or `owed` (its
    *  needs_claim byte set: incentive tokens to claim, so pump keeps it open) */
-  volumes?: { program: string; owed?: boolean; unsettled?: boolean }[];
+  volumes?: { program: string; owed?: boolean; unsettled?: boolean; cashback?: bigint }[];
+  /** PumpSwap's claim_cashback fails as the program refuses it (review L2 of 5592a871: cashback switched off, a layout
+   *  the program no longer takes) */
+  claimFails?: boolean;
+  /** Provider B alone errs on the frame carrying PumpSwap's claim_cashback, its first `n` simulations of it (review M1
+   *  of 11c963f9: a lagging backend, a stale balancer, one hostile provider) */
+  claimErrOnB?: number;
   /** Provider B throttled once the sell has landed (the devnet run at 0068524a: onfinality's HTTP 429s, each call failing
    *  after page-rpc's own retries): from the first read of W's token account ("read") or the first teardown simulation
    *  ("simulate"), B's next `n` calls fail as the page's RPC fails them */
@@ -208,7 +224,14 @@ function chain(plant: Plant = {}) {
     if (vol.owed) d[40] = 1;
     // current_sol_volume @57: volume traded and not yet settled into the accumulator (pump keeps the account open)
     if (vol.unsettled) new DataView(d.buffer).setBigUint64(57, 1n, true);
-    accounts.set(solanaVolumeAccumulator(W.address, vol.program), { owner: vol.program, lamports: Number(solanaRentMin(rent, 137)), data: d });
+    const uva = solanaVolumeAccumulator(W.address, vol.program);
+    // PumpSwap cashback owed (card solana-teardown-cashback): cashback_earned @74, its WSOL in the account's own WSOL
+    // account, a native SPL Token account of the volume account holding it on top of its rent
+    if (vol.cashback !== undefined && vol.program === SOLANA_PUMP_AMM_PROGRAM) {
+      new DataView(d.buffer).setBigUint64(74, vol.cashback, true);
+      accounts.set(solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM), { owner: SOLANA_TOKEN_PROGRAM, lamports: Number(rentMin(165) + vol.cashback), data: nativeAccount(uva, vol.cashback) });
+    }
+    accounts.set(uva, { owner: vol.program, lamports: Number(solanaRentMin(rent, 137)), data: d });
   }
   // W at 0 lamports has no account
   if (plant.lamports !== 0) accounts.set(W.address, { owner: "11111111111111111111111111111111", lamports: plant.lamports ?? ENOUGH, data: new Uint8Array(0) });
@@ -254,6 +277,7 @@ function chain(plant: Plant = {}) {
    *  sol-buy-rent-back: a transaction of the deposit alone). */
   const deposits: { pre: bigint; value: bigint; sweep: boolean }[] = [];
   let throttled = 0;
+  let claimErred = 0;
   let wrongDone = false;
   let insertDone = false;
   let tearFailed = false;
@@ -280,10 +304,40 @@ function chain(plant: Plant = {}) {
       if (program === SOLANA_COMPUTE_BUDGET_PROGRAM) continue;
       let close: string;
       let to: string;
+      if (program === SOLANA_ATA_PROGRAM && ix.data.length === 1 && ix.data[0] === 1) {
+        // CreateIdempotent: the payer funds a token account of the owner's at the associated address
+        const [payer, at, owner, mint] = keys as [string, string, string, string];
+        if (at !== solanaAta(owner, mint, keys[5]!)) throw new Error("InvalidSeeds");
+        if (on.has(at)) continue;
+        const r = Number(rentMin(165));
+        if (on.get(payer)!.lamports < r) throw new Error("InsufficientFunds");
+        on.set(payer, { ...on.get(payer)!, lamports: on.get(payer)!.lamports - r });
+        on.set(at, { owner: keys[5]!, lamports: r, data: mint === SOLANA_SOL_MINT ? nativeAccount(owner, 0n) : new Uint8Array(165) });
+        continue;
+      }
+      if (program === SOLANA_PUMP_AMM_PROGRAM && ix.data.every((b, i) => b === SOLANA_CLAIM_CASHBACK[i]) && ix.data.length === 8) {
+        // claim_cashback: what the volume account owes, from its WSOL account to the user's (which must exist)
+        const [user, uva, , , from, to2] = keys as [string, string, string, string, string, string];
+        const u = on.get(uva)!;
+        const owed = new DataView(u.data.buffer).getBigUint64(74, true) - new DataView(u.data.buffer).getBigUint64(82, true);
+        const f = on.get(from);
+        const t = on.get(to2);
+        if (uva !== solanaVolumeAccumulator(user, SOLANA_PUMP_AMM_PROGRAM) || from !== solanaAta(uva, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM) || to2 !== solanaAta(user, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)) throw new Error("ConstraintSeeds");
+        if (!t || !f) throw new Error("AccountNotInitialized");
+        if (plant.claimFails) throw new Error("CashbackDisabled");
+        const ud = Uint8Array.from(u.data);
+        new DataView(ud.buffer).setBigUint64(82, new DataView(ud.buffer).getBigUint64(74, true), true);
+        on.set(uva, { ...u, data: ud });
+        const move = (a: Acc, by: bigint): Acc => { const d = Uint8Array.from(a.data); const dv = new DataView(d.buffer); dv.setBigUint64(64, dv.getBigUint64(64, true) + by, true); return { ...a, lamports: a.lamports + Number(by), data: d }; };
+        on.set(from, move(f, -owed));
+        on.set(to2, move(t, owed));
+        continue;
+      }
       if ((program === SOLANA_TOKEN_PROGRAM || program === TOKEN_2022) && ix.data.length === 1 && ix.data[0] === 9) {
         [close, to] = [keys[0]!, keys[1]!];
         const a = on.get(close);
-        if (!a || new DataView(a.data.buffer, a.data.byteOffset + 64, 8).getBigUint64(0, true) !== 0n) throw new Error("NonNativeHasBalance");
+        const native = a && new DataView(a.data.buffer, a.data.byteOffset + 109, 4).getUint32(0, true) === 1;
+        if (!a || (!native && new DataView(a.data.buffer, a.data.byteOffset + 64, 8).getBigUint64(0, true) !== 0n)) throw new Error("NonNativeHasBalance");
       } else if ((program === SOLANA_PUMP_PROGRAM || program === SOLANA_PUMP_AMM_PROGRAM) && ix.data.every((b, i) => b === SOLANA_CLOSE_VOLUME_ACCUMULATOR[i]) && ix.data.length === 8) {
         [close, to] = [keys[1]!, keys[0]!];
         if (keys[0] !== signer || on.get(close)?.owner !== program) throw new Error("ConstraintSeeds");
@@ -443,6 +497,13 @@ function chain(plant: Plant = {}) {
           assert.deepEqual(tx.subarray(1, 65), new Uint8Array(64), "simulated unsigned");
           try {
             if (p === 1 && plant.simFailOn1) throw new Error("InsufficientFunds");
+            if (p === 1 && claimErred < (plant.claimErrOnB ?? 0)) {
+              const sm = solanaDecodeMessage(tx.subarray(65));
+              if (sm.instructions.some((x) => sm.staticKeys[x.programIndex] === SOLANA_PUMP_AMM_PROGRAM && x.data.length === 8 && x.data.every((b, i) => b === SOLANA_CLAIM_CASHBACK[i]))) {
+                claimErred++;
+                throw new Error("BlockhashNotFound");
+              }
+            }
             const after = apply(tx, true);
             const want = (params[1] as { accounts?: { addresses: string[] } }).accounts?.addresses;
             if (want && after) {
@@ -1380,6 +1441,89 @@ for (const [venue, volume] of [["pump", SOLANA_PUMP_PROGRAM], ["pumpswap", SOLAN
     assert.equal(back.length, 3, "nothing more sent");
   });
 }
+
+// Card solana-teardown-cashback: W's PumpSwap volume account owed cashback (12,742,862, the mainnet GATRKVEP…'s) after
+// a full sell: the teardown's one frame closes W's token account, then claims to W's own WSOL account (opened with
+// that rent, closed to W right after), then closes the volume account, so the sweep carries the claim into W's next
+// return note and W still ends at 0.
+test("a full sell whose PumpSwap volume account is owed cashback: the teardown claims it to W before the close, and the sweep carries it into the pool, W at 0", async () => {
+  const CASHBACK = 12_742_862n;
+  const back: string[] = [];
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }] });
+  w.host.back = (s) => void back.push(s);
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const source = solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sell = w.c.deposits[0]!;
+  // the volume account closed, its WSOL account left with its rent alone, W's own WSOL account opened and closed
+  assert.equal(w.c.accounts.get(vol), undefined);
+  assert.equal(w.c.accounts.get(source)?.lamports, Number(rentMin(165)));
+  assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), 0n);
+  assert.equal(w.c.accounts.get(solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), undefined);
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0);
+  // the sweep: as a full sell's (one teardown frame here, so one frame's fee), plus the claim
+  const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  const swept = afterSell + BigInt(TOKEN_RENT) + VOLUME_RENT + CASHBACK - BigInt(FEE) - (BigInt(FEE) + rentMin(17) + GROWTH);
+  assert.deepEqual(w.c.deposits[1], { pre: preOf(SECOND(0)), value: swept, sweep: true });
+  // the one frame: compute limit, W's token account closed, W's WSOL account opened, the claim, its close to W, then
+  // the volume close; then the sweep
+  assert.equal(back.length, 2);
+  const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
+  assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner, SOLANA_ATA_PROGRAM, SOLANA_PUMP_AMM_PROGRAM, SOLANA_TOKEN_PROGRAM, SOLANA_PUMP_AMM_PROGRAM]);
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:sent"]);
+});
+
+// Review L2 of 5592a871: the claim rides in the teardown's last frame and the verdict covers every frame, so a claim
+// that does not simulate refused the whole teardown, W's token account's close with it. Planned again with claims off,
+// W's token account still closes to W, and the owed volume account stays open, its cashback in its own WSOL account and
+// the reason told; nothing is swept, so W keeps the fee to claim it later (review L4 of 0068524a). Review M1 of
+// 11c963f9: W stays owed ("owed", the record kept), so a later pass claims it and sweeps; at 11c963f9 the rent back
+// ended "kept" and the record was dropped, so nothing ever claimed it.
+test("a full sell whose PumpSwap cashback claim does not simulate: planned again with claims off, W's token account still closes to W, the owed volume account stays open with its cashback and the reason, nothing swept, W owed for a later pass", async () => {
+  const CASHBACK = 12_742_862n;
+  const back: string[] = [];
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }], claimFails: true });
+  w.host.back = (s) => void back.push(s);
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const source = solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM);
+  const before = w.c.accounts.get(vol)!.lamports;
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const sell = w.c.deposits[0]!;
+  // W's token account closed to W; the volume account and its cashback untouched; W's own WSOL account never opened
+  assert.equal(w.c.accounts.get(solanaAta(W.address, VF.pumpswap.mint, VF.pumpswap.mintRead.owner)), undefined, "W's token account closed");
+  assert.equal(w.c.accounts.get(vol)?.lamports, before);
+  assert.equal(new DataView(w.c.accounts.get(source)!.data.buffer).getBigUint64(64, true), CASHBACK);
+  assert.equal(w.c.accounts.get(solanaAta(W.address, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM)), undefined);
+  // one frame, the compute limit and the token close alone; W keeps what it held plus that rent less the frame's fee
+  assert.equal(back.length, 1);
+  const f = solanaDecodeMessage(w.c.txs.get(back[0]!)!.tx.subarray(65));
+  assert.deepEqual(f.instructions.map((x) => f.staticKeys[x.programIndex]), [SOLANA_COMPUTE_BUDGET_PROGRAM, VF.pumpswap.mintRead.owner]);
+  const afterSell = BigInt(ENOUGH) + VF.pumpswap.minOut - sell.value - BigInt(FEE) - rentMin(17) - GROWTH;
+  assert.equal(BigInt(w.c.accounts.get(W.address)?.lamports ?? 0), afterSell + BigInt(TOKEN_RENT) - BigInt(FEE));
+  assert.equal(w.c.deposits.length, 1, "nothing swept");
+  assert.deepEqual(w.told.map((t) => `${t.step}:${t.state}`), ["rent_back:owed"]);
+  assert.match(w.told[0]!.detail, new RegExp(`^${vol}: cashback ${CASHBACK} unclaimed \\(its claim did not simulate on either provider: A .*CashbackDisabled.*, B .*CashbackDisabled`));
+  assert.equal(w.owed.get(W.address)?.passes, 1, "owed for a later pass");
+});
+
+// Review M1 of 11c963f9: one provider erring once on the claim's frame turned claims off for good (the fallback took
+// any SIM refusal, and the rent back then ended "kept", its owed record dropped), so W's cashback, the volume
+// account's rent and W's lamports stayed on W. One provider's error is a fault, read again: the next try claims.
+test("provider B errs once on the frame carrying the cashback claim: a fault read again, the claim lands on the retry, the volume account closes, the sweep takes W to 0", async () => {
+  const CASHBACK = 12_742_862n;
+  const w = await world({ venue: "pumpswap", ataLamports: TOKEN_RENT, volumes: [{ program: SOLANA_PUMP_AMM_PROGRAM, cashback: CASHBACK }], claimErrOnB: 1 });
+  const vol = solanaVolumeAccumulator(W.address, SOLANA_PUMP_AMM_PROGRAM);
+  const a = await runPoolSell(w.host, { ...ASK, token: VF.pumpswap.mint });
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  assert.equal(w.c.accounts.get(vol), undefined, "the volume account closed");
+  assert.equal(new DataView(w.c.accounts.get(solanaAta(vol, SOLANA_SOL_MINT, SOLANA_TOKEN_PROGRAM))!.data.buffer).getBigUint64(64, true), 0n, "its cashback claimed");
+  assert.equal(w.c.accounts.get(W.address)?.lamports ?? 0, 0, JSON.stringify(w.told));
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+  assert.ok(w.told.some((t) => t.step === "teardown" && t.state === "fault"), JSON.stringify(w.told));
+  assert.equal(w.told.at(-1)?.state, "sent");
+});
 
 // The devnet run at 0068524a: the sell filled, then provider B answered HTTP 429 to the rent back's reads, and the
 // whole rent back stopped there, every rent left on W. A provider's fault is read again from the top, a second apart.

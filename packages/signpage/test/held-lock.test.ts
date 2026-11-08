@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { openWalletStore } from "@blindfill/wallet/store";
+import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const gl = globalThis as Record<string, unknown>;
@@ -78,6 +79,9 @@ const until = async (what: string, ok: () => boolean) => {
   throw new Error(`never: ${what}`);
 };
 const U = "0fddd0bfdaa562c5cc85461d6d8f33b344d054d48490c5dac1ffe17ad178dd22";
+// the move's reads: U's two NEAR RPCs, main.ts heldRpcs (fastnear[0], drpc). Any other read of the page (the boot's
+// pool reads, pool-deposit.ts account, land at their own pace) is not the move's and counts on neither side.
+const moveReads = () => fetched.filter((f) => f.startsWith(`${NEAR_NETWORKS.testnet.fastnear[0]} `) || f.startsWith(`${NEAR_NETWORKS.testnet.drpc} `)).length;
 
 test("another tab's deposit follow holds FOLLOW_LOCK/testnet/<U>: the page's move reads nothing and signs nothing; once free it reads", async () => {
   const w = await openWalletStore({});
@@ -96,13 +100,15 @@ test("another tab's deposit follow holds FOLLOW_LOCK/testnet/<U>: the page's mov
   await got;
   await new Promise((r) => setTimeout(r, 50));
   fetched.length = 0;
+  // another part of the page reads while the lock is held (as the boot's pool read may): not the move's read
+  await fetch("https://api.devnet.solana.com", { method: "POST", body: '{"jsonrpc":"2.0","id":"1","method":"getAccountInfo"}' });
   const o1 = await Promise.race([heldDeps("op1").moveOut("alice.testnet"), new Promise<{ kind: string }>((ok) => setTimeout(() => ok({ kind: "waited 3 s" }), 3000))]);
-  const reads1 = fetched.filter((f) => f.includes("rpc")).length;
+  const reads1 = moveReads();
   release();
   await lock;
   fetched.length = 0;
   const o2 = await heldDeps("op1").moveOut("alice.testnet");
-  const reads2 = fetched.filter((f) => f.includes("rpc")).length;
+  const reads2 = moveReads();
   assert.equal(o1.kind, "unread");
   assert.equal(reads1, 0, "nothing read while U's follow lock is held");
   assert.ok(reads2 > 0, "once free, the move reads");
