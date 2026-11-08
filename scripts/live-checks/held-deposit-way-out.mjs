@@ -72,6 +72,9 @@ export async function probe(origin, fetchFn = fetch) {
   return rec;
 }
 
+/** SIGN_HOST's record, read with `fetchFn` (scripts/ci/bundle-checks.mjs runs read and judge on a pull request's build). */
+export const read = (fetchFn = fetch) => probe(SIGN_ORIGIN, fetchFn);
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import * as check from "./held-deposit-way-out.mjs";
 import { judge, localFetch, MARKERS, probe, SIGN_ORIGIN } from "./held-deposit-way-out.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,5 +43,13 @@ test("the good script under a page whose integrity names another script fails; o
 
 test("the committed build in this tree passes as the recorded good answer did", async () => {
   const rec = await probe(SIGN_ORIGIN, localFetch);
+  assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
+});
+
+test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on SIGN_HOST, then judge", async () => {
+  assert.equal(typeof check.read, "function");
+  const asked = [];
+  const rec = await check.read((u, o) => (asked.push(new URL(String(u)).origin), localFetch(u, o)));
+  assert.deepEqual([...new Set(asked)], [SIGN_ORIGIN]);
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
 });
