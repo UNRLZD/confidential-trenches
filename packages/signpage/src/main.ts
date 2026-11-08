@@ -52,20 +52,21 @@
 //   and Recovery code). Each opens the layer through openLayer(), which resets the activation guard (guard.shown()).
 //   Card signpage-withdraw-form adds withdraw.open: with a seed stored it draws the withdraw form (src/withdraw/), where
 //   the user types the address and the amount, refused before any proof when bad; a withdraw.open with a one-time id
-//   is refused until that way out is built. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
+//   draws the held deposit's way out (src/withdraw/held.ts, card held-deposit-way-out) for the held op of that id in
+//   this page's own store, and a move a reload cut short is resumed at sign-in, its same signed bytes. Withdraw is guarded like Sign out; its note value, fee and hand-off are the
 //   build's network's (src/withdraw/handoff.ts, card signpage-withdraw-handoff), drawn not offered where that network
 //   names no vault or relayer. export.open stays refused until its card.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { entropyToWords, profileKey, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { createPasskey, getPasskey, type PasskeyOutcome } from "@blindfill/wallet/signin/passkey";
-import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
+import { backupFirst, openWalletStore, openWalletStoreReader, SeedChanged, WALLET_CHANNEL, WALLET_SEED_LOCK, walletSeedMoved, type WalletEvent, type WalletStore } from "@blindfill/wallet/store";
 import { backupWords, checkSeed, saveWords, signInNoPrf, signInPrf, signInTyped, WordsRefused, type Landing, type Seed } from "@blindfill/wallet/signin/words";
 import { activationGuard, type Press } from "./guard.ts";
 import { startApi } from "./api.ts";
 import { depositQuoteHost, depositReadHosts } from "./deposit-wire.ts";
 import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
-import { depositFollows } from "./deposit-follow.ts";
+import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -77,6 +78,10 @@ import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
 import { vaultScope } from "./withdraw/checks.ts";
 import { drawWithdrawForm } from "./withdraw/form.ts";
+import { drawHeldMoveOut, type HeldDeps } from "./withdraw/held.ts";
+import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
+import { heldOpOf, moveOutHeld, moveOutRpc } from "../../wallet/src/deposit/moveout.ts";
+import type { DepositOp } from "../../wallet/src/deposit/follow.ts";
 import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/handoff.ts";
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
@@ -88,7 +93,7 @@ import type { PoolChain } from "./rules/pool.ts";
 
 type State =
   | "loading" | "signed-out" | "signed-in" | "no-prf" | "cancelled" | "unsupported" | "error" | "backup" | "words" | "invalid-code"
-  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw";
+  | "choose" | "existing" | "signout" | "withdraw" | "pool-withdraw" | "held";
 
 // DRAFT COPY: the final words are not set yet, but for copy and saved (S3.1's labels, 09-design-brief.md:801),
 // "invalid-code" (CN-41, signed, 09-design-brief.md:2335) and the six the owner picked, each with its pick on its line.
@@ -218,8 +223,8 @@ else {
       "signin.open": (p) => openKind("signin.open", p.way),
       signout: () => openKind("signout"),
       "backup.open": () => openKind("backup.open"),
-      // the form withdraws from the vault's notes; a one-time id's way out (from_id) is not built yet
-      "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open") : null),
+      // the form withdraws from the vault's notes; with a one-time id (from_id) the held deposit's way out
+      "withdraw.open": (p) => (takesParams("withdraw.open", p) ? openKind("withdraw.open", undefined, typeof p.from_id === "string" ? p.from_id : undefined) : null),
       // from public records only (src/deposit-wire.ts): U named ahead by this page (src/deposit-name.ts), never the seed
       "deposit.quote": depositQuoteHost({ scope: pageScope, read: fs.depositRead, named: () => namer.named(), checked: (id, r, u) => follows!.quoted(id, r, u) }),
       // the deposit sheet's reads before any address (src/deposit-wire.ts depositReadHosts): public data only
@@ -249,22 +254,22 @@ let openedBy: AccountKind | null = null;
 let restoreOnly = false;
 // A kind that comes while a resync reads the store waits for it and is decided on what it read: refused only by the
 // store's own state, never for coming at that moment (the app takes not_allowed as a refusal no retry changes).
-function openKind(kind: AccountKind, way?: unknown): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
-  if (resyncing) return { after: resynced(), answer: () => decide(kind, way) };
-  return decide(kind, way);
+function openKind(kind: AccountKind, way?: unknown, fromId?: string): OpenAnswer | { after: Promise<void>; answer: () => OpenAnswer } | null {
+  if (resyncing) return { after: resynced(), answer: () => decide(kind, way, fromId) };
+  return decide(kind, way, fromId);
 }
 async function resynced(): Promise<void> {
   while (resyncing) await resyncing;
 }
 type OpenAnswer = { result: { pending: true }; then: () => void } | null;
-function decide(kind: AccountKind, way: unknown): OpenAnswer {
+function decide(kind: AccountKind, way: unknown, fromId?: string): OpenAnswer {
   if (!takes(kind, root.dataset.signin, busy)) return null;
   return {
     result: { pending: true },
     then: () =>
       void run(async () => {
         const seed = await readSeedSettled();
-        const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined");
+        const page = pageFor(kind, way, seed, typeof PublicKeyCredential !== "undefined", fromId);
         openedBy = kind;
         restoreOnly = false;
         if (page === "signed-in") return landed({ screen: "signed-in", seed: seed! });
@@ -275,6 +280,12 @@ function decide(kind: AccountKind, way: unknown): OpenAnswer {
           // the form needs no seed: its entropy is zeroed at once
           seed!.entropy.fill(0);
           show("withdraw");
+        } else if (page === "held") {
+          seed!.entropy.fill(0);
+          // the held op of that id in this page's own store, never the app's word; none: back to the app
+          heldOp = await heldOpFor(fromId!);
+          if (heldOp === null) return show("signed-in", shown(seed!));
+          show("held");
         } else show(page === "passkey" ? "signed-out" : page);
         openLayer();
       }),
@@ -321,7 +332,7 @@ const input = (e: Event): void => {
 addEventListener("pointerdown", input, true);
 addEventListener("keydown", input, true);
 
-const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw"]);
+const GUARDED = new Set(["signout", "saved", "backup", "copy", "withdraw", "move-out"]);
 function button(action: string, label: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -367,7 +378,7 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
   }
   const parts: HTMLElement[] = [];
   if (state !== "loading" && state !== "signed-out" && state !== "signed-in" && state !== "backup" && state !== "words"
-    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw") {
+    && state !== "choose" && state !== "existing" && state !== "signout" && state !== "withdraw" && state !== "pool-withdraw" && state !== "held") {
     const p = document.createElement("p");
     p.textContent = WORDS[state];
     parts.push(p);
@@ -394,6 +405,9 @@ function show(state: State, seed?: { account: string; code_saved: boolean; signo
     // the withdraw form (src/withdraw/form.ts), top-level only: the address and the amount are typed here, never
     // passed in by the app (W:927)
     parts.push(drawWithdrawForm(document, withdrawDeps(), button, (step) => void run(step)));
+  } else if (!framed && state === "held" && heldOp !== null) {
+    // the held deposit's way out (src/withdraw/held.ts): the account typed here, never passed in by the app
+    parts.push(drawHeldMoveOut(document, heldDeps(heldOp), button, (step) => void run(step)));
   } else if (!framed && state === "pool-withdraw" && testnet && poolWithdraw) {
     // the pool withdraw screen: To and the amount typed here; the press starts the run and the layer closes, its
     // stages read back in state.ops
@@ -462,6 +476,46 @@ let withdrawWait = new AbortController();
 function withdrawsSignedOut(): void {
   withdrawWait.abort();
   withdrawWait = new AbortController();
+}
+// The held deposit's way out (card held-deposit-way-out): the op is this page's own, found by its U; the move is the
+// wallet's (moveOutHeld), U's key opened under the wallet's seed lock, shared, as the deposit follow opens it.
+let heldOp: string | null = null;
+const heldRpcs = () => [moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].fastnear[0]), moveOutRpc(NEAR_NETWORKS[PAGE_NETWORK].drpc)] as const;
+const heldSeedLock = <T,>(fn: () => Promise<T>): Promise<T> => (navigator.locks ? (navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, fn) as Promise<T>) : fn());
+// U's own lock, the deposit follow's (deposit-follow.ts FOLLOW_LOCK/<network>/<U>), only if free: while a follow of U runs
+// (it may bind U's USDC), no move of U is signed (review of d791adda, M1)
+const heldULock = (u: string) => <T,>(fn: () => Promise<T>): Promise<T | null> =>
+  navigator.locks ? (navigator.locks.request(`${FOLLOW_LOCK}${PAGE_NETWORK}/${u}`, { mode: "exclusive", ifAvailable: true }, (lock) => (lock === null ? null : fn())) as Promise<T | null>) : fn();
+async function heldOpFor(u: string): Promise<string | null> {
+  const ops = await open();
+  for (const k of await ops.keys("ops")) {
+    const op = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+    if (op?.kind === "deposit" && op.follow?.u === u && op.follow.network === PAGE_NETWORK && (await heldOpOf(ops, k).then(() => true, () => false))) return k;
+  }
+  return null;
+}
+function heldDeps(opId: string): HeldDeps {
+  const rpcs = heldRpcs();
+  return {
+    network: PAGE_NETWORK,
+    rpcs,
+    recorded: async () => ((await (await open()).get("ops", opId)) as DepositOp | undefined)?.follow?.out,
+    moveOut: async (to) => {
+      const ops = await open();
+      const u = ((await ops.get("ops", opId)) as DepositOp | undefined)?.follow?.u ?? "";
+      return moveOutHeld(opId, to, { ops, rpcs, seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(u) });
+    },
+  };
+}
+// a move a closed or reloaded page left out is resumed once per sign-in: its same signed bytes, never a new signature
+// (moveOutHeld with null never signs: a record that can no longer land waits for the user's tap, review of d791adda L6)
+async function settleHeld(): Promise<void> {
+  const ops = await open();
+  for (const k of await ops.keys("ops")) {
+    const op = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+    if (op?.kind === "deposit" && op.stage === "held" && op.follow?.out !== undefined && op.follow.why !== "moved_out" && op.follow.network === PAGE_NETWORK)
+      await moveOutHeld(k, null, { ops, rpcs: heldRpcs(), seed64: () => openSeed64(), seedLock: heldSeedLock, uLock: heldULock(op.follow.u) }).catch(() => {});
+  }
 }
 // The vault withdrawals a closed or reloaded page left RESERVED, followed to settled once per sign-in (src/withdraw/
 // handoff.ts withdrawSettle); its own note store, closed after. Nothing where the build's network names no vault.
@@ -639,6 +693,8 @@ async function landed(l: Landing): Promise<void> {
   void follows?.settle().catch(() => {});
   // a vault withdrawal a reload cut short is followed to settled (src/withdraw/handoff.ts withdrawSettle)
   void settleWithdraws().catch(() => {});
+  // a held deposit's move out a reload cut short (src/withdraw/held.ts)
+  void settleHeld().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
   void restore?.settle().catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);

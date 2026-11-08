@@ -119,11 +119,12 @@ test("the plan reads each deploy's own list: every check it prints runs, as its 
   }
 });
 
-test("the signing page's forty-nine checks (signpage-shell runs four ways, solana-teardown-cashback, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
+test("the signing page's fifty checks (signpage-shell runs four ways, solana-teardown-cashback, held-deposit-way-out, pool-senders-next-page, pool-deposit-address, wallet-withdraw-move-out, evm-sell-no-release-in-flight, wallet-near-prepay-taken, pool-deposit-sent-end, solana-release-reads-paced, solana-written-accounts-whole and solana-legs-checked the newest) and every app check, with the network a testnet build names", async () => {
   const sign = await planFor("sign", { commit: COMMIT });
-  assert.equal(new Set(sign.include.map((e) => e.key)).size, 49);
+  assert.equal(new Set(sign.include.map((e) => e.key)).size, 50);
   assert.ok(sign.include.some((e) => e.key === "solana-teardown-cashback" && !e.chrome && e.args === ""), "solana-teardown-cashback runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-senders-next-page" && !e.chrome && e.args === ""), "pool-senders-next-page runs after every sign deploy");
+  assert.ok(sign.include.some((e) => e.key === "held-deposit-way-out" && !e.chrome && e.args === ""), "held-deposit-way-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "pool-deposit-address" && !e.chrome && e.args === ""), "pool-deposit-address runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-withdraw-move-out" && !e.chrome && e.args === ""), "wallet-withdraw-move-out runs after every sign deploy");
   assert.ok(sign.include.some((e) => e.key === "wallet-near-prepay-taken" && !e.chrome && e.args === ""), "wallet-near-prepay-taken runs after every sign deploy");
