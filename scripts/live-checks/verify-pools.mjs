@@ -32,6 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { APP_HOST, harnessRoute, recorded, watch, WIDTHS } from "./app-verify-mount.mjs";
+import { downNote, footerEvidence, outages, verifyEvidence } from "./rpc-outage.mjs";
 
 const KEY = "verify-pools";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -147,8 +148,10 @@ export function judge(rec) {
     for (const c of CHAINS) judgeRow(say, n, c, r.pools.rows[c], release ?? {}, r.requests);
     const viaHelper = (r.requests ?? []).filter((x) => x.phase === "open" && x.url.startsWith(`${HELPER}/v1/rpc/`));
     say(viaHelper.length === 0, `${n}: no pool read through the helper${viaHelper.length ? `: ${viaHelper.map((x) => new URL(x.url).pathname).join(", ")}` : ""}`);
-    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
-    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error"}`);
+    // a down RPC the page shows is no error (rpc-outage.mjs, card app-shell-rpc-outage-judge): the same judgment as app-shell's
+    const { kept, down } = outages(r.errors ?? [], r.dom?.verify, rec.network, r.dom?.footer);
+    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept.map((e) => `console ${e}`)];
+    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error${downNote(down)}`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok")), lines };
 }
@@ -214,6 +217,8 @@ async function runOne({ browser, w, shots, route }) {
     phase = "after";
     for (const c of CHAINS) await f.click(`[data-control="verify-pool-${c}"]`, { timeout: 2_000 }).catch(() => {});
     run.pools = await f.evaluate(READ_POOLS);
+    // what the page shows of the RPCs it read, for judge()'s outages(): the panel's rows once its reads end, the footer
+    run.dom = { verify: await verifyEvidence(f), footer: await footerEvidence(f) };
     if (shots) {
       await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}.png`) });
       await f.evaluate(() => document.querySelector(".vbody")?.scrollTo(0, 1e6));

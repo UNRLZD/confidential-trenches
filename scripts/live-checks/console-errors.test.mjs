@@ -83,3 +83,14 @@ test("watchErrors keeps the console errors and page errors its filter picks, and
   p2.emit("pageerror", thrown(Error, "shell threw", ["f (https://confidential.unrealized.trade/s.js:1:2)"]));
   assert.deepEqual(all, ["shell 429 (https://confidential.unrealized.trade/s.js)", "pageerror Error: shell threw (https://confidential.unrealized.trade/s.js)"]);
 });
+
+test("a failed footer read is tagged, the only query a line keeps, and no other query reaches it (card app-shell-rpc-outage-judge)", () => {
+  const fail = "Failed to load resource: net::ERR_FAILED";
+  const rpc = "https://rpc.mainnet.fastnear.com/";
+  assert.equal(consoleLine(fail, `${rpc}?ct=footer`), `${fail} (${rpc}) [footer read]`);
+  assert.equal(consoleLine(fail, `${rpc}?a=1&ct=footer&b=2`), `${fail} (${rpc}) [footer read]`);
+  assert.equal(consoleLine(`Access to fetch at '${rpc}?ct=footer' blocked`, APP), `Access to fetch at '${rpc}' blocked (${APP}/) [footer read]`);
+  // a Verify read of the same RPC, a look-alike value or name, or a query in the fragment: no tag
+  for (const url of [rpc, `${rpc}?ct=footers`, `${rpc}?xct=footer`, `${rpc}?ct=footer-x`, `${rpc}#ct=footer`]) assert.equal(consoleLine(fail, url).endsWith("[footer read]"), false, url);
+  assert.equal(consoleLine("no address", ""), "no address");
+});

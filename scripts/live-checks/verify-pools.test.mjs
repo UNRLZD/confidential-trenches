@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { CHAINS, judge, pinsProblems, recordPins } from "./verify-pools.mjs";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
+import { consoleLine } from "./console-errors.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./verify-pools.answers.json", import.meta.url), "utf8"));
 const bad = (r) => judge(r).lines.filter((l) => l.startsWith("BAD"));
@@ -72,4 +73,16 @@ test("no pool named: every row must be Unverified and no pool RPC asked", () => 
   });
   // the recorded rows are green: a network with no pool named must draw none of them as read
   assert.match(bad(none).join("\n"), /phone \/verify solana: no pool named: row ok/);
+});
+
+test("planted on the good answer: a down pool RPC's preflight error is let through when the page shows its row amber, never when it shows ok (card app-shell-rpc-outage-judge)", () => {
+  const solana = new URL(VERIFY_RELEASES.mainnet.pools.solana.rpcs[0]).origin;
+  const cors = consoleLine(`Access to fetch at '${solana}/' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.`, "https://ct-app.unrealized.trade/verify");
+  const line = (r) => judge(r).lines.find((l) => l.includes("phone /verify: ") && /no console error|console /.test(l));
+  const plant = (errors, dom) => line(mutate((r) => Object.assign(r.runs[0], { errors, dom })));
+  const dom = (solanaRow) => ({ verify: { state: "read", code: "ok", funds: "ok", pools: { solana: solanaRow, base: "ok", robinhood: "ok" } }, footer: null });
+  assert.equal(plant([cors], dom("warn")), `ok  phone /verify: no CSP violation, no console error; RPC down, shown: ${solana.replace("https://", "")}`);
+  assert.match(plant([cors], dom("ok")), /^BAD phone \/verify: console Access to fetch .*\[.* is a release RPC, not shown Unverified: solana ok\]$/);
+  assert.match(plant([cors]), /not shown Unverified: solana not drawn\]$/);
+  assert.match(plant([cors, "Uncaught boom"], dom("warn")), /^BAD phone \/verify: console Uncaught boom$/);
 });

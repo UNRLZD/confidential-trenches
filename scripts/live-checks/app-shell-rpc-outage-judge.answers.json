@@ -1,13 +1,13 @@
 {
  "notes": {
   "good": "app-shell-rpc-outage-judge.mjs --harness --outage solana --record, Chrome 157 on the Mac, 8 Nov: the terminal build in the harness, the first Solana pool RPC answering every request 503",
-  "bad": "app-shell-rpc-outage-judge.mjs --harness --outage footer --record, the same run with the first NEAR RPC answering the footer block reads 503 and Verify reads on it answered"
+  "bad": "app-shell-rpc-outage-judge.mjs --harness --outage footer-pair --record, the same run with both NEAR RPCs answering the footer block reads 503 and Verify reads answered"
  },
  "good": {
   "url": "https://ct-app.unrealized.trade",
   "network": "mainnet",
   "source": "harness, apps/terminal/dist, solana RPC answering 503",
-  "at": "2026-11-08T23:14:31.610Z",
+  "at": "2026-11-08T23:40:07.233Z",
   "browser": "157.0.8103.38",
   "loads": [
    {
@@ -29,6 +29,10 @@
       "robinhood": "ok"
      }
     },
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "shot": "phone-verify.png"
    },
    {
@@ -49,6 +53,10 @@
       "base": "ok",
       "robinhood": "ok"
      }
+    },
+    "footer": {
+     "conn": "on",
+     "block": "223500005"
     },
     "shot": "desktop-verify.png"
    }
@@ -57,8 +65,8 @@
  "bad": {
   "url": "https://ct-app.unrealized.trade",
   "network": "mainnet",
-  "source": "harness, apps/terminal/dist, footer RPC answering 503",
-  "at": "2026-11-08T23:14:38.033Z",
+  "source": "harness, apps/terminal/dist, footer-pair RPC answering 503",
+  "at": "2026-11-08T23:40:13.113Z",
   "browser": "157.0.8103.38",
   "loads": [
    {
@@ -79,6 +87,10 @@
       "robinhood": "ok"
      }
     },
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "shot": "phone-verify.png"
    },
    {
@@ -87,7 +99,8 @@
     "framed": true,
     "top": "https://confidential.unrealized.trade/verify",
     "consoleErrors": [
-     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/)",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]",
      "Failed to load resource: net::ERR_NAME_NOT_RESOLVED (https://ct-api.unrealized.trade/v1/market/candles)"
     ],
     "verify": {
@@ -99,6 +112,10 @@
       "base": "ok",
       "robinhood": "ok"
      }
+    },
+    "footer": {
+     "conn": "off",
+     "block": ""
     },
     "shot": "desktop-verify.png"
    }

@@ -23,7 +23,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
+import { consoleLine } from "./console-errors.mjs";
 import * as check from "./app-verify-mount.mjs";
 import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, recorded, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
 
@@ -329,4 +331,23 @@ test("planted on the good answer: an error with no location (a console error, a 
   const r = mut("good", (rec) => rec.runs[1].errors.push(...kept));
   assert.equal(r.ok, false);
   for (const k of kept) assert.ok(bad(r).some((l) => l.includes(`console ${k}`)), `${k}: ${r.lines.join("\n")}`);
+});
+
+test("planted on the mainnet answer: a down NEAR RPC's preflight error is let through when the page shows it, never when it shows ok (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const cors = (url) => consoleLine(`Access to fetch at '${url}' from origin '${APP_HOST}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, `${APP_HOST}/verify`);
+  const line = (r) => r.lines.find((l) => l.includes("desktop /verify: ") && /no console error|console /.test(l));
+  const plant = (errors, dom) => line(mut("goodMainnet", (rec) => Object.assign(desktop(rec), { errors: [...desktop(rec).errors, ...errors], dom })));
+  const amber = { verify: { state: "read", code: "warn", funds: "warn", pools: {} }, footer: { conn: "on", block: "223500000" } };
+  // a Verify read: shown amber passes the line, shown ok or not drawn fails it
+  assert.equal(plant([cors(`${near}/`)], amber), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
+  assert.match(plant([cors(`${near}/`)], { ...amber, verify: { ...amber.verify, code: "ok" } }), /^BAD desktop \/verify: console Access to fetch .*\[.* is a release RPC, not shown Unverified: code ok, funds warn\]$/);
+  assert.match(plant([cors(`${near}/`)], undefined), /not shown Unverified: code not drawn, funds not drawn\]$/);
+  // a footer read: the footer on with its block passes, anything else fails
+  const tagged = cors(footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  assert.ok(tagged.endsWith(" [footer read]"));
+  assert.equal(plant([tagged], { ...amber, verify: { state: "read", code: "ok", funds: "ok", pools: {} } }), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
+  assert.match(plant([tagged], { ...amber, footer: { conn: "off", block: "223500000" } }), /a footer read, and the footer shows off, block 223500000, not the pair answered\]$/);
+  // any other error beside it still fails
+  assert.match(plant([cors(`${near}/`), "Uncaught boom"], amber), /^BAD desktop \/verify: console Uncaught boom$/);
 });

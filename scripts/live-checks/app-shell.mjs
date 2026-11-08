@@ -21,7 +21,7 @@
 // A screenshot of every load is kept at both widths.
 // After: app
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
-//   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] [--outage footer|solana|base|robinhood] ...   the hosts' real names answered from local
+//   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] [--outage footer|footer-pair|solana|base|robinhood] ...   the hosts' real names answered from local
 //     files by Playwright's route, as app-in-shell.mjs --harness does: APP_HOST the terminal's build (apps/terminal/dist
 //     or <dir>) under its own _headers, SIGN_HOST app-in-shell's stand-in shell
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -36,7 +36,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
-import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
+import { downNote, footerEvidence, outages, rpcRows, verifyEvidence, VERIFY_RELEASES } from "./rpc-outage.mjs";
+
+export { outages, rpcRows, verifyEvidence };
 
 const KEY = "app-shell";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -62,69 +64,6 @@ const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("b
 /** What moved, for a FAIL line: each layout shift's time, value and sources (element, rect before -> after). */
 const shiftsOf = (shifts) =>
   shifts?.length ? ` [${shifts.map((e) => `+${e.at}ms ${e.value.toFixed(4)}${e.input ? " after input" : ""}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]` : "";
-
-// ------------------------------------------------------------------------------------------------ an RPC outage
-// A down RPC the page reads is the page's to show, not the check's to fail on (card app-shell-rpc-outage-judge): Chrome
-// writes a console error for every failed load, so a down RPC of the pair /verify reads failed every load of it, and
-// verify-pools' six more hosts widened that. A failed load is let through only when both hold: its address is an origin
-// the release names, and the same load's Verify panel shows the rows that read it amber. Neither is typed here.
-
-/** Each RPC origin the network's release names, to the Verify rows that read it: the NEAR pair feeds the Code and Funds
- *  rows, a pool's pair its chain's row. Derived from VERIFY_RELEASES, the lists the page itself reads. */
-export function rpcRows(network = "mainnet") {
-  const rows = new Map();
-  const add = (url, row) => {
-    const o = originOf(url);
-    if (o) rows.set(o, [...(rows.get(o) ?? []), row]);
-  };
-  const release = VERIFY_RELEASES[network];
-  for (const u of release?.rpcs ?? []) for (const row of ["code", "funds"]) add(u, row);
-  for (const [chain, pool] of Object.entries(release?.pools ?? {})) for (const u of pool?.rpcs ?? []) add(u, chain);
-  return rows;
-}
-
-// Chrome's own words for a failed load of one RPC, in the two forms a down RPC takes (console-errors.mjs keeps each text
-// with any address cut to its origin and path):
-//   - the load itself: "Failed to load resource: ..." with the failed address in brackets (Chrome's own location of the
-//     line, read from m.location().url): the network refused it (net::ERR_*, but not one that blocked it:
-//     ERR_BLOCKED_BY_CSP, _ORB, _CLIENT stay errors), or the server answered 5xx or 429. A 4xx other than 429 is the
-//     page's own fault and stays an error;
-//   - its preflight: the app's reads POST JSON, so an RPC that answers the preflight with a 5xx or 429 (no HTTP ok
-//     status) or without Access-Control-Allow-Origin, as a CDN's error page does, also gets "Access to fetch at '<url>'
-//     ... blocked by CORS policy: Response to preflight request doesn't pass access control check: ...", which Chrome
-//     locates at the page and names the failed address in its text. Any other CORS refusal (a header, a method, a
-//     credentials rule) stays an error. Read 8 Nov in Chrome against a local server answering 503 and 429 each with and
-//     without the header: both forms, in that order, for each.
-const FAILED_LOAD = /^Failed to load resource: (?:net::ERR_(?!BLOCKED_)[A-Z0-9_]+|the server responded with a status of (?:5\d\d|429)(?: \([^()]*\))?) \((https?:\/\/[^\s()]+)\)$/;
-const FAILED_PREFLIGHT = /^Access to fetch at '(https?:\/\/[^'\s]+)' from origin '[^'\s]+' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: (?:It does not have HTTP ok status|No 'Access-Control-Allow-Origin' header is present on the requested resource)\.(?: \([^()]*\))?$/;
-/** The origin a failed-load line names, "" for any other line. */
-const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line) ?? FAILED_PREFLIGHT.exec(line))?.[1] ?? "") ?? "";
-
-/** What the same load's DOM shows for one row: its data-status (ok, warn, danger, loading), or "not drawn". */
-const shownRow = (verify, row) => (row === "code" || row === "funds" ? verify?.[row] : verify?.pools?.[row]) ?? "not drawn";
-
-/** A load's console errors split: `kept` are the errors that fail it (a failed load of a release RPC the DOM does not
- *  show amber says what it shows), `down` the release RPC origins that failed and are shown Unverified, `refused` the
- *  failed loads of a release RPC the DOM does not show so (each is also in `kept`). */
-export function outages(lines, verify, network = "mainnet") {
-  const rows = rpcRows(network);
-  const kept = [];
-  const refused = [];
-  const down = new Set();
-  for (const line of lines) {
-    const origin = failedOrigin(line);
-    const named = origin && rows.get(origin);
-    if (!named) kept.push(line);
-    else if (named.every((r) => shownRow(verify, r) === "warn")) down.add(origin);
-    else {
-      refused.push(`${line} [${origin} is a release RPC, not shown Unverified: ${named.map((r) => `${r} ${shownRow(verify, r)}`).join(", ")}]`);
-      kept.push(refused.at(-1));
-    }
-  }
-  return { kept, down: [...down], refused };
-}
-
-const downNote = (down) => (down.length ? `; RPC down, shown Unverified: ${down.map((o) => o.replace(/^https?:\/\//, "")).join(", ")}` : "");
 
 // ------------------------------------------------------------------------------------------------ the verdict
 export function judge(rec) {
@@ -153,7 +92,7 @@ export function judge(rec) {
   say(loads.length === ROUTES.length * WIDTHS.length, `${loads.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`);
   for (const l of loads) {
     const bad = [];
-    const errors = outages(l.consoleErrors, l.verify, rec.network);
+    const errors = outages(l.consoleErrors, l.verify, rec.network, l.footer);
     if (l.framed !== true) bad.push(`not inside SIGN_HOST's shell (top window at ${l.top ?? "unknown"})`);
     if (l.route !== l.expect) bad.push(`drew ${l.route ?? "nothing"}`);
     if (l.violations.length) bad.push(`CSP violation: ${l.violations.map((v) => `${v.directive} ${v.blocked}`).join("; ")}`);
@@ -172,7 +111,7 @@ export function judge(rec) {
   say(shells.length === WIDTHS.length, `the shell clicked through at ${shells.length} width(s) of ${WIDTHS.length}`);
   for (const s of shells) {
     const bad = [];
-    const errors = outages(s.consoleErrors, s.verify, rec.network);
+    const errors = outages(s.consoleErrors, s.verify, rec.network, s.footer);
     if (s.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (s.cls !== 0) bad.push(`CLS ${s.cls.toFixed(4)} inside the shell${shiftsOf(s.shifts)}`);
     if (s.steps.length === 0) bad.push("no navigation link");
@@ -250,33 +189,6 @@ export const MEASURE = ({ phone, vw }) => {
   };
 };
 
-/** Runs in the page: Verify's reads have ended (the panel is drawn, not loading, and its pools, when it draws them, are read). */
-export const VERIFY_SETTLED = () => {
-  const panel = document.querySelector(".vfy");
-  const pools = document.querySelector(".vpools");
-  return !!panel && panel.dataset.state !== "loading" && (!pools || pools.dataset.pools === "read");
-};
-
-/** Runs in the page: what the Verify panel shows, row by row (data-status: ok, warn, danger or loading); null with no panel. */
-export const VERIFY_DOM = () => {
-  const panel = document.querySelector(".vfy");
-  if (!panel) return null;
-  const status = (sel) => panel.querySelector(sel)?.dataset.status ?? null;
-  const pools = {};
-  for (const e of panel.querySelectorAll("[data-pool]")) pools[e.dataset.pool] = e.dataset.status;
-  return { state: panel.dataset.state, code: status("[data-row=code]"), funds: status("[data-row=funds]"), pools };
-};
-
-/** How long the panel's reads may take before the DOM is read as it stands (each read ends within the app's 10 s). */
-export const VERIFY_SETTLE_MS = 20_000;
-
-/** The Verify panel of this load, read from its DOM once its reads have ended: the evidence outages() judges a failed
- *  load of a release RPC by. A panel still loading when the wait ends is read as loading, which is no evidence. */
-export async function verifyEvidence(doc) {
-  await doc.waitForFunction(VERIFY_SETTLED, null, { timeout: VERIFY_SETTLE_MS }).catch(() => {});
-  return doc.evaluate(VERIFY_DOM);
-}
-
 const originOf = (u) => {
   try {
     return new URL(u).origin;
@@ -350,13 +262,14 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         await doc.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(SETTLE_MS);
         const verify = id === "verify" ? await verifyEvidence(doc) : null;
+        const footer = await footerEvidence(doc);
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
         const shot = `${w.name}-${id}.png`;
         await page.screenshot({ path: path.join(shots, shot) });
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn
@@ -380,7 +293,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       }
       const end = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       await page.screenshot({ path: path.join(shots, `${w.name}-in-shell.png`) });
-      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls, shifts: end.shiftLog, violations: end.violations, consoleErrors: seenBy.consoleErrors, verify });
+      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls, shifts: end.shiftLog, violations: end.violations, consoleErrors: seenBy.consoleErrors, verify, footer: await footerEvidence(doc) });
       await ctx.close();
     }
   } finally {
@@ -397,18 +310,21 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
 }
 
 /** A real outage in the harness (the recorder's, card app-shell-rpc-outage-judge): the browser's own request answered 503
- *  by the first RPC of a release pool's pair (`what` solana, base or robinhood: every request to it), or by the first NEAR
- *  RPC for the footer's block reads alone (`what` footer: Verify's reads on it are answered, so its rows show ok while the
- *  page logs a failed load). Every other request goes to `base`, the harness's answers. The origin comes from the
- *  release, never typed. */
+ *  by the first RPC of a release pool's pair (`what` solana, base or robinhood: every request to it); by the first NEAR
+ *  RPC for the footer's block reads alone (`footer`: Verify's reads on it are answered, the footer's other RPC answers its
+ *  read, so the footer shows Stable while the page logs a failed load); or by both NEAR RPCs for the footer's block
+ *  reads alone (`footer-pair`: the footer shows Offline). Every other request goes to `base`, the harness's answers. The
+ *  origins come from the release, never typed. */
 export function withOutage(base, what, network = "mainnet") {
   const release = VERIFY_RELEASES[network];
-  const origin = originOf((what === "footer" ? release?.rpcs : release?.pools?.[what]?.rpcs)?.[0] ?? "");
-  if (!origin) throw new Error(`--outage takes footer, solana, base or robinhood, naming an RPC on ${network}: ${what}`);
+  const footer = what === "footer" || what === "footer-pair";
+  const urls = footer ? (what === "footer" ? release?.rpcs?.slice(0, 1) : release?.rpcs) : release?.pools?.[what]?.rpcs?.slice(0, 1);
+  const origins = new Set((urls ?? []).map((u) => originOf(u)).filter(Boolean));
+  if (origins.size === 0) throw new Error(`--outage takes footer, footer-pair, solana, base or robinhood, naming an RPC on ${network}: ${what}`);
   return async (route) => {
     const u = new URL(route.request().url());
     // the footer's block reads carry a ?ct= query (src/shell/footer.ts footerUrl); Verify's reads go to the bare address
-    if (u.origin !== origin || (what === "footer" && !u.searchParams.has("ct"))) return base(route);
+    if (!origins.has(u.origin) || (footer && !u.searchParams.has("ct"))) return base(route);
     return route.fulfill({ status: 503, headers: { "content-type": "text/plain", "access-control-allow-origin": APP_HOST }, body: "Service Unavailable" });
   };
 }

@@ -25,11 +25,19 @@ export function resourceOf(url) {
 // an http(s) or ws(s) address written inside a line's text
 const URL_IN_TEXT = /\b(?:https?|wss?):\/\/[^\s"'`()<>]+/g;
 
-/** One kept line: the text, any address in it cut to origin and path, then the address in brackets when there is one. */
+// The one query a line keeps: the footer's block read marks its own request ?ct=footer (apps/terminal/src/shell/footer.ts
+// FOOTER_QUERY), so a failed one is told from Verify's reads of the same RPC (card app-shell-rpc-outage-judge). A line
+// whose address, or an address in its text, carries that param ends " [footer read]"; no other query reaches a line.
+const FOOTER_QUERY = /[?&]ct=footer(?![\w%.-])/;
+export const FOOTER_READ = " [footer read]";
+
+/** One kept line: the text, any address in it cut to origin and path, then the address in brackets when there is one,
+ *  and the footer read's tag when the failed request was the footer's. */
 export function consoleLine(text, url) {
   const at = resourceOf(url);
   const said = String(text).replace(URL_IN_TEXT, (u) => resourceOf(u) || u.split(/[?#]/)[0]);
-  return at === "" ? said : `${said} (${at})`;
+  const line = at === "" ? said : `${said} (${at})`;
+  return FOOTER_QUERY.test(String(url ?? "")) || FOOTER_QUERY.test(String(text)) ? `${line}${FOOTER_READ}` : line;
 }
 
 /** A Playwright ConsoleMessage as a kept line. */

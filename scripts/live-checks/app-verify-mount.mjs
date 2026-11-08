@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { watchErrors } from "./console-errors.mjs";
+import { downNote, footerEvidence, outages, verifyEvidence } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-verify-mount";
@@ -167,8 +168,10 @@ export function judge(rec) {
     judgePanel(say, n, r.panel, (r.requests ?? []).filter((x) => x.phase === "open"), rec, named);
     judgeTiming(say, n, r, 0, 0, rec, named);
     judgeAllRequests(say, n, r, rec, named);
-    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
-    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error"}`);
+    // a down RPC the page shows is no error (rpc-outage.mjs, card app-shell-rpc-outage-judge): the same judgment as app-shell's
+    const { kept, down } = outages(r.errors ?? [], r.dom?.verify, rec.network, r.dom?.footer);
+    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept.map((e) => `console ${e}`)];
+    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error${downNote(down)}`}`);
     if (r.width !== "desktop") continue;
     const f = r.footer ?? {};
     say(f.opened === true && f.firstState === "loading" && f.newOpens === 1, `${n}: closed, then the footer's Verify pill ${f.opened ? `opens it again ${f.newOpens ?? 0} time(s), starting ${f.firstState ?? "nowhere"}` : "does not open it"}`);
@@ -286,6 +289,8 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
     if (!f) return run;
     run.frame = f.url();
     run.panel = await readPanel(f);
+    // what the page shows of the RPCs it read, for judge()'s outages(): the panel's rows once its reads end, the footer
+    run.dom = { verify: await verifyEvidence(f), footer: await footerEvidence(f) };
     phase = "between";
     if (shots) await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}.png`) });
     if (w.name === "desktop") {

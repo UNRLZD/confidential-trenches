@@ -12,14 +12,16 @@
 //                 (Integrity-Policy then blocks the script, so nothing moves to the shell and no route draws).
 // Layout shifts are planted on the good answer: any shift on a load at either width fails, as BAR-10's 0.0806 phone tab
 // bar and 0.0008 Verify reads did (card app-shell-tabbar-cls).
-// Card app-shell-rpc-outage-judge: two more real harness runs (bar10/run.mjs --record --outage solana, and --outage footer), the good
-// answer re-recorded by the same code:
-//   outage:       Solana's first RPC answering every request 503 (--outage solana): the page logs the failed loads and
-//                 draws the Solana row amber, every other row ok: PASS, the outage let through;
-//   outageFooter: the first NEAR RPC answering the footer's block reads 503 while Verify's reads on it are answered
-//                 (--outage footer): the rows stay ok and the footer's read logs a failed load of a release RPC: FAIL, an
-//                 outage the page shows as verified.
-// The other cases plant one fact on the outage answer. No RPC host is typed here: each is read from VERIFY_RELEASES.
+// Card app-shell-rpc-outage-judge: three more real harness runs (bar10/run.mjs --record --outage ...), the good answer
+// re-recorded by the same code:
+//   outage:           Solana's first RPC answering every request 503 (--outage solana): the page logs the failed loads and
+//                     draws the Solana row amber, every other row ok: PASS, the outage let through;
+//   outageFooter:     the first NEAR RPC answering the footer's block reads 503 and the second answering them (--outage
+//                     footer): the footer shows Stable with its block, the page logs a failed footer read on every desktop
+//                     route while Verify's rows stay ok: PASS, the footer's failed read let through;
+//   outageFooterPair: both NEAR RPCs answering the footer's block reads 503 (--outage footer-pair): the footer shows
+//                     Offline: FAIL on every desktop route, a double outage failing closed.
+// The other cases plant one fact on these answers. No RPC host is typed here: each is read from VERIFY_RELEASES.
 // Screenshot paths are kept as <shots>/<file>, a build's path as <build>.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -27,6 +29,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { consoleLine } from "./console-errors.mjs";
+import { footerUrl, FOOTER_QUERY } from "../../apps/terminal/src/shell/footer.ts";
 import { judge, onConsole, outages, rpcRows, ROUTES, WIDTHS } from "./app-shell.mjs";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
@@ -196,7 +199,7 @@ test("recorded outage answer: one pool RPC answering 503, its row amber, every o
     // the run made the outage: the page logged the failed loads, and drew only the Solana row amber
     assert.ok(l.consoleErrors.length > 0 && l.consoleErrors.every((e) => e.startsWith("Failed to load resource: ") && e.endsWith(`(${SOLANA}/)`)), `${w}: ${l.consoleErrors}`);
     assert.deepEqual(l.verify, { state: "read", code: "ok", funds: "ok", pools: { solana: "warn", base: "ok", robinhood: "ok" } });
-    assert.ok(r.lines.some((x) => x.startsWith(`ok  ${w} /verify (verify): CLS`) && x.endsWith(`RPC down, shown Unverified: ${SOLANA.replace("https://", "")}`)), `${w}: ${r.lines.join("\n")}`);
+    assert.ok(r.lines.some((x) => x.startsWith(`ok  ${w} /verify (verify): CLS`) && x.endsWith(`RPC down, shown: ${SOLANA.replace("https://", "")}`)), `${w}: ${r.lines.join("\n")}`);
   }
 });
 
@@ -229,11 +232,88 @@ test("planted on the outage answer: a page error beside the outage fails, and th
   assert.deepEqual(judge(rec2).lines.filter((l) => l.startsWith("BAD")), ["BAD desktop /verify (verify): console error: Verify read no head on https://a or https://b"]);
 });
 
-test("recorded outage-footer answer: a release RPC's failed load beside rows the page shows ok: FAIL on the desktop load", () => {
+test("recorded outage-footer answer: the first NEAR RPC fails the footer's reads, the footer shows Stable with its block: PASS, on every desktop route", () => {
   const r = judge(ANSWERS.outageFooter);
+  assert.equal(r.ok, true, r.lines.join("\n"));
+  const desk = ANSWERS.outageFooter.loads.filter((l) => l.width === "desktop");
+  assert.equal(desk.length, ROUTES.length);
+  for (const l of desk) {
+    // the run made the outage on every route (the footer reads on each), tagged as the footer's own, and the footer drew the pair answered
+    assert.ok(l.consoleErrors.length > 0 && l.consoleErrors.every((e) => e.endsWith(`(${NEAR}/) [footer read]`)), `${l.path}: ${l.consoleErrors}`);
+    assert.equal(l.footer.conn, "on");
+    assert.match(l.footer.block, /^\d+$/);
+  }
+  // Verify's rows stay ok on /verify: only the footer's reads failed
+  assert.deepEqual(verifyLoad(ANSWERS.outageFooter, "desktop").verify, { state: "read", code: "ok", funds: "ok", pools: { solana: "ok", base: "ok", robinhood: "ok" } });
+  assert.ok(r.lines.some((l) => l.startsWith("ok  desktop /discover (discover): CLS") && l.endsWith(`RPC down, shown: ${NEAR.replace("https://", "")}`)), r.lines.join("\n"));
+});
+
+test("recorded outage-footer-pair answer: both NEAR RPCs fail the footer's reads and it shows Offline: FAIL on every desktop route, none on the phone", () => {
+  const r = judge(ANSWERS.outageFooterPair);
   assert.equal(r.ok, false);
   const b = r.lines.filter((l) => l.startsWith("BAD"));
-  assert.ok(b.some((l) => l.startsWith("BAD desktop /verify (verify): console error: Failed to load resource: ") && l.includes(`(${NEAR}/) [${NEAR} is a release RPC, not shown Unverified: code ok, funds ok]`)), r.lines.join("\n"));
+  for (const [id, p] of ROUTES) assert.ok(b.some((l) => l.startsWith(`BAD desktop ${p} (${id}): console error: Failed to load resource: `) && l.includes("[footer read] [") && l.includes("is a release RPC, a footer read, and both RPCs of the pair failed it]")), `${p}: ${b.join("\n")}`);
+  assert.ok(b.every((l) => l.startsWith("BAD desktop")), b.join("\n"));
+  assert.equal(ANSWERS.outageFooterPair.loads.find((l) => l.width === "desktop").footer.conn, "off");
+});
+
+test("planted on the outage-footer answer: a footer read failing while the footer does not show the pair answered fails", () => {
+  const plant = (f) => {
+    const rec = structuredClone(ANSWERS.outageFooter);
+    for (const l of rec.loads.filter((x) => x.width === "desktop")) f(l.footer);
+    return judge(rec).lines.filter((l) => l.startsWith("BAD"));
+  };
+  for (const [name, f, shows] of [
+    ["offline", (x) => (x.conn = "off"), "off, block"],
+    ["still waiting", (x) => (x.conn = "wait"), "wait, block"],
+    ["no block drawn", (x) => (x.block = ""), "on, block not drawn"],
+    ["no connection", (x) => (x.conn = null), "no connection, block"],
+  ]) {
+    const b = plant(f);
+    assert.equal(b.length, ROUTES.length, name);
+    assert.ok(b.some((l) => l.startsWith("BAD desktop /discover (discover): console error: ") && l.includes(`a footer read, and the footer shows ${shows}`)), `${name}: ${b[0]}`);
+  }
+  // no footer in the DOM at all
+  const rec = structuredClone(ANSWERS.outageFooter);
+  rec.loads.find((l) => l.width === "desktop" && l.path === "/privacy").footer = null;
+  assert.match(judge(rec).lines.find((l) => l.startsWith("BAD")), /^BAD desktop \/privacy \(privacy\): .*the footer shows not drawn, not the pair answered\]$/);
+});
+
+test("planted on the outage-footer answer: a failed load of the same origin that is not the footer's, on a route that is not Verify, fails", () => {
+  const rec = structuredClone(ANSWERS.outageFooter);
+  const orders = rec.loads.find((l) => l.width === "desktop" && l.path === "/orders");
+  orders.consoleErrors = [failed(NEAR, "the server responded with a status of 503 ()")];
+  const b = judge(rec).lines.filter((l) => l.startsWith("BAD"));
+  assert.deepEqual(b, [`BAD desktop /orders (orders): console error: ${failed(NEAR, "the server responded with a status of 503 ()")} [${NEAR} is a release RPC, not shown Unverified: code not drawn, funds not drawn]`]);
+  // and on Verify itself, with its rows ok: an untagged failed load of a NEAR RPC is a Verify read that failed and was not shown
+  const v = structuredClone(ANSWERS.outageFooter);
+  verifyLoad(v, "desktop").consoleErrors = [failed(NEAR)];
+  assert.match(judge(v).lines.find((l) => l.startsWith("BAD")), /^BAD desktop \/verify \(verify\): .*not shown Unverified: code ok, funds ok\]$/);
+});
+
+test("planted on the outage-footer answer: both NEAR RPCs failing a footer read in one load fails, as does a footer read of a pool's RPC", () => {
+  const other = [...rpcRows("mainnet").entries()].find(([o, r]) => o !== NEAR && r.includes("code"))[0];
+  const rec = structuredClone(ANSWERS.outageFooter);
+  rec.loads.find((l) => l.width === "desktop" && l.path === "/terms").consoleErrors.push(`${failed(other)} [footer read]`);
+  const b = judge(rec).lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(b.length, 1, b.join("\n"));
+  assert.ok(b[0].startsWith("BAD desktop /terms (terms): ") && b[0].includes("both RPCs of the pair failed it"), b[0]);
+  // a footer read tagged on a pool's RPC is no footer read of the release: it is judged as a Verify read, by its row
+  const p = structuredClone(ANSWERS.outageFooter);
+  p.loads.find((l) => l.width === "desktop" && l.path === "/terms").consoleErrors.push(`${failed(SOLANA)} [footer read]`);
+  assert.match(judge(p).lines.find((l) => l.startsWith("BAD")), /^BAD desktop \/terms \(terms\): .*not shown Unverified: solana not drawn\]$/);
+});
+
+test("the footer's own request carries the tag the collector reads: footerUrl is tagged, a Verify read of the same RPC is not", () => {
+  const line = (url) => consoleLine("Failed to load resource: net::ERR_FAILED", url);
+  const [first] = VERIFY_RELEASES.mainnet.rpcs;
+  assert.equal(line(footerUrl(first)), `Failed to load resource: net::ERR_FAILED (${first}/) [footer read]`);
+  assert.equal(line(first), `Failed to load resource: net::ERR_FAILED (${first}/)`);
+  assert.ok(footerUrl(first).endsWith(`?${FOOTER_QUERY}`));
+  // the preflight line names the address in its text: tagged the same
+  const cors = (url) => consoleLine(`Access to fetch at '${url}' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, "https://ct-app.unrealized.trade/");
+  assert.ok(cors(footerUrl(first)).endsWith(" [footer read]"));
+  assert.ok(!cors(first).endsWith(" [footer read]"));
 });
 
 test("planted on the outage answer: the outage shown as verified, as loading or not drawn at all fails, naming what the page shows", () => {
