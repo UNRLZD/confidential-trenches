@@ -1,6 +1,6 @@
 {
  "good": {
-  "source": "harness: the build /private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "source": "harness: the build dist at APP_HOST's name in the stand-in shell, HELPER_HOST live",
   "at": "2026-11-05T14:25:03.118Z",
   "candidates": [
    {
@@ -169,7 +169,7 @@
        "1793888100000:5.0171242587187026e-8"
       ],
       "errors": [],
-      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5/0-0-desktop.png"
+      "shot": "0-0-desktop.png"
      },
      {
       "width": "phone",
@@ -190,12 +190,12 @@
        "1793888100000:4.502866210757563e-8"
       ],
       "errors": [],
-      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5/0-1-phone.png"
+      "shot": "0-1-phone.png"
      }
     ]
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-good5",
+  "shots": "live-good5",
   "browser": "157.0.8103.38"
  },
  "bad": {
@@ -421,7 +421,7 @@
        "1793888100000:0.00000235450680299211"
       ],
       "errors": [],
-      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5/0-0-desktop.png"
+      "shot": "0-0-desktop.png"
      },
      {
       "width": "phone",
@@ -440,12 +440,12 @@
        "1793888100000:0.00000235450680299211"
       ],
       "errors": [],
-      "shot": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5/0-1-phone.png"
+      "shot": "0-1-phone.png"
      }
     ]
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/live-bad5",
+  "shots": "live-bad5",
   "browser": "157.0.8103.38"
  }
 }

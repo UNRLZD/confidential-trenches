@@ -1741,7 +1741,7 @@
  },
  "planted": {
   "url": "https://sign.confidential.unrealized.trade/",
-  "source": "local, SIGN_HOST answered from /tmp/ct-signpage-vjVvkF",
+  "source": "local, SIGN_HOST answered from ct-signpage-vjVvkF",
   "at": "2026-11-01T03:04:05.867Z",
   "browser": "153.0.8010.12",
   "runs": [
