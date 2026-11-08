@@ -306,14 +306,8 @@ if (DUST) {
   const S = base58.encode(ed25519.getPublicKey(key));
   // S's token account (Token-2022's with ImmutableOwner is 170 bytes; 200 bounds it) and its two fees
   const need = solanaRentMin(rent, 200) + 2n * FEE;
-  dust = { S, key, ata: null, w: null, armed: undefined, sent: false, p: null };
-  log(`FLOW_DUST: the stranger S ${S} (its key kept at ${at}); fund S with at least ${need} lamports on devnet`);
-  for (;;) {
-    const got = await Promise.all(rpcs.map(async (r) => BigInt((await r("getBalance", [S, { commitment: "confirmed" }])).value)));
-    if (got.every((b) => b >= need)) break;
-    await sleep(10_000);
-  }
-  log("S funded");
+  dust = { S, key, need, ata: null, w: null, armed: undefined, sent: false, p: null };
+  log(`FLOW_DUST: the stranger S ${S} (its key kept at ${at}); fund S with at least ${need} lamports on devnet (S is waited for after the buy, U first)`);
 }
 /** S's unit back to W's token account, once the sell reads confirmed and ok on both RPCs; false while it does not. */
 async function dustBack() {
@@ -377,6 +371,13 @@ if (bought) {
   }
   const W = t.transaction.message.accountKeys[1];
   if (DUST) {
+    for (;;) {
+      const got = await Promise.all(rpcs.map(async (r) => BigInt((await r("getBalance", [dust.S, { commitment: "confirmed" }])).value)));
+      if (got.every((b) => b >= dust.need)) break;
+      log(`S holds ${got.join("/")}: waiting for at least ${dust.need}`);
+      await sleep(10_000);
+    }
+    log("S funded");
     // W's key from the seed as a restore finds W (its l and j), then S takes 1 unit: S pays, W only signs
     const { solanaRestoreWallets, solanaHoldingsReader } = await import("../../wallet/src/pool/buy-wallets.ts");
     const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
