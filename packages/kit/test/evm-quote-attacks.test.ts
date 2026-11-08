@@ -6964,8 +6964,13 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
   };
   const run = (err?: { code: number; message: string }) =>
     evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: marketRoute(token) }, [spy(chain(pools, 0), err), spy(chain(pools, 1), err)], NOW, scanner(5_000_000, []));
-  await run();
+  const q = await run();
   assert.ok(seen.length >= 2, "both providers ran the swap");
+  // the recipient: keccak256("blindfill.buy.gas.v1" || the agreed block's hash)[12:], so no one can fund it before that
+  // block (review of 498eae83, L2)
+  const tag = new TextEncoder().encode("blindfill.buy.gas.v1");
+  const fresh = Buffer.from(keccak_256(new Uint8Array([...tag, ...Buffer.from(q.block.hash.slice(2), "hex")]))).toString("hex").slice(24);
+  for (const c of seen) assert.equal((c.params[0] as { data: string }).data.slice(10 + 64 + 24, 10 + 128), fresh, "the swap pays the block's fresh recipient");
   for (const c of seen) {
     const [tx, , over] = c.params as [{ from: string; to: string; data: string; gas: string }, unknown, Record<string, Record<string, string>>];
     assert.deepEqual([tx.from.toLowerCase(), tx.to.toLowerCase()], [pool, pool]);
@@ -6976,10 +6981,11 @@ test("GF5 the read is the pool's own buySwap sent from the pool at the cap, its 
     assert.equal(quoteMod.EVM_BUY_SWAP_FIT, GF_FIT);
     assert.equal(quoteMod.EVM_BUY_SWAP_FIT, (quoteMod.EVM_BUY_SWAP_GAS * 100n) / 105n, "500,000 / 1.05, rounded down");
   }
-  for (const err of [{ code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }]) {
+  // geth's word and reth's four (review of 498eae83, L3)
+  for (const err of [{ code: -32000, message: "out of gas" }, { code: -32003, message: "out of gas: gas required exceeds: 476190" }, { code: -32003, message: "out of gas: gas exhausted during memory expansion: 476190" }, { code: -32003, message: "out of gas: gas exhausted during precompiled contract execution: 476190" }, { code: -32003, message: "out of gas: invalid operand to an opcode: 476190" }]) {
     await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "over_gas_floor" && e.reference === null, err.message);
   }
-  for (const err of [{ code: -32000, message: "execution timeout" }, { code: -32000, message: "out of gas or something" }]) {
+  for (const err of [{ code: -32000, message: "execution timeout" }, { code: -32000, message: "out of gas or something" }, { code: -32000, message: "out of memory: memory limit exceeded during memory expansion" }, { code: 429, message: "out of gas: rate limited" }]) {
     await assert.rejects(run(err), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error", err.message);
   }
 });
@@ -7019,4 +7025,47 @@ test("GF9 a route through an unlisted hook is held only to listed routes that fi
   const q = await hbQuote(pools, token, [{ key: hooked.key, at: 4_500_000 }], v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]));
   assert.ok(!("code" in q), show(q));
   assert.equal(q.amountOut, AMOUNT - AMOUNT / 10n);
+});
+
+test("GF10 forty pools seeded above the market behind swaps that do not fit cost no round each: their fits are read in one round, at most two past the first, three to a request, and the market that fits is the reference", async () => {
+  const token = "0x00000000000000000000000000000000000f1f10";
+  // the market at half the amount (it fits), the seeded pool at a tenth (the route asked), and K pools the scan finds
+  // quoting the whole amount, each swap over the cap (a hook that lets only the quoter through: review of 498eae83, M2)
+  const K = 40;
+  const fakes: ModelPool[] = Array.from({ length: K }, (_, i) => ({ key: keyOf(token, NATIVE, 2000 + i, 50, NATIVE), give: (a) => a, gas: 600_000n }));
+  const pools = [{ ...gfMarket(token), give: (a: bigint) => a / 2n }, gfSeeded(token), ...fakes];
+  const logs = fakes.map((p) => ({ key: p.key, at: 4_500_000 }));
+  // provider 1's requests that carry a swap read, each with how many it carries
+  const sizes: number[] = [];
+  const spy = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const n = calls.filter((c) => String((c.params[0] as { data?: string }).data).startsWith("0x" + SEL_BUY_SWAP)).length;
+    if (n > 0) sizes.push(n);
+    return rpc(calls);
+  };
+  const ask = (route: EvmRoute) => evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [spy(chain(pools, 0)), chain(pools, 1)], NOW, scanner(5_000_000, logs));
+  const r = await ask(gfSeededRoute(token)).then((x) => x, (e: unknown) => e);
+  assert.ok(r instanceof EvmQuoteError && r.code === "below_reference", show(r));
+  assert.deepEqual(r.reference, { amountOut: AMOUNT / 2n, route: marketRoute(token) }, "the market, the best route that fits, is the reference");
+  const reads = sizes.reduce((a, b) => a + b, 0);
+  // the route's own read goes in the first round; the others, K + 1 at or above its value, three to a request (CALLS_PER_BATCH)
+  assert.ok(reads >= K + 2, `${reads} swap reads`);
+  assert.ok(sizes.length <= Math.ceil((K + 1) / 3) + 2, `${sizes.length} requests for ${reads} swap reads: one route a round`);
+  const q = await ask(marketRoute(token));
+  assert.equal(q.amountOut, AMOUNT / 2n);
+});
+
+test("GF11 out of gas is no fit only for the swap read: the same words to any other read (the hookless read here) refuse rpc_error", async () => {
+  const token = "0x00000000000000000000000000000000000f1f11";
+  const hooked: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, UNPINNED), give: (a) => a };
+  const pools = [hooked, gfMarket(token), gfSeeded(token)];
+  const oog = (rpc: EvmRpc): EvmRpc => async (calls) => {
+    const out = (await rpc(calls)) as unknown[];
+    return calls.map((c, i) => {
+      const [tx, , over] = c.params as [{ data?: string }, unknown, Record<string, { code?: string }> | undefined];
+      const hookless = over !== undefined && Object.keys(over).some((k) => k.toLowerCase() === UNPINNED.toLowerCase()) && !String(tx.data).startsWith("0x" + SEL_BUY_SWAP);
+      return hookless ? { jsonrpc: "2.0", id: i, error: { code: -32000, message: "out of gas" } } : out[i];
+    });
+  };
+  const route = v4Route([{ currency: token, fee: 3000, tickSpacing: 60, hooks: UNPINNED }]);
+  await assert.rejects(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route }, [oog(chain(pools, 0)), oog(chain(pools, 1))], NOW, scanner(5_000_000, [{ key: hooked.key, at: 4_500_000 }])), (e: unknown) => e instanceof EvmQuoteError && e.code === "rpc_error");
 });
