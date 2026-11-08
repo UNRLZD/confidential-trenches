@@ -1,0 +1,39 @@
+/* The token page's left rail (Rail.tsx). Values are R5's (research repo design/proto/assets/proto.css .rail, .rc2,
+   .rchip, .rrows, .rr and token.css's width modes at design-lock-r5). Desktop sizes are layout px on the 1920 design,
+   drawn at --fit-zoom (shell/fit.ts). The rail's column is token.css .tkp-desk's. */
+.tkr { --blue: #5b8cff; --border-row: #171717; --bg-row-hover: #141414; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-panel); border: 1px solid var(--border-panel); border-radius: 10px; }
+.tkr-exp { display: none; }
+.tkr-chips { height: 48px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--border-row); }
+.tkr-chip { position: relative; height: 30px; padding: 0 11px; border: 0; border-radius: 8px; display: inline-flex; align-items: center; font: 600 12px var(--font-ui); color: var(--text-2); background: transparent; box-shadow: inset 0 0 0 1px var(--border-panel); white-space: nowrap; cursor: pointer; }
+.tkr-chip::after { content: ""; position: absolute; inset: -7px 0; }
+.tkr-chip[aria-pressed="true"] { background: var(--border-strong); color: var(--text-1); box-shadow: none; }
+.tkr-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 6px; }
+.tkr-rows::-webkit-scrollbar { display: none; }
+.tkr-row { height: 66px; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 11px; color: inherit; text-decoration: none; transition: background-color 150ms ease; }
+a.tkr-row:hover { background: var(--bg-row-hover); }
+.tkr-row[aria-current="page"] { background: var(--bg-raised); }
+.tkr-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.tkr-skc { width: 46px; height: 46px; }
+.tkr-a { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.tkr-s { font: 600 15px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkr-p { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tkr-b { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; white-space: nowrap; }
+.tkr-mc { font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; }
+.tkr-mc u { text-decoration: none; font-size: 11px; color: var(--text-3); margin-left: 4px; }
+.tkr-c { font: 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text-3); }
+.tkr-c[data-dir="up"] { color: var(--acc); }
+.tkr-c[data-dir="down"] { color: var(--sell); }
+.tkr-msg { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-2); font-size: 13px; }
+
+/* slim (R5 token.css, under 1500): the expand button and the rings; expanded, the full rail drawn over the chart, its
+   column still 78, so the page under it never moves */
+@media (max-width: 1499.98px) {
+  .tkr-exp { position: relative; display: flex; height: 48px; flex: none; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+  .tkr-exp:hover { color: var(--text-1); }
+  .tkr:not([data-open="true"]) .tkr-chips, .tkr:not([data-open="true"]) .tkr-a, .tkr:not([data-open="true"]) .tkr-b { display: none; }
+  .tkr:not([data-open="true"]) .tkr-rows { padding: 0 4px 6px; }
+  .tkr:not([data-open="true"]) .tkr-row { justify-content: center; padding: 10px 0; }
+  .tkr:not([data-open="true"]) .tkr-msg { font-size: 11px; text-align: center; }
+  .tkr[data-open="true"] { position: relative; z-index: 8; width: 340px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+  .tkr[data-open="true"] .tkr-exp { justify-content: flex-start; padding-left: 26px; }
+}

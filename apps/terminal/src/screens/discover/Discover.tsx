@@ -46,7 +46,7 @@ function Glyph({ k }: { k: ColumnKey }) {
 }
 
 /** The stage ring around the avatar (UNRLZD CurveRing): a curve's progress, full blue once listed. */
-function Ring({ v, size, stroke, av }: { v: RowView; size: number; stroke: number; av: number }) {
+export function Ring({ v, size, stroke, av }: { v: RowView; size: number; stroke: number; av: number }) {
   const h = size / 2, R = h - stroke / 2 - 1, c = 2 * Math.PI * R;
   const f = v.stage.fill;
   const col = !v.stage.curve ? (f > 0 ? "var(--blue)" : "var(--border-strong)") : f >= 0.75 ? "var(--text-1)" : f >= 0.2 ? "#bcbcbc" : "#808080";
