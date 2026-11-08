@@ -322,6 +322,58 @@ test("readWithdrawOut (card exit-ids-out): what U holds inside intents.near at r
   assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "readMoveOut's own reads must agree too");
 });
 
+test("review 2 of exit-ids-out: a typed account or token that is not a string is refused by every builder; each builder checks its read, signs with its own key copy and zeroes that copy", () => {
+  const k = depositId(SEED, 1n, 0);
+  const k2 = depositId(SEED, 1n, 1);
+  const BH = "11111111111111111111111111111111";
+  const keyOf = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const base = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, held: 3_000_000n, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  const builders = {
+    move: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildMoveOut({ read: { ...base, registered: false, ...read } as never, key, kind: "id", to: to as string, token: token as string, storageMin: STORAGE_MIN }),
+    register: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildRegisterOut({ read: { ...base, registered: false, ...read } as never, key, to: to as string, token: token as string, storageMin: STORAGE_MIN }),
+    withdraw: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildWithdrawOut({ read: { ...base, registered: true, ...read } as never, key, kind: "id", to: to as string, token: token as string }),
+  };
+  for (const [name, b] of Object.entries(builders)) {
+    // M1: a String or an object whose toJSON names the vault or intents.near, as both `to` and the read's `to`
+    for (const name2 of [NET.vault, "intents.near"]) {
+      for (const to of [new String(name2), { toJSON: () => name2 }]) {
+        assert.throws(() => b(to, TOKEN, { to }), MoveOutRefused, `${name}: to ${String(to)}`);
+      }
+      const tok = new String(TOKEN);
+      assert.throws(() => b(TO, tok, { token: tok }), MoveOutRefused, `${name}: a String token`);
+    }
+    // M2: a read of another account, typed account or token
+    for (const [f, v] of [["u", k2.id], ["to", "bob.testnet"], ["token", NEAR_NETWORKS.mainnet.usdc]] as const) assert.throws(() => b(TO, TOKEN, { [f]: v }), MoveOutRefused, `${name}: read.${f}`);
+    // L3: the read's nonce, block hash and registration
+    for (const bad of [{ nonce: -1n }, { nonce: 7 }, { blockHash: "1111" }, { blockHash: 32 }, { blockHash: "0OIl" }, { registered: "no" }]) assert.throws(() => b(TO, TOKEN, bad), MoveOutRefused, `${name}: ${JSON.stringify(bad, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))}`);
+    // M2: the key's fields read once: a getter that answers another key on its second read does not sign with it
+    const flipped = Object.defineProperties({ ...keyOf() }, {
+      publicKey: { get: ((n = 0) => () => (n++ === 0 ? k.publicKey : k2.publicKey))(), enumerable: true },
+      secretKey: { get: ((n = 0, own = k.secretKey.slice()) => () => (n++ === 0 ? own : k2.secretKey.slice()))(), enumerable: true },
+    });
+    const m = b(TO, TOKEN, {}, flipped as never);
+    const signed = base64.decode(m.signed);
+    const txBytes = signed.slice(0, signed.length - 65);
+    assert.ok(ed25519.verify(signed.slice(signed.length - 64), sha256(txBytes), k.publicKey), `${name}: signed by the key it checked`);
+    // M2: the builder's own copy of the key is zeroed, on a build and on a refusal
+    const fill = Uint8Array.prototype.fill;
+    let zeroed = 0;
+    Uint8Array.prototype.fill = function (this: Uint8Array, v: number, ...rest: [number?, number?]) {
+      if (v === 0 && this.length === 32 && this.every((x, i) => x === k.secretKey[i])) zeroed++;
+      return fill.call(this, v, ...rest);
+    } as typeof fill;
+    try {
+      const own = keyOf();
+      b(TO, TOKEN, {}, own);
+      assert.ok(own.secretKey.some((x) => x !== 0), "the caller's key is the caller's to zero");
+      assert.throws(() => b(TO, TOKEN, { u: k2.id }, keyOf()), MoveOutRefused);
+    } finally {
+      Uint8Array.prototype.fill = fill;
+    }
+    assert.equal(zeroed, 2, `${name}: its copy zeroed after the build and after the refusal`);
+  }
+});
+
 test("the exit's typed-account rule refuses exactly what checkMoveCalls refuses, over every moving account, token and typed account (card exit-ids-out)", () => {
   const k = depositId(SEED, 1n, 0);
   const tos = [NET.vault, "intents.near", TOKEN, U, "bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, "other.testnet"];

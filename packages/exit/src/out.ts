@@ -217,8 +217,15 @@ export async function exitRecipient(typed: unknown, network: NearNetwork, rpcs: 
   if (account === "intents.near") return { ok: false, code: "intents" };
   if (account === EXIT_TOKENS[network]) return { ok: false, code: "token" };
   if (!IMPLICIT_ANY.test(account)) {
-    const at = await finalAt(rpcs, EXIT_TOKENS[network], sleep);
-    const reads = await Promise.all(rpcs.map((r) => ask(r, { request_type: "view_account", account_id: account, block_id: at }, sleep).then((x) => seen(x, at))));
+    // a read that stops (heights spread too far, an RPC busy past the waits) is unread, never a throw: only a refusal throws
+    let reads: ("exists" | "absent" | "unread")[];
+    try {
+      const at = await finalAt(rpcs, EXIT_TOKENS[network], sleep);
+      reads = await Promise.all(rpcs.map((r) => ask(r, { request_type: "view_account", account_id: account, block_id: at }, sleep).then((x) => seen(x, at))));
+    } catch (e) {
+      if (!(e instanceof ExitOutStopped)) throw e;
+      return { ok: false, code: "unread" };
+    }
     if (reads[0] === "absent" && reads[1] === "absent") return { ok: false, code: "no-account" };
     if (reads[0] !== "exists" || reads[1] !== "exists") return { ok: false, code: "unread" };
   }
@@ -240,19 +247,23 @@ export type ExitMove =
  * is exitKey unless a test says.
  */
 export function exitBuildMove(a: { seed64: Uint8Array; account: ExitAccount; network: NearNetwork; to: ExitRecipient; move: ExitMove }, keyOf: typeof exitKey = exitKey): BuiltMove {
-  const { seed64, account, network, to, move } = a;
+  // each argument read once, here: a getter answering the checks one value and the builder another has nothing to change
+  const { seed64, network, to } = a;
+  const account = { ...a.account } as ExitAccount;
+  const move = { ...a.move } as ExitMove;
+  const leg = move.leg;
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   if (!isObj(to) || !CHECKED.has(to) || to.network !== network) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
   const typed = to.account;
   const token = EXIT_TOKENS[network];
-  if (move.leg === "intents" && EXIT_INTENTS[network] === null) throw new ExitRpcRefused(`${network} has no intents.near`);
+  if (leg === "intents" && EXIT_INTENTS[network] === null) throw new ExitRpcRefused(`${network} has no intents.near`);
   const key = keyOf(seed64, account);
   try {
     const kind = account.kind === "A" ? "arm" : "id";
-    if (move.leg === "token") return buildMoveOut({ read: move.read, key, kind, to: typed, token, storageMin: move.storageMin });
-    if (move.leg === "register") return buildRegisterOut({ read: move.read, key, to: typed, token, storageMin: move.storageMin });
-    if (move.leg === "intents") return buildWithdrawOut({ read: move.read, key, kind, to: typed, token });
-    throw new ExitRpcRefused(`no move leg ${JSON.stringify((move as { leg?: unknown }).leg)}`);
+    if (leg === "token") { const m = move as Extract<ExitMove, { leg: "token" }>; return buildMoveOut({ read: m.read, key, kind, to: typed, token, storageMin: m.storageMin }); }
+    if (leg === "register") { const m = move as Extract<ExitMove, { leg: "register" }>; return buildRegisterOut({ read: m.read, key, to: typed, token, storageMin: m.storageMin }); }
+    if (leg === "intents") { const m = move as Extract<ExitMove, { leg: "intents" }>; return buildWithdrawOut({ read: m.read, key, kind, to: typed, token }); }
+    throw new ExitRpcRefused(`no move leg ${JSON.stringify(leg)}`);
   } finally {
     key.secretKey.fill(0);
   }

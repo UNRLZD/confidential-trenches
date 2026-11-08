@@ -158,6 +158,12 @@ test("the typed account: a named account that exists on both RPCs passes; one th
   assert.deepEqual(await exitRecipient(TYPED, "testnet", stale, noSleep), { ok: false, code: "unread" }, "an answer at another block is no read");
 });
 
+test("the typed account: a read that stops (heights spread over the bound, an RPC busy past the waits) answers unread, never a throw", async () => {
+  const w: World = { bal: {}, mt: {}, accounts: [TYPED] };
+  assert.deepEqual(await exitRecipient(TYPED, "testnet", pair("testnet", { ...w, lag: HEIGHT_SPREAD_MAX + 1 }, w), noSleep), { ok: false, code: "unread" });
+  assert.deepEqual(await exitRecipient(TYPED, "testnet", pair("testnet", w, { ...w, busy: 4 }), noSleep), { ok: false, code: "unread" });
+});
+
 test("the typed account: an implicit one needs no read; a bad form, the vault, intents.near and the token are refused before any read", async () => {
   const log: string[] = [];
   const rpcs = pair("testnet", { bal: {}, mt: {} }, { bal: {}, mt: {} }, log);
@@ -329,6 +335,19 @@ test("the account's key is zeroed once the move is built, and when the builder r
   assert.throws(() => exitBuildMove({ seed64: SEED, account: ACCOUNTS[0]!, network: "testnet", to: R_TEST, move: { leg: "token", read: tokenRead(ACCOUNTS[0]!, 1n), storageMin: STORAGE_MIN } }, spy), MoveOutRefused);
   assert.equal(keys.length, 2);
   for (const k of keys) assert.ok(k.every((b) => b === 0), "zeroed");
+});
+
+test("exitBuildMove reads its move's leg and its account's kind once: a getter that answers another on a later read changes nothing (review 2, L1)", () => {
+  const flip = <T,>(first: T, later: T) => { let n = 0; return () => (n++ === 0 ? first : later); };
+  const u = ACCOUNTS[0]!;
+  // the leg: token first, intents after (on testnet, which has no intents.near)
+  const move = Object.defineProperty({ read: tokenRead(u, 2_500_000n), storageMin: STORAGE_MIN }, "leg", { get: flip("token", "intents"), enumerable: true }) as unknown as ExitMove;
+  const m = exitBuildMove({ seed64: SEED, account: u, network: "testnet", to: R_TEST, move });
+  assert.equal(decode(m).receiver, EXIT_TOKENS.testnet);
+  // the kind: U first, A after (A would move U's kept base unit)
+  const acct = Object.defineProperty({ s: 1n, i: 0 }, "kind", { get: flip("U", "A"), enumerable: true }) as unknown as ExitAccount;
+  const m2 = exitBuildMove({ seed64: SEED, account: acct, network: "testnet", to: R_TEST, move: { leg: "token", read: tokenRead(u, 2_500_000n), storageMin: STORAGE_MIN } });
+  assert.equal(m2.amount, 2_499_999n, "U keeps its base unit");
 });
 
 test("an unknown account kind or network is refused", () => {
