@@ -23,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const KEY = "app-chart-controls";
-export const APP_URL = "https://confidential.unrealized.trade/";
+export const APP_URL = "https://ct-app.unrealized.trade/";
 export const JS_MARKERS = ["chart-toolbar", "chart-tf-", "chart-indicators", "chart-display", "chart-mode", "chart-denom", "chart-bottom", "chart-range-", "chart-clock", "chart-scale-pct", "chart-scale-log", "chart-scale-auto", "trade-mark", "trade-mark-card", "/v1/market/trades"];
 export const CSS_MARKERS = [".tkp-bottombar", ".tkp-menu", ".tm-layer", ".tm-dot"];
 
