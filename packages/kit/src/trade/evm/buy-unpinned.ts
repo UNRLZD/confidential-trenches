@@ -190,6 +190,31 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
+      // The pool's list (card evm-pool-lists-mainnet): the quote list's second, blastapi, pages 10 blocks ("-32600: You
+      // can make eth_getLogs requests with up to a 10 block range"), so it never seats the pool's sync. Read 2026-11-09
+      // 05:50-05:55Z from this Mac, keyless, the pool's filter (its address; deploy block 54,325,671, tx 0x2e0cba4b…c23c7)
+      // over 10,000 blocks at the head (55,055,001-55,065,000), 1M back and from the deploy block, and the PoolManager's
+      // Initialize logs (a filter with logs in every range) over 10,000 blocks at the head, 1M, 5M and 20M back:
+      // - base-rpc.publicnode.com (Allnodes): 50,000 a page ("-32701: exceed maximum block range: 50000" at 100,000);
+      //   Initialize 33 and 49 logs at the head and 1M back; HTTP 403 "Archive requests require a personal token" 5M back;
+      //   its oldest page served ends at block 51,018,473, refused at 51,005,030 (bisected, 10,000 blocks a page).
+      // - base.api.pocket.network (Pocket): 10,000 a page at the head, 1M back and from the deploy block, 3 reads of 3
+      //   each, the same 33 and 49 logs digest for digest; one backend "max 10001 blocks" at 50,000. 5M and 20M back it
+      //   answered 0 logs where Sentio and Tenderly both answer 142 and 1,021 over 1,000 blocks (a pruned backend
+      //   answering empty), or "block range exceeds maximum 500": past the pool's life, and the sync refuses two seats
+      //   that differ (packages/wallet/src/pool/evm.ts, "the two RPCs differ"), so it stalls there, never reads less.
+      // Both serve the pool's whole life today: its first 1,000 blocks' 2 Initialize logs the same on all five read.
+      // No spare: Sentio and Tenderly serve deep history (142 and 1,021 Initialize logs over 1,000 blocks 5M and 20M back,
+      // the same on both) but 1,000 blocks a page, and the wallet's pager cannot use either: Sentio refuses wider as HTTP
+      // 429 {"code":8,"message":"public eth_getLogs is limited to 1000 blocks"}, a throttle that rests it, and Tenderly as
+      // "-32602: invalid params", naming no span, so the seat Pocket's first cap walks off halves there to 781 blocks
+      // (packages/wallet/test/pool-evm.test.ts, card evm-pool-lists-mainnet: 2,576 pages for 2M blocks with Tenderly
+      // third, 239 on Pocket without it). Not taken: base.rpc.blxrbdn.com (100,000 a page, honest, but "4444: pruned history
+      // unavailable ... earliest available 52500000", and no page's policy names it), mainnet.base.org (429 to every
+      // read), drpc (code 35 at 10,000), blockpi (5,000 a page, "earliest available 51000000"), 1rpc and nodies (50),
+      // thirdweb (1,000, then 429), zan and onfinality (429 to eth_getLogs keyless), meowrpc (no eth_getLogs), ankr (a
+      // key), llamarpc 525, omniatech 521, lava 410, subquery and developer-access-mainnet.base.org (no answer).
+      poolProviders: Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
       // 10 s of Base's blocks: one every 200 ms since block 53556127 (2026-11-05 18:00:01Z, 2 s before; 10,000 blocks
       // to block 53603737 took 2,000 s on base-rpc.publicnode.com and base.gateway.tenderly.co, read 2026-11-05 20:38Z),
       // so 50 blocks (5 at 2 s blocks); live check base-200ms-blocks fails when Base's block time moves again
