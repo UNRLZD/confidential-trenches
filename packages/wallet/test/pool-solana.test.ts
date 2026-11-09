@@ -588,6 +588,16 @@ test("listed restore refuses a lister and one RPC rolling the pool back past a r
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(liar), rpcs: [noGpa(afterSpend, "https://a.example"), noGpa(liar, "https://b.example")], gap: 4 }), listedCounts(4, 0, [5, 4], [4, 4]));
 });
 
+test("listed restore refuses one RPC whose label page is one leaf short, every mark listed and its state page whole", async () => {
+  const { chain } = restorePool();
+  const accounts = new Map(chain.accounts);
+  const k1 = solanaPageOf(PROGRAM, 1, 0);
+  accounts.set(k1, accounts.get(k1)!.subarray(0, accounts.get(k1)!.length - 72));
+  const short: Chain = { ...chain, accounts };
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain), rpcs: [noGpa(short, "https://a.example"), noGpa(chain, "https://b.example")], gap: 4 }), listedCounts(5, 2, [7, 4], [7, 5]));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain), rpcs: [noGpa(chain, "https://a.example"), noGpa(short, "https://b.example")], gap: 4 }), listedCounts(5, 2, [7, 5], [7, 4]));
+});
+
 test("listed restore refuses a lister and one RPC hiding an older release and cutting the newest state leaf", async () => {
   const { chain } = restorePool();
   const userSpent = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
@@ -643,6 +653,15 @@ test("listed restore refuses a lister or an RPC breaking a mark's rules: its buc
     return r;
   }, { url: "https://a.example" });
   await assert.rejects(run(lister(chain), chain, low), /rpc 0: getMultipleAccounts: not one account per listed mark at or past slot 700/);
+  // a lister answering at a slot below the one asked (the pages' slot): its list may be short of the pages, refused
+  const plainLister = lister(chain);
+  const lowLister: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    const r = (await plainLister(m, p)) as { context: { slot: number } };
+    const min = (p[1] as { minContextSlot?: number }).minContextSlot;
+    if (min !== undefined) r.context.slot = min - 1;
+    return r;
+  }, { url: "https://l.example" });
+  await assert.rejects(run(lowLister), /^Error: lister: getProgramAccounts: answered at slot 699, below 700$/);
   // an RPC behind the lister's slot is asked for the lister's slot, and refuses
   await assert.rejects(run(lister({ ...chain, slot: 900 })), /Minimum context slot has not been reached: 700 < 900/);
   // a listed mark another program owns on one RPC
