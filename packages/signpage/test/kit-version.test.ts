@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { APP_ORIGIN, startApi, type ApiHost, type IncomingMessage } from "../src/api.ts";
 import * as NOW from "../../kit/src/signpage/schema.ts";
 import * as V14 from "./fixtures/kit-v1.4/signpage/schema.ts";
+import * as V17 from "./fixtures/kit-v1.7/signpage/schema.ts";
 import { POOL_DEPOSIT_STAGES, SIGNPAGE_KIT_VERSION, type DepositStage, type PoolChain, type PoolDepositStage, type SignpageState, type Stage } from "../../kit/src/signpage/messages.ts";
 
 const TAG_FILES = {
@@ -100,20 +101,26 @@ const FULL: SignpageState = {
   pools: [{ chain: "solana", asset: "SOL", balance: "2", ready: "1", tap_max: "0.9", price: { price: "15000000000", expo: -8, published_s: 1, read_ms: 2 } }],
   deposit_wallets: [{ chain: "base", address: "0xabc", asset: "ETH", amount: "0.01" }],
   wallets: [{ chain: "solana", address: "W1", role: "fresh", size: "50", state: "READY" }],
-  positions: [{ chain: "solana", token: "T", amount: "1", cost: "2", wallets: ["W1"] }],
+  positions: [{ chain: "solana", token: "T", amount: "1.5", cost: "2", wallets: ["W1"], decimals: 6 }, { chain: "base", token: "0xT", amount: "3", cost: "1", wallets: ["0xW"] }],
   orders: [{ order_id: "o", chain: "solana", wallet: "W1", token: "T", group_id: "g", trigger: { kind: "stop", pool: "P", venue: "pumpswap", direction: "lte", price: "1", quote_asset: "SOL" }, state: "ARMED", last_check: 5 }],
   held: [{ id: "u.near", asset: "USDC", amount: "3" }],
   ops: ALL_OPS as SignpageState["ops"],
 };
+/** FULL's positions as kit-v1.7 and before read them (card signpage-state-holdings): with no decimals. */
+const POSITIONS_V1_7 = [{ chain: "solana", token: "T", amount: "1.5", cost: "2", wallets: ["W1"] }, { chain: "base", token: "0xT", amount: "3", cost: "1", wallets: ["0xW"] }] as SignpageState["positions"];
 const { pools: _p, deposit_wallets: _d, ...FULL_V1_4_BASE } = FULL;
-const FULL_V1_4 = { ...FULL_V1_4_BASE, ops: OPS_V1_4 };
+const FULL_V1_4 = { ...FULL_V1_4_BASE, positions: POSITIONS_V1_7, ops: OPS_V1_4 };
 /** What kit-v1.5 is sent (card held-move-forgotten-tx): FULL with each moved-out deposit's moved_out and held_id left
  *  out (review L1: no live Withdraw on an older app). */
-const FULL_V1_5 = { ...FULL, ops: OPS.map((o) => (o.kind === "deposit" && "moved_out" in o ? (({ moved_out: _m, held_id: _h, ...r }: Record<string, unknown>) => r)(o) : o)) } as SignpageState;
+const FULL_V1_5 = { ...FULL, positions: POSITIONS_V1_7, ops: OPS.map((o) => (o.kind === "deposit" && "moved_out" in o ? (({ moved_out: _m, held_id: _h, ...r }: Record<string, unknown>) => r)(o) : o)) } as SignpageState;
 
 /** What kit-v1.6 is sent (card pool-deposit-stages): FULL with every pool_deposit op left out, kit-v1.6 having no kind
  *  for it; every other op as it is, moved_out included. */
-const FULL_V1_6 = { ...FULL, ops: OPS } as SignpageState;
+const FULL_V1_6 = { ...FULL, positions: POSITIONS_V1_7, ops: OPS } as SignpageState;
+
+/** What kit-v1.7 is sent (card signpage-state-holdings): FULL with each position's decimals left out, a key kit-v1.7's
+ *  schema refuses the whole state for; everything else as it is, every pool_deposit op included. */
+const FULL_V1_7 = { ...FULL, positions: POSITIONS_V1_7 } as SignpageState;
 
 /** What deposit.confirm answers, by its address: the stage named, with the facts that stage carries in OPS. */
 const confirmOf = (address: string) => {
@@ -299,7 +306,7 @@ test("hello at the kit's own version: every message as it is, and the kit's own 
 
 test("a hello gets no answer; a later or higher version reads everything, an older, malformed or extra-keyed one is kit-v1.4", async () => {
   for (const [msg, full] of [
-    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
+    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.7"), FULL_V1_7], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
     [hello("1.4"), FULL_V1_4], [hello("1.0"), FULL_V1_4], [hello("1.5.0"), FULL_V1_4], [hello("v1.5"), FULL_V1_4], [hello(15), FULL_V1_4],
     [{ ...hello(SIGNPAGE_KIT_VERSION), id: crypto.randomUUID() }, FULL_V1_4], [{ v: 2, type: "hello", kit: SIGNPAGE_KIT_VERSION }, FULL_V1_4],
   ] as const) {
@@ -333,10 +340,10 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
 });
 
-test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.6's", async () => {
+test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.7's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
-  assert.equal(`${major}.${minor - 1}`, "1.6", "raising the version again adds its level here");
-  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_6], [`${major}.${minor - 2}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
+  assert.equal(`${major}.${minor - 1}`, "1.7", "raising the version again adds its level here");
+  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_7], [`${major}.${minor - 2}`, FULL_V1_6], [`${major}.${minor - 3}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
     p.send(hello(kit));
     const id = await p.ask();
@@ -426,7 +433,7 @@ test("no hello: the deployed shape today (pools and deposit_wallets, kit-v1.4's 
   const id = await p.ask();
   assert.ok(reads(V14, p.answer(id), "state"), "kit-v1.4 reads it now");
   const { pools: _a, deposit_wallets: _b, ...rest } = deployed;
-  assert.deepEqual(p.answer(id).result, rest, "the two fields left out, every other field and op as it is");
+  assert.deepEqual(p.answer(id).result, { ...rest, positions: POSITIONS_V1_7 }, "the two fields and the position decimals left out, every other field and op as it is");
 });
 
 // ------------------------------------------------------------------------------------------------ card pool-deposit-stages
@@ -434,7 +441,7 @@ test("the pool ops here hold every pool deposit stage the kit names", () => {
   assert.deepEqual([...new Set(POOL_OPS.map((o) => o.stage))].sort(), [...POOL_DEPOSIT_STAGES].sort());
 });
 
-test("hello at the kit's own version (1.7): every pool deposit op as it is, each stage with its facts, and the kit's schema reads the state", async () => {
+test("hello at the kit's own version: every pool deposit op as it is, each stage with its facts, and the kit's schema reads the state", async () => {
   const p = page();
   p.send(hello(SIGNPAGE_KIT_VERSION));
   const id = await p.ask();
@@ -477,4 +484,63 @@ test("hello kit 1.5 and no hello: no pool_deposit op either", async () => {
     assert.ok(!JSON.stringify(p.answer(id)).includes("pool_deposit"), JSON.stringify(msg));
     assert.deepEqual(p.answer(id).result, msg ? FULL_V1_5 : FULL_V1_4);
   }
+});
+
+// ------------------------------------------------------------------------------------------------ card signpage-state-holdings
+// kit-v1.7's schema is main's before this card (f6066882, the last commit at kit 1.7: test/fixtures/kit-v1.7/, each
+// file pinned by its SHA-256 below and compared with that commit byte for byte where the clone has it). Its exact keys
+// refuse a position with decimals, so a kit-v1.7 app would drop the whole state the first time one carried them
+// (review P2-3).
+const V17_COMMIT = "f6066882";
+const V17_FILES = {
+  "signpage/schema.ts": "cc59469013d851ea7d401ddfd26aa73232f3d7fdc49a4824936915070cf9f05e",
+  "signpage/messages.ts": "9db8e564257068ea1e87e1010cf8352bc022a3181a1f10fa9c5b53c958d3ac2a",
+  "orders/record.ts": "1499cd86f07143d7205e1e86ffd3f37ae25f65e64c83b2c7fd70235a5a5def8d",
+  "freeze.ts": "28118f50d643c20f7604c945eaf4d5fc1b2a6e4246a5193d814b2fdfde75e4d0",
+};
+test("the kit-v1.7 schema here is main's at kit 1.7: each file's SHA-256 pinned, and byte for byte that commit's where the clone has it", (t) => {
+  const file = (f: string) => readFileSync(new URL(`./fixtures/kit-v1.7/${f}`, import.meta.url));
+  for (const [f, sha] of Object.entries(V17_FILES)) assert.equal(createHash("sha256").update(file(f)).digest("hex"), sha, f);
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${V17_COMMIT}^{commit}`], { stdio: "pipe" });
+  } catch {
+    return t.skip(`no ${V17_COMMIT} in this clone (a shallow checkout): the pins above hold the files`);
+  }
+  for (const f of Object.keys(V17_FILES)) assert.ok(execFileSync("git", ["show", `${V17_COMMIT}:packages/kit/src/${f}`], { maxBuffer: 1 << 24 }).equals(file(f)), `${f} is kit-v1.7's`);
+});
+
+test("hello kit 1.7: every position with no decimals, everything else as it is, and kit-v1.7's own schema reads it; its events too", async () => {
+  assert.equal(V17.SIGNPAGE_RESULT_SCHEMAS.state(FULL), false, "kit-v1.7 refuses the whole state for a position's decimals");
+  const p = page();
+  p.send(hello("1.7"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL_V1_7);
+  assert.ok(reads(V17, p.answer(id), "state"), "kit-v1.7's schema reads what the page sends it");
+  p.set({ ...FULL, vault_balance: "99" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL_V1_7, vault_balance: "99" } }]);
+  assert.ok(reads(V17, ev[0], "state"));
+});
+
+test("hello at the kit's own version (1.8): each position's decimals as they are, and the kit's schema reads them", async () => {
+  assert.equal(SIGNPAGE_KIT_VERSION, "1.8");
+  const p = page();
+  p.send(hello(SIGNPAGE_KIT_VERSION));
+  const id = await p.ask();
+  assert.deepEqual((p.answer(id).result as unknown as SignpageState).positions, FULL.positions);
+  assert.equal((p.answer(id).result as unknown as SignpageState).positions[0]!.decimals, 6);
+  assert.ok(reads(NOW, p.answer(id), "state"));
+});
+
+test("every level below the current one reads its own schema's positions: no decimals at 1.6, 1.5 and with no hello", async () => {
+  for (const msg of [hello("1.6"), hello("1.5"), null]) {
+    const p = page();
+    if (msg) p.send(msg);
+    const id = await p.ask();
+    assert.deepEqual((p.answer(id).result as unknown as SignpageState).positions, POSITIONS_V1_7, JSON.stringify(msg));
+  }
+  const p = page();
+  const id = await p.ask();
+  assert.ok(reads(V14, p.answer(id), "state"), "kit-v1.4 still reads it");
 });

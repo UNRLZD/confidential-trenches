@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
-import { KIT, LEVELS, MAP, V1_4, V1_4_KEYS, facts, judge } from "./kit-frame-version.mjs";
+import { KIT, LEVELS, MAP, V1_4, V1_4_KEYS, facts, judge as judgeNow } from "./kit-frame-version.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./kit-frame-version.answers.json", import.meta.url), "utf8"));
 const BEFORE = [
@@ -25,14 +25,21 @@ const BEFORE = [
   "BAD the bundle has no kit-v1.4 state field list of exactly its twelve fields",
 ];
 const UNSHAPED = "BAD progress and route events do not go through the shaper's stage map: an app on kit-v1.4 is sent a stage or a route event it cannot read";
+// card signpage-state-holdings: every record before it is a 1.7-era build's, judged at the version and levels it was cut
+// at (V17); the good build of the card and the live SIGN_HOST before it are judged at 1.8 (judgeNow)
+const V17 = { kit: "1.7", levels: ["1.6", "1.5"] };
+const judge = (a) => judgeNow(a, V17);
 const KIT_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.7: a kit-v1.7 app's pool deposit op has no level of its own`;
-const LEVELS_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.6","1.5"]: a kit-v1.6 app is sent what it has no kind for`;
+const LEVELS_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.6","1.5"]: an older kit's app is sent what it cannot read`;
+const KIT18_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.8: a kit-v1.8 app's position decimals has no level of its own`;
+const LEVELS18_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.7","1.6","1.5"]: an older kit's app is sent what it cannot read`;
+const DECIMALS_LINE = "BAD the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for";
 const POOL_LINE = "BAD the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out";
 const RESULT16_LINE = "BAD kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out";
 const POSTS = (n) => `BAD the bundle holds ${n} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`;
 
 test("recorded good answer: this card's build reads the hello, maps every deposit stage for kit-v1.4, keeps its fields: PASS", () => {
-  const v = judge(ANSWERS.good);
+  const v = judgeNow(ANSWERS.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(v.lines, []);
 });
@@ -60,9 +67,9 @@ test("recorded bad answers on the progress path: a second post, progress unshape
   }
   // each planted answer is the good build with that one cut, re-pinned
   for (const k of ["badTwoPosts", "badProgressUnshaped", "badRouteUnshaped", "badPoolOpsKept", "badNoV16Level", "badEventsUnshaped", "badNoResult16"]) {
-    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
-    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
-    assert.deepEqual(ANSWERS[k].keys, ANSWERS.good.keys, k);
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good17.sha384, k);
+    assert.deepEqual(ANSWERS[k].maps, ANSWERS.good17.maps, k);
+    assert.deepEqual(ANSWERS[k].keys, ANSWERS.good17.keys, k);
   }
 });
 
@@ -82,11 +89,9 @@ test("every SIGN live check that posts an app's request to the page sends the ki
 });
 
 test("pool-deposit-stages: the good build reads kit 1.7 in full, kit-v1.6 and kit-v1.5 below it, and leaves the pool_deposit op out there", () => {
-  assert.equal(KIT, "1.7");
-  assert.deepEqual(LEVELS, ["1.6", "1.5"]);
-  assert.equal(ANSWERS.good.hello.kit, "1.7");
-  assert.deepEqual(ANSWERS.good.hello.levels, ["1.6", "1.5"]);
-  assert.match(ANSWERS.good.hello.poolOps, /if\(([\w$]+)===`1\.6`\)return\{\.\.\.([\w$]+),ops:([\w$]+)\(\2\.ops\)\};if\(\1===`1\.5`\)return\{\.\.\.\2,ops:\3\(\2\.ops\)\.map\($/);
+  assert.equal(ANSWERS.good17.hello.kit, "1.7");
+  assert.deepEqual(ANSWERS.good17.hello.levels, ["1.6", "1.5"]);
+  assert.match(ANSWERS.good17.hello.poolOps, /if\(([\w$]+)===`1\.6`\)return\{\.\.\.([\w$]+),ops:([\w$]+)\(\2\.ops\)\};if\(\1===`1\.5`\)return\{\.\.\.\2,ops:\3\(\2\.ops\)\.map\($/);
 });
 
 test("recorded bad answer badLive: SIGN_HOST as served before this card (release-107, kit 1.6): FAIL, the version, the level and the pool filter named", () => {
@@ -98,7 +103,7 @@ test("review P3 2: recorded bad answers badEventsUnshaped and badNoResult16: sta
   assert.deepEqual(judge(ANSWERS.badEventsUnshaped).lines, [POOL_LINE, RESULT16_LINE], "the filter is read only on the state shaper the shaper calls");
   assert.equal(ANSWERS.badNoResult16.hello.result16, null);
   assert.deepEqual(judge(ANSWERS.badNoResult16).lines, [RESULT16_LINE]);
-  assert.match(ANSWERS.good.hello.result16, /if\(([\w$]+)===`1\.6`\)return ([\w$]+)===`state`\?([\w$]+)\(\1,([\w$]+)\):\4;$/);
+  assert.match(ANSWERS.good17.hello.result16, /if\(([\w$]+)===`1\.6`\)return ([\w$]+)===`state`\?([\w$]+)\(\1,([\w$]+)\):\4;$/);
 });
 
 test("recorded bad answers badPoolOpsKept and badNoV16Level: the good build sending kit-v1.6 its pool ops, or reading it at kit-v1.5's level: each FAIL, named", () => {
@@ -109,7 +114,7 @@ test("recorded bad answers badPoolOpsKept and badNoV16Level: the good build send
 });
 
 test("planted on the good answer: each piece taken away or moved FAILs", () => {
-  const g = ANSWERS.good;
+  const g = ANSWERS.good17;
   const map = g.maps.find((m) => Object.hasOwn(m, "refund_move"));
   const withMap = (patch) => ({ ...g, maps: [{ ...map, ...patch }] });
   assert.ok(judge({ ...g, sha384: "sha384-other" }).lines.includes("BAD SIGN_HOST's served /app.js is not the one index.html pins"));
@@ -156,7 +161,8 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   const f = facts("", js);
   assert.deepEqual(f.maps, [MAP]);
   assert.deepEqual(f.keys, [V1_4_KEYS]);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string", "object"]);
+  assert.equal(f.hello.decimals, null, "a 1.7-era shaper strips no decimals");
   assert.equal(f.hello.kit, "1.7");
   // review P3 2: the filter and the kit-v1.6 answer branch read only on the functions the shaper calls
   assert.equal(facts("", js.replace("state:Jc(r,e.state)", "state:Qz(r,e.state)").replace("function Jc(", "function Qz(e,t){return t}function Jc(")).hello.poolOps, null);
@@ -186,7 +192,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   assert.equal(facts("", js.replace("function Qc(e,t){return e===`current`||", "function Qc(e,t){return!0||")).hello.progress, null);
   const other = facts("", js.replace("qc(Wc,t)?Wc[t]", "qc(Vc,t)?Vc[t]").replace("var Wc=", `var Vc=Object.freeze({${pairs.replace("failed:`in_transit`", "failed:`failed`")}}),Wc=`));
   assert.equal(other.hello.progressMap.failed, "failed");
-  assert.equal(judge({ ...ANSWERS.good, hello: other.hello }).ok, false, "the stage function on another map");
+  assert.equal(judge({ ...ANSWERS.good17, hello: other.hello }).ok, false, "the stage function on another map");
   // the hello read and dropped; the level set but not the one the shaper reads; the post not through the shaper
   assert.equal(facts("", js.replace("return void(r=Bc(c))", "return")).hello.assign, null);
   assert.equal(facts("", js.replace("return void(r=Bc(c))", "return void(q=Bc(c))")).hello.shaper, null);
@@ -205,12 +211,42 @@ test("facts() reads the hello's path with the kit-v1.5 level (card held-move-for
   ].join(";");
   const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
   const f = facts("", js);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object", "object"]);
   assert.deepEqual(f.hello.progressMap, MAP);
   // card pool-deposit-stages: release-94's shape reads kit 1.6, kit-v1.5's level alone, no pool filter: FAIL now
   assert.deepEqual([f.hello.kit, f.hello.levels, f.hello.poolOps], ["1.6", ["1.5"], null]);
-  assert.deepEqual(judge({ ...ANSWERS.good, hello: f.hello }).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE]);
+  assert.deepEqual(judge({ ...ANSWERS.good17, hello: f.hello }).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE]);
   assert.equal(facts("", js.replace("return r===`1.4`?null:e", "return e")).hello.progress, null, "a route event to kit-v1.4");
   assert.equal(facts("", js.replace("return e!==`1.4`||hl.has(t)", "return e!==`1.5`||hl.has(t)")).hello.progress, null, "kit-v1.4 sent a later stage unmapped");
   assert.equal(facts("", js.replace("i(1,5)?`1.5`:`1.4`", "i(1,5)?`current`:`1.4`")).hello.assign, null, "kit-v1.5 read as current");
+});
+
+// ------------------------------------------------------------------------------------------------ card signpage-state-holdings
+test("signpage-state-holdings: the good build reads kit 1.8 in full, kit-v1.7, kit-v1.6 and kit-v1.5 below it, each position with no decimals there", () => {
+  assert.equal(KIT, "1.8");
+  assert.deepEqual(LEVELS, ["1.7", "1.6", "1.5"]);
+  const g = ANSWERS.good;
+  assert.equal(g.hello.kit, "1.8");
+  assert.deepEqual(g.hello.levels, ["1.7", "1.6", "1.5"]);
+  assert.match(g.hello.decimals, /let ([\w$]+)=([\w$]+)\(([\w$]+)\);if\(([\w$]+)===`1\.7`\)return \1;if\(\4===`1\.6`\)return\{\.\.\.\1,ops:/);
+  assert.deepEqual(judgeNow(g).lines, []);
+});
+
+test("recorded bad answers at 1.8: SIGN_HOST before this card, and the 1.7-era good build: each FAIL, the version, the level and the decimals named", () => {
+  assert.deepEqual(judgeNow(ANSWERS.badLiveHoldings).lines, [KIT18_LINE("1.6"), LEVELS18_LINE(["1.5"]), DECIMALS_LINE, POOL_LINE, RESULT16_LINE]);
+  assert.deepEqual(judgeNow(ANSWERS.good17).lines, [KIT18_LINE("1.7"), LEVELS18_LINE(["1.6", "1.5"]), DECIMALS_LINE]);
+});
+
+test("planted on the good answer at 1.8: no decimals strip, another version or other levels: each FAIL, named", () => {
+  const g = ANSWERS.good;
+  assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, decimals: null } }).lines, [DECIMALS_LINE]);
+  for (const v of ["1.7", "1.9", null]) assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, kit: v } }).lines, [KIT18_LINE(v ?? "?")], `kit ${v}`);
+  for (const l of [["1.6", "1.5"], ["1.7", "1.5"], ["1.7", "1.6", "1.5", "1.4"], null])
+    assert.deepEqual(judgeNow({ ...g, hello: { ...g.hello, levels: l } }).lines, [LEVELS18_LINE(l)], JSON.stringify(l));
+});
+
+test("facts() on a bundle whose state shaper keeps decimals below the current level reads no decimals strip", () => {
+  const g = ANSWERS.good;
+  const js = `X=e=>({...e,positions:e.positions.map(({decimals:e,...t})=>t)});F=e=>e.filter(e=>e.kind!==\`pool_deposit\`);`;
+  assert.equal(facts(g.index ?? "", js).hello.decimals, null);
 });
