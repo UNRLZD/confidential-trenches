@@ -18,9 +18,11 @@
 // quote they made the warm p95 1,440 ms, live check evm-quote-warm-round, run 42521476520); and the loop then five
 // reads that each take 1,500,000 gas and return 7 answer [2, then five of 1 7]: each read behind the loop is still given
 // a quarter share, 1.66M (a code that kept nothing for the reads after the one it runs answered all six 2; review of
-// baac0ecb, P3-1). That
+// baac0ecb, P3-1); and each read's gas used beside its answer (card evm-quote-gas-used: the 14M revert's 14M, the 1.5M
+// reads' 1.5M, a return of 7 under 10,000, the loop's more than 30M first in a call of 6), the same on every provider of a
+// chain, as the kit requires of the two it agrees on. That
 // the kit reads a 2 again alone, agrees on it and prices nothing on one answered alone is its test
-// (test/evm-quote-attacks.test.ts GS1-GS11, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
+// (test/evm-quote-attacks.test.ts GS1-GS20, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
 // test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-quote-read-gas-starve.mjs [--record <file> --as good|bad] [--answer <file> --as good|bad]
 // The bad answer is the same run through Multicall3's own code (no override): the loop and the 0xee read answer 0.
@@ -78,16 +80,27 @@ function aggregate(tos) {
 // keccak256("blindfill.read.gas.v1"): the word the kit's code writes after its answer, and the kit takes no answer without
 // (unaggregate, review of fe9f5ec3 finding 3); judge reads it inside EVM_READ_GAS_CODE as its PUSH32
 const MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+// The code's result layout (card evm-quote-gas-used), read from its own bytes as the kit's tests read it: elements 224
+// bytes apart (PUSH1 0xe0 MUL), each written success, gas used (m[0x60]) at +0x20, the offset 0x60 at +0x40, the
+// length at +0x60 and the return data at +0x80, as UniswapInterfaceMulticall answers (success, gasUsed, returnData)
+const LAYOUT = ["60e002", "85526060518560200152606085604001528085606001526000856080013e"];
 /** Each read's success word and its return data's last significant hex digits, or null for an answer that is not one
  *  or does not end in MARKER */
 export function results(r) {
+  const g = gasOf(r);
+  return g === null ? null : g.map(([ok, , d]) => [ok, d]);
+}
+/** Each read's [success word, gas used, return data's last significant hex digits], read by the answer's own offsets
+ *  ((bool, uint256, bytes) results), or null for an answer that is not one or does not end in MARKER */
+export function gasOf(r) {
   if (typeof r !== "string" || !/^0x([0-9a-f]{64})+$/i.test(r) || r.slice(-64).toLowerCase() !== MARKER) return null;
   const h = r.slice(2, -64);
   const at = (o) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
   try {
     return Array.from({ length: at(32) }, (_, i) => {
       const e = 64 + at(64 + 32 * i);
-      return [at(e), h.slice(2 * (e + 96), 2 * (e + 96 + at(e + 64))).replace(/^0+/, "")];
+      if (at(e + 64) !== 0x60) throw new Error("not (success, gasUsed, bytes)");
+      return [at(e), at(e + 32), h.slice(2 * (e + 128), 2 * (e + 128 + at(e + 96))).replace(/^0+/, "")];
     });
   } catch {
     return null;
@@ -141,6 +154,7 @@ export function judge(a) {
   };
   line(a?.code === EVM_READ_GAS_CODE, `the run's code is the kit's EVM_READ_GAS_CODE`);
   line(EVM_READ_GAS_CODE.includes("7f" + MARKER), "the kit's code writes its marker after the answer");
+  line(LAYOUT.every((x) => EVM_READ_GAS_CODE.includes(x)), "the kit's code writes each read's gas used beside its answer");
   const chains = a?.chains ?? [];
   line(["base", "robinhood"].every((c) => chains.some((x) => x.chain === c)), "Base and Robinhood were read");
   for (const { chain, reads } of chains) {
@@ -154,7 +168,16 @@ export function judge(a) {
       line(heavy !== null && JSON.stringify(heavy) === JSON.stringify(HEAVY_SIX_WANT), `${chain} ${r.provider}: six reads, the first a revert after 14M gas, answer ${heavy === null ? cut(r.heavy) : JSON.stringify(heavy)}`);
       const floor = results(r.floor);
       line(floor !== null && JSON.stringify(floor) === JSON.stringify(FLOOR_SIX_WANT), `${chain} ${r.provider}: the loop then five reads of 1.5M gas answer ${floor === null ? cut(r.floor) : JSON.stringify(floor)}`);
+      // the gas used (card evm-quote-gas-used): the 14M revert used 14M, the reads of 1.5M 1.5M, a return of 7 under
+      // 10,000, and the loop all it was given, more than 30M first in a call of 6
+      const used = (x) => gasOf(x)?.map((y) => y[1]) ?? [];
+      const [hv, fl, sx] = [used(r.heavy), used(r.floor), used(r.six)];
+      const near = (u, g) => u >= g && u < g + 10_000;
+      line(near(hv[0], 14_000_000) && hv.slice(1).every((u) => u < 10_000) && fl.slice(1).every((u) => near(u, 1_500_000)) && sx[1] > 30_000_000 && [0, 2, 5].every((k) => sx[k] < 10_000), `${chain} ${r.provider}: each read's gas used ${JSON.stringify({ heavy: hv, floor: fl, six: sx })}`);
     }
+    // every provider of the chain answers each read's gas used alike, which the kit requires of the two it agrees on
+    const all = (r) => ["six", "sixtyFour", "heavy", "floor"].map((k) => gasOf(r[k])?.map((y) => y[1]) ?? null);
+    line(reads.length > 0 && reads.every((r) => JSON.stringify(all(r)) === JSON.stringify(all(reads[0]))), `${chain}: every provider answers the same gas used for each read`);
   }
   return { ok, lines };
 }

@@ -375,7 +375,7 @@ export const MUTANTS = [
   // the read again alone, the agreement on it, and the buy's own route refused by name
   [QUOTE, "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o, [MULTICALL3]: { code: EVM_READ_GAS_CODE } }]", "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }, at, { ...o }]", R, "GS1 "],
   [QUOTE, "data: aggregate(part.map((i) => reads[i]!)), gas: READ_CALL_GAS_HEX }", "data: aggregate(part.map((i) => reads[i]!)) }", R, "GS4 "],
-  [QUOTE, "if ((ok !== 0 && ok !== 1 && ok !== 2) || at(e + 32) !== 0x40)", "if ((ok !== 0 && ok !== 1) || at(e + 32) !== 0x40)", R, "GS1 "],
+  [QUOTE, "if ((ok !== 0 && ok !== 1 && ok !== 2) || at(e + 64) !== 0x60)", "if ((ok !== 0 && ok !== 1) || at(e + 64) !== 0x60)", R, "GS1 "],
   [QUOTE, "    if (ok === 2) out.push({ kind: \"revert\", partial: false, gas: true });\n    else if (ok === 0) {", "    if (ok === 0 || ok === 2) {", R, "GS2 "],
   [QUOTE, "for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {", "for (const per of [] as number[]) {", R, "GS2 "],
   [QUOTE, "for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {", "for (const per of again === undefined ? [1] : []) {", R, "GS11 "],
@@ -383,14 +383,21 @@ export const MUTANTS = [
   // review of baac0ecb: the kept size not the one read at (P3-2); the reads a burner starved kept alone, or its own second
   // read not kept alone (P2-2); half a share kept for each read after the one run, not a quarter (P2-1)
   [QUOTE, "    readSizes.set(key, n);\n", "    readSizes.set(key, 1);\n", R, "GS11 "],
-  [QUOTE, "    if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;\n", "", R, "GS16 "],
-  [QUOTE, "    if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;\n", "    if (behind.has(i)) continue;\n", R, "GS16 "],
-  // delta review of 344596b1, P2-2: an earlier read makes a read behind only where it still answers 2 at its final answer
-  [QUOTE, "first2.has(j) && (all[j] as { gas?: true }).gas === true", "first2.has(j)", R, "GS17 "],
+  // card evm-quote-gas-used: each read's gas used, agreed by two providers, picks the read kept apart: the read that used
+  // more than its call's even share (not every read before), kept alone; a read that needs more than that share kept at
+  // the size it was read again at; the gas used agreed, and read from the code's answer
+  [QUOTE, "const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);", "const users = part.slice(0, k);", R, "GS18 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, 1);", "      }", R, "GS18 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, 1);", "      }", R, "GS19 "],
+  [QUOTE, "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || users.length === 0) {", "if ((all[i] as { gas?: true }).gas === true || users.length === 0) {", R, "GS17 "],
+  [QUOTE, "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || users.length === 0) {", "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || true) {", R, "GS18 "],
+  [QUOTE, " && a.used === b.used;", ";", R, "GS20 "],
+  [QUOTE, "    const used = at(e + 32);", "    const used = 0;", R, "GS18 "],
+  [QUOTE, "const share = (n: number) => Number(EVM_READ_CALL_GAS - 100_000n) / n;", "const share = (n: number) => Number(EVM_READ_CALL_GAS - 100_000n);", R, "GS18 "],
   [QUOTE, "5760021c60a0526020", "5760011c60a0526020", R, "GS16 "],
   // the per-read gas code as merged at 206d625f, an even share for each read: a hookless warm quote's heavy reverts read
   // again alone (warm p95 1,440 ms, live check evm-quote-warm-round)
-  [QUOTE, "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101ca565b506004353160005260206000f35b602435600052600051156101ca57610400600051116101ca57620186a05a106101ca57600051620186a05a030480617530116101ca5760021c60a0526020610100526000516101205260005160e0026101400160805260006040525b60005160405110156101905760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b604401356044018060400135810180358082602001608051376001604051600051030360a05102620222e001806064015a10610161575a0361271001603f0260061c60205260205180603f900401612710015a10610163575a606052600060008260805160008735602051f15a606051039061014a5760205160011c111560011b61014e565b5060015b3d8060611161015b575060605b90610168565b505b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610089565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd", "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101a4565b506004353160005260206000f35b602435600052600051156101a457610400600051116101a457620186a05a106101a457600051620186a05a030480617530116101a4576175309003603f0260061c6020526020610100526000516101205260005160e0026101400160805260006040525b600051604051101561016a5760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a1061013d575a606052600060008260805160008735602051f15a60605103906101265760205160011c111560011b61012a565b5060015b3d80606111610137575060605b90610142565b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd", R, "GS15 "],
+  [QUOTE, "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101db565b506004353160005260206000f35b602435600052600051156101db57610400600051116101db57620186a05a106101db57600051620186a05a030480617530116101db5760021c60a0526020610100526000516101205260005160081b6101400160805260006040525b60005160405110156101a15760405160e00260005160051b0160405160051b610140015260405160e00260005160051b016101400160405160051b604401356044018060400135810180358082602001608051376001604051600051030360a05102620222e001806064015a10610165575a0361271001603f0260061c60205260205180603f900401612710015a10610167575a606052600060008260805160008735602051f15a60605103806060529061014e5760205160011c111560011b610152565b5060015b3d8060611161015f575060605b90610171565b505b6000606052600060025b85526060518560200152606085604001528085606001526000856080013e50505050604051600101604052610089565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160081b610140015260005160081b606001610100f35b600080fd", "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101b5565b506004353160005260206000f35b602435600052600051156101b557610400600051116101b557620186a05a106101b557600051620186a05a030480617530116101b5576175309003603f0260061c6020526020610100526000516101205260005160081b6101400160805260006040525b600051604051101561017b5760405160e00260005160051b0160405160051b610140015260405160e00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a10610141575a606052600060008260805160008735602051f15a60605103806060529061012a5760205160011c111560011b61012e565b5060015b3d8060611161013b575060605b9061014b565b6000606052600060025b85526060518560200152606085604001528085606001526000856080013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160081b610140015260005160081b606001610100f35b600080fd", R, "GS15 "],
   [QUOTE, "if (len < 96 || r.slice(2 + 2 * (len - 32)).toLowerCase() !== READ_MARKER) return refuse(", "if (len < 64) return refuse(", R, "GS8 "],
   [QUOTE, "    if (c.route?.venue === \"uniswap-v3\" && c.route.tokens.length === 2) return true;\n", "", R, "GS6 "],
   [QUOTE, "    if (c.route?.venue === \"uniswap-v3\" && c.route.tokens.length === 2) return true;\n", "", S, "GS9 "],
@@ -439,7 +446,7 @@ export const MUTANTS = [
   [QUOTE, 'if (typeof url !== "string" || !/^https:\\/\\//.test(url)) return refuse(', "if (false) return refuse(", Q, "Q8 "],
   // a provider's answer
   [QUOTE, "if (!Number.isSafeInteger(o) || o < 0 || o + 32 > len)", "if (!Number.isSafeInteger(o) || o < 0)", Q, "Q9 "],
-  [QUOTE, "if (e + 96 + dl > len - 32) return refuse(", "if (false) return refuse(", Q, "Q9 "],
+  [QUOTE, "if (e + 128 + dl > len - 32) return refuse(", "if (false) return refuse(", Q, "Q9 "],
   [QUOTE, "\n  if (!Array.isArray(out) || out.length !== calls.length)", "\n  if (!Array.isArray(out))", Q, "Q9 "],
   // the sell quote: no route from a caller, the device's own pool, minOut, probe and age
   [QUOTE, 'if (Object.hasOwn(req, "route")) return refuse("bad_request", "a sell quote takes no route: the device picks the pool");', "", S, "planted: a server's route"],

@@ -6,6 +6,7 @@
 import { mock, test } from "node:test";
 import { readFileSync } from "node:fs";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
+import { codeAnswer, codeResult } from "./evm-quote-gas-fx.ts";
 import { onTestClock } from "./test-clock.ts";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import assert from "node:assert/strict";
@@ -74,23 +75,30 @@ const RAN_OUT = Symbol("NotEnoughLiquidity");
 // EVM_READ_GAS_CODE's success word 2: a read that failed having used half its gas or more (card evm-quote-read-gas-starve)
 const STARVED = Symbol("starved");
 // EVM_READ_GAS_CODE as merged at 206d625f, which gave each of a call's n reads the same share, L = ((gas - 100,000) / n
-// - 30,000) x 63/64: the model answers a call sent with it as that code did, and one sent with the kit's code as the kit's
+// - 30,000) x 63/64, in the result layout of card evm-quote-gas-used (each read's gas used beside it): the model answers a call sent with it as that code did, and one sent with the kit's code as the kit's
 // does (each read all the gas left but a quarter share for each read after it), so a test of the warm reads tells them
 // apart (GS15)
-const EVEN_SHARE_CODE = "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101a4565b506004353160005260206000f35b602435600052600051156101a457610400600051116101a457620186a05a106101a457600051620186a05a030480617530116101a4576175309003603f0260061c6020526020610100526000516101205260005160e0026101400160805260006040525b600051604051101561016a5760405160c00260005160051b0160405160051b610140015260405160c00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a1061013d575a606052600060008260805160008735602051f15a60605103906101265760205160011c111560011b61012a565b5060015b3d80606111610137575060605b90610142565b600060025b8552604085602001528085604001526000856060013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160e002610140015260005160e002606001610100f35b600080fd";
+const EVEN_SHARE_CODE = "0x60003560e01c80634d2301cc1461001f576382ad56cb1461002d576101b5565b506004353160005260206000f35b602435600052600051156101b557610400600051116101b557620186a05a106101b557600051620186a05a030480617530116101b5576175309003603f0260061c6020526020610100526000516101205260005160081b6101400160805260006040525b600051604051101561017b5760405160e00260005160051b0160405160051b610140015260405160e00260005160051b016101400160405160051b6044013560440180604001358101803580826020016080513760205180603f900401612710015a10610141575a606052600060008260805160008735602051f15a60605103806060529061012a5760205160011c111560011b61012e565b5060015b3d8060611161013b575060605b9061014b565b6000606052600060025b85526060518560200152606085604001528085606001526000856080013e50505050604051600101604052610091565b7fd5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a060005160081b610140015260005160081b606001610100f35b600080fd";
 // v4-core's SafeCastOverflow(), wrapped in V4Quoter's UnexpectedRevertBytes(bytes): the output needs more than 2^127 in
 const OVERFLOW = Symbol("SafeCastOverflow");
-// `mark`: EVM_READ_GAS_CODE's marker after the last result (card evm-quote-read-gas-starve); Multicall3's own has none
-const READ_MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
-function encodeAggregate(outs: (bigint | null | typeof RAN_OUT | typeof OVERFLOW | typeof STARVED)[], mark = true): string {
-  const body = outs.map((x) => (x === STARVED ? W(2n) + W(0x40n) + W(0n) : x === RAN_OUT ? W(0n) + W(0x40n) + W(36n) + "7a5ed734" + W(0n) + "0".repeat(56) : x === OVERFLOW ? W(0n) + W(0x40n) + W(100n) + "6190b2b0" + W(0x20n) + W(4n) + "93dafdf1" + "0".repeat(56) + "0".repeat(56) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
+// `mark`: EVM_READ_GAS_CODE's answer, each result (success, gasUsed, returnData) as the code's own bytes write it
+// (codeResult) and its marker after the last (cards evm-quote-read-gas-starve, evm-quote-gas-used); without it
+// Multicall3's own, (success, returnData) with no marker. `used`: each read's gas used (where it names none, 30M for a
+// read that ran out, as one given all a call of 6 gives its first, else 100,000)
+function encodeAggregate(outs: (bigint | null | typeof RAN_OUT | typeof OVERFLOW | typeof STARVED)[], mark = true, used: readonly number[] = []): string {
+  const dataOf = (x: (typeof outs)[number]): [bigint, string] => (x === STARVED ? [2n, ""] : x === RAN_OUT ? [0n, "7a5ed734" + W(0n)] : x === OVERFLOW ? [0n, "6190b2b0" + W(0x20n) + W(4n) + "93dafdf1"] : x === null ? [0n, ""] : [1n, W(x) + W(0n)]);
+  if (mark) return codeAnswer(outs.map((x, i) => codeResult(dataOf(x)[0], BigInt(used[i] ?? (x === STARVED ? 30_000_000 : 100_000)), dataOf(x)[1])));
+  const body = outs.map((x) => {
+    const [ok, d] = dataOf(x);
+    return W(ok) + W(0x40n) + W(BigInt(d.length / 2)) + d.padEnd(Math.ceil(d.length / 64) * 64, "0");
+  });
   let at = 32 * outs.length;
   const offs = body.map((b) => {
     const o = W(BigInt(at));
     at += b.length / 2;
     return o;
   });
-  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("") + (mark ? READ_MARKER : "");
+  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("");
 }
 type Head = { number: string; hash: string; timestamp: string; baseFeePerGas?: string };
 /** A provider: `head` is its latest block, `byNumber` the other blocks it holds, `price` answers each quote at the
@@ -489,18 +497,24 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         const keep = /60(0[0-9a-f])1c60a052/.exec(quoteMod.EVM_READ_GAS_CODE);
         if (keep === null) throw new Error("the model reads no reserve in EVM_READ_GAS_CODE (PUSH1 k SHR PUSH1 0xa0 MSTORE)");
         const keepShift = parseInt(keep[1]!, 16);
+        // each read's gas used, as the code answers it beside the read (card evm-quote-gas-used): what it took, all it was
+        // given where it ran out, 0 where it was not run
+        const used: number[] = [];
         return { jsonrpc: "2.0", id, result: encodeAggregate(ds.map((d, i) => {
           const need = readGasOf(d, overridden);
           if (bounded || even) {
             // the read's own gas: an even share (206d625f), or all that is left but a quarter share for each read after it
             const T = (ds.length - 1 - i) * Math.floor(S / 2 ** keepShift) + 140_000;
+            used[i] = 0;
             if (!even && left < T + 100) return STARVED as typeof STARVED;
             const L = even ? evenL : Math.floor((left - T + 10_000) * 63 / 64);
             if (need > L) {
               left -= L;
+              used[i] = L;
               return STARVED as typeof STARVED;
             }
             left -= need;
+            used[i] = need;
             const a = one(tos[i]!, d, overridden);
             // a read that reverts having used half its gas or more answers 2 (it may have caught an inner out of gas)
             return typeof a === "bigint" || 2 * need < L ? a : (STARVED as typeof STARVED);
@@ -512,7 +526,7 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
           }
           left -= need;
           return one(tos[i]!, d, overridden);
-        }), bounded) };
+        }), bounded, used) };
       }
       // PoolManager.extsload(bytes32[]): each slot's word
       if ((to.toLowerCase() === PM || to.toLowerCase() === RH_PM || to.toLowerCase() === BS_PM) && data.startsWith("0xdbd035ff")) {
@@ -2827,8 +2841,7 @@ const balanceReverts = (rpc: EvmRpc): EvmRpc => async (calls) =>
   (await rpc(calls)).map((r, i) => {
     const p = calls[i]!.params[0] as { to?: string; data?: string };
     if (calls[i]!.method !== "eth_call" || p.to?.toLowerCase() !== "0xca11bde05977b3631167028862be2a173976ca11" || !p.data?.includes(SEL_ETH_BALANCE)) return r;
-    const w = (x: bigint) => x.toString(16).padStart(64, "0");
-    return { ...(r as object), result: "0x" + w(0x20n) + w(1n) + w(0x20n) + w(0n) + w(0x40n) + w(0n) + READ_MARKER };
+    return { ...(r as object), result: codeAnswer([codeResult(0n, 2_600n, "")]) };
   });
 const SEL_ETH_BALANCE = "4d2301cc"; // Multicall3.getEthBalance(address)
 
@@ -7876,8 +7889,9 @@ test("GS14 a hidden listed two-hop within the slippage of a route through an unl
 // Delta review of 344596b1, P2-2: base-partial-v4's eight QuoterV2 quoteExactInput reads each revert after 8-9M gas and
 // answer [000222] in a call of 6 (the first three left the last three too little). A read answered 2 behind an earlier
 // 2 of its call was not kept unless it answered 2 alone too, so the honest reads read 0 alone were sent again in a call
-// of 6 and read again alone on warm quotes 1 to 4 (live p95 981 ms against baac0ecb's 874). An earlier read now makes a
-// read behind only where it still answers 2 at its final answer (a burner's), so honest reverts are kept as baac0ecb kept them.
+// of 6 and read again alone on warm quotes 1 to 4 (live p95 981 ms against baac0ecb's 874). Each read's gas used now
+// shows each needs more than an even share of a call of 6 (card evm-quote-gas-used), so each is kept at the size it was
+// read again at, as baac0ecb kept them.
 test("GS17 honest reads that revert after 8.5M or 9M gas, starved in a call of 6 by the reverts before them, are each kept at the size they were read at, and the warm quotes settle with no read answered 2", async () => {
   for (const [token, gas] of [["0x00000000000000000000000000000000000a5a68", 8_500_000], ["0x00000000000000000000000000000000000a5a69", 9_000_000]] as const) {
     // the token's four standard hookless pools, each quote through them reverting after `gas`, as a pool that runs out does
@@ -7902,4 +7916,81 @@ test("GS17 honest reads that revert after 8.5M or 9M gas, starved in a call of 6
     assert.ok(settled >= 1 && settled <= 3, `${gas}: ${quotes.map((c) => JSON.stringify(words(c))).join(" | ")}`);
     for (const c of quotes.slice(settled + 1)) assert.deepEqual(words(c), words(quotes[settled]!), `${gas}: settled at warm ${settled}`);
   }
+});
+
+// Delta review of 344596b1, P2-1 (card evm-quote-gas-used): a pool built to burn about 31M gas and then return (a
+// hookless v4 pool with ticks tuned to it) answers 1, so the quote saw only the 2s of the honest reads it starved after
+// it in its call, and kept those alone for good (PROBE-A/PROBE-G: 18 calls a warm quote against 15 with no burner). The
+// read code answers each read's gas used beside it, so the read that used the gas is the one kept apart.
+const isSpam = (d: string) => {
+  if (!d.startsWith("ca253dc9")) return false;
+  const q = poolOf(d);
+  return q.fees.some((f, k) => f === 500 && q.spacings[k] === 10);
+};
+// cold and `n` warm quotes of `pools`, each as its aggregate3 calls' reads (to, calldata, success word); `scan`: the
+// pools the scan finds past the four standard keys
+const quotesOf = async (pools: ModelPool[], token: string, n: number, scan: EvmPoolKey[]) => {
+  const out: Answered[][][] = [];
+  for (let q = 0; q <= n; q++) {
+    const calls: Answered[][] = [];
+    const rpcs: [EvmRpc, EvmRpc] = [answeredOf(chain(pools, 0), calls), chain(pools, 1)];
+    assert.deepEqual(await verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, rpcs, NOW, ...(scan.length > 0 ? [scanner(5_000_000, scan.map((key, k) => ({ key, at: 4_500_000 + k })))] : []))), below);
+    out.push(calls);
+  }
+  return out;
+};
+const showQ = (qs: Answered[][][]) => qs.map((calls, q) => `${q === 0 ? "cold" : "warm" + q} ${JSON.stringify(calls.map((c) => c.map((r) => (isSpam(r.data.slice(2)) ? "B" : "") + r.word).join("")))}`).join(" | ");
+// the honest pools of PROBE-A (the better pool and one more at a standard key) and PROBE-G (the better pool and five
+// the scan finds), each quote through them taking 2.5M gas, beside a burner of 31M at (500, 10)
+const probePools = (token: string, honest: [number, number][], burner: boolean): ModelPool[] => [
+  seeded(token),
+  ...(burner ? [{ ...spamAt(token), readGas: 31_000_000 }] : []),
+  betterAt(token, 2_500_000),
+  ...honest.map(([f, t]) => ({ key: keyOf(token, NATIVE, f, t, NATIVE), give: (a: bigint) => a / 2n, readGas: 2_500_000 })),
+];
+for (const [name, token, control, honest] of [
+  ["GS18 (PROBE-A) a pool that burns 31M gas and then returns, first in its call, keeps no honest read apart: the warm quotes send only its reads alone and answer no 2", "0x00000000000000000000000000000000000a5aa1", "0x00000000000000000000000000000000000a5aa2", [[100, 1]]],
+  ["GS19 (PROBE-G) a pool that burns 31M gas and then returns, beside six honest pools whose quotes take 2.5M, five of them found by the scan: the warm quotes send its reads alone and the honest reads as with no burner", "0x00000000000000000000000000000000000a5ab9", "0x00000000000000000000000000000000000a5ab0", [[200, 4], [400, 8], [2500, 50], [5000, 100], [7000, 140]]],
+] as const) {
+  test(name, async () => {
+    const extra = (t: string) => probePools(t, honest as unknown as [number, number][], false).slice(3).map((p) => p.key);
+    const none = await quotesOf(probePools(control, honest as unknown as [number, number][], false), control, 3, extra(control));
+    const qs = await quotesOf(probePools(token, honest as unknown as [number, number][], true), token, 3, extra(token));
+    console.log(name.slice(0, 4), JSON.stringify({ calls: qs.map((c) => c.length), noBurner: none.map((c) => c.length) }));
+    // control: the burner starved honest reads in the cold quote (they answered 2 behind it)
+    assert.ok(qs[0]!.some((c) => c.length > 1 && c.some((r) => r.word === 2 && !isSpam(r.data.slice(2)))), `cold: ${showQ(qs)}`);
+    for (const calls of qs.slice(1)) {
+      // no honest read alone, and none answered 2 (before: the reads it starved alone on every warm quote)
+      assert.ok(calls.every((c) => c.length > 1 || isSpam(c[0]!.data.slice(2))), `honest reads alone: ${showQ(qs)}`);
+      assert.ok(calls.flat().every((r) => r.word !== 2), `a 2 on a warm quote: ${showQ(qs)}`);
+      // the honest reads go in as many calls as with no burner, the burner's reads alone beside them
+      const honestCalls = calls.filter((c) => c.some((r) => !isSpam(r.data.slice(2)))).length;
+      assert.ok(honestCalls <= none[1]!.length, `${honestCalls} calls hold honest reads, ${none[1]!.length} with no burner: ${showQ(qs)} || no burner ${showQ(none)}`);
+    }
+  });
+}
+
+test("GS20 a provider that answers a read's gas used as another is not agreed with: one provider cannot write readSizes", async () => {
+  const token = "0x00000000000000000000000000000000000a5aa3";
+  const pools = probePools(token, [[100, 1]], true);
+  // provider 2 answers the burner's reads as using 100,000 gas, so the honest reads it starved would be kept alone
+  const inner = chain(pools, 1);
+  const lies: EvmRpc = async (calls) => {
+    const out = (await inner(calls)) as { result?: string }[];
+    return out.map((a, i) => {
+      const p = calls[i]!.params[0] as { to?: string; data?: string };
+      if (calls[i]!.method !== "eth_call" || p.to?.toLowerCase() !== MC3 || typeof a.result !== "string") return a;
+      const ds = decodeAggregate(p.data!);
+      let r = a.result.slice(2);
+      const at = (o: number) => Number(BigInt("0x" + r.slice(2 * o, 2 * o + 64)));
+      ds.forEach((d, k) => {
+        const e = 64 + at(64 + 32 * k);
+        if (isSpam(d)) r = r.slice(0, 2 * (e + 32)) + W(100_000n) + r.slice(2 * (e + 64));
+      });
+      return { ...a, result: "0x" + r };
+    });
+  };
+  assert.deepEqual(await stdQuote(pools, token, [chain(pools, 0), lies]), { accepted: false, code: "rpc_disagree" });
+  // control: the same provider answering as the code does
+  assert.deepEqual(await stdQuote(pools, token, [chain(pools, 0), inner]), below);
 });
