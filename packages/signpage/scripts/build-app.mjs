@@ -99,6 +99,15 @@ export const page = (integrity) => `<!doctype html>
 /** Every tsconfig.json in a folder above `repo` (the repository root). The bundler applies the nearest tsconfig.json
  *  above each module it transforms, so with none in the repository's own folders one above the root would be applied
  *  (review P1(b): useDefineForClassFields false changed app.js); the build's inputs are the repository's alone. */
+/** The files a build writes, path -> bytes: in the package (public/...) or, `served`, in the served layout (--out).
+ *  build-app.test.mjs holds the package's set to SIGN_BUILD_OUTPUTS, the files CI's bundle scan copies, ignores and
+ *  scans, so a fifth output is never written unscanned (review of 31f81cbd, P3). */
+export function outputFiles({ js, html, worker, thread }, served) {
+  return served
+    ? { "index.html": html, "app.js": js, [PROVER_WORKER_FILE]: worker, [PROVER_THREAD_FILE]: thread }
+    : { "index.html": html, "public/app.js": js, [WORKER]: worker, [THREAD]: thread };
+}
+
 export function outsideTsconfigs(repo = REPO) {
   const found = [];
   for (let d = dirname(repo); ; d = dirname(d)) {
@@ -218,9 +227,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const out = arg("--out");
   const pkg = arg("--pkg") ?? PKG;
   const { js, html, worker, thread } = await bundle(pkg);
-  const files = out
-    ? { "index.html": html, "app.js": js, [PROVER_WORKER_FILE]: worker, [PROVER_THREAD_FILE]: thread }
-    : { "index.html": html, "public/app.js": js, [WORKER]: worker, [THREAD]: thread };
+  const files = outputFiles({ js, html, worker, thread }, Boolean(out));
   const dir = out ?? pkg;
   // each file is written beside itself and renamed into place, so a reader in another process (node --test runs test
   // files at once, each building) reads a whole file, never a half-written one; every build of one tree is the same bytes

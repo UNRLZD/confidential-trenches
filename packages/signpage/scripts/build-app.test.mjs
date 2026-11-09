@@ -3,11 +3,13 @@
 // the committed public/prover-worker.js is the kit's prover worker build (packages/kit/src/prover/build.mjs), byte for
 // byte; and the deploy build's copies of the six setup files and their licences are the pinned files (copyServed).
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bundle, bundleModuleProblems, check, copyServed, outsideTsconfigs, SERVED, sha384 } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, outputFiles, outsideTsconfigs, SERVED, sha384 } from "./build-app.mjs";
+import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { BUILD_COMMAND, runBuild, signBuilt } from "../../../scripts/signpage-built.mjs";
@@ -178,4 +180,22 @@ test("planted: a tsconfig.json above the repository root refuses the build befor
     rmSync(d, { recursive: true, force: true });
   }
   assert.deepEqual(outsideTsconfigs(), [], "none above this checkout");
+});
+
+// review of 31f81cbd (P3): the files a build writes are exactly SIGN_BUILD_OUTPUTS, the set CI's bundle scan copies and
+// scans and .gitignore ignores, in the package and, by the same names, in the served layout the deploy uploads: a fifth
+// output would be uploaded unscanned
+test("build-app writes exactly SIGN_BUILD_OUTPUTS: in the package, and by the same names in the served layout", () => {
+  const b = { js: "", html: "", worker: "", thread: "" };
+  assert.deepEqual(Object.keys(outputFiles(b, false)).map((f) => `packages/signpage/${f}`).sort(), [...SIGN_BUILD_OUTPUTS].sort());
+  const served = SIGN_BUILD_OUTPUTS.map((f) => f.replace(/^packages\/signpage\/(public\/)?/, "")).sort();
+  assert.deepEqual(Object.keys(outputFiles(b, true)).sort(), served);
+  const out = mkdtempSync(join(tmpdir(), "ct-signpage-test-out-"));
+  try {
+    const r = spawnSync(process.execPath, [join(PKG, "scripts", "build-app.mjs"), "--out", out], { encoding: "utf8" });
+    assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+    assert.deepEqual(readdirSync(out, { recursive: true }).sort(), served);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

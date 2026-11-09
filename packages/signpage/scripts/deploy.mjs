@@ -25,8 +25,10 @@
 // build, made in a clean checkout of the HEAD commit it read (the sha main is held to before the build and again right
 // before the upload), never from this checkout's node_modules (review P2-1: an extra file in a dependency or a
 // re-pointed symlink changes app.js and passes pnpm store status): git worktree add --detach <tmp> <sha>,
-// pnpm install --frozen-lockfile --prefer-offline there, the build there by that checkout's own build-app.mjs, then git
-// worktree remove (never --force). Every refusal comes before its env check (CLOUDFLARE_*) and before any upload.
+// pnpm install --frozen-lockfile --prefer-offline there; the bundle, the prover's setup files and the licences (copyServed)
+// made by that checkout's own build-app.mjs, and the release lists and their ledger read from that checkout's
+// release-list.mjs, all at the sha; then git worktree remove (never --force) once the deploy is done. The gate's
+// reference reads (the kit's prover build in checkProver, the pins in checkPins) are this checkout's. Every refusal comes before its env check (CLOUDFLARE_*) and before any upload.
 // --dry-run makes every read and the build a deploy makes, keeps the build folder, and exits 1 with each REFUSED line
 // whenever a deploy would refuse, 0 only when it would go ahead. --build is for a caller that wants only the gated
 // build of this checkout (a harness, `wrangler pages dev`): pnpm install --frozen-lockfile here, the build and the
@@ -46,7 +48,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readBack } from "../../../scripts/pages-readback.mjs";
 import { HEADERS, judge } from "../../../scripts/live-checks/signpage-skeleton.mjs";
 import { ORIGINS } from "../../../scripts/live-checks/signpage-release.mjs";
@@ -150,12 +152,14 @@ export function build(pkg = PKG) {
       copyFileSync(join(pkg, f), to);
     }
     if (existsSync(join(pkg, "src", "main.ts"))) {
-      // the package's own build-app.mjs: in a clean checkout, that checkout's, so the bundle reads its node_modules alone
+      // the package's own build-app.mjs: in a clean checkout, that checkout's, so the bundle reads its node_modules alone,
+      // and its copyServed copies the setup files and licences that checkout holds (review of 31f81cbd, P3)
       const app = existsSync(join(pkg, "scripts", "build-app.mjs")) ? join(pkg, "scripts", "build-app.mjs") : BUILD_APP;
       const r = spawnSync(process.execPath, [app, "--out", out, "--pkg", pkg], { encoding: "utf8" });
       if (r.status !== 0) throw new Error(`build-app.mjs --out failed (exit ${r.status ?? r.signal}): ${`${r.stderr ?? ""}${r.error ?? ""}`.trim()}`);
-    }
-    copyServed(out);
+      const c = spawnSync(process.execPath, ["--input-type=module", "-e", `(await import(${JSON.stringify(pathToFileURL(app).href)})).copyServed(${JSON.stringify(out)});`], { encoding: "utf8" });
+      if (c.status !== 0) throw new Error(`copyServed of ${app} failed (exit ${c.status ?? c.signal}): ${`${c.stderr ?? ""}${c.error ?? ""}`.trim()}`);
+    } else copyServed(out); // a caller's own copy of the served files (the tests' plants): this checkout's setup files
   } catch (e) {
     rmSync(out, { recursive: true, force: true });
     throw e;
@@ -216,7 +220,10 @@ const gated = (name, check) => {
   try {
     return check();
   } catch (e) {
-    return [`${name} could not run on this checkout's node_modules (${`${e?.message ?? e}`.split("\n")[0]}): run pnpm install --frozen-lockfile here, then deploy again`];
+    // a module this checkout's node_modules lacks (a partial or stale install) names the install; any other throw is named
+    const missing = ["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND"].includes(e?.code) || /Cannot find (module|package)/.test(`${e?.message ?? ""}`);
+    const what = `${e?.message ?? e}`.split("\n")[0];
+    return [missing ? `${name} could not load a module from this checkout's node_modules (${what}): run pnpm install --frozen-lockfile here, then deploy again` : `${name} failed: ${what}`];
   }
 };
 
@@ -230,8 +237,9 @@ export function checkDir(dir) {
     if (existsSync(join(dir, f))) p.push(`${dir} carries ${f}: _headers is the only Pages config file the signing page has`);
   }
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
-  // both read this checkout's node_modules (the kit's prover build, the pins' sources): one that is not the lockfile's
-  // install, or none, is a REFUSED line naming the fix, never a throw past the gate (delta review 2)
+  // both read this checkout's node_modules (the kit's prover build, the pins' sources): a partial or stale install that
+  // lacks a module is a REFUSED line naming the install, any other throw one naming the error, never a throw past the
+  // gate (delta review 2). A checkout with no node_modules at all fails before this, on this file's own imports
   p.push(...gated("the prover check", () => checkProver(dir)));
   p.push(...gated("the 1Click pin check", () => checkPins(dir)));
   if (!existsSync(join(dir, "_headers"))) return [...p, `${dir} has no _headers file`];
@@ -344,12 +352,16 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     const why = `${inst.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
     return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), `REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, ...(left ? [left] : []), "nothing was uploaded"] };
   }
+  const done = () => {
+    const left = clean?.remove();
+    if (left) console.error(`deploy: ${left}`);
+  };
   let dir;
   try {
     dir = build(clean?.pkg ?? pkg);
-  } finally {
-    const left = clean?.remove();
-    if (left) console.error(`deploy: ${left}`);
+  } catch (e) {
+    done();
+    throw e;
   }
   let keep = false; // the build holds 24 MB of setup files: --dry-run and --build keep it, named, only once it passed its gate
   try {
@@ -358,7 +370,9 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     keep = dryRun || buildOnly;
     if (buildOnly) return { code: 0, out: [`gate ok on ${dir}; --build: the build's gate only, nothing read of main, CI or the releases; nothing was uploaded`] };
     // loaded here, not at the top: release-list.mjs imports this file and the terminal's deploy, which --live-runs needs not
-    const { releaseTreeProblems, unreleasedProblems } = await import("./release-list.mjs");
+    // the release lists and their ledger are the clean checkout's at the sha (review of 31f81cbd, P3), or a test's stand-ins
+    const lists = released.dir ? "./release-list.mjs" : pathToFileURL(join(clean.root, relative(REPO, PKG), "scripts", "release-list.mjs")).href;
+    const { releaseTreeProblems, unreleasedProblems } = await import(lists);
     would.push(...unreleasedProblems(dir, ...(released.dir ? [released.dir, released.ledger] : [])));
     would.push(...releaseTreeProblems(released.dir ?? undefined, head || "HEAD"));
     if (dryRun) {
@@ -383,6 +397,7 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     return { code: 0, out: [`deployed HEAD ${head} to ${PROJECT} on ${BRANCH}`, ...back.lines, ...liveCommands(head)] };
   } finally {
     if (!keep) rmSync(dir, { recursive: true, force: true });
+    done();
   }
 }
 

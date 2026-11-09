@@ -476,7 +476,7 @@ test("planted: a checkout whose node_modules lacks the kit's snarkjs gets a gate
     unlinkSync(join(bare, "packages", "kit", "node_modules", "snarkjs")); // the link only, never the store's files
     const { checkDir: checkAt } = await import(pathToFileURL(join(bare, "packages", "signpage", "scripts", "deploy.mjs")).href);
     const p = checkAt(dir);
-    assert.ok(p.some((l) => /^the prover check could not run on this checkout's node_modules \(.+\): run pnpm install --frozen-lockfile here, then deploy again$/.test(l)), p.join("\n"));
+    assert.ok(p.some((l) => /^the prover check could not load a module from this checkout's node_modules \(Cannot find module 'snarkjs'.*\): run pnpm install --frozen-lockfile here, then deploy again$/.test(l)), p.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     if (spawnSync("git", ["-C", repo, "worktree", "remove", bare]).status !== 0) {
@@ -833,5 +833,53 @@ test("deploy.mjs run as the main module reaches its gate on every path: --dry-ru
     assert.deepEqual(JSON.parse(runs.stdout).checks, LIVE_CHECKS);
   } finally {
     rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// review of 31f81cbd (P3): the setup files and licences the deploy serves are the clean checkout's at the sha, never this
+// checkout's working files: an edit to an unpinned licence text here (packages/kit/zk/NOTICE) is not what is uploaded
+test("planted: an uncommitted edit to a served licence text is not in the deploy's build: the clean checkout's is", async () => {
+  const repo = dirname(dirname(PKG));
+  const a = mkdtempSync(join(tmpdir(), "ct-signpage-test-served-"));
+  assert.equal(spawnSync("git", ["-C", repo, "worktree", "add", "--detach", a, "HEAD"]).status, 0);
+  try {
+    // this checkout's own deploy code, committed or not, as the planted node_modules test runs it
+    for (const f of execFileSync("git", ["-C", repo, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)) {
+      if (existsSync(join(repo, f))) cpSync(join(repo, f), join(a, f));
+    }
+    assert.equal(spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: a }).status, 0);
+    const notice = join(a, "packages", "kit", "zk", "NOTICE");
+    const committed = execFileSync("git", ["-C", a, "show", "HEAD:packages/kit/zk/NOTICE"]);
+    writeFileSync(notice, `${readFileSync(notice, "utf8")}planted: not the commit's\n`);
+    const { deploy: deployAt } = await import(pathToFileURL(join(a, "packages", "signpage", "scripts", "deploy.mjs")).href);
+    const r = await deployAt(["--dry-run"], {}, recorder().run, undefined, {});
+    const dir = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+    assert.ok(dir, (r.err ?? []).join("\n"));
+    try {
+      assert.ok(readFileSync(join(dir, "licenses", "zk-NOTICE.txt")).equals(committed), "the served NOTICE is the commit's");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } finally {
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", "--force", a]).status !== 0) {
+      rmSync(a, { recursive: true, force: true });
+      spawnSync("git", ["-C", repo, "worktree", "prune"]);
+    }
+  }
+});
+
+// review of 31f81cbd (P3): gated() names the install only for a module that will not load; any other throw is named as it is
+test("a gate check that throws other than on a missing module is named as it is, with no install advice", async () => {
+  const { checkDir: _ } = await import("./deploy.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "ct-signpage-test-throw-"));
+  try {
+    writeFileSync(join(dir, "index.html"), "<html></html>\n");
+    mkdirSync(join(dir, "app.js")); // a folder where the pin check reads a file: EISDIR
+    const p = checkDir(dir);
+    const line = p.find((l) => l.startsWith("the 1Click pin check failed: "));
+    assert.ok(line, p.join("\n"));
+    assert.doesNotMatch(line, /pnpm install/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
