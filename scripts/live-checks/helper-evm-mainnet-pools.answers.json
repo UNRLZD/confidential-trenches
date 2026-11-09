@@ -1,0 +1,127 @@
+{
+ "about": "good: a real run of this check against the deployed helper https://ct-api.unrealized.trade (2026-11-09T17:02:48.465Z), X-Helper-Commit ed0f714a0332ebe1be41cc5343266ca5281f6542, whose box already names both mainnet pools at the kit pins (the research repo scripts/deploy/evm-sender-key.mjs --promote wrote them from the deploy records): each pin served with the pinned collector and sell sender, the pinned SellDelegate 404, the pool code and the helper block the same on both fee providers. bad: the helper sender code at the base commit c9324d92 (before the start check), started in process (2026-11-09T17:02:55.279Z) with POOL_EVM_ADDRESS_BASE and POOL_EVM_ADDRESS_ROBINHOOD set to each chain pinned SellDelegate and a throwaway sender key, which that code takes; GET /v1/pool/fee answered as server.ts does (evmPools.get, else 404 not_found; a failed fee read 503 upstream), the providers reads real: the pins answer 404 and the foreign address is carried (503 on its depth read), so it fails.",
+ "good": {
+  "at": "2026-11-09T17:02:48.465Z",
+  "base": "https://ct-api.unrealized.trade",
+  "chains": [
+   {
+    "chain": "base",
+    "fee": {
+     "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+     "status": 200,
+     "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+     "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794243720000,\"block\":\"0x34b4da2\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    },
+    "foreign": {
+     "pool": "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
+     "status": 404,
+     "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "providers": [
+     {
+      "url": "https://mainnet.base.org",
+      "codeBytes": 10255,
+      "codeSha256": "1f7d92c4a940308268cd65d3f042ef6881b7f3f16f31793296766d683d0e8753",
+      "blockHash": "0xd0dfb1ded81ccfbceb7f152630f866cced628dc3799138c0a3ba51ee2ae8ad7f"
+     },
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "codeBytes": 10255,
+      "codeSha256": "1f7d92c4a940308268cd65d3f042ef6881b7f3f16f31793296766d683d0e8753",
+      "blockHash": "0xd0dfb1ded81ccfbceb7f152630f866cced628dc3799138c0a3ba51ee2ae8ad7f"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "fee": {
+     "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+     "status": 200,
+     "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794243720000,\"block\":\"0x691c9a8\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    },
+    "foreign": {
+     "pool": "0xf79962b094991354270fe7866f0f590ef0c9b0cf",
+     "status": 404,
+     "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "providers": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "codeBytes": 10255,
+      "codeSha256": "a13cbcabd5facdb0a6fb806216ed0f4222813de803879b6ba9e9cd7ef6ca6f15",
+      "blockHash": "0x74460f4f24f4944e3e2e66e2f88778d51dd0e3aec904540fab39eaf7b507177f"
+     },
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "codeBytes": 10255,
+      "codeSha256": "a13cbcabd5facdb0a6fb806216ed0f4222813de803879b6ba9e9cd7ef6ca6f15",
+      "blockHash": "0x74460f4f24f4944e3e2e66e2f88778d51dd0e3aec904540fab39eaf7b507177f"
+     }
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "at": "2026-11-09T17:02:55.279Z",
+  "base": "http://helper.in-process",
+  "chains": [
+   {
+    "chain": "base",
+    "fee": {
+     "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+     "status": 404,
+     "commit": "c9324d92c493d80c0e3e57ef520eed6d95f3a5ac",
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "foreign": {
+     "pool": "0xe3223113781f527188f634615ad9a3ca0aa20a4d",
+     "status": 503,
+     "commit": "c9324d92c493d80c0e3e57ef520eed6d95f3a5ac",
+     "body": "{\"error\":{\"code\":\"upstream\"}}"
+    },
+    "providers": [
+     {
+      "url": "https://mainnet.base.org",
+      "codeBytes": 10255,
+      "codeSha256": "1f7d92c4a940308268cd65d3f042ef6881b7f3f16f31793296766d683d0e8753"
+     },
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "codeBytes": 10255,
+      "codeSha256": "1f7d92c4a940308268cd65d3f042ef6881b7f3f16f31793296766d683d0e8753"
+     }
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "fee": {
+     "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+     "status": 404,
+     "commit": "c9324d92c493d80c0e3e57ef520eed6d95f3a5ac",
+     "body": "{\"error\":{\"code\":\"not_found\"}}"
+    },
+    "foreign": {
+     "pool": "0xf79962b094991354270fe7866f0f590ef0c9b0cf",
+     "status": 503,
+     "commit": "c9324d92c493d80c0e3e57ef520eed6d95f3a5ac",
+     "body": "{\"error\":{\"code\":\"upstream\"}}"
+    },
+    "providers": [
+     {
+      "url": "https://robinhood.drpc.org",
+      "codeBytes": 10255,
+      "codeSha256": "a13cbcabd5facdb0a6fb806216ed0f4222813de803879b6ba9e9cd7ef6ca6f15"
+     },
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "codeBytes": 10255,
+      "codeSha256": "a13cbcabd5facdb0a6fb806216ed0f4222813de803879b6ba9e9cd7ef6ca6f15"
+     }
+    ]
+   }
+  ]
+ }
+}
