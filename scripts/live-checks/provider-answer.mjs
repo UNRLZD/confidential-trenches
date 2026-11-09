@@ -63,23 +63,45 @@ export function classify(host, status, text, { nullNoAnswer = false, judgeStateM
  *  reached", mainnet.base.org). The tests set it to 0. */
 export const RETRY = { ms: 1000 };
 
-/** One JSON-RPC read of `method` on `url`, read again once on a no-answer. */
-export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false } = {}) {
+/** One JSON-RPC read of `method` on `url`, read again once on a no-answer. A read with its own `headers` (a page's
+ *  Origin: wallet-restore-reads-ux.mjs asks as SIGN_HOST's page does) and `redirect` rule sends them, and gets the HTTP
+ *  answer's `status` and Access-Control-Allow-Origin (`acao`) back beside it, for pageRefuses; a read without is as
+ *  before. */
+export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false, headers, redirect } = {}) {
   const host = new URL(url).host;
   const once = async () => {
     let r;
     try {
-      r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(timeoutMs) });
+      r = await fetchFn(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(timeoutMs),
+        ...(redirect === undefined ? {} : { redirect }),
+      });
     } catch (e) {
       return { noAnswer: `${host}: no answer (${e?.cause?.code ?? e?.name ?? e?.message ?? e})` };
     }
     const text = await r.text().catch(() => "");
-    return classify(host, r.status, text, { nullNoAnswer, judgeStateMiss });
+    const a = classify(host, r.status, text, { nullNoAnswer, judgeStateMiss });
+    return headers === undefined ? a : { ...a, status: r.status, acao: r.headers.get("access-control-allow-origin") };
   };
   const a = await once();
   if (a.noAnswer === undefined) return a;
   await new Promise((r) => setTimeout(r, RETRY.ms));
   return once();
+}
+
+/** Why a page at `origin` gets nothing from this answer (`rpcAnswer` with the page's headers), or null. An HTTP answer
+ *  whose Access-Control-Allow-Origin admits neither `origin` nor * is what the page really gets, a refusal, judged
+ *  before the answer's kind and never a no-answer: api.mainnet-beta.solana.com's non-JSON 403 to an Origin header (card
+ *  wallet-restore-reads-ux). No HTTP answer (a fetch that failed or timed out) and a 429 (a rate limit, whatever its
+ *  headers: the page waits it out as any client does) stay no-answers. An answer read without the page's headers
+ *  carries no status and is refused, never taken as admitted. */
+export function pageRefuses(url, a, origin) {
+  if (a?.status === undefined || a?.status === null) return a?.noAnswer === undefined ? `${new URL(url).host}: not read from ${origin}` : null;
+  if (a.status === 429 || a.acao === "*" || a.acao === origin) return null;
+  return `${new URL(url).host} HTTP ${a.status}: ${origin} may not read its answer (Access-Control-Allow-Origin ${String(a.acao)})`;
 }
 
 /** The verdict of a check from its BAD lines and its no-answers: FAIL on any wrong answer, else INCONCLUSIVE where a

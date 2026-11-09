@@ -7,7 +7,8 @@
 // - bad_helper: `--local --with https://ct-api.unrealized.trade/v1/rpc/solana`, our helper relay in the second
 //   provider's place (the pair before the CO's fold of 04:33Z): FAIL on the provider alone;
 // - bad_refuses_page: `--local --with https://api.mainnet-beta.solana.com`, the fold's first pick, which answers a
-//   request with an Origin header 403: FAIL;
+//   request with an Origin header 403 (re-recorded 13:26Z through provider-answer.mjs: a JSON-RPC error, code 403
+//   "Access forbidden", ACAO *; the non-JSON 403 with no ACAO a page would get is planted below): FAIL;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose step 5 reads no U_X: FAIL on the bundle alone;
 // - bad_one_provider and bad_dead_held_binding: the delta review's P2-2 plants on this card's build (the held reader's two
 //   amounts from one provider's map; step 5's held reader returning nothing beside a dead live-looking copy of the head);
@@ -19,7 +20,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BUNDLE_WHY, CLUSTERS, EMPTY, SIGN, bundleFacts, judge, localBuild } from "./wallet-restore-reads-ux.mjs";
+import { EXIT, RETRY } from "./provider-answer.mjs";
+import { BUNDLE_WHY, CLUSTERS, EMPTY, SIGN, bundleFacts, judge, localBuild, read } from "./wallet-restore-reads-ux.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./wallet-restore-reads-ux.answers.json", import.meta.url), "utf8"));
 const spoil = (f) => {
@@ -150,4 +152,67 @@ test("the restore that refuses a page: mainnet-beta's 403 to SIGN_HOST's origin,
   const v = judge(A.bad_refuses_page);
   assert.equal(v.ok, false);
   assert.ok(v.lines.some((l) => l.includes("api.mainnet-beta.solana.com") && l.includes("HTTP 403")), v.lines.join("\n"));
+});
+
+// Every read goes through provider-answer.mjs (rpcAnswer with SIGN_HOST's Origin header). Planted providers on this tree's
+// build (read --local, each provider's answer planted on its fetch): a provider that refuses SIGN_HOST's origin fails
+// whatever its answer's kind, one that admits it but answers nothing is INCONCLUSIVE (exit 3), and a liar can make the
+// check FAIL or INCONCLUSIVE, never PASS.
+test("planted providers: a refusal of the page fails, an admitted provider's timeout is INCONCLUSIVE, a liar never passes", async () => {
+  RETRY.ms = 0;
+  const [P, Q] = CLUSTERS.mainnet.providers;
+  const held = A.good.clusters.mainnet.providers[0].held.value;
+  const rpc = (value) => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value } });
+  const truth = (body) => (JSON.parse(body).params[0] === EMPTY ? 0 : held);
+  const honest = (body) => new Response(rpc(truth(body)), { status: 200, headers: { "access-control-allow-origin": "*" } });
+  const run = async (second) => {
+    const sent = [];
+    const a = await read(async (url, init) => {
+      sent.push(init.headers.origin);
+      return url === P ? honest(init.body) : second(init.body);
+    }, SIGN, true);
+    assert.ok(sent.length >= 4 && sent.every((o) => o === SIGN), "every read is asked from SIGN_HOST's origin");
+    return judge(a);
+  };
+  assert.equal((await run(honest)).verdict, "PASS", "both honest");
+  // api.mainnet-beta.solana.com's answer to an Origin header: a non-JSON 403, no CORS answer (a no-answer's kind, refused first)
+  const refused = await run(async () => new Response("Forbidden", { status: 403 }));
+  assert.equal(refused.verdict, "FAIL");
+  assert.ok(refused.lines.some((l) => l.includes("HTTP 403") && l.includes("may not read its answer")), refused.lines.join("\n"));
+  // an admitted provider timing out, or rate-limiting: INCONCLUSIVE, exit 3, the pair not judged
+  for (const [why, f] of [
+    ["timeout", async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }],
+    ["429", async () => new Response("Too Many Requests", { status: 429 })],
+    ["empty, admitted", async () => new Response("", { status: 200, headers: { "access-control-allow-origin": SIGN } })],
+  ]) {
+    const v = await run(f);
+    assert.deepEqual([v.verdict, EXIT[v.verdict]], ["INCONCLUSIVE", 3], `${why}: ${v.lines.join("\n")}`);
+    assert.ok(v.lines.every((l) => l.startsWith("NO ANSWER ")), why);
+  }
+  // liars
+  const liars = {
+    "another balance": async (body) => new Response(rpc(truth(body) + 1), { status: 200, headers: { "access-control-allow-origin": "*" } }),
+    "money in the empty account": async (body) => new Response(rpc(JSON.parse(body).params[0] === EMPTY ? 5 : held), { status: 200, headers: { "access-control-allow-origin": "*" } }),
+    "the right balance, no CORS answer": async (body) => new Response(rpc(truth(body)), { status: 200 }),
+    "the right balance, another origin": async (body) => new Response(rpc(truth(body)), { status: 200, headers: { "access-control-allow-origin": "https://x.example" } }),
+    "a faked no-answer": async () => new Response("<html>", { status: 200, headers: { "access-control-allow-origin": "*" } }),
+    "a faked rate limit": async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 429, message: "rate limit" } }), { status: 200, headers: { "access-control-allow-origin": "*" } }),
+    "an error": async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "invalid param" } }), { status: 200, headers: { "access-control-allow-origin": "*" } }),
+    "no balance": async () => new Response(rpc("1"), { status: 200, headers: { "access-control-allow-origin": "*" } }),
+  };
+  for (const [why, f] of Object.entries(liars)) assert.ok(["FAIL", "INCONCLUSIVE"].includes((await run(f)).verdict), why);
+  assert.equal((await run(liars["another balance"])).verdict, "FAIL");
+  assert.equal((await run(liars["the right balance, no CORS answer"])).verdict, "FAIL");
+  assert.equal((await run(liars["a faked no-answer"])).verdict, "INCONCLUSIVE");
+});
+
+test("a recorded no-answer: INCONCLUSIVE when the provider admits SIGN_HOST's origin, FAIL when it does not", () => {
+  const timeout = (x) => Object.assign(x, { status: null, acao: null, value: null, noAnswer: "solana.api.pocket.network: no answer (TimeoutError)" });
+  const t = spoil((a) => timeout(a.clusters.mainnet.providers[1].held));
+  assert.deepEqual([t.verdict, EXIT[t.verdict]], ["INCONCLUSIVE", 3], t.lines.join("\n"));
+  const r = spoil((a) => Object.assign(a.clusters.mainnet.providers[1].held, { status: 403, acao: null, value: null, noAnswer: "solana.api.pocket.network HTTP 403: not JSON (Forbidden)" }));
+  assert.equal(r.verdict, "FAIL");
+  // a no-answer never hides another provider's wrong answer
+  const w = spoil((a) => (timeout(a.clusters.mainnet.providers[1].held), (a.clusters.mainnet.providers[0].empty.acao = null)));
+  assert.equal(w.verdict, "FAIL");
 });

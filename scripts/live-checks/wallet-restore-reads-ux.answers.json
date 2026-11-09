@@ -1,6 +1,6 @@
 {
  "key": "wallet-restore-reads-ux",
- "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build; bad_filter_one_amount and bad_filter_both_nonzero (9 Nov 10:22Z): delta review 2 P2-A plants A5 and A6 built with packages/signpage/scripts/build-app.mjs on this card's build (each sha384 equal to the review's own plant build), judged by this check's own bundleFacts, the providers' reads those of good",
+ "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build; bad_filter_one_amount and bad_filter_both_nonzero (9 Nov 10:22Z): delta review 2 P2-A plants A5 and A6 built with packages/signpage/scripts/build-app.mjs on this card's build (each sha384 equal to the review's own plant build), judged by this check's own bundleFacts, the providers' reads those of good; good and bad_refuses_page re-recorded 2026-11-09T13:26Z (the Mac, --local and --local --with https://api.mainnet-beta.solana.com) on the merge of main f3e2317e with every read through provider-answer.mjs: mainnet-beta answers SIGN_HOST's Origin 403 with a JSON-RPC error {code 403, Access forbidden} and Access-Control-Allow-Origin *",
  "good": {
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
@@ -99,8 +99,8 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
-   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "pin": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
+   "sha384": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,
@@ -130,12 +130,20 @@
       "held": {
        "status": 403,
        "acao": "*",
-       "value": null
+       "value": null,
+       "error": {
+        "code": 403,
+        "message": "Access forbidden"
+       }
       },
       "empty": {
        "status": 403,
        "acao": "*",
-       "value": null
+       "value": null,
+       "error": {
+        "code": 403,
+        "message": "Access forbidden"
+       }
       }
      }
     ]

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, NOT_YET, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, NOT_YET, pageRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -100,6 +100,49 @@ test("the request is one JSON-RPC 2.0 POST of the method and its params", async 
   let seen;
   await rpcAnswer("https://p.example/rpc", "eth_getBlockByNumber", ["latest", false], { fetchFn: async (url, init) => ((seen = [url, init.method, JSON.parse(init.body)]), new Response(ok({}), { status: 200 })) });
   assert.deepEqual(seen, ["https://p.example/rpc", "POST", { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] }]);
+});
+
+// card wallet-restore-reads-ux: a read asked from a page's origin (wallet-restore-reads-ux.mjs reads the restore's
+// providers as SIGN_HOST's page does)
+test("a read with its own headers sends them and the redirect rule, and gets the answer's status and CORS answer back; a read without is as before", async () => {
+  let seen;
+  const a = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], {
+    headers: { origin: "https://page.example" },
+    redirect: "error",
+    fetchFn: async (url, init) => ((seen = init), new Response(ok({ value: 7 }), { status: 200, headers: { "access-control-allow-origin": "*" } })),
+  });
+  assert.deepEqual([seen.headers, seen.redirect], [{ "content-type": "application/json", origin: "https://page.example" }, "error"]);
+  assert.deepEqual(a, { result: { value: 7 }, status: 200, acao: "*" });
+  // a refusal read again once: the last answer's status and CORS answer
+  let n = 0;
+  const r = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { headers: { origin: "https://page.example" }, fetchFn: async () => (n++, new Response("Forbidden", { status: 403 })) });
+  assert.deepEqual([r.status, r.acao, typeof r.noAnswer, n], [403, null, "string", 2]);
+  // no answer at all: no status
+  const t = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { headers: { origin: "https://page.example" }, fetchFn: async () => { throw new DOMException("timed out", "TimeoutError"); } });
+  assert.deepEqual(t, { noAnswer: "p.example: no answer (TimeoutError)" });
+  // a read without headers: the same answer as before this card, no status beside it
+  const plain = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { fetchFn: async (url, init) => ((seen = init), new Response(ok(1), { status: 200, headers: { "access-control-allow-origin": "*" } })) });
+  assert.deepEqual([plain, seen.headers, "redirect" in seen], [{ result: 1 }, { "content-type": "application/json" }, false]);
+});
+
+test("pageRefuses: an answer the page's origin may not read is the page's real answer, never a no-answer", () => {
+  const O = "https://page.example";
+  const u = "https://p.example/rpc";
+  // api.mainnet-beta.solana.com's answer to a request with an Origin header: a non-JSON 403 with no CORS answer
+  assert.match(pageRefuses(u, { noAnswer: "p.example HTTP 403: not JSON (Forbidden)", status: 403, acao: null }, O), /^p\.example HTTP 403: https:\/\/page\.example may not read its answer \(Access-Control-Allow-Origin null\)$/);
+  // a JSON answer without the origin: the page reads nothing either
+  assert.equal(typeof pageRefuses(u, { result: 1, status: 200, acao: "https://other.example" }, O), "string");
+  assert.equal(typeof pageRefuses(u, { result: 1, status: 200, acao: null }, O), "string");
+  // the origin or * admitted: not a refusal, whatever the answer
+  assert.equal(pageRefuses(u, { result: 1, status: 200, acao: "*" }, O), null);
+  assert.equal(pageRefuses(u, { noAnswer: "x", status: 200, acao: O }, O), null);
+  // no HTTP answer (a fetch that failed or timed out), or a 429 (a rate limit, read as one whatever its headers): a no-answer
+  assert.equal(pageRefuses(u, { noAnswer: "p.example: no answer (TimeoutError)" }, O), null);
+  assert.equal(pageRefuses(u, { noAnswer: "p.example HTTP 429: 429 Too Many Requests", status: 429, acao: null }, O), null);
+  // an answer read without the page's headers carries no status (null in a record): refused, never taken as admitted
+  assert.equal(typeof pageRefuses(u, { result: 1, status: null }, O), "string");
+  assert.equal(pageRefuses(u, { noAnswer: "p.example: no answer (TimeoutError)", status: null, acao: null }, O), null);
+  assert.equal(typeof pageRefuses(u, { result: 1 }, O), "string");
 });
 
 // The kit's words (its EVM quote's module-private limited, notYet and stateless), read from the

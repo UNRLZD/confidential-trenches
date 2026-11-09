@@ -38,12 +38,15 @@
 //   node scripts/live-checks/wallet-restore-reads-ux.mjs [--local] [--with <url>] [--record <file>] [--answer <file>]
 // --local judges this tree's committed build (packages/signpage/index.html and public/app.js) in SIGN_HOST's place, the
 // providers still asked live; --with asks <url> in the second provider's place (a recorded bad answer). PASS exit 0,
-// FAIL exit 1, error exit 2.
+// FAIL exit 1, error exit 2, INCONCLUSIVE exit 3: every read goes through provider-answer.mjs (rpcAnswer, with SIGN_HOST's
+// Origin header), a provider that refuses SIGN_HOST's origin fails (pageRefuses), and one that admits it but answers
+// nothing usable (a timeout, a 429, an empty or non-JSON body) is its no-answer: the pair is then not judged.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXIT, pageRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "wallet-restore-reads-ux";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -215,21 +218,18 @@ export const BUNDLE_WHY = {
   ux_wired: "the restore's U_X reads are not built from the follows' own deps, keyed by the pool's chain",
 };
 
-/** One provider's getBalance at finalized of `u`, asked from `origin`: its status, its CORS answer and the balance. */
+/** One provider's getBalance at finalized of `u`, asked from `origin` through provider-answer.mjs: its status, its CORS
+ *  answer and the balance, or the provider's no-answer (named) or JSON-RPC error. */
 async function balanceOf(fetchFn, url, origin, u) {
-  const r = await fetchFn(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [u, { commitment: "finalized" }] }),
-    redirect: "error",
-  });
-  const text = await r.text();
-  let value = null;
-  try {
-    const v = JSON.parse(text)?.result?.value;
-    if (Number.isSafeInteger(v) && v >= 0) value = v;
-  } catch {}
-  return { status: r.status, acao: r.headers.get("access-control-allow-origin"), value };
+  const a = await rpcAnswer(url, "getBalance", [u, { commitment: "finalized" }], { fetchFn, headers: { origin }, redirect: "error" });
+  const v = a.result?.value;
+  return {
+    status: a.status ?? null,
+    acao: a.acao ?? null,
+    value: Number.isSafeInteger(v) && v >= 0 ? v : null,
+    ...(a.noAnswer === undefined ? {} : { noAnswer: a.noAnswer }),
+    ...(a.error === undefined ? {} : { error: a.error }),
+  };
 }
 
 export async function read(fetchFn = fetch, origin = SIGN, local = false, second = null) {
@@ -252,9 +252,12 @@ export function judgeBundle(b = {}) {
   return { ok: lines.length === 0, lines };
 }
 
-/** The verdict on an answer (read()). */
+/** The verdict on an answer (read()): PASS, FAIL on any wrong answer, else INCONCLUSIVE when a provider SIGN_HOST's
+ *  origin may read gave no answer (provider-answer.mjs). A provider that refuses that origin is what the page gets, so it
+ *  fails, whatever its answer's kind (pageRefuses); a lying provider can make this check FAIL or INCONCLUSIVE, never PASS. */
 export function judge(a) {
   const lines = [];
+  let quiet = false;
   const bad = (m) => lines.push(`BAD ${m}`);
   if (a?.origin !== SIGN) bad(`asked from ${String(a?.origin)}, not SIGN_HOST's origin ${SIGN}`);
   lines.push(...judgeBundle(a?.bundle).lines);
@@ -264,22 +267,40 @@ export function judge(a) {
       bad(`${name}: no read of the pair's two providers for its pool's accounts`);
       continue;
     }
+    let all = true;
     got.providers.forEach((p, k) => {
       if (String(p.url).startsWith(HELPER)) bad(`${name}: the restore's U_X reads name our helper relay (${p.url})`);
       if (p.url !== c.providers[k]) bad(`${name}: provider ${k} is ${String(p.url)}, not ${c.providers[k]}`);
       for (const what of ["held", "empty"]) {
         const x = p[what];
-        if (x?.status !== 200) bad(`${name} ${p.url} ${what}: HTTP ${String(x?.status)}`);
-        if (x?.acao !== "*" && x?.acao !== SIGN) bad(`${name} ${p.url} ${what}: SIGN_HOST's origin may not read its answer (Access-Control-Allow-Origin ${String(x?.acao)})`);
-        if (!Number.isSafeInteger(x?.value)) bad(`${name} ${p.url} ${what}: no balance in its answer`);
+        let refused;
+        try {
+          refused = pageRefuses(String(p.url), x, SIGN);
+        } catch {
+          refused = `${String(p.url)} is not a provider URL`;
+        }
+        if (refused !== null) {
+          bad(`${name} ${p.url} ${what}: ${refused}`);
+          all = false;
+        } else if (x?.noAnswer !== undefined) {
+          lines.push(`NO ANSWER ${name} ${p.url} ${what}: ${x.noAnswer}`);
+          quiet = true;
+          all = false;
+        } else {
+          if (x?.status !== 200) bad(`${name} ${p.url} ${what}: HTTP ${String(x?.status)}${x?.error ? ` ${JSON.stringify(x.error)}` : ""}`);
+          if (!Number.isSafeInteger(x?.value)) bad(`${name} ${p.url} ${what}: no balance in its answer`);
+        }
       }
     });
+    // the pair's balances are judged once every read of both providers answered
+    if (!all) continue;
     const [p, q] = got.providers;
     if (p.held?.value !== q.held?.value) bad(`${name}: the two providers give ${String(p.held?.value)} and ${String(q.held?.value)} for the program data account`);
     if (!(p.held?.value > 0)) bad(`${name}: the program data account reads no balance`);
     if (p.empty?.value !== 0 || q.empty?.value !== 0) bad(`${name}: the account no one holds reads ${String(p.empty?.value)} and ${String(q.empty?.value)}, not 0 on both`);
   }
-  return { ok: lines.length === 0, lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD ")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url))) {
@@ -292,8 +313,8 @@ if (realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.me
     if (arg("--record")) writeFileSync(arg("--record"), `${JSON.stringify(answer, null, 1)}\n`);
     const v = judge(answer);
     for (const l of v.lines) console.log(l);
-    console.log(`${v.ok ? "PASS" : "FAIL"} ${KEY}${answer.bundle?.from === "local build" ? " (local build)" : ""}`);
-    process.exit(v.ok ? 0 : 1);
+    console.log(`${v.verdict} ${KEY}${answer.bundle?.from === "local build" ? " (local build)" : ""}`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`ERROR ${KEY}: ${e?.message ?? e}`);
     process.exit(2);
