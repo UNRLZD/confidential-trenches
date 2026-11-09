@@ -336,9 +336,9 @@ export type SolanaTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: SolanaTreesOpts): Promise<PoolTrees>;
   /**
    * Every leaf of both trees both RPCs agree on, each RPC read at or past minContextSlot (a restore's marks' slot), and
-   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot. counts:
-   * each RPC's own [state, label] leaf counts in this read (counts[k], RPC k), which may run past the agreed leaves; a
-   * restore whose marks one RPC listed holds each RPC's own count to them (card exit-pool-notes, review P1-1).
+   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot. `counts`:
+   * each RPC's own state and label leaf counts at that slot, in rpcs order, since the agreed part is the shorter of the
+   * two and an RPC that returns a short page would otherwise hide a leaf from a count.
    */
   leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number]; counts: [[number, number], [number, number]] }>;
 };
@@ -349,8 +349,6 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
   const lastSlot = [0, 0];
   // beforeMs null: no cut, no reached check, every agreed entry
   async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number]; counts: [[number, number], [number, number]] }> {
-    // each RPC's own leaf count per tree: counts[k][tree]
-    const counts: [[number, number], [number, number]] = [[0, 0], [0, 0]];
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(rpcs, async (rpc, k) => {
@@ -364,6 +362,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     }, signal);
     const next: Entry[][] = [];
     const cuts: Entry[][] = [];
+    const counts: [[number, number], [number, number]] = [[0, 0], [0, 0]];
     for (const tree of [TREE_STATE, TREE_LABEL]) {
       const kept = base[tree]!;
       const start = from[tree]! * SOL_PAGE_ENTRIES;

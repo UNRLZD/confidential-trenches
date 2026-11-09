@@ -40,7 +40,9 @@
 // - The leaf count: a deposit writes its precommitment mark, one state leaf and one label leaf (contracts/pool-solana/
 //   src/deposit.rs:85, 95-96), a release its spent mark and one state leaf (release.rs:260, 268), and nothing else
 //   writes a leaf or a mark. At a read with no new mark the pages hold every leaf of the marks and no other, so the walk
-//   runs only when the label leaves number the deposit marks and the state leaves the deposit and spent marks together.
+//   runs only when each RPC's own label leaves number the deposit marks and its own state leaves the deposit and spent
+//   marks together (solanaMarkCounts): the leaves both RPCs agree on end where the shorter RPC's do, so a mark hidden on
+//   both and a page one leaf short on one would pass a count of the agreed leaves alone.
 //   An RPC that pages short (a relayer that knows a change commitment can cut just before it) is refused on every
 //   device alike, never only on the one whose note the missing leaf is.
 // - The never-closed rule (solanaMarksGaps): no mark is ever closed, so a mark one RPC gives at slot s that the other
@@ -507,21 +509,22 @@ export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
 }
 
 /**
- * A listed read's counts (card exit-pool-notes, review P1-1). A deposit writes one precommitment mark, one state leaf and
- * one label leaf; a release one spent mark and one state leaf (contracts/pool-solana/src/deposit.rs, release.rs); so
- * each RPC's own pages hold exactly D label and D + R state leaves for D listed deposits and R listed releases. Deposits
- * are numbered by their nonce 1..D and releases 0..R-1 with no gap (src/state.rs), so the listed counters are exactly
- * those: a hole is a mark left out.
+ * The marks' counts against each RPC's own pages (card exit-pool-notes, review P1-1). A deposit writes one precommitment
+ * mark, one state leaf and one label leaf; a release one spent mark and one state leaf (contracts/pool-solana/src/
+ * deposit.rs, release.rs); so each RPC's own pages hold exactly D label and D + R state leaves for D deposits and R
+ * releases. Deposits are numbered by their nonce 1..D and releases 0..R-1 with no gap (src/state.rs), so the marks'
+ * counters are exactly those: a hole is a mark left out. listed: the marks came from a lister (solanaMarksListed), else
+ * from the two RPCs' bucket scan (solanaMarks); the rule is the same.
  */
-function solanaListedCounts(marks: SolanaMarks, counts: readonly (readonly [number, number])[]): void {
+function solanaMarkCounts(marks: SolanaMarks, counts: readonly (readonly [number, number])[], listed: boolean): void {
   const d = marks.pre.size;
   const r = marks.spent.size;
   if (counts.some(([state, label]) => label !== d || state !== d + r))
-    throw new Error(`restore: the lister listed ${d} deposits and ${r} releases (${d} label and ${d + r} state leaves), but rpc 0's pages hold ${counts[0]![0]} state and ${counts[0]![1]} label leaves and rpc 1's hold ${counts[1]![0]} state and ${counts[1]![1]} label leaves`);
+    throw new Error(`restore: ${listed ? "the lister listed" : "the marks are"} ${d} deposits and ${r} releases (${d} label and ${d + r} state leaves), but rpc 0's pages hold ${counts[0]![0]} state and ${counts[0]![1]} label leaves and rpc 1's hold ${counts[1]![0]} state and ${counts[1]![1]} label leaves`);
   const nonces = new Set([...marks.pre.values()].map((m) => m.nonce));
-  if (nonces.size !== d || [...nonces].some((n) => n < 1n || n > BigInt(d))) throw new Error(`restore: the listed deposits' nonces are not 1 to ${d}`);
+  if (nonces.size !== d || [...nonces].some((n) => n < 1n || n > BigInt(d))) throw new Error(`restore: the ${listed ? "listed " : ""}deposits' nonces are not 1 to ${d}`);
   const numbers = new Set([...marks.spent.values()].map((m) => m.number));
-  if (numbers.size !== r || [...numbers].some((n) => n < 0 || n >= r)) throw new Error(`restore: the listed releases' numbers are not 0 to ${r - 1}`);
+  if (numbers.size !== r || [...numbers].some((n) => n < 0 || n >= r)) throw new Error(`restore: the ${listed ? "listed " : ""}releases' numbers are not 0 to ${r - 1}`);
 }
 
 /**
@@ -557,13 +560,10 @@ export async function solanaRestoreNotes(a: {
     const again = solanaMarksUnion(marks, read);
     // the one rule, on the RPCs' answers alone: walk at the first read with no new mark; else read again past it
     if ([...again.spent.keys(), ...again.pre.keys()].every((key) => marks.spent.has(key) || marks.pre.has(key))) {
-      // a listed read: each RPC's own pages count the listed marks exactly, and the counters run with no hole (review
-      // P1-1). The agreed leaves alone would let a lister and one RPC together drop a mark and its leaf: the shared part
-      // of the two RPCs' pages ends where the shorter one does.
-      if (a.lister !== undefined) solanaListedCounts(marks, leaves.counts);
-      // the pages hold exactly the marks' leaves (header): pages short of them, or past them, are refused on every device
-      else if (leaves.label.length !== marks.pre.size || leaves.state.length !== marks.pre.size + marks.spent.size)
-        throw new Error(`restore: the pages hold ${leaves.state.length} state and ${leaves.label.length} label leaves for ${marks.pre.size} deposits and ${marks.spent.size} releases`);
+      // each RPC's own pages hold exactly the marks' leaves, and the counters run with no hole (header; review P1-1), on
+      // both paths: the agreed leaves alone end where the shorter RPC's pages do, so a mark hidden by a lister, or on both
+      // RPCs' scans, plus one RPC's page a leaf short would pass. Refused on every device alike.
+      solanaMarkCounts(marks, leaves.counts, a.lister !== undefined);
       return withSeed(a.seed64, (seed64) => solanaRestore({ seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
     }
     marks = again;

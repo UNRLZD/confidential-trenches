@@ -153,6 +153,10 @@ const relChain = (slot = 500, edit?: (b: Uint8Array, i: number) => void): Chain 
   time: () => REL_RELEASE_T + 60n,
 });
 const pair = (a: Chain, b: Chain, oa: Over = MAINNET, ob: Over = MAINNET): [SolanaRpc, SolanaRpc] => [rpc(a, { ...oa, url: "https://a.example" }), rpc(b, { ...ob, url: "https://b.example" })];
+// a bucket-scan restore's count refusal: D deposits and R releases found, each RPC's own [state, label] leaf counts
+const marksAre = (d: number, r: number, a: readonly [number, number], b: readonly [number, number]) =>
+  `restore: the marks are ${d} deposits and ${r} releases (${d} label and ${d + r} state leaves), but rpc 0's pages hold ${a[0]} state and ${a[1]} label leaves and rpc 1's hold ${b[0]} state and ${b[1]} label leaves`;
+const exactly = (m: string) => new RegExp(`^${m.replace(/[()]/g, "\\$&")}$`);
 
 const feeAnswer = (epochStartMs: bigint, fee = "1300000", over: Partial<SolanaFeeAnswer> = {}): SolanaFeeAnswer => ({
   chain: "solana", program: PROGRAM, pool: POOL, fee_payer: FEE_PAYER, epoch_ms: 60_000, epoch_start_ms: Number(epochStartMs), fee, step: "100000", ...over,
@@ -588,6 +592,21 @@ test("listed restore refuses a lister and one RPC rolling the pool back past a r
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(liar), rpcs: [noGpa(afterSpend, "https://a.example"), noGpa(liar, "https://b.example")], gap: 4 }), listedCounts(4, 0, [5, 4], [4, 4]));
 });
 
+test("restore (bucket scan) refuses a spent mark hidden on both RPCs plus one RPC's state page a leaf short; the other RPC's pages count it", async () => {
+  const { chain } = restorePool();
+  const userSpent = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const marks = new Map(chain.marks!);
+  marks.delete(userSpent);
+  const hidden: Chain = { ...chain, marks };
+  const accounts = new Map(chain.accounts);
+  const k0 = solanaPageOf(PROGRAM, 0, 0);
+  accounts.set(k0, accounts.get(k0)!.subarray(0, accounts.get(k0)!.length - 72));
+  const short: Chain = { ...hidden, accounts };
+  const scanCounts = (a: [number, number], b: [number, number]) => exactly(`Error: ${marksAre(5, 1, a, b)}`);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(short, hidden), gap: 4 }), scanCounts([6, 5], [7, 5]));
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(hidden, short), gap: 4 }), scanCounts([7, 5], [6, 5]));
+});
+
 test("listed restore refuses one RPC whose label page is one leaf short, every mark listed and its state page whole", async () => {
   const { chain } = restorePool();
   const accounts = new Map(chain.accounts);
@@ -731,7 +750,7 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   // a spent mark that withdrew more than the note held, or nothing: withdrawn 0 is no mark (a stranger's zeroed account,
   // sol-marks-scale fold 1, review S1), passed over, so the pages hold a release's leaf with no mark and the leaf count
   // refuses
-  for (const [w, re] of [[50_000_001n, /its spent mark withdrew/], [0n, /^Error: restore: the pages hold 7 state and 5 label leaves for 5 deposits and 1 releases$/]] as const) await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(...[edit((m) => m.set(spentKey, spentData(w, 0)))].flatMap((c) => [c, c]) as [Chain, Chain]), gap: 4 }), re);
+  for (const [w, re] of [[50_000_001n, /its spent mark withdrew/], [0n, exactly(`Error: ${marksAre(5, 1, [7, 5], [7, 5])}`)]] as const) await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(...[edit((m) => m.set(spentKey, spentData(w, 0)))].flatMap((c) => [c, c]) as [Chain, Chain]), gap: 4 }), re);
   // a mark of a size the program never writes
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain).map((r) => Object.assign(async (m: string, p: readonly unknown[]) => {
     const a = (await r(m, p)) as { value?: { account: { data: [string, string] } }[] };
@@ -743,7 +762,7 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   // a mark of value 0 or nonce 0, which the program never writes (R11): value 0 is no mark (a stranger's zeroed account,
   // sol-marks-scale fold 1, review S1), passed over, so the pages hold a deposit's leaves with no mark and the leaf count
   // refuses; nonce 0 is no deposit's counter, refused at its read
-  for (const [z, re] of [[markData(0n, 3n), /^Error: restore: the pages hold 7 state and 5 label leaves for 4 deposits and 2 releases$/], [markData(10_000_000n, 0n), /counter 0 is not in bucket 0/]] as const) {
+  for (const [z, re] of [[markData(0n, 3n), exactly(`Error: ${marksAre(4, 2, [7, 5], [7, 5])}`)], [markData(10_000_000n, 0n), /counter 0 is not in bucket 0/]] as const) {
     const c = edit((m) => m.set(key, z));
     await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(c, c), gap: 4 }), re);
   }
@@ -755,8 +774,9 @@ test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its
   }, { url: r.url })) as [SolanaRpc, SolanaRpc];
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: twist((v) => void v.push(v[0]!)), gap: 4 }), /an account twice/);
   await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: twist((v) => void (v[0]!.account = { ...v[0]!.account, owner: FEE_PAYER })), gap: 4 }), /not the program's account/);
+  // a nonce past every deposit's on both RPCs: the counters are not 1 to D, refused before the walk (card exit-pool-notes)
   const far = edit((m) => m.set(key, markData(10_000_000n, 99n)));
-  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(far, far), gap: 4 }), /is not a label tree leaf/);
+  await assert.rejects(solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(far, far), gap: 4 }), /^Error: restore: the deposits' nonces are not 1 to 5$/);
   // both RPCs serve another label at deposit 9's place in the label tree
   const label = { ...chain, accounts: new Map(chain.accounts) };
   const lp = solanaPageOf(PROGRAM, 1, 0);
@@ -1635,14 +1655,14 @@ test("fold 6 (T1): one RPC pages a deposit short (its marks honest, its slot at 
     const mine = await run(SEED);
     const other = await run(SEED_OTHER);
     assert.deepEqual(mine.log, other.log, liar);
-    assert.equal(mine.out, "refused: restore: the pages hold 3 state and 3 label leaves for 4 deposits and 0 releases", liar);
+    assert.equal(mine.out, `refused: ${marksAre(4, 0, liar === "a" ? [3, 3] : [4, 4], liar === "a" ? [4, 4] : [3, 3])}`, liar);
     assert.equal(other.out, mine.out, liar);
   }
   // the label tree alone short (its state pages whole)
   const labelPage = solanaPageOf(PROGRAM, 1, 0);
   const labelShort = (i: number): Chain => { const c = full(i); return { ...c, accounts: new Map(c.accounts).set(labelPage, short(i).accounts.get(labelPage)!) }; };
   const outs = await Promise.all([SEED, SEED_OTHER].map((seed64) => outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [perRpc("https://a.example", full, full, []), perRpc("https://b.example", full, labelShort, [])], gap: 4 }))));
-  assert.deepEqual(outs, Array(2).fill("refused: restore: the pages hold 4 state and 3 label leaves for 4 deposits and 0 releases"));
+  assert.deepEqual(outs, Array(2).fill(`refused: ${marksAre(4, 0, [4, 4], [4, 3])}`));
 });
 
 test("fold 6 (T2): one RPC pages without the change leaf of the user's release (its marks honest): refused on the owner's device and on another alike", { timeout: 20_000 }, async () => {
@@ -1658,7 +1678,7 @@ test("fold 6 (T2): one RPC pages without the change leaf of the user's release (
     const mine = await run(SEED);
     const other = await run(SEED_OTHER);
     assert.deepEqual(mine.log, other.log, liar);
-    assert.match(mine.out, /^refused: restore: the pages hold 4 state and 4 label leaves for 5 deposits and 2 releases$/, liar);
+    assert.equal(mine.out, `refused: ${marksAre(5, 2, liar === "a" ? [4, 4] : [7, 5], liar === "a" ? [7, 5] : [4, 4])}`, liar);
     assert.equal(other.out, mine.out, liar);
   }
   // the state tree alone cut just before the change leaf (the label tree whole): what a relayer that knows the change
@@ -1666,7 +1686,7 @@ test("fold 6 (T2): one RPC pages without the change leaf of the user's release (
   const statePage = solanaPageOf(PROGRAM, 0, 0);
   const cut = (i: number): Chain => ({ ...full(i), accounts: new Map(chain.accounts).set(statePage, beforeSpend.accounts.get(statePage)!) });
   const outs = await Promise.all([SEED, SEED_OTHER].map((seed64) => outcome(solanaRestoreNotes({ seed64, program: PROGRAM, rpcs: [perRpc("https://a.example", full, full, []), perRpc("https://b.example", full, cut, [])], gap: 4 }))));
-  assert.deepEqual(outs, Array(2).fill("refused: restore: the pages hold 4 state and 5 label leaves for 5 deposits and 2 releases"));
+  assert.deepEqual(outs, Array(2).fill(`refused: ${marksAre(5, 2, [7, 5], [4, 5])}`));
 });
 
 test("fold 6 (T3): an honest pair on the same pools: both devices restore", async () => {
