@@ -1,0 +1,16 @@
+{
+  "name": "example-private-buy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@blindfill/kit": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}

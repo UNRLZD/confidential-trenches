@@ -172,6 +172,17 @@ test("a terminal main that never reaches the kit's entry is refused", () => {
   }
 });
 
+test("an example main that never reaches the kit's entry is refused", () => {
+  const dir = tree({ ...KIT, "examples/private-buy/main.ts": "export const x = 1;\n" });
+  try {
+    const r = check(dir);
+    assert.notEqual(r.rc, 0, r.out);
+    assert.match(r.out, /example-uses-kit-entry/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // A relay: a file outside packages/ and contracts/ that re-exports a kit internal, imported by the terminal. The rule
 // holds every module outside packages/ and contracts/, so the relay itself is refused wherever it sits, the folders a
 // build or a test fixture uses included.
@@ -639,6 +650,36 @@ test("the kit's own entry: a terminal main importing @blindfill/kit passes with 
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The private-buy example as committed (card example-private-buy), on the kit's own packages: it passes, every import it
+// makes resolves to the kit's public entry, and the same file with one deep import into the kit's pool buy is refused
+// by name. (${UP2}: the two-up path written out here, in quotes, would be a reach from this file itself.)
+const EXAMPLE = "examples/private-buy/main.ts";
+test("the private-buy example reaches Blindfill only by the kit's public entry, and a deep import planted in it is refused", () => {
+  const body = readFileSync(join(ROOT, EXAMPLE), "utf8");
+  const clean = tree({ ...ownPackages(), ...TERMINAL_MAIN, [EXAMPLE]: body });
+  try {
+    const r = check(clean);
+    assert.equal(r.rc, 0, r.out);
+    const to = targets(clean, EXAMPLE);
+    assert.ok(to.length > 0, "the example imports nothing");
+    for (const t of to) assert.deepEqual(t, { name: "@blindfill/kit", to: "packages/kit/src/index.ts", unresolved: false });
+  } finally {
+    rmSync(clean, { recursive: true, force: true });
+  }
+  const planted = tree({
+    ...ownPackages(),
+    ...TERMINAL_MAIN,
+    [EXAMPLE]: `import { solanaEncodePoolRelease } from "${UP2}/packages/kit/src/trade/solana/pool-buy.ts";\nexport const deep = solanaEncodePoolRelease;\n${body}`,
+  });
+  try {
+    const r = check(planted);
+    assert.notEqual(r.rc, 0, r.out);
+    assert.match(r.out, /error kit-public-entry-only: examples\/private-buy\/main\.ts → packages\/kit\/src\/trade\/solana\/pool-buy\.ts/, r.out);
+  } finally {
+    rmSync(planted, { recursive: true, force: true });
   }
 });
 

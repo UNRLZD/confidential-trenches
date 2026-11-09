@@ -74,6 +74,19 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@24.10.1)
 
+  examples/private-buy:
+    dependencies:
+      '@blindfill/kit':
+        specifier: workspace:*
+        version: link:../../packages/kit
+    devDependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vite:
+        specifier: 8.3.5
+        version: 8.3.5(@types/node@24.10.1)
+
   packages/exit:
     dependencies:
       '@blindfill/kit':
