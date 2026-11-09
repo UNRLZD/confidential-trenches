@@ -1,0 +1,162 @@
+{
+  "good": {
+    "at": "2026-11-09T21:40:09.296Z",
+    "helper": "https://ct-api.unrealized.trade",
+    "as": null,
+    "market": {
+      "status": 200,
+      "cors": "https://ct-app.unrealized.trade",
+      "shape": {
+        "top": [
+          "decimals",
+          "filling",
+          "pool",
+          "risk",
+          "route",
+          "row"
+        ],
+        "row": [
+          "as_of_ms",
+          "buys_1h",
+          "buys_24h",
+          "buys_5m",
+          "chain",
+          "chg_1h_bps",
+          "chg_24h_bps",
+          "chg_4h_bps",
+          "chg_5m_bps",
+          "created_s",
+          "creator",
+          "creator_sold_bps",
+          "curve_bps",
+          "dev_bps",
+          "freeze_auth",
+          "holders",
+          "icon",
+          "label",
+          "launchpad",
+          "liq_usd",
+          "mc_usd",
+          "mint_auth",
+          "name",
+          "net_5m_usd",
+          "price_usd",
+          "risk_src",
+          "sells_1h",
+          "sells_24h",
+          "sells_5m",
+          "snipers_bps",
+          "src",
+          "symbol",
+          "token",
+          "top10_bps",
+          "venue",
+          "vol_1h_usd",
+          "vol_24h_usd",
+          "vol_5m_usd"
+        ],
+        "risk": [
+          "age_s",
+          "bundlers_bps",
+          "dev_bps",
+          "freeze_auth",
+          "fresh_bps",
+          "holders",
+          "honeypot",
+          "insiders_bps",
+          "liq_usd",
+          "lp",
+          "mint_auth",
+          "snipers_bps",
+          "tax",
+          "top10_bps"
+        ]
+      }
+    },
+    "devnet": {
+      "status": 200,
+      "cors": "https://confidential.unrealized.trade",
+      "blockhash": true
+    }
+  },
+  "bad": {
+    "at": "2026-11-09T21:40:10.596Z",
+    "helper": "https://ct-api.unrealized.trade",
+    "as": "https://example.com",
+    "market": {
+      "status": 200,
+      "cors": null,
+      "shape": {
+        "top": [
+          "decimals",
+          "filling",
+          "pool",
+          "risk",
+          "route",
+          "row"
+        ],
+        "row": [
+          "as_of_ms",
+          "buys_1h",
+          "buys_24h",
+          "buys_5m",
+          "chain",
+          "chg_1h_bps",
+          "chg_24h_bps",
+          "chg_4h_bps",
+          "chg_5m_bps",
+          "created_s",
+          "creator",
+          "creator_sold_bps",
+          "curve_bps",
+          "dev_bps",
+          "freeze_auth",
+          "holders",
+          "icon",
+          "label",
+          "launchpad",
+          "liq_usd",
+          "mc_usd",
+          "mint_auth",
+          "name",
+          "net_5m_usd",
+          "price_usd",
+          "risk_src",
+          "sells_1h",
+          "sells_24h",
+          "sells_5m",
+          "snipers_bps",
+          "src",
+          "symbol",
+          "token",
+          "top10_bps",
+          "venue",
+          "vol_1h_usd",
+          "vol_24h_usd",
+          "vol_5m_usd"
+        ],
+        "risk": [
+          "age_s",
+          "bundlers_bps",
+          "dev_bps",
+          "freeze_auth",
+          "fresh_bps",
+          "holders",
+          "honeypot",
+          "insiders_bps",
+          "liq_usd",
+          "lp",
+          "mint_auth",
+          "snipers_bps",
+          "tax",
+          "top10_bps"
+        ]
+      }
+    },
+    "devnet": {
+      "status": 200,
+      "cors": null,
+      "blockhash": true
+    }
+  }
+}

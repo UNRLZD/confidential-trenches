@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// A pool buy end to end in H-app on Solana devnet (card app-a2-e2e; app.md 5.2 AE-11's buy). The real terminal (its
+// A pool buy and sell end to end in H-app on Solana devnet (card app-a2-e2e; app.md 5.2 AE-11). The real terminal (its
 // build), the real kit (the terminal's own client), the real signing page (its testnet build: the devnet pool it pins,
 // DEVNET_TABLE) and its in-browser prover, on the shipped names (startHarness realNames). The browser reaches two real
 // hosts and no other: the devnet RPC and the helper (its devnet RPC, its pool fee and its POST /v1/pool/solana/send).
 // The steps are packages/signpage/scripts/pool-flow-devnet.mjs's, run in the browser:
 //   1. sign in the no-PRF way (a virtual authenticator with no PRF): SIGN_HOST draws the 12 words, which this run keeps
-//      at ~/.ct-devnet-runs/app-a2-e2e-<time>.words (folder 0700, file 0600, never printed) so app-a2-e2e-sell can
-//      sell from the same account, then Saved;
+//      at ~/.ct-devnet-runs/app-a2-e2e-<time>.words (folder 0700, file 0600, never printed) so the account's devnet
+//      money stays reachable after the run, then Saved;
 //   2. the header's Deposit opens the sheet, which asks pool.address for each pool's chain with no asset: Solana's
 //      answer is U, the pool's one-time address (the testnet build quotes nothing: pool-deposit-address.ts);
 //   3. the run's own devnet funder (FUNDER, a key in .keys/, gitignored) pays U exactly the deposit's need (the rung,
@@ -16,10 +16,14 @@
 //   5. the token page of the devnet coin (its market row: market-token.json, a recorded mainnet answer with the devnet
 //      mint, since the helper's market data is mainnet only; the one read that is not live) shows the pool's proof
 //      making, then Proof ready; the run types the line's Max into the amount and taps Buy once;
-//   6. the box reaches Filled; every transaction the page sent is read back on both devnet RPCs (err null, confirmed).
+//   6. the box reaches Filled; the wallet W the buy filled holds the coin, read on both devnet RPCs;
+//   7. the box's Sell side opens once the signing page's state holds the position; 100% is sold in one tap and the box
+//      reaches Filled; W then holds none of the coin on both RPCs, and every transaction the page sent is read back on
+//      both (err null, confirmed).
 // Nothing here signs: SIGN_HOST signs, proves and sends; the run only funds U and reads.
 //   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant no-buy]
-//     PASS exit 0, FAIL exit 1, error exit 2. --plant no-buy stops before the buy's tap (the red run).
+//     PASS exit 0, FAIL exit 1, error exit 2. --plant no-buy stops before the buy's tap, --plant no-sell before the
+//     sell's (the red runs).
 // Needs the terminal's build (pnpm --filter terminal build), Playwright's Chromium and a funded FUNDER.
 import { createHash, createPrivateKey, sign as edSign } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -41,6 +45,7 @@ const WAIT_MS = 20_000;
 const PROOF_MS = 6 * 60_000;
 const FILL_MS = 90_000;
 const PRICE_MS = 7 * 60_000;
+const HELD_MS = 60_000;
 const FUNDER_FILE = path.join(REPO, ".keys", "app-a2-e2e-funder");
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -61,6 +66,14 @@ export function judge(rec) {
   const txs = rec.txs ?? [];
   const buyTxs = txs.filter((t) => t.step === "buy");
   say(buyTxs.length >= 1, `the buy's transactions sent: ${buyTxs.length}`);
+  const [a, b] = rec.heldAfterBuy ?? [];
+  say(typeof rec.w === "string" && a === b && /^\d+$/.test(a ?? "") && BigInt(a) > 0n, `the buy's wallet ${rec.w ?? "none"} holds ${a ?? "-"} / ${b ?? "-"} of the coin on the two RPCs`);
+  say(rec.sell?.taps === 1, `the sell tapped once: ${rec.sell?.taps ?? 0}`);
+  say(rec.sell?.asks === 1, `one sell sent: ${rec.sell?.asks ?? 0} ${rec.sell?.kind ?? ""}`);
+  say(/^Filled\b/.test(rec.sell?.end ?? ""), `the sell box ended "${rec.sell?.end ?? "none"}"`);
+  const sellTxs = txs.filter((t) => t.step === "sell");
+  say(sellTxs.length >= 1, `the sell's transactions sent: ${sellTxs.length}`);
+  say(Array.isArray(rec.heldAfterSell) && rec.heldAfterSell.length === 2 && rec.heldAfterSell.every((x) => x === "0"), `after the sell W holds ${(rec.heldAfterSell ?? ["-", "-"]).join(" / ")} on the two RPCs`);
   say(txs.length > 0 && txs.every((t) => t.reads?.length === 2 && t.reads.every((r) => r.err === null && (r.status === "confirmed" || r.status === "finalized"))), `every transaction read back ok on both RPCs: ${txs.map((t) => `${t.step} ${t.sig.slice(0, 8)} ${(t.reads ?? []).map((r) => r.status ?? "none").join("/")}`).join(", ") || "none"}`);
   say(rec.pages === 1, `one page from first frame to last: ${rec.pages}`);
   say((rec.dialogs ?? 0) === 0, `no dialog: ${rec.dialogs ?? 0}`);
@@ -139,6 +152,27 @@ async function readBack(sig) {
   const st = (await both("getSignatureStatuses", [[sig], { searchTransactionHistory: true }])).map((x) => x.value[0]);
   return st.map((x) => ({ status: x?.confirmationStatus ?? null, err: x ? x.err : "none" }));
 }
+/** The wallet the buy filled: the owner whose MINT balance the buy's transactions raised, as each RPC reads them. */
+async function buyWallet(sigs) {
+  const per = await Promise.all([DEVNET_RPC, HELPER_RPC].map(async (u) => {
+    for (const sig of sigs) {
+      const tx = await rpc(u, "getTransaction", [sig, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+      const amt = (list, owner) => BigInt(list?.find((b) => b.mint === MINT && b.owner === owner)?.uiTokenAmount.amount ?? "0");
+      const up = (tx?.meta?.postTokenBalances ?? []).filter((b) => b.mint === MINT).map((b) => b.owner).find((o) => amt(tx.meta.postTokenBalances, o) > amt(tx.meta.preTokenBalances, o));
+      if (up) return up;
+    }
+    return null;
+  }));
+  if (!per[0] || per[0] !== per[1]) throw new Error(`the buy's wallet reads ${per.join(" / ")} on the two RPCs`);
+  return per[0];
+}
+/** MINT held by `owner` (its base units, a string) as each of the two RPCs reads it at confirmed. */
+async function heldOn(owner) {
+  return Promise.all([DEVNET_RPC, HELPER_RPC].map(async (u) => {
+    const r = await rpc(u, "getTokenAccountsByOwner", [owner, { mint: MINT }, { encoding: "jsonParsed", commitment: "confirmed" }]);
+    return String(r.value.reduce((n, a) => n + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n));
+  }));
+}
 
 // ------------------------------------------------------------------------------------------------ the testnet SIGN_HOST
 /** SIGN_HOST's testnet build in a fresh folder: build-app.mjs --network testnet (run as a child, never imported), the
@@ -172,11 +206,11 @@ const PROBE = ({ app, sign }) => {
   };
   addEventListener("securitypolicyviolation", (e) => report({ kind: "csp", directive: e.effectiveDirective, blocked: String(e.blockedURI).slice(0, 80) }));
   // SIGN_HOST (the shell that frames the terminal, or a frame the kit mounts): every request APP_HOST's kit posts it,
-  // kind and id only
+  // kind, id and side only (the kit's message is flat: { ...params, v, id, type })
   if (location.hostname === sign) {
     addEventListener("message", (e) => {
       const d = e.data;
-      if (e.origin === `https://${app}` && d && typeof d === "object" && d.v === 1 && typeof d.type === "string" && typeof d.id === "string" && !("ok" in d)) report({ kind: "ask", type: d.type, id: d.id });
+      if (e.origin === `https://${app}` && d && typeof d === "object" && d.v === 1 && typeof d.type === "string" && typeof d.id === "string" && !("ok" in d)) report({ kind: "ask", type: d.type, id: d.id, side: typeof d.side === "string" ? d.side : null });
     }, true);
     return;
   }
@@ -200,6 +234,8 @@ export async function run({ plant = null, shots = null } = {}) {
   const hosts = new Set();
   // every transaction the browser sends: a sendTransaction on either devnet RPC, or the helper's pool send ({pool, tx})
   const sent = [];
+  /** the helper's pool send answers still being read */
+  const answers = [];
   let step = "signin";
   try {
     // the recorded answer keeps its mint as "<mint>" (a mint beside "token" reads as a key to gitleaks' generic rule)
@@ -214,15 +250,21 @@ export async function run({ plant = null, shots = null } = {}) {
         hosts.add(new URL(r.url()).hostname);
       } catch {}
     });
+    // a transaction sent to an RPC is named by its first signature, as sent; one the helper carries (POST
+    // /v1/pool/solana/send: slot 0, the fee payer's, is zero until the helper signs) by the signature its 200 answers
+    const add = (sig) => sig && !/^1+$/.test(sig) && !sent.some((x) => x.sig === sig) && sent.push({ step, sig });
+    const isPoolSend = (r) => r.method() === "POST" && new URL(r.url()).hostname === REAL.api && new URL(r.url()).pathname === "/v1/pool/solana/send";
     context.on("request", (r) => {
-      if (r.method() !== "POST") return;
+      if (r.method() !== "POST" || isPoolSend(r)) return;
       try {
         const b = JSON.parse(r.postData() ?? "");
-        const wire = b?.method === "sendTransaction" ? b.params?.[0] : new URL(r.url()).pathname === "/v1/pool/solana/send" ? b?.tx : null;
-        if (typeof wire !== "string") return;
-        const sig = b58(Buffer.from(wire, "base64").subarray(1, 65));
-        if (!sent.some((x) => x.sig === sig)) sent.push({ step, sig });
+        if (b?.method === "sendTransaction" && typeof b.params?.[0] === "string") add(b58(Buffer.from(b.params[0], "base64").subarray(1, 65)));
       } catch {}
+    });
+    context.on("response", (r) => {
+      if (!isPoolSend(r.request()) || r.status() !== 200) return;
+      const at = step;
+      answers.push(r.json().then((j) => typeof j?.signature === "string" && !sent.some((x) => x.sig === j.signature) && sent.push({ step: at, sig: j.signature }), () => {}));
     });
     const page = await context.newPage();
     page.on("dialog", (d) => (rec.dialogs++, void d.dismiss()));
@@ -346,11 +388,53 @@ export async function run({ plant = null, shots = null } = {}) {
     rec.buy.asks = asks.length;
     rec.buy.kind = asks[0]?.type ?? null;
     await shot("5-filled");
+    if (!/^Filled\b/.test(label)) throw new Error(`the buy ended "${label}"`);
+
+    // 7. the buy's wallet W and what it holds, read on both RPCs
+    step = "held";
+    await Promise.allSettled(answers);
+    rec.w = await buyWallet(sent.filter((x) => x.step === "buy").map((x) => x.sig));
+    rec.heldAfterBuy = await heldOn(rec.w);
+
+    // 8. the sell side, once the signing page's state holds the position: 100% sold in one tap, back into the pool
+    const side = vis('[data-testid="trade-side-sell"]');
+    const heldBy = Date.now() + HELD_MS;
+    while (Date.now() < heldBy && (await side.isDisabled())) await page.waitForTimeout(500);
+    rec.sell = { taps: 0, asks: 0 };
+    if (await side.isDisabled()) throw new Error(`no position to sell ${HELD_MS / 1000} s after Filled`);
+    await side.click();
+    await vis('[data-testid="sell-box"] .trb-input').fill("100");
+    const sellCta = vis('[data-testid="sell-cta"]');
+    const sellBy = Date.now() + WAIT_MS;
+    while (Date.now() < sellBy && (await sellCta.isDisabled())) await page.waitForTimeout(250);
+    await shot("6-sell");
+    if (plant === "no-sell") throw new Error("planted: the sell is cut (no tap)");
+    step = "sell";
+    const sellAsksBefore = events.filter((e) => e.kind === "ask").length;
+    await sellCta.click();
+    rec.sell.taps = 1;
+    const sellEnd = Date.now() + FILL_MS;
+    let sellLabel = "";
+    while (Date.now() < sellEnd) {
+      sellLabel = (await sellCta.innerText()).replace(/\s+/g, " ").trim();
+      if (/^(Filled|Failed|Not landed)/.test(sellLabel)) break;
+      await page.waitForTimeout(250);
+    }
+    rec.sell.end = sellLabel;
+    const sellAsks = events.filter((e) => e.kind === "ask").slice(sellAsksBefore).filter((e) => e.type === "pool.sell" || (e.type === "buy" && e.side === "sell"));
+    rec.sell.asks = sellAsks.length;
+    rec.sell.kind = sellAsks[0]?.type ?? null;
+    await shot("7-sold");
+
+    // 9. W holds none of the coin, read on both RPCs
+    step = "after";
+    rec.heldAfterSell = await heldOn(rec.w);
     rec.pages = context.pages().length;
   } catch (e) {
     rec.error = String(e?.message ?? e).slice(0, 300);
   } finally {
-    // 6. every transaction the page sent, and the funder's, read back on both RPCs
+    // 10. every transaction the page sent, and the funder's, read back on both RPCs
+    await Promise.allSettled(answers);
     for (const s of sent) if (!rec.txs.some((t) => t.sig === s.sig)) rec.txs.push(s);
     for (const t of rec.txs) t.reads = await readBack(t.sig).catch((e) => [{ status: null, err: String(e?.message).slice(0, 80) }]);
     rec.csp = events.filter((e) => e.kind === "csp").map((e) => `${e.host} ${e.directive} ${e.blocked}`);
@@ -374,7 +458,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(rec.stub);
     for (const l of v.lines) console.log(l);
     for (const t of rec.txs) console.log(`Tx: solana-devnet ${t.sig} (${t.step})`);
-    console.log(v.ok ? "PASS a pool buy end to end in H-app on devnet" : "FAIL");
+    console.log(v.ok ? "PASS a pool buy and sell end to end in H-app on devnet" : "FAIL");
     process.exit(v.ok ? 0 : 1);
   } catch (e) {
     console.error(`error: ${e?.message ?? e}`);
