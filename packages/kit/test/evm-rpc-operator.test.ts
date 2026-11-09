@@ -100,13 +100,16 @@ test("evmPoolProvidersOf: a venue's pool list, its quote list where it has none,
   const inherited = Object.create({ poolProviders: pool, providers: pool }) as EvmPoolVenue;
   assert.equal(evmPoolProvidersOf(inherited), undefined);
   assert.equal(evmPoolProvidersOf(evmPoolVenues().robinhood), evmPoolVenues().robinhood.poolProviders);
-  assert.equal(evmPoolProvidersOf(evmPoolVenues().base), evmPoolVenues().base.providers);
+  assert.equal(evmPoolProvidersOf(evmPoolVenues().base), evmPoolVenues().base.poolProviders);
+  // a venue with no pool list of its own reads its quote list (card evm-pool-lists-mainnet: Base mainnet has its own now)
+  assert.equal(evmPoolVenues()["base-sepolia"].poolProviders, undefined);
+  assert.equal(evmPoolProvidersOf(evmPoolVenues()["base-sepolia"]), evmPoolVenues()["base-sepolia"].providers);
 });
 
 // review mutant M3b: the pool reads check with its fallback removed passed every test; each pool-list reader outside the
 // kit takes the list from the accessor, never from a venue's fields itself
 test("every pool-list reader takes the list from evmPoolProvidersOf, never a venue's poolProviders or providers itself", () => {
-  for (const f of ["../../wallet/scripts/pool-reads-throttle-check.ts", "../../../scripts/live-checks/robinhood-mainnet-rpcs.mjs"]) {
+  for (const f of ["../../wallet/scripts/pool-reads-throttle-check.ts", "../../../scripts/live-checks/robinhood-mainnet-rpcs.mjs", "../../signpage/src/pool-testnet.ts", "../../../scripts/live-checks/evm-pool-lists-mainnet.mjs"]) {
     const src = readFileSync(new URL(f, import.meta.url), "utf8");
     assert.match(src, /evmPoolProvidersOf\(/, `${f}: takes the accessor`);
     assert.doesNotMatch(src, /\.poolProviders\b|\?\.providers\b|\.providers\s*\?\?/, `${f}: reads no venue list itself`);

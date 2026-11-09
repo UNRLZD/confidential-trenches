@@ -56,6 +56,7 @@ import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, sett
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -82,6 +83,17 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
  *  other directly; both with the page's retry. */
 export const testnetRpc = (url: string): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, init: HELPER_FETCH_INIT }) : pageRpc(url));
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
+/** An EVM chain's pool list as the page reads it, the pool sync's seats first and its spares after: the testnet pair in
+ *  the testnet build; on mainnet the kit's pool list (evmPoolProvidersOf, card evm-pool-lists-mainnet), whose seats page
+ *  the pool's logs from its deploy block, never the quote list's 10-block blastapi. SIGN_HOST's connect-src allows each
+ *  (scripts/live-checks/page-evm-rpc-csp.mjs reads both). */
+export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] =>
+  POOL_TESTNET ? TESTNET_RPCS[chain] : (evmPoolProvidersOf(evmPoolVenues()[chain]) ?? []);
+/** The pool list as RPCs (pageRpc each, testnetRpc on the testnet build), or null with fewer than two. */
+export const pageEvmPoolRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] | null => {
+  const urls = pageEvmPoolUrls(chain);
+  return urls.length < 2 ? null : urls.map((u) => testnetRpc(u));
+};
 /** The Solana pool the page's network pins: none on mainnet until pool-sol-deploy-mainnet pins it. */
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
@@ -223,11 +235,11 @@ export type TestnetOver = {
    *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
   now?: () => bigint;
   wait?: (ms: number) => Promise<void>;
-  /** An EVM chain's pool pin (EVM_POOLS of the page's network otherwise), its two RPCs (the testnet pair otherwise) and
-   *  its pool's event round (evmTreeSync over that pair otherwise): tests run the EVM deposit flow on a fake pool. */
+  /** An EVM chain's pool pin (EVM_POOLS of the page's network otherwise), its pool list, seats first (pageEvmPoolRpcs
+   *  otherwise), and its pool's event round (evmTreeSync over that list otherwise): tests run the EVM deposit flow on a fake pool. */
   evmPin?: (chain: "base" | "robinhood") => EvmPoolPin | undefined;
-  evmRpcs?: (chain: "base" | "robinhood") => readonly [EvmRpc, EvmRpc] | null;
-  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc]) => () => Promise<EvmDepositRound>;
+  evmRpcs?: (chain: "base" | "robinhood") => readonly EvmRpc[] | null;
+  evmRound?: (pin: EvmPoolPin, rpcs: readonly EvmRpc[]) => () => Promise<EvmDepositRound>;
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
    *  (its sign-out signal and its pass, fold review 3). */
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
@@ -425,10 +437,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const deposit = solanaDepositKind(() => host());
   // pool.deposit on Base or Robinhood: only with the chain's pin on the page's network and its two RPCs
   const evmPin = over.evmPin ?? ((chain: "base" | "robinhood") => EVM_POOLS[POOL_TESTNET ? EVM_TESTNET[chain] : chain]);
-  const evmRpcs = over.evmRpcs ?? ((chain: "base" | "robinhood") => (POOL_TESTNET ? ([testnetRpc(TESTNET_RPCS[chain][0]), testnetRpc(TESTNET_RPCS[chain][1])] as const) : null));
+  // the chain's pool list (pageEvmPoolRpcs): the sync reads all of it, seats and spares; the deposit's own reads its seats
+  const evmRpcs = over.evmRpcs ?? pageEvmPoolRpcs;
   const evmRound =
     over.evmRound ??
-    ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc]) => {
+    ((p: EvmPoolPin, r: readonly EvmRpc[]) => {
       const sync = evmTreeSync({ rpcs: r, pin: p });
       return async (): Promise<EvmDepositRound> => {
         const round = await sync.events();
@@ -441,7 +454,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (!evmPools.has(chain)) {
       const p = evmPin(chain);
       const r = p === undefined ? null : evmRpcs(chain);
-      evmPools.set(chain, p === undefined || r === null ? null : { pin: p, rpcs: r, round: evmRound(p, r), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
+      evmPools.set(chain, p === undefined || r === null || r.length < 2 ? null : { pin: p, rpcs: [r[0]!, r[1]!], round: evmRound(p, r), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
     }
     return evmPools.get(chain)!;
   };
