@@ -93,6 +93,30 @@ const TEMPLATE = /[A-Za-z0-9.-]*\$\{[^}]*\}[A-Za-z0-9.${}-]*\.(?:near\.org|fastn
 const OPERATOR_DOMAIN = /(^|\.)(fastnear\.com|near\.org|drpc\.org)$/;
 const CODE = /\.(m?[jt]sx?|cjs|cts|mts|rs)$/;
 
+// TEMPLATE's matches, as text.matchAll(TEMPLATE) gives them, in linear time. matchAll tries TEMPLATE at every
+// character, and its leading run [A-Za-z0-9.-]* rescans a whole long run from each one: O(n^2), 35 s on a 1.9 MB
+// quote fixture and 443 s for the tree, past the gitleaks job's 10 minutes (main a70ea92b, 9 Nov). A match that
+// starts inside a run also matches one character earlier, so the leftmost match at or after p starts at p itself or
+// where no run character comes before it: one sticky try at p, else the first such run start.
+const TEMPLATE_AT = new RegExp(TEMPLATE.source, "iy");
+const TEMPLATE_RUN_START = new RegExp(`(?<![A-Za-z0-9.-])(?:${TEMPLATE.source})`, "gi");
+function templateMatches(text) {
+  const out = [];
+  if (!text.includes("${")) return out; // every match holds "${"
+  for (let p = 0; p < text.length; ) {
+    TEMPLATE_AT.lastIndex = p;
+    let m = TEMPLATE_AT.exec(text);
+    if (!m) {
+      TEMPLATE_RUN_START.lastIndex = p;
+      m = TEMPLATE_RUN_START.exec(text);
+      if (!m) break;
+    }
+    out.push(m);
+    p = m.index + m[0].length; // never empty: a match holds "${", "}" and a domain
+  }
+  return out;
+}
+
 // [{ at: index, host, op | null, why }] of a text
 function hostsIn(text) {
   const found = new Map(); // index -> entry
@@ -118,7 +142,7 @@ function hostsIn(text) {
     }
     if (!Object.hasOwn(NEAR_RPC_OPERATORS, host)) found.set(at, { at, host: url, op: null, why: "is a NEAR RPC the operator map does not hold" });
   }
-  for (const m of text.matchAll(TEMPLATE)) found.set(m.index, { at: m.index, host: m[0], op: null, why: "is a NEAR RPC host built from a template, which the scan cannot read" });
+  for (const m of templateMatches(text)) found.set(m.index, { at: m.index, host: m[0], op: null, why: "is a NEAR RPC host built from a template, which the scan cannot read" });
   return [...found.values()].sort((a, b) => a.at - b.at);
 }
 
