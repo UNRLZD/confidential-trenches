@@ -13,10 +13,14 @@
 // sender), the transaction's only swap's trader is the one address that moved the token and sent no swap or call. A
 // trade is judged when its receipt names one such trader whose net move of the token has the trade's side, and no v2,
 // v3 or curve swap moves the token in the same transaction. Each judged trade's amt must be exactly that move. It passes only when
-// at least one trade is judged and none is wrong; with none judged it FAILS with that reason, never passes on nothing.
+// at least one trade is judged and none is wrong. A quiet market (no served tape holds a trade it can judge) is no fault of
+// the deploy: with none judged in the first TOKENS tapes it reads more of the lists' tapes, up to MAX_TOKENS and BUDGET_MS,
+// and if there is still nothing to judge it is INCONCLUSIVE (exit 3, which the live run reads again after a pause, and
+// red at the bound), never a PASS and never a FAIL. A wrongly reported v4 trade is a FAIL whatever else was read. Every
+// run prints how many tapes, trades and receipts it read.
 // After: helper
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--chain base|robinhood] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
 import { writeFileSync } from "node:fs";
 import { SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
@@ -25,6 +29,10 @@ const KEY = "helper-v4-hook-liquidity";
 export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 export const TOKENS = 12;
+/** With no trade to judge in the first TOKENS tapes, the most tapes read, and the longest the read goes on, ms. */
+export const MAX_TOKENS = 48;
+export const BUDGET_MS = 120_000;
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, ERROR: 2, INCONCLUSIVE: 3 });
 const ADDR = /^0x[0-9a-f]{40}$/;
 const TX = /^0x[0-9a-f]{64}$/;
 const WORD = /^0x[0-9a-f]{64}$/;
@@ -72,6 +80,12 @@ export function senderMoves(receipt, coin, pm) {
   return to.length === 1 ? [{ sender: to[0][0], net: to[0][1] }] : [];
 }
 
+/** The one trader move a trade of `side` can be judged against in its receipt, or null (no single such move). */
+export function judgeable(receipt, coin, pm, side) {
+  const moves = senderMoves(receipt, coin, pm)?.filter((m) => (side === "b" ? m.net > 0n : m.net < 0n)) ?? [];
+  return moves.length === 1 ? moves[0] : null;
+}
+
 /** The check on one run: { base, chain, at, coins, tapes: { [coin]: { status, trades } }, decimals, receipts }. */
 export function judge(run) {
   const lines = [];
@@ -94,22 +108,29 @@ export function judge(run) {
         bad(`${coin} trade ${t.tx}: its receipt is not agreed by two providers`);
         continue;
       }
-      const moves = senderMoves(r, coin, pm)?.filter((m) => (t.side === "b" ? m.net > 0n : m.net < 0n)) ?? [];
-      if (moves.length !== 1) {
+      const move = judgeable(r, coin, pm, t.side);
+      if (move === null) {
         skipped++;
         continue;
       }
       judged++;
       const d = run.decimals?.[coin];
       const want = Number.isInteger(d) ? units(t.amt, d) : null;
-      const leg = moves[0].net < 0n ? -moves[0].net : moves[0].net;
+      const leg = move.net < 0n ? -move.net : move.net;
       if (want === null) bad(`${coin} trade ${t.tx}: amt ${t.amt} is no amount of a token of ${d} decimals`);
-      else if (want !== leg) bad(`${coin} trade ${t.tx}: amt ${t.amt} is not the ${leg} its trader ${moves[0].sender} ${t.side === "b" ? "got" : "paid"} (${want})`);
+      else if (want !== leg) bad(`${coin} trade ${t.tx}: amt ${t.amt} is not the ${leg} its trader ${move.sender} ${t.side === "b" ? "got" : "paid"} (${want})`);
     }
   }
-  if (judged === 0) bad(`no v4 trade judged on ${run.coins?.length ?? 0} ${chain} tapes (${skipped} trades with no single sender's move of the token): nothing checked`);
-  else lines.push(`ok  ${judged} v4 trade${judged === 1 ? "" : "s"} judged, each the token its trader moved (${skipped} not judged)`);
-  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+  const tapes = Object.values(run.tapes ?? {}).filter((t) => t?.status === 200 && Array.isArray(t.trades));
+  const trades = tapes.reduce((n, t) => n + t.trades.length, 0);
+  lines.push(`ok  read ${tapes.length} of ${run.coins?.length ?? 0} ${chain} tapes, ${trades} trades, ${Object.values(run.receipts ?? {}).filter((r) => r !== null).length} receipts agreed by two providers`);
+  const failed = lines.some((l) => l.startsWith("BAD"));
+  // nothing judged is no fault of the deploy (a quiet market) and no pass: INCONCLUSIVE, unless something else is wrong
+  const quiet = judged === 0 && Array.isArray(run.coins) && run.coins.length > 0;
+  if (judged > 0) lines.push(`ok  ${judged} v4 trade${judged === 1 ? "" : "s"} judged, each the token its trader moved (${skipped} not judged)`);
+  else if (quiet && !failed) lines.push(`INCONCLUSIVE no v4 trade to judge on ${run.coins.length} ${chain} tapes (${trades} trades read, ${skipped} with no single sender's move of the token): nothing checked, not a pass`);
+  const verdict = failed ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 async function getJson(base, path, fetchFn) {
@@ -151,27 +172,41 @@ async function agreedMany(calls, fetchFn, rpcs, pick = (x) => x) {
 }
 const receiptOf = (r) => ({ status: r.status, logs: (r.logs ?? []).map((l) => ({ address: String(l.address).toLowerCase(), topics: (l.topics ?? []).map((t) => String(t).toLowerCase()), data: String(l.data).toLowerCase() })) });
 
-export async function read(base = BASE, fetchFn = fetch, chain = "base", rpcs = SWAP_RPCS[chain]) {
+/** One run's reads. The first TOKENS coins of the lists (New first) are always read; with no trade in them to judge it reads
+ *  the lists' next coins, one tape at a time, until a trade can be judged, MAX_TOKENS tapes are read or `budgetMs` has
+ *  passed since the lists were read (a quiet market, not a fault of the deploy). */
+export async function read(base = BASE, fetchFn = fetch, chain = "base", rpcs = SWAP_RPCS[chain], { budgetMs = BUDGET_MS, now = Date.now } = {}) {
   const run = { base, chain, at: new Date().toISOString(), coins: [], tapes: {}, decimals: {}, receipts: {} };
   const l = await getJson(base, `/v1/market/lists?chain=${chain}`, fetchFn);
   if (l.status !== 200 || !isObj(l.body?.lists)) {
     run.lists = `lists ${l.status}`;
     return run;
   }
+  const t0 = now();
+  const pm = VENUES[chain].poolManager;
   const order = ["new", ...Object.keys(l.body.lists).filter((k) => k !== "new")];
-  for (const k of order) for (const row of l.body.lists[k] ?? []) if (ADDR.test(row?.token ?? "") && !run.coins.includes(row.token) && run.coins.length < TOKENS) run.coins.push(row.token);
-  for (const coin of run.coins) {
+  const listed = [];
+  for (const k of order) for (const row of l.body.lists[k] ?? []) if (ADDR.test(row?.token ?? "") && !listed.includes(row.token)) listed.push(row.token);
+  let ready = 0;
+  const readCoin = async (coin) => {
+    run.coins.push(coin);
     const t = await getJson(base, `/v1/market/trades?chain=${chain}&token=${coin}&limit=50`, fetchFn);
     const trades = Array.isArray(t.body?.trades) ? t.body.trades.filter((x) => TX.test(x?.tx ?? "")).map((x) => ({ tx: x.tx, side: x.side, amt: x.amt })) : null;
     run.tapes[coin] = { status: t.status, trades };
-    if (t.status !== 200 || trades === null) continue;
+    if (t.status !== 200 || trades === null) return;
     const txs = [...new Set(trades.map((x) => x.tx))].filter((tx) => !(tx in run.receipts));
     const rs = await agreedMany(txs.map((tx) => ({ method: "eth_getTransactionReceipt", params: [tx] })), fetchFn, rpcs, receiptOf);
     txs.forEach((tx, i) => (run.receipts[tx] = rs[i]));
-    if (trades.some((x) => senderMoves(run.receipts[x.tx], coin, VENUES[chain].poolManager)?.length)) {
+    if (trades.some((x) => senderMoves(run.receipts[x.tx], coin, pm)?.length)) {
       const [d] = await agreedMany([{ method: "eth_call", params: [{ to: coin, data: "0x313ce567" }, "latest"] }], fetchFn, rpcs);
       run.decimals[coin] = typeof d === "string" && /^0x[0-9a-f]{1,64}$/.test(d) ? Number(BigInt(d)) : null;
     }
+    ready += trades.filter((x) => judgeable(run.receipts[x.tx], coin, pm, x.side) !== null).length;
+  };
+  for (const coin of listed.slice(0, TOKENS)) await readCoin(coin);
+  for (const coin of listed.slice(TOKENS, MAX_TOKENS)) {
+    if (ready > 0 || now() - t0 >= budgetMs) break;
+    await readCoin(coin);
   }
   return run;
 }
@@ -185,10 +220,10 @@ if (import.meta.main) {
     if (!(chain in SWAP_RPCS)) throw new Error(`no chain ${chain}`);
     const run = await read(base, fetch, chain);
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run);
+    const { verdict, lines } = judge(run);
     for (const line of lines) console.log(line);
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${base}, ${chain})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${verdict} (${base}, ${chain})`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${e.message}`);
     process.exit(2);

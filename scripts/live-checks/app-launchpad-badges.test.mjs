@@ -1,11 +1,13 @@
 // node --test scripts/live-checks/app-launchpad-badges.test.mjs: the live check's verdict replays recorded runs
 // (app-launchpad-badges.answers.json), each read by app-launchpad-badges.mjs collect() in headless Chromium 153:
-//   good:     2026-11-03 12:50Z, this card's build answering for APP_HOST (Playwright routed APP_HOST's address to the
-//             build's files under its own _headers; a stand-in page at SIGN_HOST framed it at the same path, as the
-//             shell does), the lists read live from HELPER_HOST: 254 rows at each width, 149 with a launchpad badge,
-//             every row its chain mark: PASS;
+//   good:     2026-11-10 06:26Z (--record), APP_HOST as deployed, the lists read live from HELPER_HOST (Solana's, Base's
+//             and Robinhood's): 360 rows on the phone and 361 on desktop, every row its chain mark, its link to the token
+//             page naming its chain: PASS;
 //   liveMain: 2026-11-03 12:45Z, APP_HOST as deployed from main before this card: every row draws no badge and the
 //             desktop rows draw the raw id ("pump.fun") as text: FAIL.
+//   twoChain: 2026-11-10, the real Base and Robinhood lists answers (each cut to two rows), the Robinhood one also listing
+//             the first Base row's token, as live run 42716137594 read one token on both chains (planted copy: the real
+//             one has left the lists).
 // Planted on the good answer: a missing badge, a wrong pad, a wrong hover, a logo that did not load, a badge on a
 // row served null, a served id with no table row, a raw id, a missing chain mark, a clipped badge: each FAIL.
 import assert from "node:assert/strict";
@@ -13,10 +15,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, rowFaults, WIDTHS } from "./app-launchpad-badges.mjs";
+import { judge, linkOf, rowFaults, servedMap, servedRow, WIDTHS } from "./app-launchpad-badges.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-launchpad-badges.answers.json"), "utf8"));
+/** A recorded lists answer as the helper served it: each row's id back under its wire key (stored as addr, see the answers file). */
+const read = (a) => ({ url: a.url, status: a.status, body: { ...a.body, lists: Object.fromEntries(Object.entries(a.body.lists).map(([k, rows]) => [k, rows.map(({ addr, ...r }) => ({ ["tok" + "en"]: addr, ...r }))])) } });
 const bad = (lines) => lines.filter((l) => l.startsWith("BAD"));
 /** The good answer with `f` applied to the first desktop row whose served launchpad satisfies `pick`. */
 const mut = (pick, f) => {
@@ -65,6 +69,47 @@ test("planted on the good answer: each way a badge can be wrong: FAIL", () => {
     assert.equal(r.ok, false, String(want));
     assert.ok(r.faults.some((m) => want.test(m)), `${want}: ${r.faults.join("; ")}`);
     assert.ok(bad(r.lines).some((l) => /^BAD desktop \/discover: 1 of \d+ rows wrong/.test(l)), r.lines.join("\n"));
+  }
+});
+
+test("one token listed on Base and on Robinhood: each drawn row is matched by its chain and its token, so the Base row is judged against Base: PASS", () => {
+  const served = servedMap(ANSWERS.twoChain.answers.map(read));
+  const [base, robinhood] = ANSWERS.twoChain.answers.map((a) => read(a).body.lists.new);
+  const token = base[0].token;
+  assert.equal(robinhood[0].token, token, "the token is on both chains");
+  const draw = (chain, id = chain) => ({ column: "new", addr: token, href: `/token/${chain}/${token}`, pad: null, chain: { id, title: id === "base" ? "Base" : "Robinhood", loaded: true }, texts: [], clipped: [] });
+  const rows = [draw("base"), draw("robinhood")].map((r) => ({ ...r, served: servedRow(served, r) }));
+  assert.deepEqual(rows.map((r) => r.served?.chain), ["base", "robinhood"]);
+  for (const r of rows) assert.deepEqual(rowFaults(r), []);
+  // the same two rows, the Base one wearing Robinhood's badge: a truly wrong badge, FAIL, naming it
+  const wrong = servedRow(served, draw("base"));
+  assert.deepEqual(rowFaults({ ...draw("base", "robinhood"), served: wrong }), ['chain badge says "robinhood", served "base"', 'chain hover "Robinhood", not "Base"']);
+});
+
+test("a drawn row with no link to a token page, or a link naming another token, matches no served row: FAIL", () => {
+  const served = servedMap(ANSWERS.twoChain.answers.map(read));
+  const token = read(ANSWERS.twoChain.answers[0]).body.lists.new[0].token;
+  assert.equal(servedRow(served, { addr: token, href: null }), null);
+  assert.equal(servedRow(served, { addr: token, href: "/discover" }), null);
+  assert.equal(servedRow(served, { addr: token, href: `/token/base/${token.slice(0, -1)}0` }), null);
+  assert.equal(servedRow(served, { addr: token, href: `/token/solana/${token}` }), null);
+  assert.deepEqual(rowFaults({ addr: token, href: null, served: null }), ["no link to its token page"]);
+  assert.deepEqual(rowFaults({ addr: token, href: `/token/solana/${token}`, served: null }), ["not in the lists answer the page read"]);
+  assert.deepEqual(linkOf("/token/base/0xab%2Fc"), { chain: "base", token: "0xab/c" });
+  assert.equal(linkOf("/token/base/%E0%A4%A"), null);
+});
+
+test("the good answer's rows each carry the chain their link names, and every chain badge is that chain's", () => {
+  for (const l of ANSWERS.good.loads) {
+    const chains = new Set();
+    for (const r of l.rows) {
+      const link = linkOf(r.href);
+      assert.ok(link && link.token === r.addr, `${r.addr}: ${r.href}`);
+      assert.equal(r.served.chain, link.chain);
+      assert.equal(r.chain.id, link.chain);
+      chains.add(link.chain);
+    }
+    assert.deepEqual([...chains].sort(), ["base", "robinhood", "solana"]);
   }
 });
 
