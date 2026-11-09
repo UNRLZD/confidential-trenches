@@ -126,11 +126,13 @@ test("a stale status never steps the stage back; no status and the deadline past
   assert.equal(await followPoolQuote(F, e.deps), "expired");
 });
 
-test("REFUNDED: refunded shown, and with no refund carry the follow never ends as if done", async () => {
+test("REFUNDED: with no refund carry nothing is read under U_{s,i}, so nothing shows refunded, and the follow never ends as if done", async () => {
   const w = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }]);
-  assert.equal(await followPoolQuote(F, w.deps), "refunded");
+  // review P2: the helper's REFUNDED alone shows no refund; nothing seen sent by the deadline: expired
+  assert.equal(await followPoolQuote(F, w.deps), "expired");
+  assert.deepEqual(w.stages, ["expired"]);
   assert.deepEqual(w.deposits, []);
-  assert.ok(w.sleeps.length >= 3, "read on round after round until the signal stops it, never ended at refunded");
+  assert.ok(w.sleeps.length >= 3, "read on round after round until the signal stops it, never ended");
   // with a carry: the move is asked, shown, and what reaches U_X after it goes into the pool
   let asked = 0;
   const c = world(
@@ -143,6 +145,7 @@ test("REFUNDED: refunded shown, and with no refund carry the follow never ends a
     { refund: async () => (++asked === 1 ? "moved" : "wait") },
   );
   assert.equal(await followPoolQuote(F, c.deps), "in_pool");
+  // the move read the money under U_{s,i} on both RPCs: refunded, then moved, in one round
   assert.deepEqual(c.stages, ["refunded", "refund_move", "in_pool"]);
   assert.deepEqual(c.deposits, [10_000_000n]);
 });
@@ -261,11 +264,15 @@ test("Solana's reads: U_X's finalized balance per RPC, the costs at today's rent
 });
 
 test("review L1: after REFUNDED a stale PENDING_DEPOSIT past the deadline never steps the stage back to quote_checked or expired", async () => {
-  const w = world([
-    { bal: [0n, 0n], status: "REFUNDED" },
-    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
-    { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
-  ]);
+  const w = world(
+    [
+      { bal: [0n, 0n], status: "REFUNDED" },
+      { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+      { bal: [0n, 0n], status: "PENDING_DEPOSIT", past: true },
+    ],
+    // the refund read under U_{s,i} on both RPCs, not moved yet (pool-deposit-stages review P2: refunded needs that read)
+    { refund: async () => "held" },
+  );
   await followPoolQuote(F, w.deps);
   assert.deepEqual(w.stages, ["refunded"]);
 });
@@ -356,4 +363,104 @@ test("pool-deposit-stages: withStage sets since_ms once at the first stage past 
   assert.equal(withStage(w, "in_pool", 9).refunded, undefined);
   assert.equal(withStage(op, "in_pool", 3).since_ms, 3, "the chain read first: in_pool with no status seen still has its time");
   assert.equal(withStage(op, "refund_move", 3).refunded, true);
+});
+
+// ------------------------------------------------------------------------------------------------ review P2, P3 1
+/** The page's follower over a store, posting each write through opOf as the app reads it. */
+async function follower(rows: Map<string, unknown>, w: ReturnType<typeof world>, clock = { t: 1000 }) {
+  const { poolFollows } = await import("../src/pool-deposit-follow.ts");
+  const { opOf } = await import("../src/state.ts");
+  const sent: Record<string, unknown>[] = [];
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) {
+        rows.set(k, v);
+        const { id: _i, kind: _k, txs: _t, chain: _c, ...rest } = opOf(k, v) as Record<string, unknown>;
+        sent.push(rest);
+      }
+      return rows.get(k);
+    },
+  };
+  // the host's own signal runs the follow: the world's rounds running out stop the host, as a sign out would
+  const deps = { ...w.deps, sleep: async (ms: number, sig: AbortSignal) => (await w.deps.sleep(ms, sig), w.deps.signal.aborted ? host.stop() : undefined) };
+  const host = poolFollows({ store: async () => store, deps: () => deps, decimals: () => 9, locks: () => null, now: () => clock.t++ });
+  return { host, sent };
+}
+const QUOTE = { deposit_address: "DEPOSIT", origin_asset: "nep141:base-usdc", min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
+const UX = { scope: 777n, index: 3, wallet: "U_X", refundId: "ab".repeat(32) };
+const legacy = (stage: string) => new Map<string, unknown>([["op-old", { kind: "pool_deposit", stage, txs: [], created_ms: 400, follow: F }]]);
+
+test("review P2: the helper's REFUNDED with nothing read under U_{s,i} shows no refund; the real delivery lands in_pool with no refunded", async () => {
+  const asks: string[] = [];
+  const w = world(
+    [
+      { bal: [0n, 0n], status: "REFUNDED" },
+      { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+      { bal: [0n, 0n], status: "SUCCESS", past: true },
+    ],
+    { refund: async () => (asks.push("none"), "none") },
+  );
+  const rows = new Map<string, unknown>();
+  const { host, sent } = await follower(rows, w);
+  await host.quoted("op-x", "solana", QUOTE, UX);
+  await host.idle();
+  assert.ok(asks.length >= 1, "the chain was read for the refund");
+  assert.ok(!sent.some((o) => o.stage === "refunded" || o.stage === "refund_move" || "refunded" in o), JSON.stringify(sent));
+  assert.deepEqual(sent.at(-1), { stage: "in_pool", since_ms: (sent.find((o) => o.stage === "in_pool") as { since_ms: number }).since_ms });
+  assert.equal((rows.get("op-x") as { refunded?: true }).refunded, undefined, "the record carries no refund either");
+});
+
+test("review P2: an unsent quote with the helper answering REFUNDED and nothing under U_X or U_{s,i}: expired past its deadline, never refunded", async () => {
+  const w = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => "none" });
+  await followPoolQuote(F, w.deps);
+  assert.deepEqual(w.stages, ["expired"]);
+  // a read that did not count ("wait": the two RPCs did not agree) is read again before expired is shown
+  let n = 0;
+  const v = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => (++n === 1 ? "wait" : "none") });
+  await followPoolQuote(F, v.deps);
+  assert.deepEqual(v.stages, ["expired"]);
+  assert.ok(n >= 2, "expired only after a read that found nothing");
+});
+
+test("review P2: the refund read under U_{s,i} on both RPCs and not moved (held) shows refunded; a later move shows refund_move", async () => {
+  let n = 0;
+  const w = world(
+    [{ bal: [0n, 0n], status: "REFUNDED" }, { bal: [0n, 0n], status: "REFUNDED" }, { bal: [0n, 0n], status: "REFUNDED" }],
+    { refund: async () => (++n === 1 ? "held" : "moved") },
+  );
+  await followPoolQuote(F, w.deps);
+  assert.deepEqual(w.stages, ["refunded", "refund_move"]);
+});
+
+test("review P3 1: a record of release-94 to 107 past quote_checked gets no since_ms on a reload; a legacy refund_move keeps refunded into the pool", async () => {
+  const transit = legacy("in_transit");
+  const a = await follower(transit, world([{ bal: [FLOOR, FLOOR], status: "SUCCESS" }, { bal: [0n, 0n], status: "SUCCESS", past: true }]), { t: 900_000 });
+  await a.host.settle();
+  await a.host.idle();
+  assert.deepEqual(a.sent, [{ stage: "in_pool" }, { stage: "in_pool" }], "no reload time as the send's");
+  const move = legacy("refund_move");
+  const b = await follower(move, world([{ bal: [FLOOR, FLOOR], status: "REFUNDED" }, { bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => "wait" }), { t: 900_000 });
+  await b.host.settle();
+  await b.host.idle();
+  assert.deepEqual(b.sent, [{ stage: "in_pool", refunded: true }, { stage: "in_pool", refunded: true }]);
+});
+
+test("review P2 with P3 1: a legacy refunded record (the helper's word, no refunded fact) is read again from quote_checked, untimed; refunded again only on the chain's read", async () => {
+  const { resumeOf } = await import("../src/pool-deposit-follow.ts");
+  const old = legacy("refunded");
+  const a = await follower(old, world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => "none" }));
+  await a.host.settle();
+  await a.host.idle();
+  assert.deepEqual(a.sent, [{ stage: "quote_checked" }, { stage: "expired" }], "the refund the chain never read is gone; nothing sent: expired");
+  const again = legacy("refunded");
+  const b = await follower(again, world([{ bal: [0n, 0n], status: "REFUNDED" }], { refund: async () => "held" }));
+  await b.host.settle();
+  await b.host.idle();
+  assert.deepEqual(b.sent, [{ stage: "quote_checked" }, { stage: "refunded" }], "read under U_{s,i}: refunded again, with no made-up send time");
+  // a refunded record this build wrote (its refunded fact set at the chain's read) is followed on as it is
+  const own = { kind: "pool_deposit" as const, stage: "refunded" as const, txs: [], created_ms: 1, follow: F, since_ms: 5, refunded: true as const };
+  assert.equal(resumeOf(own), own);
 });

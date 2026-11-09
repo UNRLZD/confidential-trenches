@@ -89,7 +89,8 @@ export function opOf(id: string, rec: unknown): Operation | null {
   // refunded stage on and `since_ms` from the first send seen; kit messages.ts PoolDepositFacts)
   if (rec.kind === "pool_deposit") {
     op.chain = isRecord(rec.follow) ? rec.follow.chain : undefined;
-    if (rec.refunded === true && POOL_DEPOSIT_REFUNDED_STAGES.includes(rec.stage as PoolDepositStage)) op.refunded = true;
+    // refund_move is shown only once the chain read the refund under U_{s,i} (every release): refunded with or without the record's fact
+    if ((rec.refunded === true || rec.stage === "refund_move") && POOL_DEPOSIT_REFUNDED_STAGES.includes(rec.stage as PoolDepositStage)) op.refunded = true;
     if (rec.since_ms !== undefined && rec.stage !== "quote_checked" && rec.stage !== "expired") op.since_ms = rec.since_ms;
   }
   const probe = stateOf(true, undefined, [op as Operation]);

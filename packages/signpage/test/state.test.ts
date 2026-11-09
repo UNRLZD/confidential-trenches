@@ -394,6 +394,8 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
     // the record keeps refunded from the refunded stage on; the app is sent it only on the refund's later legs
     [rec("refunded", { since_ms: 7, refunded: true }), want("refunded", { since_ms: 7 })],
     [rec("refund_move", { since_ms: 7, refunded: true }), want("refund_move", { since_ms: 7, refunded: true })],
+    // review P3 1: a refund_move record of release-94 to 107 (no refunded fact) is still sent as a refund's leg
+    [rec("refund_move"), want("refund_move", { refunded: true })],
     [rec("in_pool", { since_ms: 7, refunded: true, final: true }), want("in_pool", { since_ms: 7, refunded: true })],
     // a send time on a stage where nothing was sent is not sent
     [rec("expired", { since_ms: 7 }), want("expired")],

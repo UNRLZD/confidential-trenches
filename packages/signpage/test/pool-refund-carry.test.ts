@@ -94,19 +94,19 @@ test("a refund under U_{s,i} is quoted to X's coin for U_X, signed by U_{s,i}, r
   assert.equal(w.sentIntents[0]!.signed_intent.public_key, `ed25519:${SOL_U}`);
 });
 
-test("nothing held, reads that do not agree, a move in its window, a seed that is not U_{s,i}'s, a relayer refusal: nothing new", async () => {
+test("nothing held, reads that do not agree, a move in its window, a seed that is not U_{s,i}'s, a relayer refusal: nothing new (held: the money read under U_{s,i}, not moved)", async () => {
   assert.equal(await poolRefundMover(world({ read: readOf(0n) }).host)(F, signal), "none");
   assert.equal(await poolRefundMover(world({ read: null }).host)(F, signal), "wait");
   const inWindow = world({ read: readOf(25_000_000n, false), move: { nonce: "n", deadline_ms: NOW + 60_000, asset: BASE_USDC, amount: "25000000", height: 99 } });
   assert.equal(await poolRefundMover(inWindow.host)(F, signal), "wait");
   assert.deepEqual(inWindow.log, [], "never a second intent for the same money in the first one's window");
   const other = world({ read: readOf(25_000_000n), seed: new Uint8Array(64).fill(1) });
-  assert.equal(await poolRefundMover(other.host)(F, signal), "wait");
+  assert.equal(await poolRefundMover(other.host)(F, signal), "held");
   assert.ok(!other.log.includes("send") && !other.log.includes("record"), "a seed whose U_{s,i} is not the op's signs nothing");
-  assert.equal(await poolRefundMover(world({ read: readOf(25_000_000n), intents: 400 }).host)(F, signal), "wait");
+  assert.equal(await poolRefundMover(world({ read: readOf(25_000_000n), intents: 400 }).host)(F, signal), "held");
   // a refund the pool's floor refuses (about 0.0132 SOL of min out under 0.0136): no intent signed, it waits
   const small = world({ read: readOf(2_000_000n) });
-  assert.equal(await poolRefundMover(small.host)(F, signal), "wait");
+  assert.equal(await poolRefundMover(small.host)(F, signal), "held");
   assert.deepEqual(small.log, ["quote"]);
 });
 

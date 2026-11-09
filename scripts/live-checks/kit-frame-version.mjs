@@ -17,8 +17,9 @@
 //   - its kit-v1.4 state fields are exactly kit-v1.4's twelve (no pools, no deposit_wallets);
 //   - (card pool-deposit-stages) it reads every kit at KIT and above in full (the version minified into its level
 //     function), with kit-v1.6 and kit-v1.5 as their own levels below it (`?\`current\`:i(1,6)?\`1.6\`:i(1,5)?\`1.5\`:\`1.4\``),
-//     and its state shaper leaves every pool_deposit op out at both (`e.filter(e=>e.kind!==\`pool_deposit\`)`): kit-v1.6
-//     and before have no kind for a pool deposit's op.
+//     and the state shaper the shaper calls leaves every pool_deposit op out at both (`e.filter(e=>e.kind!==\`pool_deposit\`)`):
+//     kit-v1.6 and before have no kind for a pool deposit's op; the answer shaper it calls has kit-v1.6's own branch,
+//     its state through that state shaper and every other result (deposit.confirm's moved_out) as it is.
 // A page without them sends a kit-v1.4 app a state with a stage or field that kit refuses whole, so that app stops
 // receiving states. That the page applies them to every state, answer and event it posts is
 // packages/signpage/test/kit-version.test.ts's, against kit-v1.4's own schema, with its mutant sweep.
@@ -75,14 +76,22 @@ function helloPath(js) {
   // "1.N->1.M"), and the threshold's version from its own `X=\`1.7\`.split(\`.\`).map(Number)`
   const levels = lv ? [...lv[6].matchAll(/\(1,(\d{1,4})\)\?`1\.(\d{1,4})`/g)].map((x) => (x[1] === x[2] ? `1.${x[2]}` : `1.${x[1]}->1.${x[2]}`)) : null;
   const kit = lv ? (new RegExp(`(?:^|[^\\w$])${esc(lv[5])}=\`(\\d{1,4}\\.\\d{1,4})\`\\.split\\(\`\\.\`\\)\\.map\\(Number\\)`).exec(js)?.[1] ?? null) : null;
-  // the state shaper's kit-v1.6 and kit-v1.5 branches, each through the pool filter
-  const filter = POOL_FILTER.exec(js)?.[1];
-  const poolOps = filter
-    ? (new RegExp(`function [\\w$]+\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null)
-    : null;
+
   const assign = reader && level ? new RegExp(`let ([\\w$]+)=${esc(reader)}\\([\\w$]+\\);if\\(\\1!==null\\)return void\\(([\\w$]+)=${esc(level)}\\(\\1\\)\\)`).exec(js) : null;
   const v = assign ? esc(assign[2]) : null;
-  const shaper = v ? new RegExp(`([\\w$]+)=\\(([\\w$]+),([\\w$]+)\\)=>\\{if\\(\`ok\`in \\2\\)return \\2\\.ok&&\\3!==void 0\\?\\{\\.\\.\\.\\2,result:[\\w$]+\\(${v},\\3,\\2\\.result\\)\\}:\\2;if\\(\\2\\.type===\`state\`\\)return\\{\\.\\.\\.\\2,state:[\\w$]+\\(${v},\\2\\.state\\)\\};`).exec(js) : null;
+  const shaper = v ? new RegExp(`([\\w$]+)=\\(([\\w$]+),([\\w$]+)\\)=>\\{if\\(\`ok\`in \\2\\)return \\2\\.ok&&\\3!==void 0\\?\\{\\.\\.\\.\\2,result:([\\w$]+)\\(${v},\\3,\\2\\.result\\)\\}:\\2;if\\(\\2\\.type===\`state\`\\)return\\{\\.\\.\\.\\2,state:([\\w$]+)\\(${v},\\2\\.state\\)\\};`).exec(js) : null;
+  // card pool-deposit-stages (review P3 2): the functions the shaper itself calls, the state shaper (for every state
+  // answer and event) and the answer shaper; the state shaper's kit-v1.6 and kit-v1.5 branches each through the pool
+  // filter, and the answer shaper's kit-v1.6 branch through that state shaper with every other kind's result as it is
+  // (deposit.confirm keeps moved_out at kit-v1.6)
+  const filter = POOL_FILTER.exec(js)?.[1];
+  const stateFn = shaper ? esc(shaper[5]) : null;
+  const poolOps = filter && stateFn
+    ? (new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null)
+    : null;
+  const result16 = shaper && stateFn
+    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\(\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
+    : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
@@ -105,6 +114,7 @@ function helloPath(js) {
     kit,
     levels,
     poolOps,
+    result16,
   };
 }
 
@@ -144,6 +154,7 @@ export function judge(a) {
     if (h.kit !== KIT) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${KIT}: a kit-v${KIT} app's pool deposit op has no level of its own`);
     if (!same(h.levels, LEVELS)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(LEVELS)}: a kit-v1.6 app is sent what it has no kind for`);
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
+    if (typeof h.result16 !== "string") bad("kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);

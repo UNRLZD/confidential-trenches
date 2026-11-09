@@ -28,6 +28,7 @@ const UNSHAPED = "BAD progress and route events do not go through the shaper's s
 const KIT_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not kit-v1.7: a kit-v1.7 app's pool deposit op has no level of its own`;
 const LEVELS_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.6","1.5"]: a kit-v1.6 app is sent what it has no kind for`;
 const POOL_LINE = "BAD the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out";
+const RESULT16_LINE = "BAD kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out";
 const POSTS = (n) => `BAD the bundle holds ${n} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`;
 
 test("recorded good answer: this card's build reads the hello, maps every deposit stage for kit-v1.4, keeps its fields: PASS", () => {
@@ -58,7 +59,7 @@ test("recorded bad answers on the progress path: a second post, progress unshape
     assert.deepEqual(judge(ANSWERS[k]).lines, [UNSHAPED], k);
   }
   // each planted answer is the good build with that one cut, re-pinned
-  for (const k of ["badTwoPosts", "badProgressUnshaped", "badRouteUnshaped", "badPoolOpsKept", "badNoV16Level"]) {
+  for (const k of ["badTwoPosts", "badProgressUnshaped", "badRouteUnshaped", "badPoolOpsKept", "badNoV16Level", "badEventsUnshaped", "badNoResult16"]) {
     assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
     assert.deepEqual(ANSWERS[k].maps, ANSWERS.good.maps, k);
     assert.deepEqual(ANSWERS[k].keys, ANSWERS.good.keys, k);
@@ -90,7 +91,14 @@ test("pool-deposit-stages: the good build reads kit 1.7 in full, kit-v1.6 and ki
 
 test("recorded bad answer badLive: SIGN_HOST as served before this card (release-107, kit 1.6): FAIL, the version, the level and the pool filter named", () => {
   assert.equal(ANSWERS.badLive.sha384, "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE");
-  assert.deepEqual(judge(ANSWERS.badLive).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE]);
+  assert.deepEqual(judge(ANSWERS.badLive).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE]);
+});
+
+test("review P3 2: recorded bad answers badEventsUnshaped and badNoResult16: state events through a shaper that shapes nothing, kit-v1.6's answers through no level of its own: each FAIL, named", () => {
+  assert.deepEqual(judge(ANSWERS.badEventsUnshaped).lines, [POOL_LINE, RESULT16_LINE], "the filter is read only on the state shaper the shaper calls");
+  assert.equal(ANSWERS.badNoResult16.hello.result16, null);
+  assert.deepEqual(judge(ANSWERS.badNoResult16).lines, [RESULT16_LINE]);
+  assert.match(ANSWERS.good.hello.result16, /if\(([\w$]+)===`1\.6`\)return ([\w$]+)===`state`\?([\w$]+)\(\1,([\w$]+)\):\4;$/);
 });
 
 test("recorded bad answers badPoolOpsKept and badNoV16Level: the good build sending kit-v1.6 its pool ops, or reading it at kit-v1.5's level: each FAIL, named", () => {
@@ -129,6 +137,7 @@ test("planted on the good answer: each piece taken away or moved FAILs", () => {
   for (const l of [["1.5"], ["1.6"], ["1.5", "1.6"], ["1.6", "1.5", "1.4"], ["1.6->1.7", "1.5"], null])
     assert.deepEqual(judge({ ...g, hello: { ...g.hello, levels: l } }).lines, [LEVELS_LINE(l)], JSON.stringify(l));
   assert.deepEqual(judge({ ...g, hello: { ...g.hello, poolOps: null } }).lines, [POOL_LINE], "no pool filter");
+  assert.deepEqual(judge({ ...g, hello: { ...g.hello, result16: null } }).lines, [RESULT16_LINE], "no kit-v1.6 answer branch");
 });
 
 test("facts() reads the map, the field list and the hello from a minified bundle", () => {
@@ -139,6 +148,7 @@ test("facts() reads the map, the field list and the hello from a minified bundle
     "Lc=`1.7`.split(`.`).map(Number)",
     "function Bc(e){let t=Rc.exec(e);if(!t)return`1.4`;let[n,r]=[Number(t[1]),Number(t[2])],i=(e,t)=>n>e||n===e&&r>=t;return i(Lc[0],Lc[1])?`current`:i(1,6)?`1.6`:i(1,5)?`1.5`:`1.4`}",
     "var Dl=e=>e.filter(e=>e.kind!==`pool_deposit`);function Jc(e,t){if(e===`current`)return t;if(e===`1.6`)return{...t,ops:Dl(t.ops)};if(e===`1.5`)return{...t,ops:Dl(t.ops).map(e=>e.kind===`deposit`?El(e):e)};return t}",
+    "function Xc(e,t,n){if(e===`current`)return n;if(e===`1.6`)return t===`state`?Jc(e,n):n;return n}",
     "function Qc(e,t){return e===`current`||Kc.has(t)?t:qc(Wc,t)?Wc[t]:null}",
     "function pl(e){let r=`1.4`,i=(e,t)=>{if(`ok`in e)return e.ok&&t!==void 0?{...e,result:Xc(r,t,e.result)}:e;if(e.type===`state`)return{...e,state:Jc(r,e.state)};if(e.type!==`progress`)return e;if(!(`stage`in e))return r===`current`?e:null;let n=Qc(r,e.stage);return n===null?null:n===e.stage?e:{...e,stage:n}},a=(t,n)=>{let r=i(t,n);r!==null&&e.parent.postMessage(r,Zc)},c=async i=>{let c=zc(i);if(c!==null)return void(r=Bc(c));}}",
   ].join(";");
@@ -146,8 +156,13 @@ test("facts() reads the map, the field list and the hello from a minified bundle
   const f = facts("", js);
   assert.deepEqual(f.maps, [MAP]);
   assert.deepEqual(f.keys, [V1_4_KEYS]);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "string", "string"]);
   assert.equal(f.hello.kit, "1.7");
+  // review P3 2: the filter and the kit-v1.6 answer branch read only on the functions the shaper calls
+  assert.equal(facts("", js.replace("state:Jc(r,e.state)", "state:Qz(r,e.state)").replace("function Jc(", "function Qz(e,t){return t}function Jc(")).hello.poolOps, null);
+  assert.equal(facts("", js.replace("result:Xc(r,t,e.result)", "result:Qy(r,t,e.result)").replace("function Xc(", "function Qy(e,t,n){return n}function Xc(")).hello.result16, null);
+  assert.equal(facts("", js.replace("if(e===`1.6`)return t===`state`?Jc(e,n):n;", "")).hello.result16, null);
+  assert.equal(facts("", js.replace("t===`state`?Jc(e,n):n;", "t===`state`?Qz(e,n):n;")).hello.result16, null);
   assert.deepEqual(f.hello.levels, ["1.6", "1.5"]);
   // card pool-deposit-stages: the pool filter cut or another one, a branch through no filter, a level named wrong, no threshold
   assert.equal(facts("", js.replace("e.kind!==`pool_deposit`", "e.kind!==`deposit`")).hello.poolOps, null);
@@ -190,11 +205,11 @@ test("facts() reads the hello's path with the kit-v1.5 level (card held-move-for
   ].join(";");
   const js = `var pl=Object.freeze({${pairs}}),b=new Set([${V1_4_KEYS.map((k) => `\`${k}\``).join(",")}]);${path}`;
   const f = facts("", js);
-  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object"]);
+  assert.deepEqual(Object.values(f.hello).map((x) => typeof x), ["string", "string", "string", "string", "object", "string", "object", "object", "object"]);
   assert.deepEqual(f.hello.progressMap, MAP);
   // card pool-deposit-stages: release-94's shape reads kit 1.6, kit-v1.5's level alone, no pool filter: FAIL now
   assert.deepEqual([f.hello.kit, f.hello.levels, f.hello.poolOps], ["1.6", ["1.5"], null]);
-  assert.deepEqual(judge({ ...ANSWERS.good, hello: f.hello }).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE]);
+  assert.deepEqual(judge({ ...ANSWERS.good, hello: f.hello }).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE]);
   assert.equal(facts("", js.replace("return r===`1.4`?null:e", "return e")).hello.progress, null, "a route event to kit-v1.4");
   assert.equal(facts("", js.replace("return e!==`1.4`||hl.has(t)", "return e!==`1.5`||hl.has(t)")).hello.progress, null, "kit-v1.4 sent a later stage unmapped");
   assert.equal(facts("", js.replace("i(1,5)?`1.5`:`1.4`", "i(1,5)?`current`:`1.4`")).hello.assign, null, "kit-v1.5 read as current");

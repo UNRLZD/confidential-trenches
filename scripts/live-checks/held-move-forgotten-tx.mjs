@@ -73,7 +73,8 @@ export const MARK = Object.freeze({
   dust_floor: /\.amount\)\+1n>=[\w$]+\.MIN_DEPOSIT\?\{kind:`moved`/g,
   // card pool-deposit-stages: kit-v1.6 reads the moved_out fact in full, as the version the page reads everything at
   // (release-94 to 107) or, once the page reads kit-v1.7 in full, as kit-v1.6's own level, which keeps moved_out
-  kit_1_6: /`1\.6`\.split\(|\(1,6\)\?`1\.6`:/g,
+  // (review P3 2: the kit-v1.6 state branch itself, its ops through the pool filter alone, never a moved_out strip)
+  kit_1_6: /`1\.6`\.split\(|if\(([\w$]+)===`1\.6`\)return\{\.\.\.([\w$]+),ops:[\w$]+\(\2\.ops\)\};/g,
   level_1_5: "`1.5`",
 });
 /** The markers' names, as the record keys their counts (a name, not the host: a record naming both archival hosts in one
