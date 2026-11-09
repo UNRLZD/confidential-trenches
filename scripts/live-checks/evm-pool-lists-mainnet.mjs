@@ -15,6 +15,8 @@
 // block leaves its window: HTTP 403 "Archive requests require a personal token", 5M blocks back on 2026-11-09), and on
 // two seats whose logs differ (base.api.pocket.network answered 0 logs 5M back where Sentio and Tenderly answer 142).
 // A refused read is asked again twice, as the wallet's pager asks a refusal of a size the provider answered.
+// And SIGN_HOST (https://confidential.unrealized.trade/), where the device syncs, must answer 200 with a connect-src that
+// names every seat's origin: a seat its policy refuses is no seat.
 // After: sign
 //   node scripts/live-checks/evm-pool-lists-mainnet.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -27,11 +29,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
 import { POOL_TOPICS, SWAP4, recorder } from "./robinhood-mainnet-rpcs.mjs";
+import { connectSrc, read } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "evm-pool-lists-mainnet";
 export const PAGE = 10_000;
 export const BACK = 1_000_000;
 const TRIES = 3;
+export const SIGN_HOST = "https://confidential.unrealized.trade/";
 /** Each chain's id and its pool's deploy block (the deploy tx's receipt, read 2026-11-09 05:5xZ on base.api.pocket.network
  *  and rpc.mainnet.chain.robinhood.com: contracts/pool-evm/deployments/<chain>.json's PrivacyPoolSimple tx). */
 export const CHAINS = Object.freeze({
@@ -124,10 +128,21 @@ export async function checkChain(transport, chain, kit = kitList(chain)) {
   }
 }
 
-/** Both chains: { ok, lines }. `kits`: each chain's (kitList) unless a test names others. */
-export async function check(transport, kits = { base: kitList("base"), robinhood: kitList("robinhood") }) {
+/** SIGN_HOST's answer (read: status and CSP) against every seat: { ok, line }. */
+export function judgePage(page, kits) {
+  const seats = Object.values(kits).flatMap((k) => k.list.slice(0, 2).map((u) => new URL(u).origin));
+  if (page?.status !== 200 || typeof page.csp !== "string") return { ok: false, line: `SIGN_HOST ${SIGN_HOST} answered ${page?.status}, ${page?.csp === null ? "no CSP" : "a CSP"}` };
+  const allowed = connectSrc(page.csp) ?? [];
+  const lacks = seats.filter((o) => !allowed.includes(o));
+  return lacks.length ? { ok: false, line: `SIGN_HOST's connect-src lacks ${lacks.join(" ")}` } : { ok: true, line: `SIGN_HOST's connect-src names every seat (${seats.length})` };
+}
+
+/** Both chains and SIGN_HOST's policy: { ok, lines }. `kits`: each chain's (kitList) unless a test names others. */
+export async function check(transport, kits = { base: kitList("base"), robinhood: kitList("robinhood") }, page) {
   const lines = [];
-  let ok = true;
+  const p = judgePage(page, kits);
+  let ok = p.ok;
+  lines.push(p.line);
   for (const chain of Object.keys(CHAINS)) {
     const r = await checkChain(transport, chain, kits[chain]);
     ok &&= r.ok;
@@ -143,14 +158,15 @@ async function main(argv) {
   const at = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : undefined);
   const record = at("--record");
   const kits = { base: kitList("base"), robinhood: kitList("robinhood") };
+  const page = await read(SIGN_HOST);
   const rec = recorder();
-  const r = await check(rec.transport, kits);
+  const r = await check(rec.transport, kits, page);
   for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
   if (record) {
     const before = recorder();
     const b = await checkChain(before.transport, "base", { ...kits.base, list: [...BASE_BEFORE] });
     if (b.ok) throw new Error("Base's pair before passed: no bad run to record");
-    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { kits, log: rec.log }, baseBefore: { kit: { ...kits.base, list: [...BASE_BEFORE] }, log: before.log } }, null, 1)}\n`);
+    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { kits, page, log: rec.log }, baseBefore: { kit: { ...kits.base, list: [...BASE_BEFORE] }, log: before.log } }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
   console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);

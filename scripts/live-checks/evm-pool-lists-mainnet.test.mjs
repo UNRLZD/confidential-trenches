@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { BASE_BEFORE, check, checkChain, kitList, replayer } from "./evm-pool-lists-mainnet.mjs";
+import { BASE_BEFORE, check, checkChain, judgePage, kitList, replayer } from "./evm-pool-lists-mainnet.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-pool-lists-mainnet.answers.json", import.meta.url), "utf8"));
 
@@ -18,16 +18,17 @@ test("the check reads the kit's own Base and Robinhood pool lists, and the good 
 });
 
 test("the recorded good answer passes: on both chains two operators, each paging the pool's filter at the head, 1,000,000 back and from the deploy block, their logs one", async () => {
-  const r = await check(replayer(A.good.log), A.good.kits);
+  const r = await check(replayer(A.good.log), A.good.kits, A.good.page);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(r.lines.length, 10);
+  assert.equal(r.lines.length, 11);
+  assert.equal(r.lines[0], "SIGN_HOST's connect-src names every seat (4)");
   for (const chain of ["base", "robinhood"]) {
     const own = r.lines.filter((l) => l.startsWith(`${chain}: `));
     assert.equal(own.filter((l) => /the pool's filter over 10000 blocks (to the head|1000000 back|from the deploy block) \(\d+-\d+\), \d+ logs on both$/.test(l)).length, 3, own.join("\n"));
     assert.equal(own.filter((l) => /both seats: the PoolManager's Swap logs (at the head|1000000 back) \(\d+-\d+\), [1-9]\d* logs, digest [0-9a-f]{16} on both$/.test(l)).length, 2, own.join("\n"));
   }
-  assert.match(r.lines[0], /^base: base-rpc\.publicnode\.com \(publicnode\.com\) and base\.api\.pocket\.network \(pocket\.network\): /);
-  assert.match(r.lines[5], /^robinhood: rpc\.mainnet\.chain\.robinhood\.com \(robinhood\.com\) and robinhood\.api\.pocket\.network \(pocket\.network\): /);
+  assert.match(r.lines[1], /^base: base-rpc\.publicnode\.com \(publicnode\.com\) and base\.api\.pocket\.network \(pocket\.network\): /);
+  assert.match(r.lines[6], /^robinhood: rpc\.mainnet\.chain\.robinhood\.com \(robinhood\.com\) and robinhood\.api\.pocket\.network \(pocket\.network\): /);
 });
 
 test("the recorded bad answer fails: Base on its pair before, blastapi's 10-block cap", async () => {
@@ -39,7 +40,7 @@ test("the recorded bad answer fails: Base on its pair before, blastapi's 10-bloc
 
 test("planted: the good answers under one operator twice fail before any read", async () => {
   const kits = { ...A.good.kits, base: { ...A.good.kits.base, list: ["https://base-rpc.publicnode.com", "https://base-sepolia-rpc.publicnode.com"] } };
-  const r = await check(replayer(A.good.log), kits);
+  const r = await check(replayer(A.good.log), kits, A.good.page);
   assert.equal(r.ok, false);
   assert.ok(r.lines.includes("base: the two seats are one operator (publicnode.com): base-rpc.publicnode.com and base-sepolia-rpc.publicnode.com"), r.lines.join("\n"));
 });
@@ -54,4 +55,14 @@ test("planted: a seat that answers the Swap logs with none where the other has s
   const r = await checkChain(replayer(log), "base", A.good.kits.base);
   assert.equal(r.ok, false);
   assert.match(r.lines.at(-1), /^base: the seats' answers to the PoolManager's Swap logs at the head \(\d+-\d+\) differ: base-rpc\.publicnode\.com [1-9]\d* logs [0-9a-f]{16}, base\.api\.pocket\.network 0 logs [0-9a-f]{16}$/);
+});
+
+test("planted: SIGN_HOST's policy without a seat's origin, or a page with no CSP, fails, naming what it lacks", async () => {
+  const cut = { ...A.good.page, csp: A.good.page.csp.replace(" https://base.api.pocket.network", "") };
+  const r = await check(replayer(A.good.log), A.good.kits, cut);
+  assert.equal(r.ok, false);
+  assert.equal(r.lines[0], "SIGN_HOST's connect-src lacks https://base.api.pocket.network");
+  assert.equal(judgePage({ status: 200, csp: null }, A.good.kits).ok, false);
+  assert.equal(judgePage({ status: 404, csp: A.good.page.csp }, A.good.kits).ok, false);
+  assert.equal(judgePage(undefined, A.good.kits).ok, false);
 });
