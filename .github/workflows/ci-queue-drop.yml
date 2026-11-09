@@ -24,7 +24,8 @@ on:
   merge_group:
     types: [destroyed]
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.event.reason == 'merged' && format('ci-queue-merged-{0}', github.run_id) || format('ci-{0}', github.event.merge_group.head_ref) }}

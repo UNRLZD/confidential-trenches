@@ -51,7 +51,7 @@ export function dropProblems(ci, drop) {
   const d = concurrency(drop);
   if (!c.group || !d.group) return ["a workflow has no top-level concurrency group"];
   if (!/^on:\n {2}merge_group:\n {4}types: \[destroyed\]\n(?=\S|\n)/m.test(drop)) p.push("ci-queue-drop.yml does not run on merge_group's destroyed event alone");
-  if (!/^permissions: \{\}$/m.test(drop)) p.push("ci-queue-drop.yml's token has permissions");
+  if (!/^permissions:\n {2}contents: read\n(?! )/m.test(drop)) p.push("ci-queue-drop.yml's token has more than contents: read");
   for (const [job, body] of drop.split(/^jobs:\n/m)[1]?.split(/^ {2}(?=[a-z])/m).filter(Boolean).map((b) => [b.split(":")[0], b]) ?? []) {
     if (!/^ {4}if: \$\{\{ false \}\}$/m.test(body)) p.push(`ci-queue-drop.yml's job ${job} can start, and take a runner`);
   }
@@ -90,7 +90,7 @@ const PLANTED = {
   "the drop keyed on the pull request, so a rebuild cancels the new group": [DROP, "format('ci-{0}', github.event.merge_group.head_ref)", "format('ci-{0}', 'pr-540')", "takes another key"],
   "a drop job that starts": [DROP, "    if: ${{ false }}", "    if: ${{ true }}", "can start, and take a runner"],
   "the drop on every merge_group event": [DROP, "    types: [destroyed]", "    types: [checks_requested, destroyed]", "does not run on merge_group's destroyed event alone"],
-  "a drop token with permissions": [DROP, "permissions: {}", "permissions:\n  actions: write", "token has permissions"],
+  "a drop token with more permissions": [DROP, "permissions:\n  contents: read\n", "permissions:\n  contents: read\n  actions: write\n", "token has more than contents: read"],
   "ci.yml keyed on its run": [CI, "  group: ci-${{ github.event.merge_group.head_ref || github.ref }}", "  group: ci-${{ github.run_id }}", "takes another key than its ci.yml run's"],
   "ci.yml cancelling on every event": [CI, "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}", "  cancel-in-progress: true", "a run on main can be cancelled"],
 };
