@@ -1,0 +1,27 @@
+{
+ "note": "good: this card's build of packages/signpage (index.html and public/app.js from scripts/build-app.mjs on card/intents-u-registered-first). bad: SIGN_HOST as served at 2026-11-08T17:52Z (the build of main 2f62a05c, byte for byte: no registration gate), read by this check's --record.",
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-NCox3+pdP74HNoV0/CTS0SArCC1vecN2mmxwlESjTyavq40/BQhIYTqmajbpmvJ2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-NCox3+pdP74HNoV0/CTS0SArCC1vecN2mmxwlESjTyavq40/BQhIYTqmajbpmvJ2",
+  "carries": {
+   "the id-intent rule refuses a U's intent unless both RPCs read it registered": true,
+   "the follow's one read takes storage_balance_of(U) on the token at the same block, null or a balance, per RPC": true,
+   "the read keeps each RPC's registration as it answered": true,
+   "the refund move asks no quote while either read says unregistered": true,
+   "the pool refund carry reads the registration on mainnet's USDC": true
+  },
+  "usdc": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-VHI5s/Xv1C1kcwT2nbhFaw+Gk4n0RqxbmNzubfxt/UsJtaeQNeaHV0o0AX6Ik582\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-VHI5s/Xv1C1kcwT2nbhFaw+Gk4n0RqxbmNzubfxt/UsJtaeQNeaHV0o0AX6Ik582",
+  "carries": {
+   "the id-intent rule refuses a U's intent unless both RPCs read it registered": false,
+   "the follow's one read takes storage_balance_of(U) on the token at the same block, null or a balance, per RPC": false,
+   "the read keeps each RPC's registration as it answered": false,
+   "the refund move asks no quote while either read says unregistered": false,
+   "the pool refund carry reads the registration on mainnet's USDC": false
+  },
+  "usdc": true
+ }
+}
