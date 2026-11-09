@@ -37,7 +37,7 @@ const M = [
   ["a lifted op not adopted (r4)", FOLLOW,
     [["if (op.stage === \"done\" && op.follow.final !== true) adopt(id);", "void [id, op, adopt];"]], WT, "r4"],
   ["the move recorded after it is sent", REFUND,
-    [["  await deps.record(move);\n  // 4.", "  // 4."], ["  return { kind: \"sent\", move, status, code };", "  await deps.record(move);\n  return { kind: \"sent\", move, status, code };"]], WR, "the steps in order"],
+    [["  await deps.record(move);\n  // 4.", "  // 4."], ["  return { kind: \"sent\", move, status, code, tx };", "  await deps.record(move);\n  return { kind: \"sent\", move, status, code, tx };"]], WR, "the steps in order"],
   ["the intent's window past the rule's 120 s", REFUND,
     [["export const REFUND_INTENT_WINDOW_MS = 120_000;", "export const REFUND_INTENT_WINDOW_MS = 300_000;"]], ST, "a refund is moved"],
   ["SIGN_HOST's follow without the refund move", HOST,

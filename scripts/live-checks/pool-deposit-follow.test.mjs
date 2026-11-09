@@ -1,5 +1,6 @@
 // node --test scripts/live-checks/pool-deposit-follow.test.mjs: the live check replays its recorded answers
-// (pool-deposit-follow.answers.json). good: this card's build: PASS. bad: origin/main 6616059d's build (release-91), and
+// (pool-deposit-follow.answers.json). good: this card's build, re-recorded by card pool-deposit-op-txs (the run's end read
+// from its {end, txs}, the follow function re-cut into the excerpt from that build): PASS. bad: origin/main 6616059d's build (release-91), and
 // liveBefore: SIGN_HOST before this card's deploy: each FAIL, each mark named. Planted on the good one: another /app.js,
 // no pin, each mark taken away: each FAIL. Planted in the bundle's own excerpt (pool-deposit-follow.excerpt.txt, cut from
 // this build's public/app.js: the floor and its read, the quote check, the wiring, the follow's page deps, its reads and
