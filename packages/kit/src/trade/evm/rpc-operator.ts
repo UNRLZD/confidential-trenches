@@ -1,9 +1,11 @@
 // Who runs an EVM RPC (card robinhood-mainnet-rpcs, review L-2): two reads count as two only when two operators answer
 // them. One function for every place that pairs EVM RPCs: the kit's pool lists (their tests), the helper's
 // POOL_EVM_RPCS_* check at its start, and the card's live check.
-// - A host the curated map names is its operator. The map holds every EVM host of the money gate's map
-//   (scripts/ci/rpc-operators.mjs, each cited there; a kit test holds the two to one answer) and the pool lists' own.
-// - Any other host is its domain, the last two labels (robinhood.com, pocket.network), lower case, a trailing dot
+// - The curated map names every EVM host of the money gate's map (scripts/ci/rpc-operators.mjs, each cited there; a kit
+//   test holds the two to one answer) and the pool lists' own, each by the name the rule below gives it (a kit test
+//   holds that too), so the function never reads it (card evm-pool-leaves-any-source: the signing page's pool sync
+//   asks for an operator, and a map read would bundle the testnet hosts into SIGN_HOST's mainnet build).
+// - A host is its domain, the last two labels (robinhood.com, pocket.network), lower case, a trailing dot
 //   dropped, or that domain's alias where one operator answers under another's domain (EVM_RPC_DOMAIN_ALIASES): by
 //   domain, never by host, so a second host of an aliased domain is never a second operator. A two-part suffix (co.uk)
 //   makes two operators read as one, which refuses a pair, never passes one.
@@ -14,7 +16,7 @@ import { deepFreeze } from "../../freeze.ts";
 
 /** host -> operator, named by its own domain, the form a host the map leaves out gets, so the two never split one
  *  operator in two. */
-// pure: an app that never asks for an operator (the signing page) bundles none of the map
+// pure, and read by no function: an app bundles none of the map unless it reads the map itself
 export const EVM_RPC_OPERATORS: Readonly<Record<string, string>> = /* @__PURE__ */ deepFreeze({
   // the money gate's (scripts/ci/rpc-operators.mjs), Base, Robinhood and their test networks
   "mainnet.base.org": "base.org",
@@ -56,8 +58,6 @@ export function evmRpcOperator(url: string): string | null {
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
   const host = u.hostname.toLowerCase().replace(/\.$/, "");
   if (host === "") return null;
-  const named = Object.hasOwn(EVM_RPC_OPERATORS, host) ? EVM_RPC_OPERATORS[host] : undefined;
-  if (named !== undefined) return named;
   const m = V4_MAPPED.exec(host);
   if (m) {
     const n = (parseInt(m[1]!, 16) << 16) | parseInt(m[2]!, 16);

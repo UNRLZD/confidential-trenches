@@ -428,3 +428,18 @@ function evmHelperRoute(origin: string, chain: "base" | "robinhood"): { rpc: Sol
 export function evmHelperRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
   return evmHelperRoute(origin, chain).rpc;
 }
+/** The helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, card evm-pool-leaves-any-source, review
+ *  of 0b379bf4 P1-1): answered by the helper's keyed providers alone, never its public fallback (which holds the device's
+ *  own providers), else an error. Its `operator` is "helper", one operator for the pool sync's sources (evm.ts
+ *  evmSourceOperator); paced on the holdings readers' queue for its URL. One reader per origin and chain. */
+const keyedRoutes = new Map<string, SolanaRpc>();
+export function evmHelperKeyedRpc(origin: string, chain: "base" | "robinhood"): SolanaRpc {
+  const url = `${helperUrl(origin, chain)}?keyed=only`;
+  let r = keyedRoutes.get(url);
+  if (r === undefined) {
+    const route = holdingsRoute((fetch) => solanaJsonRpc(url, { init: HELPER_FETCH_INIT, fetch }));
+    r = Object.assign((method: string, params: readonly unknown[]) => route.rpc(method, params), { url, operator: "helper" }) as SolanaRpc;
+    keyedRoutes.set(url, r);
+  }
+  return r;
+}

@@ -1059,3 +1059,107 @@ test("card helper-evm-range-cap-walk (review fold 5): of two batches every provi
   assert.equal(a.status, 200, a.body);
   assert.deepEqual(JSON.parse(a.body).map((x: { error: unknown }) => x.error), [CAP_ERRS[0]![0], CAP_ERRS[2]![0]]);
 });
+
+// -- card evm-pool-leaves-any-source: ?keyed=only reads the chain's keyed URLs alone, never a public provider ------------
+// The device's EVM pool sync takes old logs from any source and keeps them only when two operators agree byte for byte;
+// this route is one source. Relaying a public provider the device reads itself (base-rpc.publicnode.com, Robinhood's
+// own RPC) would let one lying operator count twice. Keyed-only: the env-named keyed URLs that hold a key, else 503.
+
+const KO_KEYED = "https://keyed.test/v2/projectsegment0123456789";
+const KO_DRPC = "https://lb.drpc.test/base/drpckey0123456789abcdef";
+const KO_PINNED = ["https://p1.test", "https://p2.test"];
+/** A read on `chain` with keyed-only on, as POST /v1/rpc/{chain}?keyed=only hands it (server.ts). */
+const keyedOnly = (r: ReturnType<typeof createRpc>, chain: string, body: unknown) =>
+  (r.handle as (...a: unknown[]) => ReturnType<typeof r.handle>)(chain, JSON_T, JSON.stringify(body), undefined, false, true);
+/** Every URL answers the read (a public one would, and must never be asked), but those `down` names fail it so. */
+function keyedOnlyRig(env: Record<string, string>, down: Record<string, () => Promise<Response>> = {}, chain = "base") {
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+    asked.push(url);
+    if (down[url] !== undefined) return down[url]!();
+    const b = JSON.parse(String(init.body)) as { id: unknown };
+    return jsonOk({ jsonrpc: "2.0", id: b.id, result: `0x${Buffer.from(url).toString("hex").slice(0, 8)}` });
+  };
+  const t = { v: performance.timeOrigin + performance.now() };
+  const r = createRpc(env, { fetch: fetch as never, holds: providerHolds(() => t.v), pinned: { [chain]: KO_PINNED }, now: () => t.v });
+  return { r, asked };
+}
+const BLOCK = { jsonrpc: "2.0", id: 5, method: "eth_blockNumber", params: [] };
+const KO_DOWN: [string, () => Promise<Response>][] = [
+  ["HTTP 503", async () => new Response("down", { status: 503 })],
+  ["a thrown connection error", async () => { throw new TypeError("fetch failed"); }],
+  ["a 401 refusing the key", async () => new Response("no", { status: 401 })],
+];
+
+for (const chain of ["base", "robinhood"] as const) {
+  const name = chain === "base" ? "BASE_RPC_URL" : "ROBINHOOD_RPC_URL";
+  test(`card evm-pool-leaves-any-source: ${chain} ?keyed=only with a keyed URL set: the read goes to that URL alone and its answer is the caller's`, async () => {
+    const { r, asked } = keyedOnlyRig({ [name]: KO_KEYED }, {}, chain);
+    const a = await keyedOnly(r, chain, BLOCK);
+    assert.equal(a.status, 200, a.body);
+    assert.equal(JSON.parse(a.body).id, 5);
+    assert.deepEqual(asked, [KO_KEYED]);
+  });
+  for (const [what, down] of KO_DOWN) {
+    test(`card evm-pool-leaves-any-source: ${chain} ?keyed=only with the keyed URL failing (${what}): 503 upstream, and no pinned, fallback or public URL is asked though each would answer`, async () => {
+      const { r, asked } = keyedOnlyRig({ [name]: KO_KEYED }, { [KO_KEYED]: down }, chain);
+      const a = await keyedOnly(r, chain, TRANSFERS());
+      assert.equal(a.status, 503, a.body);
+      assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
+      assert.deepEqual(asked, [KO_KEYED], "only the keyed URL");
+    });
+  }
+  test(`card evm-pool-leaves-any-source: ${chain} ?keyed=only with no keyed URL configured: 503 upstream and nothing is fetched`, async () => {
+    const { r, asked } = keyedOnlyRig({}, {}, chain);
+    const a = await keyedOnly(r, chain, BLOCK);
+    assert.equal(a.status, 503, a.body);
+    assert.deepEqual(JSON.parse(a.body), { error: { code: "upstream" } });
+    assert.deepEqual(asked, []);
+  });
+  test(`card evm-pool-leaves-any-source: ${chain} ?keyed=only with a keyed name set to a public URL holding no key (readUpstreams keyless): that URL is public, so 503 and nothing is fetched`, async () => {
+    const pub = chain === "base" ? "https://base-rpc.publicnode.com" : "https://rpc.mainnet.chain.robinhood.com";
+    const { r, asked } = keyedOnlyRig({ [name]: pub }, {}, chain);
+    const a = await keyedOnly(r, chain, BLOCK);
+    assert.equal(a.status, 503, a.body);
+    assert.deepEqual(asked, []);
+  });
+  test(`card evm-pool-leaves-any-source: ${chain} without the flag, a failing keyed URL still falls back to the pinned providers as before`, async () => {
+    const { r, asked } = keyedOnlyRig({ [name]: KO_KEYED }, { [KO_KEYED]: async () => new Response("down", { status: 503 }) }, chain);
+    const a = await call(r, chain, BLOCK);
+    assert.equal(a.status, 200, a.body);
+    assert.deepEqual(asked, [KO_KEYED, KO_PINNED[0]]);
+  });
+}
+
+test("card evm-pool-leaves-any-source: ?keyed=only walks every keyed URL in order (the first down, a dRPC key answers), never past them", async () => {
+  const { r, asked } = keyedOnlyRig({ BASE_RPC_URL: KO_KEYED, BASE_RPC_URL_DRPC_1: KO_DRPC }, { [KO_KEYED]: async () => new Response("down", { status: 503 }) });
+  const a = await keyedOnly(r, "base", BLOCK);
+  assert.equal(a.status, 200, a.body);
+  assert.deepEqual(asked, [KO_KEYED, KO_DRPC]);
+  const { r: r2, asked: asked2 } = keyedOnlyRig({ BASE_RPC_URL: KO_KEYED, BASE_RPC_URL_DRPC_1: KO_DRPC }, { [KO_KEYED]: async () => new Response("down", { status: 503 }), [KO_DRPC]: async () => new Response("down", { status: 502 }) });
+  const b = await keyedOnly(r2, "base", BLOCK);
+  assert.equal(b.status, 503, b.body);
+  assert.deepEqual(asked2, [KO_KEYED, KO_DRPC]);
+});
+
+test("card evm-pool-leaves-any-source: ?keyed=only with the keyed URL throttling (429, 30 s): the caller's 429, and no public URL is asked", async () => {
+  const { r, asked } = keyedOnlyRig({ BASE_RPC_URL: KO_KEYED }, { [KO_KEYED]: async () => new Response("slow", { status: 429, headers: { "retry-after": "30" } }) });
+  const a = await keyedOnly(r, "base", BLOCK);
+  assert.equal(a.status, 429, a.body);
+  assert.deepEqual(asked, [KO_KEYED]);
+});
+
+test("card evm-pool-leaves-any-source: ?keyed=only on Solana with its keyed URL failing: 503, never the public endpoint (api.mainnet-beta.solana.com)", async () => {
+  const { r, asked } = keyedOnlyRig({ SOLANA_RPC_URL: KO_KEYED }, { [KO_KEYED]: async () => new Response("down", { status: 503 }) }, "solana");
+  const a = await keyedOnly(r, "solana", { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] });
+  assert.equal(a.status, 503, a.body);
+  assert.deepEqual(asked, [KO_KEYED]);
+});
+
+test("card evm-pool-leaves-any-source: ?keyed=only refuses what the route refuses, before any call (an unlisted method 400)", async () => {
+  const { r, asked } = keyedOnlyRig({ BASE_RPC_URL: KO_KEYED });
+  const a = await keyedOnly(r, "base", { jsonrpc: "2.0", id: 1, method: "debug_traceTransaction", params: [] });
+  assert.equal(a.status, 400, a.body);
+  assert.equal(code(a), "method_not_allowed");
+  assert.deepEqual(asked, []);
+});

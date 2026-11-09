@@ -608,6 +608,21 @@ test("planted (review P3-5): `ended` is told once on an abort and on a floor wri
   assert.match(b.ends[0]!.why.join("\n"), /^the restore stopped: note .* in the store has another precommitment$/m);
 });
 
+// card evm-pool-leaves-any-source: the page's restore keeps the page's hold for the pool (the deposit's sync's too) and
+// reads the page's history sources, so a restore after a deposit reads only past the held blocks
+test("card evm-pool-leaves-any-source: the restore passes the page's hold and history for each EVM pool", async () => {
+  const { pageEvmHold, pageEvmHistory } = await import("../src/pool-testnet.ts");
+  const args: { held?: unknown; history?: unknown; pin: { network: string } }[] = [];
+  const w = await world({ evm: (async (x: { held?: unknown; history?: unknown; pin: { network: string } }) => (args.push(x), { notes: [], spends: [], elsewhere: [], wallets: [], block: 1n })) as never });
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("done", () => a.posted.some((m) => m.id === id && m.stage === "done"));
+  const pin = POOLS[1]!.chain === "evm" ? POOLS[1]!.pin : assert.fail("the EVM pool");
+  assert.equal(args.length, 1);
+  assert.equal(args[0]!.held, pageEvmHold(pin));
+  assert.deepEqual(args[0]!.history, pageEvmHistory(pin));
+});
+
 // ---------- card wallet-id-reader-paced: a Retry reads on, and the run's signal reaches every view and wait ----------
 
 test("a Retry reads on where the last run stopped: no id answered at the kept pass is asked again; a sign out drops what was kept", async () => {
