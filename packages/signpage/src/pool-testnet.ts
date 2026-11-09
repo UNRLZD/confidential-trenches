@@ -53,12 +53,13 @@ import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/s
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, tokenHeld, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { positionsCache, positionsPass, type Position } from "./positions.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
-import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
+import { checkPoolRequest, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
@@ -267,6 +268,10 @@ export type TestnetOver = {
   /** The trade kinds (poolBuyKind, poolSellKind otherwise): a test reads the hosts this page wires into them (W's buy
    *  record, written by the buy host and read by the sell host; delta review 8 of 5697d7a1). */
   tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
+  /** The buy wallets' finder reader for the page's RPCs (the helper's or a devnet RPC's otherwise; tests). */
+  holdings?: (rpcs: readonly [SolanaRpc, SolanaRpc]) => HoldingsReader;
+  /** The positions cache's retry and timers (src/positions.ts; tests). */
+  positions?: Parameters<typeof positionsCache>[1];
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -355,6 +360,8 @@ export type TestnetPool = {
   settle(): Promise<void>;
   /** A signed-in state read, when no pass runs: settle the pool's INCOMING notes, then its RESERVED ones. */
   stateRead(): Promise<void>;
+  /** state.positions (src/positions.ts): the last whole pass, null before it; the first signed-in read starts one. */
+  positions(): readonly Position[] | null;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -426,6 +433,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
+    positions.clear();
     follows.abort();
     follows = new AbortController();
     const p = open;
@@ -611,6 +619,48 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
+  // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
+  // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc]) => {
+    const spent = await spentNotesOf(notes, scope!);
+    if (spent.length === 0) return [];
+    const seed64 = await page.seed64();
+    try {
+      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER)) }]);
+      if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
+      return got.wallets;
+    } finally {
+      seed64.fill(0);
+    }
+  };
+  // state.positions (src/positions.ts, card signpage-state-holdings): the buy wallets' tokens, each held amount read again
+  // on both RPCs, one pass at a time, run at the first signed-in state read and again when a pool buy or sell ends
+  const positions = positionsCache(
+    async () => {
+      if (scope === null) return [];
+      const r = rpcs();
+      const notes = await openNoteStore(await page.store());
+      try {
+        return await positionsPass({
+          wallets: async () =>
+            (await poolBuyWallets(notes, r)).map((w) => ({ address: w.address, tokens: [...w.holdings.tokens].filter(([, h]) => h.amount > 0n).map(([m]) => m) })),
+          held: async (address, mint) => (await tokenHeld(r, address, mint)).amount,
+          decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
+        });
+      } finally {
+        notes.close();
+      }
+    },
+    over.positions ?? {},
+  );
+  positions.watch(() => {
+    for (const f of watchers) f();
+  });
+  // a pool buy's or sell's run, the positions read again once it ends, whatever its answer (a refusal ran nothing)
+  const positionsAfter = <R,>(r: R): R => {
+    if (typeof r === "object" && r !== null && "after" in r) void (r as { after: Promise<unknown> }).after.then(() => positions.refresh(), () => positions.refresh());
+    return r;
+  };
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
   const sellHost = (): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
@@ -622,20 +672,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes: store,
       ops: page.store,
       seed64: page.seed64,
-      // the pool's Ws with their holdings: on mainnet through the helper's keyed route, in the testnet build on one devnet
-      // RPC (the header's testnet-only choice); none: no read
-      wallets: async () => {
-        const spent = await spentNotesOf(await store(), scope!);
-        if (spent.length === 0) return [];
-        const seed64 = await page.seed64();
-        try {
-          const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER) }]);
-          if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
-          return got.wallets;
-        } finally {
-          seed64.fill(0);
-        }
-      },
+      wallets: async () => poolBuyWallets(await store(), r),
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
       owed: owedRentBacks(page.store),
       bought: buyMints(page.store),
@@ -988,9 +1025,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         : ask.kind === "pool.deposit"
           ? deposit(ask, ctx)
           : ask.kind === "pool.buy" && table !== null
-            ? buy(ask, ctx)
+            ? positionsAfter(buy(ask, ctx))
             : ask.kind === "pool.sell"
-              ? sell(ask, ctx)
+              ? positionsAfter(sell(ask, ctx))
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" },
@@ -1006,6 +1043,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     host: () => host(),
     settle,
     stateRead,
+    positions: () => {
+      positions.first();
+      return positions.get();
+    },
     proofs,
     readyWith: async (read) => {
       const q = open ? (await open.catch(() => null))?.queue : undefined;

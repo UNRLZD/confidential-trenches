@@ -80,6 +80,7 @@ import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
+import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
@@ -279,9 +280,11 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
-        prices.refresh((out.pools ?? []).map((p) => p.chain));
-        return out;
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
+        prices.refresh((pooled.pools ?? []).map((p) => p.chain));
+        // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
+        // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
+        return withPositions(pooled, s.signed_in && testnet ? testnet.positions() : null);
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
