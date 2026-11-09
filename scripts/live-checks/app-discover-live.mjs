@@ -9,6 +9,9 @@
 //   - the page read GET /v1/market/lists?chain=solana at HELPER_HOST, 200, and every row of the answer it read holds
 //     exactly the terminal's ROW_FIELDS, in order, read from apps/terminal/src/screens/discover/fields.ts itself
 //     (the live shape equals the fixtures');
+//   - Base and Robinhood (card app-chains-evm): the page read GET /v1/market/lists?chain=base and ?chain=robinhood at
+//     HELPER_HOST, 200, every row holding exactly ROW_FIELDS as Solana's do, and Discover (on the shell's chain filter's
+//     All) draws at least one Base row and one Robinhood row, each a link to /token/<that chain>/<id>;
 //   - no CSP violation and no console error in Discover's frame;
 //   - every request Discover's frame made (and the navigation of its own child frames) is to a host its CSP lets that
 //     kind of request reach.
@@ -18,10 +21,11 @@
 // or of a hidden frame is judged by its own host's checks (app-shell, signpage-*).
 // A screenshot of every width is kept.
 // After: app
-//   node scripts/live-checks/app-discover-live.mjs [--url <page>] [--shots <dir>] [--record <file>]
+//   node scripts/live-checks/app-discover-live.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
-// --url is the page to open (default APP_HOST/discover); --record writes what the run read, so the check's test can
-// replay it through judge().
+// --url is the page to open (default APP_HOST/discover); --build serves that terminal build at APP_HOST's name inside
+// the stand-in shell (app-in-shell.mjs harnessRoute), the helper still answered live; --record writes what the run
+// read, so the check's test can replay it through judge().
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -35,6 +39,9 @@ const KEY = "app-discover-live";
 export const APP_HOST = "https://ct-app.unrealized.trade";
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
+/** The EVM chains Discover reads beside Solana (card app-chains-evm), each its own lists read. */
+export const EVM_CHAINS = ["base", "robinhood"];
+export const listsUrl = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
 export const COLUMNS = ["new", "trending", "hot", "graduating"];
 /** The columns that must hold rows: the helper's own check requires `new` and `trending_1h` to hold rows. */
 export const REQUIRED = ["new", "trending"];
@@ -136,6 +143,22 @@ export function judge(rec) {
       if (!(a.rows > 0)) abad.push("no rows");
     }
     say(abad.length === 0, `${tag}: the lists read at HELPER_HOST ${a ? `${a.status}, ${a.rows} rows each with exactly the ${ROW_FIELDS.length} fields of the fixtures${abad.length ? `: ${abad.join("; ")}` : ""}` : abad.join("; ")}`);
+
+    // card app-chains-evm: Base's and Robinhood's lists, read and drawn as Solana's are
+    for (const c of EVM_CHAINS) {
+      const e = l.chains?.[c] ?? null;
+      const ebad = [];
+      if (!e) ebad.push(`the page read no ${c} lists answer`);
+      else {
+        if (e.url !== listsUrl(c)) ebad.push(`read ${e.url}`);
+        if (e.status !== 200) ebad.push(`status ${e.status}`);
+        if (e.badRows.length) ebad.push(`${e.badRows.length} of ${e.rows} row(s) differ from ROW_FIELDS, first ${e.badRows[0].list}[${e.badRows[0].index}]: ${e.badRows[0].fault}`);
+        if (!(e.rows > 0)) ebad.push("no rows");
+      }
+      const drawn = l.drawn?.[c] ?? 0;
+      if (!(drawn > 0)) ebad.push(`Discover draws no ${c} row`);
+      say(ebad.length === 0, `${tag}: ${c}: ${ebad.length ? ebad.join("; ") : `the lists read at HELPER_HOST 200, ${e.rows} rows each with exactly the ${ROW_FIELDS.length} fields; ${drawn} ${c} row(s) drawn, each a link to /token/${c}/<id>`}`);
+    }
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -162,11 +185,23 @@ const MEASURE = ({ phone }) => {
     const t = [...dsc.querySelectorAll('.dsc-col[data-col="trending"] .dsc-bs')].filter(vis);
     trendingSides = t.filter((e) => /^[\d.,KM]+\/[\d.,KM]+$/.test(e.textContent.trim())).length;
   }
-  return { route: root?.dataset.route ?? null, state: dsc?.dataset.discover ?? null, columns, trendingSides };
+  // each drawn row's chain, from its link (/token/<chain>/<id>, its own data-token), in the view shown now
+  const drawn = {};
+  for (const r of dsc?.querySelectorAll('[role="listitem"]') ?? []) {
+    if (!vis(r)) continue;
+    const m = /^\/token\/([a-z]+)\/(.+)$/.exec(r.querySelector("a")?.getAttribute("href") ?? "");
+    if (m && decodeURIComponent(m[2]) === r.getAttribute("data-token")) drawn[m[1]] = (drawn[m[1]] ?? 0) + 1;
+  }
+  return { route: root?.dataset.route ?? null, state: dsc?.dataset.discover ?? null, columns, trendingSides, drawn };
 };
 
-export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null } = {}) {
+export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null, build = null } = {}) {
   mkdirSync(shots, { recursive: true });
+  if (build && !prepare) {
+    const { harnessRoute } = await import("./app-in-shell.mjs");
+    const harness = await harnessRoute(path.resolve(build), "signed");
+    prepare = (ctx) => ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+  }
   const browser = await launchBrowser("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
@@ -179,10 +214,12 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       const navs = [];
       const consoleErrors = [];
       let lists = null;
+      const evm = {};
       page.on("request", (r) => requests.push(r));
       page.on("response", (r) => {
         if (r.request().isNavigationRequest()) navs.push(r);
         if (r.url() === LISTS_URL && !lists) lists = r;
+        for (const c of EVM_CHAINS) if (r.url() === listsUrl(c) && !evm[c]) evm[c] = r;
       });
       page.on("console", (m) => m.type() === "error" && consoleErrors.push({ text: m.text(), src: m.location()?.url ?? "" }));
       page.on("pageerror", (e) => consoleErrors.push({ text: String(e), src: "" }));
@@ -205,7 +242,7 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       await page.waitForTimeout(500);
       const target = app ?? page.mainFrame();
       await target.evaluate(() => document.fonts.ready).catch(() => {});
-      const m = await target.evaluate(MEASURE, { phone: w.isMobile }).catch(() => ({ route: null, state: null, columns: [], trendingSides: null }));
+      const m = await target.evaluate(MEASURE, { phone: w.isMobile }).catch(() => ({ route: null, state: null, columns: [], trendingSides: null, drawn: {} }));
       if (w.isMobile && m.state) {
         // the phone holds one list at a time: read each tab
         for (const key of COLUMNS) {
@@ -215,6 +252,9 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
             return { key: k, count: Number(document.querySelector(`.dsc-tab[data-tab="${k}"] .dsc-count`)?.textContent), rows: [...document.querySelectorAll('.dsc-phone [role="listitem"]')].filter(vis).length };
           }, key);
           m.columns.push(c);
+          // each tab's rows by chain: the phone's count of a chain is its most on any one tab
+          const d = await target.evaluate(MEASURE, { phone: true }).catch(() => null);
+          for (const [ch, n] of Object.entries(d?.drawn ?? {})) m.drawn[ch] = Math.max(m.drawn[ch] ?? 0, n);
         }
         await target.click('.dsc-tab[data-tab="new"]');
       }
@@ -240,6 +280,21 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
           }
         }
       }
+      // Base's and Robinhood's answers, each row's keys against ROW_FIELDS as Solana's (card app-chains-evm)
+      const chains = {};
+      for (const c of EVM_CHAINS) {
+        const r = evm[c];
+        if (!r) continue;
+        const b = await r.json().catch(() => null);
+        const e = { url: r.url(), status: r.status(), rows: 0, badRows: [] };
+        for (const [list, rs] of Object.entries(b && typeof b.lists === "object" && b.lists ? b.lists : {}))
+          for (const [i, row] of (Array.isArray(rs) ? rs : []).entries()) {
+            e.rows++;
+            const fault = keysFault(row);
+            if (fault) e.badRows.push({ list, index: i, fault });
+          }
+        chains[c] = e;
+      }
       const violations = await target.evaluate(() => window.__ct?.violations ?? []).catch(() => []);
       rec.loads.push({
         width: w.name,
@@ -256,6 +311,8 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
         footer: await footerEvidence(target).catch(() => null),
         requests: requests.filter((r) => own(r) || childNav(r)).map((r) => ({ url: r.url().startsWith("data:") ? r.url().slice(0, 40) : r.url(), type: r.resourceType() })),
         lists: lists ? { url: lists.url(), status: lists.status(), rows, badRows } : null,
+        chains,
+        drawn: m.drawn ?? {},
         shot,
       });
       await ctx.close();
@@ -271,7 +328,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined) });
+    const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined), build: opt("--build", null) });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);

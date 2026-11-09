@@ -68,6 +68,8 @@ export const IN_PROCESS = [
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
   { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
+  { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
   // serves that file; the helper part reads the helper, past the build
   { key: "withdraw-fee-busy-waits", host: "sign", load: () => import("../live-checks/withdraw-fee-busy-waits.mjs"), run: async (m, f, dirs) => m.judgeSign(await m.readSign(SIGN, f, m.pinOf(readFileSync(path.join(dirs.sign, "index.html"), "utf8")))) },
@@ -131,6 +133,7 @@ export const OUT = {
   "app-token-rail": "the helper's lists answer",
   "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
   "app-token-route": "a browser and the helper",
+  "app-chains-evm": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",

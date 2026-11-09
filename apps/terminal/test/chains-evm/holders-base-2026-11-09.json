@@ -1,0 +1,10 @@
+{
+ "read": "GET https://ct-api.unrealized.trade/v1/market/holders?chain=base for the token of token-base-2026-11-09.json, Origin APP_HOST, 2026-11-09 18:43Z, HTTP 200",
+ "body": {
+  "holders": [],
+  "total": 4210,
+  "top_bps": 8882,
+  "src": "geckoterminal",
+  "as_of_ms": 1794249378000
+ }
+}

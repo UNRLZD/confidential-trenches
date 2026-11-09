@@ -120,18 +120,29 @@ export type PoolDepositRun = { end: PoolDepositEnd; txs: TxRef[] };
  *  reads did not agree, or a recorded move is still in its window). */
 export type RefundRead = "moved" | "held" | "none" | "wait";
 
-export interface PoolFollowDeps {
-  /** 1Click's status of the quote's address for U_X and U_{s,i} (readDepositStatus with the refund id), or null. */
-  status(f: PoolFollowRecord, signal: AbortSignal): Promise<StatusRead | null>;
-  /** U_X's balance at finalized on X's two RPCs (each its own read). Throws when a read fails. */
-  balances(f: PoolFollowRecord): Promise<readonly [bigint, bigint]>;
+/** One U_X: its chain, the pool's scope and index it was named at, its address on X and U_{s,i}'s 64-hex id. */
+export type PoolUx = Pick<PoolFollowRecord, "chain" | "s" | "i" | "u" | "refund_id">;
+
+/**
+ * U_X's reads on X and its carry into X's pool: the follow's, and a restore's (src/pool-restore.ts step 5, card
+ * wallet-restore-reads-ux: src/main.ts hands it these of the follow's own deps), so a live deposit and a restore read
+ * U_X and carry it the same way.
+ */
+export interface PoolUxReads {
+  /** U_X's balance at finalized on X's two RPCs (each its own read, one U_X per request). Throws when a read fails. */
+  balances(f: Pick<PoolUx, "u">): Promise<readonly [bigint, bigint]>;
   /** The least U_X must hold for one deposit, and what one deposit costs on top of its rung (worst case), and the
    *  rent U_X keeps after it (0 on EVM), read on two RPCs at the round's time. */
-  costs(f: PoolFollowRecord): Promise<{ floor: bigint; perRung: bigint; keep: bigint }>;
+  costs(f: PoolUx): Promise<{ floor: bigint; perRung: bigint; keep: bigint }>;
   /** The pool's ladder on X. */
   ladder: Ladder;
   /** The page's pool.deposit on X from U_X, for `amount`, to its end, with the txs its answer named. */
-  deposit(f: PoolFollowRecord, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
+  deposit(f: PoolUx, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
+}
+
+export interface PoolFollowDeps extends PoolUxReads {
+  /** 1Click's status of the quote's address for U_X and U_{s,i} (readDepositStatus with the refund id), or null. */
+  status(f: PoolFollowRecord, signal: AbortSignal): Promise<StatusRead | null>;
   /** The quote's deadline past on both RPCs' clocks. */
   past(f: PoolFollowRecord): Promise<boolean>;
   /** The refund carry: what U_{s,i} holds inside intents.near moved back to X's coin, to U_X; none, and a refund waits.

@@ -150,6 +150,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-state-holdings.mjs",
   "scripts/live-checks/held-move-forgotten-tx.mjs",
   "scripts/live-checks/wallet-restore-id-reader.mjs",
+  "scripts/live-checks/wallet-restore-reads-ux.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
   "scripts/live-checks/signpage-pool-flow.mjs",
   "scripts/live-checks/signpage-pool-kinds.mjs",
