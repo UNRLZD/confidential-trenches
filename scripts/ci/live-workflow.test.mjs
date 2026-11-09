@@ -57,7 +57,7 @@ test("planted: a run that names a check that does not exist, an artifact step th
   assert.ok(has(liveProblems(LIVE.replace("pnpm --filter signpage run test:e2e", "node scripts/live-checks/no-such-check.mjs")), /no-such-check, which is no file/));
   assert.ok(has(liveProblems(LIVE.replace("        if: always()\n        with:\n          name: live-", "        with:\n          name: live-")), /artifact step does not run `if: always\(\)`/));
   assert.ok(has(liveProblems(LIVE.replace("    if: always() && needs.plan.result != 'skipped'", "    if: needs.plan.result != 'skipped'")), /live job does not run `if: always\(\)`/));
-  assert.ok(has(liveProblems(LIVE.replace('node "scripts/live-checks/$KEY.mjs" $ARGS', "node scripts/live-checks/app-shell.mjs")), /does not run the check its matrix names/));
+  assert.ok(has(liveProblems(LIVE.replace('node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS', "node scripts/live-checks/app-shell.mjs")), /single-check step is not the one the gate holds: it must run the check its matrix names/));
   assert.ok(has(liveProblems(LIVE.replace("  browser-e2e:", "  other-e2e:")), /no browser-e2e job/));
 });
 
@@ -72,6 +72,76 @@ test("planted (card jupiter-build-budget-503): a summary grep that drops a verdi
 
 test("planted: a step that installs Playwright's own Chromium is refused", () => {
   assert.ok(has(liveProblems(LIVE.replace("--with-deps $ENGINES", "--with-deps chromium firefox")), /installs Playwright's own Chromium/));
+});
+
+// card live-inconclusive-rerun: the gate's own module, read at test time so a base without it fails these tests alone
+const gate = () => import("./live-workflow.mjs");
+
+test("live-inconclusive-rerun: both runners hold every rerun case, and live.yml runs a single check through live-rerun.mjs", async () => {
+  const { rerunProblems, RERUN_CASES } = await gate();
+  assert.deepEqual(await rerunProblems(), []);
+  assert.ok(LIVE.includes('          node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS\n'), "the single-check step");
+  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3,1", "1", "2"]);
+});
+
+test("planted (live-inconclusive-rerun): a single-check step that runs the check itself, read once, is refused", () => {
+  const direct = LIVE.replace('node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS', 'node "scripts/live-checks/$KEY.mjs" $ARGS 2>&1 | tee "$out/$ID.log"');
+  assert.notEqual(direct, LIVE);
+  assert.ok(has(liveProblems(direct), /single-check step is not the one the gate holds/));
+});
+
+// stand-in runners that each break one rule, on the single-check path; the group path is planted in live-serial.test.mjs
+const STANDIN = (single) => ({ single, group: async (keys, o) => ({ ok: (await single(keys[0], o)).code === 0 }) });
+const loop = (decide) => async (key, o) => {
+  let code;
+  for (let n = 1; ; n++) {
+    const r = await o.run(key, []);
+    code = typeof r === "number" ? r : r.code;
+    const next = decide(code, n);
+    if (next === "stop") return { code };
+    if (next === "pass") return { code: 0 };
+    await o.sleep(next);
+  }
+};
+
+test("planted (live-inconclusive-rerun): exit 3 then exit 0 must pass: a runner that never reruns is refused", async () => {
+  const { rerunProblems } = await gate();
+  const p = await rerunProblems(STANDIN(loop(() => "stop")));
+  assert.ok(has(p, /a single check\): exit 3 then exit 0 passes on the rerun: was red, want a pass/), p.join("\n"));
+  assert.ok(has(p, /exit 3 throughout is red at the bound and names the providers: ran 1 times, want 3/));
+});
+
+test("planted (live-inconclusive-rerun): exit 3 throughout must stay red and name the providers", async () => {
+  const { rerunProblems } = await gate();
+  // passes once the bound is spent
+  const lenient = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 ? "stop" : n >= 3 ? "pass" : 30_000))));
+  assert.ok(has(lenient, /exit 3 throughout is red at the bound and names the providers: passed, want red/), lenient.join("\n"));
+  // red, but names no provider
+  const mute = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(mute, /does not name the providers that did not answer \(rpc-a\.example\.org, rpc-b\.example\.org\)/), mute.join("\n"));
+  // no bound
+  const endless = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n > 8 ? "stop" : 30_000))));
+  assert.ok(has(endless, /exit 3 throughout is red at the bound and names the providers: ran 9 times, want 3/), endless.join("\n"));
+  // no pause, or a short one
+  const eager = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 1000))));
+  assert.ok(has(eager, /a pause of 1000 ms, under half the base/), eager.join("\n"));
+});
+
+test("planted (live-inconclusive-rerun): exit 1 and exit 2 must never run again", async () => {
+  const { rerunProblems } = await gate();
+  const p = await rerunProblems(STANDIN(loop((c, n) => (c === 0 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(p, /exit 1 \(FAIL\) is never run again: ran 3 times, want 1/), p.join("\n"));
+  assert.ok(has(p, /exit 2 \(ERROR\) is never run again: ran 3 times, want 1/), p.join("\n"));
+  assert.ok(has(p, /exit 3 then exit 1 is red and not run again: ran 3 times, want 2/), p.join("\n"));
+});
+
+test("planted (live-inconclusive-rerun): a bound or a pause out of reason is refused", async () => {
+  const { rerunProblems } = await gate();
+  const { RERUN } = await import("./live-rerun.mjs");
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, runs: 1 }), /RERUN\.runs is 1, want 2 to 5/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, runs: 50 }), /RERUN\.runs is 50, want 2 to 5/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, baseMs: 1000 }), /is not 10 s or more/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, capMs: 3_600_000 }), /capped at 5 min or less/));
 });
 
 // a list file that prints `checks` with --live-runs, as the real ones do
@@ -512,10 +582,10 @@ test("planted: a serial group the job cannot run fails the plan: one member, an 
 
 test("planted: live.yml that runs a serial group's checks as one single check, drops the group step, or lets both steps run, is refused", () => {
   assert.deepEqual(liveProblems(LIVE), []);
-  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group != ''\n", "")), /does not run a serial group's checks with scripts\/ci\/live-serial\.mjs/), "no `if` on the group step: every job would run it");
-  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group == ''\n", "")), /single-check step does not run `if: matrix\.group == ''`/), "no `if` on the single step: a group job would run no-key twice");
-  assert.ok(has(liveProblems(LIVE.replace("node scripts/ci/live-serial.mjs $GROUP", "node scripts/live-checks/$GROUP.mjs")), /does not run a serial group's checks/), "a group run as one check");
-  assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /does not run a serial group's checks/), "the group is not the matrix's");
+  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group != ''\n", "")), /serial step is not the one the gate holds: it must run a serial group's checks/), "no `if` on the group step: every job would run it");
+  assert.ok(has(liveProblems(LIVE.replace("        if: matrix.group == ''\n", "")), /single-check step is not the one the gate holds: .* on `if: matrix\.group == ''`/), "no `if` on the single step: a group job would run no-key twice");
+  assert.ok(has(liveProblems(LIVE.replace('node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP', "node scripts/live-checks/$GROUP.mjs")), /serial step is not the one the gate holds/), "a group run as one check");
+  assert.ok(has(liveProblems(LIVE.replace("GROUP: ${{ matrix.group }}", "GROUP: ${{ matrix.key }}")), /serial step is not the one the gate holds/), "the group is not the matrix's");
   assert.ok(has(liveProblems(LIVE.replace("timeout-minutes: ${{ matrix.group != '' && 45 || 20 }}", "timeout-minutes: 20")), /a serial group's job has no longer limit/), "a group of about 11 minutes of checks cannot be held to 20");
 });
 
@@ -533,4 +603,59 @@ test("planted (card live-runs-one-per-host): a live.yml whose dispatched runs do
   assert.ok(has(cancel("true"), /cancel-in-progress/), "a second run cancels the first");
   assert.ok(has(cancel("${{ github.event_name == 'workflow_dispatch' }}"), /cancel-in-progress/), "true on a dispatch");
   assert.deepEqual(cancel("false"), []);
+});
+
+// review of 9eaf059a, P2-1: wiring that turns a red check job green. Each planted edit is refused.
+const RUN_LINE = 'node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS';
+const SERIAL_LINE = 'node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP';
+const plant = (from, to) => {
+  const out = LIVE.replace(from, to);
+  assert.notEqual(out, LIVE, `the plant's anchor is in live.yml: ${from}`);
+  return liveProblems(out);
+};
+
+test("planted (review P2-1): six ways to turn a red check job green are each refused", () => {
+  const single = /single-check step is not the one the gate holds/;
+  assert.ok(has(plant(RUN_LINE, `${RUN_LINE} 2>&1 | tee "$out/$ID.log" || true`), single), "| tee … || true");
+  assert.ok(has(plant(RUN_LINE, `${RUN_LINE}; exit 0`), single), "; exit 0");
+  assert.ok(has(plant(RUN_LINE, `${RUN_LINE.replace(' --log "$out/$ID.log"', "")} 2>&1 | tee "$out/$ID.log"`), single), "a tee with no pipefail");
+  assert.ok(has(plant(`          ${RUN_LINE}`, `          node "scripts/live-checks/$KEY.mjs" $ARGS || true; exit 0\n          ${RUN_LINE}`), single), "a direct run before the runner");
+  assert.ok(has(plant(SERIAL_LINE, `${SERIAL_LINE} || true`), /serial step is not the one the gate holds/), "|| true on the serial line");
+  assert.ok(has(plant("  check:\n    needs: plan\n", "  check:\n    needs: plan\n    continue-on-error: true\n"), /continue-on-error/), "continue-on-error on the check job");
+  assert.ok(has(plant(`        run: |\n          out="$RUNNER_TEMP/live"\n          mkdir -p "$out"\n          export TMPDIR="$out"\n          # shellcheck disable=SC2086\n          ${RUN_LINE}`, `        continue-on-error: true\n        run: |\n          out="$RUNNER_TEMP/live"\n          mkdir -p "$out"\n          export TMPDIR="$out"\n          # shellcheck disable=SC2086\n          ${RUN_LINE}`), /continue-on-error/), "continue-on-error on the step");
+  assert.ok(has(plant("permissions:\n  contents: read\n", "permissions:\n  contents: read\n\ndefaults:\n  run:\n    shell: \"sh -c 'sh {0}; exit 0'\"\n"), /a shell or defaults key/), "a shell template that swallows the exit");
+  assert.ok(has(plant(`        run: |\n          out="$RUNNER_TEMP/live"`, `        shell: bash {0}\n        run: |\n          out="$RUNNER_TEMP/live"`), /a shell or defaults key/), "a step shell with no -e");
+  assert.ok(has(plant('if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi', 'echo "a check job ended $CHECKS"'), /live job does not fail when a check job did not succeed/), "the verdict that stops reading the check jobs");
+  assert.ok(has(plant("      - uses: actions/upload-artifact@", '      - run: node "scripts/live-checks/$KEY.mjs" $ARGS || true\n      - uses: actions/upload-artifact@'), /runs a live check outside the two runner steps/), "a check run in a step of its own");
+});
+
+// review of 9eaf059a, P2-2: the runner comes from the workflow's own commit; only the check comes from the deployed one
+test("planted (review P2-2): a runner taken from the deployed commit, or a runner checkout that lacks a file, is refused", async () => {
+  const { RUNNER_FILES } = await gate();
+  assert.deepEqual(RUNNER_FILES, ["scripts/ci/jup-idle.mjs", "scripts/ci/live-rerun.mjs", "scripts/ci/live-serial.mjs", "scripts/live-checks/helper-token-page-cold.mjs", "scripts/net-window.mjs"]);
+  const checkout = /runner checkout is not the one the gate holds/;
+  assert.ok(has(plant(RUN_LINE, RUN_LINE.replace(".live-runner/", "")), /single-check step is not the one the gate holds/), "the deployed commit's runner");
+  assert.ok(has(plant(SERIAL_LINE, SERIAL_LINE.replace(".live-runner/", "")), /serial step is not the one the gate holds/), "the deployed commit's serial runner");
+  assert.ok(has(plant("          ref: ${{ github.workflow_sha }}\n", "          ref: ${{ inputs.commit }}\n"), checkout), "the runner checked out at the deployed commit");
+  assert.ok(has(plant("            scripts/ci/jup-idle.mjs\n", ""), checkout), "a file the runners import left out");
+  assert.ok(has(plant("          path: .live-runner\n", "          path: runner\n"), checkout), "another folder");
+  assert.ok(has(plant("          sparse-checkout-cone-mode: false\n", ""), checkout), "cone mode, which reads the patterns as folders");
+});
+
+// delta re-check of 9b2c8b10, P3-a/b/c: the runner folder is written by the held checkout alone, and nothing reaches
+// into node or the job's environment to set a check's exit
+test("planted (re-check P3-a, P3-b): a second checkout into .live-runner, or any other line naming it, is refused", () => {
+  const named = /names \.live-runner outside the held runner checkout and runner lines/;
+  const second = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ inputs.commit }}\n          path: .live-runner\n          persist-credentials: false\n";
+  assert.ok(has(plant("      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 24\n      - run: pnpm install --frozen-lockfile\n      - name: Google Chrome", `${second}      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 24\n      - run: pnpm install --frozen-lockfile\n      - name: Google Chrome`), named), "a second checkout over the runners");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: printf 'process.exit(0)' > .live-runner/scripts/ci/live-rerun.mjs\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), named), "a step that writes a runner");
+  assert.ok(has(plant(`          ${RUN_LINE}`, `          ${RUN_LINE}`.replace("node .live-runner", "node ./.live-runner")), named), "the runner line spelled another way");
+});
+
+test("planted (re-check P3-c): NODE_OPTIONS, or a write to GITHUB_ENV or GITHUB_PATH, is refused", () => {
+  const env = /NODE_OPTIONS, GITHUB_ENV or GITHUB_PATH/;
+  assert.ok(has(plant("          KEY: ${{ matrix.key }}\n", "          KEY: ${{ matrix.key }}\n          NODE_OPTIONS: --import ./pass.mjs\n"), env), "NODE_OPTIONS on the step");
+  assert.ok(has(plant("  check:\n    needs: plan\n", "  check:\n    needs: plan\n    env:\n      NODE_OPTIONS: --require ./pass.cjs\n"), env), "NODE_OPTIONS on the job");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"NODE_OPTIONS=--import ./pass.mjs\" >> \"$GITHUB_ENV\"\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_ENV write");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"$PWD/fake-node\" >> $GITHUB_PATH\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_PATH write, a node of its own first");
 });

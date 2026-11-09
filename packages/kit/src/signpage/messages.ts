@@ -290,7 +290,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.7";
+export const SIGNPAGE_KIT_VERSION = "1.8";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
