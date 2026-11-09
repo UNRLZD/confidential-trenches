@@ -6,10 +6,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
+import { POOL_DEPOSIT_STAGES } from "@blindfill/kit";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
-import type { Asset, DepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
+import type { Asset, DepositStatus, PoolDepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
 
 const NOW = Date.parse("2026-11-01T18:00:00Z");
@@ -214,31 +215,125 @@ test("Recent: the account's deposits from state.ops, newest first, three at most
   for (const k of ["recent", "noActivity"] as const) assert.equal(WORDS[k].draft, false, k);
 });
 
-// card deposit-to-pool (v2 A3): where the money goes. The sheet's To row names the NEAR vault (the cash home) and the
-// three pools (the kit's POOL_CHAINS). The kit's deposit.quote and deposit.dry land only in the NEAR vault, and nothing
-// yet follows money sent to a pool's address on into the pool (card pool-deposit-follow), so a pool picked is its own state: no quote,
-// no address, Get address off, whatever the amount and the dry quote say.
+// card deposit-to-pool (v2 A3) and deposit-to-pool-pools: where the money goes. The sheet's To row names the NEAR vault
+// (the cash home) and the three pools (the kit's POOL_CHAINS). A pool tile is fundable only once the signing page's
+// pool.address answers its chain (the kit's pool.address with no asset: the chain's one-time address, nothing sent);
+// while it refuses, the tile is Not available (pool-off), asks no quote and shows no address. A fundable pool's Get
+// address is pool.address with the asset and amount: its checked quote is the address drawn, and the deposit's stages
+// are the kit's pool_deposit op under that request's id, of that chain only (kit-v1.7, card pool-deposit-stages).
 
-test("the To row: the NEAR vault first, then the kit's three pools; only the vault takes a deposit from the sheet", () => {
+test("the To row: the NEAR vault first, then the kit's three pools; a pool is fundable only once pool.address answers its chain", () => {
   assert.deepEqual([...DESTS], ["near", "solana", "base", "robinhood"]);
-  assert.equal(destFundable("near"), true);
-  for (const d of ["solana", "base", "robinhood"] as const) assert.equal(destFundable(d), false, d);
+  assert.equal(destFundable("near", {}), true);
+  for (const d of ["solana", "base", "robinhood"] as const) {
+    assert.equal(destFundable(d, {}), false, `${d}: not asked yet`);
+    assert.equal(destFundable(d, { [d]: false }), false, `${d}: refused`);
+    assert.equal(destFundable(d, { [d]: true }), true, `${d}: answered`);
+  }
+  assert.equal(destFundable("base", { solana: true }), false, "another pool's answer never opens this one");
 });
 
-test("a pool picked: pool-off before any quote, in every form state; Get address off; never an address", () => {
+test("a pool pool.address refuses: pool-off before any quote, in every form state; Get address off; never an address", () => {
   for (const dest of ["solana", "base", "robinhood"] as const) {
-    for (const p of [{}, { asset: null }, { dry: { kind: "pending" } }, { amount: "1.5" }, { codeSaved: false }, { dry: { kind: "refused", code: "busy" } }] as Partial<SheetInput>[]) {
-      const s = at({ ...p, dest });
+    for (const p of [{}, { asset: null }, { dry: { kind: "pending" } }, { amount: "1.5" }, { dry: { kind: "refused", code: "busy" } }] as Partial<SheetInput>[]) {
+      const s = at({ ...p, dest, poolOpen: false });
       assert.equal(s, "pool-off", `${dest} ${JSON.stringify(p)}`);
       assert.equal(getAddressOn(s, base), false);
       assert.equal(ADDRESS_STATES.has(s), false);
     }
   }
-  assert.equal(at({ dest: "near" }), "S4.3", "the vault: the quote, Get address on");
+  assert.equal(at({ dest: "near", poolOpen: false }), "S4.3", "the vault: the quote, Get address on");
+});
+
+test("a pool pool.address answers: the form with no dry quote (deposit.dry lands in the vault only), Get address on at S4.3", () => {
+  const pool = (p: Partial<SheetInput>) => at({ dest: "solana", poolOpen: true, dry: { kind: "idle" }, ...p });
+  assert.equal(at({ dest: "solana", poolOpen: undefined }), "S4.1", "signed in, the pool's answer not back yet: loading");
+  assert.equal(pool({}), "S4.3");
+  assert.equal(getAddressOn(pool({}), base), true);
+  assert.equal(pool({ dry: { kind: "refused", code: "busy" } }), "S4.3", "a vault dry quote never draws on a pool");
+  assert.equal(pool({ amount: "1.5" }), "S4.4", "below the asset's minimum before any call");
+  assert.equal(pool({ amount: "" }), "S4.3");
+  assert.equal(getAddressOn(pool({ amount: "" }), base), true, "the tap itself parses the amount and asks nothing without one");
+  assert.equal(pool({ asset: null }), "S4.1");
+  assert.equal(pool({ checked: { kind: "pending" } }), "S4.2");
+  for (const [code, want] of [["not_available", "S4.6"], ["busy", "S4.7"], ["down", "S4.8"], ["above_max", "S4.5"], ["below_min", "S4.4"], ["quote_check_failed", "quote-refused"]] as const)
+    assert.equal(pool({ checked: { kind: "refused", code } }), want, code);
+  assert.equal(pool({ codeSaved: false }), "S4.19", "AE-02: the 12 words not saved hold a pool's address too");
+  assert.equal(at({ dest: "solana", poolOpen: false, codeSaved: false }), "S4.19", "the probe is refused while the words are not saved: Backup first, never Not available");
+  assert.equal(at({ dest: "solana", poolOpen: false, codeSaved: false, amount: "" }), "S4.3", "no amount yet, the words not saved: the form, never Not available");
+  assert.equal(at({ dest: "solana", poolOpen: undefined, signedIn: false }), "S4.3", "signed out asks nothing: the form, Get address off");
+  assert.equal(getAddressOn("S4.3", { ...base, signedIn: false }), false);
+});
+
+const POOL_TABLE: [PoolDepositStatus | null, string][] = [
+  [null, "S4.13"],
+  [{ pool: "solana", stage: "quote_checked" }, "S4.13"],
+  [{ pool: "solana", stage: "waiting", since_ms: 1 }, "S4.14"],
+  [{ pool: "solana", stage: "in_transit", since_ms: 1 }, "S4.15"],
+  [{ pool: "solana", stage: "failed", since_ms: 1 }, "S4.15"],
+  [{ pool: "solana", stage: "short", since_ms: 1 }, "S4.18"],
+  [{ pool: "solana", stage: "refunded", since_ms: 1 }, "S4.17"],
+  [{ pool: "solana", stage: "refund_move", refunded: true, since_ms: 1 }, "refund-move"],
+  [{ pool: "solana", stage: "in_pool", since_ms: 1 }, "pool-in"],
+  [{ pool: "solana", stage: "in_pool", refunded: true, since_ms: 1 }, "pool-in"],
+  [{ pool: "solana", stage: "expired" }, "S4.20"],
+];
+
+test("every pool deposit stage to its one state; Deposited (pool-in) only at in_pool, the notes read on two RPCs", () => {
+  const pooled = (status: PoolDepositStatus | null, now = NOW) => at({ dest: "solana", poolOpen: true, checked: { kind: "ok", value: checked }, status, now });
+  for (const [status, want] of POOL_TABLE) assert.equal(pooled(status), want, JSON.stringify(status));
+  assert.deepEqual(POOL_DEPOSIT_STAGES.filter((st) => pooled({ pool: "solana", stage: st, since_ms: 1 }) === "pool-in"), ["in_pool"]);
+  assert.equal(pooled({ pool: "solana", stage: "quote_checked" }, Date.parse(DEADLINE)), "S4.20", "the signed deadline with nothing sent");
+  assert.equal(pooled({ pool: "solana", stage: "waiting", since_ms: 1 }, Date.parse(DEADLINE) + 1), "S4.14", "a send seen keeps going past it");
+  for (const [, s] of POOL_TABLE) assert.equal(HELD_STATES.has(s as never), false, "a pool deposit has no held stage");
+});
+
+test("a pool_deposit op: its chain, stage and facts; only the op of the chain asked, never another chain's or a vault deposit", () => {
+  const op: Operation = { id: "p1", kind: "pool_deposit", chain: "solana", stage: "in_transit", txs: [{ chain: "solana", hash: "h" }], since_ms: 5 };
+  assert.deepEqual(poolStatusOf(op), { pool: "solana", stage: "in_transit", since_ms: 5 });
+  const ops: Operation[] = [op, { id: "d1", kind: "deposit", stage: "done", txs: [] }];
+  assert.deepEqual(poolStatusFor(ops, "p1", "solana"), { pool: "solana", stage: "in_transit", since_ms: 5 });
+  assert.equal(poolStatusFor(ops, "p1", "base"), null, "the op names Solana's pool: Base's sheet never follows it");
+  assert.equal(poolStatusFor(ops, "d1", "solana"), null, "a vault deposit is never a pool's");
+  assert.equal(poolStatusFor(ops, "nope", "solana"), null);
+  assert.equal(poolStatusFor(undefined, "p1", "solana"), null);
+});
+
+test("pool.address's answer: the quote only when it names the chain asked; another chain's, or none, is refused", () => {
+  const ans = (chain: "solana" | "base", quote?: SignpageResults["deposit.quote"]): SignpageResults["pool.address"] => ({ chain, address: "U", asset: chain === "solana" ? "SOL" : "ETH", ...(quote ? { quote } : {}) });
+  assert.deepEqual(poolQuote("solana", ans("solana", checked)), checked);
+  assert.equal(poolQuote("base", ans("solana", checked)), null, "Solana's pool answered for Base: no address drawn");
+  assert.equal(poolQuote("solana", ans("solana")), null, "an address with no checked quote: nothing follows it, never drawn");
+});
+
+test("ready to buy: the chain's pool from state.pools, Ready and Pending in its own asset", () => {
+  const pools = [
+    { chain: "solana" as const, asset: "SOL" as const, balance: "0.25", ready: "0.2" },
+    { chain: "base" as const, asset: "ETH" as const, balance: "0.01" },
+  ];
+  assert.deepEqual(poolReady(pools, "solana"), { asset: "SOL", ready: "0.2", pending: "0.05" });
+  assert.deepEqual(poolReady(pools, "base"), { asset: "ETH", ready: null, pending: "0.01" }, "no proof yet: all pending");
+  assert.deepEqual(poolReady([{ chain: "solana", asset: "SOL", balance: "0.2", ready: "0.2" }], "solana"), { asset: "SOL", ready: "0.2", pending: null });
+  assert.equal(poolReady(pools, "robinhood"), null);
+  assert.equal(poolReady(undefined, "solana"), null);
+  assert.deepEqual(poolReady([{ chain: "solana", asset: "SOL", balance: "1", ready: "1.000000000" }], "solana"), { asset: "SOL", ready: "1", pending: null });
+});
+
+test("Recent: a pool deposit is a deposit, by its stage's word", () => {
+  const pd = (id: string, stage: PoolDepositStatus["stage"], facts: object = {}) => ({ id, kind: "pool_deposit", chain: "solana", stage, txs: [], ...facts }) as Operation;
+  assert.deepEqual(recentRows([pd("a", "in_pool", { since_ms: 1 }), pd("b", "refund_move", { refunded: true, since_ms: 1 }), pd("c", "waiting", { since_ms: 1 })]).map((r) => r.word), ["waiting", "refunded", "deposited"]);
+  assert.deepEqual(recentRows([pd("q", "quote_checked"), pd("t", "in_transit", { since_ms: 1 }), pd("f", "failed", { since_ms: 1 })]).map((r) => r.word), ["processing", "processing", "waiting"]);
+  assert.deepEqual(recentRows([pd("s", "short", { since_ms: 1 }), pd("r", "refunded", { since_ms: 1 }), pd("e", "expired")]).map((r) => r.word), ["expired", "refunded", "short"]);
+  assert.deepEqual(recentRows([pd("a", "in_pool", { since_ms: 1 })]), [{ id: "a", word: "deposited" }], "no USD amount: a pool holds its own asset");
 });
 
 test("a deposit already asked follows its own stages: the destination cannot turn a vault deposit into a pool's", () => {
-  for (const [status, want] of TABLE) assert.equal(sheetState({ ...base, dest: "solana", checked: { kind: "ok", value: checked }, status }), want, JSON.stringify(status));
+  for (const [status, want] of TABLE) assert.equal(sheetState({ ...base, dest: "solana", poolOpen: true, checked: { kind: "ok", value: checked }, status }), want, JSON.stringify(status));
+});
+
+test("the pool words are the ones the owner kept on Portfolio (owner 3 Nov 09:17Z): Ready and Pending", () => {
+  assert.deepEqual([WORDS.ready.text, WORDS.pending.text], ["Ready", "Pending"]);
+  for (const k of ["ready", "pending"] as const) assert.ok(!WORDS[k].draft && WORDS[k].source.startsWith("owner 3 Nov 09:17Z"), k);
 });
 
 test("held-move-forgotten-tx: a moved-out deposit draws no Held mark and no withdraw.open", () => {

@@ -11,7 +11,11 @@
 // backup.open with the typed amount in the return view, Copy copies the checked quote's address. Card deposit-to-pool:
 // the To row in every form state, the NEAR vault and the three pools in that order, each tile its chain's own mark
 // (market/pads.ts logos) loaded; each pool picked draws pool-off with Get address off and asks no quote; the vault
-// picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn.
+// picked back draws the quote again and Get address sends deposit.quote; Recent's header is whole or not drawn. Card
+// deposit-to-pool-pools: the Solana pool, which pool.address answers (Base and Robinhood refuse), draws the form with no
+// dry quote and Get address on; its Get address sends pool.address with the chain, asset and amount only (never a vault
+// quote), and every pool_deposit stage draws its own state, the done screen (pool-in) only at in_pool with Ready and
+// Pending from state.pools; another chain's answer draws no address.
 //   node apps/terminal/test/deposit-sheet/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -67,9 +71,24 @@ const STATES = [
   ["held-not-caught-up", true, "held-not-caught-up"],
   ["held-vault-blocked", true, "held-vault-blocked"],
   ["expired", true, "S4.20"],
-  ["quote", false, "pool-off", "solana"],
+  ["pools-closed", false, "pool-off", "solana"],
   ["quote", false, "pool-off", "base"],
   ["quote", false, "pool-off", "robinhood"],
+  // card deposit-to-pool-pools: the Solana pool, which pool.address answers, through its pool_deposit op's stages
+  ["pool-quote", false, "S4.3", "solana"],
+  ["backup-first", false, "S4.19", "solana"],
+  ["pool-refused", true, "S4.6", "solana"],
+  ["pool-other-chain", true, "quote-refused", "solana"],
+  ["pool-address", true, "S4.13", "solana"],
+  ["pool-waiting", true, "S4.14", "solana"],
+  ["pool-processing", true, "S4.15", "solana"],
+  ["pool-failed", true, "S4.15", "solana"],
+  ["pool-short", true, "S4.18", "solana"],
+  ["pool-refunded", true, "S4.17", "solana"],
+  ["pool-refund-move", true, "refund-move", "solana"],
+  ["pool-in", true, "pool-in", "solana"],
+  ["pool-in-proving", true, "pool-in", "solana"],
+  ["pool-expired", true, "S4.20", "solana"],
 ];
 const DESTS = ["near", "solana", "base", "robinhood"];
 const DEST_NAMES = ["NEAR", "Solana", "Base", "Robinhood"];
@@ -118,6 +137,8 @@ async function open(browser, w, f, { tap = false, clock = "fixed", dest = null }
   page.on("request", (r) => !r.url().startsWith(BASE) && !r.url().startsWith("data:") && external.push(r.url()));
   await page.goto(`${BASE}/?f=${f}`);
   await page.waitForSelector(".dep[data-state]");
+  // the calls from the pick on (the vault, picked first, asks its dry quote for the fixture's amount as the sheet opens)
+  if (dest) await page.evaluate(() => (window.__picked = window.__calls.length));
   if (dest) await page.locator(`[data-dest="${dest}"]`).click();
   if (tap) {
     await page.waitForSelector('.dep[data-state="S4.3"]');
@@ -162,8 +183,15 @@ try {
       }));
       check(cut.length === 0, `${tag}: Recent's header cut: ${cut.join(", ")}`);
       // BAR-12: the done screen only at the kit's done
-      check((want === "S4.16") === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
-      if (["S4.3", "S4.13", "S4.15", "S4.16"].includes(want) && !boxes[want]) boxes[want] = { sheet: await rect(page, ".dep-box"), action: await rect(page, ".dfoot .dbtn") };
+      // a pool's done screen (pool-in) only at the kit's in_pool, with what its pool holds ready to buy
+      check(["S4.16", "pool-in"].includes(want) === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
+      if (want === "pool-in") {
+        const ready = await page.locator("[data-ready]").first().getAttribute("data-ready");
+        check(ready === (f === "pool-in" ? "0.4" : "none"), `${tag}: Ready ${ready}`);
+        const pend = await page.locator("[data-pending]").first().getAttribute("data-pending").catch(() => null);
+        check(pend === (f === "pool-in" ? "0.01" : "0.41"), `${tag}: Pending ${pend}`);
+      }
+      if (["S4.3", "S4.13", "S4.15", "S4.16", "pool-in"].includes(want) && !boxes[want]) boxes[want] = { sheet: await rect(page, ".dep-box"), action: await rect(page, ".dfoot .dbtn") };
       for (const d of await page.$$eval("[data-draft-copy]", (els) => els.filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(want);
@@ -177,9 +205,15 @@ try {
         check(tiles.filter((t) => t.on === "true").map((t) => t.dest).join() === (dest ?? "near"), `${tag}: To picked ${JSON.stringify(tiles.map((t) => t.on))}`);
       } else check(tiles.length === 0, `${tag}: To row outside the form states`);
       if (dest) {
-        const calls = await page.evaluate(() => window.__calls);
-        check(!calls.some((c) => c.kind === "deposit.quote"), `${tag}: a pool picked sent deposit.quote`);
-        check(await page.locator('[data-control="deposit-get"]').isDisabled(), `${tag}: Get address on for a pool`);
+        // a pool never asks the vault's quotes; its own quote is pool.address for the chain picked, with the asset and
+        // amount only; pool-off keeps Get address off; the address states draw the pool's checked quote's address
+        const calls = await page.evaluate(() => window.__calls.slice(window.__picked));
+        check(!calls.some((c) => c.kind === "deposit.quote" || c.kind === "dry"), `${tag}: a pool picked sent ${JSON.stringify(calls.filter((c) => c.kind === "deposit.quote" || c.kind === "dry"))}`);
+        const quoted = calls.filter((c) => c.kind === "pool.address" && c.params.amount !== undefined);
+        check(tap ? quoted.length === 1 && JSON.stringify(quoted[0].params) === JSON.stringify({ chain: dest, origin_asset: "nep141:wrap.near", amount: "15" }) : quoted.length === 0, `${tag}: pool.address quotes ${JSON.stringify(quoted)}`);
+        if (want === "pool-off") check(await page.locator('[data-control="deposit-get"]').isDisabled(), `${tag}: Get address on for a pool pool.address refuses`);
+        if (want === "S4.3") check(await page.locator('[data-control="deposit-get"]').isEnabled(), `${tag}: Get address off for a pool pool.address answers`);
+        if (FORM_STATES.has(want)) check(JSON.stringify(tiles.map((t) => t.dest)) === JSON.stringify(DESTS) && (await page.$$eval(".dtiles button", (els) => els.map((e) => e.getAttribute("data-fundable")))).join() === (f === "pools-closed" || f === "backup-first" ? "yes,no,no,no" : "yes,yes,no,no"), `${tag}: fundable tiles`);
         check((await page.locator(".dep").getAttribute("data-dest")) === dest, `${tag}: data-dest`);
       }
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${want}-${f}${dest ? `-${dest}` : ""}-${w.name}.png`) });
@@ -187,7 +221,7 @@ try {
     }
 
     // BAR-05 and AS-03: one sheet box and one action box through the flow, and R5's
-    for (const k of ["S4.13", "S4.15", "S4.16"]) {
+    for (const k of ["S4.13", "S4.15", "S4.16", "pool-in"]) {
       check(boxes[k] && near(boxes[k].sheet, boxes["S4.3"].sheet, 1), `@${w.name}: BAR-05 sheet ${k} ${boxes[k]?.sheet} vs S4.3 ${boxes["S4.3"]?.sheet}`);
       check(boxes[k] && near(boxes[k].action, boxes["S4.3"].action, 1), `@${w.name}: BAR-05 action ${k} ${boxes[k]?.action} vs S4.3 ${boxes["S4.3"]?.action}`);
     }
@@ -238,6 +272,15 @@ try {
       await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
       const q = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "deposit.quote");
       check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
+      await ctx.close();
+    }
+    {
+      // card deposit-to-pool-pools: the vault's refused quote stays the vault's; Solana picked after it starts unasked
+      const { ctx, page } = await open(browser, w, "quote-refused", { tap: true });
+      await page.waitForSelector('.dep[data-state="quote-refused"]', { timeout: 5_000 }).catch(() => {});
+      await page.locator('[data-dest="solana"]').click();
+      await page.waitForSelector('.dep[data-state="S4.3"]', { timeout: 5_000 }).catch(() => {});
+      check((await page.locator(".dep").getAttribute("data-state")) === "S4.3", `@${w.name}: Solana after the vault's refusal draws ${await page.locator(".dep").getAttribute("data-state")}`);
       await ctx.close();
     }
     {
