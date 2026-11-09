@@ -102,9 +102,11 @@ function rpc(c: Chain, o: Over = {}, log: string[] = []): SolanaRpc {
         const min = (params[1] as { minContextSlot?: number }).minContextSlot;
         if (min !== undefined && c.slot < min) throw new Error(`Minimum context slot has not been reached: ${c.slot} < ${min}`);
         // an answer past the kit's cap is refused, as its JSON-RPC client does (trade/solana/send.ts)
-        const answer = { context: ctx, value: (params[0] as string[]).map((a) => (c.accounts.has(a) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(c.accounts.get(a)!), "base64"] } : null)) };
+        // a page, or a mark read by its address (card exit-pool-notes: a listed restore reads every listed mark so)
+        const at = (a: string): Uint8Array | undefined => c.accounts.get(a) ?? c.marks?.get(a);
+        const answer = { context: ctx, value: (params[0] as string[]).map((a) => (at(a) !== undefined ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(at(a)!), "base64"] } : null)) };
         if (JSON.stringify({ jsonrpc: "2.0", id: 1, result: answer }).length > SOLANA_ANSWER_MAX_BYTES) throw new Error("answer too large");
-        return { context: ctx, value: (params[0] as string[]).map((a) => (c.accounts.has(a) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(c.accounts.get(a)!), "base64"] } : null)) };
+        return answer;
       }
       case "getLatestBlockhash": return { context: ctx, value: { blockhash: base58.encode(new Uint8Array(32).fill(7)), lastValidBlockHeight: 1 } };
       case "getFeeForMessage": return { context: ctx, value: o.fee ?? 10_000 };
@@ -508,6 +510,68 @@ test("restore from the words alone: every note and each spent note's W, from the
   assert.ok(r.notes.some((n) => n.ref.kind === "change" && n.leaf.value === 0n && n.leaf.leafIndex === 4n));
   assert.ok(r.notes.some((n) => n.ref.kind === "return" && n.leaf.value === 5_000_000n && n.leaf.leafIndex === 5n));
   assert.deepEqual(r.spends.map((s) => [s.l, s.j, s.withdrawn, s.w]), [[l0, 0, 50_000_000n, d.freshWallet(SEED, "sol", l0, 0).address]]);
+});
+
+// card exit-pool-notes: one RPC lists the marks by bucket (getProgramAccounts), and both RPCs read every listed mark by
+// its address (getMultipleAccounts), equal byte for byte. The two never serve getProgramAccounts (as
+// solana-rpc.publicnode.com refuses it, read 9 Nov 2026 18:40Z), and every mark is read, so neither learns which are ours.
+const noGpa = (c: Chain, url: string, log: string[] = []): SolanaRpc => {
+  const r = rpc(c, { ...MAINNET, url }, log);
+  return Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getProgramAccounts") throw new Error("Indexed requests require a personal token");
+    return r(m, p);
+  }, { url });
+};
+const lister = (c: Chain, log: string[] = []): SolanaRpc => rpc(c, { ...MAINNET, url: "https://l.example" }, log);
+
+test("listed restore: one RPC lists the marks, both read each listed mark and the pages, and the notes are the bucket scan's", async () => {
+  const { chain } = restorePool();
+  const base = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, rpcs: pair(chain, chain), gap: 4 });
+  const logs: string[][] = [[], [], []];
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain, logs[2]), rpcs: [noGpa(chain, "https://a.example", logs[0]), noGpa(chain, "https://b.example", logs[1])], gap: 4 });
+  const js = (x: unknown) => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? `${v}` : v));
+  assert.equal(js(r), js(base));
+  // the two RPCs read accounts by address only; the lister lists and reads nothing else
+  for (const k of [0, 1]) assert.ok(logs[k]!.length > 0 && logs[k]!.every((m) => m === "getMultipleAccounts"), `rpc ${k}: ${logs[k]}`);
+  assert.ok(logs[2]!.length > 0 && logs[2]!.every((m) => m === "getProgramAccounts"));
+});
+
+test("listed restore refuses a lister's lies: a hidden mark, a made-up address, a moved spent mark, an empty list, and short pages", async () => {
+  const { chain, afterSpend } = restorePool();
+  const [a, b] = [noGpa(chain, "https://a.example"), noGpa(chain, "https://b.example")];
+  const run = (l: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc] = [a, b]) => solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: l, rpcs, gap: 4 });
+  const marks = [...chain.marks!];
+  const spentKey = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const listing = (m: Map<string, Uint8Array>): SolanaRpc => lister({ ...chain, marks: m });
+  // a hidden mark: the lister leaves out one deposit's, and the pages on both RPCs count one deposit more
+  await assert.rejects(run(listing(new Map(marks.filter(([k]) => k !== marks[1]![0])))), /the pages hold 7 state and 5 label leaves for 4 deposits and 2 releases: the lister listed/);
+  // a made-up address in a bucket: both RPCs read nothing there
+  const fake = base58.encode(new Uint8Array(32).fill(9));
+  await assert.rejects(run(listing(new Map([...marks, [fake, markData(1_000_000n, 99n)]]))), new RegExp(`rpc 0: listed mark ${fake} is not on it`));
+  // our spent mark's record listed at another address, in place of its own: that address reads nothing on both RPCs
+  await assert.rejects(run(listing(new Map([...marks.filter(([k]) => k !== spentKey), [fake, chain.marks!.get(spentKey)!]]))), /listed mark \S+ is not on it/);
+  // one RPC holding another record at a listed mark's address: the two RPCs' bytes differ
+  const moved = new Map(chain.marks!);
+  moved.set(spentKey, spentData(40_000_000n, 0));
+  await assert.rejects(run(lister(chain), [a, noGpa({ ...chain, marks: moved }, "https://b.example")]), /listed mark \S+: the two RPCs' bytes differ/);
+  // a lister that answers every bucket empty while the pages count marks: the restore stops and says so
+  await assert.rejects(run(listing(new Map())), /the pages hold 7 state and 5 label leaves for 0 deposits and 0 releases: the lister listed/);
+  // short pages on both RPCs (the pool before the last deposit and release), every mark listed: refused
+  const short: Chain = { ...afterSpend, marks: chain.marks!, slot: chain.slot };
+  await assert.rejects(run(lister(chain), [noGpa(short, "https://a.example"), noGpa(short, "https://b.example")]), /the pages hold 5 state and 4 label leaves for 5 deposits and 2 releases/);
+  // a listed account with no record the program wrote (a zero-filled one of a mark's size): refused
+  // (an honest lister's memcmp holds the tag, so this one adds it to its first precommitment bucket itself)
+  const zeroed = new Map(chain.marks!);
+  zeroed.set(fake, new Uint8Array(PRE_LEN));
+  const both = { ...chain, marks: zeroed };
+  const plain = lister(chain);
+  const adds: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    const r = (await plain(m, p)) as { value: { pubkey: string }[] };
+    const f = (p[1] as { filters: [{ dataSize: number }, { memcmp: { bytes: string } }] }).filters;
+    if (f[0].dataSize === PRE_LEN && base58.decode(f[1].memcmp.bytes)[0] === 0) r.value.push({ pubkey: fake });
+    return r;
+  }, { url: "https://l.example" });
+  await assert.rejects(run(adds, [noGpa(both, "https://a.example"), noGpa(both, "https://b.example")]), /listed mark \S+: no record the program wrote/);
 });
 
 test("restore refuses two RPCs whose marks differ, a mark whose nonce is not its label, and a mark not in the state tree", async () => {

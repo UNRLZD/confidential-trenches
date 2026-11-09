@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.ts\"",
-    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/rpc.ts src/setup.ts src/scan.ts src/out.ts src/withdraw.ts scripts/record-pages.ts scripts/out-testnet.ts test/rpc.test.ts test/setup.test.ts test/replay.ts test/scan.test.ts test/out.test.ts test/out-cli.ts test/withdraw.test.ts"
+    "typecheck": "tsc --noEmit --strict --target es2023 --module nodenext --moduleResolution nodenext --allowImportingTsExtensions --erasableSyntaxOnly --skipLibCheck --types node src/rpc.ts src/setup.ts src/scan.ts src/out.ts src/withdraw.ts src/sol-rpc.ts src/sol-scan.ts scripts/record-pages.ts scripts/record-sol.ts scripts/sol-live.ts scripts/out-testnet.ts test/rpc.test.ts test/setup.test.ts test/replay.ts test/scan.test.ts test/out.test.ts test/out-cli.ts test/withdraw.test.ts test/sol-replay.ts test/sol-scan.test.ts"
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*"

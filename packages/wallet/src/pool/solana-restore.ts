@@ -288,6 +288,101 @@ function spentChange(seed64: Uint8Array, ref: NoteRef, leaf: Leaf, withdrawn: bi
   return { ref: cref, precommitment: cP, leaf: { value: cValue, label: l, commitment: cCommitment, leafIndex: BigInt(cAt) } };
 }
 
+/** Listed marks per getMultipleAccounts: solana-rpc.publicnode.com takes at most 10 accounts in one call (the kit's
+ * trade/solana/flow.ts). */
+export const SOL_MARK_READ_BATCH = 10;
+
+/**
+ * Every mark of the pool, listed by one RPC and read by two (card exit-pool-notes). `lister` runs the bucket scan's
+ * getProgramAccounts calls (the same filters: one size, the counter's bytes past its low byte, then the tag) and only
+ * names addresses; nothing it answers is a mark. Each bucket's addresses are then read by getMultipleAccounts on both
+ * `rpcs`, at or past the lister's slot, and each must be on both with the same owner (the program) and the same bytes,
+ * a record the program wrote (not zero in its first 8 bytes, its tag last) whose counter is in that bucket and no other
+ * mark's. Buckets go on until one lists fewer than it holds; a bucket of 256 is 256 real marks, so a lister cannot list
+ * without end. Every mark is read, so neither RPC learns which are the user's, and neither needs to serve
+ * getProgramAccounts (solana-rpc.publicnode.com refuses it: "Indexed requests require a personal token", read 9 Nov
+ * 2026 18:40Z). A lister that hides marks, or lists none, is found by the leaf count (solanaRestoreNotes): the pages,
+ * read on both RPCs, count every deposit and release. calls is empty: the never-closed rule is the bucket scan's, and
+ * here a mark's bytes come from both RPCs only.
+ */
+export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal?: AbortSignal, minSlots?: readonly [number, number], lagWait?: SolanaLagWait): Promise<SolanaMarksRead> {
+  checkSolanaRpcs(rpcs);
+  if (typeof lister !== "function") throw new Error("lister: an rpc");
+  if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
+  const slots = [minSlots?.[0] ?? 0, minSlots?.[1] ?? 0];
+  const out = [new Map<string, Uint8Array>(), new Map<string, Uint8Array>()] as const;
+  // both RPCs' bytes of `keys`, each at or past `min` and its own last slot
+  const read = async (keys: readonly string[], min: number): Promise<string[]> => {
+    const got = await Promise.all(([0, 1] as const).map(async (k) => {
+      const datas: string[] = [];
+      for (let i = 0; i < keys.length; i += SOL_MARK_READ_BATCH) {
+        signal?.throwIfAborted();
+        const part = keys.slice(i, i + SOL_MARK_READ_BATCH);
+        const at = Math.max(min, slots[k]!);
+        const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
+        const slot = a?.context?.slot;
+        if (!Number.isSafeInteger(slot) || (slot as number) < at || !Array.isArray(a.value) || a.value.length !== part.length) throw new Error(`rpc ${k}: getMultipleAccounts: not one account per listed mark at or past slot ${at}`);
+        slots[k] = Math.max(slots[k]!, slot as number);
+        (a.value as ({ owner?: unknown; data?: unknown } | null)[]).forEach((x, j) => {
+          if (x === null) throw new Error(`rpc ${k}: listed mark ${part[j]} is not on it`);
+          const d = x?.data;
+          if (x?.owner !== program || !Array.isArray(d) || d[1] !== "base64" || typeof d[0] !== "string") throw new Error(`rpc ${k}: listed mark ${part[j]}: not the program's account`);
+          datas.push(d[0]);
+        });
+      }
+      return datas;
+    }));
+    keys.forEach((key, j) => {
+      if (got[0][j] !== got[1][j]) throw new Error(`listed mark ${key}: the two RPCs' bytes differ`);
+    });
+    return got[0];
+  };
+  for (const z of [0, 1] as const) {
+    const size = z === 0 ? SOL_SPENT_MARK_LEN : SOL_PRE_MARK_LEN;
+    const { width, first } = COUNTER[size];
+    const byCounter = new Map<bigint, string>();
+    for (let b = 0; ; b++) {
+      signal?.throwIfAborted();
+      const high = new Uint8Array(width);
+      for (let i = 0, v = b; i < width - 1; i++, v = Math.floor(v / 256)) high[i] = v % 256;
+      high[width - 1] = SOL_MARK_TAG;
+      const filters = [{ dataSize: size }, { memcmp: { offset: COUNTER_AT + 1, bytes: base58.encode(high) } }];
+      const a = (await solanaLagRetry(() => lister("getProgramAccounts", [program, { commitment: "finalized", encoding: "base64", withContext: true, dataSlice: { offset: 0, length: 0 }, filters }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
+      const slot = a?.context?.slot;
+      if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error("lister: getProgramAccounts: not a list with its context");
+      const keys: string[] = [];
+      for (const x of a.value as { pubkey?: unknown }[]) {
+        const key = x?.pubkey;
+        let ok = false;
+        try {
+          ok = typeof key === "string" && base58.decode(key).length === 32;
+        } catch {}
+        if (!ok) throw new Error("lister: getProgramAccounts: not an address");
+        if (keys.includes(key as string) || out[z].has(key as string)) throw new Error(`lister: mark ${key as string} listed twice`);
+        keys.push(key as string);
+      }
+      const datas = await read(keys, slot as number);
+      keys.forEach((key, j) => {
+        const bytes = base64.decode(datas[j]!);
+        if (bytes.length !== size) throw new Error(`listed mark ${key}: not ${size} bytes`);
+        if (bytes.subarray(0, 8).every((v) => v === 0) || bytes[size - 1] !== SOL_MARK_TAG) throw new Error(`listed mark ${key}: no record the program wrote`);
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+        const c = width === 4 ? BigInt(view.getUint32(COUNTER_AT, true)) : view.getBigUint64(COUNTER_AT, true);
+        if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw new Error(`listed mark ${key}: counter ${c} is not in bucket ${b}`);
+        const owner = byCounter.get(c);
+        if (owner !== undefined) throw new Error(`listed mark ${key}: counter ${c} is mark ${owner}'s`);
+        byCounter.set(c, key);
+        out[z].set(key, bytes);
+      });
+      if (keys.length < SOL_MARK_BUCKET - (b === 0 ? first : 0)) break;
+    }
+  }
+  const u64 = (d: Uint8Array, at: number): bigint => new DataView(d.buffer, d.byteOffset, d.length).getBigUint64(at, true);
+  const spent = new Map([...out[0]].map(([key, d]) => [key, { withdrawn: u64(d, 0), number: new DataView(d.buffer, d.byteOffset, d.length).getUint32(8, true) }] as const));
+  const pre = new Map([...out[1]].map(([key, d]) => [key, { value: u64(d, 0), nonce: u64(d, 8) }] as const));
+  return { spent, pre, slot: Math.max(slots[0]!, slots[1]!), calls: solanaMarkCalls() };
+}
+
 export type SolanaRestoreArgs = {
   seed64: Uint8Array;
   program: string;
@@ -387,24 +482,35 @@ export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
  * Restore of the Solana pool from the 12 words, on two RPCs: the marks, then rounds of the pages and the marks again past
  * them until a read gives no new mark (header), then solanaRestore once on those marks and pages.
  */
-export async function solanaRestoreNotes(a: { /** the seed, or a SeedUse opened only for the walk's match, after every read */ seed64: Uint8Array | SeedUse; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number; /** tests only */ lagWait?: SolanaLagWait }) {
+export async function solanaRestoreNotes(a: {
+  /** the seed, or a SeedUse opened only for the walk's match, after every read */ seed64: Uint8Array | SeedUse;
+  program: string;
+  rpcs: readonly [SolanaRpc, SolanaRpc];
+  /** when given, it lists the marks and the two RPCs read each one (solanaMarksListed); else both run the bucket scan */
+  lister?: SolanaRpc;
+  signal?: AbortSignal;
+  gap?: number;
+  /** tests only */ lagWait?: SolanaLagWait;
+}) {
   const sync = solanaTreeSync(a.rpcs, a.program, a.lagWait);
   const scope = solanaPoolOf(a.program).scope;
-  const first = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait);
+  const marksAt = (minSlots?: readonly [number, number]): Promise<SolanaMarksRead> =>
+    a.lister === undefined ? solanaMarks(a.rpcs, a.program, a.signal, minSlots, a.lagWait) : solanaMarksListed(a.lister, a.rpcs, a.program, a.signal, minSlots, a.lagWait);
+  const first = await marksAt();
   let marks: SolanaMarks = first;
   // every answer each RPC gave, for the never-closed rule across reads
   const calls = solanaMarkCalls();
   solanaMarksGaps(calls, first.calls);
   for (;;) {
     const leaves = await sync.leaves(marks.slot, a.signal);
-    const read = await solanaMarks(a.rpcs, a.program, a.signal, leaves.slots, a.lagWait);
+    const read = await marksAt(leaves.slots);
     solanaMarksGaps(calls, read.calls);
     const again = solanaMarksUnion(marks, read);
     // the one rule, on the RPCs' answers alone: walk at the first read with no new mark; else read again past it
     if ([...again.spent.keys(), ...again.pre.keys()].every((key) => marks.spent.has(key) || marks.pre.has(key))) {
       // the pages hold exactly the marks' leaves (header): pages short of them, or past them, are refused on every device
       if (leaves.label.length !== marks.pre.size || leaves.state.length !== marks.pre.size + marks.spent.size)
-        throw new Error(`restore: the pages hold ${leaves.state.length} state and ${leaves.label.length} label leaves for ${marks.pre.size} deposits and ${marks.spent.size} releases`);
+        throw new Error(`restore: the pages hold ${leaves.state.length} state and ${leaves.label.length} label leaves for ${marks.pre.size} deposits and ${marks.spent.size} releases${a.lister === undefined ? "" : ": the lister listed marks the pages do not count"}`);
       return withSeed(a.seed64, (seed64) => solanaRestore({ seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
     }
     marks = again;

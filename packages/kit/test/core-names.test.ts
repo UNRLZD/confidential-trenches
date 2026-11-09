@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 45 names in all. */
+/** The values core exports, and its types: 50 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -24,8 +24,10 @@ const VALUES = [
   "readTokenStorageMin",
   // card exit-withdraw: the change index of a spent note, A's own withdrawal and A's DeleteAccount (step 6)
   "changeIndex", "buildVaultWithdrawOut", "buildDeleteOut", "SETTLE_BLOCKS", "closeRefundsRan",
+  // card exit-pool-notes: the Solana pool's restore (its listed read included), its pool and scope, its two-RPC check
+  "solanaRestoreNotes", "solanaPoolOf", "checkSolanaRpcs",
 ];
-const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor"];
+const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor", "SolanaRestoredNote", "SolanaRestoredSpend"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {
@@ -53,7 +55,7 @@ test("core re-exports the wallet's own code by relative path, not a copy", () =>
   for (const s of src.statements) {
     if (!ts.isExportDeclaration(s)) continue;
     const spec = (s.moduleSpecifier as ts.StringLiteral).text;
-    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys|deposit\/(moveout|account)|arming\/accounts)\.ts$/, spec);
+    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys|deposit\/(moveout|account)|arming\/accounts|pool\/(solana-restore|solana))\.ts$/, spec);
   }
 });
 
