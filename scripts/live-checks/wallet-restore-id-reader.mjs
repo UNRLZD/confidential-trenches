@@ -91,12 +91,15 @@ export const MARK = Object.freeze({
   // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
   ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
   // each pool scope's step 5 pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
-  // places before readDepositIds: `var hV=`the pool's own chain is not read ...`; ... i.push(`${r.label}: ${hV}`)}}`
-  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?\.push\(`\$\{[\w$]+\.label\}: \$\{\1\}`\)\}\}/g,
-  // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, held to the
-  // run's own seed (its mark), handed to that one use and zeroed when it ends; and the run's SeedUse is that request per
-  // use (a run-long lock, with the run inside one request, holds none)
-  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{[^}]{0,400}`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\5\(\6\)\)/g,
+  // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
+  // (delta review 2: no condition in front of it):
+  // `var hV=`the pool's own chain is not read ...`; ... for(let e of gV(a))i.push(`${r.label}: ${e}`);i.push(`${r.label}: ${hV}`)}}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?\)([\w$]+)\.push\(`\$\{([\w$]+)\.label\}: \$\{[\w$]+\}`\);\2\.push\(`\$\{\3\.label\}: \$\{\1\}`\)\}\}/g,
+  // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, its HMAC kept
+  // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
+  // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
+  // that request per use (a run-long lock, with the run inside one request, holds none)
+  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);

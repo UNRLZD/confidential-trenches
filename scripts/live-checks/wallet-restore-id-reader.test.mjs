@@ -258,16 +258,27 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end("l(s.some(e=>!e.endsWith(hV))?`stalled`:`done`)"), "ids_end"), 0);
   assert.equal(n(end("l(s.length>0?`stalled`:`done`)", "x"), "ids_end"), 0, "the catch pushes to another array");
   assert.equal(n(end("l(s.length>1?`stalled`:`done`)"), "ids_end"), 0);
-  const ux = (push) => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}${push}}}var yV={}`;
+  // this build's two statements: each reason idsUndone names, then the U_X reason, with nothing between them
+  const ux = (push) => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}async function vV(e,t,n,r,i){for(let r of t){let a=1;for(let e of gV(a))i.push(\`\${r.label}: \${e}\`);${push}}}var yV={}`;
   assert.equal(n(ux("i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 1);
   assert.equal(n(ux("i.push(`${r.label}: ${gV}`)"), "ids_ux_push"), 0, "another constant pushed");
   assert.equal(n(ux("i.push(`${r.label}: done`)"), "ids_ux_push"), 0);
+  // delta review 2 (P3): a condition before the push (a pool with no notes would end done, its U_X unread)
+  assert.equal(n(ux("r.notes.length>0&&i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "a condition before the U_X push");
+  assert.equal(n(ux("if(r.notes.length>0)i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "an if before the U_X push");
+  assert.equal(n(ux("x.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "pushed to another array than the reasons'");
   const lock = (check, mark, zero, use) =>
     `d=n=>r().request(Io,{mode:\`shared\`,signal:t},async()=>{if(t.throwIfAborted(),${check})throw Error(\`signed out during the restore\`);let r=await e.seed64();try{let e=re(We,c,r);if(u===null)u=e;else{let t=e.length===u.length&&e.every((e,t)=>e===u[t]);if(e.fill(0),!t)throw Error(\`${mark}\`)}return await n(r)}finally{${zero}}}),${use}`;
   const good = ["!await e.signedIn()", "other words were signed in during the restore", "r.fill(0)", "f=e=>d(async t=>e(t))"];
   assert.equal(n(lock(...good), "seed_per_use_lock"), 1);
   assert.equal(n(lock("!1", good[1], good[2], good[3]), "seed_per_use_lock"), 0, "no signed-in check");
   assert.equal(n(lock(good[0], "the words changed", good[2], good[3]), "seed_per_use_lock"), 0, "no run mark");
+  // delta review 2 (P3): a compare that is always true holds the run to no seed
+  const always = lock(...good).replace("e.every((e,t)=>e===u[t])", "e.every((e,t)=>e===e)");
+  assert.notEqual(always, lock(...good));
+  assert.equal(n(always, "seed_per_use_lock"), 0, "an always-true compare");
+  const noMark = lock(...good).replace("if(u===null)u=e;", "if(u===null)u=r;");
+  assert.equal(n(noMark, "seed_per_use_lock"), 0, "the mark is not the seed's HMAC");
   assert.equal(n(lock(good[0], good[1], "void 0", good[3]), "seed_per_use_lock"), 0, "the seed not zeroed");
   // the run-long lock: the run's SeedUse hands out one seed held for the run, not a request per use
   assert.equal(n(lock(good[0], good[1], good[2], "f=e=>e(S)"), "seed_per_use_lock"), 0, "a run-long seed");
