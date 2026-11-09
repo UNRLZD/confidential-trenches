@@ -239,6 +239,22 @@ test("S14.1 empty; S14.2 rows: deposits, withdrawals, buys and sells newest firs
   assert.equal(rows[3]!.at, null);
 });
 
+test("a trade that never moved in full (refused, not_landed, part_filled) draws no amount: its USD and units are only the ask (review P2-1)", () => {
+  for (const stage of ["refused", "not_landed", "part_filled"] as const) {
+    const ops: Operation[] = [
+      { id: "b", kind: "buy", stage, txs: [], created_ms: NOW - H, chain: "solana", token: "WTH", amount_usd: "25" },
+      { id: "s", kind: "sell", stage, txs: [], created_ms: NOW - 2 * H, chain: "solana", token: "WTH", units: "28.86" },
+    ];
+    const [b, s] = activity(ops, data());
+    assert.deepEqual([b!.usd, b!.units, s!.usd, s!.units], [null, null, null, null], stage);
+    assert.deepEqual([b!.at, b!.token, s!.chain], [NOW - H, "WTH", "solana"], `${stage}: the row keeps its time, chain and token`);
+  }
+  for (const stage of ["filled", "sent", "signed"] as const) {
+    const [b] = activity([{ id: "b", kind: "buy", stage, txs: [], created_ms: NOW, amount_usd: "25" }], data());
+    assert.equal(b!.usd, 2500n, stage);
+  }
+});
+
 test("S14.4 an exported key is a row with its address", () => {
   const rows = activity(OPS, data({ exported: [{ id: "x1", at: NOW - 3 * H, chain: "solana", token: "WTH", address: "5Ftu" }] }));
   const x = rows.find((r) => r.id === "x1")!;

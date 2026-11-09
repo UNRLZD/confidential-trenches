@@ -618,6 +618,23 @@ test("hello kit 1.8: every op with no detail and none dropped, a deposit's amoun
   assert.ok(reads(V18, ev[0], "state"));
 });
 
+test("hello kit 1.8 and the kit's own: every deposit.confirm answer as it is (no stage mapped, facts kept), each level's schema reads it; the state alone is shaped", async () => {
+  for (const [kit, schema] of [["1.8", V18], [SIGNPAGE_KIT_VERSION, NOW]] as const) {
+    const p = page();
+    p.send(hello(kit));
+    await p.ask();
+    for (const op of OPS.filter((o) => o.kind === "deposit")) {
+      const cid = await p.confirm(op.id);
+      assert.deepEqual(p.answer(cid).result, confirmOf(op.id), `${kit} deposit.confirm ${op.id}`);
+      assert.ok(reads(schema, p.answer(cid), "deposit.confirm"), `${kit} reads deposit.confirm ${op.id}`);
+    }
+    for (const [from] of MAPPED) {
+      const cid = await p.confirm(OPS.find((o) => o.stage === from)!.id);
+      assert.equal(p.answer(cid).result.stage, from, `${kit}: ${from} is never mapped to a kit-v1.4 stage`);
+    }
+  }
+});
+
 test("hello at the kit's own version: every op's detail as it is, and the kit's schema reads it", async () => {
   const p = page();
   p.send(hello(SIGNPAGE_KIT_VERSION));
