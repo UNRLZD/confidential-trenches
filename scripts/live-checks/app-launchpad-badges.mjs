@@ -12,6 +12,10 @@
 //   - no element of the row (the avatar's initials aside) has the raw id as its text;
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
+// A drawn row is matched to its served row by chain and token, never by the token alone: one address can be listed on
+// two chains (Base and Robinhood both served 0x120c76...). The row's chain comes from its link to the token page
+// (/token/<chain>/<id>, apps/terminal/src/screens/discover/Discover.tsx), the one source on the row apart from the chain
+// badge this check judges; a row with no such link is a fault.
 // After: app
 //   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -41,7 +45,7 @@ const own = (t, k) => typeof k === "string" && Object.prototype.hasOwnProperty.c
 export function rowFaults(row) {
   const bad = [];
   const s = row.served;
-  if (!s) return ["not in the lists answer the page read"];
+  if (!s) return [linkOf(row.href) || row.href === undefined ? "not in the lists answer the page read" : "no link to its token page"];
   const id = s.launchpad;
   if (id !== null && !own(PADS, id) && !NO_LOGO.includes(id)) bad.push(`launchpad ${JSON.stringify(id)} has no row in the table`);
   const pad = id !== null && own(PADS, id) ? PADS[id] : null;
@@ -92,6 +96,41 @@ export function judge(rec) {
   return { ok: lines.every((x) => x.startsWith("ok ")), lines };
 }
 
+// ------------------------------------------------------------------------------------------------ the served row
+// One token id can be listed on two chains (a Base token and a Robinhood token may share an address), so a drawn row
+// is matched to its served row by chain AND token, never by the token alone.
+/** `served` key for one chain's token. */
+export const servedKey = (chain, token) => `${chain}\n${token}`;
+
+/** The chain and token a drawn row's link to its token page names (/token/<chain>/<id>), or null. The link is the row's
+ *  own source of chain, apart from the chain badge this check judges. */
+export function linkOf(href) {
+  const m = typeof href === "string" ? /^\/token\/([a-z]+)\/([^/?#]+)$/.exec(href) : null;
+  if (!m) return null;
+  try {
+    return { chain: m[1], token: decodeURIComponent(m[2]) };
+  } catch {
+    return null;
+  }
+}
+
+/** What the lists answers served, by chain and token: [{ url, status, body }] (each chain's own snapshot only, as Discover draws it). */
+export function servedMap(answers) {
+  const served = new Map();
+  for (const a of answers) {
+    const body = a.status === 200 ? a.body : null;
+    if (!body || body.chain !== new URL(a.url).searchParams.get("chain")) continue;
+    for (const rs of Object.values(body.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string" && r.chain === body.chain) served.set(servedKey(r.chain, r.token), { launchpad: r.launchpad ?? null, chain: r.chain });
+  }
+  return served;
+}
+
+/** The served row of one drawn row (its `addr` and `href`), or null when its link names no chain or the lists hold no such row. */
+export function servedRow(served, row) {
+  const l = linkOf(row.href);
+  return l && l.token === row.addr ? (served.get(servedKey(l.chain, row.addr)) ?? null) : null;
+}
+
 // ------------------------------------------------------------------------------------------------ the live read
 /** In the frame that draws Discover: every visible row of `scope` with its badges, its leaf texts and any clipping. */
 export const READ = ({ scope, column }) => {
@@ -127,7 +166,7 @@ export const READ = ({ scope, column }) => {
     // the row's own words, not the avatar's drawn initials (two letters of the symbol, never an id)
     const texts = [...row.querySelectorAll("*")].filter((e) => e.children.length === 0 && !e.closest(".tok-av")).map((e) => e.textContent.trim()).filter(Boolean);
     const strip = (b) => (b ? { id: b.id, title: b.title, loaded: b.loaded } : null);
-    out.push({ column, addr: row.dataset.token, pad: strip(pad), chain: strip(chain), texts, clipped });
+    out.push({ column, addr: row.dataset.token, href: row.querySelector("a[href]")?.getAttribute("href") ?? null, pad: strip(pad), chain: strip(chain), texts, clipped });
   }
   return out;
 };
@@ -187,14 +226,10 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
       const shot = `${w.name}-discover.png`;
       await page.screenshot({ path: path.join(shots, shot) });
-      const served = new Map();
-      for (const a of answers) {
-        const body = a.status() === 200 ? await a.json().catch(() => null) : null;
-        // a chain's rows from its own snapshot only, as Discover draws them
-        if (body?.chain !== new URL(a.url()).searchParams.get("chain")) continue;
-        for (const rs of Object.values(body?.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string" && r.chain === body.chain) served.set(r.token, { launchpad: r.launchpad ?? null, chain: r.chain });
-      }
-      for (const r of rows) r.served = served.get(r.addr) ?? null;
+      const read = [];
+      for (const a of answers) read.push({ url: a.url(), status: a.status(), body: a.status() === 200 ? await a.json().catch(() => null) : null });
+      const served = servedMap(read);
+      for (const r of rows) r.served = servedRow(served, r);
       rec.loads.push({ width: w.name, path: new URL(target.url()).pathname, state, lists: lists ? { url: lists.url(), status: lists.status() } : null, rows, shot });
       await ctx.close();
     }
