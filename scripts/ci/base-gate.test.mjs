@@ -1,4 +1,4 @@
-// On a pull request, ci.yml runs money-gate, verify-gate, vault-sandbox's rule and quote-speed as the base commit has them, so a pull
+// On a pull request, ci.yml runs money-gate, verify-gate, vault-sandbox's rule, pr-paths' rule and quote-speed as the base commit has them, so a pull
 // request cannot change the gate that judges it; on a merge queue group, as main has them, from main (the merge base of
 // main and the group's head) to the group's head. This test finds every ci.yml step that runs a gate from
 // "$RUNNER_TEMP", replays its whole run block in a temp clone as a pull request and as a group, and checks that each
@@ -107,7 +107,7 @@ function prClone() {
   git(repo, ["checkout", "--quiet", "--detach", base]);
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.mjs`), "// probe\n");
   writeFileSync(path.join(repo, `scripts/live-checks/${PROBE}.md`), `CARD ${PROBE} / live: PASS\nMoney path: no\n`);
-  for (const g of ["money-gate", "verify-gate", "vault-sandbox", "quote-speed"]) {
+  for (const g of ["money-gate", "verify-gate", "vault-sandbox", "quote-speed", "pr-paths"]) {
     const f = path.join(repo, `scripts/ci/${g}.mjs`);
     const text = readFileSync(f, "utf8");
     writeFileSync(f, text.startsWith("#!") ? text.replace(/\n/, `\n${TAMPER}`) : TAMPER + text);
@@ -145,11 +145,14 @@ const EXPECT = {
   "vault-sandbox": /run=true: \d+ changed file\(s\) the suite reads/,
   // the head touches no file of the quote, so the base's gate decides on the head's change without a run
   "quote-speed": /quote-speed: PASS \(skip: none of \d+ changed file\(s\)/,
+  // card ci-pr-light: the head touches scripts/ci/vault-sandbox.mjs, a file every test job reads, so every job runs;
+  // a group decides nothing (each gated job reads the rule's output only on pull_request)
+  "pr-paths": /^test_mutants=true$|^a merge_group run runs every job$/m,
 };
 
-test("ci.yml runs money-gate, verify-gate, vault-sandbox's rule and quote-speed from the base on a pull request", () => {
+test("ci.yml runs money-gate, verify-gate, vault-sandbox's rule, pr-paths' rule and quote-speed from the base on a pull request", () => {
   const steps = baseGateSteps(readFileSync(CI, "utf8"));
-  assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "quote-speed", "vault-sandbox", "verify-gate"], JSON.stringify(steps, null, 2));
+  assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "pr-paths", "quote-speed", "vault-sandbox", "verify-gate"], JSON.stringify(steps, null, 2));
 });
 
 for (const [event, clone] of [["pull_request", prClone], ["merge_group", groupClone]])

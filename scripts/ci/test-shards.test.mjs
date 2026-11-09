@@ -1,7 +1,8 @@
 // Card ci-test-shards: ci.yml's test work runs as shard jobs (test-*), and the job `test`, a required check of main's
 // ruleset, passes only when every shard passed. A required check that is skipped counts as passed, so `test` must run
 // whatever its shards ended with, and fail unless each one ended in success: a shard that failed, was skipped or was
-// cancelled fails it. This reads ci.yml, replays test's own step under bash with each planted ending, and plants each
+// cancelled fails it, but for the one skip card ci-pr-light allows: on a pull request, a shard the job `changes`, itself
+// passed, said false for. This reads ci.yml, replays test's own step under bash with each planted ending, and plants each
 // way the wiring can break. It also holds scripts/ci/test-shards.mjs's split of the terminal's browser runs.
 //   node --test scripts/ci/test-shards.test.mjs
 import assert from "node:assert/strict";
@@ -45,9 +46,9 @@ function stepRun(job, name) {
 }
 
 // test's step as GitHub runs it (bash -e -o pipefail), with NEEDS as toJSON(needs) gives it: its exit status
-function replay(run, needs) {
+function replay(run, needs, event = "pull_request") {
   return spawnSync("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", run], {
-    env: { PATH: process.env.PATH, NEEDS: JSON.stringify(needs, null, 2) },
+    env: { PATH: process.env.PATH, EVENT: event, NEEDS: JSON.stringify(needs, null, 2) },
     encoding: "utf8",
   }).status;
 }
@@ -62,7 +63,8 @@ export function shardProblems(ci) {
   const needs = /^ {4}needs:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((s) => s.trim()).filter(Boolean);
   if (!needs) p.push("test has no one-line needs: [...] list");
   for (const s of shards) if (needs && !needs.includes(s)) p.push(`test does not need ${s}`);
-  for (const n of needs ?? []) if (!shards.includes(n)) p.push(`test needs ${n}, which is no shard job (test-*)`);
+  for (const n of needs ?? []) if (!shards.includes(n) && n !== "changes") p.push(`test needs ${n}, which is no shard job (test-*)`);
+  if (needs && !needs.includes("changes")) p.push("test does not need changes, so it cannot tell a planned skip from a lost shard");
   if (!/^ {4}if:.*\balways\(\)/m.test(job)) p.push("test's if has no always(): a failed shard would skip test, and a skipped required check passes");
   for (const [name, text] of Object.entries(all)) {
     if (name !== "test" && !shards.includes(name)) continue;
@@ -70,12 +72,29 @@ export function shardProblems(ci) {
     if (name !== "test" && !/^ {4}timeout-minutes:\s*\d+\s*$/m.test(text)) p.push(`${name} has no timeout of its own`);
   }
   if (!/^ {10}NEEDS: \$\{\{ toJSON\(needs\) \}\}$/m.test(job)) p.push("test's step does not read NEEDS from toJSON(needs)");
+  if (!/^ {10}EVENT: \$\{\{ github\.event_name \}\}$/m.test(job)) p.push("test's step does not read EVENT from github.event_name");
   const run = stepRun(job, "every shard passed");
   if (!run) return [...p, "test has no step named \"every shard passed\""];
-  const ended = (result) => Object.fromEntries((needs ?? shards).map((s, i) => [s, { result: i === 0 ? result : "success", outputs: {} }]));
+  // the shards each ended `result` but the first, which ended `first`; the changes job ended `plan`, saying `say` for
+  // the first shard and "true" for every other
+  const list = (needs ?? shards).filter((s) => s !== "changes");
+  const flag = (s) => s.replaceAll("-", "_");
+  const ended = (first, { plan = "success", say = "true" } = {}) => ({
+    changes: { result: plan, outputs: Object.fromEntries(list.map((s, i) => [flag(s), i === 0 ? say : "true"])) },
+    ...Object.fromEntries(list.map((s, i) => [s, { result: i === 0 ? first : "success", outputs: {} }])),
+  });
   if (replay(run, ended("success")) !== 0) p.push("test fails when every shard passed");
   for (const r of ["failure", "skipped", "cancelled"]) if (replay(run, ended(r)) === 0) p.push(`test passes when a shard is ${r}`);
   if (replay(run, {}) === 0) p.push("test passes with no shard at all");
+  if (replay(run, { changes: ended("success").changes }) === 0) p.push("test passes with no shard at all");
+  // card ci-pr-light: the planned skip passes on a pull request, and nowhere else
+  if (replay(run, ended("skipped", { say: "false" })) !== 0) p.push("test fails a pull request whose shard the changes job planned to skip");
+  for (const ev of ["merge_group", "push", "workflow_dispatch"]) if (replay(run, ended("skipped", { say: "false" }), ev) === 0) p.push(`test passes a skipped shard on ${ev}, which runs every job`);
+  for (const say of ["", "maybe"]) if (replay(run, ended("skipped", { say })) === 0) p.push(`test passes a skipped shard the changes job said "${say}" for`);
+  for (const plan of ["failure", "skipped", "cancelled"]) {
+    if (replay(run, ended("success", { plan })) === 0) p.push(`test passes when the changes job is ${plan}`);
+    if (replay(run, ended("skipped", { plan, say: "false" })) === 0) p.push(`test passes a planned skip when the changes job is ${plan}`);
+  }
   const browser = all["test-browser"];
   if (!browser) p.push("ci.yml has no test-browser shard for the terminal's browser runs");
   else {
@@ -123,13 +142,19 @@ test("ci.yml: test needs every shard and passes only when each one passed", () =
 const PLANTED = {
   "a shard missing from test's needs": [/needs: \[([^\]]*), test-vault\]/, "needs: [$1]", "test does not need test-vault"],
   "test without always()": [/if: always\(\) && github\.event_name != 'schedule'\n(\s+runs-on: ubuntu-24\.04\n\s+timeout-minutes: 5)/, "if: github.event_name != 'schedule'\n$1", "test's if has no always()"],
-  "a skipped shard read as passed": ['all(.[]; .result == "success")', 'all(.[]; .result == "success" or .result == "skipped")', "test passes when a shard is skipped"],
-  "a failed shard read as passed": ['all(.[]; .result == "success")', 'all(.[]; .result != "cancelled")', "test passes when a shard is failure"],
+  "a skipped shard read as passed": ['.value.result == "success" or', '.value.result == "success" or .value.result == "skipped" or', "test passes when a shard is skipped"],
+  "a failed shard read as passed": ['.value.result == "success" or', '.value.result != "cancelled" or', "test passes when a shard is failure"],
+  // card ci-pr-light: each way the planned skip can widen
+  "a planned skip on any event": ['$event == "pull_request" and ', "", "test passes a skipped shard on merge_group"],
+  "a skip the plan did not say": [' and $plan[(.key | gsub("-"; "_"))] == "false"', "", 'test passes a skipped shard the changes job said ""'],
+  "a skip read from a plan that did not pass": ['.changes.result == "success" and ', "", "test passes when the changes job is failure"],
+  "test without the changes job": ["needs: [changes, test-wallet,", "needs: [test-wallet,", "test does not need changes"],
+  "test without the event": ["          EVENT: ${{ github.event_name }}\n          NEEDS: ${{ toJSON(needs) }}", "          NEEDS: ${{ toJSON(needs) }}", "test's step does not read EVENT"],
   "a step that passes on anything": ['|| { echo "a shard did not pass"; exit 1; }', "|| true", "test passes when a shard is failure"],
   "a shard that may fail": [/(\n  test-scripts:\n)/, "$1    continue-on-error: true\n", "test-scripts has continue-on-error"],
   "a step that may fail in a shard": ["      - name: the EVM pool's tests\n", "      - name: the EVM pool's tests\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
   "a Foundry install that may fail": ["      - name: Foundry v1.7.1\n", "      - name: Foundry v1.7.1\n        continue-on-error: true\n", "test-scripts has continue-on-error"],
-  "a shard with no timeout": [/(\n  test-vault:\n(?:.*\n){2}) {4}timeout-minutes: \d+\n/, "$1", "test-vault has no timeout of its own"],
+  "a shard with no timeout": [/(\n  test-vault:\n(?:.*\n){3}) {4}timeout-minutes: \d+\n/, "$1", "test-vault has no timeout of its own"],
   "a browser part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: \|)/, "$1TOTAL: 2$2", "test-browser does not take its part"],
   "a mutant part count set by hand": [/(this part's share\n {8}env:\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}(\n {8}run: node)/, "$1TOTAL: 4$2", "test-mutants does not take its part"],
   "the mutant sweeps run whole in every part": ['run: node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test:mutants", "test-mutants does not run scripts/ci/test-shards.mjs mutants"],

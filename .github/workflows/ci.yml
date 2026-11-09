@@ -35,9 +35,12 @@ on:
 permissions:
   contents: read
 
-# a newer push to a pull request cancels its older run; every run on main finishes (the money re-read included)
+# a newer push to a pull request cancels its older run; every run on main finishes (the money re-read included). A merge
+# queue group's run is keyed on its group's ref (merge_group.head_ref, the gh-readonly-queue branch), which
+# ci-queue-drop.yml's run takes the moment GitHub destroys a group it did not merge, cancelling this run (card
+# ci-pr-light; ci-queue-drop.test.mjs reads both keys on recorded payloads)
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.merge_group.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -293,6 +296,57 @@ jobs:
             *) node scripts/ci/money-gate.mjs --all ;;
           esac
 
+  # Card ci-pr-light: a pull request runs a test job only when the change touches a file the job reads, and every job on
+  # merge_group, push and by hand. scripts/ci/pr-paths.mjs decides, from each unit's reads in the head checkout (a
+  # package's folder, the files a job's steps run, their imports and the paths they name); on a pull request it runs as
+  # main has it (see verify-gate), so a pull request cannot edit the rule to skip its own jobs. On any other event this
+  # job decides nothing: each gated job's if reads its output only on pull_request, so the queue and main never depend
+  # on it. A job skipped by its if reports success to a required check (GitHub's "Troubleshooting required status
+  # checks", Handling skipped but required checks: "A job is skipped by a conditional / The job reports Success"), so
+  # the required check test passes a skipped shard only on pull_request, only when this job passed and said false for
+  # it (scripts/ci/test-shards.test.mjs plants each other ending). pr-paths.test.mjs plants each rule.
+  changes:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      test_wallet: ${{ steps.decide.outputs.test_wallet }}
+      test_packages: ${{ steps.decide.outputs.test_packages }}
+      test_mutants: ${{ steps.decide.outputs.test_mutants }}
+      test_browser: ${{ steps.decide.outputs.test_browser }}
+      test_scripts: ${{ steps.decide.outputs.test_scripts }}
+      test_vault: ${{ steps.decide.outputs.test_vault }}
+      pool_solana: ${{ steps.decide.outputs.pool_solana }}
+      slither: ${{ steps.decide.outputs.slither }}
+      tests: ${{ steps.decide.outputs.tests }}
+      typecheck: ${{ steps.decide.outputs.typecheck }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: which test jobs this change can affect
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
+        run: |
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; fi
+          case "$EVENT" in
+            pull_request)
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              [ -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ] || { echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"; exit 0; }
+              node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD" ;;
+            *) echo "a $EVENT run runs every job" ;;
+          esac
+
   # Each package's own fast tests. Two heavy suites stay out of these jobs: the near-sandbox tests (a cargo test target
   # with required-features = ["sandbox"], which a plain cargo test skips) and Playwright (a package's test:e2e script,
   # never its test script), but for the terminal's in-shell run below.
@@ -305,7 +359,8 @@ jobs:
   # could pass on a shard that failed, was skipped or was cancelled, or when a shard has no timeout of its own.
   # scripts/ci/tests-run.test.mjs reads each pnpm --filter, so a package no shard selects fails it.
   test-wallet:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_wallet == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -321,6 +376,7 @@ jobs:
         run: pnpm --filter @blindfill/wallet run test
 
   test-packages:
+    needs: changes
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -336,10 +392,20 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+      # on a pull request, only the packages pr-paths.mjs selects (each that reads a changed file, and each that depends
+      # on one): its selector is empty for every package, "none" for none, else one --filter=<name> per package
       - name: every other workspace package's test script
-        run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test
+        env:
+          SELECT: ${{ github.event_name == 'pull_request' && needs.changes.outputs.tests || '' }}
+        run: |
+          if [ "$SELECT" = none ]; then echo "skip: this change touches no file another package's tests read"; exit 0; fi
+          pnpm -r --filter '!@blindfill/wallet' $SELECT --if-present --no-bail run test
       - name: every workspace package's typecheck
-        run: pnpm -r --if-present run typecheck
+        env:
+          SELECT: ${{ github.event_name == 'pull_request' && needs.changes.outputs.typecheck || '' }}
+        run: |
+          if [ "$SELECT" = none ]; then echo "skip: this change touches no file a package's typecheck reads"; exit 0; fi
+          pnpm -r $SELECT --if-present run typecheck
       - name: the deploy gate's own tests
         run: node --test apps/terminal/scripts/check-deploy.test.ts
       - name: every live check replays its recorded answers
@@ -378,7 +444,8 @@ jobs:
   # heaviest part at 536 s (eight would plan 616 s).
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   test-mutants:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_mutants == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -404,7 +471,8 @@ jobs:
   # runs its first command (the build) in every part and gives each later command to exactly one part, by the job's
   # own strategy.job-index of strategy.job-total, so a part added to the matrix or to test:e2e is never dropped.
   test-browser:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_browser == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -445,7 +513,8 @@ jobs:
         run: KIT_PROVER_E2E=1 node --test packages/kit/test/prove-e2e.test.ts
 
   test-scripts:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_scripts == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -508,7 +577,8 @@ jobs:
   # scripts/ci/retry.sh (card ci-cargo-fetch-retry: main went red twice on ark-poly, curl [56] unexpected eof, runs
   # 42146603371 and 42148449367). scripts/ci/download-retry.mjs refuses a cargo step without that fetch before it.
   test-vault:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_vault == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -528,19 +598,22 @@ jobs:
         run: cargo +1.96.0 test --locked --manifest-path contracts/vault/Cargo.toml
 
   # The required check: it runs whatever the shards ended with (always()), and passes only when each one passed. A
-  # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset.
+  # shard that failed, was skipped or was cancelled fails it; a test that skipped instead would pass the ruleset. The one
+  # skip it passes (card ci-pr-light): on a pull request, a shard the changes job, itself passed, said false for (its
+  # output named as the shard's id with _ for -).
   test:
-    needs: [test-wallet, test-packages, test-mutants, test-browser, test-scripts, test-vault]
+    needs: [changes, test-wallet, test-packages, test-mutants, test-browser, test-scripts, test-vault]
     if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: every shard passed
         env:
+          EVENT: ${{ github.event_name }}
           NEEDS: ${{ toJSON(needs) }}
         run: |
           printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          printf '%s' "$NEEDS" | jq -e 'type == "object" and length > 0 and all(.[]; .result == "success")' > /dev/null || { echo "a shard did not pass"; exit 1; }
+          printf '%s' "$NEEDS" | jq -e --arg event "$EVENT" '(.changes.outputs // {}) as $plan | .changes.result == "success" and ([to_entries[] | select(.key != "changes")] | length > 0 and all(.[]; .value.result == "success" or ($event == "pull_request" and .value.result == "skipped" and $plan[(.key | gsub("-"; "_"))] == "false")))' > /dev/null || { echo "a shard did not pass"; exit 1; }
           echo "every shard passed"
 
   # The vault's near-sandbox suite (contracts/vault/tests/harness/run.sh: the vault, the mock token and the harness's
@@ -791,7 +864,8 @@ jobs:
   # cargo-build-sbf fetches its pinned platform-tools on first use. rustc 1.96.0 for the program as the test job's; rustc
   # 1.97.1 for the LiteSVM tests, the least agave 4.3's crates (litesvm 0.17.0's runtime) build with.
   pool-solana:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.pool_solana == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -904,7 +978,8 @@ jobs:
   # scripts/ci/slither-gate.mjs fails the job on a High or Medium hit that contracts/pool-evm/slither/triage.json does
   # not list (printing the entry to add) and on a listed entry Slither no longer reports.
   slither:
-    if: github.event_name != 'schedule'
+    needs: changes
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.slither == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

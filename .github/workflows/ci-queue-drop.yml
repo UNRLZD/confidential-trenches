@@ -1,0 +1,39 @@
+# A merge queue group GitHub drops stops its CI run (card ci-pr-light).
+#
+# When a group fails, or a pull request ahead of it leaves the queue, GitHub destroys the group and deletes its
+# gh-readonly-queue/main/pr-N-<sha> branch, but ci.yml's run on that group keeps every runner it holds until its
+# jobs end: on 9 Nov five dropped groups' runs (42684845293, 42684847045, 42684849227, 42684851534, 42685422939) held
+# runners from 19:36Z. GitHub cancels no run itself ("Managing a merge queue" names no cancel; webhook docs, event
+# merge_group, action destroyed: "This happens when a pull request is removed from the queue: any group containing that
+# pull request is also destroyed", with reason merged, dequeued or invalidated).
+#
+# This workflow runs on that destroyed event and takes the group's concurrency key, the one ci.yml's run holds
+# (ci-<merge_group.head_ref>); with cancel-in-progress, a new run in a group cancels the one in progress ("Control the
+# concurrency of workflows and jobs": groups are shared across the repository's workflows, and cancel-in-progress
+# cancels "any currently running job or workflow in the same concurrency group"). A merged group's run is left alone
+# (a key of its own), so main's commit never shows a cancelled run. The pattern is chapel-lang/chapel#29274's
+# (types [checks_requested, destroyed], concurrency on merge_group.head_ref); GitHub's events page lists only
+# checks_requested for Actions, and Chapel's destroyed runs (e.g. 42687218339, which cancelled 42686293354 on
+# gh-readonly-queue/main/pr-29664-3f86289d716f1, 9 Nov 19:50Z) show the event reaching Actions.
+#
+# Its one job never starts, so a dropped group costs no runner: the run exists only to take the key.
+# scripts/ci/ci-queue-drop.test.mjs reads both workflows' keys on recorded payloads.
+name: ci-queue-drop
+
+on:
+  merge_group:
+    types: [destroyed]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.event.reason == 'merged' && format('ci-queue-merged-{0}', github.run_id) || format('ci-{0}', github.event.merge_group.head_ref) }}
+  cancel-in-progress: true
+
+jobs:
+  queue-drop:
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - run: "true"
