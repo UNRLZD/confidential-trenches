@@ -6,16 +6,18 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, checkPins, deploy, liveRuns, servedSources } from "./deploy.mjs";
 import { makeList } from "./release-list.mjs";
+import { bundle } from "./build-app.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 
@@ -36,15 +38,27 @@ function pkgWith(headers, extra = {}) {
 // the repository answers main's head `main` (HEAD's by default; a list is one head per read, the last kept), with exit
 // `lsRemote`; gh answers main's ci.yml push runs `runs` (one passed run of HEAD by default). `uploads` are the calls that
 // would send bytes (the reads any run may make)
-const HEAD = "a".repeat(40);
+// HEAD is this checkout's real commit: the deploy checks out the sha it read (delta review 2), so the stand-in names one
+const HEAD = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const OTHER = "b".repeat(40);
 const passed = (sha = HEAD, id = 1) => ({ headSha: sha, status: "completed", conclusion: "success", databaseId: id });
-function recorder({ head = HEAD, status = "", install = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
+// The clean checkout a deploy builds in (review P2-1) is made for real: git worktree add and remove, and its install
+// (--prefer-offline, about 1 s from the store), run as asked; the install in the repository (--build's) is answered.
+// `add` is git worktree add's exit (0: run for real); `checkedOut` the commits each clean checkout holds once added.
+function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
   const calls = [];
+  const checkedOut = [];
   const heads = [main].flat();
   const run = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
-    if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" : "" };
+    if (cmd === "pnpm" && args[0] === "install" && install) return { status: install, stdout: "", stderr: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" };
+    if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? spawnSync(cmd, args, { ...opts, env: { ...process.env, ...opts?.env }, encoding: "utf8" }) : { status: 0, stdout: "", stderr: "" };
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add" && add) return { status: add, stdout: "", stderr: `fatal: '${args.at(-1)}' is not a commit\n` };
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree") {
+      const r = spawnSync(cmd, args, { ...opts, encoding: "utf8" });
+      if (args[3] === "add" && r.status === 0) checkedOut.push(spawnSync("git", ["-C", args.at(-2), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim());
+      return r;
+    }
     if (cmd === "gh") return { status: 0, stdout: JSON.stringify(runs) };
     if (cmd !== "git") return { status: 0, stdout: "" };
     if (args[0] === "ls-remote") {
@@ -54,7 +68,7 @@ function recorder({ head = HEAD, status = "", install = 0, lsRemote = 0, main = 
     if (args.includes("rev-parse")) return { status: 0, stdout: head ? `${head}\n` : "" };
     return { status: 0, stdout: status };
   };
-  return { calls, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
+  return { calls, checkedOut, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 }
 // a package folder that is not there: build() throws on it, so a deploy that returns on it never built
 const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
@@ -62,12 +76,14 @@ const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
 // card signpage-release-at-deploy: a deploy uploads only a build the newest committed release names. The tests that
 // reach the upload deploy this tree's build against a releases folder whose one list names that build, so they hold on a
 // card branch that changes SIGN_HOST and cuts no release (the release is cut on main, right before the sign deploy)
-/** A releases folder whose one list, release-1, names `pkg`'s SIGN_HOST build, and its ledger: { dir, ledger }. */
-function releasedAs(pkg = PKG) {
+/** A releases folder whose one list, release-1, names `pkg`'s SIGN_HOST build and the tree `tree` (HEAD's: the list cut
+ *  from HEAD's inputs, review P1), and its ledger: { dir, ledger }. */
+const HEAD_TREE = spawnSync("git", ["-C", PKG, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).stdout.trim();
+function releasedAs(pkg = PKG, tree = HEAD_TREE) {
   const built = build(pkg);
   try {
     const dir = mkdtempSync(join(tmpdir(), "ct-signpage-released-"));
-    const text = `${JSON.stringify(makeList("release-1", { SIGN_HOST: built }, null), null, 1)}\n`;
+    const text = `${JSON.stringify({ ...makeList("release-1", { SIGN_HOST: built }, null), tree }, null, 1)}\n`;
     writeFileSync(join(dir, "release-1.json"), text);
     return { dir, ledger: { "release-1": createHash("sha256").update(text).digest("hex") } };
   } finally {
@@ -196,7 +212,7 @@ test("--build and --dry-run stop after the gate and keep the build, whose _heade
   const built = await deploy(["--build"], {}, b.run);
   assert.equal(built.code, 0, (built.err ?? []).join("\n"));
   rmSync(/gate ok on (\S+);/.exec(built.out[0])[1], { recursive: true, force: true });
-  assert.deepEqual(b.calls.map((c) => c.cmd), ["pnpm"], "--build makes no git or gh read");
+  assert.deepEqual(b.calls.map((c) => `${c.cmd} ${c.args[0]}`), ["pnpm install"], "--build makes no git or gh read: the install here only");
   const { uploads, run } = recorder();
   const r = await deploy(["--dry-run"], {}, run, undefined, {}, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
@@ -217,6 +233,49 @@ test("with the gate passed and no token, nothing is uploaded", async () => {
   assert.equal(r.code, 2);
   assert.match(r.err[0], /CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set/);
   assert.equal(uploads().length, 0);
+});
+
+// card signpage-generated-merge-free: the deploy builds index.html and app.js at HEAD from the sources, never from a
+// committed or local copy, and the newest release list still pins their bytes: a list that names another bundle (here
+// the same page with one unrelated copy change, its integrity re-pinned as build-app.mjs writes it) refuses the deploy
+test("the build's four output files are built at the deploy from the sources: a local build in the package is never copied", async () => {
+  const served = servedSources(PKG);
+  assert.deepEqual(served.filter((f) => ["index.html", "public/app.js", "public/prover-worker.js", "public/prover-thread.js"].includes(f)), []);
+  const fresh = await bundle();
+  const dir = build();
+  try {
+    assert.ok(readFileSync(join(dir, "app.js")).equals(fresh.js));
+    assert.equal(readFileSync(join(dir, "index.html"), "utf8"), fresh.html);
+    assert.ok(readFileSync(join(dir, "prover-worker.js")).equals(fresh.worker));
+    assert.ok(readFileSync(join(dir, "prover-thread.js")).equals(fresh.thread));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planted: a deploy whose fresh build of the sources the newest release list does not name is refused, nothing uploaded", async () => {
+  const other = mkdtempSync(join(tmpdir(), "ct-signpage-test-"));
+  const js = `${readFileSync(join(PKG, "public", "app.js"), "utf8")}\n/* another build */\n`;
+  cpSync(join(PKG, "public"), join(other, "public"), { recursive: true });
+  writeFileSync(join(other, "public", "app.js"), js);
+  const sri = `sha384-${createHash("sha384").update(js).digest("base64")}`;
+  writeFileSync(join(other, "index.html"), readFileSync(join(PKG, "index.html"), "utf8").replace(/integrity="[^"]+"/, `integrity="${sri}"`));
+  const stale = releasedAs(other);
+  try {
+    for (const [argv, env, code] of [[["--dry-run"], {}, 1], [[], ENV, 1]]) {
+      const rec = recorder();
+      const r = await deploy(argv, env, rec.run, undefined, signHost(rec).net, stale);
+      assert.equal(r.code, code, `${argv}: ${(r.err ?? []).join("\n")}`);
+      assert.ok(r.err.some((l) => l.includes("is not this SIGN_HOST build") && l.includes("/app.js")), `${argv}: ${r.err.join("\n")}`);
+      assert.equal(rec.uploads().length, 0, `${argv}`);
+    }
+    // and the list of this tree's own fresh build lets the same deploy through
+    const rec = recorder();
+    assert.equal((await deploy(["--dry-run"], {}, rec.run, undefined, {}, RELEASED_TREE())).code, 0);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+    rmSync(stale.dir, { recursive: true, force: true });
+  }
 });
 
 test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", async () => {
@@ -246,7 +305,7 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
   assert.equal(headless.uploads().length, 0);
   // --dry-run still builds and gates a work in progress, and exits 1 with what a deploy would refuse
-  const dry = recorder({ status: " M packages/signpage/index.html" });
+  const dry = recorder({ status: " M packages/signpage/src/main.ts" });
   const d = await deploy(["--dry-run"], {}, dry.run, undefined, {}, RELEASED_TREE());
   assert.equal(d.code, 1, (d.out ?? []).join("\n"));
   rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
@@ -254,25 +313,176 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   assert.match(d.err.join("\n"), /^REFUSED the tree has uncommitted changes/m);
 });
 
-test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the repository root) after the tree reads and before the build", async () => {
+test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile) in a clean checkout of HEAD after the tree reads, builds there, and removes it", async () => {
   const { calls, run, installs } = recorder();
   // the build of a missing package throws: the install was already asked for, after the tree and main reads
   await assert.rejects(deploy([], ENV, run, NO_PKG), /ENOENT|No such file/);
-  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? (c.args[0] === "-C" ? 2 : 0) : 0)].join(" ")), ["git rev-parse", "git status", "git ls-remote", "gh run", "pnpm install"]);
-  assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
-  assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
+  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? (c.args[0] === "-C" ? 2 : 0) : 0)].join(" ")), ["git rev-parse", "git status", "git ls-remote", "gh run", "git worktree", "pnpm install", "git worktree"]);
+  const [add, , remove] = calls.slice(4);
+  assert.deepEqual(add.args.slice(2), ["worktree", "add", "--detach", installs()[0].opts.cwd, HEAD], "the sha the deploy read");
+  assert.deepEqual(remove.args.slice(2), ["worktree", "remove", installs()[0].opts.cwd], "removed, never --force");
+  assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile", "--prefer-offline"]);
+  assert.notEqual(installs()[0].opts.cwd, dirname(dirname(PKG)), "never this checkout's node_modules");
+  assert.equal(existsSync(installs()[0].opts.cwd), false, "the clean checkout is gone");
   const dry = recorder();
   await assert.rejects(deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT|No such file/);
   assert.equal(dry.installs().length, 1, "--dry-run builds what a deploy would, so it installs too");
 });
 
-test("a failed install refuses before a token is read: no build, no upload", async () => {
+// review P2-1: pnpm store status is no lockfile check. An extra file in a dependency (poseidon-lite's constants/<n>.mjs,
+// which the bundler resolves before <n>.js) and a re-pointed symlink (packages/kit's and packages/wallet's poseidon-lite)
+// each change a local build's app.js and pass it. The deploy builds in a clean checkout of HEAD: its bytes are the clean
+// install's (PKG, built by signBuilt from CI's fresh install), whatever this checkout's node_modules hold
+test("planted: an extra file in a dependency or a re-pointed symlink passes pnpm store status and changes a local build; the deploy's build is the clean one", async () => {
+  const repo = dirname(dirname(PKG));
+  const clean = readFileSync(join(PKG, "public", "app.js"));
+  const a = mkdtempSync(join(tmpdir(), "ct-signpage-test-planted-"));
+  const sh = (cmd, args, cwd) => {
+    const r = spawnSync(cmd, args, { cwd, encoding: "utf8" });
+    assert.equal(r.status, 0, `${cmd} ${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    return r;
+  };
+  sh("git", ["-C", repo, "worktree", "add", "--detach", a, "HEAD"]);
+  // this checkout's own deploy code, committed or not (delta review 2): every tracked file it changed goes into A
+  for (const f of sh("git", ["-C", repo, "diff", "--name-only", "HEAD"]).stdout.split("\n").filter(Boolean)) {
+    if (existsSync(join(repo, f))) cpSync(join(repo, f), join(a, f));
+    else rmSync(join(a, f), { force: true });
+  }
+  const copy = mkdtempSync(join(tmpdir(), "ct-signpage-test-pl-"));
+  try {
+    sh("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], a);
+    const store = join(a, "node_modules", ".pnpm");
+    const pl = join(store, readdirSync(store).find((f) => f.startsWith("poseidon-lite@")), "node_modules", "poseidon-lite");
+    const constants = readdirSync(join(pl, "constants")).filter((f) => /^\d+\.js$/.test(f));
+    // a copy, never an edit in place: the installed files are hard links into pnpm's store
+    cpSync(pl, copy, { recursive: true });
+    writeFileSync(join(copy, "constants", "2.js"), readFileSync(join(copy, "constants", "2.js"), "utf8").replace(/'[A-Za-z0-9+/]{4}/, "'AAAA"));
+    const links = ["kit", "wallet"].map((p) => join(a, "packages", p, "node_modules", "poseidon-lite"));
+    const plants = {
+      "an extra file in a dependency": {
+        on: () => constants.forEach((f) => writeFileSync(join(pl, "constants", f.replace(/\.js$/, ".mjs")), 'export default { C: ["planted"], M: [["planted"]] };\n')),
+        off: () => constants.forEach((f) => unlinkSync(join(pl, "constants", f.replace(/\.js$/, ".mjs")))),
+      },
+      "a re-pointed symlink": {
+        on: () => links.forEach((l) => { unlinkSync(l); symlinkSync(copy, l); }),
+        off: () => links.forEach((l) => { unlinkSync(l); symlinkSync(join("..", "..", "..", "node_modules", ".pnpm", pl.slice(store.length + 1)), l); }),
+      },
+    };
+    const { deploy: deployAt } = await import(pathToFileURL(join(a, "packages", "signpage", "scripts", "deploy.mjs")).href);
+    for (const [name, plant] of Object.entries(plants)) {
+      plant.on();
+      try {
+        sh("pnpm", ["store", "status"], a); // the old check passes it
+        const local = mkdtempSync(join(tmpdir(), "ct-signpage-test-local-"));
+        sh(process.execPath, [join(a, "packages", "signpage", "scripts", "build-app.mjs"), "--out", local], a);
+        const changed = !readFileSync(join(local, "app.js")).equals(clean);
+        rmSync(local, { recursive: true, force: true });
+        assert.ok(changed, `${name}: the plant changes a local build's app.js`);
+        const rec = recorder();
+        const r = await deployAt(["--dry-run"], {}, rec.run, undefined, {});
+        const dir = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+        assert.ok(dir, `${name}: ${(r.err ?? []).join("\n")}`);
+        try {
+          assert.ok(readFileSync(join(dir, "app.js")).equals(clean), `${name}: the deploy's app.js is the clean build's`);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+        assert.equal(rec.uploads().length, 0);
+      } finally {
+        plant.off();
+      }
+    }
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", a]).status !== 0) {
+      rmSync(a, { recursive: true, force: true });
+      spawnSync("git", ["-C", repo, "worktree", "prune"]);
+    }
+  }
+});
+
+// review P1: the deploy is held to the list's tree, not only its bytes: a list naming this very build, cut from other
+// SIGN_HOST build inputs (here the empty tree's), is refused, since no clean build of HEAD was ever compared to it
+test("planted: a newest list naming this build's bytes but cut from other inputs than HEAD's refuses the deploy and --dry-run", async () => {
+  const other = releasedAs(PKG, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+  try {
+    for (const [argv, env] of [[["--dry-run"], {}], [[], ENV]]) {
+      const rec = recorder();
+      const r = await deploy(argv, env, rec.run, undefined, signHost(rec).net, other);
+      assert.equal(r.code, 1, `${argv}: ${(r.out ?? []).join("\n")}`);
+      assert.ok(!r.err.some((l) => l.includes("is not this SIGN_HOST build")), `${argv}: the bytes are the list's`);
+      assert.ok(r.err.some((l) => /^REFUSED release-1 was cut from other SIGN_HOST build inputs than HEAD's \(.+\), so no clean build of HEAD was compared to it: cut release-2/.test(l)), `${argv}: ${r.err.join("\n")}`);
+      assert.equal(rec.uploads().length, 0);
+      const kept = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+      if (kept) rmSync(kept, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed install refuses before a token is read: no build, no upload, and the clean checkout is removed", async () => {
   for (const argv of [[], ["--dry-run"]]) {
-    const { run, uploads } = recorder({ install: 1 });
+    const { run, uploads, installs, calls } = recorder({ install: 1 });
     const r = await deploy(argv, {}, run, NO_PKG);
     assert.equal(r.code, 1, (r.out ?? []).join("\n"));
     assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
     assert.equal(uploads().length, 0);
+    // M8b: the checkout the failed install ran in is gone, by git worktree remove
+    const root = installs()[0].opts.cwd;
+    assert.ok(calls.some((c) => c.cmd === "git" && c.args.slice(2).join(" ") === `worktree remove ${root}`), `${argv}`);
+    assert.equal(existsSync(root), false, `${argv}: ${root} is left`);
+  }
+});
+
+// M15: a clean checkout that cannot be made (git worktree add fails) refuses, naming the sha: no install, no build
+test("a failed git worktree add refuses with a REFUSED line: no install, no build, no upload", async () => {
+  for (const argv of [[], ["--dry-run"]]) {
+    const { run, uploads, installs } = recorder({ add: 128 });
+    const r = await deploy(argv, ENV, run, undefined, {}, RELEASED_TREE());
+    assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+    assert.ok(r.err.some((l) => l.startsWith(`REFUSED the clean checkout of ${HEAD} failed (git worktree add exit 128): fatal:`)), `${argv}: ${r.err.join("\n")}`);
+    assert.equal(r.err.at(-1), "nothing was uploaded");
+    assert.equal(installs().length, 0);
+    assert.equal(uploads().length, 0);
+  }
+});
+
+// delta review 2: HEAD can move between the deploy's read of it and the clean checkout (a checkout, a pull): the build is
+// the commit read, whose sha main is held to before the build and again before the upload, never the later HEAD
+test("planted: HEAD moves after the deploy read its sha: the clean checkout and the build are the sha's", async () => {
+  const parent = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD^1"], { encoding: "utf8" }).trim();
+  for (const argv of [["--dry-run"], []]) {
+    const rec = recorder({ head: parent }); // the sha read is HEAD^1; the repository's HEAD is past it
+    const r = await deploy(argv, ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE());
+    assert.deepEqual(rec.checkedOut, [parent], `${argv}: ${[...(r.out ?? []), ...(r.err ?? [])].join("\n")}`);
+    const kept = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+    if (kept) rmSync(kept, { recursive: true, force: true });
+  }
+});
+
+// delta review 2: the gate's prover and pin checks read this checkout's node_modules; a stale one (here: an install that
+// lacks the kit's snarkjs, as one made before it was added would) is a REFUSED line naming the install, never a throw
+test("planted: a checkout whose node_modules lacks the kit's snarkjs gets a gate problem naming the install, not a throw", async () => {
+  const repo = dirname(dirname(PKG));
+  const bare = mkdtempSync(join(tmpdir(), "ct-signpage-test-bare-"));
+  assert.equal(spawnSync("git", ["-C", repo, "worktree", "add", "--detach", bare, "HEAD"]).status, 0);
+  const dir = build();
+  try {
+    for (const f of execFileSync("git", ["-C", repo, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)) {
+      if (existsSync(join(repo, f))) cpSync(join(repo, f), join(bare, f));
+    }
+    assert.equal(spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: bare }).status, 0);
+    unlinkSync(join(bare, "packages", "kit", "node_modules", "snarkjs")); // the link only, never the store's files
+    const { checkDir: checkAt } = await import(pathToFileURL(join(bare, "packages", "signpage", "scripts", "deploy.mjs")).href);
+    const p = checkAt(dir);
+    assert.ok(p.some((l) => /^the prover check could not load a module from this checkout's node_modules \(Cannot find module 'snarkjs'.*\): run pnpm install --frozen-lockfile here, then deploy again$/.test(l)), p.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", bare]).status !== 0) {
+      rmSync(bare, { recursive: true, force: true });
+      spawnSync("git", ["-C", repo, "worktree", "prune"]);
+    }
   }
 });
 
@@ -581,7 +791,7 @@ test("planted: a build whose app.js names a harness 1Click key, or leaves a pin 
 // back, so a main block that awaits deploy() at the top level never settles once the late import starts (Node exits 13,
 // "unsettled top-level await"). Every path runs the real script on this tree with stand-ins on PATH for the reads that
 // leave the machine: git ls-remote answers HEAD as main's head and git status a clean tree (every other git call is git's),
-// gh a passed ci.yml push run of HEAD, pnpm an install that did nothing; no CLOUDFLARE_* is set, so nothing is uploaded.
+// gh a passed ci.yml push run of HEAD, pnpm an install that did nothing (the clean checkout's is pnpm's own); no CLOUDFLARE_* is set, so nothing is uploaded.
 test("deploy.mjs run as the main module reaches its gate on every path: --dry-run and a deploy through the late import of release-list.mjs, --build, --live-runs", () => {
   const repo = dirname(dirname(PKG));
   const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -593,7 +803,9 @@ test("deploy.mjs run as the main module reaches its gate on every path: --dry-ru
   };
   stub("git", `if [ "$1" = ls-remote ]; then printf '%s\\trefs/heads/main\\n' "${head}"; exit 0; fi\nif [ "$3" = status ]; then exit 0; fi\nexec "${git}" "$@"`);
   stub("gh", `printf '%s\\n' '${JSON.stringify([passed(head)])}'`);
-  stub("pnpm", "exit 0");
+  // the clean checkout's install (--prefer-offline, review P2-1) is pnpm's own, from the store: the build there needs it
+  const pnpm = execFileSync("sh", ["-c", "command -v pnpm"], { encoding: "utf8" }).trim();
+  stub("pnpm", `case "$*" in *--prefer-offline*) exec "${pnpm}" "$@";; esac\nexit 0`);
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   delete env.CLOUDFLARE_API_TOKEN;
   delete env.CLOUDFLARE_ACCOUNT_ID;
@@ -621,5 +833,53 @@ test("deploy.mjs run as the main module reaches its gate on every path: --dry-ru
     assert.deepEqual(JSON.parse(runs.stdout).checks, LIVE_CHECKS);
   } finally {
     rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// review of 31f81cbd (P3): the setup files and licences the deploy serves are the clean checkout's at the sha, never this
+// checkout's working files: an edit to an unpinned licence text here (packages/kit/zk/NOTICE) is not what is uploaded
+test("planted: an uncommitted edit to a served licence text is not in the deploy's build: the clean checkout's is", async () => {
+  const repo = dirname(dirname(PKG));
+  const a = mkdtempSync(join(tmpdir(), "ct-signpage-test-served-"));
+  assert.equal(spawnSync("git", ["-C", repo, "worktree", "add", "--detach", a, "HEAD"]).status, 0);
+  try {
+    // this checkout's own deploy code, committed or not, as the planted node_modules test runs it
+    for (const f of execFileSync("git", ["-C", repo, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)) {
+      if (existsSync(join(repo, f))) cpSync(join(repo, f), join(a, f));
+    }
+    assert.equal(spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: a }).status, 0);
+    const notice = join(a, "packages", "kit", "zk", "NOTICE");
+    const committed = execFileSync("git", ["-C", a, "show", "HEAD:packages/kit/zk/NOTICE"]);
+    writeFileSync(notice, `${readFileSync(notice, "utf8")}planted: not the commit's\n`);
+    const { deploy: deployAt } = await import(pathToFileURL(join(a, "packages", "signpage", "scripts", "deploy.mjs")).href);
+    const r = await deployAt(["--dry-run"], {}, recorder().run, undefined, {});
+    const dir = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+    assert.ok(dir, (r.err ?? []).join("\n"));
+    try {
+      assert.ok(readFileSync(join(dir, "licenses", "zk-NOTICE.txt")).equals(committed), "the served NOTICE is the commit's");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } finally {
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", "--force", a]).status !== 0) {
+      rmSync(a, { recursive: true, force: true });
+      spawnSync("git", ["-C", repo, "worktree", "prune"]);
+    }
+  }
+});
+
+// review of 31f81cbd (P3): gated() names the install only for a module that will not load; any other throw is named as it is
+test("a gate check that throws other than on a missing module is named as it is, with no install advice", async () => {
+  const { checkDir: _ } = await import("./deploy.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "ct-signpage-test-throw-"));
+  try {
+    writeFileSync(join(dir, "index.html"), "<html></html>\n");
+    mkdirSync(join(dir, "app.js")); // a folder where the pin check reads a file: EISDIR
+    const p = checkDir(dir);
+    const line = p.find((l) => l.startsWith("the 1Click pin check failed: "));
+    assert.ok(line, p.join("\n"));
+    assert.doesNotMatch(line, /pnpm install/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

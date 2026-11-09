@@ -49,10 +49,12 @@ jobs:
           path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
           key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
       - name: install gitleaks
+        id: gitleaks-bin
         run: |
           bash scripts/ci/fetch.sh ~/.cache/ci-downloads/gitleaks-8.30.1.tgz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
             https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
           tar -xzf ~/.cache/ci-downloads/gitleaks-8.30.1.tgz -C "$RUNNER_TEMP" gitleaks
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/gitleaks" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - if: steps.gitleaks-tgz.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -88,6 +90,38 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+      # card signpage-generated-merge-free (review P3-1): SIGN_HOST's bundle is build output, so the tree scan above meets
+      # it only once it is built; this builds it from the checkout's sources and scans the package with main's rules (the
+      # bundle's `TOKEN:` Circle USDC id passes by main's .gitleaks.toml rule for that exact value, as before)
+      - name: build the signing page's bundle
+        run: node packages/signpage/scripts/build-app.mjs
+      # The scan reads a folder of its own holding only the four built files (scripts/ci/sign-build-inputs.mjs
+      # SIGN_BUILD_OUTPUTS) at their repository paths, with main's rules and main's ignore file: gitleaks dir also reads the
+      # scanned folder's own .gitleaksignore, so scanning packages/signpage in place would let a pull request that adds
+      # packages/signpage/.gitleaksignore silence it (delta review 2). It ignores every gitleaks:allow mark: the tree scan
+      # honours one on a source line by design, and the bundler puts that line's secret and its mark on one minified line.
+      # The sha256 check catches a gitleaks binary that a later step swapped in $RUNNER_TEMP, and nothing more: a step can
+      # also put its own sha256sum first on PATH ($GITHUB_PATH), and on a pull request this workflow and fetch.sh are the
+      # pull request's own (only the verify and money gates run from main).
+      - name: scan the signing page's built bundle with main's rules
+        env:
+          GITLEAKS_SHA256: ${{ steps.gitleaks-bin.outputs.sha256 }}
+        run: |
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/gitleaks" | sha256sum --strict -c -
+          rules="$(mktemp -d)"
+          git show origin/main:.gitleaks.toml > "$rules/.gitleaks.toml"
+          : > "$rules/.gitleaksignore"
+          if git cat-file -e origin/main:.gitleaksignore; then
+            git show origin/main:.gitleaksignore > "$rules/.gitleaksignore"
+          fi
+          scan="$(mktemp -d)"
+          for f in packages/signpage/index.html packages/signpage/public/app.js packages/signpage/public/prover-worker.js packages/signpage/public/prover-thread.js; do
+            mkdir -p "$scan/$(dirname "$f")"
+            cp -- "$f" "$scan/$f"
+          done
+          cd "$scan"
+          "$RUNNER_TEMP/gitleaks" dir packages/signpage --config "$rules/.gitleaks.toml" \
+            --gitleaks-ignore-path "$rules/.gitleaksignore" --ignore-gitleaks-allow --redact --no-banner
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
@@ -111,6 +145,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: the terminal reaches Blindfill only through the kit's public entry
         run: pnpm run check:imports
+      # card signpage-generated-merge-free: the signing page's bundle is built from its sources wherever it is read and at
+      # every deploy, never committed, so signing page branches never conflict on it
+      - name: the signing page's build output is never committed
+        run: node scripts/ci/no-tracked-build-output.mjs
       - name: the performance table's own tests
         run: node --test scripts/perf-table.test.mjs
       - name: the README and docs/performance.md match the run records
@@ -262,8 +300,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # the whole history: release.test.mjs holds the newest SIGN_HOST release list to this runner's clean build when the
+      # list's tree has HEAD's build inputs, and reads that tree (card signpage-generated-merge-free, review P1(a))
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -279,8 +320,8 @@ jobs:
       - name: every live check replays its recorded answers
         run: node --test scripts/live-checks/*.test.mjs
       # Every SIGN_HOST and APP_HOST live check that reads only what the host serves from the build runs its own read
-      # and judge on this pull request's build: SIGN_HOST's committed index.html and public/ (the bytes its deploy
-      # serves, held to a fresh build-app.mjs build by the signpage tests above) and the terminal's vite build. A change
+      # and judge on this pull request's build: SIGN_HOST's index.html and public/, built from this checkout's sources by
+      # build-app.mjs as its deploy builds them (scripts/signpage-built.mjs), and the terminal's vite build. A change
       # that breaks one of their facts, or reshapes the code a check reads, fails here and not on the live host (card
       # signpage-check-shapes-on-build; scripts/ci/bundle-checks.mjs lists the checks left out, and why).
       - name: every bundle-reading SIGN_HOST and APP_HOST live check passes on this build

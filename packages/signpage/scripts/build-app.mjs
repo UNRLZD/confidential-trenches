@@ -4,14 +4,19 @@
 // integrity metadata (public/_headers). It also writes public/prover-worker.js, the kit's prover worker as the kit's
 // build.mjs makes it (snarkjs 0.7.5's pinned browser build, then worker.js with the setup files' pins), unchanged: the
 // prover runs on SIGN_HOST only (card signpage-prover-host; vault.md 2.14, M304 D-8), and public/prover-thread.js, the
-// one file that worker starts its threads from (the kit's build.mjs, card signpage-prover-threads). The four files are committed,
-// so the deploy's build (scripts/deploy.mjs, a copy of index.html and public/) and every harness serve exactly these
-// bytes, and a release can be checked byte for byte.
+// one file that worker starts its threads from (the kit's build.mjs, card signpage-prover-threads). The four files are build
+// output, never committed (card signpage-generated-merge-free: a committed bundle conflicted on every pair of signing
+// page branches; scripts/ci/sign-build-inputs.mjs SIGN_BUILD_OUTPUTS, held by scripts/ci/no-tracked-build-output.mjs).
+// Every reader in this repository builds them first (scripts/signpage-built.mjs signBuilt, once per process), the deploy builds
+// them at HEAD into its own folder (scripts/deploy.mjs build(), `--out`), and the release list pins their bytes, so a
+// release is still checked byte for byte.
 // The six setup files (24 MB) are not copied into public/: the deploy's build copies them from packages/kit/zk/ to
 // /assets/zk/<sha256>.<ext> (vault.md V2's end state) with copyServed below, which refuses any whose size or sha256
 // is not its pin, and the licence texts beside them to /licenses/ (the worker's header names /licenses/GPL-3.0.txt).
 //   node packages/signpage/scripts/build-app.mjs           writes public/app.js, index.html, public/prover-worker.js and public/prover-thread.js
-//   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the committed files differ from a fresh build,
+//   node packages/signpage/scripts/build-app.mjs --out <dir> [--pkg <dir>]   writes them into <dir> as served: index.html,
+//     app.js, prover-worker.js, prover-thread.js (the deploy's build), from <pkg>'s sources (this package's by default)
+//   node packages/signpage/scripts/build-app.mjs --check   exit 1 when the files on disk differ from a fresh build,
 //     or the fresh bundle carries a test path (bundleModuleProblems)
 // No test path marks a wallet as armed (card signpage-pool-kinds, carried from signpage-solana-trade): only a test writes an
 // arm record into a signing state, in its own fake store. The release build holds that: the bundle's module list has no
@@ -19,7 +24,7 @@
 // READY only from the device's own arming withdrawal, which no bundled module makes today; settleArm and moveArmRecord
 // only move a READY record on).
 import { createHash } from "node:crypto";
-import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,14 +96,36 @@ export const page = (integrity) => `<!doctype html>
 </html>
 `;
 
+/** Every tsconfig.json in a folder above `repo` (the repository root). The bundler applies the nearest tsconfig.json
+ *  above each module it transforms, so with none in the repository's own folders one above the root would be applied
+ *  (review P1(b): useDefineForClassFields false changed app.js); the build's inputs are the repository's alone. */
+/** The files a build writes, path -> bytes: in the package (public/...) or, `served`, in the served layout (--out).
+ *  build-app.test.mjs holds the package's set to SIGN_BUILD_OUTPUTS, the files CI's bundle scan copies, ignores and
+ *  scans, so a fifth output is never written unscanned (review of 31f81cbd, P3). */
+export function outputFiles({ js, html, worker, thread }, served) {
+  return served
+    ? { "index.html": html, "app.js": js, [PROVER_WORKER_FILE]: worker, [PROVER_THREAD_FILE]: thread }
+    : { "index.html": html, "public/app.js": js, [WORKER]: worker, [THREAD]: thread };
+}
+
+export function outsideTsconfigs(repo = REPO) {
+  const found = [];
+  for (let d = dirname(repo); ; d = dirname(d)) {
+    if (existsSync(join(d, "tsconfig.json"))) found.push(join(d, "tsconfig.json"));
+    if (dirname(d) === d) return found;
+  }
+}
+
 /** The networks a build is for (card signpage-pool-flow): SIGN_HOST's, and the testnet build's (Solana devnet, Base
  *  Sepolia, Robinhood testnet). The wallet's pool/network.ts reads it as __SIGN_NETWORK__, folded at build time. */
 export const NETWORKS = Object.freeze(["mainnet", "testnet"]);
 
 /** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread } as bytes, text,
  *  bytes and bytes, the chunk's module ids, and the number of chunks. */
-export async function bundle(pkg = PKG, { network = "mainnet" } = {}) {
+export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {}) {
   if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
+  const above = outsideTsconfigs(repo);
+  if (above.length) throw new Error(`a tsconfig.json above the repository root would change the build, which reads only the repository's: ${above.join(", ")}: move it away`);
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
   try {
@@ -187,12 +214,31 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (!p.length) console.log(`build-app: public/app.js, index.html, ${WORKER} and ${THREAD} match a fresh build`);
     process.exit(p.length ? 1 : 0);
   }
-  const { js, html, worker, thread } = await bundle();
-  writeFileSync(join(PKG, "public/app.js"), js);
-  writeFileSync(join(PKG, "index.html"), html);
-  writeFileSync(join(PKG, WORKER), worker);
-  writeFileSync(join(PKG, THREAD), thread);
-  console.log(`build-app: public/app.js ${js.length} bytes, ${sha384(js)}`);
+  const arg = (name) => {
+    const i = process.argv.indexOf(name);
+    if (i < 0) return undefined;
+    const v = process.argv[i + 1];
+    if (!v || v.startsWith("--")) {
+      console.error(`build-app: ${name} needs a folder`);
+      process.exit(2);
+    }
+    return v;
+  };
+  const out = arg("--out");
+  const pkg = arg("--pkg") ?? PKG;
+  const { js, html, worker, thread } = await bundle(pkg);
+  const files = outputFiles({ js, html, worker, thread }, Boolean(out));
+  const dir = out ?? pkg;
+  // each file is written beside itself and renamed into place, so a reader in another process (node --test runs test
+  // files at once, each building) reads a whole file, never a half-written one; every build of one tree is the same bytes
+  for (const [rel, bytes] of Object.entries(files)) {
+    const to = join(dir, rel);
+    mkdirSync(dirname(to), { recursive: true });
+    const tmp = `${to}.${process.pid}.tmp`;
+    writeFileSync(tmp, bytes);
+    renameSync(tmp, to);
+  }
+  console.log(`build-app: ${out ? "app.js" : "public/app.js"} ${js.length} bytes, ${sha384(js)}${out ? ` (in ${out})` : ""}`);
   console.log(`build-app: ${WORKER} ${worker.length} bytes, sha256 ${sha256(worker)}`);
   console.log(`build-app: ${THREAD} ${thread.length} bytes, sha256 ${sha256(thread)}`);
 }

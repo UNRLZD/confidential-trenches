@@ -29,7 +29,7 @@ import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
 import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
-import { jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch } from "./jito.ts";
+import { JITO_TICK_SLACK_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch } from "./jito.ts";
 
 const key = (n: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/attack/${n}`).digest());
@@ -579,6 +579,8 @@ test("M369 (M1): a rebroadcast goes to the region that took the first send only,
   const sig = (a.body as { signature: string }).signature;
   assert.equal(path!.name, "jito");
   assert.equal(path!.paceKey, engine.seen[0]!.url, "the kit paces it per region, shared by every carry rebroadcasting there");
+  // card helper-jito-pace-margin: the kit's pacer runs at the region's own pace plus the tick slack (./jito.ts)
+  assert.equal(path!.minIntervalMs, 50 + JITO_TICK_SLACK_MS);
   await assert.rejects(path!.send(b64), /block engine busy/, "the first send's second: not sent, and the kit's record says so");
   assert.equal(engine.seen.length, 1);
   await sleep(60);
@@ -587,6 +589,30 @@ test("M369 (M1): a rebroadcast goes to the region that took the first send only,
   refuse = true;
   await assert.rejects(path!.send(b64), /block engine refused/);
   assert.equal(new Set(engine.seen.map((x) => x.url)).size, 1, "never another region");
+});
+
+// Review of 48c11e3c, P3: the kit's pacer ticks on whole Date.now() ms from its last tick (packages/kit send.ts paceArm
+// and paceFire), the gate on performance.now() from the request's hand-off; at an equal interval 5-10% of ticks were
+// refused unsent. 200 ticks of the kit's rule at the path's minIntervalMs: none refused.
+test("the kit's ticks at the path's minIntervalMs are never refused by the region's gate: 200 rebroadcasts, all sent", async () => {
+  const engine = blockEngine(() => "ok");
+  let path: SolanaSendPath | undefined;
+  let b64 = "";
+  const s = mainnet({ engine, intervalMs: 20, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
+  assert.equal(code(await s.carry(body(tipped()))), "ok");
+  const min = path!.minIntervalMs!;
+  let last = Date.now();
+  let refused = 0;
+  for (let n = 0; n < 200; ) {
+    // paceArm: a timer for the rest of the interval; paceFire only once Date.now() - last reaches it
+    await sleep(Math.max(0, last + min - Date.now()));
+    if (Date.now() - last < min) continue;
+    last = Date.now();
+    n++;
+    await path!.send(b64).catch(() => refused++);
+  }
+  assert.equal(refused, 0, `${refused} of 200 ticks refused`);
+  assert.equal(engine.seen.length, 201);
 });
 
 // The review's capacity run, on the helper: the keyless limit is one request a second per region from the helper's
