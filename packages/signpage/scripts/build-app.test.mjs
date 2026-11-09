@@ -7,7 +7,7 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bundle, bundleModuleProblems, check, copyServed, SERVED, sha384 } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, outsideTsconfigs, SERVED, sha384 } from "./build-app.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { BUILD_COMMAND, runBuild, signBuilt } from "../../../scripts/signpage-built.mjs";
@@ -160,4 +160,22 @@ test("signBuilt leaves the four output files in the package as a fresh build; a 
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+});
+
+// review P1(b): the bundler applies the nearest tsconfig.json above a module, so one above the repository root (the
+// reviewer's plant: useDefineForClassFields false, app.js changed) would change the release build unseen; bundle()
+// refuses to build while one is there
+test("planted: a tsconfig.json above the repository root refuses the build before anything is bundled", async () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-above-"));
+  try {
+    mkdirSync(join(d, "repo"));
+    writeFileSync(join(d, "tsconfig.json"), JSON.stringify({ compilerOptions: { useDefineForClassFields: false } }));
+    assert.deepEqual(outsideTsconfigs(join(d, "repo")), [join(d, "tsconfig.json")]);
+    await assert.rejects(bundle(PKG, { repo: join(d, "repo") }), /tsconfig\.json above the repository root[\s\S]*useDefineForClassFields|tsconfig\.json above the repository root/);
+    rmSync(join(d, "tsconfig.json"));
+    assert.deepEqual(outsideTsconfigs(join(d, "repo")), []);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+  assert.deepEqual(outsideTsconfigs(), [], "none above this checkout");
 });

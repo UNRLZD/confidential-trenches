@@ -24,7 +24,7 @@
 // READY only from the device's own arming withdrawal, which no bundled module makes today; settleArm and moveArmRecord
 // only move a READY record on).
 import { createHash } from "node:crypto";
-import { constants, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,14 +96,27 @@ export const page = (integrity) => `<!doctype html>
 </html>
 `;
 
+/** Every tsconfig.json in a folder above `repo` (the repository root). The bundler applies the nearest tsconfig.json
+ *  above each module it transforms, so with none in the repository's own folders one above the root would be applied
+ *  (review P1(b): useDefineForClassFields false changed app.js); the build's inputs are the repository's alone. */
+export function outsideTsconfigs(repo = REPO) {
+  const found = [];
+  for (let d = dirname(repo); ; d = dirname(d)) {
+    if (existsSync(join(d, "tsconfig.json"))) found.push(join(d, "tsconfig.json"));
+    if (dirname(d) === d) return found;
+  }
+}
+
 /** The networks a build is for (card signpage-pool-flow): SIGN_HOST's, and the testnet build's (Solana devnet, Base
  *  Sepolia, Robinhood testnet). The wallet's pool/network.ts reads it as __SIGN_NETWORK__, folded at build time. */
 export const NETWORKS = Object.freeze(["mainnet", "testnet"]);
 
 /** A fresh bundle for `network` (SIGN_HOST's, mainnet, unless named): { js, html, worker, thread } as bytes, text,
  *  bytes and bytes, the chunk's module ids, and the number of chunks. */
-export async function bundle(pkg = PKG, { network = "mainnet" } = {}) {
+export async function bundle(pkg = PKG, { network = "mainnet", repo = REPO } = {}) {
   if (!NETWORKS.includes(network)) throw new Error("network: mainnet or testnet");
+  const above = outsideTsconfigs(repo);
+  if (above.length) throw new Error(`a tsconfig.json above the repository root would change the build, which reads only the repository's: ${above.join(", ")}: move it away`);
   const { build } = await import("vite");
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-app-"));
   try {
