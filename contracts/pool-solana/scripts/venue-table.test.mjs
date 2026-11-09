@@ -97,8 +97,13 @@ test("the need: the table's rent, a fee per transaction and the sweep, and mainn
   const funder = b58encode(new Uint8Array(32).fill(3));
   const steps = tableSteps(funder, funder, 1n, 255, Array.from({ length: 34 }, (_, i) => b58encode(new Uint8Array(32).fill(i + 10))), PRIORITY_MICRO_LAMPORTS);
   assert.equal(steps.length, 3, "create and extend 28, extend 6, freeze");
-  assert.deepEqual(needOf(6_461_760n, steps, PRIORITY_MICRO_LAMPORTS), { lookup_table: 6_461_760n, fees: 20_000n, priority: 80_000n, total: 6_561_760n });
-  assert.equal(needOf(1n, steps, 0n).priority, 0n);
+  assert.deepEqual(needOf(6_461_760n, steps, PRIORITY_MICRO_LAMPORTS, 650_240n), { lookup_table: 6_461_760n, fees: 20_000n, priority: 80_000n, funder_floor: 650_240n, total: 7_212_000n });
+  assert.equal(needOf(1n, steps, 0n, 0n).priority, 0n);
+  // a resume: the rest of the list in extends only, then the freeze; nothing left to add: the freeze alone
+  const rest = tableSteps(funder, funder, 1n, 255, Array.from({ length: 4 }, (_, i) => b58encode(new Uint8Array(32).fill(i + 10))), 0n, { create: false });
+  assert.deepEqual(rest.map((s) => s.step), ["lookup table: extend with 4 addresses", "lookup table: freeze (authority none)"]);
+  assert.ok(rest[0].ixs.every((x) => x.data[0] === 2));
+  assert.deepEqual(tableSteps(funder, funder, 1n, 255, [], 0n, { create: false }).map((s) => s.step), ["lookup table: freeze (authority none)"]);
   assert.match(runLine("mainnet", "pumpswap"), /^node contracts\/pool-solana\/scripts\/venue-table\.mjs --cluster mainnet --venue pumpswap --return </);
 });
 

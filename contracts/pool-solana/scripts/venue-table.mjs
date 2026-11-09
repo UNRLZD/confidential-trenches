@@ -85,7 +85,7 @@ export function recordOf(cluster, dir = DEPLOYMENTS) {
 
 /** The table's transactions for `list`, each under TX_MAX: create with the first addresses that fit, the rest in
  *  extends of as many as fit, then the freeze. Each is { step, ixs } (a priced cluster's start with its price). */
-export function tableSteps(funder, table, slot, bump, list, price) {
+export function tableSteps(funder, table, slot, bump, list, price, { create = true } = {}) {
   const head = price > 0n ? [priceIx(price)] : [];
   const fits = (ixs) => {
     const m = compileMessage(funder, ixs, "11111111111111111111111111111111");
@@ -93,26 +93,45 @@ export function tableSteps(funder, table, slot, bump, list, price) {
   };
   const steps = [];
   let at = 0;
-  for (let first = true; first || at < list.length; first = false) {
+  for (let first = true; (first && create) || at < list.length; first = false) {
     let n = list.length - at;
     const build = (k) => {
       const ix = tableIxs(funder, table, slot, bump, list.slice(at, at + k));
-      return [...head, ...(first ? [ix.create] : []), ...(k > 0 ? [ix.extend] : [])];
+      return [...head, ...(first && create ? [ix.create] : []), ...(k > 0 ? [ix.extend] : [])];
     };
     while (n > 0 && !fits(build(n))) n--;
-    if (n === 0 && !first) throw new Error("no address fits an extend");
-    steps.push({ step: first ? `lookup table: create and extend with ${n} addresses` : `lookup table: extend with ${n} addresses`, ixs: build(n) });
+    if (n === 0 && !(first && create)) throw new Error("no address fits an extend");
+    steps.push({ step: first && create ? `lookup table: create and extend with ${n} addresses` : `lookup table: extend with ${n} addresses`, ixs: build(n) });
     at += n;
   }
   steps.push({ step: "lookup table: freeze (authority none)", ixs: [...head, tableIxs(funder, table, slot, bump, []).freeze] });
   return steps;
 }
 
-/** The funder's need: the table's rent, and each transaction's fee and priority bound (the sweep's fee included). */
-export function needOf(tableRent, steps, price) {
+/** The funder's need: the table's rent still to pay (`tableRent`), each transaction's fee and priority bound (the
+ *  sweep's fee included), and the funder's own floor, rent(0): between its sends the funder must stay rent-exempt, or
+ *  the runtime refuses the send that would leave it under that (the devnet run of 9 Nov 23:12Z: its second extend was
+ *  refused "insufficient funds for rent"). The sweep sends the floor back with the rest. */
+export function needOf(tableRent, steps, price, floor) {
   const fees = BigInt(steps.length + 1) * FEE_PER_SIGNATURE;
   const priority = steps.reduce((s, x) => s + (BigInt(x.ixs.filter((i) => i.program !== "ComputeBudget111111111111111111111111111111").length) * CU_PER_IX * price + 999_999n) / 1_000_000n, 0n);
-  return { lookup_table: tableRent, fees, priority, total: tableRent + fees + priority };
+  return { lookup_table: tableRent, fees, priority, funder_floor: floor, total: tableRent + fees + priority + floor };
+}
+
+export const SLOT_HASHES = "SysvarS1otHashes111111111111111111111111111";
+/** How far back from the SlotHashes sysvar's newest entry the table's slot is taken (pool-table-devnet.mjs's way): the
+ *  create is refused "is not a recent slot" (invalid instruction data) unless the node that runs it holds that slot in
+ *  its SlotHashes, and a load-balanced RPC's getSlot can come from a node ahead of the one that simulates. */
+export const SLOT_BACK = 32;
+export const CREATE_TRIES = 3;
+/** A recent slot as `call` holds it: entry SLOT_BACK (or its oldest) of its SlotHashes sysvar at confirmed. */
+export async function recentSlot(call) {
+  const v = (await call("getAccountInfo", [SLOT_HASHES, { encoding: "base64", commitment: "confirmed", dataSlice: { offset: 0, length: 8 + 40 * (SLOT_BACK + 1) } }])).value;
+  if (!v || v.owner !== "Sysvar1111111111111111111111111111111111111") throw new Error("no SlotHashes sysvar");
+  const d = Buffer.from(v.data[0], "base64");
+  const held = Math.min(d.length >= 8 ? Number(d.readBigUInt64LE(0)) : 0, Math.floor((d.length - 8) / 40));
+  if (held < 1) throw new Error("the SlotHashes sysvar holds no slot");
+  return d.readBigUInt64LE(8 + 40 * Math.min(SLOT_BACK, held - 1));
 }
 
 /** The paste line for a venue on a cluster. */
@@ -132,7 +151,8 @@ export async function plan(cluster, venue, { fetchFn = fetch, dir = DEPLOYMENTS 
   const list = kit.solanaPoolVenueTableList({ program: record.program_id, pool: record.pool }, tv);
   const rent = await kit.readSolanaRent(call);
   const tableRent = kit.solanaRentMin(rent, TABLE_META + 32 * list.length);
-  return { cluster, venue, c, call, file, record, tv, list, tableRent };
+  const rentOf = (n) => kit.solanaRentMin(rent, n);
+  return { cluster, venue, c, call, file, record, tv, list, tableRent, rentOf };
 }
 
 /** The journal beside the key: every signed transaction, the table and the record's venue, written at each change. */
@@ -196,39 +216,48 @@ async function run(p, { returnTo, keyDir = null }) {
       const r = await read2(p, jr.j.table);
       if (r[0] && r[0].owner === ALT_PROGRAM && same2(r)) (t = { address: jr.j.table, slot: BigInt(jr.j.slot), bump: jr.j.bump }), (held = r[0]);
     }
-    const steps0 = tableSteps(funder.id, "11111111111111111111111111111111", 0n, 255, list, c.price);
-    const need = needOf(p.tableRent, steps0, c.price);
+    // what the chain holds decides where the run goes on: nothing (create), a prefix of the list under the funder (extend
+    // the rest), the list under the funder (freeze), the list frozen (record); anything else stops with the table named
+    const got = [];
+    if (held) for (let i = TABLE_META; i < held.data.length; i += 32) got.push(b58encode(held.data.subarray(i, i + 32)));
+    const have2 = !held ? "none" : tableProblems(held, list, null).length === 0 ? "frozen" : "partial";
+    if (have2 === "partial" && (held.data[21] !== 1 || b58encode(held.data.subarray(22, 54)) !== funder.id || got.length > list.length || got.some((a, i) => a !== list[i]))) {
+      throw new Error(`lookup table ${t.address} is not the funder's or not a prefix of the list: ${tableProblems(held, list, funder.id).join("; ")}`);
+    }
+    const P0 = "11111111111111111111111111111111";
+    const left = have2 === "frozen" ? [] : tableSteps(funder.id, t?.address ?? P0, t?.slot ?? 0n, t?.bump ?? 255, list.slice(got.length), c.price, { create: have2 === "none" });
+    const owed = have2 === "frozen" ? 0n : p.rentOf(TABLE_META + 32 * list.length) - (held ? p.rentOf(TABLE_META + 32 * got.length) : 0n);
+    const need = needOf(owed, left, c.price, have2 === "frozen" ? 0n : p.rentOf(0));
     const have = await balance2(p, funder.id);
-    if (!held && have < need.total) {
-      log(`send ${need.total} lamports (${solOf(need.total)} SOL) to the funder ${funder.id} on ${cluster}, from ${returnTo}: the table's rent ${need.lookup_table}, fees ${need.fees}, priority ${need.priority}`);
-      for (let b = have; b < need.total; b = await balance2(p, funder.id)) {
-        if (b > 0n) log(`the funder holds ${b}: waiting for ${need.total}`);
-        await sleep(10_000);
-      }
+    if (have < need.total) {
+      log(`send ${need.total - have} lamports (${solOf(need.total - have)} SOL) to the funder ${funder.id} on ${cluster}, from ${returnTo}: it needs ${need.total} (the table's rent ${need.lookup_table}, fees ${need.fees}, priority ${need.priority}, its own floor ${need.funder_floor}, which comes back) and holds ${have}`);
+      for (let b = have; b < need.total; b = await balance2(p, funder.id)) await sleep(10_000);
       log(`the funder holds at least ${need.total} on both RPCs`);
     }
-    if (!t) {
-      const slot = BigInt(await p.call[0]("getSlot", [{ commitment: "finalized" }]));
-      const at = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);
-      t = { address: at.address, slot, bump: at.bump };
-      Object.assign(jr.j, { table: t.address, slot: String(slot), bump: t.bump });
-      jr.save();
+    if (have2 === "none") {
+      // the create at a slot the sending node holds; refused as not recent (nothing lands), it is built again from a new read
+      for (let i = 1; ; i++) {
+        const slot = await recentSlot(p.call[0]);
+        const at = pda([funder.pub, le(slot, 8)], ALT_PROGRAM);
+        t = { address: at.address, slot, bump: at.bump };
+        Object.assign(jr.j, { table: t.address, slot: String(slot), bump: t.bump });
+        jr.save();
+        const first = tableSteps(funder.id, t.address, t.slot, t.bump, list, c.price)[0];
+        try {
+          await sc(first.step, first.ixs);
+          break;
+        } catch (e) {
+          if (i >= CREATE_TRIES || !/invalid instruction data|not a recent slot/i.test(String(e?.message)) || (await read2(p, t.address, "confirmed"))[0]) throw e;
+          log(`slot ${slot} is not recent on the sending node: reading again (try ${i + 1} of ${CREATE_TRIES})`);
+        }
+      }
+      const n0 = tableSteps(funder.id, t.address, t.slot, t.bump, list, c.price)[0].ixs.find((x) => x.data[0] === 2);
+      const done = n0 ? Number(Buffer.from(n0.data).readBigUInt64LE(4)) : 0;
+      for (const s of tableSteps(funder.id, t.address, t.slot, t.bump, list.slice(done), c.price, { create: false }).slice(0, -1)) await sc(s.step, s.ixs);
+    } else if (have2 === "partial") {
+      for (const s of left.slice(0, -1)) await sc(s.step, s.ixs);
     }
     const steps = tableSteps(funder.id, t.address, t.slot, t.bump, list, c.price);
-    // what the chain holds decides where the run goes on: nothing (create), a prefix under the funder (extend the rest),
-    // the list under the funder (freeze), the list frozen (done); anything else stops with the table named
-    let have2 = held ? tableProblems(held, list, null).length === 0 ? "frozen" : "partial" : "none";
-    if (have2 === "none") {
-      for (const s of steps.slice(0, -1)) await sc(s.step, s.ixs);
-    } else if (have2 === "partial") {
-      const got = [];
-      for (let i = TABLE_META; i < held.data.length; i += 32) got.push(b58encode(held.data.subarray(i, i + 32)));
-      if (held.data[21] !== 1 || b58encode(held.data.subarray(22, 54)) !== funder.id || got.some((a, i) => a !== list[i])) throw new Error(`lookup table ${t.address} is not the funder's or not a prefix of the list: ${tableProblems(held, list, funder.id).join("; ")}`);
-      if (got.length < list.length) {
-        const rest = tableSteps(funder.id, t.address, t.slot, t.bump, list.slice(got.length), c.price).slice(0, -1).map((s, i) => (i === 0 ? { step: s.step.replace("create and extend", "extend"), ixs: s.ixs.filter((x) => x.data[0] !== 0) } : s));
-        for (const s of rest) await sc(s.step, s.ixs);
-      }
-    }
     if (have2 !== "frozen") {
       await readBack(p, t.address, list, funder.id);
       log(`lookup table ${t.address} holds the ${list.length} addresses on both RPCs at finalized, the funder its authority; freezing it`);
@@ -278,7 +307,7 @@ async function dryRun(p) {
   const slot = BigInt(await p.call[0]("getSlot", [{ commitment: "finalized" }]));
   const t = pda([probe.pub, le(slot, 8)], ALT_PROGRAM);
   const steps = tableSteps(probe.id, t.address, slot, t.bump, p.list, p.c.price);
-  const need = needOf(p.tableRent, steps, p.c.price);
+  const need = needOf(p.tableRent, steps, p.c.price, p.rentOf(0));
   const bh = (await p.call[0]("getLatestBlockhash", [{ commitment: "confirmed" }])).value.blockhash;
   log(`${p.cluster}: program ${p.record.program_id}, pool ${p.record.pool}; the ${p.venue} venue read at finalized on ${p.c.rpcs.join(" and ")}, the same bytes`);
   log(`the table will freeze these ${p.list.length} addresses, in this order (the kit's solanaPoolVenueTableList):`);
@@ -287,7 +316,7 @@ async function dryRun(p) {
     const size = Buffer.from(signTx(compileMessage(probe.id, s.ixs, bh), [probe]).base64, "base64").length;
     log(`built: ${s.step}: ${size} bytes`);
   }
-  log(`cost: ${need.total} lamports = ${solOf(need.total)} SOL (the table's rent ${need.lookup_table} = ${solOf(need.lookup_table)} SOL, locked for good in the frozen table; fees ${need.fees}; priority ${need.priority}); the rest comes back`);
+  log(`cost: ${need.total} lamports = ${solOf(need.total)} SOL (the table's rent ${need.lookup_table} = ${solOf(need.lookup_table)} SOL, locked for good in the frozen table; fees ${need.fees}; priority ${need.priority}; the funder's own floor ${need.funder_floor}, which comes back); the rest comes back`);
   log(`the run: ${runLine(p.cluster, p.venue)}`);
 }
 
