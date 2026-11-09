@@ -2,28 +2,44 @@
  "good": {
   "key": "wallet-restore-id-reader",
   "url": "local build",
-  "at": "2026-11-09T01:02:21.189Z",
+  "at": "2026-11-09T02:54:06.118Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-uP71X3IKA1oPrRgOVJ2GZxbY0guH1aEAVBK5B/BxVYrMXpYCLZ1QVwEMRsW5RJVP",
+   "integrity": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 797840,
-   "sha384": "sha384-uP71X3IKA1oPrRgOVJ2GZxbY0guH1aEAVBK5B/BxVYrMXpYCLZ1QVwEMRsW5RJVP",
+   "bytes": 810182,
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
-    "reach_misses": 1
+    "reach_misses": 1,
+    "id_hex": 1,
+    "id_storage": 1,
+    "id_intents": 1,
+    "id_rank": 1,
+    "id_pass_meet": 1,
+    "id_pass_stale": 1,
+    "ids_margin": 1,
+    "ids_stop": 1,
+    "ids_undone": 1,
+    "ids_ux_unread": 1,
+    "ids_catch": 1,
+    "ids_drift": 1,
+    "seed_per_use": 1,
+    "ids_end": 1,
+    "ids_ux_push": 1,
+    "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "66a9b275f19da6d1ddb67b52b249d234f6666c633d5d118cf51e5bd8cf2143df"
+   "unused": "d7b0c3474aa1b25076b1ae3d2d0bd21da75c1ef52f1777bef5685283169c276a"
   },
   "rpc": {
    "rpc_0": {
@@ -43,6 +59,11 @@
       "http": 200,
       "acao": "*",
       "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
     },
     "unused": {
@@ -55,7 +76,17 @@
       "http": 200,
       "acao": "*",
       "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
     }
    },
    "rpc_1": {
@@ -75,6 +106,11 @@
       "http": 200,
       "acao": "*",
       "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
     },
     "unused": {
@@ -87,201 +123,25 @@
       "http": 200,
       "acao": "*",
       "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
     }
    }
   }
  },
  "bad_main_bundle": {
   "key": "wallet-restore-id-reader",
-  "url": "local build of main-1e1bc558",
-  "at": "2026-11-08T22:20:29.167Z",
-  "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
-  "index": {
-   "status": 200,
-   "scripts": 1,
-   "src": "/app.js",
-   "integrity": "sha384-WcXlV7R4ceI6g8xecTqQT+rR3R2p1GCieB/9CviXLSqxfg96pGb9al6Q3k2DDuYg",
-   "module": true
-  },
-  "app": {
-   "status": 200,
-   "bytes": 795132,
-   "sha384": "sha384-WcXlV7R4ceI6g8xecTqQT+rR3R2p1GCieB/9CviXLSqxfg96pGb9al6Q3k2DDuYg",
-   "markers": {
-    "reach_error": 0,
-    "reach_floor": 0,
-    "reach_misses": 0
-   }
-  },
-  "ids": {
-   "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "658e1d438014629a5f164e4546cea1039f58a5c4330084fa3845b50f306bfbb0"
-  },
-  "rpc": {
-   "rpc_0": {
-    "preflight": {
-     "http": 200,
-     "acao": "*",
-     "acam": "*",
-     "acah": "*"
-    },
-    "registered": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "registered"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "account"
-     }
-    },
-    "unused": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "null"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "UNKNOWN_ACCOUNT"
-     }
-    }
-   },
-   "rpc_1": {
-    "preflight": {
-     "http": 204,
-     "acao": "https://confidential.unrealized.trade",
-     "acam": "POST",
-     "acah": "content-type"
-    },
-    "registered": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "registered"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "account"
-     }
-    },
-    "unused": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "null"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "UNKNOWN_ACCOUNT"
-     }
-    }
-   }
-  }
- },
- "bad_live_before": {
-  "key": "wallet-restore-id-reader",
-  "url": "https://confidential.unrealized.trade",
-  "at": "2026-11-08T22:20:30.328Z",
-  "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
-  "index": {
-   "status": 200,
-   "scripts": 1,
-   "src": "/app.js",
-   "integrity": "sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ",
-   "module": true
-  },
-  "app": {
-   "status": 200,
-   "bytes": 788109,
-   "sha384": "sha384-C8yTRZUU8uVNDCUv88eUMoBE4JrYgzhUPqeOSmmQ/YniUVLtl64cjOo774Qwy/LJ",
-   "markers": {
-    "reach_error": 0,
-    "reach_floor": 0,
-    "reach_misses": 0
-   }
-  },
-  "ids": {
-   "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "ffbfdee1e85b293363154717caa6f4068ff4f2b96f38b743dd904fa491dc7a89"
-  },
-  "rpc": {
-   "rpc_0": {
-    "preflight": {
-     "http": 200,
-     "acao": "*",
-     "acam": "*",
-     "acah": "*"
-    },
-    "registered": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "registered"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "account"
-     }
-    },
-    "unused": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "null"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "UNKNOWN_ACCOUNT"
-     }
-    }
-   },
-   "rpc_1": {
-    "preflight": {
-     "http": 204,
-     "acao": "https://confidential.unrealized.trade",
-     "acam": "POST",
-     "acah": "content-type"
-    },
-    "registered": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "registered"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "account"
-     }
-    },
-    "unused": {
-     "storage": {
-      "http": 200,
-      "acao": "*",
-      "read": "null"
-     },
-     "account": {
-      "http": 200,
-      "acao": "*",
-      "read": "UNKNOWN_ACCOUNT"
-     }
-    }
-   }
-  }
- },
- "bad_no_cors": {
-  "key": "wallet-restore-id-reader",
-  "url": "local build",
-  "at": "2026-11-08T22:20:30.998Z",
+  "url": "local build of main-610143c2",
+  "at": "2026-11-09T01:51:11.789Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
@@ -297,12 +157,28 @@
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
-    "reach_misses": 1
+    "reach_misses": 1,
+    "id_hex": 0,
+    "id_storage": 0,
+    "id_intents": 0,
+    "id_rank": 0,
+    "id_pass_meet": 0,
+    "id_pass_stale": 0,
+    "ids_margin": 0,
+    "ids_stop": 0,
+    "ids_undone": 0,
+    "ids_ux_unread": 0,
+    "ids_catch": 0,
+    "ids_drift": 0,
+    "seed_per_use": 0,
+    "ids_end": 0,
+    "ids_ux_push": 0,
+    "seed_per_use_lock": 0
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "0ab69ac52ba2fab228462d581282b07a72852aaba346808f45892efd474482dd"
+   "unused": "74fed42566a068a7ed2722c96cdc8b154e7f45f61db72576e3017b6d66fd5f40"
   },
   "rpc": {
    "rpc_0": {
@@ -322,6 +198,11 @@
       "http": 200,
       "acao": "*",
       "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
     },
     "unused": {
@@ -334,7 +215,295 @@
       "http": 200,
       "acao": "*",
       "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
      }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
+    }
+   },
+   "rpc_1": {
+    "preflight": {
+     "http": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "acam": "POST",
+     "acah": "content-type"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
+    }
+   }
+  }
+ },
+ "bad_live_before": {
+  "key": "wallet-restore-id-reader",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-09T01:51:13.288Z",
+  "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 797415,
+   "sha384": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
+   "markers": {
+    "reach_error": 1,
+    "reach_floor": 1,
+    "reach_misses": 1,
+    "id_hex": 0,
+    "id_storage": 0,
+    "id_intents": 0,
+    "id_rank": 0,
+    "id_pass_meet": 0,
+    "id_pass_stale": 0,
+    "ids_margin": 0,
+    "ids_stop": 0,
+    "ids_undone": 0,
+    "ids_ux_unread": 0,
+    "ids_catch": 0,
+    "ids_drift": 0,
+    "seed_per_use": 0,
+    "ids_end": 0,
+    "ids_ux_push": 0,
+    "seed_per_use_lock": 0
+   }
+  },
+  "ids": {
+   "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
+   "unused": "13183e005cf801db867644615fa093e59fc6c343abbbd4500274efd5760a5089"
+  },
+  "rpc": {
+   "rpc_0": {
+    "preflight": {
+     "http": 200,
+     "acao": "*",
+     "acam": "*",
+     "acah": "*"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
+    }
+   },
+   "rpc_1": {
+    "preflight": {
+     "http": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "acam": "POST",
+     "acah": "content-type"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
+    }
+   }
+  }
+ },
+ "bad_no_cors": {
+  "key": "wallet-restore-id-reader",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-09T01:51:14.023Z",
+  "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-T88i7kQj1BnivxaMrNeN8ZznnSlYLiHq+D/VEc+Icyzqt4amVUUZPfJz1QQnGVFH",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 809757,
+   "sha384": "sha384-T88i7kQj1BnivxaMrNeN8ZznnSlYLiHq+D/VEc+Icyzqt4amVUUZPfJz1QQnGVFH",
+   "markers": {
+    "reach_error": 1,
+    "reach_floor": 1,
+    "reach_misses": 1,
+    "id_hex": 1,
+    "id_storage": 1,
+    "id_intents": 1,
+    "id_rank": 1,
+    "id_pass_meet": 1,
+    "id_pass_stale": 1,
+    "ids_margin": 1,
+    "ids_stop": 1,
+    "ids_undone": 1,
+    "ids_ux_unread": 1,
+    "ids_catch": 1,
+    "ids_drift": 1,
+    "seed_per_use": 1,
+    "ids_end": 1,
+    "ids_ux_push": 1,
+    "seed_per_use_lock": 1
+   }
+  },
+  "ids": {
+   "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
+   "unused": "b185f3060dd93f06873a30f15f91a0cd843d8b4d3446f57f0938f54732e0129c"
+  },
+  "rpc": {
+   "rpc_0": {
+    "preflight": {
+     "http": 200,
+     "acao": "*",
+     "acam": "*",
+     "acah": "*"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
     }
    },
    "rpc_1": {
@@ -349,6 +518,10 @@
      "account": {
       "http": 200,
       "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "read": "list"
      }
     },
     "unused": {
@@ -359,7 +532,154 @@
      "account": {
       "http": 200,
       "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "read": "list"
      }
+    },
+    "block": {
+     "http": 200,
+     "read": "header"
+    }
+   }
+  }
+ },
+ "bad_catch_done": {
+  "key": "wallet-restore-id-reader",
+  "url": "local build of catch-mutant",
+  "at": "2026-11-09T01:51:10.821Z",
+  "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-yZAfrX6wOZrU+ZH9KbU7aeJTYJm+s6UL78ZUQRtU/CPS03pMINbqvm+AbxGkTPFE",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 809680,
+   "sha384": "sha384-yZAfrX6wOZrU+ZH9KbU7aeJTYJm+s6UL78ZUQRtU/CPS03pMINbqvm+AbxGkTPFE",
+   "markers": {
+    "reach_error": 1,
+    "reach_floor": 1,
+    "reach_misses": 1,
+    "id_hex": 1,
+    "id_storage": 1,
+    "id_intents": 1,
+    "id_rank": 1,
+    "id_pass_meet": 1,
+    "id_pass_stale": 1,
+    "ids_margin": 1,
+    "ids_stop": 1,
+    "ids_undone": 1,
+    "ids_ux_unread": 1,
+    "ids_catch": 0,
+    "ids_drift": 1,
+    "seed_per_use": 1,
+    "ids_end": 0,
+    "ids_ux_push": 1,
+    "seed_per_use_lock": 1
+   }
+  },
+  "ids": {
+   "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
+   "unused": "d6f7f38712a8ddf6d962e9f3f7f36753f3deaec0ba8212bd54bc423da5991304"
+  },
+  "rpc": {
+   "rpc_0": {
+    "preflight": {
+     "http": 200,
+     "acao": "*",
+     "acam": "*",
+     "acah": "*"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
+    }
+   },
+   "rpc_1": {
+    "preflight": {
+     "http": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "acam": "POST",
+     "acah": "content-type"
+    },
+    "registered": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "registered"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "account"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "unused": {
+     "storage": {
+      "http": 200,
+      "acao": "*",
+      "read": "null"
+     },
+     "account": {
+      "http": 200,
+      "acao": "*",
+      "read": "UNKNOWN_ACCOUNT"
+     },
+     "intents": {
+      "http": 200,
+      "acao": "*",
+      "read": "list"
+     }
+    },
+    "block": {
+     "http": 200,
+     "acao": "*",
+     "read": "header"
     }
    }
   }

@@ -366,3 +366,23 @@ test("step 7 (N2): an id read as money is still re-read on each open until its m
   // an id with a note is the vault's, never re-read
   assert.ok(!plan.rereads.some((x) => x.i === 0));
 });
+
+// review of e31892ef (P3-4): a seed use derives one window of a lane's ids, at most `margin` of them, however far the
+// lane's highest note lies: a note at 8,000 once made lane 0's first window 0..8,168 (1,022 ids under one seed-lock use)
+test("step 5: each seed use derives at most margin ids of a lane, the lane read to the same end", async () => {
+  const far = { notes: [note(dep(8000))], laneHighest: [8000, null, null, null, null, null, null, null], laneWalked: walkedTo([8000, null, null, null, null, null, null, null]) };
+  const sizes: number[] = [];
+  const use = (<T,>(u: (s: Uint8Array) => T): Promise<T> => {
+    const r = u(SEED);
+    sizes.push((r as unknown as Map<number, string>).size);
+    return Promise.resolve(r);
+  });
+  const { holds, log } = idReader([]);
+  const got = await restoreDepositIds(use, SCOPE, far, holds);
+  assert.equal(got[0]!.readTo, at(0, 1000 + DEPOSIT_ID_MARGIN));
+  assert.ok(Math.max(...sizes) <= DEPOSIT_ID_MARGIN, `a use derived ${Math.max(...sizes)} ids`);
+  // the same ids, in the same order, as with the seed given as bytes
+  const bytes = idReader([]);
+  await restoreDepositIds(SEED, SCOPE, far, bytes.holds);
+  assert.deepEqual(log, bytes.log);
+});

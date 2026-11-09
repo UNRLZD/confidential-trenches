@@ -53,6 +53,19 @@ import { refKey, type Leaf, type NoteRecord, type NoteState, type NoteStore } fr
 export const RESTORE_GAP = 10_000;
 /** The device lanes: a device names only deposit indices ≡ d (mod 8) (wallet.md l.249-250). */
 export const RESTORE_LANES = 8;
+
+/**
+ * The seed opened for one use only: `use` runs on it and it is zeroed after (the signing page opens it under the seed
+ * lock for that use alone, so a restore's reads never hold the lock; card wallet-restore-id-reader-wired, review P2-2).
+ * `use` is synchronous: nothing of the seed outlives it.
+ */
+export type SeedUse = <T>(use: (seed64: Uint8Array) => Sync<T>) => Promise<T>;
+/** A use's result that is no promise: a use that awaits would hold the seed past its end (review of e31892ef, P3-5). */
+export type Sync<T> = T extends PromiseLike<unknown> ? never : T;
+/** `use` on the seed: a SeedUse opens it for that use; a seed given as bytes is the caller's to hold and zero. */
+export function withSeed<T>(seed: Uint8Array | SeedUse, use: (seed64: Uint8Array) => Sync<T>): Promise<T> {
+  return typeof seed === "function" ? seed(use) : Promise.resolve().then(() => use(seed));
+}
 const U32 = 0xffffffff;
 const CHAIN_TAGS = /* @__PURE__ */ Object.keys(CHAINS) as Chain[];
 
@@ -226,8 +239,10 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
 }
 
 // The last index a whole walk of the lane reads: `gap` indices of the lane past its last note or its reach, whichever
-// is higher (the lane's first gap indices when it has neither), or the lane's last index below 2^32
-function walkEnd(lane: number, found: readonly number[], gap: number, reach: number | null = null): number {
+// is higher (the lane's first gap indices when it has neither), or the lane's last index below 2^32. Exported for the
+// pools' walks, which return their notes only: step 5 (../restore/wallets.ts restoreDepositIds) holds a pool lane's ids
+// to it (the signing page's restore kind, packages/signpage/src/pool-restore.ts)
+export function walkEnd(lane: number, found: readonly number[], gap: number, reach: number | null = null): number {
   const from = Math.max(found.length === 0 ? lane - RESTORE_LANES : found[found.length - 1]!, reach ?? -Infinity);
   const end = from + RESTORE_LANES * gap;
   const top = lane + RESTORE_LANES * Math.floor((U32 - lane) / RESTORE_LANES);

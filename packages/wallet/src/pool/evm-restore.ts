@@ -52,7 +52,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { vaultLabelOf } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
-import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
+import { RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, withSeed } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { solanaSameProvider } from "@blindfill/kit";
@@ -308,7 +308,8 @@ const randomIndex = (n: number): number => {
 };
 
 export type EvmRestoreNotesArgs = {
-  seed64: Uint8Array;
+  /** The seed, or a SeedUse opened only for the walk's match, after the pool's events are read. */
+  seed64: Uint8Array | SeedUse;
   /** The network's pin (EVM_POOLS[network]). */
   pin: EvmPoolPin;
   /** A pinned list of two or more providers of different operators on the pool's network: the pool's events. */
@@ -371,7 +372,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
-  const { notes, spends, elsewhere } = evmRestore({ seed64: a.seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+  const { notes, spends, elsewhere } = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
   if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {

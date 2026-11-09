@@ -151,6 +151,9 @@ const restore = !framed
         return s !== undefined;
       },
       written: () => void testnet?.proofs().catch(() => {}),
+      // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
+      // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts); no key, no words
+      ended: (stage, why) => void (stage === "stalled" && console.warn(`restore stalled: ${why.join("; ")}`)),
     })
   : null;
 // a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):

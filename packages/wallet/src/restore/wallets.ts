@@ -31,7 +31,7 @@
 //   past its note walk's end is unfinished (`complete` false): step 7 refuses it, raising no counter (review N3).
 import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
-import { RESTORE_LANES, type NoteRestore } from "../notes/restore.ts";
+import { RESTORE_LANES, type NoteRestore, type SeedUse, withSeed } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
 import { isRestorePass, type RestorePass } from "./id-reader.ts";
 
@@ -194,7 +194,8 @@ export type DepositIds = { lanes: LaneIds[]; complete: boolean };
 
 /** Step 5, the deposit ids: every lane of the scope read to DEPOSIT_ID_MARGIN never-used ids past its highest with a note or history. */
 export async function restoreDepositIds(
-  seed64: Uint8Array,
+  /** the seed, or a SeedUse opened only to derive each window of a lane's ids (at most `margin` of them), never for a read */
+  seed64: Uint8Array | SeedUse,
   scope: bigint,
   r: Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked">,
   holds: IdReader,
@@ -229,9 +230,21 @@ export async function restoreDepositIds(
     // ends the lane at its walk's end, never at 2^32, and the restore still returns what it found
     let reach: number | null = null;
     let readTo = lane - RESTORE_LANES;
-    for (let i = lane; i <= U32 && i <= (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin; i += RESTORE_LANES) {
+    // the ids are derived a window at a time (at most `margin` indices, none past the lane's bound now), the seed opened
+    // for that alone; the bound is still checked at each index
+    let win = new Map<number, string>();
+    const bound = (): number => Math.min(U32, (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);
+    for (let i = lane; i <= U32 && i <= bound(); i += RESTORE_LANES) {
       readTo = i;
-      const id = depositAccount(seed64, scope, i).account;
+      if (!win.has(i)) {
+        const from = i, to = Math.min(bound(), i + RESTORE_LANES * (margin - 1));
+        win = await withSeed(seed64, (s) => {
+          const m = new Map<number, string>();
+          for (let k = from; k <= to; k += RESTORE_LANES) m.set(k, depositAccount(s, scope, k).account);
+          return m;
+        });
+      }
+      const id = win.get(i)!;
       let state: unknown;
       try {
         state = await holds(id);
