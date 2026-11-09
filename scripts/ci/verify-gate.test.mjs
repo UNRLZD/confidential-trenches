@@ -2,9 +2,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifyGate } from "./verify-gate.mjs";
 import { SIGN_BUILD_INPUTS } from "./sign-build-inputs.mjs";
 
@@ -392,5 +393,20 @@ test("a new list on that branch may name the merge base's tree when its SIGN_HOS
     assert.equal(refusals(r, base, head), "");
   } finally {
     r.done();
+  }
+});
+
+// main's verify gate runs from scripts/ alone (ci.yml verify-gate: git archive "$BASE" scripts), so what it imports reads
+// nothing outside scripts/: sign-build-inputs.mjs loads in a folder that holds scripts/ci/ and nothing else (a read of the
+// kit's prover names there, delta review P3-2, would break main's gate; release.test.mjs holds the names instead)
+test("sign-build-inputs.mjs, which main's verify gate imports, loads from scripts/ alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vg-scripts-only-"));
+  try {
+    mkdirSync(join(dir, "scripts", "ci"), { recursive: true });
+    cpSync(join(dirname(fileURLToPath(import.meta.url)), "sign-build-inputs.mjs"), join(dir, "scripts", "ci", "sign-build-inputs.mjs"));
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(join(dir, "scripts", "ci", "sign-build-inputs.mjs"))}); console.log(m.SIGN_BUILD_INPUTS.length)`], { encoding: "utf8" });
+    assert.ok(Number(out) > 0, out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

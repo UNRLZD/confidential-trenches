@@ -518,6 +518,16 @@ test("APP_HOST's part of a list is built by the terminal deploy's own build(), s
   assert.doesNotMatch(src, /vite\.js/, "release-list.mjs runs no vite build of its own");
 });
 
+// delta review P3-2: the prover's two built files are named by the kit (PROVER_WORKER_FILE, PROVER_THREAD_FILE).
+// SIGN_BUILD_OUTPUTS, which .gitignore and the build-output gate are held to, sits in scripts/ci, which may not read a kit
+// internal (check:imports' kit-reach refuses even the path), so this test holds its two prover entries to those names
+test("SIGN_BUILD_OUTPUTS names the prover's files by the kit's PROVER_WORKER_FILE and PROVER_THREAD_FILE, and .gitignore ignores each", async () => {
+  const { PROVER_THREAD_FILE, PROVER_WORKER_FILE } = await import("../../kit/src/prover/build.mjs");
+  assert.deepEqual(SIGN_BUILD_OUTPUTS.slice(2), [`packages/signpage/public/${PROVER_WORKER_FILE}`, `packages/signpage/public/${PROVER_THREAD_FILE}`]);
+  const ignore = readFileSync(join(PKG, "..", "..", ".gitignore"), "utf8").split("\n");
+  for (const f of SIGN_BUILD_OUTPUTS) assert.ok(ignore.includes(`/${f}`), `.gitignore names /${f}`);
+});
+
 // review P1(a): the bundle is built on the release machine, so CI rebuilds it on its own clean install and holds the
 // newest list to it whenever that list's tree has HEAD's SIGN_BUILD_INPUTS (a release merge, or a release branch): a list
 // cut from a machine whose bytes are not the sources' build (a tsconfig above the repo, an edited node_modules) fails here

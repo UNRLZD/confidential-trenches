@@ -41,6 +41,9 @@ export const isSignBuildInput = (path) => SIGN_BUILD_INPUTS.some((i) => path ===
 export const SIGN_BUILD_OUTPUTS = Object.freeze([
   "packages/signpage/index.html",
   "packages/signpage/public/app.js",
+  // the kit's PROVER_WORKER_FILE and PROVER_THREAD_FILE (packages/kit/src/prover/build.mjs): written here, since no file
+  // outside packages/ may read a kit internal (check:imports, kit-reach), and held to those names by
+  // packages/signpage/scripts/release.test.mjs (delta review P3-2)
   "packages/signpage/public/prover-worker.js",
   "packages/signpage/public/prover-thread.js",
 ]);
