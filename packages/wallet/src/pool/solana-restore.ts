@@ -137,6 +137,23 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
   if (typeof lister !== "function") throw new Error("lister: an rpc");
   if (minSlots !== undefined && !(Array.isArray(minSlots) && minSlots.length === 2 && minSlots.every((x) => Number.isSafeInteger(x) && x >= 0))) throw new Error("minSlots: two slots");
   const slots = [minSlots?.[0] ?? 0, minSlots?.[1] ?? 0];
+  // one stop for every call below: the caller's signal, or the first throw on the lister or either RPC, so no read goes
+  // on past the refusal (sol-marks-scale review S2)
+  signal?.throwIfAborted(); // a signal aborted already never fires its event
+  const stop = new AbortController();
+  const onAbort = (): void => stop.abort(signal!.reason);
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await listed(lister, rpcs, program, stop.signal, slots, lagWait, held);
+  } catch (e) {
+    stop.abort(e);
+    throw e;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function listed(lister: SolanaRpc, rpcs: readonly [SolanaRpc, SolanaRpc], program: string, signal: AbortSignal, slots: number[], lagWait: SolanaLagWait | undefined, held: SolanaMarks | undefined): Promise<SolanaMarks> {
   const out = [new Map<string, Uint8Array>(), new Map<string, Uint8Array>()] as const;
   // a held mark's bytes, as the program wrote them (its record, then the tag): z 0 spent, 1 pre
   const heldBytes = (z: 0 | 1, key: string): Uint8Array | undefined => {
@@ -162,7 +179,7 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
     const got = await Promise.all(([0, 1] as const).map(async (k) => {
       const datas: string[] = [];
       for (let i = 0; i < keys.length; i += SOL_MARK_READ_BATCH) {
-        signal?.throwIfAborted();
+        signal.throwIfAborted();
         const part = keys.slice(i, i + SOL_MARK_READ_BATCH);
         const at = Math.max(min, slots[k]!);
         const a = (await solanaLagRetry(() => rpcs[k]("getMultipleAccounts", [part, { commitment: "finalized", encoding: "base64", ...(at > 0 ? { minContextSlot: at } : {}) }]), lagWait, signal)) as { context?: { slot?: unknown }; value?: unknown };
@@ -188,7 +205,7 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
     const { width, first } = COUNTER[size];
     const byCounter = new Map<bigint, string>();
     for (let b = 0; ; b++) {
-      signal?.throwIfAborted();
+      signal.throwIfAborted();
       const high = new Uint8Array(width);
       for (let i = 0, v = b; i < width - 1; i++, v = Math.floor(v / 256)) high[i] = v % 256;
       high[width - 1] = SOL_MARK_TAG;
@@ -199,6 +216,10 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
       const slot = a?.context?.slot;
       if (!Number.isSafeInteger(slot) || (slot as number) < 0 || !Array.isArray(a.value)) throw new Error("lister: getProgramAccounts: not a list with its context");
       if ((slot as number) < at) throw new Error(`lister: getProgramAccounts: answered at slot ${slot as number}, below ${at}`);
+      // a bucket holds one mark per counter: a list past that is refused before any read (sol-marks-scale RV-F), so a
+      // lister cannot make the device read thousands of addresses on the pair
+      const room = SOL_MARK_BUCKET - (b === 0 ? first : 0);
+      if (a.value.length > room) throw new Error(`lister: bucket ${b} lists ${a.value.length} marks, past its ${room}`);
       const keys: string[] = [];
       for (const x of a.value as { pubkey?: unknown }[]) {
         const key = x?.pubkey;
@@ -217,7 +238,13 @@ export async function solanaMarksListed(lister: SolanaRpc, rpcs: readonly [Solan
       keys.forEach((key) => {
         const bytes = heldBytes(z, key) ?? base64.decode(got.get(key)!);
         if (bytes.length !== size) throw new Error(`listed mark ${key}: not ${size} bytes`);
-        if (bytes.subarray(0, 8).every((v) => v === 0) || bytes[size - 1] !== SOL_MARK_TAG) throw new Error(`listed mark ${key}: no record the program wrote`);
+        // review S1 (sol-marks-scale fold 1): a record whose first 8 bytes are 0 is no mark the program wrote (a
+        // deposit's value is at least MIN_DEPOSIT, contracts/pool-solana/src/deposit.rs:76; a release's withdrawn is
+        // never 0, release.rs:218). Anyone can make a zeroed account of a mark's size the program owns (CreateAccount
+        // takes any owner); the tag in the memcmp keeps it out of an honest list, and one a lister names anyway, read
+        // zeroed on both RPCs, is passed over and never counted, so it hides no mark (solanaMarkCounts still holds)
+        if (bytes.subarray(0, 8).every((v) => v === 0)) return;
+        if (bytes[size - 1] !== SOL_MARK_TAG) throw new Error(`listed mark ${key}: no record the program wrote`);
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
         const c = width === 4 ? BigInt(view.getUint32(COUNTER_AT, true)) : view.getBigUint64(COUNTER_AT, true);
         if (c < BigInt(first) || c >> 8n !== BigInt(b)) throw new Error(`listed mark ${key}: counter ${c} is not in bucket ${b}`);
