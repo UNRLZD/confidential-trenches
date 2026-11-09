@@ -10,7 +10,10 @@
 //     (the deep link loads inside the shell, never the redirect to "/" an unknown route would give);
 //   - the read: the page read GET /v1/market/token?chain=solana&token=<mint>, 200, whose row is that mint;
 //   - an unknown id, APP_HOST/token/solana/<a made-up id>: the page's not-found state (data-token-page="empty", no
-//     token drawn), its token read answered 404.
+//     token drawn), its token read answered 404;
+//   - Base and Robinhood (card app-chains-evm): the same reads of a live token of each, the third row of that chain's
+//     Trending column (GET /v1/market/lists?chain=base and ?chain=robinhood), opened at APP_HOST/token/<chain>/<id> at
+//     1440 x 900: the page ready with that token, its read GET /v1/market/token?chain=<chain>&token=<id>, 200.
 // A screenshot of every load is kept.
 // After: app
 //   node scripts/live-checks/app-token-route.mjs [--build <dir>] [--shots <dir>] [--record <file>]
@@ -31,13 +34,18 @@ export const APP_HOST = "https://ct-app.unrealized.trade";
 export const SIGN_HOST = "https://confidential.unrealized.trade";
 export const HELPER_HOST = "https://ct-api.unrealized.trade";
 export const LISTS_URL = `${HELPER_HOST}/v1/market/lists?chain=solana`;
-export const TOKEN_URL = (mint) => `${HELPER_HOST}/v1/market/token?chain=solana&token=${encodeURIComponent(mint)}`;
+export const TOKEN_URL = (mint, chain = "solana") => `${HELPER_HOST}/v1/market/token?chain=${chain}&token=${encodeURIComponent(mint)}`;
+/** The EVM chains whose token page the check opens beside Solana's (card app-chains-evm). */
+export const EVM_CHAINS = ["base", "robinhood"];
+export const listsUrl = (chain) => `${HELPER_HOST}/v1/market/lists?chain=${chain}`;
 /** The id the unknown load opens: no mint of any chain. */
 export const UNKNOWN = "NoSuchTokenOnAnyChain1111111111111111111111";
 export const LOADS = [
   { name: "desktop", id: "mint", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", id: "mint", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "desktop", id: "unknown", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  { name: "desktop", id: "base", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+  { name: "desktop", id: "robinhood", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 const READ_MS = 25_000;
 
@@ -55,7 +63,7 @@ export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const loads = rec.loads ?? [];
-  say(loads.length === LOADS.length, `${loads.length} loads of ${LOADS.length} (a live mint at both widths, an unknown id)`);
+  say(loads.length === LOADS.length, `${loads.length} loads of ${LOADS.length} (a live mint at both widths, an unknown id, a live Base and Robinhood token)`);
   const lists = rec.lists ?? null;
   const mint = lists?.trending ? pickOf(lists.trending) : null;
   const lbad = [];
@@ -66,12 +74,26 @@ export function judge(rec) {
     if (!mint) lbad.push("the lists' Trending column is empty");
   }
   say(lbad.length === 0, `the helper's lists: ${lbad.length ? lbad.join("; ") : `200, the live mint is ${mint} (${(lists.trending.find((x) => x.mint === mint) ?? {}).symbol})`}`);
+  const ids = { mint, unknown: UNKNOWN };
+  for (const c of EVM_CHAINS) {
+    const e = rec.evm?.[c] ?? null;
+    ids[c] = e?.trending ? pickOf(e.trending) : null;
+    const ebad = [];
+    if (!e) ebad.push("not read");
+    else {
+      if (e.url !== listsUrl(c)) ebad.push(`read at ${e.url}`);
+      if (e.status !== 200) ebad.push(`status ${e.status}`);
+      if (!ids[c]) ebad.push("its Trending column is empty");
+    }
+    say(ebad.length === 0, `the helper's ${c} lists: ${ebad.length ? ebad.join("; ") : `200, the live token is ${ids[c]} (${(e.trending.find((x) => x.mint === ids[c]) ?? {}).symbol})`}`);
+  }
   for (const [i, l] of loads.entries()) {
     const want = LOADS[i];
     const unknown = want?.id === "unknown";
-    const tag = `${l.width} /token/solana/${unknown ? "<unknown>" : "<live mint>"}`;
-    const id = unknown ? UNKNOWN : mint;
-    const at0 = `/token/solana/${id}`;
+    const chain = EVM_CHAINS.includes(want?.id) ? want.id : "solana";
+    const tag = `${l.width} /token/${chain}/${unknown ? "<unknown>" : chain === "solana" ? "<live mint>" : "<live token>"}`;
+    const id = ids[want?.id] ?? null;
+    const at0 = `/token/${chain}/${id}`;
     const bad = [];
     if (l.opened !== `${APP_HOST}${at0}`) bad.push(`opened ${l.opened}`);
     if (l.route !== "token") bad.push(`drew ${l.route ?? "nothing"}`);
@@ -89,7 +111,7 @@ export function judge(rec) {
       if (!l.token) bad.push("the page read no token answer");
       else {
         const at = `${l.token.url}?chain=${l.token.chain}&token=${encodeURIComponent(l.token.mint)}`;
-        if (id && (at !== TOKEN_URL(id) || l.token.params !== 2)) bad.push(`token read at ${at} (${l.token.params} params), not ${TOKEN_URL(id)}`);
+        if (!id || at !== TOKEN_URL(id, chain) || l.token.params !== 2) bad.push(`token read at ${at} (${l.token.params} params), not ${id ? TOKEN_URL(id, chain) : "a live token's"}`);
         if (l.token.status !== 200) bad.push(`token status ${l.token.status}`);
         if (l.token.rowMint !== id) bad.push(`token row ${l.token.rowMint ?? "none"}`);
         if (!l.symbol || l.symbol !== l.token.symbol) bad.push(`the page's symbol ${l.symbol ?? "none"}, the row's ${l.token.symbol ?? "none"}`);
@@ -117,17 +139,27 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   // the rows kept to the fields the Trending column's order reads (the id as `mint`: gitleaks reads a long id beside a token key as a secret)
   const lists = { url: LISTS_URL, status: lr.status, as_of_ms: lb?.as_of_ms ?? null, trending: Array.isArray(rows) ? rows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };
   const mint = lists.trending ? pickOf(lists.trending) : null;
+  // Base's and Robinhood's lists, kept as Solana's are (card app-chains-evm)
+  const evm = {};
+  const ids = { mint, unknown: UNKNOWN };
+  for (const c of EVM_CHAINS) {
+    const er = await fetch(listsUrl(c), { headers: { origin: APP_HOST } });
+    const eb = await er.json().catch(() => null);
+    const erows = eb?.lists?.trending_1h ?? eb?.lists?.trending ?? null;
+    evm[c] = { url: listsUrl(c), status: er.status, as_of_ms: eb?.as_of_ms ?? null, trending: Array.isArray(erows) ? erows.map((r) => ({ mint: r?.token, symbol: r?.symbol, vol_1h_usd: r?.vol_1h_usd ?? null })) : null };
+    ids[c] = evm[c].trending ? pickOf(evm[c].trending) : null;
+  }
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed");
   }
   const browser = await launchBrowser("chromium");
-  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), lists, loads: [] };
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), browser: browser.version(), lists, evm, loads: [] };
   try {
     for (const [i, w] of LOADS.entries()) {
-      const id = w.id === "unknown" ? UNKNOWN : mint;
-      const opened = `${APP_HOST}/token/solana/${id}`;
+      const id = ids[w.id];
+      const opened = `${APP_HOST}/token/${EVM_CHAINS.includes(w.id) ? w.id : "solana"}/${id}`;
       const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
       if (harness) await ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
       const page = await ctx.newPage();
