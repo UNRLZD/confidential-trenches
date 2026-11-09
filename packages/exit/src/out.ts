@@ -313,9 +313,15 @@ export async function exitStorageMin(network: NearNetwork, rpcs: readonly [Vault
 /** The typed account's registration on the token as exitReadStorage read it; exitBuildWithdraw takes only these. */
 export type ExitStorage = { readonly network: NearNetwork; readonly account: string; readonly storageMin: bigint; readonly registered: boolean };
 const STORAGE_READ = new WeakSet<object>();
-/** Whether `s` is a registration exitReadStorage read for typed account `to`. */
-export function exitStorageFor(s: unknown, to: ExitRecipient): s is ExitStorage {
-  return isObj(s) && STORAGE_READ.has(s) && s.network === to.network && s.account === to.account;
+/**
+ * Whether `s` is a registration exitReadStorage read for typed account `to`, and takes it: each read serves one
+ * withdrawal (delta review P3-3). Note 1's payout registers a fresh typed account, so a read reused for note 2 would
+ * attach the storage minimum again, refunded into the keyless vault.
+ */
+export function exitStorageTake(s: unknown, to: ExitRecipient): s is ExitStorage {
+  if (!isObj(s) || !STORAGE_READ.has(s) || s.network !== to.network || s.account !== to.account) return false;
+  STORAGE_READ.delete(s);
+  return true;
 }
 /**
  * What a withdrawal to typed account `to` attaches for its registration on the token, read on both RPCs of `network`'s

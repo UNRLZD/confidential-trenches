@@ -162,6 +162,9 @@ test("P3-3/P3-4: register_deposit comes from exitReadStorage's own reads on both
   const w = (out.built.calls[0]!.args as { withdrawal: Record<string, unknown> }).withdrawal;
   assert.equal(w.register_deposit, "0");
   assert.equal(out.built.calls[0]!.deposit, vaultWithdrawYocto(0n, 0n, true));
+  // one read serves one withdrawal (third review P3-1): note 1's payout may register the typed account, so a second
+  // build on the same read is refused and reads again
+  await assert.rejects(build(note, { storage: reg }), /not one exitReadStorage read/, "a read used twice");
   // the same facts, not read by exitReadStorage: refused, so no caller's number reaches register_deposit
   await assert.rejects(build(note, { storage: { network: NET, account: X, storageMin: REG, registered: true } }), /not one exitReadStorage read/);
   const other = await exitRecipient("d".repeat(64), NET, pair());
@@ -183,7 +186,7 @@ const NH = noteSecrets(SEED, { kind: "deposit", s: 1n, i: 0 }).nullifierHash;
 const L = LABEL, J = 0;
 const delRead = (o: Partial<DeleteReadFor> = {}): DeleteReadFor => ({
   network: NET, a: aOf(L, J), to: X, token: TOKEN, height: 1000, blockHash: BH, nonce: 9n, beneficiary: "exists", spend: { nullifierHash: NH, status: "settled", reserve: 0n },
-  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, ...o,
+  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, nonceBack: null, settleNonce: 9n, ...o,
 });
 const fires = (re: RegExp) => (e: unknown) => e instanceof MoveOutRefused && re.test(e.message);
 
@@ -193,7 +196,7 @@ test("exitBuildDelete: A's DeleteAccount to the typed account on a read with not
   assert.equal(m.receiver, aOf(L, J));
   assert.deepEqual(m.calls, [{ action: "DeleteAccount", beneficiary_id: X }]);
   // P1-S fix 3: settled SETTLE_BLOCKS back, the withdraw (before the settle) needs no FINAL read: a reload lost its hash
-  exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to, read: delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - SETTLE_BLOCKS }), nullifierHash: NH });
+  exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to, read: delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - SETTLE_BLOCKS, nonceBack: 9n }), nullifierHash: NH });
   for (const [why, r, re] of [
     ["the typed account missing (its NEAR would burn)", delRead({ beneficiary: "absent" }), /fund the typed account first/],
     ["before settle: in_flight", delRead({ spend: { nullifierHash: NH, status: "in_flight", reserve: 5n } }), /settled with reserve 0/],
@@ -202,7 +205,7 @@ test("exitBuildDelete: A's DeleteAccount to the typed account on a read with not
     ["reserve above 0", delRead({ spend: { nullifierHash: NH, status: "settled", reserve: 1n } }), /settled with reserve 0/],
     ["the withdraw tx not FINAL, no lookback", delRead({ withdrawTx: "unread" }), /not read past their refunds/],
     ["A's settle not FINAL, no lookback", delRead({ settleTx: "unread" }), /not read past their refunds/],
-    ["settled too recently, no tx read", delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1001 - SETTLE_BLOCKS }), /not read past their refunds/],
+    ["settled too recently, no tx read", delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1001 - SETTLE_BLOCKS, nonceBack: 9n }), /not read past their refunds/],
     ["USDC halted", delRead({ usdc: { state: "halted" } }), /USDC is not read at zero/],
     ["USDC left in A", delRead({ usdc: { state: "held", amount: 3n } }), /USDC is not read at zero/],
     ["a token under A in intents.near", delRead({ intents: "holds" }), /stranded/],
@@ -214,13 +217,14 @@ test("exitBuildDelete: A's DeleteAccount to the typed account on a read with not
  * Fake steps: the spends row's states in turn (the last one stays), A's existence, the close reads in turn (the last one
  * stays), the head after each, and every call in order: "record <step>" before each send, the sends by their one action.
  */
-function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Record<string, ExitSent>>; del?: Partial<DeleteReadFor>[]; account?: "exists" | "absent" | "unread"; heads?: (number | null)[]; recordThrows?: boolean }) {
+function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Record<string, ExitSent>>; del?: Partial<DeleteReadFor>[]; account?: "exists" | "absent" | "unread"; heads?: (number | null)[]; recordThrows?: boolean; recordBlocks?: number }) {
   const order: string[] = [];
   const asked: { withdraw: string | null; settle: string | null }[] = [];
   const records: ExitTxRecord[] = [];
   const slept: number[] = [];
   const rows = [...o.rows], dels = [...(o.del ?? [{}])], heads = [...(o.heads ?? [1000])];
   const next = <T,>(q: T[]): T => (q.length > 1 ? q.shift()! : q[0]!);
+  let drift = 0; // blocks a slow record lets pass
   const steps: ExitWithdrawSteps = {
     withdraw: async () => (await build(noteOf({ kind: "deposit", s: 1n, i: 0 }))).out,
     send: async (m) => {
@@ -233,26 +237,30 @@ function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Reco
       if (o.recordThrows) throw new Error("the store is full");
       order.push(`record ${r.step}`);
       records.push(r);
+      drift += o.recordBlocks ?? 0;
     },
     spend: async () => {
       const r = rows.length === 0 ? null : next(rows);
-      return r === null ? null : ({ index: 3, nullifierHash: NH, status: "paid", reserve: 5n, ...r } as VaultSpendRow);
+      return r === null ? null : ({ index: 3, nullifierHash: NH, status: "paid", reserve: 5n, refundValue: r.status === "refund_pending" ? 7n : 0n, ...r } as VaultSpendRow);
     },
     account: async () => o.account ?? "exists",
     readA: async (a) => ({ height: 100, blockHash: BH, nonce: 8n, free: 10n ** 24n, gasPrice: 100_000_000n, a }),
     readDelete: async (a, index, nh, txs) => {
       order.push(`read ${index}`);
       asked.push({ ...txs });
-      return { ...delRead({ a, spend: { nullifierHash: nh, status: "settled", reserve: 0n }, withdrawTx: txs.withdraw === null ? "unread" : "final", settleTx: txs.settle === null ? "none" : "final" }), ...next(dels) };
+      return { ...delRead({ a, spend: { nullifierHash: nh, status: "settled", reserve: 0n }, withdrawTx: txs.withdraw === null ? "unread" : "final", settleTx: txs.settle === null ? "none" : "final", settleNonce: txs.settle === null ? null : 9n }), ...next(dels) };
     },
-    head: async () => next(heads),
+    head: async () => {
+      const h = next(heads);
+      return h === null ? null : h + drift;
+    },
     sleep: async (ms) => {
       slept.push(ms);
     },
   };
   return { steps, order, asked, records, slept };
 }
-const BACK = { settledBack: 1000 - SETTLE_BLOCKS };
+const BACK = { settledBack: 1000 - SETTLE_BLOCKS, nonceBack: 9n };
 const closeOne = async (w: ReturnType<typeof world>, txs?: { withdraw?: string | null; settle?: string | null }) => exitCloseOne({ seed64: SEED, network: NET, to: await typed(), l: L, j: J, nullifierHash: NH, txs, steps: w.steps });
 
 test("exitWithdrawOne: withdraw, then settle, then A's DeleteAccount, each hash kept before its send and each step once the one before landed; the close read gets both hashes", async () => {
@@ -299,9 +307,10 @@ test("exitWithdrawOne never sends a DeleteAccount before the settle landed: a wi
   const cases: [string, Parameters<typeof world>[0], string, string[]][] = [
     ["the withdrawal failed, no spend", { rows: [], sent: { withdraw: "failed" } }, "withdraw", ["record withdraw", "withdraw"]],
     ["the withdrawal unread, no spend", { rows: [], sent: { withdraw: "unread" } }, "withdraw", ["record withdraw", "withdraw"]],
-    // a later row reading settled (another's settle, or a stale word) does not stand in for this settle's own landing
-    ["the settle failed", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "failed" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
-    ["the settle unread", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "unread" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["the settle failed, the spend still paid", { rows: [{ status: "paid", reserve: 5n }, { status: "paid", reserve: 5n }], sent: { settle: "failed" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["the settle unread, the spend still paid", { rows: [{ status: "paid", reserve: 5n }, { status: "paid", reserve: 5n }], sent: { settle: "unread" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["the settle failed, the spend not read", { rows: [{ status: "paid", reserve: 5n }, null], sent: { settle: "failed" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["the settle failed, settled with reserve above 0", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 1n }], sent: { settle: "failed" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
     ["still paid after the settle", { rows: [{ status: "paid", reserve: 5n }, { status: "paid", reserve: 5n }] }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
     ["settled with reserve above 0", { rows: [{ status: "settled", reserve: 1n }] }, "settle", ["record withdraw", "withdraw"]],
     ["the payout still in flight", { rows: [{ status: "in_flight", reserve: 5n }] }, "settle", ["record withdraw", "withdraw"]],
@@ -371,13 +380,42 @@ test("P1-S fix 4: a settle too recent (another's, just after the withdraw) is wa
 test("P3-2: a DeleteAccount is sent within EXIT_CLOSE_SEND_BLOCKS of its read, else dropped unsent and signed again on a new read; never sent late", async () => {
   const once = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [1000 + EXIT_CLOSE_SEND_BLOCKS + 1, 1000 + EXIT_CLOSE_SEND_BLOCKS] });
   assert.equal((await closeOne(once)).stage, "closed");
-  assert.deepEqual(once.order, ["read 3", "read 3", "record close", "DeleteAccount"]);
+  assert.deepEqual(once.order, ["read 3", "record close", "read 3", "record close", "DeleteAccount"]);
   for (const head of [1000 + EXIT_CLOSE_SEND_BLOCKS + 1, null]) {
     const x = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [head] });
     const out = await closeOne(x);
     assert.equal(out.stage, "close", String(head));
-    assert.ok(!x.order.includes("DeleteAccount") && !x.order.includes("record close"), String(head));
+    assert.ok(!x.order.includes("DeleteAccount"), String(head));
   }
+});
+
+test("third review P3-3: the window is read after the hash is kept, right before the send: a record slow by more than EXIT_CLOSE_SEND_BLOCKS sends nothing", async () => {
+  const slow = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [1000], recordBlocks: EXIT_CLOSE_SEND_BLOCKS + 1 });
+  const out = await closeOne(slow);
+  assert.equal(out.stage, "close");
+  assert.ok(!slow.order.includes("DeleteAccount"));
+  // a record within the window sends
+  const quick = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [1000], recordBlocks: EXIT_CLOSE_SEND_BLOCKS - 1 });
+  assert.equal((await closeOne(quick)).stage, "closed");
+});
+
+test("third review P3-4: A's settle reads failed or unread because another settled first: the row read settled with reserve 0, so the run goes on to the close, with no rerun; a resume that starts at settled keeps the refund flag", async () => {
+  for (const sent of ["failed", "unread"] as const) {
+    const x = world({ rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: sent }, del: [BACK] });
+    const out = await exitWithdrawOne({ seed64: SEED, network: NET, to: await typed(), steps: x.steps });
+    assert.equal(out.stage, "closed", sent);
+    assert.deepEqual(x.order, ["record withdraw", "withdraw", "record settle", "settle", "read 3", "record close", "DeleteAccount"], sent);
+  }
+  // the settle that did not land while the spend is not settled with reserve 0: it stops at the settle, naming it
+  for (const [why, after] of [["still paid", { status: "paid", reserve: 5n }], ["settled with a reserve left", { status: "settled", reserve: 1n }]] as const) {
+    const x = world({ rows: [{ status: "paid", reserve: 5n }, after], sent: { settle: "failed" } });
+    const out = await closeOne(x);
+    assert.ok(out.stage === "settle" && "why" in out && /the settle read failed/.test(out.why), why);
+  }
+  const refunded = world({ rows: [{ status: "settled", reserve: 0n, refundValue: 7n }], del: [BACK] });
+  assert.deepEqual(await closeOne(refunded).then((o) => [o.stage, o.refund]), ["closed", true]);
+  const plain = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK] });
+  assert.deepEqual(await closeOne(plain).then((o) => [o.stage, o.refund]), ["closed", false]);
 });
 
 // ---------- exitReadDelete: every fact of A's close at one block on both RPCs ----------
@@ -391,7 +429,7 @@ const b58 = (b: Uint8Array) => {
 const PAUSED = { error: { cause: { name: "CONTRACT_EXECUTION_ERROR" }, data: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' } };
 const MISSING = { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } } };
 const WTX = "W".repeat(44), STX = "S".repeat(44);
-type Side = { row?: Record<string, unknown>; back?: Record<string, unknown>; usdc?: string | "halt"; to?: "exists" | "absent"; intents?: unknown[] | "absent" | "unread"; tx?: Record<string, string> };
+type Side = { row?: Record<string, unknown>; back?: Record<string, unknown>; usdc?: string | "halt"; to?: "exists" | "absent"; intents?: unknown[] | "absent" | "unread"; tx?: Record<string, string>; txNonce?: Record<string, number>; nonceBack?: number };
 /** One fake RPC of the release pair, answering readSettle's, view_account's, the spends view's, exitHoldings', intents.near's and the tx reads. */
 function side(name: string, aId: string, pk: Uint8Array, o: Side = {}) {
   const row = (at: number) => ({ index: 3, nullifier_hash: NH.toString(), withdrawn: "1000000", new_leaf_index: 1, refund_precommitment: "7", refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: "settled", payer: aId, reserve: "0", recipient: X, fee: "0", context: "9", ...(at === 1000 ? o.row : (o.back ?? o.row)) });
@@ -399,10 +437,10 @@ function side(name: string, aId: string, pk: Uint8Array, o: Side = {}) {
     name,
     block: async (p: unknown) => ({ result: { header: { height: (p as { finality?: string }).finality ? 1000 : (p as { block_id: number }).block_id, hash: BH } } }),
     call: async () => ({ result: { gas_price: "100000000" } }),
-    tx: async (p: { tx_hash: string; sender_account_id: string }) => ({ result: { final_execution_status: o.tx?.[p.tx_hash] ?? "FINAL", transaction: { hash: p.tx_hash, signer_id: p.sender_account_id }, status: { SuccessValue: "" }, receipts_outcome: [] } }),
+    tx: async (p: { tx_hash: string; sender_account_id: string }) => ({ result: { final_execution_status: o.tx?.[p.tx_hash] ?? "FINAL", transaction: { hash: p.tx_hash, signer_id: p.sender_account_id, nonce: o.txNonce?.[p.tx_hash] ?? 9 }, status: { SuccessValue: "" }, receipts_outcome: [] } }),
     query: async (p: Record<string, unknown>) => {
       const at = p.block_id as number;
-      if (p.request_type === "view_access_key_list") return { result: { block_height: at, keys: [{ public_key: `ed25519:${b58(pk)}`, access_key: { nonce: 9, permission: "FullAccess" } }] } };
+      if (p.request_type === "view_access_key_list") return { result: { block_height: at, keys: [{ public_key: `ed25519:${b58(pk)}`, access_key: { nonce: at === 1000 ? 9 : (o.nonceBack ?? 9), permission: "FullAccess" } }] } };
       if (p.request_type === "view_account") {
         if (p.account_id === "intents.near" && o.intents === "unread") return null;
         const missing = p.account_id === "intents.near" ? (o.intents ?? "absent") === "absent" : p.account_id === X ? o.to === "absent" : false;
@@ -434,7 +472,7 @@ test("exitReadDelete reads at one block on both RPCs: A's nonce, the typed accou
   assert.deepEqual(ok.spend, { nullifierHash: NH, status: "settled", reserve: 0n });
   assert.deepEqual(ok.usdc, { state: "held", amount: 0n });
   assert.equal(ok.intents, "no-intents", "testnet's pair reads no intents.near (UNKNOWN_ACCOUNT on both, 9 Nov 17:25Z)");
-  assert.deepEqual([ok.withdrawTx, ok.settleTx, ok.settledBack], ["final", "final", 1000 - SETTLE_BLOCKS]);
+  assert.deepEqual([ok.withdrawTx, ok.settleTx, ok.settledBack, ok.nonceBack, ok.settleNonce], ["final", "final", 1000 - SETTLE_BLOCKS, 9n, 9n]);
   await closeOn(ok);
 });
 
@@ -463,6 +501,25 @@ test("P2-2 / P1-S fix 3: a tx read EXECUTED is unread and a hash not kept is unr
   await assert.rejects(closeOn(now), fires(/not read past their refunds/));
   // the RPCs differ on the row back there: no lookback
   assert.equal((await readDel({}, recent, { txs: { withdraw: null, settle: null } })).settledBack, null);
+  // third review P3-5: a row read settled back there with a reserve left is no lookback (settle.rs l.96-97 writes both at once)
+  const reserved = { back: { status: "settled", reserve: "5" } };
+  const rs = await readDel(reserved, reserved, { txs: { withdraw: null, settle: null } });
+  assert.equal(rs.settledBack, null);
+  await assert.rejects(closeOn(rs), fires(/not read past their refunds/));
+});
+
+test("third review P3-2: A's nonce moved since the lookback (its own settle held back landed after another's), or a later tx of A after its kept settle: the close waits; one RPC alone on a nonce is no read", async () => {
+  // settled long ago by another, but A's held settle was included after the lookback block: its gas refund may still run
+  const moved = await readDel({ nonceBack: 8 }, { nonceBack: 8 }, { txs: { withdraw: null, settle: null } });
+  assert.deepEqual([moved.settledBack, moved.nonceBack, moved.nonce], [1000 - SETTLE_BLOCKS, 8n, 9n]);
+  await assert.rejects(closeOn(moved), fires(/not read past their refunds/));
+  assert.equal((await readDel({ nonceBack: 8 }, {}, { txs: { withdraw: null, settle: null } })).nonceBack, null, "the RPCs differ on the nonce back there");
+  // A's kept settle FINAL, but its nonce is not A's nonce now: a later tx of A
+  const later = await readDel({ txNonce: { [STX]: 8 }, back: { status: "paid", reserve: "5" } }, { txNonce: { [STX]: 8 }, back: { status: "paid", reserve: "5" } });
+  assert.deepEqual([later.settleTx, later.settleNonce, later.settledBack], ["final", 8n, null]);
+  await assert.rejects(closeOn(later), fires(/not read past their refunds/));
+  const split = await readDel({ txNonce: { [STX]: 8 } }, {});
+  assert.deepEqual([split.settleTx, split.settleNonce], ["unread", null], "the RPCs differ on the settle's nonce");
 });
 
 test("intents.near: any token under A gates the close, an empty list passes; a split or unread read of intents.near itself is a stop, never 'no intents.near'", async () => {
