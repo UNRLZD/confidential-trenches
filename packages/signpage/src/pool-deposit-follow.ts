@@ -24,7 +24,7 @@
 // - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS.
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
-import type { PoolChain } from "../../kit/src/signpage/messages.ts";
+import type { PoolChain, PoolDepositStage } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import { type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
 import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -58,8 +58,8 @@ export interface PoolFollowRecord {
   move?: MoveRecord;
 }
 
-/** The pool follow's stages, as kit messages.ts PoolDepositStage names them. */
-export type PoolFollowStage = "quote_checked" | "waiting" | "in_transit" | "in_pool" | "refunded" | "refund_move" | "failed" | "short" | "expired";
+/** The pool follow's stages: kit messages.ts PoolDepositStage, the stages the app reads on the op (card pool-deposit-stages). */
+export type PoolFollowStage = PoolDepositStage;
 
 /** Each 1Click status's stage before the device's own reads (as the vault's STATUS_STAGE). */
 export const POOL_STATUS_STAGE: Readonly<Record<OneClickStatus, PoolFollowStage>> = Object.freeze({
@@ -186,8 +186,20 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
 // ---------------------------------------------------------------------------------------------- on SIGN_HOST's page
 
 /** The op a pool quote's follow keeps in the wallet store's "ops" under its request's id (src/state.ts op contract):
- *  nothing secret. `final` once in_pool is read on past the quote's deadline. */
-export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true };
+ *  nothing secret. `final` once in_pool is read on past the quote's deadline. `since_ms` is the device's clock when a
+ *  stage first said the money was sent (any stage but quote_checked and expired), `refunded` true from the refunded
+ *  stage on (card pool-deposit-stages): the facts src/state.ts opOf sends the app on the stages they belong to (kit
+ *  messages.ts PoolDepositFacts). */
+export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true };
+
+/** The op with `s` written: its stage, and the facts that stage first sets (since_ms once, at the first stage past a
+ *  send; refunded at refunded or refund_move), each kept after. */
+export function withStage(op: PoolDepositOp, s: PoolFollowStage, now: number): PoolDepositOp {
+  const next: PoolDepositOp = { ...op, stage: s };
+  if (op.since_ms === undefined && s !== "quote_checked" && s !== "expired") next.since_ms = now;
+  if (s === "refunded" || s === "refund_move") next.refunded = true;
+  return next;
+}
 
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
 export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
@@ -240,11 +252,11 @@ export function poolFollows(h: PoolFollowHost) {
       });
       if (d === null) return;
       const stage = async (s: PoolFollowStage) => {
-        await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: s } : undefined));
+        await ops.update("ops", id, (v) => (isPoolOp(v) ? withStage(v, s, (h.now ?? Date.now)()) : undefined));
       };
       const end = await followPoolQuote(f, { ...d, stage, signal }, now.stage);
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
-      if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: "in_pool", final: true } : undefined));
+      if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true } : undefined));
     };
     const lm = locks();
     // one follower per op across tabs; two ops of one U_X may run at once, since each deposit from U_X is the page's

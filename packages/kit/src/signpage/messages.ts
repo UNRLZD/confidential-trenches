@@ -290,7 +290,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.6";
+export const SIGNPAGE_KIT_VERSION = "1.7";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -395,6 +395,39 @@ export interface DepositFacts {
   readonly amount_usd?: string;
   readonly moved_out?: true;
 }
+/**
+ * Every stage a pool deposit can reach (card pool-deposit-stages): the op the signing page keeps for a pool.address quote
+ * under that request's id, as it follows money sent to the quote's address on into chain X's pool (card
+ * pool-deposit-follow, packages/signpage/src/pool-deposit-follow.ts):
+ * - quote_checked: the address is shown, nothing seen yet; waiting: the send is known; in_transit: 1Click is processing
+ *   it, or 1Click reported SUCCESS and U_X's balance has not read yet on both of X's RPCs;
+ * - in_pool: a deposit from U_X into X's pool ended filled or part filled, each note it counts read back at finalized on
+ *   X's two RPCs (pool-deposit.ts): the money is in the pool as notes. More sent to U_X before the quote's deadline is
+ *   carried in too, under the same stage. How much is ready to buy is state.pools' `ready`, never a stage;
+ * - failed: 1Click reported FAILED and is still processing it; short: 1Click INCOMPLETE_DEPOSIT, less arrived than the
+ *   quote's amount; expired: the signed deadline passed with nothing sent;
+ * - refunded: 1Click refunded the money to U_X's own id inside intents.near; refund_move: the device's move of that
+ *   refund back to X's coin, to U_X, is in flight (then in_pool once it is carried in).
+ * A pool deposit has no held or halted stage: a refund is carried on into the pool, never left waiting under an id.
+ */
+export type PoolDepositStage = "quote_checked" | "waiting" | "in_transit" | "in_pool" | "refunded" | "refund_move" | "failed" | "short" | "expired";
+export const POOL_DEPOSIT_STAGES: readonly PoolDepositStage[] = Object.freeze([
+  "quote_checked", "waiting", "in_transit", "in_pool", "refunded", "refund_move", "failed", "short", "expired",
+] as const);
+/** The stages a refunded pool deposit's later legs can be at: the refund move's own, then the pool it lands in. */
+export const POOL_DEPOSIT_REFUNDED_STAGES: readonly PoolDepositStage[] = Object.freeze(["refund_move", "in_pool"] as const);
+/**
+ * What the device knows of a pool deposit beside its stage (card pool-deposit-stages), on the pool_deposit op in
+ * state.ops, each only on the stages it belongs to, as DepositFacts:
+ * - refunded: true once 1Click refunded the money, so the legs after it are the refund move's (POOL_DEPOSIT_REFUNDED_STAGES);
+ * - since_ms: unix ms when the device first saw the send, the sheet's counter's zero; on every stage but quote_checked
+ *   and expired, where nothing was sent.
+ * States only: never a key, the 12 words, U_X's index or which note is whose.
+ */
+export interface PoolDepositFacts {
+  readonly refunded?: boolean;
+  readonly since_ms?: number;
+}
 export type WithdrawStage = "proving" | "submitted" | "in_transit" | "sent" | "refunded" | "stopped";
 export type TradeStage = "signed" | "sent" | "filled" | "part_filled" | "refused" | "not_landed";
 export type HopStage = "in_flight" | "arrived" | "refunded" | "fallback";
@@ -415,10 +448,12 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * One request's operation in state.ops, by its id: the id of the request that started it. A deposit's op id is its
  * deposit.quote request's id (card kit-deposit-calls): the app finds the deposit it asked for in state.ops under the id
  * it sent, and a retry, which reuses the id, names the same op. The client drops an op it cannot read and keeps the
- * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op).
+ * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op). A pool
+ * deposit's op id is its pool.address request's id (card pool-deposit-stages), `chain` the pool's.
  */
 export type Operation =
   | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
+  | ({ readonly id: string; readonly kind: "pool_deposit"; readonly chain: PoolChain; readonly stage: PoolDepositStage; readonly txs: readonly TxRef[] } & PoolDepositFacts)
   | { readonly id: string; readonly kind: "withdraw"; readonly stage: WithdrawStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "buy" | "sell"; readonly stage: TradeStage; readonly txs: readonly TxRef[]; readonly code?: ErrorCode }
   | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }

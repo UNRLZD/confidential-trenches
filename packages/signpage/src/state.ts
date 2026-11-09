@@ -19,7 +19,8 @@
 // - A seed with no status (a database from before it, or a status the frame cannot read) is signed in with code_saved
 //   false, so the Backup dot shows, and no `way`, which the kit's state type leaves optional: the frame does not know it
 //   and says nothing. A status with no seed is signed out: signed_in comes from the seed's key alone.
-// - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } and a deposit's facts (the op contract is
+// - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } and a deposit's facts, a
+//   pool deposit's chain and facts (the op contract is
 //   at readOps). Only those fields are copied (a tx as { chain, hash }), and only when the op passes the kit's own state
 //   schema, the one the client checks every answer against: a record of another shape is left out, never sent, so one
 //   bad record cannot make the client refuse the whole state. Oldest first by created_ms; past the kit's
@@ -36,7 +37,7 @@
 //   change or sign out, also when no database exists yet, and the reader reports its own connection closed by a delete
 //   (versionchange). Each one calls the watchers, and the API posts a state event when the state read then differs. A
 //   sign out or a closed connection drops the reader; the next read opens a new one.
-import type { DepositFacts, Operation, SigninWay, SignpageState } from "../../kit/src/signpage/messages.ts";
+import { POOL_DEPOSIT_REFUNDED_STAGES, type DepositFacts, type Operation, type PoolDepositStage, type SigninWay, type SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { depositKey, depositRecordOf, type WalletEvent, type WalletStoreReader } from "@blindfill/wallet/store";
 import type { DepositPublic } from "./deposit-wire.ts";
@@ -83,6 +84,14 @@ export function opOf(id: string, rec: unknown): Operation | null {
   // record, follow.out; card held-move-forgotten-tx): the app draws no Held mark for it. An op follow.ts ends moved_out
   // with no move of its own (a withdraw.open took the money; its USDC may still reach U) stays Held, with its Withdraw
   if (rec.kind === "deposit" && rec.stage === "held" && isRecord(rec.follow) && rec.follow.why === "moved_out" && isRecord(rec.follow.out)) op.moved_out = true;
+  // a pool deposit (card pool-deposit-stages; pool-deposit-follow.ts PoolDepositOp): its pool's chain from the follow
+  // record, and each fact its record keeps only on the stages it belongs to (the record keeps `refunded` from the
+  // refunded stage on and `since_ms` from the first send seen; kit messages.ts PoolDepositFacts)
+  if (rec.kind === "pool_deposit") {
+    op.chain = isRecord(rec.follow) ? rec.follow.chain : undefined;
+    if (rec.refunded === true && POOL_DEPOSIT_REFUNDED_STAGES.includes(rec.stage as PoolDepositStage)) op.refunded = true;
+    if (rec.since_ms !== undefined && rec.stage !== "quote_checked" && rec.stage !== "expired") op.since_ms = rec.since_ms;
+  }
   const probe = stateOf(true, undefined, [op as Operation]);
   return SIGNPAGE_RESULT_SCHEMAS.state(probe) ? (op as Operation) : null;
 }

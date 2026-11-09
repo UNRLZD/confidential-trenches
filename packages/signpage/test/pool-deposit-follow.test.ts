@@ -295,3 +295,65 @@ test("review L2: the costs are read only once U_X holds at least the least rung"
   assert.equal(await followPoolQuote(F, w.deps), "in_pool");
   assert.ok(seen.length > 0 && seen.every((l) => l >= SOL_LADDER.min), seen.join(","));
 });
+
+test("pool-deposit-stages: the follower writes since_ms at the first stage that saw a send and refunded from the refund on, and the app reads each on its stages", async () => {
+  const { poolFollows } = await import("../src/pool-deposit-follow.ts");
+  const { opOf } = await import("../src/state.ts");
+  const rows = new Map<string, unknown>();
+  const seen: unknown[] = [];
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) rows.set(k, v), seen.push(opOf(k, v));
+      return rows.get(k);
+    },
+  };
+  let asked = 0;
+  const w = world(
+    [
+      { bal: [0n, 0n], status: "PENDING_DEPOSIT" },
+      { bal: [0n, 0n], status: "REFUNDED" },
+      { bal: [0n, 0n], status: "REFUNDED" },
+      { bal: [FLOOR, FLOOR], status: "REFUNDED" },
+      { bal: [0n, 0n], status: "REFUNDED", past: true },
+    ],
+    { refund: async () => (++asked === 1 ? "moved" : "wait") },
+  );
+  let clock = 100;
+  const host = poolFollows({ store: async () => store, deps: () => w.deps, decimals: () => 9, locks: () => null, now: () => clock++ });
+  const quote = { deposit_address: "DEPOSIT", origin_asset: "nep141:base-usdc", min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
+  await host.quoted("op-r", "solana", quote, { scope: 777n, index: 3, wallet: "U_X", refundId: "ab".repeat(32) });
+  await host.idle();
+  const sent = seen.map((o) => {
+    const { id: _i, kind: _k, txs: _t, chain, ...rest } = o as Record<string, unknown>;
+    assert.equal(chain, "solana");
+    return rest;
+  });
+  // since_ms is the clock at the first stage past a send (refunded here), kept after; refunded only on the refund's legs
+  const t = (sent.find((o) => o.stage === "refunded") as { since_ms: number }).since_ms;
+  assert.ok(t > 100, "a time from the host's clock");
+  assert.deepEqual(sent, [
+    { stage: "quote_checked" },
+    { stage: "refunded", since_ms: t },
+    { stage: "refund_move", since_ms: t, refunded: true },
+    { stage: "in_pool", since_ms: t, refunded: true },
+    { stage: "in_pool", since_ms: t, refunded: true },
+  ]);
+  const last = rows.get("op-r") as Record<string, unknown>;
+  assert.equal(last.final, true);
+  assert.equal(last.refunded, true);
+});
+
+test("pool-deposit-stages: withStage sets since_ms once at the first stage past a send, never on quote_checked or expired", async () => {
+  const { withStage } = await import("../src/pool-deposit-follow.ts");
+  const op = { kind: "pool_deposit" as const, stage: "quote_checked" as const, txs: [], created_ms: 1, follow: F };
+  assert.deepEqual(withStage(op, "expired", 5), { ...op, stage: "expired" });
+  const w = withStage(withStage(op, "expired", 5), "waiting", 6);
+  assert.equal(w.since_ms, 6, "a late send after expired");
+  assert.equal(withStage(w, "in_pool", 9).since_ms, 6, "kept, never moved");
+  assert.equal(withStage(w, "in_pool", 9).refunded, undefined);
+  assert.equal(withStage(op, "in_pool", 3).since_ms, 3, "the chain read first: in_pool with no status seen still has its time");
+  assert.equal(withStage(op, "refund_move", 3).refunded, true);
+});
