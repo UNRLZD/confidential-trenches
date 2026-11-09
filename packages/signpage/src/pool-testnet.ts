@@ -52,7 +52,7 @@ import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaP
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { buyMints, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
@@ -599,6 +599,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       bought: buyMints(page.store),
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
+      // the sells with no deposit back (kept on W) sent and not settled yet, settled at the next load
+      kept: keptSells(page.store),
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
@@ -611,9 +613,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const notes = await openNoteStore(await page.store());
       try {
         const ops = await page.store();
-        const ends: Promise<void>[] = [];
-        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, settled: (signature, stage) => void ends.push(settleSellOps(ops, signature, stage).catch(() => {})) }, locks);
-        await Promise.all(ends);
+        // each sell's stage written before its record goes (a write that fails keeps it for the next read)
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: (signature, stage) => settleSellOps(ops, signature, stage) }, locks);
       } finally {
         notes.close();
       }
@@ -752,7 +753,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
         // a failed reserved pass never holds back a send owed (the money on W): the finish below still runs
         if (mine.some((n) => n.state === "RESERVED")) await settleReserved().catch(() => {});
-        if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R")))) await settleSells();
+        // a sell's note left INCOMING, or a sell with no deposit back (no note) left sent: both settled by the sell's verdict
+        if (mine.some((n) => n.state === "INCOMING" && (n.ref.kind === "return" || (n.ref.kind === "second" && n.ref.id.id === "R"))) || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();
         // the next buy's proofs (card signpage-pool-pins): a page that loads with the pool's notes landed opens the
         // queue, and each read while it is open makes the epoch's proofs again, one pass at a time
         if (open !== null || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")) passing ??= proofs().finally(() => (passing = null));

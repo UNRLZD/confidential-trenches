@@ -47,7 +47,7 @@ const M = [
   ["D4 a sell not read yet taken as sold", SELL, T, '? "no" : "unsure";', '? "no" : "yes";'],
   ["D5 an unsure read stored as W's own state", SELL, T, 'steady: sold === "no" }', "steady: true }"],
   ["D6 a failed sell taken as sold", SELL, T, 'if (got.every((g) => g.got === "failed")) return "no";', 'if (got.every((g) => g.got === "failed")) return "yes";'],
-  ["D7 a sell past its blockhash taken as sold", SELL, T, '(await pastOnBoth(rpcs, by.last)) ? "no" : "unsure"', '(await pastOnBoth(rpcs, by.last)) ? "yes" : "unsure"'],
+  ["D7 a sell past its blockhash taken as sold", SELL, T, "(await goneOnBoth(rpcs, base58.encode(signed.subarray(1, 65)), by.last)) ? \"no\" : \"unsure\"", "(await goneOnBoth(rpcs, base58.encode(signed.subarray(1, 65)), by.last)) ? \"yes\" : \"unsure\""],
   // D8 (soldOne's own `by === undefined` taken as sold) is left out as equivalent since the review of bf467ae7's F5:
   // readW asks soldOne only of a mint with a recorded sell; D8b holds a held mint with none
   ["D8b a held mint with no sell read taken as sold", SELL, T, 'sells.get(t.mint) ?? "no"', 'sells.get(t.mint) ?? "yes"'],
@@ -86,7 +86,7 @@ const M = [
   ["review 6 N20-setup-fault-unlocked", SELL, T, "      const go = await withHolds(locks, address, true, wait, async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;", "      const go = await (async (f: () => Promise<void>) => (await f(), true))(async () => {\n        const o = (await h.owed!.list()).find((r) => r.address === address);\n        if (!o) return;"],
   ["review 6 N21-sweep-refused-gives-up", SELL, T, "      if (now.k === \"refused\") return { end: \"refused\" as const, detail: now.why };", "      if (now.k === \"refused\") return { end: \"gave_up\" as const, detail: now.why };"],
   ["review 6 N22-busy-detail-plain", SELL, T, "e === BUSY ? \"a sell took the sell lock between tries: W waits for the next load\" : faultOf(e)", "faultOf(e)"],
-  ["review 6 N24-sell-back-ifAvailable", SELL, T, "later.back = (locks) => withHolds(locks, w.address, false, wait,", "later.back = (locks) => withHolds(locks, w.address, true, wait,"],
+  ["review 6 N24-sell-back-ifAvailable", SELL, T, "const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, false, wait,", "const back: NonNullable<typeof later.back> = (locks) => withHolds(locks, w.address, true, wait,"],
   // delta review 7 of 08290868's plants on the claim's prefund (F1)
   ["review 7 P7 a made account read as unmade", KIT, KC, "        if (toRead === null) {", "        if (true) {"],
   ["review 7 P9 the open's lamports bound without the prefund", KIT, KC, "lam - c.prefund > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim", "lam > SOLANA_TOKEN_ACCOUNT_RENT_MAX) sim"],
@@ -102,6 +102,31 @@ const M = [
   ["review 8 C5 the buy host loses bought", TESTNET, TT, "      // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it\n      bought: buyMints(page.store),\n", ""],
   ["review 8 C6 the sell host loses bought", TESTNET, TT, "      owed: owedRentBacks(page.store),\n      bought: buyMints(page.store),\n", "      owed: owedRentBacks(page.store),\n"],
   ["review 8 C7 buyMints' get returns undefined", SELL, T, "return Object.hasOwn(all, address) ? all[address] : undefined;", "return undefined;"],
+  // card sol-sell-deposit-back-floor: the deposit back under the kit's release floor is never built; the sale stays on W
+  ["floor F1 a deposit back under the floor built", SELL, T, "return { reserve, value: p.minOut - reserve < p.noteFloor ? 0n : p.minOut - reserve };", "return { reserve, value: p.minOut - reserve };"],
+  ["floor F2 no floor taken", SELL, T, '  if (typeof p.noteFloor !== "bigint" || p.noteFloor < SOLANA_POOL_MIN_DEPOSIT) return { refused: "quote_check_failed" };\n', ""],
+  ["floor F3 the pool's least deposit for the floor", SELL, T, "const noteFloor = solanaPoolNoteFloor(rent);", "const noteFloor = SOLANA_POOL_MIN_DEPOSIT;"],
+  ["floor F4 an eight under the floor kept, never the six", SELL, T, '      if (next && r.value === 0n) return no("quote_check_failed");\n', ""],
+  ["floor F5 a value of 0 built as a deposit", SELL, T, "value === 0n ? steps : [...steps, depositIx(", "false ? steps : [...steps, depositIx("],
+  ["floor F6 one RPC's read of the sell filled", SELL, T, "if (got[0].got === \"ok\" && got[1].got === \"ok\") return \"filled\";", "if (got[0].got === \"ok\" || got[1].got === \"ok\") return \"filled\";"],
+  ["floor F7 one RPC's silence not_landed", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(", "if ((got[0].got === \"none\" || got[1].got === \"none\") && (await goneOnBoth("],
+  ["floor F10 not_landed before both are past", SELL, T, "const at = await pastAt(rpcs, last);", "const at = [0, 0] as const;"],
+  ["floor F8 a full sell kept on W runs no rent back", SELL, T, "        if (v === \"filled\" && !keeps) later.back = back;\n", ""],
+  ["floor F9 a sell kept on W writes a note", SELL, T, "const note = kept ? null : await store.move(", "const note = false ? null : await store.move("],
+  // review of b38cd8c2: F1 a read that throws is no RPC's word; F3 none only at a slot each RPC is past at; F4 the kept
+  // sell's record before the send, settled on load, dropped at its verdict
+  ["review F1 a throwing read taken as none on both", SELL, T, "const got = await both(rpcs, (r) => readBackFailure(r, k.signature, signed)).catch(() => null);", "const got = await both(rpcs, (r) => readBackFailure(r, k.signature, signed)).catch((): { got: \"none\" }[] => [{ got: \"none\" }, { got: \"none\" }]);"],
+  ["review F3 a status at any slot", SELL, T, "return int(s?.context?.slot) >= at[i]! &&", "return true &&"],
+  ["review F3 no status read for the sell's none", SELL, T, "if (got[0].got === \"none\" && got[1].got === \"none\" && (await goneOnBoth(rpcs, k.signature, k.last))) return \"not_landed\";", "if (got[0].got === \"none\" && got[1].got === \"none\" && (await pastOnBoth(rpcs, k.last))) return \"not_landed\";"],
+  ["review F3 no status read for a recorded sell's none", SELL, T, "goneOnBoth(rpcs, base58.encode(signed.subarray(1, 65)), by.last)", "pastOnBoth(rpcs, by.last)"],
+  ["review F4 no record before the send", SELL, T, "    if (kept) await h.kept?.put(", "    if (false) await h.kept?.put("],
+  ["review F4 not settled on load", SELL, T, "const v = await keptVerdict(h.rpcs, k).catch(() => \"pending\" as const);", "const v = \"pending\" as const;"],
+  ["review F4 the record kept after its verdict", SELL, T, "        await h.kept?.drop(signature).catch(() => {});\n", ""],
+  // review of fcd67b72: P1 the load settles a kept sell with no note; P2 the kept record before the request's record
+  ["review P1 the load settles sells only on a note", TESTNET, TT, " || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();", ") await settleSells();"],
+  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n", ""], ["    await h.signed?.(signature);\n", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n"]]],
+  // review of 5de2165e: P3-2 the state read's kept list read unguarded (one that always fails ends the read early)
+  ["review P3-2 the kept list read unguarded", TESTNET, TT, "(await keptSells(page.store).list().catch(() => [])).length > 0", "(await keptSells(page.store).list()).length > 0"],
 ];
 // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
 const only = process.env.ONLY;
