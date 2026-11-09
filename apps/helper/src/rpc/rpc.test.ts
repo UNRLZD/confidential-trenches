@@ -49,9 +49,10 @@ const code = (a: { body: string }) => JSON.parse(a.body).error?.code;
 
 test("the allowlist, batch size and body limit are the kit's (a change goes through packages/kit/src/helper/v1.ts)", () => {
   // the kit's chains, then the testnet build's second Solana provider (card pool-buy-send-fast) on the kit's Solana list
-  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet"]);
+  // and the mainnet mark scan's second route (card sol-pools-mainnet-pin, marks.test.ts), getProgramAccounts alone
+  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet", "solana-marks"]);
   // solana-devnet adds getGenesisHash alone (card live-check-devnet-pair)
-  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], c === "solana-devnet" ? [...HELPER_RPC_METHODS.solana, "getGenesisHash"] : [...HELPER_RPC_METHODS[c]], c);
+  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], c === "solana-devnet" ? [...HELPER_RPC_METHODS.solana, "getGenesisHash"] : c === "solana-marks" ? ["getProgramAccounts"] : [...HELPER_RPC_METHODS[c]], c);
   assert.equal(RPC_BATCH_MAX, HELPER_RPC_BATCH_MAX);
   const row = HELPER_V1_PATHS.find((p) => p.path === "/v1/rpc/{chain}");
   assert.equal(row?.limitBytes, RPC_BODY_MAX);
@@ -629,10 +630,10 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
 });
 
-test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet: none, off)", () => {
+test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet and solana-marks: none, off)", () => {
   const d = readUpstreams({});
   for (const c of RPC_CHAINS) {
-    if (c === "solana-devnet") assert.equal(d[c].off, true, c);
+    if (c === "solana-devnet" || c === "solana-marks") assert.equal(d[c].off, true, c);
     else assert.match(d[c].url, /^https:\/\//);
     assert.deepEqual(d[c].forms, []);
   }
