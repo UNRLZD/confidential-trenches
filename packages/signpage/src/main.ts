@@ -92,7 +92,7 @@ import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/hando
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
-import { settleTradeOps } from "./trade.ts";
+import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleOwed } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { poolRestore } from "./pool-restore.ts";
@@ -257,6 +257,9 @@ else {
     state: () =>
       fs.state().then(async (s) => {
         if (s.signed_in) void testnet?.stateRead();
+        // a trade of this page that ended with an op it could not end (a leg unknown, a lost write) is settled again at
+        // each state read until none is left (src/trade.ts tradeSettleOwed), no reload needed
+        if (s.signed_in && tradeSettleOwed()) void settleTrades();
         const r = s.signed_in && hasSolana ? rent.get() : null;
         // the ready list and the notes in one turn of the queue (card pool-ready-no-flicker): a remake's swap never
         // falls between them, so a note that stays ready never reads as ready "0". A failed notes read is kept and
@@ -752,6 +755,17 @@ function notesMoved(e: WalletEvent): void {
     .catch(() => {});
 }
 
+// The trade ops a closed page or an unknown leg left open, settled from their wallets' marks (src/trade.ts
+// settleTradeOps): one pass at a time, on the store bounded as a pick's is (timedStore), on its own paced pair.
+let tradeSettling: Promise<void> | null = null;
+function settleTrades(): Promise<void> {
+  if (framed || !globalThis.navigator?.locks) return Promise.resolve();
+  return (tradeSettling ??= open()
+    .then((s) => settleTradeOps(timedStore(s, TRADE_STORE_MS), navigator.locks, releaseTradeDeps().providers))
+    .catch(() => {})
+    .finally(() => (tradeSettling = null)));
+}
+
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
@@ -770,8 +784,7 @@ async function landed(l: Landing): Promise<void> {
   void restore?.settle().catch(() => {});
   // a buy or sell a closed or reloaded page left open is settled from its wallets' marks, or refused when it sent
   // nothing (src/trade.ts settleTradeOps): the app's Sell never waits on an op no page will end
-  // (its own paced pair: a few status reads once per sign-in)
-  if (!framed && globalThis.navigator?.locks) void open().then((s) => settleTradeOps(s, navigator.locks, releaseTradeDeps().providers)).catch(() => {});
+  void settleTrades();
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }

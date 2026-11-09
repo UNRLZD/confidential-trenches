@@ -186,9 +186,13 @@ export function refusalCode(record: SolanaTradeRecord): ErrorCode {
 
 type Leg = SolanaTradeRecord["legs"][number];
 const legState = (l: Leg): string | undefined => (l.reread ? l.reread.state : l.outcome?.state);
-const filled = (l: Leg): boolean => l.outcome?.state === "filled" || l.reread?.state === "filled";
-// landed with an error on both providers, or dead (06c A4, the kit's send.ts): its money moves no more
-const ended = (l: Leg): boolean => legState(l) === "failed" || legState(l) === "expired";
+/** A leg's known end as the op records it: filled, failed (landed with an error on both providers) or not_landed (dead,
+ *  06c A4, the kit's send.ts); undefined while unknown. */
+const legEnd = (l: Leg): LegEnd | undefined => {
+  if (l.outcome?.state === "filled" || l.reread?.state === "filled") return "filled";
+  const st = legState(l);
+  return st === "failed" ? "failed" : st === "expired" ? "not_landed" : undefined;
+};
 
 type Answer = HostAnswer<"buy">;
 type Locks = Pick<LockManager, "request">;
@@ -389,7 +393,9 @@ export function tradeKind(host: TradeHost): TradeKind {
       } finally {
         signer.close();
         if (record) {
-          const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
+          // each leg's known end on its tx (filled, failed, not_landed; none while unknown): the op's own record of it,
+          // which noted() reads to end the op once the last leg's end is known (state.ts opOf sends {chain, hash} only)
+          const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature, ...(legEnd(l) ? { state: legEnd(l)! } : {}) }] : []));
           if (answer) write({ txs });
           else {
             const code = refusalCode(record);
@@ -399,7 +405,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         }
         // the marks go only once the op's own record of the end has landed: a lost write keeps them, and the next load
         // (settleTradeOps) or pick reads their txs and writes the end (P2-1), never an op left signed or sent for good
-        if (await landed()) await unmark(store, keys, record);
+        if (!(await landed()) || !(await unmark(store, keys, record))) owed = true;
       }
       if (end) give({ error: end });
     }
@@ -407,20 +413,26 @@ export function tradeKind(host: TradeHost): TradeKind {
     // each wallet's mark goes when its txs' end is known here: none signed, none sent (the kit returned its leg
     // unsigned), its swap filled (a buy's goes IN_POSITION) or failed or dead; any other keeps its mark, resolved at a
     // later pick once this trade's lock is free
-    async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<void> {
-      await Promise.all(
+    // A leg's mark goes only once its known end is on the op (noteLeg, as settleDeadMarks does; re-check of 91fb908e):
+    // a mark dropped with its end unwritten would leave the op open with nothing left to end it. True when every mark of
+    // this trade went; a kept one (an unknown leg, a lost note) is ended by a later settleTradeOps.
+    async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<boolean> {
+      const gone = await Promise.all(
         keys.map(async (key, i) => {
           const rec = armRecordOf(key, await store.get("wallets", key).catch(() => undefined));
-          if (rec?.inflight?.op !== ctx.id) return;
+          if (rec?.inflight?.op !== ctx.id) return true;
           const leg = record?.legs[i];
           if (rec.inflight.txs.length === 0) return settleArm(store, key, ctx.id);
           // a leg the kit returned unsigned was never sent: a signature its signer gave and the kit dropped as late (card
           // kit-renewal-read-bounded) is in the mark only, so the mark goes and no later pick notes it on the op
           if (record && leg && leg.signature === undefined) return settleArm(store, key, ctx.id);
-          if (leg && filled(leg)) return settleArm(store, key, ctx.id, side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
-          if (leg && ended(leg)) return settleArm(store, key, ctx.id);
-        }).map((x) => x.catch(() => false)),
+          const end = leg ? legEnd(leg) : undefined;
+          if (!leg || !end) return false;
+          if (!(await noteLeg(store, ctx.id, leg.signature!, end).then(() => true, () => false))) return false;
+          return settleArm(store, key, ctx.id, end === "filled" && side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
+        }).map((x) => x.then((v) => v !== false, () => false)),
       );
+      return gone.every(Boolean);
     }
   };
   return Object.assign(kind, {
@@ -431,6 +443,11 @@ export function tradeKind(host: TradeHost): TradeKind {
 }
 
 type LegEnd = "filled" | "failed" | "not_landed";
+
+/** A trade of this page ended with an op it could not end itself (a lost end write, a leg still unknown): the page runs
+ *  settleTradeOps again on its next state read until none is left (re-check of 91fb908e, P3; src/main.ts). */
+let owed = false;
+export const tradeSettleOwed = (): boolean => owed;
 
 /** One ops write, tried three times (50 and 200 ms apart) before it rejects: the op's end is what the app's sell lock
  *  reads, so it is never dropped on one failed write. */
@@ -480,8 +497,11 @@ export async function settleDeadMarks(store: TradeStore, locks: Locks, providers
  */
 export async function settleTradeOps(store: TradeStore, locks: Locks, providers: readonly [SolanaRpc, SolanaRpc]): Promise<void> {
   await locks.request(TRADE_PICK_LOCK, { mode: "exclusive" }, async () => {
+    owed = false;
     await settleDeadMarks(store, locks, providers);
     const marked = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
+    // a mark still out (a leg unknown, a trade of a live page) is read again at the next state read
+    if (marked.size > 0) owed = true;
     for (const k of await store.keys("ops")) {
       const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
       if (!rec || (rec.kind !== "buy" && rec.kind !== "sell") || !["pending", "signed", "sent"].includes(String(rec.stage)) || marked.has(k)) continue;

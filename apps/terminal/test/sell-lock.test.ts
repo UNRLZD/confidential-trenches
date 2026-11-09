@@ -33,10 +33,14 @@ test("P2: a remount finds an open sell on the device's record and locks every se
   assert.equal(sellLocked(READY, { state: null, stale: false } as Snap, here("1000"), none), false);
 });
 
-test("P3-3a: a sell tapped on this page that the record does not show yet (pending) locks its holding while the row is unmoved", () => {
+test("P3-3a: a sell tapped on this page that the record does not show yet (pending) locks its holding, whatever the row does", () => {
   const tapped = new Map([["s1", tap("1000")]]);
   assert.equal(sellLocked(READY, at([]), here("1000"), tapped), true, "a remount before signed");
-  assert.equal(sellLocked(READY, at([]), here("750"), tapped), false, "the row moved");
+  // the row moving says nothing of a sell the record has not shown: a second pool sell would queue behind it
+  // (re-check of 91fb908e, P3)
+  for (const u of ["750", "1000.5", null]) assert.equal(sellLocked(READY, at([]), here(u), tapped), true, `the row moved to ${u}`);
+  // the reviewer's case: a row move for another reason (a deposit of the same token) keeps the pending sell's lock
+  assert.equal(sellLocked(READY, at([]), here("1000.5"), new Map([["s1", tap("1000")]])), true);
   assert.equal(sellLocked(READY, at([]), here("1000", "OtherMint111111111111111111111111111111pump"), tapped), false, "another holding");
   // once the record has shown it, its stage there speaks for it (an op aged out of the list locks nothing)
   assert.equal(sellLocked(READY, at([]), here("1000"), new Map([["s1", tap("1000", MINT, true)]])), false);

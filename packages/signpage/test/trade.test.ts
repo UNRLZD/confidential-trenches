@@ -20,7 +20,7 @@ import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type Solan
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
-import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind, tradeSettleOwed } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -233,7 +233,8 @@ test("a buy: the ladder split's READY wallets from the arm records, answered at 
   assert.equal(txs.txs.length, 3);
   assert.ok(txs.txs.every((t) => t.chain === "solana" && base58.decode(t.hash).length === 64));
   assert.deepEqual(p.progress, ["filled"]);
-  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("17")), stage: "filled", txs: txs.txs, created_ms: 1_700_000_000_000 });
+  // the record keeps each leg's known end on its tx (re-check of 91fb908e); the answer names {chain, hash} only
+  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("17")), stage: "filled", txs: txs.txs.map((t) => ({ ...t, state: "filled" })), created_ms: 1_700_000_000_000 });
   assert.deepEqual((p.calls[0] as { wallets?: readonly string[] }).wallets, [0, 1, 2, 3].map((j) => W[j]!.address), "the kit gets every one of the user's Solana wallets");
   assert.ok([0, 1, 2, 3].every((j) => mark(s, j) === undefined), "every mark is off once the fill is read");
   assert.deepEqual([0, 1, 2, 3].map((j) => (s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).state), ["IN_POSITION", "IN_POSITION", "IN_POSITION", "READY"]);
@@ -266,7 +267,7 @@ test("a leg the kit drops as late after its signer answered reaches no answer, s
   assert.ok(staged.some((w) => w.stage === "signed") && staged.some((w) => w.stage === "sent"));
   for (const w of opWrites) assert.ok(!w.txs.some((t) => t.hash === late), `the ${w.stage} write names the dropped signature`);
   for (const w of staged) assert.deepEqual(w.txs.map((t) => t.hash), sent.txs.map((t) => t.hash), `the ${w.stage} write names the kept signatures`);
-  assert.deepEqual((s.m.ops!.get(id) as { txs: unknown }).txs, sent.txs);
+  assert.deepEqual((s.m.ops!.get(id) as { txs: unknown }).txs, sent.txs.map((t) => ({ ...t, state: "filled" })));
 });
 
 test("a wallet without this device's own arm record is refused before any signature, whatever the legs say", async () => {
@@ -314,7 +315,7 @@ test("a repeated id is never run again: answered from its ops record, or id_reus
   const first = await p.ask(buy("10"));
   const again = await p.ask(buy("10"), first.id);
   assert.equal(p.calls.length, 1, "one run");
-  assert.deepEqual(again.answer, { result: { stage: "filled", txs: (s.m.ops!.get(first.id) as { txs: unknown[] }).txs } });
+  assert.deepEqual(again.answer, { result: { stage: "filled", txs: (s.m.ops!.get(first.id) as { txs: { chain: string; hash: string }[] }).txs.map((t) => ({ chain: t.chain, hash: t.hash })) } });
   assert.deepEqual((await p.ask(buy("10.5"), first.id)).answer, { error: "id_reused" }, "the same id with another request");
   const pending = crypto.randomUUID();
   s.m.ops!.set(pending, { kind: "buy", sha: shaOf(buy("10")), stage: "pending", txs: [], created_ms: 1 });
@@ -952,4 +953,39 @@ test("the next load's settle refuses an open trade op that sent nothing, and lea
   assert.deepEqual(s.m.ops!.get("dead-signed"), { ...op("signed"), stage: "refused", code: "failed" });
   assert.deepEqual(s.m.ops!.get("live"), op("pending"), "a page still running it");
   assert.deepEqual(s.m.ops!.get("ended"), op("filled"));
+});
+
+test("a sell with one leg failed and one unknown never stays sent: each leg's end goes on the op before its mark goes, and the settle ends the op (re-check of 91fb908e, P2)", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos), [armKey("sol", L, 1)]: rec(1, 1_000n, pos) });
+  const held = { [W[0]!.address]: 3_000n, [W[1]!.address]: 3_000n };
+  // the kit sends no end stage: nothing filled and one leg is still unknown (flow.ts finishSolanaSet, stage null)
+  const p = page(s, { legState: (i) => (i === 0 ? "failed" : "unknown") }, [provider(held), provider(held)]);
+  const a = await p.ask(sell("6000"));
+  await p.idle();
+  p.die();
+  const op = () => s.m.ops!.get(a.id) as { stage: string; txs: { hash: string; state?: string }[] };
+  assert.equal(op().stage, "sent");
+  assert.equal(op().txs[0]!.state, "failed", "the failed leg's end is on the op before its mark went");
+  assert.equal(mark(s, 0), undefined, "the failed leg's mark went");
+  assert.equal(mark(s, 1)?.op, a.id, "the unknown leg's mark stays");
+  assert.equal(tradeSettleOwed(), true, "the page owes a settle at its next state read");
+  // still unknown on the providers: open, the mark kept
+  await settleTradeOps(s, navigator.locks, [sigStatus(null, LVBH), sigStatus(null, LVBH)]);
+  assert.equal(op().stage, "sent");
+  assert.equal(mark(s, 1)?.op, a.id);
+  assert.equal(tradeSettleOwed(), true, "a mark still out: owed again");
+  // the unknown leg failed too: the op ends not_landed and no mark is left
+  await settleTradeOps(s, navigator.locks, [sigStatus("err"), sigStatus("err")]);
+  assert.equal(op().stage, "not_landed");
+  assert.deepEqual([mark(s, 0), mark(s, 1)], [undefined, undefined]);
+  assert.equal(tradeSettleOwed(), false, "nothing left to settle");
+});
+
+test("the page settles an owed trade at each state read, on the store bounded as a pick's is (re-check of 91fb908e, P3)", () => {
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(main, /if \(s\.signed_in && tradeSettleOwed\(\)\) void settleTrades\(\);/, "the state read runs the owed settle");
+  assert.match(main, /settleTradeOps\(timedStore\(s, TRADE_STORE_MS\), navigator\.locks, releaseTradeDeps\(\)\.providers\)/, "the settle's store is timed");
+  assert.equal(main.match(/settleTradeOps\(/g)?.length, 1, "one settle call, through settleTrades");
+  assert.doesNotMatch(main, /set(Interval|Timeout)\([^)]*settleTrades/, "no timer runs it");
 });

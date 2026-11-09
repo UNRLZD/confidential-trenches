@@ -115,12 +115,12 @@ export interface Tapped {
 }
 
 /**
- * Every sell button is locked (card app-sell-mount, re-checks of 0ea1ef58, 68b288e7 and c01c07a4):
+ * Every sell button is locked (card app-sell-mount, re-checks of 0ea1ef58, 68b288e7, c01c07a4 and 91fb908e):
  * - while the device's record (state.ops) holds a sell that is open (signed, sent), from any mount or tab: a box
  *   mounted again finds it there, never READY (P2). No row move lets go of it: the signing page settles every open
  *   sell itself (trade.ts settleTradeOps, pool-sell.ts settleSellOps), so the op is what ends the lock;
  * - while a sell tapped on this page for this holding (`here`) is not in state.ops yet (pending, which the record never
- *   shows) and the row is unmoved (P3-3a);
+ *   shows), whatever the row does, until its outcome or the record shows it (P3-3a; re-check of 91fb908e);
  * - while a sell tapped on this page for this holding has landed (filled, part filled) but the row still shows the
  *   units it was tapped on: the holdings read lags the op's end (P3-2 in this page);
  * - after this mount's sell may have sold (filled, part filled, not landed), until its op shows an end and while the
@@ -143,7 +143,9 @@ export function sellLocked(phase: Phase, snap: Pick<SignpageClientSnapshot, "sta
     if (OPEN.has(o.stage)) return true;
     if (LANDED.has(o.stage) && mine(o.id) && !moved(o.id)) return true;
   }
-  for (const [id, t] of tapped) if (!t.seen && mine(id) && !moved(id) && !ops.some((o) => o.id === id)) return true;
+  // a sell tapped here that the record does not show yet holds its holding whatever the row does (re-check of
+  // 91fb908e): only its outcome (an id not in TAPPED) or the record showing it lets go
+  for (const [id, t] of tapped) if (!t.seen && mine(id) && !ops.some((o) => o.id === id)) return true;
   const sold = phase.k === "filled" || (phase.k === "ended" && phase.stage !== "refused");
   if (!sold || moved(phase.id)) return false;
   if (snap.stale) return true;
