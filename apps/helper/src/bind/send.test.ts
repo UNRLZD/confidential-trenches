@@ -57,6 +57,8 @@ import {
 import { createTokenWatch, pausedFrom, USDC, USDC_CODE_HASH, type HoldAt, type TokenStatus } from "../token-status/status.ts";
 import { A, B, hashOf, nearPair, PAUSED } from "../../test/token-status/near.ts";
 import { watchDeps } from "./env.ts";
+import { createIntentsCarry, type IntentsAnswer } from "../intents/carry.ts";
+import { createIntentsStore, onQuoteAnswer, onStatusAnswer } from "../intents/records.ts";
 
 const VAULT = "vault.confidential.unrlzd.near";
 const RELAYER = "bind.test.near";
@@ -3154,4 +3156,121 @@ test("review P2-2: b0 and the key's nonce are read on both providers before the 
     assert.deepEqual([tx.length, node.sent.length, node.relayerStore.nonceNext(r.key)], [0, 0, before], `${name}: nothing signed, sent or counted`);
     assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final", `${name}: the next send, both agreeing, lands`);
   }
+});
+
+// ---- PR4-3 and PR4-3b on their real consumer: intents/carry.ts over createRelayer (card helper-judge-two-agree) ----
+
+const CARRY_USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+const ONECLICK = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/oneclick-status.json"), "utf8")).answers.success_usdc;
+const CARRY_NOW = Date.parse("2026-11-07T18:00:00.000Z");
+/** The gas account's balance on the provider the relayer reads it on: above the carry's floor and a registration. */
+const rich = (e?: Edit): Edit => async (m, p, real) => (m === "query" && p.request_type === "view_account" ? { amount: (10n ** 26n).toString() } : e === undefined ? real() : e(m, p, real));
+/**
+ * intents/carry.ts with the real relayer on the node, provider `liar` (or both) answering a lookup of every
+ * `method` transaction as named at D with every receipt failed; the chain's storage reads, the simulation and the
+ * final time faked (a storage key unset reads registered). The helper's clock moves 1 s on each read of it, so a send
+ * not read final is read until its intent's deadline and a minute past, then given up.
+ */
+async function carryOver(liars: readonly (0 | 1)[], method: string) {
+  const node = new Node();
+  const methodOf = new Map<string, string>();
+  const only: Edit = async (m, p, real) => {
+    const hash = Array.isArray(p) ? undefined : (p as { tx_hash?: string }).tx_hash;
+    return m === "tx" && hash !== undefined && methodOf.get(hash) === method ? failedAtD(m, p, real) : real();
+  };
+  const edits: Partial<Record<0 | 1 | 2, Edit>> = { 0: rich(liars.includes(0) ? only : undefined) };
+  if (liars.includes(1)) edits[1] = only;
+  const r = relayerWith(node, edits);
+  const signed: { method: string; tx: TxRef }[] = [];
+  const relayer: Pick<Relayer, "send" | "resolve" | "balance"> = {
+    balance: () => r.balance(),
+    resolve: (tx, o) => r.resolve(tx, o),
+    send: (action, guard, before, opts) =>
+      r.send(action, guard, (tx) => {
+        const m = action.kind === "call" ? action.method : action.kind;
+        methodOf.set(tx.tx_hash, m);
+        signed.push({ method: m, tx });
+        before(tx);
+      }, opts),
+  };
+  const storage = new Map<string, "registered" | "none">();
+  const store = createIntentsStore(mkdtempSync(join(tmpdir(), "intents-node-")), undefined, () => CARRY_NOW);
+  const clock = { ms: CARRY_NOW };
+  const carry = createIntentsCarry({
+    vault: VAULT,
+    usdc: CARRY_USDC,
+    store,
+    reads: { finalMs: async () => BigInt(CARRY_NOW), simulate: async () => true, storage: async (t, a) => storage.get(`${t}/${a}`) ?? "registered" },
+    relayer,
+    held: async () => false,
+    now: () => (clock.ms += 1_000),
+    resolveEveryMs: 1,
+  });
+  // a signer the helper saw: its deposit quote carried, then a REFUNDED status read for it
+  const u = createHash("sha256").update(`signer ${liars.join()} ${method}`).digest("hex");
+  const q = structuredClone(ONECLICK.quoteResponse);
+  Object.assign(q.quoteRequest, { recipient: u, refundTo: u, depositType: "ORIGIN_CHAIN", refundType: "INTENTS" });
+  Object.assign(q.quote, { depositAddress: createHash("sha256").update(`address ${u}`).digest("hex"), deadline: "2026-11-07T18:30:00.000Z" });
+  const quote = JSON.stringify(q);
+  assert.ok(await onQuoteAnswer(quote, store));
+  assert.equal(onStatusAnswer(JSON.stringify({ ...structuredClone(ONECLICK), status: "REFUNDED", quoteResponse: q }), store), u);
+  let n = 0;
+  const intent = (to: string) => {
+    const payload = JSON.stringify({ signer_id: u, verifying_contract: "intents.near", deadline: "2026-11-07T18:02:00.000Z", nonce: Buffer.alloc(32, ++n).toString("base64"), intents: [{ intent: "ft_withdraw", token: CARRY_USDC, receiver_id: to, amount: "2003610" }] });
+    return { signed_intent: { standard: "raw_ed25519", payload, public_key: `ed25519:${base58(Buffer.alloc(32, 1))}`, signature: `ed25519:${base58(Buffer.alloc(64, 2))}` } };
+  };
+  const codeOf = async (to: string) => {
+    const a: IntentsAnswer = await carry.carry(intent(to));
+    return "error" in a.body ? a.body.error.code : "sent";
+  };
+  return { node, r, carry, store, storage, signed, u, codeOf };
+}
+
+test("two-agree, PR4-3 on carry.ts: one provider (either) reading the receiver's landed storage_deposit failed leaves it unknown: one registration for one receiver; both agreeing on failed free it", async () => {
+  for (const liar of [0, 1] as const) {
+    const s = await carryOver([liar], "storage_deposit");
+    s.storage.set(`${CARRY_USDC}/fresh.near`, "none"); // the agreed block still reads the receiver unregistered
+    const codes: string[] = [];
+    for (let k = 0; k < 4; k++) codes.push(await s.codeOf("fresh.near"));
+    s.storage.set(`${CARRY_USDC}/fresh.near`, "registered"); // it landed on the first
+    codes.push(await s.codeOf("fresh.near"));
+    await s.carry.idle();
+    const regs = s.signed.filter((x) => x.method === "storage_deposit");
+    assert.equal(regs.length, 1, `liar ${liar}: ${regs.length} storage_deposits for one receiver (${codes.join(",")})`);
+    assert.equal((await s.r.resolve(regs[0]!.tx, noResend)).kind, "unknown", `liar ${liar}: the relayer's read`);
+    assert.deepEqual(codes, ["in_flight", "in_flight", "in_flight", "in_flight", "sent"], `liar ${liar}`);
+    s.store.close();
+  }
+  // the consumer does act on an agreed outcome: both providers reading it failed free it, and it is paid again
+  const both = await carryOver([0, 1], "storage_deposit");
+  both.storage.set(`${CARRY_USDC}/fresh.near`, "none");
+  const first = await both.codeOf("fresh.near");
+  const second = await both.codeOf("fresh.near");
+  await both.carry.idle();
+  assert.deepEqual([first, second], ["registration_failed", "registration_failed"], "both agreeing on failed, twice");
+  assert.equal(both.signed.filter((x) => x.method === "storage_deposit").length, 2, "both agreeing on failed: paid again");
+  both.store.close();
+});
+
+test("two-agree, PR4-3b on carry.ts: one provider (either) reading three landed execute_intents of a signer failed never strikes it; both agreeing on failed strike it", async () => {
+  for (const liar of [0, 1] as const) {
+    const s = await carryOver([liar], "execute_intents");
+    const codes: string[] = [];
+    for (let k = 0; k < 4; k++) {
+      codes.push(await s.codeOf("alice.near"));
+      await s.carry.idle();
+    }
+    assert.deepEqual(codes, ["sent", "sent", "sent", "sent"], `liar ${liar}: struck on one lookup's word`);
+    assert.equal(s.store.signer(s.u).failed, 0, `liar ${liar}`);
+    for (const x of s.signed) assert.equal((await s.r.resolve(x.tx, noResend)).kind, "unknown", `liar ${liar}: the relayer's read`);
+    s.store.close();
+  }
+  const both = await carryOver([0, 1], "execute_intents");
+  const codes: string[] = [];
+  for (let k = 0; k < 4; k++) {
+    codes.push(await both.codeOf("alice.near"));
+    await both.carry.idle();
+  }
+  assert.deepEqual(codes, ["sent", "sent", "sent", "sender_struck"], "both agreeing on failed: struck");
+  both.store.close();
 });
