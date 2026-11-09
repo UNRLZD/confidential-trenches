@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, LIMIT_CODES, NOT_YET, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, LIMIT_CODES, NOT_YET, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -153,13 +153,18 @@ test("P2-1: a 5xx with no CORS answer is a provider's passing fault, a no-answer
   for (const status of [401, 403, 404, 405]) assert.equal(typeof pageRefuses("https://p.example/rpc", { noAnswer: "x", status, acao: null }, O), "string", String(status));
 });
 
-test("P3-3: the page's Solana throttle codes are a rate limit whatever their words, as the page reads them", () => {
+test("P3-3: the page's Solana throttle codes are a rate limit whatever their words, as the page reads them: in a page-mode read's 2xx only", () => {
   for (const code of [-32029, -32429, -429, 15, 429, -32005]) {
-    const a = classify("p", 200, rpcErr(code, "Too many"));
+    const a = classify("p", 200, rpcErr(code, "Too many"), { page: true });
     assert.match(a.noAnswer ?? "", /^p HTTP 200: rate limit /, String(code));
   }
   // a revert under one of them is still the contract's
-  assert.deepEqual(classify("p", 200, rpcErr(3, "x")), { error: { code: 3, message: "x" } });
+  assert.deepEqual(classify("p", 200, rpcErr(3, "x"), { page: true }), { error: { code: 3, message: "x" } });
+  // delta review P3-1: outside page mode (the EVM checks), only 429 and -32005 and the words; in page mode, a throttle code
+  // outside a 2xx is the provider's answer (send.ts reads a non-2xx by its status), judged
+  for (const code of [-32029, -32429, -429, 15]) assert.deepEqual(classify("p", 200, rpcErr(code, "Too many")), { error: { code, message: "Too many" } }, String(code));
+  assert.deepEqual(classify("p", 403, rpcErr(15, "Forbidden: origin not allowed"), { page: true }), { error: { code: 15, message: "Forbidden: origin not allowed" } });
+  assert.deepEqual([...LIMIT_CODES].sort(), [-32005, 429].sort());
 });
 
 test("P3-3: the throttle codes are the kit's own (RPC_THROTTLE_CODES in the files the kit's entry loads)", () => {
@@ -168,7 +173,7 @@ test("P3-3: the throttle codes are the kit's own (RPC_THROTTLE_CODES in the file
   const sets = [];
   for (const f of program.getSourceFiles()) for (const m of f.text.matchAll(/\nconst RPC_THROTTLE_CODES\b[^=]*= new Set\(\[([^\]]*)\]\)/g)) sets.push(m[1].split(",").map((x) => Number(x.trim())));
   assert.equal(sets.length, 1);
-  for (const c of sets[0]) assert.ok(LIMIT_CODES.has(c), String(c));
+  assert.deepEqual([...PAGE_THROTTLE_CODES].sort((a, b) => a - b), [...sets[0]].sort((a, b) => a - b));
 });
 
 test("P3-2: a redirect is named as one, never as a provider that said nothing", async () => {
@@ -207,6 +212,31 @@ test("P3-1: the CORS preflight is sent as a page's browser sends it, and read", 
     assert.equal(n, 2);
     assert.equal(preflightRefuses("https://p.example/rpc", q, O), null);
   }
+});
+
+// delta review of 9f6473ac..66b42bea, P2-1: a page-mode read takes any 5xx as a passing fault before its body, as the
+// page does (send.ts: a 429 or 5xx is a retry before the body is read); outside page mode a 5xx's JSON-RPC error is judged
+test("P2-1: a page-mode read's 5xx is a no-answer whatever its body, CORS answer or not", async () => {
+  for (const status of [500, 503])
+    for (const acao of [null, "*"]) {
+      const headers = acao === null ? {} : { "access-control-allow-origin": acao };
+      const a = await rpcAnswer("https://p.example/rpc", "getBalance", [], { headers: { origin: "https://page.example" }, fetchFn: async () => new Response(rpcErr(-32603, "internal error"), { status, headers }) });
+      assert.equal(typeof a.noAnswer, "string", `${status} ${acao}`);
+      assert.match(a.noAnswer, new RegExp(`^p\\.example HTTP ${status}: `));
+      assert.equal(pageRefuses("https://p.example/rpc", a, "https://page.example"), null, `${status} ${acao}`);
+    }
+  // outside page mode: judged, as before (robinhood-rpc.publicnode.com's 403 with a JSON-RPC error inside is an answer)
+  assert.deepEqual(classify("p", 503, rpcErr(-32603, "internal error")), { error: { code: -32603, message: "internal error" } });
+});
+
+// delta review P3-2: a browser never follows a preflight's redirect, so one is the page's refusal
+test("P3-2: a preflight that redirects is a refusal, never a no-answer", async () => {
+  let n = 0;
+  const p = await preflight("https://p.example/rpc", "https://page.example", { fetchFn: async () => (n++, Promise.reject(new TypeError("fetch failed", { cause: new Error("unexpected redirect") }))) });
+  assert.equal(p.noAnswer, undefined);
+  assert.equal(n, 1);
+  assert.match(preflightRefuses("https://p.example/rpc", p, "https://page.example") ?? "", /redirect/);
+  for (const status of [301, 302, 307, 308]) assert.match(preflightRefuses("https://p.example/rpc", { status, acao: "*", allowHeaders: "content-type" }, "https://page.example") ?? "", new RegExp(`HTTP ${status}`));
 });
 
 // The kit's words (its EVM quote's module-private limited, notYet and stateless), read from the

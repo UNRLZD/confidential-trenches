@@ -196,6 +196,8 @@ test("planted providers: a refusal of the page fails, an admitted provider's tim
     ...[502, 503, 504].map((status) => [`${status} with no CORS answer`, async () => new Response("<html>Bad gateway</html>", { status })]),
     ...[-32029, -32429, -429, 15].map((code) => [`throttle code ${code}`, async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message: "Too many" } }), { status: 200, headers: { "access-control-allow-origin": "*" } })]),
     ["redirect", async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); }],
+    // delta review of 9f6473ac..66b42bea, P2-1: a 5xx with a JSON-RPC error inside, with and without a CORS answer
+    ...[500, 503].flatMap((status) => [null, "*"].map((acao) => [`${status} with a JSON-RPC error, ACAO ${acao}`, async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "internal error" } }), { status, headers: acao === null ? {} : { "access-control-allow-origin": acao } })])),
     ["timeout", async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }],
     ["429", async () => new Response("Too Many Requests", { status: 429 })],
     ["empty, admitted", async () => new Response("", { status: 200, headers: { "access-control-allow-origin": SIGN } })],
@@ -213,12 +215,18 @@ test("planted providers: a refusal of the page fails, an admitted provider's tim
     ["no CORS answer", async () => new Response(null, { status: 204 })],
     ["another origin", async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "https://x.example", "access-control-allow-headers": "content-type" } })],
     ["content-type not allowed", async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization" } })],
+    // delta review P3-2: a browser never follows a preflight's redirect
+    ["OPTIONS 301", async () => new Response(null, { status: 301, headers: { location: "https://elsewhere.example/", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type" } })],
+    ["OPTIONS redirect refused", async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); }],
   ]) {
     const v = await run(honest, f);
     assert.equal(v.verdict, "FAIL", why);
     assert.ok(v.lines.some((l) => l.includes("preflight")), `${why}: ${v.lines.join("\n")}`);
   }
   assert.equal((await run(honest, async () => new Response("", { status: 503 }))).verdict, "INCONCLUSIVE", "a preflight's 503");
+  // delta review P3-1: a 403 with the throttle code 15 inside, its origin refused in words, is the page's refusal: FAIL
+  const forbidden = await run(async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 15, message: "Forbidden: origin not allowed" } }), { status: 403, headers: { "access-control-allow-origin": "*" } }));
+  assert.equal(forbidden.verdict, "FAIL", forbidden.lines.join("\n"));
   // liars
   const liars = {
     "another balance": async (body) => new Response(rpc(truth(body) + 1), { status: 200, headers: { "access-control-allow-origin": "*" } }),
