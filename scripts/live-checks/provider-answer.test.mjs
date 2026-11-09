@@ -1,9 +1,10 @@
 // The shared provider-answer rule (provider-answer.mjs): every no-answer kind planted, every judged kind planted, the
-// re-read once, and the kit's words held equal to these.
+// re-read once, and the kit's words held equal to these (read from the files the kit's entry loads, never a deep path).
 //   node --test scripts/live-checks/provider-answer.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { classify, NOT_YET, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
@@ -92,19 +93,25 @@ test("the request is one JSON-RPC 2.0 POST of the method and its params", async 
   assert.deepEqual(seen, ["https://p.example/rpc", "POST", { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] }]);
 });
 
-// The kit's words (packages/kit/src/checks/evm/quote.ts limited, notYet, stateless; pool-index.ts limited), read from
-// its source: a change on either side fails here until both say the same
+// The kit's words (its EVM quote's module-private limited, notYet and stateless), read from the
+// files the kit's entry loads: TypeScript follows packages/kit/src/index.ts's own imports, so this test names no file
+// past the entry. A change on either side fails here until both say the same.
 test("the rate-limit, not-yet and stateless words are the kit's own", () => {
-  const src = (p) => readFileSync(new URL(`../../packages/kit/src/checks/evm/${p}`, import.meta.url), "utf8");
-  const quote = src("quote.ts");
-  const fn = (name) => {
-    const at = quote.indexOf(`const ${name} = `);
-    assert.notEqual(at, -1, `quote.ts has no const ${name}`);
-    return quote.slice(at, quote.indexOf("\n};", at));
+  const entry = fileURLToPath(new URL("../../packages/kit/src/index.ts", import.meta.url));
+  const program = ts.createProgram([entry], { noEmit: true, noLib: true, types: [], allowImportingTsExtensions: true, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, target: ts.ScriptTarget.ESNext });
+  const files = program.getSourceFiles().filter((f) => !f.isDeclarationFile && !f.fileName.includes("/node_modules/"));
+  assert.ok(files.length > 10, "the entry's files were read");
+  // each top-level `const <name> = ...;` in the entry's files (to the first `;` that ends a line followed by an
+  // unindented or empty one), to the regex literals its body tests with
+  const words = (name) => {
+    const out = [];
+    for (const f of files)
+      for (const m of f.text.matchAll(new RegExp(`\\nconst ${name} = ([\\s\\S]*?);\\n(?=\\S|\\n)`, "g")))
+        out.push(...[...m[1].matchAll(/\/((?:\\\/|[^/\n])+)\/([a-z]*)\.test\(/g)].map((x) => `/${x[1]}/${x[2]}`));
+    return out;
   };
-  const regexIn = (body) => [...body.matchAll(/\/((?:\\\/|[^/\n])+)\/([a-z]*)\.test\(/g)].map((m) => `/${m[1]}/${m[2]}`);
-  assert.deepEqual(regexIn(fn("limited")), [String(RATE_LIMIT)]);
-  assert.deepEqual(regexIn(fn("notYet")), [String(NOT_YET)]);
-  assert.deepEqual(regexIn(fn("stateless")), [String(STATELESS)]);
-  assert.deepEqual(regexIn(src("pool-index.ts").split("const limited = ")[1].split("\n")[0]), [String(RATE_LIMIT)]);
+  // the EVM quote's limited (the pool index's copy is not among the entry's files)
+  assert.deepEqual(words("limited"), [String(RATE_LIMIT)]);
+  assert.deepEqual(words("notYet"), [String(NOT_YET)]);
+  assert.deepEqual(words("stateless"), [String(STATELESS)]);
 });
