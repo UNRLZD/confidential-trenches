@@ -92,7 +92,7 @@ import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/hando
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
-import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleOwed } from "./trade.ts";
+import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { poolRestore } from "./pool-restore.ts";
@@ -257,9 +257,9 @@ else {
     state: () =>
       fs.state().then(async (s) => {
         if (s.signed_in) void testnet?.stateRead();
-        // a trade of this page that ended with an op it could not end (a leg unknown, a lost write) is settled again at
-        // each state read until none is left (src/trade.ts tradeSettleOwed), no reload needed
-        if (s.signed_in && tradeSettleOwed()) void settleTrades();
+        // a trade no tab is running that the store shows open or marked (any tab's: a leg unknown, a lost write, a
+        // closed tab) is settled at each state read until none is left (src/trade.ts tradeSettleDue), no reload needed
+        if (s.signed_in) void settleTradesIfDue();
         const r = s.signed_in && hasSolana ? rent.get() : null;
         // the ready list and the notes in one turn of the queue (card pool-ready-no-flicker): a remake's swap never
         // falls between them, so a note that stays ready never reads as ready "0". A failed notes read is kept and
@@ -764,6 +764,14 @@ function settleTrades(): Promise<void> {
     .then((s) => settleTradeOps(timedStore(s, TRADE_STORE_MS), navigator.locks, releaseTradeDeps().providers))
     .catch(() => {})
     .finally(() => (tradeSettling = null)));
+}
+
+function settleTradesIfDue(): Promise<void> {
+  if (framed || !globalThis.navigator?.locks || tradeSettling) return Promise.resolve();
+  return open()
+    .then((st) => tradeSettleDue(st, navigator.locks))
+    .then((due) => (due ? settleTrades() : undefined))
+    .catch(() => {});
 }
 
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed

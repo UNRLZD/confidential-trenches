@@ -405,7 +405,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         }
         // the marks go only once the op's own record of the end has landed: a lost write keeps them, and the next load
         // (settleTradeOps) or pick reads their txs and writes the end (P2-1), never an op left signed or sent for good
-        if (!(await landed()) || !(await unmark(store, keys, record))) owe();
+        if (await landed()) await unmark(store, keys, record);
       }
       if (end) give({ error: end });
     }
@@ -415,11 +415,12 @@ export function tradeKind(host: TradeHost): TradeKind {
     // later pick once this trade's lock is free
     // A leg's mark goes only once its known end is on the op (noteLeg, as settleDeadMarks does; re-check of 91fb908e):
     // a mark dropped with its end unwritten would leave the op open with nothing left to end it. True when every mark of
-    // this trade went; a kept one (an unknown leg, a lost note) is ended by a later settleTradeOps.
+    // this trade went; a kept one (an unknown leg, a lost note, a failed read) is ended by a later settleTradeOps, which
+    // any tab's state read runs once this trade's lock is free (tradeSettleDue).
     async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<boolean> {
       const gone = await Promise.all(
         keys.map(async (key, i) => {
-          // a read that failed says nothing of the mark: kept, and owed (re-check of 81b3ce20)
+          // a read that failed says nothing of the mark: kept, for the next settle pass (re-check of 81b3ce20)
           const got = await store.get("wallets", key).then((v) => ({ v }), () => null);
           if (!got) return false;
           const rec = armRecordOf(key, got.v);
@@ -447,14 +448,25 @@ export function tradeKind(host: TradeHost): TradeKind {
 
 type LegEnd = "filled" | "failed" | "not_landed";
 
-/** A trade of this page ended with an op it could not end itself (a lost end write, a leg still unknown, a mark read
- *  that failed): the page runs settleTradeOps again on its next state read until none is left (re-checks of 91fb908e
- *  and 81b3ce20; src/main.ts). Only a pass that read the marks clears it; a trade's own end that keeps a mark bumps
- *  `owedAt`, so a pass that read before that end never clears it. */
-let owed = false;
-let owedAt = 0;
-const owe = (): void => void ((owed = true), owedAt++);
-export const tradeSettleOwed = (): boolean => owed;
+/**
+ * Whether a settle pass is due (re-check of 54cf7a29): the store holds a buy or sell no tab is running that is not
+ * settled, whose trade lock is free (probed ifAvailable): a wallet's mark, or an op still open (pending, signed, sent)
+ * with no mark and no tx, which a pass refuses. Exactly what a pass acts on, so a record no pass changes (an open op
+ * with txs and no mark, written before card app-sell-mount) never makes one due at every read.
+ * Read from the store every tab shares, so a trade one tab left (closed, a leg unknown, a lost write, a failed mark
+ * read) is due in every other; a running trade holds its lock and is its own to end. src/main.ts runs settleTradeOps at
+ * a state read when it is due.
+ */
+export async function tradeSettleDue(store: TradeStore, locks: Locks): Promise<boolean> {
+  const ops = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
+  for (const k of await store.keys("ops")) {
+    if (ops.has(k)) continue;
+    const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
+    if (rec && (rec.kind === "buy" || rec.kind === "sell") && ["pending", "signed", "sent"].includes(String(rec.stage)) && !(Array.isArray(rec.txs) && rec.txs.length > 0)) ops.add(k);
+  }
+  for (const op of ops) if (await locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l !== null)) return true;
+  return false;
+}
 
 /** One ops write, tried three times (50 and 200 ms apart) before it rejects: the op's end is what the app's sell lock
  *  reads, so it is never dropped on one failed write. */
@@ -504,14 +516,8 @@ export async function settleDeadMarks(store: TradeStore, locks: Locks, providers
  */
 export async function settleTradeOps(store: TradeStore, locks: Locks, providers: readonly [SolanaRpc, SolanaRpc]): Promise<void> {
   await locks.request(TRADE_PICK_LOCK, { mode: "exclusive" }, async () => {
-    const at = owedAt;
     await settleDeadMarks(store, locks, providers);
     const marked = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
-    // owed: a mark of a dead or ended trade this pass could not settle (a leg unknown), read again at the next state
-    // read. A running trade's mark is its own to end (its end owes one if it keeps a mark), and a pass that throws
-    // before here leaves owed as it was (re-check of 81b3ce20)
-    const dead = await Promise.all([...marked].map((op) => locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l !== null)));
-    owed = dead.some(Boolean) || owedAt !== at;
     for (const k of await store.keys("ops")) {
       const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
       if (!rec || (rec.kind !== "buy" && rec.kind !== "sell") || !["pending", "signed", "sent"].includes(String(rec.stage)) || marked.has(k)) continue;
