@@ -26,15 +26,18 @@
 // test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-quote-read-gas-starve.mjs [--record <file> --as good|bad] [--answer <file> --as good|bad]
 // The bad answer is the same run through Multicall3's own code (no override): the loop and the 0xee read answer 0.
-// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3: a provider that answers nothing usable (an empty body, not
-// JSON, an HTTP error or a rate limit, read again once) is named and left out; fewer than two of a chain answering is
-// INCONCLUSIVE, never a pass on one provider.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3: a provider that answers nothing usable (provider-answer.mjs:
+// an empty body, not JSON, an HTTP error, a rate limit or a block or state it does not hold, read again once) is named
+// and left out; fewer than two of a chain answering is INCONCLUSIVE, never a pass on one provider.
 // After every app deploy (as the kit's other EVM quote checks): a pinned provider can stop applying code overrides or
 // change its gas cap at any time, and the deploy's run reads it again
 // After: app
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+
+export { EXIT };
 
 const KEY = "evm-quote-read-gas-starve";
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
@@ -109,35 +112,14 @@ export function gasOf(r) {
   }
 }
 
-// An answer that is empty, not JSON, not a JSON-RPC answer, an HTTP error or a rate limit is the provider's no-answer,
-// named with its host and HTTP status (live run 42552050303 died on an empty body: "Unexpected end of JSON input"). A
-// JSON-RPC error that is not a rate limit is an answer, judged: a provider that stops applying the code override answers so
-async function once(url, method, params) {
-  const host = new URL(url).host;
-  let r;
-  try {
-    r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  } catch (e) {
-    return { noAnswer: `${host}: no answer (${e?.cause?.code ?? e?.message ?? e})` };
-  }
-  const text = await r.text().catch(() => "");
-  const no = (why) => ({ noAnswer: `${host} HTTP ${r.status}: ${why}` });
-  if (text.trim() === "") return no("empty body");
-  let j;
-  try {
-    j = JSON.parse(text);
-  } catch {
-    return no(`not JSON (${text.slice(0, 40).replace(/\s+/g, " ")})`);
-  }
-  if (j === null || typeof j !== "object" || !("result" in j || "error" in j)) return no("not a JSON-RPC answer");
-  const limited = j.error !== undefined && ([429, -32005].includes(j.error?.code) || /rate.?limit|too many requests/i.test(String(j.error?.message)));
-  if (!r.ok || limited) return no(j.error !== undefined ? `error ${JSON.stringify(j.error).slice(0, 80)}` : "not a success");
-  return j.result ?? { error: j.error };
-}
-/** One read, read again once on a no-answer */
-async function rpc(url, method, params) {
-  const a = await once(url, method, params);
-  return a?.noAnswer === undefined ? a : once(url, method, params);
+// One read through the shared rule (provider-answer.mjs, card live-checks-provider-no-answer), read again once on a
+// no-answer: an empty body, not JSON, not a JSON-RPC answer, a 429, a status outside 2xx with no JSON-RPC error, a rate
+// limit in the kit's own words or a block or state the provider does not hold is the provider's no-answer, named with
+// its host and HTTP status (live run 42552050303 died on an empty body: "Unexpected end of JSON input"). Any other
+// JSON-RPC error is an answer, judged, on a 403 too: a provider that stops applying the code override answers so
+async function rpc(url, method, params, nullNoAnswer = false) {
+  const a = await rpcAnswer(url, method, params, { nullNoAnswer });
+  return a.noAnswer !== undefined ? a : a.error !== undefined ? { error: a.error } : a.result;
 }
 
 /** Each mainnet chain's providers' answers at their latest block; `own`: Multicall3's own code (the bad answer) */
@@ -150,7 +132,7 @@ export async function collect(own = false) {
     const reads = [];
     for (const url of v.providers ?? []) {
       const provider = new URL(url).host;
-      const block = await rpc(url, "eth_getBlockByNumber", ["latest", false]);
+      const block = await rpc(url, "eth_getBlockByNumber", ["latest", false], true);
       if (block?.noAnswer !== undefined) {
         reads.push({ provider, noAnswer: block.noAnswer });
         continue;
@@ -180,7 +162,6 @@ const cut = (x) => {
   const s = JSON.stringify(x) ?? String(x);
   return s.length > 140 ? `not the code's: ${s.slice(0, 66)}...${s.slice(-66)}` : `not the code's: ${s}`;
 };
-export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 /** PASS where each mainnet chain has two providers or more that answered, and each answers the planted calls as the kit's
  *  code must; FAIL on any wrong answer; else INCONCLUSIVE where a chain has fewer than two that answered, each named */
 export function judge(a) {
@@ -225,7 +206,7 @@ export function judge(a) {
     const all = (r) => ["six", "sixtyFour", "heavy", "floor"].map((k) => gasOf(r[k])?.map((y) => y[1]) ?? null);
     if (reads.length > 0) line(reads.every((r) => JSON.stringify(all(r)) === JSON.stringify(all(reads[0]))), `${chain}: every provider answers the same gas used for each read`);
   }
-  const verdict = bad ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  const verdict = verdictOf(bad, quiet);
   return { verdict, ok: verdict === "PASS", lines };
 }
 
