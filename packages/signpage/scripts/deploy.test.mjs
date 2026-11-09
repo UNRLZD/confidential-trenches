@@ -4,9 +4,9 @@
 // /assets/zk/<sha256>.<ext>; a changed, missing or extra setup file, a stale worker or a worker rule with another
 // policy is refused.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -573,5 +573,53 @@ test("planted: a build whose app.js names a harness 1Click key, or leaves a pin 
     assert.ok(checkPins(dir).some((l) => l.includes("copies of ONECLICK_FEE_BPS in the bundle are not frozen")), checkPins(dir).join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Card signpage-deploy-runs: deploy.mjs run as the main module (node packages/signpage/scripts/deploy.mjs), as a sign deploy
+// runs it, not imported as the tests above import it. release-list.mjs, which deploy() loads late, imports deploy.mjs
+// back, so a main block that awaits deploy() at the top level never settles once the late import starts (Node exits 13,
+// "unsettled top-level await"). Every path runs the real script on this tree with stand-ins on PATH for the reads that
+// leave the machine: git ls-remote answers HEAD as main's head and git status a clean tree (every other git call is git's),
+// gh a passed ci.yml push run of HEAD, pnpm an install that did nothing; no CLOUDFLARE_* is set, so nothing is uploaded.
+test("deploy.mjs run as the main module reaches its gate on every path: --dry-run and a deploy through the late import of release-list.mjs, --build, --live-runs", () => {
+  const repo = dirname(dirname(PKG));
+  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const git = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const bin = mkdtempSync(join(tmpdir(), "ct-signpage-main-"));
+  const stub = (name, body) => {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+  };
+  stub("git", `if [ "$1" = ls-remote ]; then printf '%s\\trefs/heads/main\\n' "${head}"; exit 0; fi\nif [ "$3" = status ]; then exit 0; fi\nexec "${git}" "$@"`);
+  stub("gh", `printf '%s\\n' '${JSON.stringify([passed(head)])}'`);
+  stub("pnpm", "exit 0");
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  delete env.CLOUDFLARE_API_TOKEN;
+  delete env.CLOUDFLARE_ACCOUNT_ID;
+  const main = (...args) => {
+    const r = spawnSync(process.execPath, [join(PKG, "scripts", "deploy.mjs"), ...args], { cwd: repo, env, encoding: "utf8", timeout: 300_000 });
+    const all = `${r.stdout}${r.stderr}`;
+    assert.ok(!/unsettled top-level await/i.test(all), `deploy.mjs ${args.join(" ")} never settled (exit ${r.status}):\n${all}`);
+    const kept = /gate ok on (\S+);/.exec(r.stdout)?.[1];
+    if (kept && kept.startsWith(tmpdir())) rmSync(kept, { recursive: true, force: true });
+    return { ...r, all, kept };
+  };
+  try {
+    const dry = main("--dry-run");
+    assert.ok([0, 1].includes(dry.status), `--dry-run exit ${dry.status}:\n${dry.all}`);
+    assert.match(dry.stdout, /deploy: gate ok on \S+; --dry-run: nothing was uploaded; a deploy would (go ahead|refuse it:)/, dry.all);
+    // a deploy: past the late import, it refuses a build no release names, or stops at the missing token
+    const real = main();
+    assert.ok([1, 2].includes(real.status), `a deploy exit ${real.status}:\n${real.all}`);
+    assert.match(real.stderr, /deploy: (REFUSED release-\d+, the newest release, is not this SIGN_HOST build|REFUSED .*RELEASED|gate ok; CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set, nothing was uploaded)/, real.all);
+    const built = main("--build");
+    assert.equal(built.status, 0, built.all);
+    assert.match(built.stdout, /deploy: gate ok on \S+; --build:/);
+    const runs = main("--live-runs");
+    assert.equal(runs.status, 0, runs.all);
+    assert.deepEqual(JSON.parse(runs.stdout).checks, LIVE_CHECKS);
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
   }
 });
