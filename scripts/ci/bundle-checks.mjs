@@ -97,7 +97,6 @@ export const OUT = {
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
-  "signpage-generated-merge-free": "what the host serves against a fresh build of this checkout, which on the build itself is the same bytes by construction (its replay judges the deploy's own build)",
   "signpage-release-at-deploy": "the newest committed release list against what the host serves (the sign deploy refuses a build that list does not name)",
   "wallet-deposit-follow": "the helper's deposit status answer",
   "pool-ready-no-flicker": "the devnet run record",
