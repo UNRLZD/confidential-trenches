@@ -40,8 +40,11 @@ const isPair = (e: unknown, stronger: string): boolean => e instanceof Error && 
 // network or pair still throws at once
 const REPLAYED = new WeakSet<NearRpc>();
 let LIVE: RestorePass | undefined;
-const passFor = (rpcs: readonly [NearRpc, NearRpc], opts: { tries?: number; sleep?: (ms: number) => Promise<void> }): Promise<RestorePass> =>
-  REPLAYED.has(rpcs[0]) && REPLAYED.has(rpcs[1]) && LIVE ? Promise.resolve(LIVE) : openRestorePass("mainnet", rpcs, { sleep: noSleep, ...(opts.tries === undefined ? {} : { tries: opts.tries }), ...(opts.sleep ? { sleep: opts.sleep } : {}) });
+// the pass opened on the test's own clock and signal, as the reader after it: a pass on the real clock left the page-wide
+// pace at the process's real time, which a virtual clock starting at 0 then waited out (PR #521's fresh run, 06:19Z: a
+// read that fails at once on a Retry-After past the bound waited 21.7 s, each test's clock its own)
+const passFor = (rpcs: readonly [NearRpc, NearRpc], opts: { tries?: number; sleep?: (ms: number) => Promise<void>; now?: () => number; signal?: AbortSignal }): Promise<RestorePass> =>
+  REPLAYED.has(rpcs[0]) && REPLAYED.has(rpcs[1]) && LIVE ? Promise.resolve(LIVE) : openRestorePass("mainnet", rpcs, { sleep: noSleep, ...(opts.tries === undefined ? {} : { tries: opts.tries }), ...(opts.sleep ? { sleep: opts.sleep } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
 const nearIdReader = (network: "mainnet", rpcs: readonly [NearRpc, NearRpc], opts: Parameters<typeof idReaderAt>[3] = {}): IdReader => {
   // the pace's waits are stubbed unless a test gives its own sleep (its virtual clock moves by them)
   const p = passFor(rpcs, opts).then((pass) => idReaderAt(network, rpcs, pass, { sleep: noSleep, ...opts }));
