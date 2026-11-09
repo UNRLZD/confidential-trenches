@@ -7,7 +7,7 @@
 // secret in docker's argv) and holds the leak check to finding each.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, symlinkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -52,7 +52,7 @@ async function rpcs(t, data = [rentData(5_080, 1), rentData(5_080, 1)]) {
   return servers.map((s) => `http://127.0.0.1:${s.address().port}`).join(",");
 }
 
-function server({ env = BASE_ENV, record = RECORD, script = readFileSync(SCRIPT, "utf8") } = {}) {
+function server({ env = BASE_ENV, record = RECORD, script = readFileSync(SCRIPT, "utf8"), helper = HELPER } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "sol-fee-key-"));
   const deploy = path.join(dir, "apps/helper/deploy");
   mkdirSync(deploy, { recursive: true });
@@ -70,11 +70,16 @@ function server({ env = BASE_ENV, record = RECORD, script = readFileSync(SCRIPT,
     path.join(bin, "docker"),
     `#!/usr/bin/env bash
 a=(); for x in "$@"; do [[ "$x" == "-e" ]] && break; a+=("$x"); done
+net=0; prev=""; for x in "\$@"; do [[ "\$prev" == "--network" && "\$x" == "none" ]] && net=1; prev="\$x"; done
 printf '%s\\n' "\${a[*]}" >> "${log}"
 while [[ $# -gt 0 && "$1" != ct-helper:* ]]; do shift; done
 [[ "$1" == "ct-helper:${COMMIT}" ]] || exit 125
 shift
-cd "${HELPER}"
+# STUB_SLEEP: wait that long first (a run that holds the lock a while); PLANT_MAKER: the key maker (the run with
+# --network none) prints that file and names PLANT_ADDRESS instead of running
+[[ -n "\${STUB_SLEEP:-}" ]] && sleep "\$STUB_SLEEP"
+if [[ \$net == 1 && -n "\${PLANT_MAKER:-}" ]]; then cat > /dev/null; cat "\$PLANT_MAKER"; echo "sol-fee-payer-key: fee payer \$PLANT_ADDRESS" >&2; exit 0; fi
+cd "${helper}"
 exec "${process.execPath}" "$@"
 `,
     { mode: 0o755 },
@@ -151,8 +156,9 @@ test("writes the four mainnet names once: the record's program, a real fee payer
   assert.match(r.stdout, new RegExp(`needs at least ${mark} lamports, its low mark`));
   const order = r.stdout.split("\n").filter((l) => /^sol-fee-payer-key: [1-3]\. /.test(l));
   assert.equal(order.length, 3);
-  assert.match(order[0], /^sol-fee-payer-key: 1\. apps\/helper\/deploy\/redeploy\.sh /);
-  assert.equal(order[1], `sol-fee-payer-key: 2. the owner sends 0.01 SOL (10000000 lamports) to ${address}: the low mark ${mark} and 32 failed sends at 217245 each, rounded up to 0.01 SOL; each landed release pays it back more than it fronts`);
+  assert.equal(order[0], `sol-fee-payer-key: 1. apps/helper/deploy/redeploy.sh ${COMMIT} again (the commit the helper runs, whose image made the key), so the helper starts with the four lines`);
+  assert.equal(order[1], `sol-fee-payer-key: 2. the owner sends 0.01 SOL (10000000 lamports) to ${address}: the low mark ${mark} and 32 failed sends at 217245 each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back over the page`);
+  assert.ok(!/pays it back more than it fronts/.test(r.stdout), "no claim that every release pays back more than it fronts (a page-opening one does not)");
   assert.match(order[2], /helper-sol-fee-payer-mainnet among them$/);
 });
 
@@ -228,7 +234,7 @@ test("no HELPER_COMMIT (exit 6), a bad RPC pair (exit 2) and two RPCs that disag
 test("planted leaks are caught: the secret on stdout, the secret in docker's argv", async (t) => {
   const pair = await rpcs(t);
   const text = readFileSync(SCRIPT, "utf8");
-  const at = '  trap - EXIT\n';
+  const at = '  mv -f "$tmp" "$env"\n  TMP=""\n';
   assert.ok(text.includes(at));
   const plants = {
     stdout: `${at}  grep -E '^POOL_SOLANA_FEE_PAYER_KEY_MAINNET=' "$env"\n`,
@@ -251,4 +257,75 @@ test("the script is executable in the tree and runs under bash", () => {
 test("the default RPC pair is the helper's keyless mainnet pair (src/data/solana/trades.ts TRADES_RPCS)", async () => {
   const { TRADES_RPCS } = await import("../src/data/solana/trades.ts");
   assert.equal(/^RPCS_DEFAULT="([^"]+)"$/m.exec(readFileSync(SCRIPT, "utf8"))?.[1], TRADES_RPCS.join(","));
+});
+
+// review FIX 1 (P-old-image): the documented order once ran this step on the image of the commit before this card,
+// whose src/pool/solana.ts has no solanaFeePayerLowMark (5d86814f's has none): the reader died on a raw TypeError. It
+// refuses by name now, exit 7, deploy/.env unchanged, and the order puts the redeploy first.
+test("an image from before this card (no solanaFeePayerLowMark) refuses by name (exit 7), deploy/.env unchanged; the header puts the redeploy first", async (t) => {
+  const pair = await rpcs(t);
+  const old = mkdtempSync(path.join(tmpdir(), "sol-fee-old-image-"));
+  cpSync(path.join(HELPER, "src"), path.join(old, "src"), { recursive: true });
+  copyFileSync(path.join(HELPER, "package.json"), path.join(old, "package.json"));
+  symlinkSync(path.join(HELPER, "node_modules"), path.join(old, "node_modules"));
+  const file = path.join(old, "src/pool/solana.ts");
+  const text = readFileSync(file, "utf8");
+  const cut = text.replace(/export const solanaFeePayerLowMark = [^;]+;\n/, "");
+  assert.notEqual(cut, text, "the planted image's solana.ts has no solanaFeePayerLowMark");
+  writeFileSync(file, cut);
+  const s = server({ helper: old });
+  const r = await s.run({ SOL_FEE_PAYER_RPCS: pair });
+  assert.equal(r.status, 7, r.stderr);
+  assert.match(r.stderr, new RegExp(`^sol-fee-payer-key: the running image ct-helper:${COMMIT} predates this step \\(no solanaFeePayerLowMark in its src/pool/solana\\.ts\\): redeploy\\.sh .+ first; with the four lines absent the mainnet pool stays off; nothing changed$`, "m"));
+  assert.ok(!/TypeError/.test(r.stderr), r.stderr);
+  assert.equal(s.envText(), BASE_ENV);
+  assert.deepEqual(files(s), [".env", "sol-fee-payer-key.sh"], "no temporary file, no lock left");
+  assert.equal(s.docker().trim().split("\n").length, 1, "the key maker never ran");
+  const header = readFileSync(SCRIPT, "utf8").split("\n").filter((l) => /^#   [1-5]\. /.test(l));
+  assert.match(header[0], /^#   1\. apps\/helper\/deploy\/redeploy\.sh .*first/);
+  assert.match(header[1], /^#   2\. this step;$/);
+  assert.match(header[2], /^#   3\. apps\/helper\/deploy\/redeploy\.sh <the same commit> again/);
+});
+
+// review FIX 2 (P-twice): two runs at once both passed the "already set" check and both renamed: two addresses
+// printed, only the second key kept, SOL sent to the first stranded. One lock now, from the check through the rename.
+test("two runs at once: one writes, the other refuses on the lock (exit 9); one key in deploy/.env, one address printed, no lock left", async (t) => {
+  const pair = await rpcs(t);
+  const s = server();
+  const first = s.run({ SOL_FEE_PAYER_RPCS: pair, STUB_SLEEP: "1.5" });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const second = s.run({ SOL_FEE_PAYER_RPCS: pair });
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(b.status, 9, b.stderr);
+  assert.match(b.stderr, /another key step holds deploy\/\.env\.lock/);
+  const env = s.envText();
+  assert.equal(env.split("\n").filter((l) => l.startsWith("POOL_SOLANA_FEE_PAYER_KEY_MAINNET=")).length, 1);
+  const addresses = [a, b].flatMap((r) => [...r.stdout.matchAll(/^sol-fee-payer-key: fee payer (\S+)$/gm)].map((m) => m[1]));
+  assert.deepEqual(addresses, [feePayerKey(valueOf(env, "POOL_SOLANA_FEE_PAYER_KEY_MAINNET")).address], "one address printed, the kept key's");
+  assert.deepEqual(files(s), [".env", "sol-fee-payer-key.sh"]);
+  // a lock left by a killed run (SIGKILL) refuses until it is removed
+  mkdirSync(path.join(s.deploy, ".env.lock"));
+  const c = await s.run({ SOL_FEE_PAYER_RPCS: pair });
+  assert.equal(c.status, 9);
+  assert.ok(existsSync(path.join(s.deploy, ".env.lock")), "another run's lock is never removed by the refused run");
+});
+
+// review FIX 4: base58 of seed||pub is 85 characters for a seed with three leading zero bytes; the form check takes
+// 80 to 90 (8ccc7d84's {86,88} refused it, so a real key would have stopped the step)
+test("an 85-character key passes the form check and is written", async (t) => {
+  const pair = await rpcs(t);
+  const seed = Buffer.alloc(32);
+  seed[3] = 1;
+  const { ed25519 } = await import("@noble/curves/ed25519.js");
+  const pub = Buffer.from(ed25519.getPublicKey(seed));
+  const key = base58(Buffer.concat([seed, pub]));
+  assert.equal(key.length, 85);
+  const s = server();
+  const plant = path.join(s.dir, "maker.out");
+  writeFileSync(plant, `POOL_SOLANA_PROGRAM_MAINNET=${PROGRAM}\nPOOL_SOLANA_FEE_PAYER_KEY_MAINNET=${key}\nPOOL_SOLANA_FEE_MAINNET=1300000\nPOOL_SOLANA_RPCS_MAINNET=${pair}\n`);
+  const r = await s.run({ SOL_FEE_PAYER_RPCS: pair, PLANT_MAKER: plant, PLANT_ADDRESS: base58(pub) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(valueOf(s.envText(), "POOL_SOLANA_FEE_PAYER_KEY_MAINNET"), key);
+  assert.equal(feePayerKey(key).address, base58(pub));
 });

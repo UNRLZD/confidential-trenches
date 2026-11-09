@@ -35,7 +35,8 @@
 # account, the public key and the fee recipient, all public.
 # The relayer account does not exist until it is funded: a NEAR transfer to the 64-hex id creates it with this one
 # full-access key. Its NEAR pays relay gas and storage only; the vault pays out only against a device's proof.
-# exit 0 done, 2 usage, 3 a name already set, 4 the deploy record names no mainnet vault, 6 no image, 1 any other failure
+# exit 0 done, 2 usage, 3 a name already set, 4 the deploy record names no mainnet vault, 6 no image, 9 another key step
+# holds the lock, 1 any other failure
 set -euo pipefail
 
 # mainnet USDC, the vault's token (the kit's VAULT_CONSTANTS.TOKEN)
@@ -76,6 +77,25 @@ sk.fill(0);
 process.stderr.write(`withdraw-relayer-key: vault ${rec.account_id}\nwithdraw-relayer-key: relayer account ${relayer}\nwithdraw-relayer-key: public key ed25519:${b58(pub)}\nwithdraw-relayer-key: fee recipient ${fee}\n`);
 JS
 
+# One run at a time on deploy/.env (review FIX 2 of card helper-sol-fee-payer-mainnet): deploy/.env.lock, the lock the
+# three key steps share (this one, withdraw-relayer-key.sh or bind-relayer-key.sh, and sol-fee-payer-key.sh, each of
+# which replaces deploy/.env whole), taken before the "already set" check and held through the rename, so two runs never
+# both pass the check and both rename (two accounts printed, one key kept); a second run refuses (exit 9). A folder
+# (mkdir is atomic; flock is not on macOS, where the tests run). The lock and the temporary file are removed at any end:
+# the script's own exits, a signal (HUP, INT, TERM end it through exit, so the EXIT trap runs), an error under set -e. A
+# run killed with SIGKILL leaves the folder: remove it once no run is going.
+LOCK=""
+TMP=""
+cleanup() {
+  [[ -n "$TMP" ]] && rm -f "$TMP"
+  [[ -n "$LOCK" ]] && rmdir "$LOCK" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 main() {
   local fee=""
   if [[ $# -eq 2 && "$1" == "--fee-recipient" ]]; then
@@ -95,6 +115,11 @@ main() {
   record="$root/contracts/vault/deployments/mainnet-v1.json"
   [[ -e "$record" ]] || record="$root/contracts/vault/deployments/mainnet-test.json"
 
+  if ! mkdir "$env.lock" 2>/dev/null; then
+    echo "withdraw-relayer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder); nothing changed" >&2
+    exit 9
+  fi
+  LOCK="$env.lock"
   for name in "${NAMES[@]}"; do
     if [[ -e "$env" ]] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${name}[[:space:]]*[=:]" "$env"; then
       echo "withdraw-relayer-key: $name is already set in deploy/.env; nothing changed" >&2
@@ -113,7 +138,7 @@ main() {
 
   umask 077
   tmp="$(mktemp "$env.relayer.XXXXXX")"
-  trap 'rm -f "$tmp"' EXIT
+  TMP="$tmp"
   if [[ -e "$env" ]]; then cat "$env" > "$tmp"; fi
   if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then printf '\n' >> "$tmp"; fi
   local rc=0
@@ -140,7 +165,7 @@ main() {
   feeto="$(grep -E '^WITHDRAW_FEE_RECIPIENT_MAINNET=' "$tmp" | cut -d= -f2)"
   chmod 600 "$tmp"
   mv -f "$tmp" "$env"
-  trap - EXIT
+  TMP=""
   echo "withdraw-relayer-key: wrote ${NAMES[*]} to deploy/.env. Next, in this order:"
   echo "withdraw-relayer-key: 1. apps/helper/deploy/redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>'), so the helper starts with the four lines"
   echo "withdraw-relayer-key: 2. the owner sends 1 NEAR to $relayer"

@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # Makes the mainnet Solana pool's fee payer key on the helper's server (card helper-sol-fee-payer-mainnet), as
-# withdraw-relayer-key.sh makes the withdrawal relayer's. Run on the server, from the checkout redeploy.sh keeps, once it
-# is at a commit that has this file (main fetched and the commit found on it, as redeploy.sh's step 0 does, then checked
-# out, its step 1; vault-lines.sh's step 1 has the command):
+# withdraw-relayer-key.sh makes the withdrawal relayer's. Run on the server, from the checkout redeploy.sh keeps:
 #   apps/helper/deploy/sol-fee-payer-key.sh
+# The order, which it prints again at the end with the commit and the address filled in:
+#   1. apps/helper/deploy/redeploy.sh <a commit that has this file>, first: this step runs in the running helper's image
+#      (ct-helper:<HELPER_COMMIT>) and reads that image's own solanaFeePayerLowMark, so an image from before this card is
+#      refused (exit 7); the helper runs as before meanwhile, its mainnet pool off while the four lines are absent;
+#   2. this step;
+#   3. apps/helper/deploy/redeploy.sh <the same commit> again (the same commit keeps its release), so the helper starts
+#      with the four lines;
+#   4. the owner sends the printed SOL to the printed fee payer address;
+#   5. once it has landed: the helper's live checks, helper-sol-fee-payer-mainnet among them.
 # In order, stopping at the first failure with deploy/.env unchanged:
+#   0. takes deploy/.env.lock, the lock the three key steps share (this one, withdraw-relayer-key.sh and
+#      bind-relayer-key.sh, each of which replaces deploy/.env whole), held from the check below through the rename and
+#      removed at the end, whatever the end: a second run while one holds it refuses (exit 9), so two runs never both
+#      pass the check and both rename (two addresses printed, one key kept). A folder (mkdir is atomic on every
+#      filesystem; flock is not on macOS, where the tests run). A run killed with SIGKILL leaves it: remove the folder
+#      once no run is going;
 #   1. refuses (exit 3) when any line of deploy/.env sets one of the four names below (redeploy.sh's lines_of matcher),
 #      so a second run never replaces a key the fee payer already holds SOL on; when deploy/.env names no image
 #      (HELPER_COMMIT, exit 6); when the pool's mainnet deploy record, contracts/pool-solana/deployments/mainnet.json, does
@@ -13,7 +26,7 @@
 #      record (exit 4 unless it is mainnet's genesis, a program id and that program's pool account, the kit's
 #      solanaPoolAccount) and the Rent sysvar on the two RPCs below (the kit's readSolanaRent: both must agree, exit 5
 #      when they do not answer or agree), and from that rent the kit's solanaPoolFee and the helper's
-#      solanaFeePayerLowMark (src/pool/solana.ts). The helper's start holds POOL_SOLANA_FEE_MAINNET to that same fee for
+#      solanaFeePayerLowMark (src/pool/solana.ts; exit 7 when the image has none: redeploy first, step 1). The helper's start holds POOL_SOLANA_FEE_MAINNET to that same fee for
 #      the rent it reads (M362 (3)), so the line is written as the kit computes it, never typed;
 #   3. makes one ed25519 key inside the same image with no network (node:crypto, --network none, read-only) and checks,
 #      with the image's own code, that the helper's start takes the four lines (src/pool/solana.ts
@@ -31,18 +44,20 @@
 # all public.
 # The RPCs: the two keyless mainnet providers the helper's trade reads and the pool live checks use
 # (src/data/solana/trades.ts TRADES_RPCS); SOL_FEE_PAYER_RPCS in this shell replaces them ("<a>,<b>", two different
-# https URLs). The fee payer holds gas only: each release pays it back its cost and more (the relay fee), the Jito tip
-# comes from the pool, and on mainnet a tag 3 that fails on chain never lands (bundle-only, M362 (4), M369).
+# https URLs). The fee payer holds gas only; the Jito tip comes from the pool, and on mainnet a tag 3 that fails on chain
+# never lands (bundle-only, M362 (4), M369).
+# An ordinary release pays the fee payer back more than it fronts, and the one in 1,024 that opens a page costs it that
+# page's rent, which the 715 lamports every release leaves for it (the page reserve, M356 (5)) pay back over the page.
 # exit 0 done, 2 usage, 3 a name already set, 4 no or a bad mainnet pool record, 5 the rent not read, 6 no image,
-# 1 any other failure
+# 7 the image predates this step, 9 another key step holds the lock, 1 any other failure
 set -euo pipefail
 
 NAMES=(POOL_SOLANA_PROGRAM_MAINNET POOL_SOLANA_FEE_PAYER_KEY_MAINNET POOL_SOLANA_FEE_MAINNET POOL_SOLANA_RPCS_MAINNET)
 RPCS_DEFAULT="https://api.mainnet-beta.solana.com,https://solana-rpc.publicnode.com"
 # The failed plain sends the funding covers past the low mark: a mainnet tag 2, or a tag 3 whose every block engine
 # failed on transport, pays its two signatures and its priority even when it fails on chain (M356 (1), M362 (4)), one
-# per nullifier per epoch at most. Each release that lands pays the fee payer back more than it fronted, so the balance
-# rises with use and only failures take it down.
+# per nullifier per epoch at most. Landed releases balance over each page through the page reserve (above), so only
+# failures take the balance down.
 FAILED_SENDS=32
 # The funding is rounded up to this many lamports (0.01 SOL).
 ROUND=10000000
@@ -55,6 +70,7 @@ import { pathToFileURL } from "node:url";
 const own = (p) => import(new URL(p, pathToFileURL(`${process.cwd()}/`)).href);
 const { readSolanaRent, solanaJsonRpc, solanaPoolAccount, solanaPoolFee, solanaPoolPriorityBudget } = await import("@blindfill/kit");
 const { solanaFeePayerLowMark } = await own("src/pool/solana.ts");
+if (typeof solanaFeePayerLowMark !== "function") process.exit(7);
 let text = "";
 for await (const c of process.stdin) text += c;
 const nl = text.indexOf("\n");
@@ -121,6 +137,20 @@ sk.fill(0);
 process.stderr.write(`sol-fee-payer-key: fee payer ${address}\n`);
 JS
 
+# The lock and the temporary file, removed at any end: the script's own exits, a signal (HUP, INT, TERM end it through
+# exit, so the EXIT trap runs), an error under set -e.
+LOCK=""
+TMP=""
+cleanup() {
+  [[ -n "$TMP" ]] && rm -f "$TMP"
+  [[ -n "$LOCK" ]] && rmdir "$LOCK" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # deploy/.env's lines setting NAME, in any form redeploy.sh's lines_of reads
 lines_of() {
   grep -E "^[[:space:]]*(export[[:space:]]+)?$2[[:space:]]*[=:]" "$1" || true
@@ -138,6 +168,11 @@ main() {
   record="$root/contracts/pool-solana/deployments/mainnet.json"
   rpcs="${SOL_FEE_PAYER_RPCS:-$RPCS_DEFAULT}"
 
+  if ! mkdir "$env.lock" 2>/dev/null; then
+    echo "sol-fee-payer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder); nothing changed" >&2
+    exit 9
+  fi
+  LOCK="$env.lock"
   for name in "${NAMES[@]}"; do
     # grep -q: the matching line is never captured, so not even bash -x prints it
     if [[ -e "$env" ]] && lines_of "$env" "$name" | grep -q .; then
@@ -173,6 +208,10 @@ main() {
   read_line="$( { printf '%s\n' "$rpcs"; cat "$record"; } | docker run --rm -i --log-driver none --pull never --read-only --cap-drop ALL --security-opt no-new-privileges:true \
     --entrypoint node "ct-helper:$commit" --input-type=module -e "$READER")" || rc=$?
   if [[ $rc -ne 0 ]]; then
+    if [[ $rc -eq 7 ]]; then
+      echo "sol-fee-payer-key: the running image ct-helper:$commit predates this step (no solanaFeePayerLowMark in its src/pool/solana.ts): redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>') first; with the four lines absent the mainnet pool stays off; nothing changed" >&2
+      exit 7
+    fi
     echo "sol-fee-payer-key: the reader stopped (exit $rc); nothing changed" >&2
     [[ $rc -eq 4 || $rc -eq 5 ]] && exit "$rc"
     exit 1
@@ -185,7 +224,7 @@ main() {
 
   umask 077
   tmp="$(mktemp "$env.solfee.XXXXXX")"
-  trap 'rm -f "$tmp"' EXIT
+  TMP="$tmp"
   if [[ -e "$env" ]]; then cat "$env" > "$tmp"; fi
   if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then printf '\n' >> "$tmp"; fi
   # the maker's stdout (the four lines) into the temporary file, its stderr (public: the address, or why it stopped)
@@ -221,7 +260,7 @@ main() {
   fi
   chmod 600 "$tmp"
   mv -f "$tmp" "$env"
-  trap - EXIT
+  TMP=""
   # the funding: the low mark and FAILED_SENDS worst failed
   # sends (two signatures and the whole priority budget each), rounded up to 0.01 SOL
   local fail=$(( 10000 + budget ))
@@ -232,8 +271,8 @@ main() {
   echo "sol-fee-payer-key: fee payer $address"
   echo "sol-fee-payer-key: the fee payer needs at least $mark lamports, its low mark: its own rent floor, one worst release fronted before the pool pays its fee back (spent mark, change entry, a new page, two signatures) and the whole priority budget"
   echo "sol-fee-payer-key: Next, in this order:"
-  echo "sol-fee-payer-key: 1. apps/helper/deploy/redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>'), so the helper starts with the four lines"
-  echo "sol-fee-payer-key: 2. the owner sends $sol SOL ($need lamports) to $address: the low mark $mark and $FAILED_SENDS failed sends at $fail each, rounded up to 0.01 SOL; each landed release pays it back more than it fronts"
+  echo "sol-fee-payer-key: 1. apps/helper/deploy/redeploy.sh $commit again (the commit the helper runs, whose image made the key), so the helper starts with the four lines"
+  echo "sol-fee-payer-key: 2. the owner sends $sol SOL ($need lamports) to $address: the low mark $mark and $FAILED_SENDS failed sends at $fail each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back over the page"
   echo "sol-fee-payer-key: 3. once it has landed: the helper's live checks, helper-sol-fee-payer-mainnet among them"
 }
 
