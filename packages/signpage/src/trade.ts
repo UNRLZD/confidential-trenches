@@ -186,9 +186,13 @@ export function refusalCode(record: SolanaTradeRecord): ErrorCode {
 
 type Leg = SolanaTradeRecord["legs"][number];
 const legState = (l: Leg): string | undefined => (l.reread ? l.reread.state : l.outcome?.state);
-const filled = (l: Leg): boolean => l.outcome?.state === "filled" || l.reread?.state === "filled";
-// landed with an error on both providers, or dead (06c A4, the kit's send.ts): its money moves no more
-const ended = (l: Leg): boolean => legState(l) === "failed" || legState(l) === "expired";
+/** A leg's known end as the op records it: filled, failed (landed with an error on both providers) or not_landed (dead,
+ *  06c A4, the kit's send.ts); undefined while unknown. */
+const legEnd = (l: Leg): LegEnd | undefined => {
+  if (l.outcome?.state === "filled" || l.reread?.state === "filled") return "filled";
+  const st = legState(l);
+  return st === "failed" ? "failed" : st === "expired" ? "not_landed" : undefined;
+};
 
 type Answer = HostAnswer<"buy">;
 type Locks = Pick<LockManager, "request">;
@@ -253,12 +257,16 @@ export function tradeKind(host: TradeHost): TradeKind {
       const ms = host.storeMs ?? TRADE_STORE_MS;
       const store = timedStore(await within(host.store(), ms, "the store's open"), ms);
       const op: { kind: "buy" | "sell"; sha: string; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number } = { kind: side, sha: ctx.sha, stage: "pending", txs: [], created_ms: now() };
+      // each write in order, tried again before it counts as lost (card app-sell-mount re-check 2, P2-1): a lost write
+      // keeps the wallets' marks (legsRun), so the next load or pick settles the op from them, never leaving it open
       let writes: Promise<void> = Promise.resolve();
+      let lost = false;
       const write = (patch: Partial<typeof op>): void => {
         Object.assign(op, patch);
         const snap = { ...op, txs: op.txs.map((t) => ({ ...t })) };
-        writes = writes.then(() => store.put("ops", ctx.id, snap)).catch(() => {});
+        writes = writes.then(() => putAgain(store, ctx.id, snap)).catch(() => void (lost = true));
       };
+      const landed = async (): Promise<boolean> => (await writes, !lost);
       const refuse = async (code: ErrorCode): Promise<void> => {
         write({ stage: "refused", code });
         await writes;
@@ -277,7 +285,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         });
         if (typeof set === "string") return refuse(set);
         if ("answer" in set) return give(set.answer);
-        await legsRun(store, set, write, refuse);
+        await legsRun(store, set, write, refuse, landed);
       } catch (e) {
         if (!answer) return refuse(e instanceof SolanaRpcTransportError ? "down" : "failed");
         throw e;
@@ -292,25 +300,7 @@ export function tradeKind(host: TradeHost): TradeKind {
      * each one is marked as this trade's before the lock is let go.
      */
     async function pick(store: TradeStore, locks: Locks): Promise<{ legs: SolanaTradeLeg[]; keys: string[]; all: string[] } | ErrorCode> {
-      // every dead tab's marks at once (one Promise.all), so the pick lock is held for one round of reads, not one per
-      // mark; the marks grouped by op, each op's lock probed once (two probes of one op at once would each read the
-      // other as a live trade)
-      const byOp = new Map<string, { key: string; m: NonNullable<ArmRecord["inflight"]> }[]>();
-      for (const { key, rec } of await armRecords(store, "sol")) if (rec.inflight) byOp.set(rec.inflight.op, [...(byOp.get(rec.inflight.op) ?? []), { key, m: rec.inflight }]);
-      await Promise.all(
-        [...byOp].map(async ([op, marks]) => {
-          const live = await locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
-          if (live) return;
-          await Promise.all(
-            marks.map(async ({ key, m }) => {
-              const states = await Promise.all(m.txs.map((t) => txEnd(host.deps.providers, t)));
-              if (states.includes("unknown")) return;
-              await settleArm(store, key, op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
-              if (m.txs[0]) await noteLeg(store, op, m.txs[0].sig, states[0] as LegEnd).catch(() => {});
-            }),
-          );
-        }),
-      );
+      await settleDeadMarks(store, locks, host.deps.providers);
       const records = await armRecords(store, "sol");
       const all = records.map((r) => r.rec.address);
       let set: { legs: SolanaTradeLeg[]; keys: string[] } | ErrorCode;
@@ -342,8 +332,9 @@ export function tradeKind(host: TradeHost): TradeKind {
     async function legsRun(
       store: TradeStore,
       set: { legs: SolanaTradeLeg[]; keys: string[]; all: string[] },
-      write: (patch: { stage?: string; txs?: TxRef[] }) => void,
+      write: (patch: { stage?: string; txs?: TxRef[]; code?: ErrorCode }) => void,
       refuse: (code: ErrorCode) => Promise<void>,
+      landed: () => Promise<boolean>,
     ): Promise<void> {
       const { legs, keys } = set;
       const signer = solanaArmedSigner(store, () => {
@@ -380,6 +371,7 @@ export function tradeKind(host: TradeHost): TradeKind {
         }
       };
       let record: SolanaTradeRecord | null = null;
+      let end: ErrorCode | null = null;
       try {
         // wallets: every arm record's address on Solana, so the kit refuses a tx naming another of the user's wallets
         // (solana-buy-flow 249521d's required SolanaTradeRequest.wallets; typed from the kit once it merges)
@@ -400,31 +392,51 @@ export function tradeKind(host: TradeHost): TradeKind {
         throw e;
       } finally {
         signer.close();
-        await unmark(store, keys, record);
+        if (record) {
+          // each leg's known end on its tx (filled, failed, not_landed; none while unknown): the op's own record of it,
+          // which noted() reads to end the op once the last leg's end is known (state.ts opOf sends {chain, hash} only)
+          const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature, ...(legEnd(l) ? { state: legEnd(l)! } : {}) }] : []));
+          if (answer) write({ txs });
+          else {
+            const code = refusalCode(record);
+            end = readDown && !signing && code === "failed" ? "down" : code;
+            write({ stage: "refused", code: end });
+          }
+        }
+        // the marks go only once the op's own record of the end has landed: a lost write keeps them, and the next load
+        // (settleTradeOps) or pick reads their txs and writes the end (P2-1), never an op left signed or sent for good
+        if (await landed()) await unmark(store, keys, record);
       }
-      const txs = record.legs.flatMap((l) => (l.signature ? [{ chain: "solana" as const, hash: l.signature }] : []));
-      const code = refusalCode(record);
-      if (!answer) return refuse(readDown && !signing && code === "failed" ? "down" : code);
-      write({ txs });
+      if (end) give({ error: end });
     }
 
     // each wallet's mark goes when its txs' end is known here: none signed, none sent (the kit returned its leg
     // unsigned), its swap filled (a buy's goes IN_POSITION) or failed or dead; any other keeps its mark, resolved at a
     // later pick once this trade's lock is free
-    async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<void> {
-      await Promise.all(
+    // A leg's mark goes only once its known end is on the op (noteLeg, as settleDeadMarks does; re-check of 91fb908e):
+    // a mark dropped with its end unwritten would leave the op open with nothing left to end it. True when every mark of
+    // this trade went; a kept one (an unknown leg, a lost note, a failed read) is ended by a later settleTradeOps, which
+    // any tab's state read runs once this trade's lock is free (tradeSettleDue).
+    async function unmark(store: TradeStore, keys: readonly string[], record: SolanaTradeRecord | null): Promise<boolean> {
+      const gone = await Promise.all(
         keys.map(async (key, i) => {
-          const rec = armRecordOf(key, await store.get("wallets", key).catch(() => undefined));
-          if (rec?.inflight?.op !== ctx.id) return;
+          // a read that failed says nothing of the mark: kept, for the next settle pass (re-check of 81b3ce20)
+          const got = await store.get("wallets", key).then((v) => ({ v }), () => null);
+          if (!got) return false;
+          const rec = armRecordOf(key, got.v);
+          if (rec?.inflight?.op !== ctx.id) return true;
           const leg = record?.legs[i];
           if (rec.inflight.txs.length === 0) return settleArm(store, key, ctx.id);
           // a leg the kit returned unsigned was never sent: a signature its signer gave and the kit dropped as late (card
           // kit-renewal-read-bounded) is in the mark only, so the mark goes and no later pick notes it on the op
           if (record && leg && leg.signature === undefined) return settleArm(store, key, ctx.id);
-          if (leg && filled(leg)) return settleArm(store, key, ctx.id, side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
-          if (leg && ended(leg)) return settleArm(store, key, ctx.id);
-        }).map((x) => x.catch(() => false)),
+          const end = leg ? legEnd(leg) : undefined;
+          if (!leg || !end) return false;
+          if (!(await noteLeg(store, ctx.id, leg.signature!, end).then(() => true, () => false))) return false;
+          return settleArm(store, key, ctx.id, end === "filled" && side === "buy" ? { from: "READY", to: "IN_POSITION", token } : undefined);
+        }).map((x) => x.then((v) => v !== false, () => false)),
       );
+      return gone.every(Boolean);
     }
   };
   return Object.assign(kind, {
@@ -435,6 +447,93 @@ export function tradeKind(host: TradeHost): TradeKind {
 }
 
 type LegEnd = "filled" | "failed" | "not_landed";
+
+/**
+ * Whether a settle pass is due (re-check of 54cf7a29): the store holds a buy or sell no tab is running that is not
+ * settled, whose trade lock no tab holds (locks.query): a wallet's mark, or an op still open (pending, signed, sent)
+ * with no mark and no tx, which a pass refuses. Exactly what a pass acts on, so a record no pass changes (an open op
+ * with txs and no mark, written before card app-sell-mount) never makes one due at every read.
+ * Read from the store every tab shares, so a trade one tab left (closed, a leg unknown, a lost write, a failed mark
+ * read) is due in every other; a running trade holds its lock and is its own to end. src/main.ts runs settleTradeOps at
+ * a state read when it is due.
+ */
+export async function tradeSettleDue(store: TradeStore, locks: Pick<LockManager, "query">): Promise<boolean> {
+  const ops = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
+  for (const k of await store.keys("ops")) {
+    if (ops.has(k)) continue;
+    const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
+    if (rec && (rec.kind === "buy" || rec.kind === "sell") && ["pending", "signed", "sent"].includes(String(rec.stage)) && !(Array.isArray(rec.txs) && rec.txs.length > 0)) ops.add(k);
+  }
+  if (ops.size === 0) return false;
+  // the held names, as pool-sell.ts settleDeadSellOps reads them: a probe that took a dead op's lock, outside
+  // TRADE_PICK_LOCK, could make a pick's own settleDeadMarks read that op as live (re-check of efd3845d, P3-a)
+  const held = new Set(((await locks.query()).held ?? []).map((l) => l.name));
+  return [...ops].some((op) => !held.has(tradeLock(op)));
+}
+
+/** One ops write, tried three times (50 and 200 ms apart) before it rejects: the op's end is what the app's sell lock
+ *  reads, so it is never dropped on one failed write. */
+async function putAgain(store: TradeStore, id: string, v: unknown): Promise<void> {
+  for (const wait of [50, 200, -1]) {
+    try {
+      return void (await store.put("ops", id, v));
+    } catch (e) {
+      if (wait < 0) throw e;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
+/**
+ * Every dead tab's marks at once (one Promise.all): the marks grouped by op, each op's lock probed once (two probes of
+ * one op at once would each read the other as a live trade). A mark whose txs all ended is noted on its op first and
+ * goes only once that note landed (a failed note keeps it, P2-1); anything unknown keeps it. Run under TRADE_PICK_LOCK,
+ * by every pick and once per load (settleTradeOps).
+ */
+export async function settleDeadMarks(store: TradeStore, locks: Locks, providers: readonly [SolanaRpc, SolanaRpc]): Promise<void> {
+  const byOp = new Map<string, { key: string; m: NonNullable<ArmRecord["inflight"]> }[]>();
+  for (const { key, rec } of await armRecords(store, "sol")) if (rec.inflight) byOp.set(rec.inflight.op, [...(byOp.get(rec.inflight.op) ?? []), { key, m: rec.inflight }]);
+  await Promise.all(
+    [...byOp].map(async ([op, marks]) => {
+      const live = await locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
+      if (live) return;
+      await Promise.all(
+        marks.map(async ({ key, m }) => {
+          const states = await Promise.all(m.txs.map((t) => txEnd(providers, t)));
+          if (states.includes("unknown")) return;
+          if (m.txs[0] && !(await noteLeg(store, op, m.txs[0].sig, states[0] as LegEnd).then(() => true, () => false))) return;
+          await settleArm(store, key, op, states[0] === "filled" && m.side === "buy" ? { from: "READY", to: "IN_POSITION", token: m.token } : undefined);
+        }),
+      );
+    }),
+  );
+}
+
+/**
+ * Once per load (src/main.ts landed): the trade ops a closed or reloaded page left open (pending, signed or sent) are
+ * settled, as pool-sell.ts settleSellOps and settleDeadSellOps settle a pool sell's (card app-sell-mount re-check 2,
+ * P2-1). Under TRADE_PICK_LOCK, so no pick writes a pending record meanwhile: first every dead tab's marks (their txs
+ * read with txEnd, the op's end written from them); then each op still open whose own lock is free and that no mark
+ * names: with no tx it sent nothing, so it is refused "failed". An open op with txs and no mark is left as it is: its
+ * marks went only after its end landed (legsRun), so only a record written before this fix can be one.
+ */
+export async function settleTradeOps(store: TradeStore, locks: Locks, providers: readonly [SolanaRpc, SolanaRpc]): Promise<void> {
+  await locks.request(TRADE_PICK_LOCK, { mode: "exclusive" }, async () => {
+    await settleDeadMarks(store, locks, providers);
+    const marked = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
+    for (const k of await store.keys("ops")) {
+      const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
+      if (!rec || (rec.kind !== "buy" && rec.kind !== "sell") || !["pending", "signed", "sent"].includes(String(rec.stage)) || marked.has(k)) continue;
+      if (Array.isArray(rec.txs) && rec.txs.length > 0) continue;
+      const live = await locks.request(tradeLock(k), { mode: "exclusive", ifAvailable: true }, async (l) => l === null);
+      if (live) continue;
+      await store.update("ops", k, (v) => {
+        const r = v as { stage?: unknown; txs?: unknown } | undefined;
+        return r && ["pending", "signed", "sent"].includes(String(r.stage)) && !(Array.isArray(r.txs) && r.txs.length > 0) ? { ...r, stage: "refused", code: "failed" } : v;
+      });
+    }
+  });
+}
 
 /** How a tx a dead tab signed ended: the kit's readSolanaTxEnd on both providers (06c A4, the send loop's own rule),
  * its expired read as not_landed; unknown keeps its wallet out. */
