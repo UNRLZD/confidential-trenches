@@ -1,8 +1,9 @@
 // The helper's abuse limits (card helper-abuse-limits): one throttling contract on every route, with no IP stored.
 //
 // The contract: when the helper's own budget or its upstream throttles, the answer is 429 { error: { code } } with a
-// Retry-After in whole seconds, which the browser can read (server.ts exposes it by CORS). A 503 stays fatal and never
-// means "wait". No answer body carries upstream text.
+// Retry-After in whole seconds, which the browser can read (server.ts exposes it by CORS). A 503 upstream names a
+// Retry-After where a wait helps: the proxy's not-ready answer (proxy.ts notReady) and the relay routes' failed reads
+// (server.ts UPSTREAM_RETRY_AFTER_S, card withdraw-fee-busy-waits). No answer body carries upstream text.
 //
 // The client is the address Caddy forwards (deploy/Caddyfile: reverse_proxy writes X-Forwarded-For from the peer it saw
 // and keeps no access log), else the socket's peer. It is a map key in memory and nothing else: never logged, never
