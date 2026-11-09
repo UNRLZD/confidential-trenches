@@ -20,7 +20,8 @@
 // build SIGN_HOST serves is a release on main; the flow that cuts one is in release-list.mjs's header, and the live
 // check signpage-release-at-deploy reads SIGN_HOST against that list after the deploy. It also refuses an uncommitted
 // change anywhere in the tree (the build carries the kit's prover too), no HEAD, or a failed
-// `pnpm install --frozen-lockfile` (run first, so the build reads HEAD's lockfile): the upload is named by HEAD's
+// `pnpm install --frozen-lockfile` (run first, so the build reads HEAD's lockfile), or node_modules that pnpm store status
+// finds is not that lockfile's (a package file edited after the install): the upload is named by HEAD's
 // commit, so it is HEAD's build. Every refusal comes before its env check (CLOUDFLARE_*) and before any upload.
 // --dry-run makes every read and the build a deploy makes, keeps the build folder, and exits 1 with each REFUSED line
 // whenever a deploy would refuse, 0 only when it would go ahead. --build is for a caller that wants only the gated
@@ -301,6 +302,14 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
   if (inst.status !== 0) {
     const why = `${inst.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
     return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), `REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, "nothing was uploaded"] };
+  }
+  // the bundle is built from node_modules (card signpage-generated-merge-free, review P1(c)): pnpm store status checks
+  // every installed package against the integrity the lockfile names (about 1 s), so a package file edited after the
+  // install refuses the build here, never rides into a release
+  const store = run("pnpm", ["store", "status"], { cwd: REPO, env, encoding: "utf8" });
+  if (store.status !== 0) {
+    const what = `${store.stdout ?? ""}${store.stderr ?? ""}`.trim().split("\n").filter(Boolean).slice(0, 10).join(" | ");
+    return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), `REFUSED node_modules is not the lockfile's (pnpm store status exit ${store.status ?? store.signal})${what ? `: ${what}` : ""}: run pnpm install --frozen-lockfile --force, then deploy again`, "nothing was uploaded"] };
   }
   const dir = build(pkg);
   let keep = false; // the build holds 24 MB of setup files: --dry-run and --build keep it, named, only once it passed its gate

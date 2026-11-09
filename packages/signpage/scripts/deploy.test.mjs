@@ -40,12 +40,14 @@ function pkgWith(headers, extra = {}) {
 const HEAD = "a".repeat(40);
 const OTHER = "b".repeat(40);
 const passed = (sha = HEAD, id = 1) => ({ headSha: sha, status: "completed", conclusion: "success", databaseId: id });
-function recorder({ head = HEAD, status = "", install = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
+function recorder({ head = HEAD, status = "", install = 0, store = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
   const calls = [];
   const heads = [main].flat();
   const run = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     if (cmd === "pnpm" && args[0] === "install") return { status: install, stdout: "", stderr: install ? "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" : "" };
+    // pnpm store status as it answers a node_modules file edited after the install (review P1(c), read 9 Nov on this repo)
+    if (cmd === "pnpm" && args[0] === "store") return { status: store, stdout: store ? "@noble/hashes@2.4.0\n\nYou can run pnpm install --force to refetch the modified packages\n" : "" };
     if (cmd === "gh") return { status: 0, stdout: JSON.stringify(runs) };
     if (cmd !== "git") return { status: 0, stdout: "" };
     if (args[0] === "ls-remote") {
@@ -197,7 +199,7 @@ test("--build and --dry-run stop after the gate and keep the build, whose _heade
   const built = await deploy(["--build"], {}, b.run);
   assert.equal(built.code, 0, (built.err ?? []).join("\n"));
   rmSync(/gate ok on (\S+);/.exec(built.out[0])[1], { recursive: true, force: true });
-  assert.deepEqual(b.calls.map((c) => c.cmd), ["pnpm"], "--build makes no git or gh read");
+  assert.deepEqual(b.calls.map((c) => `${c.cmd} ${c.args[0]}`), ["pnpm install", "pnpm store"], "--build makes no git or gh read: the install and its check only");
   const { uploads, run } = recorder();
   const r = await deploy(["--dry-run"], {}, run, undefined, {}, RELEASED_TREE());
   assert.equal(r.code, 0, (r.err ?? []).join("\n"));
@@ -302,12 +304,28 @@ test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile at the
   const { calls, run, installs } = recorder();
   // the build of a missing package throws: the install was already asked for, after the tree and main reads
   await assert.rejects(deploy([], ENV, run, NO_PKG), /ENOENT|No such file/);
-  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? (c.args[0] === "-C" ? 2 : 0) : 0)].join(" ")), ["git rev-parse", "git status", "git ls-remote", "gh run", "pnpm install"]);
+  assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? (c.args[0] === "-C" ? 2 : 0) : 0)].join(" ")), ["git rev-parse", "git status", "git ls-remote", "gh run", "pnpm install", "pnpm store"]);
   assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile"]);
   assert.equal(installs()[0].opts.cwd, dirname(dirname(PKG)));
   const dry = recorder();
   await assert.rejects(deploy(["--dry-run"], {}, dry.run, NO_PKG), /ENOENT|No such file/);
   assert.equal(dry.installs().length, 1, "--dry-run builds what a deploy would, so it installs too");
+});
+
+// review P1(c): the bundle is built from node_modules, so a package file edited after the install would ride into a
+// release unseen; pnpm store status checks every installed package against its integrity (about 1 s here) and the
+// deploy refuses on any difference, naming the fix
+test("planted: node_modules that is not the lockfile's (pnpm store status names a modified package) refuses: no build, no upload", async () => {
+  for (const argv of [[], ["--dry-run"], ["--build"]]) {
+    const before = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith("ct-signpage-")));
+    const { run, uploads, calls } = recorder({ store: 1 });
+    const r = await deploy(argv, ENV, run, undefined, {}, RELEASED_TREE());
+    assert.equal(r.code, 1, `${argv}: ${(r.out ?? []).join("\n")}`);
+    assert.match(r.err.join("\n"), /REFUSED node_modules is not the lockfile's \(pnpm store status exit 1\): @noble\/hashes@2\.4\.0[\s\S]*pnpm install --frozen-lockfile --force[\s\S]*nothing was uploaded/, `${argv}`);
+    assert.deepEqual(calls.find((c) => c.cmd === "pnpm" && c.args[0] === "store").args, ["store", "status"]);
+    assert.equal(uploads().length, 0);
+    assert.deepEqual(readdirSync(tmpdir()).filter((f) => f.startsWith("ct-signpage-") && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-") && !before.has(f)), [], `${argv}: no build was made`);
+  }
 });
 
 test("a failed install refuses before a token is read: no build, no upload", async () => {
