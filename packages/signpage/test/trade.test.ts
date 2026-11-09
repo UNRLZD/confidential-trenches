@@ -989,3 +989,50 @@ test("the page settles an owed trade at each state read, on the store bounded as
   assert.equal(main.match(/settleTradeOps\(/g)?.length, 1, "one settle call, through settleTrades");
   assert.doesNotMatch(main, /set(Interval|Timeout)\([^)]*settleTrades/, "no timer runs it");
 });
+
+// owed is the page's own flag: a settle pass with nothing out leaves it false
+const settleClean = () => settleTradeOps(store(), navigator.locks, [noRpc, noRpc]);
+
+test("owed stays true when the settle pass cannot read the marks (re-check of 81b3ce20, P3-1)", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) });
+  const held = { [W[0]!.address]: 3_000n };
+  const p = page(s, { legState: () => "unknown" }, [provider(held), provider(held)]);
+  await p.ask(sell("3000"));
+  await p.idle();
+  p.die();
+  assert.equal(tradeSettleOwed(), true);
+  // the reviewer's stub: the wallets' keys cannot be read
+  const broken = { ...s, keys: async (n: string) => (n === "wallets" ? Promise.reject(new Error("InvalidStateError")) : s.keys(n)) };
+  await settleTradeOps(broken, navigator.locks, [sigStatus(null, LVBH), sigStatus(null, LVBH)]).catch(() => {});
+  assert.equal(tradeSettleOwed(), true, "a pass that could not read the marks leaves owed as it was");
+  assert.ok(mark(s, 0), "the mark is still out");
+});
+
+test("a trade whose mark read fails at its end keeps the mark owed (re-check of 81b3ce20, P3-1)", async () => {
+  await settleClean();
+  assert.equal(tradeSettleOwed(), false);
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n) });
+  let fail = false;
+  const flaky = { ...s, get: (n: string, k: string) => (fail && n === "wallets" ? Promise.reject(new Error("InvalidStateError")) : s.get(n, k)) };
+  const p = page(flaky as typeof s, { legState: () => ((fail = true), "filled"), final: "filled" });
+  await p.ask(buy("10"));
+  await p.idle();
+  assert.ok(mark(s, 0), "the mark stays: its read failed, so it is not known gone");
+  assert.equal(tradeSettleOwed(), true, "a read that failed is a kept mark");
+});
+
+test("a running trade's marks are not owed: the settle pass leaves owed false while its lock is held (re-check of 81b3ce20, P3-2)", async () => {
+  await settleClean();
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n), [armKey("sol", L, 1)]: rec(1, 1_000n) });
+  let go!: () => void;
+  const p = page(s, { hold: new Promise<void>((r) => (go = r)), final: "filled" });
+  const a = await p.ask(buy("10"));
+  assert.equal(mark(s, 0)?.op, a.id, "the running trade's mark is out");
+  await settleTradeOps(s, navigator.locks, [noRpc, noRpc]);
+  assert.equal(tradeSettleOwed(), false, "a live trade's mark is its own to end");
+  go();
+  await p.idle();
+  assert.equal(mark(s, 0), undefined);
+  assert.equal(tradeSettleOwed(), false);
+});
