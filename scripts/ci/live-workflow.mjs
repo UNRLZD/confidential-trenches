@@ -24,7 +24,7 @@
 //     twice would let a real red through;
 //   - the two runner steps are held whole (SINGLE_STEP, SERIAL_STEP): the runner line is the step's only command and
 //     writes the log itself, so no `|| true`, `; exit 0`, tee without pipefail or line before it turns a red job green; no
-//     other line of the check job runs a check; no continue-on-error anywhere; the live job fails on a check job that
+//     other line of the check job runs a check; no continue-on-error, shell or defaults key anywhere; the live job fails on a check job that
 //     did not succeed (review of 9eaf059a, P2-1);
 //   - the runners come from the workflow's own commit (RUNNER_CHECKOUT: github.workflow_sha into .live-runner, a sparse
 //     checkout of RUNNER_FILES, the runners and every file they import), the checks from the deployed one, so a dispatch
@@ -186,7 +186,10 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   for (const [n, l] of uncommented(check)) {
     if (/\bnode\b.*(?:scripts\/live-checks\/|live-rerun\.mjs|live-serial\.mjs)/.test(l) && ![RUN_LINE, SERIAL_LINE].includes(l.trim())) p.push(`${file}: the check job runs a live check outside the two runner steps (its line ${n}: ${l.trim()})`);
   }
-  for (const [n, l] of uncommented(text)) if (/^\s*-?\s*continue-on-error:/.test(l)) p.push(`${file}:${n}: continue-on-error: a job or step that may fail and still read as success (the live job reads needs.check.result)`);
+  for (const [n, l] of uncommented(text)) {
+    if (/^\s*-?\s*continue-on-error:/.test(l)) p.push(`${file}:${n}: continue-on-error: a job or step that may fail and still read as success (the live job reads needs.check.result)`);
+    if (/^\s*-?\s*(?:shell|defaults):/.test(l)) p.push(`${file}:${n}: a shell or defaults key: a step's run is GitHub's own bash -e, never a template that could swallow its exit`);
+  }
   const verdict = jobText("live");
   want(/^ {10}CHECKS: \$\{\{ needs\.check\.result \}\}$/m.test(verdict) && verdict.includes('if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi'), "the live job does not fail when a check job did not succeed (CHECKS: ${{ needs.check.result }}, and exit 1 unless it is success)");
   want(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.test(jobText("check")) && (([, g, o]) => Number(g) > Number(o))(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.exec(jobText("check"))), "a serial group's job has no longer limit than a single check's (timeout-minutes: ${{ matrix.group != '' && <longer> || <shorter> }})");
