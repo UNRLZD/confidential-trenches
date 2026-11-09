@@ -85,6 +85,8 @@ export type NoteRestore = {
   pendingRefunds: RestoredSpend[];
   /** per lane, the highest deposit index with a note, or null for an empty lane (steps 5 and 7 start from it) */
   laneHighest: (number | null)[];
+  /** per lane, the last index the walk read (gap past its last note or its reach): step 5 holds its ids to it */
+  laneWalked: number[];
 };
 
 export type RestoreArgs = {
@@ -99,10 +101,22 @@ export type RestoreArgs = {
   /** tests only: RESTORE_GAP unless given */
   gap?: number;
   /**
-   * The deposit index walk of one lane, run where the caller likes (the proof pool's workers): walkLane(seed64, scope,
-   * lane, p => precommitments.has(p), gap) for exactly the lane, scope and gap given. walkLane on this thread unless given.
+   * Per lane, the index the walk reads to at least before its gap counts (null: none), as step 5's walk-end error
+   * names it ("restore again with reach[lane] = i"): a user whose ids with history run past the walk's end restores
+   * again with it, and hands the same reach to restoreDepositIds.
    */
-  walk?: (lane: number, scope: bigint, gap: number, precommitments: ReadonlySet<bigint>) => Promise<LaneWalk>;
+  reach?: readonly (number | null)[];
+  /**
+   * The deposit index walk of one lane, run where the caller likes (the proof pool's workers): walkLane(seed64, scope,
+   * lane, p => precommitments.has(p), gap, reach) for exactly the lane, scope, gap and reach given. walkLane on this
+   * thread unless given.
+   */
+  walk?: (lane: number, scope: bigint, gap: number, precommitments: ReadonlySet<bigint>, reach: number | null) => Promise<LaneWalk>;
+  /**
+   * The height the vault's pages are read at or above (vaultSync's cursor.height: "behind" below it), 0 unless given.
+   * Step 7's second scan (../restore/after.ts secondScan) reads them at or past its bound block.
+   */
+  atLeast?: number;
 };
 
 /** Steps 2 and 3: the vault's pages on two RPCs, then every note of this seed found in them. */
@@ -110,17 +124,20 @@ export async function restoreNotes(a: RestoreArgs): Promise<NoteRestore> {
   // two hosts of one operator are one read: a pair that is not a release pair is refused before any read
   if (nearPairNetwork(a.rpcs) === null) throw new Error(nearPairRule());
   const scope = vaultScopeOf(keccak_256, a.vault, a.token);
-  const s = await vaultSync({ vault: a.vault, rpcs: a.rpcs, cursor: vaultSyncStart(a.vault), lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
+  if (a.atLeast !== undefined && (!Number.isSafeInteger(a.atLeast) || a.atLeast < 0)) throw new Error("atLeast is a block height");
+  const cursor = { ...vaultSyncStart(a.vault), height: a.atLeast ?? 0 };
+  const s = await vaultSync({ vault: a.vault, rpcs: a.rpcs, cursor, lists: ["deposits", "spends", "leaves"], ...(a.signal ? { signal: a.signal } : {}) });
   if (s.leaves.length !== s.stateTree.size) throw new Error("the leaves read are not the whole state tree");
   // the vault's own scope and token, read on both RPCs: a wrong token string would give an empty restore that looks valid
   const finalHeights = await readConfig(a.rpcs, a.vault, a.token, scope, s.height, a.signal);
   const gap = a.gap ?? RESTORE_GAP;
+  const reach = checkReach(a.reach);
   let lanes: LaneWalk[] | undefined;
   if (a.walk) {
     const ps: ReadonlySet<bigint> = new Set(s.deposits.map((r) => r.precommitment));
-    lanes = await untilAbort(Promise.all(Array.from({ length: RESTORE_LANES }, (_, lane) => a.walk!(lane, scope, gap, ps))), a.signal);
+    lanes = await untilAbort(Promise.all(Array.from({ length: RESTORE_LANES }, (_, lane) => a.walk!(lane, scope, gap, ps, reach[lane]!))), a.signal);
   }
-  return { height: s.height, finalHeights, blockHash: s.blockHash, cursor: s.cursor, ...restorePages(a.seed64, scope, s, { gap, ...(lanes ? { lanes } : {}) }) };
+  return { height: s.height, finalHeights, blockHash: s.blockHash, cursor: s.cursor, ...restorePages(a.seed64, scope, s, { gap, reach, ...(lanes ? { lanes } : {}) }) };
 }
 
 // config() at each RPC's final block: the same bytes on both, its scope the one computed from (vault, token) and its
@@ -159,6 +176,16 @@ function untilAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   });
 }
 
+/** A walk's reach per lane (RestoreArgs `reach`): an index of the lane or null, one per lane; none given, all null. */
+export function checkReach(reach: readonly (number | null)[] | undefined): (number | null)[] {
+  if (reach === undefined) return Array<null>(RESTORE_LANES).fill(null);
+  if (!Array.isArray(reach) || reach.length !== RESTORE_LANES) throw new Error("reach: one per lane");
+  return reach.map((x, lane) => {
+    if (x !== null && (!Number.isSafeInteger(x) || x < lane || x > U32 || x % RESTORE_LANES !== lane)) throw new Error(`reach[${lane}]: not an index of lane ${lane}`);
+    return x;
+  });
+}
+
 /** One lane's walk: the indices with a note, ascending, and the last index read with its precommitment. */
 export type LaneWalk = { found: number[]; last: number; lastPrecommitment: bigint };
 
@@ -166,17 +193,20 @@ export type LaneWalk = { found: number[]; last: number; lastPrecommitment: bigin
  * The deposit index walk of one lane: every index of the lane with a note, in order, until `gap` indices of the lane
  * in a row have none. `has` tells whether the vault holds a precommitment (a lookup in pages already read).
  */
-export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): LaneWalk {
-  return walkLaneOf(masters(seed64, "deposit"), scope, lane, has, gap);
+export function walkLane(seed64: Uint8Array, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null): LaneWalk {
+  return walkLaneOf(masters(seed64, "deposit"), scope, lane, has, gap, reach);
 }
 
 /**
  * walkLane from the deposit note masters alone (masters(seed64, "deposit")), so a walk Worker is handed the two
  * masters and never the seed (../restore/walk.ts).
  */
-export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP): LaneWalk {
+export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigint, lane: number, has: (precommitment: bigint) => boolean, gap: number = RESTORE_GAP, reach: number | null = null): LaneWalk {
   if (!Number.isInteger(lane) || lane < 0 || lane >= RESTORE_LANES) throw new Error("a lane is 0-7");
   if (!Number.isSafeInteger(gap) || gap < 1) throw new Error("gap is a count above 0");
+  if (reach !== null && (!Number.isSafeInteger(reach) || reach < lane || reach > U32 || reach % RESTORE_LANES !== lane)) throw new Error(`reach: not an index of lane ${lane}`);
+  // a reach (the index a walk-end error named) is read as a note is for the stop rule: misses count only past it
+  const floor = reach ?? -1;
   // depositNote's derivation (../derive/notes.ts) with its masters read once for the whole walk; every hit is checked
   // against noteSecrets below, so a drift between the two stops the restore instead of losing a note
   const found: number[] = [];
@@ -190,15 +220,15 @@ export function walkLaneOf(m: { nullifier: bigint; secret: bigint }, scope: bigi
     if (has(lastPrecommitment)) {
       found.push(i);
       misses = 0;
-    } else misses++;
+    } else if (i > floor) misses++;
   }
   return { found, last, lastPrecommitment };
 }
 
-// The last index a whole walk of the lane reads: `gap` indices of the lane past its last note (the lane's first
-// gap indices when it has none), or the lane's last index below 2^32
-function walkEnd(lane: number, found: readonly number[], gap: number): number {
-  const from = found.length === 0 ? lane - RESTORE_LANES : found[found.length - 1]!;
+// The last index a whole walk of the lane reads: `gap` indices of the lane past its last note or its reach, whichever
+// is higher (the lane's first gap indices when it has neither), or the lane's last index below 2^32
+function walkEnd(lane: number, found: readonly number[], gap: number, reach: number | null = null): number {
+  const from = Math.max(found.length === 0 ? lane - RESTORE_LANES : found[found.length - 1]!, reach ?? -Infinity);
   const end = from + RESTORE_LANES * gap;
   const top = lane + RESTORE_LANES * Math.floor((U32 - lane) / RESTORE_LANES);
   return Math.min(end, top);
@@ -209,9 +239,10 @@ export function restorePages(
   seed64: Uint8Array,
   scope: bigint,
   pages: { deposits: readonly VaultDepositRow[]; spends: readonly VaultSpendRow[]; leaves: readonly bigint[] },
-  opts: { gap?: number; lanes?: readonly LaneWalk[] } = {},
+  opts: { gap?: number; reach?: readonly (number | null)[]; lanes?: readonly LaneWalk[] } = {},
 ): Omit<NoteRestore, "height" | "finalHeights" | "blockHash" | "cursor"> {
   const gap = opts.gap ?? RESTORE_GAP;
+  const reach = checkReach(opts.reach);
   if (opts.lanes !== undefined && (!Array.isArray(opts.lanes) || opts.lanes.length !== RESTORE_LANES)) throw new Error("lanes: one walk per lane");
   const byP = new Map<bigint, VaultDepositRow>();
   for (const r of pages.deposits) {
@@ -258,14 +289,16 @@ export function restorePages(
 
   // the deposit index walk, lane by lane
   const laneHighest: (number | null)[] = [];
+  const laneWalked: number[] = [];
   for (let lane = 0; lane < RESTORE_LANES; lane++) {
-    const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap);
+    const w = opts.lanes ? opts.lanes[lane]! : walkLane(seed64, scope, lane, (P) => byP.has(P), gap, reach[lane]!);
     const found = Array.isArray(w?.found) ? [...w.found] : null;
     // a walk run elsewhere: the lane's own indices, ascending, each one the vault holds (checked by asDeposit below) ...
     if (found === null || !found.every((i, k) => Number.isInteger(i) && i >= 0 && i <= U32 && i % RESTORE_LANES === lane && (k === 0 || i > found[k - 1]!)))
       throw new Error(`lane ${lane}: the walk's indices are not this lane's, ascending`);
     // ... read to gap misses past its last note, on this seed and scope: its last index's precommitment is recomputed
-    if (w.last !== walkEnd(lane, found, gap)) throw new Error(`lane ${lane}: the walk ended at ${String(w.last)}, not ${walkEnd(lane, found, gap)} (gap ${gap} past its last note)`);
+    const end = walkEnd(lane, found, gap, reach[lane]!);
+    if (w.last !== end) throw new Error(`lane ${lane}: the walk ended at ${String(w.last)}, not ${end} (gap ${gap} past its last note${reach[lane] === null ? "" : ` or its reach ${reach[lane]}`})`);
     if (w.lastPrecommitment !== noteSecrets(seed64, { kind: "deposit", s: scope, i: w.last }).precommitment)
       throw new Error(`lane ${lane}: the walk's last precommitment is not this seed's and scope's`);
     for (const i of found) {
@@ -273,6 +306,7 @@ export function restorePages(
       if (!asDeposit(ref)) throw new Error(`deposit index ${i}: the walk's precommitment is not the note's`);
     }
     laneHighest.push(found.length === 0 ? null : found[found.length - 1]!);
+    laneWalked.push(end);
   }
 
   // every note found, followed
@@ -326,7 +360,7 @@ export function restorePages(
   }
   spends.sort((x, y) => x.spend.index - y.spend.index);
   pendingRefunds.sort((x, y) => x.spend.index - y.spend.index);
-  return { notes, spends, pendingRefunds, laneHighest };
+  return { notes, spends, pendingRefunds, laneHighest, laneWalked };
 }
 
 /** A note restore found that writeRestored left as the store holds it, for the caller to act on. */

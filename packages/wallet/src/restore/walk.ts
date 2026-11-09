@@ -14,7 +14,7 @@ import { masters } from "../derive/index.ts";
 import { RESTORE_LANES, walkLaneOf, type LaneWalk, type RestoreArgs } from "../notes/restore.ts";
 
 /** What the page sends one walk Worker. */
-export type WalkAsk = { lane: number; scope: bigint; gap: number; nullifier: bigint; secret: bigint; precommitments: bigint[] };
+export type WalkAsk = { lane: number; scope: bigint; gap: number; reach: number | null; nullifier: bigint; secret: bigint; precommitments: bigint[] };
 /** What a walk Worker answers. */
 export type WalkAnswer = { ok: true; walk: LaneWalk } | { ok: false; error: string };
 
@@ -25,10 +25,11 @@ export function answerWalk(ask: unknown): WalkAnswer {
     if (typeof a !== "object" || a === null) throw new Error("not a walk ask");
     if (!Number.isInteger(a.lane) || a.lane! < 0 || a.lane! >= RESTORE_LANES) throw new Error("lane: not 0-7");
     if (!Number.isSafeInteger(a.gap) || a.gap! < 1) throw new Error("gap: not a count above 0");
+    if (a.reach !== null && !Number.isSafeInteger(a.reach)) throw new Error("reach: not an index or null");
     if (typeof a.scope !== "bigint" || typeof a.nullifier !== "bigint" || typeof a.secret !== "bigint") throw new Error("scope and masters: not bigints");
     if (!Array.isArray(a.precommitments) || !a.precommitments.every((p) => typeof p === "bigint")) throw new Error("precommitments: not bigints");
     const ps = new Set<bigint>(a.precommitments);
-    return { ok: true, walk: walkLaneOf({ nullifier: a.nullifier, secret: a.secret }, a.scope, a.lane!, (p) => ps.has(p), a.gap!) };
+    return { ok: true, walk: walkLaneOf({ nullifier: a.nullifier, secret: a.secret }, a.scope, a.lane!, (p) => ps.has(p), a.gap!, a.reach) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "the walk failed" };
   }
@@ -47,7 +48,7 @@ export interface WalkPort {
  */
 export function walkInWorkers(seed64: Uint8Array, spawn: () => WalkPort): NonNullable<RestoreArgs["walk"]> {
   const m = masters(seed64, "deposit");
-  return (lane, scope, gap, precommitments) =>
+  return (lane, scope, gap, precommitments, reach) =>
     new Promise<LaneWalk>((resolve, reject) => {
       const w = spawn();
       let done = false;
@@ -62,7 +63,7 @@ export function walkInWorkers(seed64: Uint8Array, spawn: () => WalkPort): NonNul
         end(() => (a?.ok === true ? resolve(a.walk) : reject(new Error(`lane ${lane}: the walk worker refused: ${String((a as { error?: unknown } | undefined)?.error ?? "no answer")}`))));
       });
       w.addEventListener("error", () => end(() => reject(new Error(`lane ${lane}: the walk worker failed`))));
-      const ask: WalkAsk = { lane, scope, gap, nullifier: m.nullifier, secret: m.secret, precommitments: [...precommitments] };
+      const ask: WalkAsk = { lane, scope, gap, reach, nullifier: m.nullifier, secret: m.secret, precommitments: [...precommitments] };
       w.postMessage(ask);
     });
 }

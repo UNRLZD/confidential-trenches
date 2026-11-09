@@ -61,6 +61,8 @@ export const IN_PROCESS = [
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
+  { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
@@ -125,6 +127,7 @@ export const OUT = {
   "app-legend-holds-still": "a browser and the helper",
   "app-discover-rows-hold": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
+  "verify-pools": "a browser and chain RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
   "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
@@ -140,6 +143,7 @@ export const OUT = {
   "evm-quote-warm-round": "EVM RPC quotes",
   "evm-quote-lag-held": "EVM RPC quotes",
   "evm-quote-read-gas-starve": "EVM RPC quotes",
+  "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",

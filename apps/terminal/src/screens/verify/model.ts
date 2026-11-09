@@ -8,7 +8,7 @@ import { VERIFY_READS } from "./read.ts";
 import type { VerifyPins, VerifyReadId, VerifyReads } from "./read.ts";
 
 export type VerifyStatus = "ok" | "warn" | "danger";
-export type VerifyValueKey = "keys" | "codeHash" | "release" | "asset" | "registration" | "balance" | "deposited" | "spent" | "returned" | "surplus";
+export type VerifyValueKey = "keys" | "codeHash" | "release" | "asset" | "registration" | "balance" | "deposited" | "spent" | "returned" | "surplus" | "authority" | "owner" | "proxy";
 /** One value the panel read; `rpc` names the RPC when the two did not give one answer. */
 export type VerifyValue = { k: VerifyValueKey; v: string; rpc?: string };
 export type VerifyCheckId = "keys" | "code" | "asset" | "registration" | "tokenCode" | "balance";

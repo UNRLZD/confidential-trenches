@@ -51,6 +51,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
+  "scripts/live-checks/evm-pool-index.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
   "scripts/live-checks/evm-quote-read-gas-starve.mjs",
   "scripts/live-checks/evm-quote-warm-round.mjs",
@@ -146,6 +147,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-near-prepay-taken.mjs",
   "scripts/live-checks/held-deposit-way-out.mjs",
   "scripts/live-checks/held-move-forgotten-tx.mjs",
+  "scripts/live-checks/wallet-restore-id-reader.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
   "scripts/live-checks/signpage-pool-flow.mjs",
   "scripts/live-checks/signpage-pool-kinds.mjs",
@@ -197,6 +199,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
+  "scripts/live-checks/verify-pools.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

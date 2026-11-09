@@ -13,6 +13,7 @@ export interface Word {
 }
 
 const ok = (text: string, source: string): Word => ({ text, source, draft: false });
+const draft = (text: string, source: string): Word => ({ text, source, draft: true });
 
 export const WORDS = {
   title: ok("Verify", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S18 (the footer's Verify pill, the panel it opens); the route's name"),
@@ -34,6 +35,17 @@ export const WORDS = {
   rpcs: ok("RPCs", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S18.4 [draft copy: RPCs disagree]"),
   unverified: ok("Unverified", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S18.3 [draft copy: Unverified]"),
   disagree: ok("RPCs disagree", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S18.4 [draft copy: RPCs disagree]"),
+  // the pool rows (card verify-pools); each chain's row is named by its chain, data as deposit/model.ts CHAIN_NAME draws it
+  pools: draft("Pools", "card verify-pools: the heading over the Solana, Base and Robinhood pool rows"),
+  authority: draft("Upgrade authority", "card verify-pools: the Solana pool program's programdata upgrade authority (none drawn as —)"),
+  owner: draft("Owner", "card verify-pools: owner() of the Base and Robinhood pool (none drawn as —)"),
+  proxy: draft("Proxy", "card verify-pools: the EIP-1967 implementation, admin and beacon slots of the EVM pool (none drawn as —)"),
+  solscan: ok("Solscan", "token/words.ts solscan (R5 token.js EXPL.solana); the Solana pool's first explorer"),
+  solanaExplorer: draft("Solana Explorer", "card verify-pools: explorer.solana.com, the Solana pool's second explorer"),
+  basescan: ok("BaseScan", "token/words.ts basescan (R5 token.js EXPL.base); the Base pool's first explorer"),
+  blockscout: draft("Blockscout", "card verify-pools: base.blockscout.com, the Base pool's second explorer"),
+  rhExplorer: ok("Robinhood explorer", "token/words.ts rhExplorer (R5 token.js EXPL.robinhood); the Robinhood pool's first explorer"),
+  hoodscan: draft("HoodScan", "card verify-pools: hoodscan.co, the Robinhood pool's second explorer (chainid.network 4663 explorers)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
