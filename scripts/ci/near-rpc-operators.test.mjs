@@ -71,6 +71,16 @@ test("planted: a NEAR RPC host built from a template, or on another port, is ref
   assert.deepEqual(lineProblems("const u = `https://${host}`;", "x.mjs"), [], "a host from a variable is the map's own loop, not a template host");
 });
 
+test("a big fixture of long hex runs is scanned in linear time, and a template host in it is still refused", () => {
+  // TEMPLATE's leading run rescanned each hex run from every character: a 1.9 MB quote fixture took 35 s, the tree
+  // 443 s, past the gitleaks job's 10 minutes (main a70ea92b's push CI, 9 Nov 04:36Z)
+  const hex = `{"data": "0x${"ab12".repeat(50_000)}"}\n`; // one 200 KB run: the quadratic scan took over 5 s on it
+  const started = performance.now();
+  assert.deepEqual(lineProblems(hex, "fixture.json"), []);
+  assert.match(lineProblems(`${hex}const u = \`archival-rpc.\${n}.near.org\`;\n`, "x.mjs").join(), /built from a template/, "a file that holds a template host is still read whole");
+  assert.ok(performance.now() - started < 5_000, `two 200 KB hex runs took ${Math.round(performance.now() - started)} ms`);
+});
+
 test("the allow marker on a host's line passes one operator's alternatives; on another line, or another word, it does not", () => {
   assert.deepEqual(lineProblems(`    fastnear: ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"], // ${ALLOW} (alternatives)`, "a.ts"), []);
   assert.equal(lineProblems(`// ${ALLOW}\nconst P = ["https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"];`, "a.ts").length, 1);
