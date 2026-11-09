@@ -5,7 +5,7 @@
 //   Pocket's Solana gateway) asked live with SIGN_HOST's Origin header: one balance for the program data account, 0 for
 //   the account no one holds, each readable there;
 // - bad_helper: `--local --with https://ct-api.unrealized.trade/v1/rpc/solana`, our helper relay in the second
-//   provider's place (the pair before the CO's fold of 04:33Z): FAIL on the provider alone;
+//   provider's place (the pair this card read before it moved to two public operators): FAIL on the provider alone;
 // - bad_refuses_page: `--local --with https://api.mainnet-beta.solana.com`, the fold's first pick, which answers a
 //   request with an Origin header 403 (re-recorded 13:26Z through provider-answer.mjs: a JSON-RPC error, code 403
 //   "Access forbidden", ACAO *; the non-JSON 403 with no ACAO a page would get is planted below): FAIL;

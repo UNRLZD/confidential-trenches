@@ -762,7 +762,7 @@ test("planted: the U_X reads are keyed by the pool's chain from its pin: an EVM 
   assert.deepEqual(new Set(ux.asked.map((a) => a.params[0])), want);
 });
 
-// ---------- CO fold 04:33Z: the restore's U_X reads on two public operators, never our helper relay ----------
+// ---------- the restore's U_X reads on two public operators, never our helper relay ----------
 
 test("planted (fold 04:33Z): every restore U_X read, balances and costs alike, goes to the two public operators and never names our helper relay", async () => {
   const urls: string[] = [];

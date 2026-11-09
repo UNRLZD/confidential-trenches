@@ -213,7 +213,7 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
     // each id NEAR reads as holding money (a refund 1Click left under U_{s,i} inside intents.near, or the token), by index
     const nearMoney = new Map<number, string>();
     // the id's NEAR read and its U_X read side by side, each paced by its own providers, so the U_X reads spread over
-    // the minutes the NEAR reads take and add no wall time (CO fold 04:33Z)
+    // the minutes the NEAR reads take and add no wall time (card wallet-restore-reads-ux)
     const both: IdReader = async (id, i) => {
       if (i === undefined) throw new Error("no deposit index for its U_X");
       const u = await uxOf(seed, chain, w.scope, i, id);
@@ -314,7 +314,7 @@ async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: Abort
 }
 
 /**
- * The restore's U_X pair on Solana (CO fold 04:33Z, the pair CO 04:46Z): two public operators, never our helper relay,
+ * The restore's U_X pair on Solana (card wallet-restore-reads-ux): two public operators, never our helper relay,
  * since one restore asks for every one of a user's U_X in a row and our server is not the RPC provider wallet.md §2.3
  * step 5 lets see some ids (one per request, spread over both providers and over minutes). PublicNode and Pocket's
  * gateway, the pair Verify reads the Solana pool on (d8657094): Solana's own api.mainnet-beta.solana.com answers any

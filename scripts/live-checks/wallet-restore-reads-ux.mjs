@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Live check of card wallet-restore-reads-ux: the signing page's restore reads each pool deposit id's U_X on the pool's
 // own chain with the pool follow's own reader (packages/signpage/src/pool-restore.ts step 5, restoreUxOf: getBalance at
-// finalized, one U_X per request) on the restore's own pair, two public operators and never our helper relay (CO fold
-// 04:33Z: one restore asks for all of a user's U_X, and our server is not the provider the paper lets see some ids),
+// finalized, one U_X per request) on the restore's own pair, two public operators and never our helper relay (one
+// restore asks for all of a user's U_X, and our server is not the provider the paper lets see some ids),
 // and the two must give the same balance. This check makes those very reads from SIGN_HOST's origin
 // (https://confidential.unrealized.trade, sent as the Origin header, so a provider that refuses a page fails here) on
 // both of the restore's providers (RESTORE_UX_SOLANA: PublicNode and Pocket's Solana gateway, the pair Verify reads the
