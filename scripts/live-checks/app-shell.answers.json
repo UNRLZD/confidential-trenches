@@ -1,23 +1,24 @@
 {
  "good": {
   "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
   "source": "bar10, the build inside the stand-in shell, answers at once",
-  "at": "2026-11-04T10:01:58.631Z",
+  "at": "2026-11-08T23:33:57.049Z",
   "browser": "157.0.8103.38",
   "headers": {
-   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
    "integrityPolicy": "blocked-destinations=(script)"
   },
   "scripts": [
    {
-    "src": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
-    "integrity": "sha384-WcEAop7sW7C5gP3gasn2m4jSuYTTB/K6xHQVxRBa6kXHRznriVhSI3OrXBmaB0lr",
-    "served": "sha384-WcEAop7sW7C5gP3gasn2m4jSuYTTB/K6xHQVxRBa6kXHRznriVhSI3OrXBmaB0lr"
+    "src": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "integrity": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj",
+    "served": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj"
    }
   ],
   "loadedScripts": [
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/",
     "app": true
    },
@@ -27,7 +28,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/discover",
     "app": true
    },
@@ -37,7 +38,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/portfolio",
     "app": true
    },
@@ -47,7 +48,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/orders",
     "app": true
    },
@@ -57,7 +58,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/profile",
     "app": true
    },
@@ -67,7 +68,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/verify",
     "app": true
    },
@@ -77,7 +78,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/privacy",
     "app": true
    },
@@ -87,7 +88,7 @@
     "app": false
    },
    {
-    "url": "https://ct-app.unrealized.trade/assets/index-CLrhrwPo.js",
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
     "frame": "https://ct-app.unrealized.trade/terms",
     "app": true
    },
@@ -107,13 +108,18 @@
     "route": "token",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-token.png"
+    "shot": "phone-token.png"
    },
    {
     "width": "phone",
@@ -124,13 +130,18 @@
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-discover.png"
+    "shot": "phone-discover.png"
    },
    {
     "width": "phone",
@@ -141,13 +152,18 @@
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-portfolio.png"
+    "shot": "phone-portfolio.png"
    },
    {
     "width": "phone",
@@ -158,13 +174,18 @@
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-orders.png"
+    "shot": "phone-orders.png"
    },
    {
     "width": "phone",
@@ -175,13 +196,18 @@
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-profile.png"
+    "shot": "phone-profile.png"
    },
    {
     "width": "phone",
@@ -192,13 +218,27 @@
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-verify.png"
+    "shot": "phone-verify.png"
    },
    {
     "width": "phone",
@@ -209,13 +249,18 @@
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-privacy.png"
+    "shot": "phone-privacy.png"
    },
    {
     "width": "phone",
@@ -226,13 +271,18 @@
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/phone-terms.png"
+    "shot": "phone-terms.png"
    },
    {
     "width": "desktop",
@@ -243,13 +293,18 @@
     "route": "token",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500037"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-token.png"
+    "shot": "desktop-token.png"
    },
    {
     "width": "desktop",
@@ -260,13 +315,18 @@
     "route": "discover",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500041"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-discover.png"
+    "shot": "desktop-discover.png"
    },
    {
     "width": "desktop",
@@ -277,13 +337,18 @@
     "route": "portfolio",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500045"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-portfolio.png"
+    "shot": "desktop-portfolio.png"
    },
    {
     "width": "desktop",
@@ -294,13 +359,18 @@
     "route": "orders",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500048"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-orders.png"
+    "shot": "desktop-orders.png"
    },
    {
     "width": "desktop",
@@ -311,13 +381,18 @@
     "route": "profile",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500052"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-profile.png"
+    "shot": "desktop-profile.png"
    },
    {
     "width": "desktop",
@@ -328,13 +403,27 @@
     "route": "verify",
     "violations": [],
     "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "on",
+     "block": "223500056"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-verify.png"
+    "shot": "desktop-verify.png"
    },
    {
     "width": "desktop",
@@ -345,13 +434,18 @@
     "route": "privacy",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500059"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-privacy.png"
+    "shot": "desktop-privacy.png"
    },
    {
     "width": "desktop",
@@ -362,13 +456,18 @@
     "route": "terms",
     "violations": [],
     "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500063"
+    },
     "cls": 0,
     "shiftCount": 0,
     "shifts": [],
     "hscroll": false,
     "smallText": [],
     "smallTaps": [],
-    "shot": "<shots>/desktop-terms.png"
+    "shot": "desktop-terms.png"
    }
   ],
   "inShell": [
@@ -404,7 +503,12 @@
     "cls": 0,
     "shifts": [],
     "violations": [],
-    "consoleErrors": []
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    }
    },
    {
     "width": "desktop",
@@ -444,7 +548,12 @@
     "cls": 0,
     "shifts": [],
     "violations": [],
-    "consoleErrors": []
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500072"
+    }
    }
   ],
   "shots": "<shots>"
@@ -1224,6 +1333,1771 @@
     "cls": 0,
     "violations": [],
     "consoleErrors": []
+   }
+  ],
+  "shots": "<shots>"
+ },
+ "outage": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "bar10, the build inside the stand-in shell, answers at once, solana RPC answering 503",
+  "at": "2026-11-08T23:35:30.553Z",
+  "browser": "157.0.8103.38",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "integrity": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj",
+    "served": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj"
+   }
+  ],
+  "loadedScripts": [
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": false
+   }
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://solana-rpc.publicnode.com/)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "warn",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500037"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500041"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500044"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500048"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500052"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://solana-rpc.publicnode.com/)"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "warn",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "on",
+     "block": "223500055"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500059"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500063"
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": ""
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500071"
+    }
+   }
+  ],
+  "shots": "<shots>"
+ },
+ "outageFooter": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "bar10, the build inside the stand-in shell, answers at once, footer RPC answering 503",
+  "at": "2026-11-09T00:34:34.383Z",
+  "browser": "157.0.8103.38",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "integrity": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj",
+    "served": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj"
+   }
+  ],
+  "loadedScripts": [
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": false
+   }
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2150
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2081
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2124
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2067
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2061
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2084
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2071
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2066
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500039",
+     "ms": 2136
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500042",
+     "ms": 2097
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500046",
+     "ms": 2086
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500050",
+     "ms": 2066
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500053",
+     "ms": 2070
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "on",
+     "block": "223500057",
+     "ms": 2091
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500061",
+     "ms": 2068
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500064",
+     "ms": 2071
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 3791
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "on",
+     "block": "223500073",
+     "ms": 4211
+    }
+   }
+  ],
+  "shots": "<shots>"
+ },
+ "outageFooterPair": {
+  "url": "https://ct-app.unrealized.trade",
+  "network": "mainnet",
+  "source": "bar10, the build inside the stand-in shell, answers at once, footer-pair RPC answering 503",
+  "at": "2026-11-09T00:36:05.988Z",
+  "browser": "157.0.8103.38",
+  "headers": {
+   "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
+   "integrityPolicy": "blocked-destinations=(script)"
+  },
+  "scripts": [
+   {
+    "src": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "integrity": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj",
+    "served": "sha384-W9bpb1qoxP3F62qqsNoXKQrnNOSSglZj33jekcYYKbtysskWJOjX8zWJsXZD2Ddj"
+   }
+  ],
+  "loadedScripts": [
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/discover",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/discover",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/portfolio",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/portfolio",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/orders",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/orders",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/profile",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/profile",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/verify",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/verify",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/privacy",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/privacy",
+    "app": false
+   },
+   {
+    "url": "https://ct-app.unrealized.trade/assets/index-DQm2uIN5.js",
+    "frame": "https://ct-app.unrealized.trade/terms",
+    "app": true
+   },
+   {
+    "url": "https://confidential.unrealized.trade/shell.js",
+    "frame": "https://confidential.unrealized.trade/terms",
+    "app": false
+   }
+  ],
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2125
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-token.png"
+   },
+   {
+    "width": "phone",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2080
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-discover.png"
+   },
+   {
+    "width": "phone",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2098
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-portfolio.png"
+   },
+   {
+    "width": "phone",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2086
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-orders.png"
+   },
+   {
+    "width": "phone",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2076
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-profile.png"
+   },
+   {
+    "width": "phone",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2082
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-verify.png"
+   },
+   {
+    "width": "phone",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2059
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-privacy.png"
+   },
+   {
+    "width": "phone",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2060
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "phone-terms.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/",
+    "expect": "token",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/",
+    "route": "token",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2125
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-token.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "expect": "discover",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/discover",
+    "route": "discover",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2096
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/portfolio",
+    "expect": "portfolio",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/portfolio",
+    "route": "portfolio",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2082
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-portfolio.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/orders",
+    "expect": "orders",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/orders",
+    "route": "orders",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2064
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-orders.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/profile",
+    "expect": "profile",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/profile",
+    "route": "profile",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2068
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-profile.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/verify",
+    "expect": "verify",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/verify",
+    "route": "verify",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": {
+     "state": "read",
+     "code": "ok",
+     "funds": "ok",
+     "pools": {
+      "solana": "ok",
+      "base": "ok",
+      "robinhood": "ok"
+     }
+    },
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2091
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-verify.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/privacy",
+    "expect": "privacy",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/privacy",
+    "route": "privacy",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2079
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-privacy.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/terms",
+    "expect": "terms",
+    "framed": true,
+    "top": "https://confidential.unrealized.trade/terms",
+    "route": "terms",
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 2066
+    },
+    "cls": 0,
+    "shiftCount": 0,
+    "shifts": [],
+    "hscroll": false,
+    "smallText": [],
+    "smallTaps": [],
+    "shot": "desktop-terms.png"
+   }
+  ],
+  "inShell": [
+   {
+    "width": "phone",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/profile",
+      "expect": "profile",
+      "route": "profile",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [],
+    "verify": null,
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 3795
+    }
+   },
+   {
+    "width": "desktop",
+    "framed": true,
+    "steps": [
+     {
+      "href": "/discover",
+      "expect": "discover",
+      "route": "discover",
+      "reloaded": false
+     },
+     {
+      "href": "/portfolio",
+      "expect": "portfolio",
+      "route": "portfolio",
+      "reloaded": false
+     },
+     {
+      "href": "/terms",
+      "expect": "terms",
+      "route": "terms",
+      "reloaded": false
+     },
+     {
+      "href": "/privacy",
+      "expect": "privacy",
+      "route": "privacy",
+      "reloaded": false
+     },
+     {
+      "href": "/",
+      "expect": "token",
+      "route": "token",
+      "reloaded": false
+     }
+    ],
+    "cls": 0,
+    "shifts": [],
+    "violations": [],
+    "consoleErrors": [
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://rpc.mainnet.fastnear.com/) [footer read]",
+     "Failed to load resource: the server responded with a status of 503 (Service Unavailable) (https://near.drpc.org/) [footer read]"
+    ],
+    "verify": null,
+    "footer": {
+     "conn": "off",
+     "block": "",
+     "ms": 4228
+    }
    }
   ],
   "shots": "<shots>"

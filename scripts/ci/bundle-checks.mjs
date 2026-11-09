@@ -116,6 +116,7 @@ export const OUT = {
   "pool-restore-wired": "a browser",
   "kit-deposit-assets-dry": "a browser",
   "app-shell": "a browser",
+  "app-shell-rpc-outage-judge": "a browser",
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",

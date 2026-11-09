@@ -270,7 +270,7 @@ function receiptOf(data: string, status: "0x1" | "0x0", bought: boolean, gasUsed
   const r = evmReadRelease(bytes(data));
   const pad = (a: string) => a.slice(2).padStart(64, "0");
   const log = { address: POOL, topics: [BOUGHT_TOPIC, `0x${pad(r.recipient)}`], data: `0x${pad(r.feeRecipient)}${w32(r.value)}${w32(r.fee)}${r.nullifier}${w32(7n)}${pad(r.buy!.token)}${w32(2_360_180n)}` };
-  return { status, gasUsed, effectiveGasPrice: "0x7d2b7500", logs: bought ? [log] : [] };
+  return { status, blockHash: `0x${"e".repeat(64)}`, gasUsed, effectiveGasPrice: "0x7d2b7500", logs: bought ? [log] : [] };
 }
 const settle = () => new Promise((r) => setTimeout(r, 50));
 

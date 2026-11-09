@@ -90,7 +90,7 @@ function rpc(calls: Calls, opts: { revert?: boolean; gas?: bigint; chain?: strin
       case "eth_maxPriorityFeePerGas": return "0x5f5e100";
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
-      case "eth_getTransactionReceipt": return { status: opts.reverted ? "0x0" : "0x1" };
+      case "eth_getTransactionReceipt": return { status: opts.reverted ? "0x0" : "0x1", blockHash: `0x${"e".repeat(64)}` };
       default: throw new Error(`unexpected ${method}`);
     }
   };
