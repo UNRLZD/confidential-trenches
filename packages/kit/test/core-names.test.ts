@@ -13,9 +13,17 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 16 names in all. */
-const VALUES = ["RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64"];
-const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend"];
+/** The values core exports, and its types: 39 names in all. */
+const VALUES = [
+  "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
+  // card exit-ids-out: the ids' keys and their moves out
+  "armAccount", "depositId", "refundId", "returnId", "buildMoveOut", "buildRegisterOut", "buildWithdrawOut", "moveOutRpc", "MoveOutRefused", "readMoveOutFor", "readWithdrawOut", "HEIGHT_SPREAD_MAX",
+  // and the settle of a spend of ours by its own arming account (step 4)
+  "buildSettleOut", "readSettle", "settleNeed",
+  // and the token's storage minimum, an unregistered typed account's registration
+  "readTokenStorageMin",
+];
+const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {
@@ -43,7 +51,7 @@ test("core re-exports the wallet's own code by relative path, not a copy", () =>
   for (const s of src.statements) {
     if (!ts.isExportDeclaration(s)) continue;
     const spec = (s.moduleSpecifier as ts.StringLiteral).text;
-    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys)\.ts$/, spec);
+    assert.match(spec, /^\.\.\/\.\.\/wallet\/src\/(notes\/(restore|secrets|store)|signin\/words|derive\/keys|deposit\/(moveout|account)|arming\/accounts)\.ts$/, spec);
   }
 });
 
