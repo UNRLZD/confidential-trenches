@@ -1,15 +1,17 @@
 // Card exit-withdraw (vault paper 2.12 step 6; SB-04's WM-10 vault leg, wallet.md l.1080): the exit tool's withdrawal,
 // sent by the note's own arming account A_{l,j} with no relayer, and A's DeleteAccount to the typed account once its
 // spend is settled. Both go through moveout.ts's one sealed signer: buildVaultWithdrawOut (one withdraw on a release's
-// vault, relay_fee "0", recipient and fee_recipient the typed account) and buildDeleteOut (one DeleteAccount, action tag
-// 7, only after the spend reads settled with reserve 0, A's USDC reads held at 0 and nothing under A in intents.near).
+// vault, relay_fee "0", recipient and fee_recipient the typed account, register_deposit the token's minimum, checked at
+// the vault's block time) and buildDeleteOut (one DeleteAccount, action tag 7 told apart by its shape, only to a typed
+// account that exists, after the spend reads settled with reserve 0 past its refunds, the withdraw tx FINAL, A's USDC
+// held at 0 and nothing under A in intents.near). Each refusal names the guard that fired.
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { vaultContextInput, vaultContextOf, vaultScopeOf, vaultWithdrawYocto, type VaultWithdrawal } from "@blindfill/kit";
+import { VAULT_FIELD_Q, vaultContextInput, vaultContextOf, vaultScopeOf, vaultWithdrawYocto, type VaultWithdrawal } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -29,25 +31,27 @@ const TGAS = 10n ** 12n;
 const REG = 1_250_000_000_000_000_000_000n;
 const WITHDRAWN = 1_000_000n;
 const NH = 12345678901234567890n;
+const NOW = 1_800_000_000_000;
 const key = () => ({ id: A, publicKey: PK, secretKey: SK.slice() });
 const read = { height: 100, blockHash: BH, nonce: 41n, free: 10n ** 24n, gasPrice: 100_000_000n, a: A };
 
 function request(vault: string, token: string, o: Partial<VaultWithdrawal> = {}) {
-  const withdrawal: VaultWithdrawal = { recipient: TO, register_deposit: REG.toString(), fee_recipient: TO, relay_fee: "0", refund_precommitment: "77", deadline_ms: 1_900_000_000_000, salt: "ab".repeat(16), ...o };
+  const withdrawal: VaultWithdrawal = { recipient: TO, register_deposit: REG.toString(), fee_recipient: TO, relay_fee: "0", refund_precommitment: "77", deadline_ms: NOW + 500_000, salt: "ab".repeat(16), ...o };
   const context = vaultContextOf(keccak_256, vaultContextInput(vault, withdrawal), vaultScopeOf(keccak_256, vault, token));
   const proof = { a: ["1", "2"] as [string, string], b: [["3", "4"], ["5", "6"]] as [[string, string], [string, string]], c: ["7", "8"] as [string, string] };
   const publicSignals = ["11", NH.toString(), WITHDRAWN.toString(), "13", "2", "14", "1", context.toString()];
   return { withdrawal, proof, publicSignals };
 }
+const wd = (o: Partial<Parameters<typeof moveout.buildVaultWithdrawOut>[0]> = {}) => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault!, to: TO, ...request(NET.vault!, NET.usdc), storageMin: REG, nowMs: NOW, ...o });
 
-test("buildVaultWithdrawOut: A signs one withdraw on the release vault, relay_fee 0, recipient and fee recipient the typed account, 300 Tgas and the vault's attachment, at A's nonce + 1", () => {
-  const r = request(NET.vault, NET.usdc);
-  const m = moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...r });
+test("buildVaultWithdrawOut: A signs one withdraw on the release vault, relay_fee 0, recipient and fee recipient the typed account, the token's minimum as register_deposit, 300 Tgas and the vault's attachment, at A's nonce + 1", () => {
+  const r = request(NET.vault!, NET.usdc);
+  const m = wd();
   assert.equal(m.receiver, NET.vault);
   assert.equal(m.nonce, 42n);
   assert.equal(m.amount, WITHDRAWN);
   assert.equal(m.calls.length, 1);
-  const c = m.calls[0] as { method: string; args: Record<string, unknown>; gas: bigint; deposit: bigint };
+  const c = m.calls[0]!;
   assert.equal(c.method, "withdraw");
   assert.equal(c.gas, 300n * TGAS);
   assert.equal(c.deposit, vaultWithdrawYocto(REG, 0n, true));
@@ -59,108 +63,141 @@ test("buildVaultWithdrawOut: A signs one withdraw on the release vault, relay_fe
   assert.ok(Buffer.from(bytes).includes(Buffer.from(`"relay_fee":"0"`)) && Buffer.from(bytes).includes(Buffer.from(`"fee_recipient":"${TO}"`)));
 });
 
-test("buildVaultWithdrawOut refuses before any seal: a fee, another recipient or fee recipient, a vault that is no release's, a context that is not the request's, another gas or attachment, another key or read", () => {
-  const ok = request(NET.vault, NET.usdc);
-  const bad: [string, () => unknown][] = [
-    ["a relay fee", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...request(NET.vault, NET.usdc, { relay_fee: "1" }) })],
-    ["another recipient", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...request(NET.vault, NET.usdc, { recipient: "evil.testnet" }) })],
-    ["another fee recipient", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...request(NET.vault, NET.usdc, { fee_recipient: "evil.testnet" }) })],
-    ["A as the typed account", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: A, ...request(NET.vault, NET.usdc, { recipient: A, fee_recipient: A }) })],
-    ["the vault as the typed account", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: NET.vault, ...request(NET.vault, NET.usdc, { recipient: NET.vault, fee_recipient: NET.vault }) })],
-    ["intents.near as the typed account", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: "intents.near", ...request(NET.vault, NET.usdc, { recipient: "intents.near", fee_recipient: "intents.near" }) })],
-    ["a vault that is no release's", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: "evil.testnet", to: TO, ...request("evil.testnet", NET.usdc) })],
-    ["the token as vault", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.usdc, to: TO, ...request(NET.usdc, NET.usdc) })],
-    ["a context of another vault", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...request(MAIN.vault, MAIN.usdc) })],
-    ["a context of another request", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, withdrawal: { ...ok.withdrawal, salt: "cd".repeat(16) } })],
-    ["seven signals", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, publicSignals: ok.publicSignals.slice(1) })],
-    ["withdrawn 0", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, publicSignals: ok.publicSignals.map((s, i) => (i === 2 ? "0" : s)) })],
-    ["a non-canonical signal", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, publicSignals: ok.publicSignals.map((s, i) => (i === 0 ? "011" : s)) })],
-    ["a proof coordinate not a decimal", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, proof: { ...ok.proof, a: ["0x1", "2"] } })],
-    ["a proof with another field", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, proof: { ...ok.proof, z: ["1", "1"] } as never })],
-    ["a withdrawal with another field", () => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault, to: TO, ...ok, withdrawal: { ...ok.withdrawal, memo: "x" } as never })],
-    ["a read of another account", () => moveout.buildVaultWithdrawOut({ read: { ...read, a: "b".repeat(64) }, key: key(), vault: NET.vault, to: TO, ...ok })],
-    ["a nonce past a u64", () => moveout.buildVaultWithdrawOut({ read: { ...read, nonce: 2n ** 64n - 1n }, key: key(), vault: NET.vault, to: TO, ...ok })],
-    ["another key", () => moveout.buildVaultWithdrawOut({ read, key: { ...key(), secretKey: new Uint8Array(32).fill(1) }, vault: NET.vault, to: TO, ...ok })],
+test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () => {
+  const ok = request(NET.vault!, NET.usdc);
+  const Q = VAULT_FIELD_Q.toString();
+  const bad: [string, () => unknown, RegExp][] = [
+    ["a relay fee", () => wd(request(NET.vault!, NET.usdc, { relay_fee: "1" })), /the fee is 0/],
+    ["another recipient", () => wd(request(NET.vault!, NET.usdc, { recipient: "evil.testnet" })), /recipient and the fee recipient are the typed account/],
+    ["another fee recipient", () => wd(request(NET.vault!, NET.usdc, { fee_recipient: "evil.testnet" })), /recipient and the fee recipient are the typed account/],
+    ["A as the typed account", () => wd({ to: A, ...request(NET.vault!, NET.usdc, { recipient: A, fee_recipient: A }) }), /typed account is U or the token/],
+    ["the vault as the typed account", () => wd({ to: NET.vault!, ...request(NET.vault!, NET.usdc, { recipient: NET.vault!, fee_recipient: NET.vault! }) }), /the vault or intents.near/],
+    ["intents.near as the typed account", () => wd({ to: "intents.near", ...request(NET.vault!, NET.usdc, { recipient: "intents.near", fee_recipient: "intents.near" }) }), /the vault or intents.near/],
+    ["mainnet's vault as the typed account on testnet", () => wd({ to: MAIN.vault, ...request(NET.vault!, NET.usdc, { recipient: MAIN.vault, fee_recipient: MAIN.vault }) }), /a release's vault or USDC, or under a vault/],
+    ["an account under the vault", () => wd({ to: `x.${NET.vault}`, ...request(NET.vault!, NET.usdc, { recipient: `x.${NET.vault}`, fee_recipient: `x.${NET.vault}` }) }), /a release's vault or USDC, or under a vault/],
+    ["a vault that is no release's", () => wd({ vault: "evil.testnet", ...request("evil.testnet", NET.usdc) }), /no release's vault/],
+    ["the token as vault", () => wd({ vault: NET.usdc, ...request(NET.usdc, NET.usdc) }), /no release's vault/],
+    ["a context of another vault", () => wd(request(MAIN.vault, MAIN.usdc)), /context is not this request's/],
+    ["a context of another request", () => wd({ withdrawal: { ...ok.withdrawal, salt: "cd".repeat(16) } }), /context is not this request's/],
+    ["1000 N as register_deposit", () => wd(request(NET.vault!, NET.usdc, { register_deposit: (1000n * 10n ** 24n).toString() })), /not the token's storage minimum/],
+    ["register_deposit 0", () => wd(request(NET.vault!, NET.usdc, { register_deposit: "0" })), /not the token's storage minimum/],
+    ["no storage minimum read", () => wd({ storageMin: 0n }), /storage minimum is not read/],
+    ["a deadline passed at the vault's block time", () => wd({ nowMs: NOW + 500_001 }), /deadline_ms: passed/],
+    ["no block time", () => wd({ nowMs: -1 }), /block time is not read/],
+    ["seven signals", () => wd({ publicSignals: ok.publicSignals.slice(1) }), /8 public signals/],
+    ["withdrawn 0", () => wd({ publicSignals: ok.publicSignals.map((s, i) => (i === 2 ? "0" : s)) }), /withdrawn: 0/],
+    ["a non-canonical signal", () => wd({ publicSignals: ok.publicSignals.map((s, i) => (i === 0 ? "011" : s)) }), /8 public signals/],
+    ["a proof coordinate of q", () => wd({ proof: { ...ok.proof, a: [Q, "2"] } }), /below q/],
+    ["a proof coordinate not a decimal", () => wd({ proof: { ...ok.proof, a: ["0x1", "2"] } }), /below q/],
+    ["a proof with another field", () => wd({ proof: { ...ok.proof, z: ["1", "1"] } as never }), /three points/],
+    ["a withdrawal with another field", () => wd({ withdrawal: { ...ok.withdrawal, memo: "x" } as never }), /seven fields/],
+    ["a read of another account", () => wd({ read: { ...read, a: "b".repeat(64) } }), /not A's/],
+    ["a nonce past a u64", () => wd({ read: { ...read, nonce: 2n ** 64n - 1n } }), /not A's, or its nonce/],
+    ["another key", () => wd({ key: { ...key(), secretKey: new Uint8Array(32).fill(1) } }), /moving account's own/],
   ];
-  for (const [why, f] of bad) assert.throws(f, moveout.MoveOutRefused, why);
+  for (const [why, f, re] of bad) assert.throws(f, (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
+  // q - 1 is a coordinate the vault parses
+  wd({ proof: { ...ok.proof, a: [(VAULT_FIELD_Q - 1n).toString(), "2"] } });
   // the calls the check seals: another gas, another attachment, another method, two calls
   const call = (o: Record<string, unknown> = {}) => [{ method: "withdraw" as const, args: { withdrawal: ok.withdrawal, proof: ok.proof, public_signals: ok.publicSignals }, gas: 300n * TGAS, deposit: vaultWithdrawYocto(REG, 0n, true), ...o }];
-  moveout.checkVaultWithdrawCalls(A, NET.vault, TO, call());
-  for (const [why, c] of [
-    ["more gas", call({ gas: 301n * TGAS })],
-    ["less attachment", call({ deposit: vaultWithdrawYocto(REG, 0n, true) - 1n })],
-    ["ragequit", call({ method: "ragequit" })],
-    ["two calls", [...call(), ...call()]],
-    ["an extra arg", call({ args: { withdrawal: ok.withdrawal, proof: ok.proof, public_signals: ok.publicSignals, x: 1 } })],
+  moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, call(), REG, NOW);
+  for (const [why, c, re] of [
+    ["more gas", call({ gas: 301n * TGAS }), /gas and attachment/],
+    ["less attachment", call({ deposit: vaultWithdrawYocto(REG, 0n, true) - 1n }), /gas and attachment/],
+    ["ragequit", call({ method: "ragequit" }), /one withdraw call/],
+    ["two calls", [...call(), ...call()], /one withdraw call/],
+    ["an extra arg", call({ args: { withdrawal: ok.withdrawal, proof: ok.proof, public_signals: ok.publicSignals, x: 1 } }), /alone/],
   ] as const)
-    assert.throws(() => moveout.checkVaultWithdrawCalls(A, NET.vault, TO, c as never), moveout.MoveOutRefused, why);
+    assert.throws(() => moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, c as never, REG, NOW), (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
   // the caller's key is the caller's; the builder's copy is zeroed
   const own = SK.slice();
-  moveout.buildVaultWithdrawOut({ read, key: { ...key(), secretKey: own }, vault: NET.vault, to: TO, ...ok });
+  wd({ key: { ...key(), secretKey: own } });
   assert.deepEqual(own, SK);
 });
 
 const settled = { nullifierHash: NH, status: "settled" as const, reserve: 0n };
-const del = (o: Partial<moveout.DeleteReadFor> = {}): moveout.DeleteReadFor => ({ a: A, to: TO, token: NET.usdc, height: 100, blockHash: BH, nonce: 43n, spend: settled, usdc: { state: "held", amount: 0n }, intents: null, ...o });
+const del = (o: Partial<moveout.DeleteReadFor> = {}): moveout.DeleteReadFor => ({
+  network: "testnet", a: A, to: TO, token: NET.usdc, height: 1000, blockHash: BH, nonce: 43n, beneficiary: "exists", spend: settled,
+  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settle: { by: "self", tx: "final" }, ...o,
+});
+const close = (r: moveout.DeleteReadFor, o: { to?: string; token?: string; network?: "testnet" | "mainnet"; k?: ReturnType<typeof key> } = {}) =>
+  moveout.buildDeleteOut({ read: r, key: o.k ?? key(), network: o.network ?? "testnet", to: o.to ?? TO, token: o.token ?? NET.usdc, nullifierHash: NH });
 
-test("buildDeleteOut: once the spend reads settled with reserve 0, A's USDC held at 0 and nothing under A in intents.near, A signs one DeleteAccount (tag 7) on itself, its NEAR to the typed account", () => {
-  const m = moveout.buildDeleteOut({ read: del(), key: key(), to: TO, token: NET.usdc, nullifierHash: NH });
+test("buildDeleteOut: on a read with nothing left behind, A signs one DeleteAccount (tag 7) on itself, its NEAR to the typed account", () => {
+  const m = close(del());
   assert.equal(m.receiver, A);
   assert.equal(m.nonce, 44n);
   assert.equal(m.amount, 0n);
-  assert.deepEqual(m.calls, [{ method: "DeleteAccount", beneficiary_id: TO }]);
+  assert.deepEqual(m.calls, [{ action: "DeleteAccount", beneficiary_id: TO }]);
   const signed = base64.decode(m.signed);
   const bytes = signed.subarray(0, signed.length - 65);
   assert.ok(ed25519.verify(signed.subarray(signed.length - 64), sha256(bytes), PK));
   // nearcore's Transaction V0: signer, key, nonce, receiver, block hash, then one action: tag 7 and the beneficiary
   const tail = Buffer.concat([Buffer.from([1, 0, 0, 0, 7]), Buffer.from(new Uint32Array([TO.length]).buffer), Buffer.from(TO)]);
   assert.ok(Buffer.from(bytes).subarray(bytes.length - tail.length).equals(tail), "the one action is DeleteAccount(the typed account)");
-  // mainnet: what A holds inside intents.near read at 0
-  const k = moveout.buildDeleteOut({ read: del({ token: MAIN.usdc, intents: 0n, to: "x-typed.near" }), key: key(), to: "x-typed.near", token: MAIN.usdc, nullifierHash: NH });
-  assert.equal(k.receiver, A);
+  // mainnet: intents.near read with no token under A; another's settle read settled SETTLE_BLOCKS back
+  close(del({ network: "mainnet", token: MAIN.usdc, to: "x-typed.near", intents: "empty", settle: { by: "other", back: 1000 - moveout.SETTLE_BLOCKS } }), { network: "mainnet", token: MAIN.usdc, to: "x-typed.near" });
 });
 
-test("buildDeleteOut refuses: a delete before settle (in_flight, paid, refund_pending), reserve above 0, a halted USDC read, USDC left in A, money under A in intents.near or unread there on mainnet, another spend, another beneficiary", () => {
-  const bad: [string, moveout.DeleteReadFor, string?][] = [
-    ["before the withdrawal's payout", del({ spend: { ...settled, status: "in_flight" as never } })],
-    ["paid, not settled", del({ spend: { ...settled, status: "paid" as never } })],
-    ["refund_pending, not settled", del({ spend: { ...settled, status: "refund_pending" as never } })],
-    ["settled with reserve above 0", del({ spend: { ...settled, reserve: 1n } })],
-    ["USDC halted (a view that fails is not a zero)", del({ usdc: { state: "halted" } })],
-    ["USDC halted, with a zero beside it", del({ usdc: { state: "halted", amount: 0n } as never })],
-    ["USDC left in A", del({ usdc: { state: "held", amount: 1n } })],
-    ["money under A in intents.near", del({ intents: 1n })],
-    ["intents.near unread on mainnet", del({ token: MAIN.usdc, intents: null, to: "x-typed.near" }), "x-typed.near"],
-    ["another spend's row", del({ spend: { ...settled, nullifierHash: NH + 1n } })],
-    ["a read of another account", del({ a: "b".repeat(64) })],
-    ["a read for another typed account", del({ to: "evil.testnet" })],
-    ["a nonce past a u64", del({ nonce: 2n ** 64n - 1n })],
+test("buildDeleteOut refuses, each at its own guard: a missing typed account, a delete before settle or its refunds, a halted or nonzero USDC, anything under A in intents.near, another network, token or spend", () => {
+  const bad: [string, () => unknown, RegExp][] = [
+    ["the typed account does not exist (P1: its NEAR would burn)", () => close(del({ beneficiary: "absent" })), /fund the typed account first/],
+    ["the typed account not read", () => close(del({ beneficiary: "unread" as never })), /not read as existing/],
+    ["before the withdrawal's payout", () => close(del({ spend: { ...settled, status: "in_flight" } })), /settled with reserve 0/],
+    ["paid, not settled", () => close(del({ spend: { ...settled, status: "paid" } })), /settled with reserve 0/],
+    ["refund_pending, not settled", () => close(del({ spend: { ...settled, status: "refund_pending" } })), /settled with reserve 0/],
+    ["settled with reserve above 0", () => close(del({ spend: { ...settled, reserve: 1n } })), /settled with reserve 0/],
+    ["the withdraw tx not FINAL (its refunds may still run)", () => close(del({ withdrawTx: "unread" })), /withdraw tx is not read FINAL/],
+    ["A's settle not FINAL", () => close(del({ settle: { by: "self", tx: "unread" } })), /settle is not read past its refunds/],
+    ["another's settle read only now", () => close(del({ settle: { by: "other", back: null } })), /settle is not read past its refunds/],
+    ["another's settle too recent", () => close(del({ settle: { by: "other", back: 1000 - moveout.SETTLE_BLOCKS + 1 } })), /settle is not read past its refunds/],
+    ["USDC halted (a view that fails is not a zero)", () => close(del({ usdc: { state: "halted" } })), /USDC is not read at zero/],
+    ["USDC halted, with a zero beside it", () => close(del({ usdc: { state: "halted", amount: 0n } as never })), /USDC is not read at zero/],
+    ["USDC left in A", () => close(del({ usdc: { state: "held", amount: 1n } })), /USDC is not read at zero/],
+    ["a token under A in intents.near", () => close(del({ intents: "holds" })), /stranded/],
+    ["intents.near not read", () => close(del({ intents: null as never })), /stranded/],
+    ["another spend's row", () => close(del({ spend: { ...settled, nullifierHash: NH + 1n } })), /not this withdrawal's/],
+    ["a read of another account", () => close(del({ a: "b".repeat(64) })), /not of A/],
+    ["a read for another typed account", () => close(del({ to: "evil.testnet" })), /not of this typed account/],
+    ["a read for another token", () => close(del({ token: MAIN.usdc })), /not of this token/],
+    ["a read of another network", () => close(del({ network: "mainnet" })), /not of this network/],
+    ["testnet USDC named on mainnet (P2-1)", () => close(del({ network: "mainnet" }), { network: "mainnet" }), /not the network's USDC/],
+    ["a nonce past a u64", () => close(del({ nonce: 2n ** 64n - 1n })), /height, nonce or block hash/],
   ];
-  for (const [why, r, to] of bad) {
-    const tok = r.token;
-    assert.throws(() => moveout.buildDeleteOut({ read: r, key: key(), to: to ?? TO, token: tok, nullifierHash: NH }), moveout.MoveOutRefused, why);
-  }
-  for (const [why, to] of [["A itself", A], ["the vault", NET.vault], ["intents.near", "intents.near"], ["the token", NET.usdc]] as const)
-    assert.throws(() => moveout.buildDeleteOut({ read: del({ to }), key: key(), to, token: NET.usdc, nullifierHash: NH }), moveout.MoveOutRefused, why);
-  // the check: one DeleteAccount, its beneficiary the typed account and nothing else
-  moveout.checkDeleteCalls(A, TO, NET.usdc, [{ method: "DeleteAccount", beneficiary_id: TO }]);
-  for (const [why, c] of [
-    ["another beneficiary", [{ method: "DeleteAccount", beneficiary_id: "evil.testnet" }]],
-    ["two deletes", [{ method: "DeleteAccount", beneficiary_id: TO }, { method: "DeleteAccount", beneficiary_id: TO }]],
-    ["an extra field", [{ method: "DeleteAccount", beneficiary_id: TO, gas: 1n }]],
-    ["a beneficiary that is no string", [{ method: "DeleteAccount", beneficiary_id: new String(TO) }]],
+  for (const [why, f, re] of bad) assert.throws(f, (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
+  for (const [why, to, re] of [
+    ["A itself", A, /U or the token/],
+    ["the vault", NET.vault!, /vault or intents.near/],
+    ["intents.near", "intents.near", /vault or intents.near/],
+    ["the token", NET.usdc, /U or the token/],
+    ["mainnet's vault (P2-1)", MAIN.vault, /a release's vault or USDC/],
+    ["mainnet's USDC (P2-1)", MAIN.usdc, /a release's vault or USDC/],
+    ["an account under the vault", `x.${NET.vault}`, /under a vault/],
+    ["a name with a space", " alice.testnet", /not a NEAR account id/],
+    ["an upper-case name", "Alice.testnet", /not a NEAR account id/],
+    ["an empty name", "", /not a NEAR account id/],
   ] as const)
-    assert.throws(() => moveout.checkDeleteCalls(A, TO, NET.usdc, c as never), moveout.MoveOutRefused, why);
+    assert.throws(() => close(del({ to }), { to }), (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
+  // the check: one DeleteAccount, its beneficiary the typed account and nothing else
+  moveout.checkDeleteCalls(A, TO, NET.usdc, [{ action: "DeleteAccount", beneficiary_id: TO }]);
+  for (const [why, c] of [
+    ["another beneficiary", [{ action: "DeleteAccount", beneficiary_id: "evil.testnet" }]],
+    ["two deletes", [{ action: "DeleteAccount", beneficiary_id: TO }, { action: "DeleteAccount", beneficiary_id: TO }]],
+    ["an extra field", [{ action: "DeleteAccount", beneficiary_id: TO, gas: 1n }]],
+    ["a method in place of the action", [{ method: "DeleteAccount", beneficiary_id: TO }]],
+    ["a beneficiary that is no string", [{ action: "DeleteAccount", beneficiary_id: new String(TO) }]],
+  ] as const)
+    assert.throws(() => moveout.checkDeleteCalls(A, TO, NET.usdc, c as never), /one DeleteAccount, its beneficiary the typed account/, why);
   const own = SK.slice();
-  moveout.buildDeleteOut({ read: del(), key: { ...key(), secretKey: own }, to: TO, token: NET.usdc, nullifierHash: NH });
+  close(del(), { k: { ...key(), secretKey: own } });
   assert.deepEqual(own, SK);
 });
 
-/** The module with its private signer exported, loaded from a copy (deposit-moveout-signers.test.ts's probe). */
-async function probe(): Promise<typeof moveout & { signMoveTx: (publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: unknown) => { hash: string; signed: string } }> {
+/** The module with its private signer and seal exported, loaded from a copy (deposit-moveout-signers.test.ts's probe). */
+async function probe(): Promise<typeof moveout & { signMoveTx: (publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: unknown) => { hash: string; signed: string }; seal: (move: unknown) => unknown }> {
   const FILE = new URL("../src/deposit/moveout.ts", import.meta.url);
   const SRC = readFileSync(FILE, "utf8");
-  const src = `${SRC.replace(/from "(\.{1,2}\/[^"]+)"/g, (_, p: string) => `from "${new URL(p, FILE).href}"`).replace(/from "([^".][^"]*)"/g, (_, p: string) => `from "${import.meta.resolve(p)}"`)}\nexport { signMoveTx };\n`;
+  const src = `${SRC.replace(/from "(\.{1,2}\/[^"]+)"/g, (_, p: string) => `from "${new URL(p, FILE).href}"`).replace(/from "([^".][^"]*)"/g, (_, p: string) => `from "${import.meta.resolve(p)}"`)}\nexport { signMoveTx, seal };\n`;
   const dir = mkdtempSync(path.join(tmpdir(), "moveout-probe-"));
   try {
     const f = path.join(dir, "moveout-probe.ts");
@@ -171,17 +208,28 @@ async function probe(): Promise<typeof moveout & { signMoveTx: (publicKey: Uint8
   }
 }
 
-test("the signer signs a DeleteAccount only as checkDeleteCalls sealed it: an unsealed one, one naming another beneficiary, one on another receiver, one riding with a call are refused", async () => {
+test("the signer signs tag 7 only for a sealed DeleteAccount, by its shape, alone and on the signer's own account; a method named DeleteAccount stays a FunctionCall", async () => {
   const m = await probe();
-  const sealed = m.checkDeleteCalls(A, TO, NET.usdc, [{ method: "DeleteAccount", beneficiary_id: TO }]);
+  const sealed = m.checkDeleteCalls(A, TO, NET.usdc, [{ action: "DeleteAccount", beneficiary_id: TO }]);
   assert.equal(sealed.receiver, A);
   m.signMoveTx(PK, SK, 1n, BH, sealed);
   const refused = (move: unknown, why: string) => assert.throws(() => m.signMoveTx(PK, SK, 1n, BH, move), /not one a check of this module passed/, why);
-  refused({ signer: A, receiver: A, calls: [{ method: "DeleteAccount", beneficiary_id: TO }] }, "an unsealed DeleteAccount");
-  refused({ signer: A, receiver: A, calls: [{ method: "DeleteAccount", beneficiary_id: "evil.testnet" }] }, "an unsealed DeleteAccount to another beneficiary");
+  refused({ signer: A, receiver: A, calls: [{ action: "DeleteAccount", beneficiary_id: TO }] }, "an unsealed DeleteAccount");
+  refused({ signer: A, receiver: A, calls: [{ action: "DeleteAccount", beneficiary_id: "evil.testnet" }] }, "an unsealed DeleteAccount to another beneficiary");
   refused({ ...sealed, receiver: NET.vault }, "a sealed delete's copy on another receiver");
   assert.throws(() => Object.assign(sealed.calls[0]!, { beneficiary_id: "evil.testnet" }), TypeError);
-  assert.throws(() => m.checkDeleteCalls(A, TO, NET.usdc, [{ method: "DeleteAccount", beneficiary_id: "evil.testnet" }]), m.MoveOutRefused);
-  // a function-call check never seals a call named DeleteAccount, so no FunctionCall reaches tag 7 and no delete tag 2
-  assert.throws(() => m.checkSettleCalls(A, NET.vault, [{ method: "DeleteAccount" as never, args: { nullifier_hash: "5" }, gas: 150n * TGAS, deposit: 0n }], "paid"), m.MoveOutRefused);
+  // the signer's own guard, behind the seal: a sealed delete on another receiver, two deletes, a delete with a call
+  const D = { action: "DeleteAccount", beneficiary_id: TO };
+  const F = { method: "settle", args: { nullifier_hash: "5" }, gas: 150n * TGAS, deposit: 0n };
+  for (const [why, move] of [
+    ["on another receiver", { signer: A, receiver: NET.vault, calls: [D] }],
+    ["two deletes", { signer: A, receiver: A, calls: [D, D] }],
+    ["a delete with a call", { signer: A, receiver: A, calls: [F, D] }],
+  ] as const)
+    assert.throws(() => m.signMoveTx(PK, SK, 1n, BH, m.seal(move)), /the one action, on the signer's own account/, why);
+  // a FunctionCall whose method is the string "DeleteAccount" is signed as a FunctionCall (tag 2), never tag 7
+  const named = m.seal({ signer: A, receiver: A, calls: [{ method: "DeleteAccount", args: {}, gas: 1n, deposit: 0n }] });
+  const bytes = base64.decode(m.signMoveTx(PK, SK, 1n, BH, named).signed);
+  const at = 4 + 64 + 1 + 32 + 8 + 4 + 64 + 32 + 4;
+  assert.equal(bytes[at], 2, "a method name never makes tag 7");
 });

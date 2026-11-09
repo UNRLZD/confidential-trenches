@@ -47,6 +47,7 @@ export {
   // account once its spend reads settled with reserve 0 (vault paper 2.12 step 6), both through the same sealed signer
   buildVaultWithdrawOut,
   buildDeleteOut,
+  SETTLE_BLOCKS,
   type DeleteReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
 // the token's storage minimum on both RPCs of the release pair: an unregistered typed account's registration deposit
