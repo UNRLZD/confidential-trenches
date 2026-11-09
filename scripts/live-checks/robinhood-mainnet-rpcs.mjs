@@ -13,9 +13,13 @@
 // HTTP 403 "Archive requests require a personal token" from 1,000 blocks), and on two seats whose logs differ. A refused
 // log read is asked again twice, as the wallet's pager asks a refusal of a size the provider answered (Pocket's backends
 // differ: EVM_LOG_REFUSED_AGAIN).
+// Every read goes through provider-answer.mjs (rpcAnswer). A seat that holds no block or state for a read is judged, a
+// wrong answer: that it keeps the history is what the check is for (judgeStateMiss). A seat that answers nothing usable
+// (a failed fetch, a 429 or a rate limit, an empty or non-JSON-RPC body) on the last of its tries is named, and the
+// check is INCONCLUSIVE, never a pass: two seats are needed to judge, and any wrong answer still fails it.
 // After: helper
 //   node scripts/live-checks/robinhood-mainnet-rpcs.mjs [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read, as the good run of robinhood-mainnet-rpcs.answers.json, and two bad runs: a real
 // run on the pair the device had before (Robinhood's own and PublicNode, PublicNode's refusals in it), and the good
 // answers under a list of one operator twice.
@@ -25,6 +29,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
+import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "robinhood-mainnet-rpcs";
 export const CHAIN_ID = "0x1237";
@@ -46,30 +51,9 @@ export function kitList() {
   return { list: [...(evmPoolProvidersOf(v) ?? [])], address: (v.pool ?? v.poolManager).toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 
-const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** One JSON-RPC call over the network: { result } or { error }; a 429, a 5xx or a failed fetch is tried 4 times. */
-export async function post(url, method, params) {
-  for (let t = 1; ; t++) {
-    try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
-      if ((r.status === 429 || r.status >= 500) && t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      const j = await r.json().catch(() => null);
-      if (j?.error) return { error: `HTTP ${r.status} RPC error ${j.error.code}: ${j.error.message}` };
-      if (!r.ok || j === null) return { error: `HTTP ${r.status}` };
-      return { result: j.result };
-    } catch (e) {
-      if (t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      return { error: `fetch failed: ${e?.message ?? e}` };
-    }
-  }
-}
+/** One read over the network, through provider-answer.mjs: { result }, { error } (a JSON-RPC error, judged; a block or
+ *  state the seat does not hold included) or { noAnswer } (why, with the host and status). */
+export const post = (url, method, params) => rpcAnswer(url, method, params, { timeoutMs: 20_000, judgeStateMiss: true });
 
 /** A live transport that keeps every answer, in order. */
 export function recorder() {
@@ -83,7 +67,7 @@ export function recorder() {
 }
 
 /** A transport that answers each call with the recorded answers to that same call, in their order; past the last, the
- *  last again. */
+ *  last again. A call with no recorded answer is a no-answer. */
 export function replayer(log) {
   const queues = new Map();
   for (const e of log) {
@@ -94,10 +78,32 @@ export function replayer(log) {
   return async (url, method, params) => {
     const q = queues.get(JSON.stringify([url, method, params]));
     const e = q?.length > 1 ? q.shift() : q?.[0];
-    if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
+    if (e === undefined) return { noAnswer: `${new URL(url).host}: no recorded answer to ${method} ${JSON.stringify(params)}` };
+    return "noAnswer" in e ? { noAnswer: e.noAnswer } : "error" in e ? { error: e.error } : { result: e.result };
   };
 }
+
+/** A read that failed: `quiet` when the seat answered nothing usable (INCONCLUSIVE), else a wrong answer (FAIL). */
+class ReadFailed extends Error {
+  constructor(message, quiet) {
+    super(message);
+    this.quiet = quiet;
+  }
+}
+
+/** Ask `transport` up to `tries` times: the result, or a ReadFailed on the last try's no-answer or JSON-RPC error. */
+export async function askOf(transport, tries, prefix, url, method, params, what) {
+  let a;
+  for (let t = 1; t <= tries; t++) {
+    a = await transport(url, method, params);
+    if (a?.noAnswer === undefined && a?.error === undefined) return a?.result;
+  }
+  if (a.noAnswer !== undefined) throw new ReadFailed(`${prefix}${what}: no answer: ${a.noAnswer}`, true);
+  throw new ReadFailed(`${prefix}${new URL(url).host}: ${what}: RPC error ${a.error?.code}: ${a.error?.message ?? JSON.stringify(a.error)}`, false);
+}
+
+/** A check's caught error as its verdict: INCONCLUSIVE for a seat's no-answer, else FAIL. */
+export const verdictOfError = (e) => (e?.quiet === true ? "INCONCLUSIVE" : "FAIL");
 
 const host = (u) => new URL(u).host;
 /** An operator: the kit's one rule (evmRpcOperator), the helper's and the kit's tests' too. */
@@ -105,7 +111,7 @@ export const operatorOf = (u) => evmRpcOperator(u);
 const hx = (n) => `0x${n.toString(16)}`;
 const digest = (logs) => createHash("sha256").update(JSON.stringify(logs.map((l) => [l.blockHash, l.logIndex, l.transactionHash, l.data, l.topics]))).digest("hex").slice(0, 16);
 
-/** The check: { ok, lines }. `list` and `address`: the kit's (kitList) unless a test names others. */
+/** The check: { verdict, ok, lines }. `list` and `address`: the kit's (kitList) unless a test names others. */
 export async function check(transport, { list, address, poolManager } = kitList()) {
   const lines = [];
   try {
@@ -113,14 +119,7 @@ export async function check(transport, { list, address, poolManager } = kitList(
     const seats = list.slice(0, 2);
     for (const u of seats) if (operatorOf(u) === null) throw new Error(`${JSON.stringify(u)} is not an http or https URL`);
     if (operatorOf(seats[0]) === operatorOf(seats[1])) throw new Error(`the two seats are one operator (${operatorOf(seats[0])}): ${seats.map(host).join(" and ")}`);
-    const ask = async (url, method, params, what) => {
-      let a;
-      for (let t = 1; t <= TRIES; t++) {
-        a = await transport(url, method, params);
-        if (!("error" in a)) return a.result;
-      }
-      throw new Error(`${host(url)}: ${what}: ${a.error}`);
-    };
+    const ask = (url, method, params, what) => askOf(transport, TRIES, "", url, method, params, what);
     const heads = [];
     for (const url of seats) {
       const id = await ask(url, "eth_chainId", [], "eth_chainId");
@@ -149,10 +148,10 @@ export async function check(transport, { list, address, poolManager } = kitList(
       if (swaps[0].n === 0) throw new Error(`the seats' Swap logs ${where} over blocks ${from}-${from + 99n}: no logs on either, so their agreement proves nothing`);
       lines.push(`both seats: the PoolManager's Swap logs ${where} over blocks ${from}-${from + 99n}, ${swaps[0].n} logs, digest ${swaps[0].d} on both`);
     }
-    return { ok: true, lines };
+    return { verdict: "PASS", ok: true, lines };
   } catch (e) {
     lines.push(`${e?.message ?? e}`);
-    return { ok: false, lines };
+    return { verdict: verdictOfError(e), ok: false, lines };
   }
 }
 
@@ -167,19 +166,20 @@ async function main(argv) {
   const kit = kitList();
   const rec = recorder();
   const r = await check(rec.transport, kit);
-  for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+  for (const l of r.lines) console.log(`${r.verdict} ${l}`);
   if (record) {
+    if (r.verdict !== "PASS") throw new Error(`the good run is ${r.verdict}: no good run to record`);
     const before = recorder();
     const b = await check(before.transport, { ...kit, list: [...BEFORE] });
-    if (b.ok) throw new Error("the pair before passed: no bad run to record");
+    if (b.verdict !== "FAIL") throw new Error(`the pair before is ${b.verdict}, not FAIL: no bad run to record`);
     writeFileSync(
       record,
       `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { list: kit.list, address: kit.address, poolManager: kit.poolManager, log: rec.log }, before: { list: [...BEFORE], address: kit.address, poolManager: kit.poolManager, log: before.log }, oneOperator: { list: [...ONE_OPERATOR], address: kit.address, poolManager: kit.poolManager, log: rec.log } }, null, 1)}\n`,
     );
     console.log(`recorded ${record}`);
   }
-  console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return r.ok ? 0 : 1;
+  console.log(`${r.verdict} ${KEY}`);
+  return EXIT[r.verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

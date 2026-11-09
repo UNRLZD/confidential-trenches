@@ -77,7 +77,7 @@ test("planted: NOT_MOVED only shrinks: a listed check that builds none, or is go
 });
 
 test("the moved checks are off NOT_MOVED and on the shared module", () => {
-  for (const f of ["evm-buy-gas-depth.mjs", "evm-buy-hookdata-fee.mjs", "evm-quote-read-gas-starve.mjs"]) assert.equal(NOT_MOVED.includes(`scripts/live-checks/${f}`), false, f);
+  for (const f of ["evm-buy-gas-depth.mjs", "evm-buy-hookdata-fee.mjs", "evm-quote-read-gas-starve.mjs", "robinhood-mainnet-rpcs.mjs"]) assert.equal(NOT_MOVED.includes(`scripts/live-checks/${f}`), false, f);
 });
 
 test("the gate's own run: a planted tree exits 1 naming the file; the repo's tree exits 0", () => {

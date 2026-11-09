@@ -15,11 +15,15 @@
 // block leaves its window: HTTP 403 "Archive requests require a personal token", 5M blocks back on 2026-11-09), and on
 // two seats whose logs differ (base.api.pocket.network answered 0 logs 5M back where Sentio and Tenderly answer 142).
 // A refused read is asked again twice, as the wallet's pager asks a refusal of a size the provider answered.
+// Every read goes through provider-answer.mjs (rpcAnswer, as robinhood-mainnet-rpcs.mjs's recorder reads): a block or
+// state a seat does not hold is a wrong answer here, since the check is that the seats keep the history; a seat that
+// answers nothing usable on its last try is named and leaves its chain INCONCLUSIVE, never a pass. A wrong answer on
+// either chain or SIGN_HOST's policy is FAIL over it.
 // And SIGN_HOST (https://confidential.unrealized.trade/), where the device syncs, must answer 200 with a connect-src that
 // names every seat's origin: a seat its policy refuses is no seat.
 // After: sign
 //   node scripts/live-checks/evm-pool-lists-mainnet.mjs [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run of evm-pool-lists-mainnet.answers.json, and a real bad run: Base on
 // the pair its sync had before (its quote list's first two, publicnode and blastapi).
 import "../net-window.mjs";
@@ -28,7 +32,8 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "../../packages/kit/src/index.ts";
-import { POOL_TOPICS, SWAP4, recorder } from "./robinhood-mainnet-rpcs.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
+import { POOL_TOPICS, SWAP4, askOf, recorder, replayer, verdictOfError } from "./robinhood-mainnet-rpcs.mjs";
 import { connectSrc, read } from "./page-evm-rpc-csp.mjs";
 
 const KEY = "evm-pool-lists-mainnet";
@@ -49,28 +54,14 @@ export function kitList(chain) {
   return { list: [...(evmPoolProvidersOf(v) ?? [])], pool: v.pool.toLowerCase(), poolManager: v.poolManager.toLowerCase() };
 }
 
-/** A transport that answers each call with the recorded answers to that same call, in their order; past the last, the
- *  last again. */
-export function replayer(log) {
-  const queues = new Map();
-  for (const e of log) {
-    const k = JSON.stringify([e.url, e.method, e.params]);
-    if (!queues.has(k)) queues.set(k, []);
-    queues.get(k).push(e);
-  }
-  return async (url, method, params) => {
-    const q = queues.get(JSON.stringify([url, method, params]));
-    const e = q?.length > 1 ? q.shift() : q?.[0];
-    if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
-  };
-}
+/** The recorded answers' transport: robinhood-mainnet-rpcs.mjs's, one replay for both checks. */
+export { replayer };
 
 const host = (u) => new URL(u).host;
 const hx = (n) => `0x${n.toString(16)}`;
 const digest = (logs) => createHash("sha256").update(JSON.stringify(logs.map((l) => [l.blockHash, l.logIndex, l.transactionHash, l.data, l.topics]))).digest("hex").slice(0, 16);
 
-/** One chain's check: { ok, lines }. `kit`: the kit's (kitList) unless a test names another. */
+/** One chain's check: { verdict, ok, lines }. `kit`: the kit's (kitList) unless a test names another. */
 export async function checkChain(transport, chain, kit = kitList(chain)) {
   const lines = [];
   const { id, deploy } = CHAINS[chain];
@@ -80,14 +71,7 @@ export async function checkChain(transport, chain, kit = kitList(chain)) {
     const seats = list.slice(0, 2);
     for (const u of seats) if (evmRpcOperator(u) === null) throw new Error(`${chain}: ${JSON.stringify(u)} is not an http or https URL`);
     if (evmRpcOperator(seats[0]) === evmRpcOperator(seats[1])) throw new Error(`${chain}: the two seats are one operator (${evmRpcOperator(seats[0])}): ${seats.map(host).join(" and ")}`);
-    const ask = async (url, method, params, what) => {
-      let a;
-      for (let t = 1; t <= TRIES; t++) {
-        a = await transport(url, method, params);
-        if (!("error" in a)) return a.result;
-      }
-      throw new Error(`${chain}: ${host(url)}: ${what}: ${a.error}`);
-    };
+    const ask = (url, method, params, what) => askOf(transport, TRIES, `${chain}: `, url, method, params, what);
     const heads = [];
     for (const url of seats) {
       const got = await ask(url, "eth_chainId", [], "eth_chainId");
@@ -121,10 +105,10 @@ export async function checkChain(transport, chain, kit = kitList(chain)) {
       if (got[0].n === 0) throw new Error(`${chain}: ${what}: no logs on either seat, so their agreement proves nothing`);
       lines.push(`${chain}: both seats: ${what}, ${got[0].n} logs, digest ${got[0].d} on both`);
     }
-    return { ok: true, lines };
+    return { verdict: "PASS", ok: true, lines };
   } catch (e) {
     lines.push(`${e?.message ?? e}`);
-    return { ok: false, lines };
+    return { verdict: verdictOfError(e), ok: false, lines };
   }
 }
 
@@ -137,18 +121,22 @@ export function judgePage(page, kits) {
   return lacks.length ? { ok: false, line: `SIGN_HOST's connect-src lacks ${lacks.join(" ")}` } : { ok: true, line: `SIGN_HOST's connect-src names every seat (${seats.length})` };
 }
 
-/** Both chains and SIGN_HOST's policy: { ok, lines }. `kits`: each chain's (kitList) unless a test names others. */
+/** Both chains and SIGN_HOST's policy: { verdict, ok, lines }: FAIL on any wrong answer, else INCONCLUSIVE when a chain
+ *  had a seat answer nothing, else PASS. `kits`: each chain's (kitList) unless a test names others. */
 export async function check(transport, kits = { base: kitList("base"), robinhood: kitList("robinhood") }, page) {
   const lines = [];
   const p = judgePage(page, kits);
-  let ok = p.ok;
+  let bad = !p.ok;
+  let quiet = false;
   lines.push(p.line);
   for (const chain of Object.keys(CHAINS)) {
     const r = await checkChain(transport, chain, kits[chain]);
-    ok &&= r.ok;
+    bad ||= r.verdict === "FAIL";
+    quiet ||= r.verdict === "INCONCLUSIVE";
     lines.push(...r.lines);
   }
-  return { ok, lines };
+  const verdict = verdictOf(bad, quiet);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 /** Base's pair before the card: its quote list's first two, which the sync read as its pool list. */
@@ -161,16 +149,17 @@ async function main(argv) {
   const page = await read(SIGN_HOST);
   const rec = recorder();
   const r = await check(rec.transport, kits, page);
-  for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+  for (const l of r.lines) console.log(`${r.verdict} ${l}`);
   if (record) {
+    if (r.verdict !== "PASS") throw new Error(`the good run is ${r.verdict}: no good run to record`);
     const before = recorder();
     const b = await checkChain(before.transport, "base", { ...kits.base, list: [...BASE_BEFORE] });
-    if (b.ok) throw new Error("Base's pair before passed: no bad run to record");
+    if (b.verdict !== "FAIL") throw new Error(`Base's pair before is ${b.verdict}, not FAIL: no bad run to record`);
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { kits, page, log: rec.log }, baseBefore: { kit: { ...kits.base, list: [...BASE_BEFORE] }, log: before.log } }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
-  console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return r.ok ? 0 : 1;
+  console.log(`${r.verdict} ${KEY}`);
+  return EXIT[r.verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

@@ -3,7 +3,8 @@
 // and Pocket seated, both answering the pool's filter at the head and 1,000,000 back, their Swap logs the same and some
 // at the head and 1,000,000 back), a real
 // run on the pair the device had before (Robinhood's own and PublicNode: PublicNode's HTTP 403 "Archive requests require
-// a personal token"), and the good answers under a list of one operator twice. Good passes; both bad runs fail.
+// a personal token"), and the good answers under a list of one operator twice. Good passes; both bad runs fail. Every
+// answer is provider-answer.mjs's (rpcAnswer): a seat that answers nothing is INCONCLUSIVE, never a pass or a FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -20,6 +21,7 @@ test("the check reads the kit's own Robinhood pool list, and the good run is a r
 test("the recorded good run passes: Robinhood's own and Pocket, two operators, each paging the pool's filter, their Swap logs one", async () => {
   const r = await run(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.verdict, "PASS");
   assert.match(r.lines[0], /^rpc\.mainnet\.chain\.robinhood\.com \(robinhood\.com\): chain 0x1237, head \d+; the pool's filter on 0x[0-9a-f]{40} over 10000 blocks to the head \d+ logs, 10000 blocks 1000000 back \d+ logs$/);
   assert.match(r.lines[1], /^robinhood\.api\.pocket\.network \(pocket\.network\): chain 0x1237, /);
   assert.match(r.lines[2], /^both seats: the PoolManager's Swap logs at the head over blocks \d+-\d+, [1-9]\d* logs, digest [0-9a-f]{16} on both$/);
@@ -29,8 +31,9 @@ test("the recorded good run passes: Robinhood's own and Pocket, two operators, e
 test("the recorded bad run on the pair before fails on PublicNode's archive refusal", async () => {
   assert.deepEqual(A.before.list, BEFORE);
   const r = await run(A.before);
+  assert.equal(r.verdict, "FAIL");
   assert.equal(r.ok, false);
-  assert.match(r.lines.at(-1), /^robinhood-rpc\.publicnode\.com: the pool's filter over 10000 blocks to the head: HTTP 403 RPC error -32602: Archive requests require a personal token/);
+  assert.match(r.lines.at(-1), /^robinhood-rpc\.publicnode\.com: the pool's filter over 10000 blocks to the head: RPC error -32602: Archive requests require a personal token/);
 });
 
 test("a list of one operator twice fails before any read", async () => {
@@ -54,6 +57,20 @@ test("two seats whose Swap logs differ fail, at the head or 1,000,000 back, and 
   }
   const missing = await run({ ...A.good, log: A.good.log.filter((e) => !(e.url === A.good.list[1] && e.method === "eth_chainId")) });
   assert.equal(missing.ok, false);
+  assert.equal(missing.verdict, "INCONCLUSIVE", missing.lines.join("\n"));
+});
+
+// card pool-lists-check-provider-answer: a seat that answers nothing usable is named and the check INCONCLUSIVE (exit
+// 3); a seat that answers wrong is FAIL (exit 1)
+test("planted: a seat's no-answer on every try is INCONCLUSIVE, naming it; one no-answer then an answer passes", async () => {
+  const quiet = { noAnswer: "robinhood.api.pocket.network HTTP 429: 429 Too Many Requests" };
+  const head = (e) => e.url === A.good.list[1] && e.method === "eth_blockNumber";
+  const r = await run({ ...A.good, log: A.good.log.map((e) => (head(e) ? { url: e.url, method: e.method, params: e.params, ...quiet } : e)) });
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.lines.at(-1), "eth_blockNumber: no answer: robinhood.api.pocket.network HTTP 429: 429 Too Many Requests");
+  const at = A.good.log.findIndex(head);
+  const once = await run({ ...A.good, log: [...A.good.log.slice(0, at), { url: A.good.log[at].url, method: "eth_blockNumber", params: [], ...quiet }, ...A.good.log.slice(at)] });
+  assert.equal(once.verdict, "PASS", once.lines.join("\n"));
 });
 
 // review L-1: two seats that agree on no logs prove nothing about the history the sync reads
