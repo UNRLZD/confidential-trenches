@@ -262,11 +262,12 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         await doc.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(SETTLE_MS);
         const verify = id === "verify" ? await verifyEvidence(doc) : null;
-        const footer = await footerEvidence(doc);
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
         const shot = `${w.name}-${id}.png`;
         await page.screenshot({ path: path.join(shots, shot) });
+        // the footer's clock for outages()'s read cap is read last, as the load's error list closes
+        const footer = await footerEvidence(doc);
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
         rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });

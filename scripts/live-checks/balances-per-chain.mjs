@@ -184,8 +184,9 @@ async function runOne(browser, w, shots, handler) {
     await f.waitForSelector(`${sel}:not([data-pools='loading'])`, { timeout: READY_MS }).catch(() => {});
     Object.assign(run, await f.evaluate(READ, w.isMobile));
     run.violations = await f.evaluate(() => window.__ctViolations ?? []);
-    run.footer = await footerEvidence(f);
     await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}.png`) });
+    // the footer's clock for outages()'s read cap is read last, as the error list closes
+    run.footer = await footerEvidence(f);
   } finally {
     await ctx.close();
   }

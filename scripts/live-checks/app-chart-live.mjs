@@ -308,10 +308,11 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
     }
   }
   const originEnd = app ? await app.evaluate(() => performance.timeOrigin).catch(() => null) : null;
-  const footer = app ? await footerEvidence(app).catch(() => null) : null;
   // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
   const shot = `${n}-${i}-${w.name}.png`;
   await page.screenshot({ path: path.join(shots, shot) });
+  // the footer's clock for outages()'s read cap is read last, as the error list closes
+  const footer = app ? await footerEvidence(app).catch(() => null) : null;
   await ctx.close();
   return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, footer, shot };
 }

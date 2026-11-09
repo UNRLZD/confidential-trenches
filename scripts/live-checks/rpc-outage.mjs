@@ -21,6 +21,14 @@
 // RPC", "Verify read no head on A or B"). The deploy is retried. Any other console error, a failed load of an origin the
 // release does not name, a 4xx other than 429, a block (ERR_BLOCKED_BY_*), a page error, still fails whatever the page
 // shows.
+// What a check does with `verifyDown` (the origins let through by the Verify rule) is its own: app-verify-mount and
+// verify-pools accept amber rows for an origin only when that open's own recorded reads of it bear the outage out
+// (confirmDown: a read the RPC failed, readDown; and for every check amber, none answered 200). The page's console and DOM
+// alone are not that proof: an amber panel beside an unrelated failed load, with every read 200, is a bug of the panel's.
+// A preflight line counts only as Chrome writes it: located at the page that made the read, its origin the one the line
+// says the read came from, its path no file's (an app script printing the same words is an error).
+// The footer's clock (FOOTER_DOM ms) is read last, as the load's error list closes, so a footer read after the first DOM
+// read is counted by the cap.
 // Not a check of its own; scripts/live-checks/app-shell.test.mjs holds it.
 // Runs: once, no check of its own: the shared judgment of a down RPC (app-shell.test.mjs holds it)
 import { BLOCK_EVERY_MS } from "../../apps/terminal/src/shell/footer.ts";
@@ -66,11 +74,27 @@ export function rpcRows(network = "mainnet") {
 //     without the header: both forms, in that order, for each.
 const TAG = "(?: \\[footer read\\])?";
 const FAILED_LOAD = new RegExp(`^Failed to load resource: (?:net::ERR_(?!BLOCKED_)[A-Z0-9_]+|the server responded with a status of (?:5\\d\\d|429)(?: \\([^()]*\\))?) \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
-const FAILED_PREFLIGHT = new RegExp(`^Access to fetch at '(https?:\\/\\/[^'\\s]+)' from origin '[^'\\s]+' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: (?:It does not have HTTP ok status|No 'Access-Control-Allow-Origin' header is present on the requested resource)\\.(?: \\([^()]*\\))?${TAG}$`);
+const FAILED_PREFLIGHT = new RegExp(`^Access to fetch at '(https?:\\/\\/[^'\\s]+)' from origin '[^'\\s]+' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: (?:It does not have HTTP ok status|No 'Access-Control-Allow-Origin' header is present on the requested resource)\\. \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
+// Chrome locates that line at the document that made the read, never at a script: the location's origin is the origin the
+// line says the read came from, and its path is a page's (no file extension), so an app's own console.error that prints
+// Chrome's words from /assets/index-*.js is no preflight line
+const preflightOf = (line) => {
+  const m = FAILED_PREFLIGHT.exec(line);
+  if (!m) return null;
+  const from = /from origin '([^'\s]+)'/.exec(line)?.[1];
+  const at = originOf(m[2]);
+  let path;
+  try {
+    path = new URL(m[2]).pathname;
+  } catch {
+    return null;
+  }
+  return at !== null && at === originOf(from ?? "") && !/\.[A-Za-z0-9]+$/.test(path) ? m[1] : null;
+};
 const FOOTER_TAGGED = / \[footer read\]$/;
 
 /** The origin a failed-load line names, "" for any other line. */
-const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line) ?? FAILED_PREFLIGHT.exec(line))?.[1] ?? "") ?? "";
+const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line)?.[1] ?? preflightOf(line)) ?? "") ?? "";
 
 /** What the same load's DOM shows for one row: its data-status (ok, warn, danger, loading), or "not drawn". */
 const shownRow = (verify, row) => (row === "code" || row === "funds" ? verify?.[row] : verify?.pools?.[row]) ?? "not drawn";
@@ -84,7 +108,28 @@ export const releaseOrigins = () => new Set(Object.keys(VERIFY_RELEASES).flatMap
 
 /** A status a down RPC answers with, or none at all (a refused connection, a failed preflight): 5xx, 429, no answer. A
  *  4xx other than 429 is no outage. */
-export const downStatus = (status) => status === null || status === undefined || status === 0 || status === 429 || (status >= 500 && status < 600);
+export const downStatus = (status) => status === 429 || (status >= 500 && status < 600);
+
+/** One recorded read of an RPC that the RPC failed: it answered 5xx or 429, or it answered nothing and Playwright's
+ *  requestfailed event says why (`failure`, the browser's error text). A read the page aborted itself (net::ERR_ABORTED)
+ *  or a request that ended with no answer and no failure is no outage. */
+export const readDown = (x) => (x.status === null || x.status === undefined || x.status === 0 ? typeof x.failure === "string" && x.failure !== "" && !/ERR_ABORTED/.test(x.failure) : downStatus(x.status));
+
+/** Which of the origins the console and the DOM show down (`shown`) this open's own recorded reads (`reads`: its POSTs
+ *  to the RPCs) bear out: `some`, those with a read the RPC failed; `all`, those of them with no read answered 200. An
+ *  origin the open never read, or read only with 200s, is neither: the failed load was another open's, or none of the
+ *  page's. */
+export function confirmDown(shown, reads) {
+  const some = new Set();
+  const all = new Set();
+  for (const o of shown) {
+    const q = (reads ?? []).filter((x) => originOf(x.url) === o);
+    if (!q.some(readDown)) continue;
+    some.add(o);
+    if (q.every((x) => x.status !== 200)) all.add(o);
+  }
+  return { some, all };
+}
 
 /** The pairs of RPCs the release names for a network: the NEAR pair and each pool's pair, as their origins. */
 function pairsOf(network) {
@@ -110,7 +155,7 @@ export function outages(lines, verify, network = "mainnet", footer = null) {
   const preflights = new Map();
   for (const l of lines) {
     if (!FOOTER_TAGGED.test(l)) continue;
-    const m = FAILED_LOAD.test(l) ? loads : FAILED_PREFLIGHT.test(l) ? preflights : null;
+    const m = FAILED_LOAD.test(l) ? loads : preflightOf(l) !== null ? preflights : null;
     const o = failedOrigin(l);
     if (m && o) m.set(o, (m.get(o) ?? 0) + 1);
   }

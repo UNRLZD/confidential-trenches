@@ -87,12 +87,12 @@ test("planted on the good answer: a down pool RPC's preflight error is let throu
   assert.match(plant([cors, "Uncaught boom"], dom("warn")), /^BAD phone \/verify: console Uncaught boom$/);
 });
 
-test("planted on the good answer: an amber pool row and its RPC's non-200 reads pass only beside a shown outage of that chain's RPC, in the same load (card app-shell-rpc-outage-judge)", () => {
+test("planted on the good answer: an amber pool row and its RPC's failed reads pass only beside a shown outage that this open's own reads bear out (card app-shell-rpc-outage-judge)", () => {
   const rpcs = VERIFY_RELEASES.mainnet.pools.solana.rpcs;
   const first = new URL(rpcs[0]).origin;
   const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
   const dom = (solana) => ({ verify: { state: "read", code: "ok", funds: "ok", pools: { solana, base: "ok", robinhood: "ok" } }, footer: null });
-  const run = ({ errors = [load(first, 503)], d = dom("warn"), checks, status = 503, origin = first, row = "warn" } = {}) =>
+  const run = ({ errors = [load(first, 503)], d = dom("warn"), checks, status = 503, failure, only = false, origin = first, row = "warn" } = {}) =>
     bad(mutate((r) => {
       const x = r.runs[0];
       x.errors = errors;
@@ -100,15 +100,26 @@ test("planted on the good answer: an amber pool row and its RPC's non-200 reads 
       const s = x.pools.rows.solana;
       s.status = row;
       for (const k of Object.keys(s.checks)) s.checks[k] = checks?.[k] ?? { status: "warn", word: "Unverified" };
-      for (const q of x.requests) if (q.method === "POST" && q.url.startsWith(origin)) q.status = status;
+      const reads = x.requests.filter((q) => q.method === "POST" && q.url.startsWith(origin));
+      for (const q of only ? reads.slice(0, 1) : reads) {
+        q.status = status;
+        if (failure) q.failure = failure;
+      }
     }));
-  // the shown outage: the row amber, every check Unverified, the first RPC answering 503: nothing fails
+  // the shown outage: the row amber, every check Unverified, every read of the first RPC failed: nothing fails
   assert.deepEqual(run(), []);
-  // 429 and no answer read as down as well; a check that still read ok beside an Unverified one passes
   assert.deepEqual(run({ status: 429, errors: [load(first, 429)] }), []);
-  assert.deepEqual(run({ status: null }), []);
+  // no answer: passes with the browser's failure text, fails with none, fails when the page aborted the read itself
+  assert.deepEqual(run({ status: null, failure: "net::ERR_FAILED" }), []);
+  assert.match(run({ status: null }).join("\n"), /phone \/verify solana: row warn/);
+  assert.match(run({ status: null, failure: "net::ERR_ABORTED" }).join("\n"), /phone \/verify solana: row warn/);
+  // (c) every check Unverified with the RPC's one read answering 200 and a failed load of it in the console
+  assert.match(run({ status: 200 }).join("\n"), /phone \/verify solana: row warn/);
+  // a check that still read ok beside an Unverified one passes when the RPC's read failed; with the read answering 200 it fails
   const mixed = A.good.runs[0].pools.rows.solana.checks;
-  assert.deepEqual(run({ checks: { [Object.keys(mixed)[0]]: { status: "ok", word: null } } }), []);
+  const oneOk = { [Object.keys(mixed)[0]]: { status: "ok", word: null } };
+  assert.deepEqual(run({ checks: oneOk }), []);
+  assert.match(run({ checks: oneOk, status: 200 }).join("\n"), /phone \/verify solana: row warn/);
   // the same amber row with no failed load, or with the page's DOM showing the row ok, is an unexplained warn
   assert.match(run({ errors: [] }).join("\n"), /phone \/verify solana: row warn/);
   assert.match(run({ d: dom("ok") }).join("\n"), /console Failed to load resource/);
@@ -117,8 +128,10 @@ test("planted on the good answer: an amber pool row and its RPC's non-200 reads 
   assert.match(run({ checks: Object.fromEntries(Object.keys(mixed).map((k) => [k, { status: "warn", word: "RPCs disagree" }])) }).join("\n"), /phone \/verify solana: row warn/);
   assert.match(run({ row: "danger", d: dom("danger") }).join("\n"), /phone \/verify solana: row danger/);
   // a 4xx other than 429 on the down RPC's reads, or a non-200 read of the RPC not shown down, fails
-  assert.match(run({ status: 403 }).join("\n"), /phone \/verify solana: this page read .* not all 200/);
+  assert.match(run({ status: 403 }).join("\n"), /phone \/verify solana: row warn|phone \/verify solana: this page read .* not all 200/);
   assert.match(run({ origin: new URL(rpcs[1]).origin, status: 500 }).join("\n"), /phone \/verify solana: this page read .* not all 200/);
-  // a page error beside the outage still fails
+  // a page error beside the outage still fails; an app script printing Chrome's preflight words from its own file is no preflight line
   assert.match(run({ errors: [load(first, 503), "Uncaught boom"] }).join("\n"), /phone \/verify: console Uncaught boom$/);
+  const words = `Access to fetch at '${first}/' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`;
+  assert.match(run({ errors: [consoleLine(words, "https://ct-app.unrealized.trade/assets/index-abc.js")] }).join("\n"), /console Access to fetch/);
 });

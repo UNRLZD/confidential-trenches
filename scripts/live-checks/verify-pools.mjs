@@ -32,7 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { APP_HOST, harnessRoute, recorded, watch, WIDTHS } from "./app-verify-mount.mjs";
-import { downNote, downStatus, footerEvidence, outages, verifyEvidence } from "./rpc-outage.mjs";
+import { confirmDown, downNote, footerEvidence, outages, readDown, verifyEvidence } from "./rpc-outage.mjs";
 
 const KEY = "verify-pools";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -128,18 +128,21 @@ function judgeRow(say, n, c, row, release, reqs, shown = new Set()) {
   // a pool RPC down that the page shows (rpc-outage.mjs: its failed load let through by this chain's row amber in the same
   // load) draws the row amber with its checks ok or Unverified, at least one Unverified; any other warn, "RPCs disagree"
   // or danger fails as before (card app-shell-rpc-outage-judge)
-  const isDown = named.rpcs.some((u) => shown.has(originOf(u)));
+  // and only when this open's own recorded reads of that RPC bear it out: one was failed (5xx, 429, or no answer with a
+  // failure text), and with every check Unverified none answered 200
+  const { some, all } = confirmDown(shown, poolPosts);
+  const isDown = named.rpcs.some((u) => some.has(originOf(u)));
   const keys = Object.keys(checks).length === want.length && want.every((k) => k in checks);
   const allOk = want.every((k) => checks[k]?.status === "ok" && !checks[k]?.word) && keys;
   const unverified = (k) => checks[k]?.status === "warn" && checks[k]?.word === "Unverified";
-  const downOk = isDown && keys && row.status === "warn" && want.every((k) => unverified(k) || (checks[k]?.status === "ok" && !checks[k]?.word)) && want.some(unverified);
+  const downOk = isDown && keys && row.status === "warn" && want.every((k) => unverified(k) || (checks[k]?.status === "ok" && !checks[k]?.word)) && want.some(unverified) && (!want.every(unverified) || named.rpcs.some((u) => all.has(originOf(u))));
   say(isDown ? downOk : row.status === "ok" && allOk, `${n} ${c}: row ${row.status}; ${want.map((k) => `${k} ${checks[k]?.status ?? "none"}${checks[k]?.word ? ` (${checks[k].word})` : ""}`).join(", ")}`);
   const pair = named.rpcs.map(host);
   say(row.rpcs.length === 2 && row.rpcs.every((r, i) => r === pair[i]), `${n} ${c}: the row names ${row.rpcs.join(" and ") || "no RPC"}, want ${pair.join(" and ")}`);
   const asked = named.rpcs.map((u) => {
     const q = poolPosts.filter((x) => host(x.url) === host(u));
     // a read of an RPC the page shows down answers 5xx, 429 or nothing; a 4xx is no outage and fails
-    return { u, n: q.length, ok: q.length > 0 && q.every((x) => x.status === 200 || (shown.has(originOf(u)) && downStatus(x.status))) };
+    return { u, n: q.length, ok: q.length > 0 && q.every((x) => x.status === 200 || (some.has(originOf(u)) && readDown(x))) };
   });
   say(asked.every((a) => a.ok), `${n} ${c}: this page read ${asked.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ")}`);
   const links = EXPLORERS[c](addressOf(c, named.pin));
@@ -225,6 +228,11 @@ async function runOne({ browser, w, shots, route }) {
       const e = byReq.get(res.request());
       if (e) e.status = res.status();
     });
+    // a read that got no answer: the browser's own reason, which tells a refused or reset read from one the page aborted
+    page.on("requestfailed", (q) => {
+      const e = byReq.get(q);
+      if (e) e.failure = q.failure()?.errorText ?? "";
+    });
     watch(page, run.errors);
     await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
     const f = await appFrame(page);
@@ -242,6 +250,8 @@ async function runOne({ browser, w, shots, route }) {
       await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}-end.png`) });
     }
     run.violations = await f.evaluate(() => window.__ctViolations ?? []);
+    // the footer's clock for outages()'s read cap is read last, as the error list closes
+    run.dom.footer = await footerEvidence(f);
     return run;
   } finally {
     await ctx.close();

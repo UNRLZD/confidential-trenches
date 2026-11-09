@@ -418,3 +418,18 @@ test("planted: a footer makes one read in each BLOCK_EVERY_MS of the load, plus 
   assert.equal(n(8, 18000), 8);
   assert.equal(outages([tagged], null, "mainnet", { conn: "on", block: "223500000" }).kept.length, 1, "no clock in the record: no read is allowed");
 });
+
+test("planted: a preflight line is Chrome's own only when it is located at the page that made the read; an app script printing the same words, or located at another site, is an error (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const app = "https://ct-app.unrealized.trade";
+  const words = `Access to fetch at '${near}/' from origin '${app}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`;
+  const rows = { state: "read", code: "warn", funds: "warn", pools: {} };
+  const kept = (line) => outages([line], rows).kept.length;
+  assert.equal(kept(consoleLine(words, `${app}/verify`)), 0, "located at the page");
+  assert.equal(kept(consoleLine(words, `${app}/token/solana/So11111111111111111111111111111111111111112`)), 0, "a token page");
+  assert.equal(kept(consoleLine(words, `${app}/assets/index-abc.js`)), 1, "located at the app's script");
+  assert.equal(kept(consoleLine(words, `${app}/assets/worker.mjs`)), 1, "located at a module");
+  assert.equal(kept(consoleLine(words, "https://evil.example/verify")), 1, "located at another site");
+  assert.equal(kept(words), 1, "no location at all");
+  assert.equal(kept(consoleLine(words.replace(`from origin '${app}'`, "from origin 'https://evil.example'"), `${app}/verify`)), 1, "a read said to come from another origin");
+});
