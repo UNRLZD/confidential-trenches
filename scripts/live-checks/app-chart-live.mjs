@@ -12,9 +12,10 @@
 //      helper refuses (429) holds that token's reads for its Retry-After. The probe keeps its counts (rounds, reads, the
 //      helper's own answers, answers with none of its own yet, refusals and their longest Retry-After, failed reads).
 //   3. Watch: headless Chromium opens APP_HOST/token/<chain>/<token> at 1440 x 900 and 390 x 844 (dpr 2, touch), finds
-//      the terminal's frame inside SIGN_HOST's shell and reads the library's own last bar (data-last: time and close)
-//      every 250 ms until it changes or WATCH_MAX_MS passes, while Node reads the helper's newest bars each second and
-//      its tape (GET /v1/market/trades, limit 1) every two.
+//      the terminal's frame inside SIGN_HOST's shell, waits for the chart to settle (settled: any state but loading,
+//      and a ready chart only once its last bar is drawn, within READY_MS), then reads the library's own last bar
+//      (data-last: time and close) every 250 ms until it changes or WATCH_MAX_MS passes, while Node reads the helper's
+//      newest bars each second and its tape (GET /v1/market/trades, limit 1) every two.
 //   4. Verdict per watch (classify):
 //      - the page drew a change: it must be the newest bar of an answer the helper gave (the page's own candle reads,
 //        each answer's last bar kept, or Node's: a burst moves a bar several times a second, so Node's one read a
@@ -244,6 +245,11 @@ export async function probe(cands) {
   return { pick: pickOf(cands, changes, tape), stats };
 }
 
+/** Whether a read of the chart (MEASURE) is the watch's start: a chart in any state but loading, a ready one only with
+ *  its last bar drawn. The page sets data-chart="ready" as it renders and writes data-last in the effect after (card
+ *  app-chart-live-stall: run 42628866668 attempt 1's desktop read between the two and watched nothing). */
+export const settled = (m) => Boolean(m?.chart && m.chart !== "loading" && (m.chart !== "ready" || m.last !== null));
+
 const MEASURE = () => {
   const root = document.querySelector('main[data-route="token"]');
   const c = [...(root?.querySelectorAll("[data-chart]") ?? [])].find((e) => e.getClientRects().length);
@@ -287,7 +293,7 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
         break;
       }
     }
-    if (m?.chart && m.chart !== "loading") break;
+    if (settled(m)) break;
   }
   const readyAt = Date.now();
   const origin = app ? await app.evaluate(() => performance.timeOrigin).catch(() => null) : null;
