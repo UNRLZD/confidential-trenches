@@ -8,15 +8,18 @@
 // reads everything but a deposit's moved_out fact (card held-move-forgotten-tx), which it refuses the whole state for:
 // it is sent each deposit with that fact left out, so its app still draws the moved deposit as held. A client that names
 // kit-v1.6 reads everything but a pool deposit's op (card pool-deposit-stages), which kit-v1.6 has no kind for: it is
-// sent the state with every pool_deposit op left out (kit-v1.5 too), never the op in another kind's shape. A client at
+// sent the state with every pool_deposit op left out (kit-v1.5 too), never the op in another kind's shape. A client that
+// names kit-v1.7 reads everything but a position's decimals (card signpage-state-holdings), a key its schema refuses
+// the whole state for: it is sent each position with decimals left out (every level below it too). A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
 /** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
- *  pool_deposit op), or everything (kit-v1.7 and above). */
-export type KitLevel = "1.4" | "1.5" | "1.6" | "current";
+ *  pool_deposit op), kit-v1.7's (no position decimals; none at the levels below either), or everything (kit-v1.8 and
+ *  above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "1.7" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -38,7 +41,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 7) ? "1.7" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -127,10 +130,17 @@ function factsV1_5<T extends object>(d: T): T {
 /** The ops with no pool deposit's: kit-v1.6 and before have no pool_deposit kind (card pool-deposit-stages). */
 const noPoolOps = (ops: readonly Operation[]): Operation[] => ops.filter((o) => o.kind !== "pool_deposit");
 
-/** The state as a client at `level` reads it: kit-v1.6's with no pool_deposit op; kit-v1.5's, that and each deposit op
+/** The positions with no decimals: kit-v1.7 and before have no such key and refuse a position that has it (card
+ *  signpage-state-holdings). */
+const noDecimals = (s: SignpageState): SignpageState => ({ ...s, positions: s.positions.map(({ decimals: _d, ...p }) => p) });
+
+/** The state as a client at `level` reads it, each position with no decimals below the current level: kit-v1.7's as it
+ *  is otherwise; kit-v1.6's with no pool_deposit op; kit-v1.5's, that and each deposit op
  *  with no moved_out; kit-v1.4's fields only, in the state's own order, each op mapped or left out. */
-export function stateFor(level: KitLevel, s: SignpageState): SignpageState {
-  if (level === "current") return s;
+export function stateFor(level: KitLevel, given: SignpageState): SignpageState {
+  if (level === "current") return given;
+  const s = noDecimals(given);
+  if (level === "1.7") return s;
   if (level === "1.6") return { ...s, ops: noPoolOps(s.ops) };
   if (level === "1.5") return { ...s, ops: noPoolOps(s.ops).map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };
   const out: Record<string, unknown> = {};
@@ -145,13 +155,15 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
 }
 
 /**
- * An answer's result of `kind` as a client at `level` reads it: for kit-v1.6 the state with no pool_deposit op; for
+ * An answer's result of `kind` as a client at `level` reads it: for kit-v1.7 the state with no position decimals; for
+ * kit-v1.6 that state with no pool_deposit op; for
  * kit-v1.5 that state and deposit.confirm's facts with
  * no moved_out; for kit-v1.4 the state mapped, deposit.confirm's stage mapped with no facts; every other kind's result
  * as it is (each reads each kind it can ask the same as now).
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, result: unknown): unknown {
   if (level === "current") return result;
+  if (level === "1.7") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.5") return kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;
   if (kind === "state") return stateFor(level, result as SignpageState);
