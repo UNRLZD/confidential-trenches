@@ -8,14 +8,23 @@
 # Foundry v1.7.1 is no action but its release file, foundry_v1.7.1_linux_amd64.tar.gz (asset 415095756 of
 # foundry-rs/foundry, 98,596,412 bytes), sha256 cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b:
 # the asset's digest field on GitHub's API read on 2026-11-08 at 09:34Z, and a local sha256 of its bytes agrees.
-# The five job ids are the required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test.
-# The sixth, vault-sandbox, and the seventh, pool-solana, join them when the owner adds them to the ruleset. The
-# eighth, slither, is advisory and stays out of it.
+# The six job ids are the required checks of main's ruleset (26292755, read 2026-11-10): gitleaks, deep-import,
+# verify-gate, money-gate, test, vault-sandbox. The seventh, pool-solana, joins them when the owner adds it to the
+# ruleset. The eighth, slither, is advisory and stays out of it.
 name: ci
 
+# merge_group: GitHub's merge queue asks for the checks on each group's head (main with the queued pull requests, each
+# as a merge commit) before it lands the group; every job a pull request runs also runs there. A gate step judges a
+# group as a pull request from main to the group's head: its main is the merge base of main and the head, never
+# merge_group.base_sha, which is the group's parent commit and can be the queue entry ahead, so not main's copy of a
+# gate. Main is refs/remotes/origin/main in full (a bare origin/main reads a tag of that name first, and the checkout
+# fetches every tag), and a group into any other branch runs no gate and fails. verify-gate judges each queued pull request on its own (verify-gate.mjs --group). base-gate.test.mjs replays
+# every gate step as a pull request and as a group, each with the head's gates tampered.
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   # nightly on main: the vault's sandbox suite only (every other job skips a scheduled run)
@@ -60,8 +69,9 @@ jobs:
         with:
           path: ~/.cache/ci-downloads/gitleaks-8.30.1.tgz
           key: download-gitleaks-8.30.1-551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-      # Main's rules judge every run: .gitleaks.toml and .gitleaksignore come from origin/main (the checkout above
-      # fetches every branch), never the checkout's own copies, so no pull request can pass its own secret. gitleaks
+      # Main's rules judge every run: .gitleaks.toml and .gitleaksignore come from main as fetched (the checkout above
+      # fetches every branch), named refs/remotes/origin/main in full since a bare origin/main reads a tag of that name
+      # first and the checkout fetches every tag, never the checkout's own copies, so no pull request can pass its own secret. gitleaks
       # also reads the scanned folder's own .gitleaksignore whatever -i names, so main's copy is written over it.
       # A new ignore line or rule lands in its own pull request first, apart from the commit it covers: that pull
       # request's scan uses main's rules too, so it passes only without its new entry; once it is on main, the covered
@@ -72,10 +82,10 @@ jobs:
       - name: scan the tree and the history with main's rules
         run: |
           mkdir -p "$RUNNER_TEMP/rules"
-          git show origin/main:.gitleaks.toml > "$RUNNER_TEMP/rules/.gitleaks.toml"
+          git show refs/remotes/origin/main:.gitleaks.toml > "$RUNNER_TEMP/rules/.gitleaks.toml"
           : > "$RUNNER_TEMP/rules/.gitleaksignore"
-          if git cat-file -e origin/main:.gitleaksignore; then
-            git show origin/main:.gitleaksignore > "$RUNNER_TEMP/rules/.gitleaksignore"
+          if git cat-file -e refs/remotes/origin/main:.gitleaksignore; then
+            git show refs/remotes/origin/main:.gitleaksignore > "$RUNNER_TEMP/rules/.gitleaksignore"
           fi
           cp "$RUNNER_TEMP/rules/.gitleaksignore" .gitleaksignore
           "$RUNNER_TEMP/gitleaks" dir . --config "$RUNNER_TEMP/rules/.gitleaks.toml" \
@@ -109,10 +119,10 @@ jobs:
         run: |
           echo "$GITLEAKS_SHA256  $RUNNER_TEMP/gitleaks" | sha256sum --strict -c -
           rules="$(mktemp -d)"
-          git show origin/main:.gitleaks.toml > "$rules/.gitleaks.toml"
+          git show refs/remotes/origin/main:.gitleaks.toml > "$rules/.gitleaks.toml"
           : > "$rules/.gitleaksignore"
-          if git cat-file -e origin/main:.gitleaksignore; then
-            git show origin/main:.gitleaksignore > "$rules/.gitleaksignore"
+          if git cat-file -e refs/remotes/origin/main:.gitleaksignore; then
+            git show refs/remotes/origin/main:.gitleaksignore > "$rules/.gitleaksignore"
           fi
           scan="$(mktemp -d)"
           for f in packages/signpage/index.html packages/signpage/public/app.js packages/signpage/public/prover-worker.js packages/signpage/public/prover-thread.js; do
@@ -167,9 +177,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
+          # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
           case "$EVENT" in
             pull_request)
               mkdir -p "$RUNNER_TEMP/base"
@@ -186,13 +200,13 @@ jobs:
           esac
 
   verify-gate:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -204,15 +218,22 @@ jobs:
       # extracted, so every file the gate imports comes from the base too; the gate reads the PR from its working
       # directory, the head checkout (process.cwd(), scripts/ci/verify-gate.mjs and money-gate.mjs), never from its own
       # path. scripts/ci/base-gate.test.mjs replays these lines. The body goes in through env, never into the script text.
+      # A merge queue group is judged from main (the merge base of main and the group's head) with main's gate, one
+      # queued pull request at a time, each with its own description, which its queue merge commit carries (--group).
       - name: every commit names its card, and each card has its live check
         env:
+          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
+          GROUP=
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; GROUP=--group; HEAD="$MQ_HEAD"; BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
           mkdir -p "$RUNNER_TEMP/base"
           git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
-          node "$RUNNER_TEMP/base/scripts/ci/verify-gate.mjs" "$BASE" "$HEAD"
+          node "$RUNNER_TEMP/base/scripts/ci/verify-gate.mjs" $GROUP "$BASE" "$HEAD"
 
   # Each NEAR tx is read on FastNEAR's archive, dRPC and near.org's archive, which FastNEAR also runs
   # (scripts/ci/near-rpc-operators.mjs). near.org's host answers 429 with a Retry-After of 43 to 600 s (4 a minute,
@@ -233,7 +254,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -250,9 +271,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
+          # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; PR_HEAD="$MQ_HEAD"; PR_BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
           case "$EVENT" in
             pull_request)
               # as main has it, with the base's whole scripts/ tree (see verify-gate); it reads the head checkout
@@ -554,7 +579,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -570,7 +595,11 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
+          # a merge queue group runs as a pull request from main to the group's head (see the merge_group trigger above)
+          if [ "$EVENT" = merge_group ]; then [ "$MQ_BASE_REF" = refs/heads/main ] || { echo "a merge queue group into $MQ_BASE_REF: only main's queue is judged"; exit 1; }; EVENT=pull_request; HEAD="$MQ_HEAD"; BASE="$(git merge-base refs/remotes/origin/main "$MQ_HEAD")"; fi
           case "$EVENT" in
             pull_request)
               mkdir -p "$RUNNER_TEMP/base"

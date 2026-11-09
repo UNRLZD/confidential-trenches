@@ -40,8 +40,8 @@ test("the source: the label only while a bar is GeckoTerminal's; the header wins
 });
 
 test("no bars is the empty state, with its source", () => {
-  assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "chain"), { status: "empty", gecko: false });
-  assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "geckoterminal"), { status: "empty", gecko: true });
+  assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "chain"), { status: "empty", gecko: false, held: true });
+  assert.deepEqual(toCandleData({ ...good(), candles: [] }, "15m", "geckoterminal"), { status: "empty", gecko: true, held: true });
 });
 
 test("the helper's timeframe names: 1H, 4H and 1D are asked for as 1h, 4h and 1d", () => {
@@ -116,7 +116,7 @@ test("the chart's text: prices and volume as Discover draws them; any other text
 test("the read: 404 is empty, another status, a bad body or a failed fetch is the error state, the header is read", async () => {
   const answer = (status: number, body: unknown, src: string | null) => async () =>
     new Response(JSON.stringify(body), { status, headers: src === null ? {} : { "X-Helper-Source": src } });
-  assert.deepEqual(await loadCandles("solana", "M", "15m", answer(404, { error: { code: "not_found" } }, null)), { status: "empty", gecko: false });
+  assert.deepEqual(await loadCandles("solana", "M", "15m", answer(404, { error: { code: "not_found" } }, null)), { status: "empty", gecko: false, held: false });
   assert.deepEqual(await loadCandles("solana", "M", "15m", answer(503, {}, null)), { status: "error" });
   assert.deepEqual(await loadCandles("solana", "M", "15m", answer(200, { ...good(), tf: "1m" }, "geckoterminal")), { status: "error" });
   assert.deepEqual(await loadCandles("solana", "M", "15m", async () => { throw new Error("offline"); }), { status: "error" });
