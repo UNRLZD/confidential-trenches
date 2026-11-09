@@ -56,3 +56,25 @@ test("R-03: nearRpc gives back a 408's JSON body (dRPC's free-plan timeout), whi
   await assert.rejects(near.nearRpc(near.NEAR_NETWORKS.mainnet.drpc, answer(408, "Request Timeout")).query({}));
   for (const status of [429, 500, 503]) await assert.rejects(near.nearRpc(near.NEAR_NETWORKS.mainnet.drpc, answer(status, JSON.stringify(timeout))).query({}), new RegExp(`HTTP ${status}`));
 });
+
+// card wallet-id-reader-paced: a reader tells a provider's "busy" from a wrong answer by the status nearRpc keeps, and
+// waits what the provider's Retry-After asks (RFC 9110 §10.2.3: seconds, or an HTTP date); the caller's signal aborts
+test("nearRpc's HTTP failures keep their status and Retry-After; the caller's signal aborts the request", async () => {
+  const drpc = near.NEAR_NETWORKS.mainnet.drpc;
+  const answer = (status: number, headers: Record<string, string>) => (async () => new Response("{}", { status, headers })) as unknown as typeof fetch;
+  const caught = (p: Promise<unknown>) => p.then(() => assert.fail("resolved"), (e: unknown) => e as near.RpcHttpError);
+  const e429 = await caught(near.nearRpc(drpc, answer(429, { "retry-after": "3" })).query({}));
+  assert.deepEqual([e429.message, e429.status, e429.retryAfterMs], ["HTTP 429", 429, 3000]);
+  const e503 = await caught(near.nearRpc(drpc, answer(503, {})).query({}));
+  assert.deepEqual([e503.status, e503.retryAfterMs], [503, undefined]);
+  const at = Date.parse("2026-11-09T02:00:00Z");
+  const res = (ra: string) => ({ status: 429, headers: new Headers({ "retry-after": ra }) });
+  assert.equal(near.rpcHttpError(res("Mon, 09 Nov 2026 02:00:05 GMT"), at).retryAfterMs, 5000);
+  for (const bad of ["soon", "-1", "1.5", "Mon, 09 Nov 2026 01:59:00 GMT"]) assert.equal(near.rpcHttpError(res(bad), at).retryAfterMs, undefined, bad);
+  // the signal reaches fetch: an abort rejects the request at once
+  const hangs = ((_u: string, init: RequestInit) => new Promise((_res, rej) => init.signal!.addEventListener("abort", () => rej(init.signal!.reason)))) as unknown as typeof fetch;
+  const c = new AbortController();
+  const p = near.nearRpc(drpc, hangs, 60_000).query({}, c.signal);
+  c.abort(new Error("signed out"));
+  await assert.rejects(p, /signed out/);
+});
