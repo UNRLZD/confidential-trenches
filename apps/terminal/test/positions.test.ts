@@ -20,15 +20,16 @@ test("token amounts to exact base units and back: the string's own decimals, no 
 });
 
 test("a percent sell rounds down to the base unit: never more than is held", () => {
+  // the token's decimals passed (6): with none read the share floors at the string's scale plus 4 (sell-mount.test.ts)
   assert.equal(sellAmount("1000", 2500), "250");
   assert.equal(sellAmount("1234567.891234", 5000), "617283.945617");
   // 33.33% of 10 base units of 0.000010 is 3.333 units: 3
-  assert.equal(sellAmount("0.000010", 3333), "0.000003");
+  assert.equal(sellAmount("0.000010", 3333, 6), "0.000003");
   // 75% of 1 base unit is 0.75: rounds down to 0, so nothing to sell
-  assert.equal(sellAmount("0.000001", 7500), null);
+  assert.equal(sellAmount("0.000001", 7500, 6), null);
   // every percent of an odd amount rounds down, and the parts never sum past the whole
   const whole = "999999999.999999";
-  const parts = [2500, 5000, 7500].map((b) => toUnits(sellAmount(whole, b)!)!.n);
+  const parts = [2500, 5000, 7500].map((b) => toUnits(sellAmount(whole, b, 6)!)!.n);
   assert.deepEqual(parts, [249999999999999n, 499999999999999n, 749999999999999n]);
 });
 
@@ -37,7 +38,7 @@ test("100% sells the whole amount exactly, the kit's own string, whatever its di
 });
 
 test("dust: a sell of zero base units is no sell, a zero or unreadable position sells nothing, a percent is 0 to 100", () => {
-  assert.equal(sellAmount("0.000003", 2500), null);
+  assert.equal(sellAmount("0.000003", 2500, 6), null);
   assert.equal(sellAmount("0", 10000), null);
   assert.equal(sellAmount("0.000", 10000), null);
   assert.equal(sellAmount("x", 5000), null);

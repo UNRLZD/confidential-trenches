@@ -34,8 +34,10 @@ const NOW = Date.parse("2026-11-04T06:00:00Z");
 // the fixtures' mint and EVM token (shapes only), kept apart from a `token:` key (gitleaks reads a long id beside that word)
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
 const EVM = "0x00000000000000000000000000000000000f1fe7";
-// the sell box's 50% of the fixture's 1234567.891234 units (test/sell-positions/run.mjs HALF)
+// the sell box's 50% of the fixture's 1234567.891234 units (test/sell-positions/run.mjs HALF): the token amount on
+// pool.sell, whole base units at the token's 6 decimals on the vault's sell (signpage trade.ts UNITS)
 const HALF = "617283.945617";
+const HALF_UNITS = "617283945617";
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -56,7 +58,7 @@ const BUYS = [
 const BAD = { "sol-ready": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", vault: "false" };
 const SELLS = [
   ["sell-pool", "f=up&pool=sol", "Back to Cash", { kind: "pool.sell", params: { chain: "solana", token: MINT, amount: HALF, slippage_bps: 1000 } }],
-  ["sell-vault", "f=up", "", { kind: "buy", params: { chain: "solana", token: MINT, side: "sell", amount: HALF, slippage_bps: 1000 } }],
+  ["sell-vault", "f=up", "", { kind: "buy", params: { chain: "solana", token: MINT, side: "sell", amount: HALF_UNITS, slippage_bps: 1000 } }],
 ];
 
 async function build(root) {
