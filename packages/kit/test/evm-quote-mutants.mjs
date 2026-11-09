@@ -23,6 +23,8 @@ const BUYU = "src/trade/evm/buy-unpinned.ts";
 const Q = "test/evm-quote.test.ts";
 const R = "test/evm-quote-attacks.test.ts";
 const H = "test/evm-quote-head.test.ts";
+// a real cold and warm Robinhood quote's answers, replayed (card evm-quote-gas-used, review of e9b54f71, P2)
+const RP = "test/evm-quote-gas-used-replay.test.ts";
 // the sell quote (card evm-sell-device-quote) and the index's sell builder and signer that take only one
 const SELLQ = "src/trade/evm/sell.ts";
 const S = "test/evm-sell-quote.test.ts";
@@ -387,8 +389,17 @@ export const MUTANTS = [
   // more than its call's even share (not every read before), kept alone; a read that needs more than that share kept at
   // the size it was read again at; the gas used agreed, and read from the code's answer
   [QUOTE, "const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);", "const users = part.slice(0, k);", R, "GS18 "],
-  [QUOTE, "      } else for (const j of users) keepAt(j, 1);", "      }", R, "GS18 "],
-  [QUOTE, "      } else for (const j of users) keepAt(j, 1);", "      }", R, "GS19 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      }", R, "GS18 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      }", R, "GS19 "],
+  // review of e9b54f71, P2: the reads that used the gas kept alone, not at 6 where they used no more than a share of 6
+  [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      } else for (const j of users) keepAt(j, 1);", R, "GS21 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      } else for (const j of users) keepAt(j, 1);", RP, "a real Robinhood quote "],
+  // review of e9b54f71, P3: the reads after the starved one counted as its users, Math.min dropped, the final gas used for
+  // the first (in the ladder, then in the users' filter)
+  [QUOTE, "const users = part.slice(0, k).filter(", "const users = part.filter((_, x) => x !== k).filter(", R, "GS22 "],
+  [QUOTE, "keep.set(i, Math.min(keep.get(i) ?? n, n))", "keep.set(i, n)", R, "GS22 "],
+  [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      } else for (const j of users) keepAt(j, (all[j]!.used ?? 0) > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", R, "GS22 "],
+  [QUOTE, "const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);", "const users = part.slice(0, k).filter((j) => (all[j]!.used ?? 0) > S);", R, "GS22 "],
   [QUOTE, "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || users.length === 0) {", "if ((all[i] as { gas?: true }).gas === true || users.length === 0) {", R, "GS17 "],
   [QUOTE, "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || users.length === 0) {", "if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || true) {", R, "GS18 "],
   [QUOTE, " && a.used === b.used;", ";", R, "GS20 "],

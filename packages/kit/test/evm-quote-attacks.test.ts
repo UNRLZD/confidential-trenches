@@ -7994,3 +7994,102 @@ test("GS20 a provider that answers a read's gas used as another is not agreed wi
   // control: the same provider answering as the code does
   assert.deepEqual(await stdQuote(pools, token, [chain(pools, 0), inner]), below);
 });
+
+// Review of e9b54f71 (card evm-quote-gas-used): the fold's rules on answers both providers give as planted, each read's
+// success word and gas used by the call it is read in. The model's first call holds 16 reads at Robinhood's 64 a call
+// (as GS11), so S = (40M - 100,000) / 16 = 2,493,750 and READ_AGAIN_PER_CALL's share 6,650,000; a cold Robinhood TORCH
+// quote's call of 64 (S 623,437) is the same rule at a quarter of the gas (test/evm-quote-gas-used-replay.test.ts replays
+// it as answered live).
+type Plant = { first: [number, number]; six?: [number, number]; one?: [number, number] };
+// `rpc` with the planted answers of the reads `roles` names by their place in the quote's first call of more than 6
+// reads, as both providers see it: "first" in that call, "six" in a call of 2 to 6, "one" alone; a stage not planted (the
+// read in another call of the quote) is the model's own answer
+const planted = (inner: EvmRpc, roles: Map<number, Plant>, named: { call?: string; reads: Map<string, Plant> }): EvmRpc => async (calls) => {
+  const res = (await inner(calls)) as { result?: string }[];
+  return res.map((a, c) => {
+    const p = calls[c]!.params[0] as { to?: string; data?: string };
+    if (calls[c]!.method !== "eth_call" || p.to?.toLowerCase() !== MC3 || typeof a.result !== "string") return a;
+    const ds = decodeAggregate(p.data!);
+    if (named.call === undefined && ds.length > 6) {
+      named.call = ds.join();
+      for (const [k, plant] of roles) named.reads.set(ds[k]!, plant);
+    }
+    let r = a.result.slice(2);
+    const at = (o: number) => Number(BigInt("0x" + r.slice(2 * o, 2 * o + 64)));
+    ds.forEach((d, k) => {
+      const plant = named.reads.get(d);
+      const stage = plant === undefined ? undefined : ds.length > 6 ? (ds.join() === named.call ? plant.first : undefined) : ds.length > 1 ? plant.six : plant.one;
+      if (stage === undefined) return;
+      const [word, used] = stage;
+      const e = 64 + at(64 + 32 * k);
+      r = r.slice(0, 2 * e) + (word === 0 ? r.slice(2 * e, 2 * (e + 32)) : W(BigInt(word))) + W(BigInt(used)) + r.slice(2 * (e + 64));
+    });
+    return { ...a, result: "0x" + r };
+  });
+};
+// a cold quote with `roles` planted, then `warm` quotes, each as its aggregate3 calls; `kept(k)`: the size readSizes keeps
+// for the first call's read k
+const foldRun = async (token: string, roles: Map<number, Plant>, warm = 0) => {
+  const pools = [seeded(token), betterAt(token, 100_000), { key: keyOf(token, NATIVE, 100, 1, NATIVE), give: (a: bigint) => a / 2n }];
+  const named = { reads: new Map<string, Plant>() } as { call?: string; reads: Map<string, Plant> };
+  const quotes: Answered[][][] = [];
+  for (let q = 0; q <= warm; q++) {
+    const calls: Answered[][] = [];
+    assert.deepEqual(await stdQuote(pools, token, [answeredOf(planted(chain(pools, 0), roles, named), calls), planted(chain(pools, 1), roles, named)]), below);
+    quotes.push(calls);
+  }
+  const first = quotes[0]!.find((c) => c.map((r) => r.data.slice(2)).join() === named.call)!;
+  assert.equal(first.length, 16, `calls of ${quotes[0]!.map((c) => c.length).join(",")}`);
+  return { quotes, kept: (k: number) => quoteMod.evmReadSizeKept(first[k]!.to, first[k]!.data) };
+};
+const at64 = async (f: () => Promise<void>) => {
+  quoteMod.evmReadsPerCall(64);
+  try {
+    await f();
+  } finally {
+    quoteMod.evmReadsPerCall();
+  }
+};
+
+// Review of e9b54f71, P2: honest reads above S but within READ_AGAIN_PER_CALL's share (TORCH's 9 to 11 of about 1M in a
+// call of 64), with lighter reads behind them starved, are kept at 6 a call: the warm quotes send none of them alone and
+// answer no 2 (kept alone, TORCH's warm quotes sent 16 calls, 9 alone, against 9 at 6 a call)
+test("GS21 honest reads that used more than an even share of their call, but less than a share of 6, are kept at 6 a call when lighter reads behind them answer 2: the warm quotes send no read alone and answer no 2", () =>
+  at64(async () => {
+    const { quotes, kept } = await foldRun("0x00000000000000000000000000000000000a5aa7", new Map([[1, { first: [0, 3_000_000] }], [2, { first: [0, 4_000_000] }], [5, { first: [2, 150_000], six: [0, 150_000] }], [6, { first: [2, 150_000], six: [0, 150_000] }]]), 2);
+    assert.deepEqual([1, 2, 5, 6].map(kept), [6, 6, undefined, undefined]);
+    const words = quotes.map((calls) => JSON.stringify(calls.map((c) => c.map((r) => r.word).join(""))));
+    for (const calls of quotes.slice(1)) {
+      assert.ok(calls.every((c) => c.length > 1), `a read alone on a warm quote: ${words.join(" | ")}`);
+      assert.ok(calls.flat().every((r) => r.word !== 2), `a 2 on a warm quote: ${words.join(" | ")}`);
+    }
+  }));
+
+// Review of e9b54f71, P3: three rules no physical read in the model tells apart from its mutant.
+//  (a) only the reads before a starved read can have starved it: a read after it that used more than S is not kept
+//      (where honest, a read starved with S or less leaves each read after it about S/4, so none after it uses more);
+//  (b) a read kept alone as it needed (still 2 at 6 a call) stays alone when a read it starved keeps it at 6 (Math.min);
+//  (c) a read that starved one after it is kept by its first answer's gas used, not its final one: one that used 4M at
+//      first and 8M read again at 6 a call is kept at 6, as it fit there, never alone;
+//  (d) and is told by its first gas used: one that used S or less at first starved no read after it, whatever it used
+//      when read again.
+test("GS22 the fold on planted answers both providers give: a read after a starved one is not kept, a read kept alone stays alone, and the reads that starved one are told and kept by their first gas used", () =>
+  at64(async () => {
+    // (a) read 1 starved (used 150,000; read again at 6 a call, its answer at 150,000), read 3 after it used 4M first
+    const a = (await foldRun("0x00000000000000000000000000000000000a5aa4", new Map([[1, { first: [2, 150_000], six: [0, 150_000] }], [3, { first: [0, 4_000_000] }]]))).kept;
+    assert.equal(a(3), undefined, "a read after the starved one is kept");
+    assert.equal(a(1), 6, "the starved read, with no read before it above S, keeps the size it was read again at");
+    // (b) read 1 used 4M and ran out, still 2 at 6 a call, its answer alone at 8M; read 3 after it starved (150,000)
+    const b = (await foldRun("0x00000000000000000000000000000000000a5aa5", new Map([[1, { first: [2, 4_000_000], six: [2, 1_660_000], one: [0, 8_000_000] }], [3, { first: [2, 150_000], six: [0, 150_000] }]]))).kept;
+    assert.equal(b(1), 1, "a read kept alone as it needed is kept at 6 by the read it starved");
+    assert.equal(b(3), undefined, "the read it starved is kept");
+    // (c) read 1 used 4M and ran out, its answer at 8M read again at 6 a call; read 3 after it starved (150,000)
+    const c = (await foldRun("0x00000000000000000000000000000000000a5aa6", new Map([[1, { first: [2, 4_000_000], six: [0, 8_000_000] }], [3, { first: [2, 150_000], six: [0, 150_000] }]]))).kept;
+    assert.equal(c(1), 6, "a read that fit at 6 a call is kept alone by its final gas used");
+    assert.equal(c(3), undefined, "the read it starved is kept");
+    // (d) read 1 used 1M (S or less) and ran out, its answer at 8M read again at 6 a call; read 3 after it starved
+    // (150,000): no read before read 3 used more than S at its first answer, so read 3 keeps the size it was read again
+    // at, and read 1 its own
+    const d = (await foldRun("0x00000000000000000000000000000000000a5aa8", new Map([[1, { first: [2, 1_000_000], six: [0, 8_000_000] }], [3, { first: [2, 150_000], six: [0, 150_000] }]]))).kept;
+    assert.deepEqual([d(1), d(3)], [6, 6], "a read that used S or less at first counted as one that starved the reads after it");
+  }));

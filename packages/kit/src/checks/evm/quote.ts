@@ -710,7 +710,10 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   // answered 2 in a call of n that needs more than an even share of it, S = (EVM_READ_CALL_GAS - 100,000) / n (its gas
   // used at its final answer, or still 2 alone), is kept at the size it was read again at. One that needs S or less was
   // starved by the reads before it that used more than S (where every read of a call takes S or less, each is given
-  // about S at least): those are kept apart, alone, and the read itself is not kept. So a pool built to burn gas, which may return after it (a
+  // about S at least): those are kept apart, alone where they used more than READ_AGAIN_PER_CALL's share, else at that
+  // many a call, and the read itself is not kept (review of e9b54f71, P2: a cold Robinhood TORCH quote at 100 ETH has 9
+  // to 11 honest reads above S(64), 623,000, before 37 reads answered 2 in one call of 64; kept alone, its warm quotes
+  // sent 16 calls, 9 alone, in 1.83 to 2.09 s, against 9 calls, none alone, at 6 a call). So a pool built to burn gas, which may return after it (a
   // hookless v4 pool with ticks tuned to burn 30M, delta review of 344596b1, P2-1), is the read sent apart, never the
   // honest reads it starved; one with no read before it above S is kept at the size it was read again at.
   const share = (n: number) => Number(EVM_READ_CALL_GAS - 100_000n) / n;
@@ -723,7 +726,7 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
       const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);
       if ((all[i] as { gas?: true }).gas === true || (all[i]!.used ?? 0) > S || users.length === 0) {
         if (size.get(i) !== sent.get(i)) keepAt(i, size.get(i)!);
-      } else for (const j of users) keepAt(j, 1);
+      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);
     });
   }
   // a plain read kept here keeps that size, newest; one kept before and not here keeps its size, newest
