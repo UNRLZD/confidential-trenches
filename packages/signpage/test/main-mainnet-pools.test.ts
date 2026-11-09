@@ -17,6 +17,7 @@ import { base64 } from "@scure/base";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
+import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 
 const wrap = (src: string, name: string, body: string): string => {
   const anchor = `export function ${name}(`;
@@ -123,6 +124,10 @@ const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mintData = new Uint8Array(82);
 mintData[44] = 6;
 mintData[45] = 1;
+/** While set, every Solana read but the Rent's and the sold mint's answers after this many ms (review P3-3): the
+ *  landing's settle pass's reads, slow, as a provider that is down and retried makes them. */
+const SLOW_MS = 2000;
+gl.__ctSlowMs = 0;
 g.fetch = async (url: unknown, init?: RequestInit) => {
   let body: { id?: unknown; method?: string; params?: unknown[] } = {};
   try {
@@ -130,6 +135,9 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   } catch {}
   const id = body.id ?? 1;
   calls.push({ url: String(url), method: String(body.method) });
+  const slow = gl.__ctSlowMs as number;
+  const rentOrMint = body.method === "getAccountInfo" && (body.params?.[0] === "SysvarRent111111111111111111111111111111111" || body.params?.[0] === SELL_MINT);
+  if (slow > 0 && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) await new Promise((ok) => setTimeout(ok, slow));
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
     rentReads.push(String(url));
     const value = { owner: "Sysvar1111111111111111111111111111111111111", data: [base64.encode(rentData), "base64"], lamports: 1009200, executable: false, rentEpoch: 0, space: 17 };
@@ -145,6 +153,20 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   if (body.method === "getTokenAccountsByOwner") return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: [] } }), { status: 200 });
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
 };
+
+/** Asks deposit.quote as the APP_HOST frame does; its answer's code (any: this test's helper refuses the quote). */
+async function askQuote(): Promise<string> {
+  const id = crypto.randomUUID();
+  const e = new Event("message");
+  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "deposit.quote", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" } } });
+  win.dispatchEvent(e);
+  for (let t = 0; t < 2000; t++) {
+    const a = posted.find((m) => m.id === id);
+    if (a) return a.ok ? "ok" : a.error!.code;
+    await new Promise((ok) => setTimeout(ok, 5));
+  }
+  throw new Error("no answer to deposit.quote");
+}
 
 async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
   const id = crypto.randomUUID();
@@ -176,10 +198,19 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   const held = await ns.move(p.id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now() + 600_000), context: "1" });
   g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
+  // review P3-3 (card sol-pools-mainnet-pin): the landing's settle pass (src/pool-testnet.ts settle, a pool.deposit run)
+  // holds the seed lock shared across its Solana reads, and a deposit.quote waits for the landing's naming, whose write
+  // takes that lock exclusive: the pass starts only once the naming is written, so a slow provider never holds the quote
+  gl.__ctSlowMs = SLOW_MS;
   await import("../src/main.ts");
   const app = doc.body.children.find((c) => c.tagName === "iframe");
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
+  const t0 = performance.now();
+  await askQuote();
+  const quoteMs = performance.now() - t0;
+  gl.__ctSlowMs = 0;
+  assert.ok(quoteMs < SLOW_MS / 2, `deposit.quote at boot answered after ${Math.round(quoteMs)} ms, behind the settle pass's Solana reads (${SLOW_MS} ms each)`);
 
   const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;

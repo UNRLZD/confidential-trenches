@@ -755,8 +755,11 @@ function notesMoved(e: WalletEvent): void {
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
-  // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
-  void testnet?.settle();
+  // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask; once the landing's naming
+  // is written (card sol-pools-mainnet-pin, review P3-3): the run holds the seed lock shared across its RPC reads, which
+  // the naming's write waits out, and a deposit.quote waits for the naming (deposit-name.ts named), so a settle started
+  // first held the quote for as long as its reads took (3.28 s with both RPCs answering 503)
+  void namer.named().then(() => testnet?.settle()).catch(() => {});
   // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
   void follows?.settle().catch(() => {});
   // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
