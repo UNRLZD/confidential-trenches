@@ -245,10 +245,10 @@ test("verifyQuery: the view calls of app.md A7, at the block given", () => {
   assert.deepEqual(verifyQuery("token", PINS, at), { request_type: "view_account", account_id: PINS.asset, block_id: H });
 });
 
-test("WORDS: every word carries its source; no draft is left (owner 2 Nov 06:08Z, all approved); no claim words", () => {
+test("WORDS: every word carries its source; the only drafts are the pool rows' new labels (card verify-pools); no claim words", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text.length > 0 && w.source.length > 0, k);
   for (const k of ["close", "asset"] as const) assert.equal(WORDS[k].draft, false, k);
-  assert.deepEqual([...DRAFTS], []);
+  assert.deepEqual([...DRAFTS], ["pools", "authority", "owner", "proxy", "solanaExplorer", "blockscout", "hoodscan"]);
   const claim = /\b(verified|safe|secure|backed|guarantee|trustless|all there|matches|proven|solvent)\b/i;
   for (const [k, w] of Object.entries(WORDS)) assert.doesNotMatch(w.text, claim, k);
   for (const w of Object.values(WORDS)) assert.doesNotMatch(w.text, /[.!?]$/, "labels, not sentences");

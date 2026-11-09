@@ -59,8 +59,12 @@ export const IN_PROCESS = [
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
+  // cut as a release only after its merge: the marks and the pin, not the ledger
+  { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
+  { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   { key: "signpage-withdraw-form", host: "sign", load: () => import("../live-checks/signpage-withdraw-form.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "wallet-withdraw-move-out", host: "sign", load: () => import("../live-checks/wallet-withdraw-move-out.mjs"), run: async (m, f) => m.judge(await m.probe(SIGN, f)) },
   { key: "signpage-pool-kinds", host: "sign", load: () => import("../live-checks/signpage-pool-kinds.mjs"), run: async (m, _f, dirs) => m.judge(await m.read(dirs.sign)) },
@@ -77,6 +81,8 @@ export const CHILD_RUNS = [
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
+  { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
@@ -88,6 +94,7 @@ export const OUT = {
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
+  "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
   "wallet-deposit-follow": "the helper's deposit status answer",
   "pool-ready-no-flicker": "the devnet run record",
@@ -121,6 +128,7 @@ export const OUT = {
   "app-legend-holds-still": "a browser and the helper",
   "app-discover-rows-hold": "a browser and the helper",
   "app-verify-mount": "a browser and NEAR RPCs",
+  "verify-pools": "a browser and chain RPCs",
   "app-no-blank-pages": "a browser",
   "app-footer-bar": "a browser and NEAR RPCs (its --harness run is in test:e2e)",
   "app-portfolio-mount": "a browser (its --harness run is in test-browser)",
@@ -136,6 +144,7 @@ export const OUT = {
   "evm-quote-warm-round": "EVM RPC quotes",
   "evm-quote-lag-held": "EVM RPC quotes",
   "evm-quote-read-gas-starve": "EVM RPC quotes",
+  "evm-pool-index": "EVM RPC index reads on the venue's two index readers",
   "evm-sell-hook-intrablock": "EVM RPC traces and replays",
   "rh-cold-quote": "EVM RPC quotes",
   "token-page-fills-after": "a browser and the helper",

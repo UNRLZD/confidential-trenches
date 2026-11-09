@@ -12,11 +12,18 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { openWalletStore } from "@blindfill/wallet/store";
+import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const gl = globalThis as Record<string, unknown>;
 const moveOuts: (string | null)[] = [];
 gl.__ctMoveOut = moveOuts;
+const settled: string[] = [];
+gl.__ctSettled = settled;
+const settledArchival: string[][] = [];
+gl.__ctSettledArchival = settledArchival;
+const settledArchivalRpcs: { tx: (p: unknown) => Promise<unknown> }[][] = [];
+gl.__ctSettledArchivalRpcs = settledArchivalRpcs;
 registerHooks({
   load(url, context, next) {
     const r = next(url, context);
@@ -36,7 +43,9 @@ export function drawHeldMoveOut(doc, deps, button, run) {
     if (url.endsWith("/signpage/src/main.ts")) {
       const s = String(r.source);
       if (!s.includes("function decide(")) throw new Error("decide: its line moved; update this test's hook");
-      return { ...r, source: `${s}\nglobalThis.__ctDecide = decide;\nglobalThis.__ctBusy = () => busy;\nglobalThis.__ctRoot = root;\n` };
+      const resume = "await moveOutHeld(k, null, {";
+      if (s.split(resume).length !== 2) throw new Error("settleHeld: its resume line moved; update this test's hook");
+      return { ...r, source: `${s.replace(resume, "await ((k1, t1, d1) => (globalThis.__ctSettled.push(k1), globalThis.__ctSettledArchival.push(d1.archival.map((h) => h.name)), globalThis.__ctSettledArchivalRpcs.push(d1.archival), moveOutHeld(k1, t1, d1)))(k, null, {")}\nglobalThis.__ctDecide = decide;\nglobalThis.__ctBusy = () => busy;\nglobalThis.__ctRoot = root;\n` };
     }
     return r;
   },
@@ -70,7 +79,9 @@ Object.assign(gl, {
 });
 const BC = globalThis.BroadcastChannel;
 gl.BroadcastChannel = class extends BC { constructor(name: string) { super(name); (this as unknown as { unref?: () => void }).unref?.(); } };
-gl.fetch = async () => new Response("{}", { status: 503 });
+// every fetch refused (503), unless a test hands its own answers
+let answers: ((url: string) => Response) | null = null;
+gl.fetch = async (url: string) => (answers ? answers(url) : new Response("{}", { status: 503 }));
 const until = async (what: string, ok: () => boolean) => {
   for (let t = 0; t < 500; t++) {
     if (ok()) return;
@@ -85,6 +96,8 @@ test("withdraw.open with the from_id of a held op holding a move: the recorded a
   await w.insertSeed({ v: 1, entropy: new Uint8Array(16).fill(0x7f), source: "code", code_saved: true, created_ms: 1 });
   const out = { to: "alice.testnet", amount: "1999999", nonce: "8", height: 1000, register: false, hash: "11111111111111111111111111111111", signed: "AA==" };
   await w.put("ops", "op1", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, follow: { network: "testnet", s: "1", i: 0, u: U, address: "a", deadline_ms: 1, origin: "nep141:x", min_out: "1", why: "note", out } });
+  // a moved one: the sign-in's resume reads it too, so a later deposit in its U is open again (delta review of c3e71713, item 2)
+  await w.put("ops", "op0", { kind: "deposit", stage: "held", txs: [], created_ms: 2, held_id: U, follow: { network: "testnet", s: "1", i: 1, u: U, address: "b", deadline_ms: 1, origin: "nep141:x", min_out: "1", why: "moved_out", out } });
   w.close();
   await import("../src/main.ts");
   const root = gl.__ctRoot as { dataset: Record<string, string> };
@@ -102,4 +115,18 @@ test("withdraw.open with the from_id of a held op holding a move: the recorded a
   assert.equal(input.value, "alice.testnet", "the recorded account is drawn");
   assert.equal(input.readOnly, true);
   assert.equal(page.dataset.outcome, "sent");
+  // op0 sorts first, so settleHeld reads it before op1's follow polls
+  await until("op1's resume", () => settled.includes("op1"));
+  assert.deepEqual(settled, ["op0", "op1"], "the sign-in's resume reads every held op with a move, a moved one too");
+  for (const names of settledArchival) assert.deepEqual(names, [...NEAR_NETWORKS.testnet.archival], "each resume is handed the network's whole archival list");
+  // each archival host is asked again after a throttle (the wallet's archivalRpc, delta review 3 F4): a 429, then the answer
+  const asked: string[] = [];
+  const host = NEAR_NETWORKS.testnet.archival[0];
+  answers = (url) => (url !== host ? new Response("{}", { status: 503 }) : (asked.push(url), asked.length === 1 ? new Response("", { status: 429, headers: { "retry-after": "0" } }) : Response.json({ result: { ok: 1 } })));
+  try {
+    assert.deepEqual(await settledArchivalRpcs[0]![0]!.tx({ tx_hash: "x", sender_account_id: "y", wait_until: "NONE" }), { result: { ok: 1 } });
+  } finally {
+    answers = null;
+  }
+  assert.deepEqual(asked, [host, host], "asked again once after the 429");
 });

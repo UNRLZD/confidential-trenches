@@ -84,7 +84,7 @@ import {
   type SolanaPoolRelease,
   type SolanaRent,
 } from "../../../kit/src/trade/solana/pool-buy.ts";
-import { SOLANA_POOL_NEXT_PAGE_WINDOW } from "../../../kit/src/trade/solana/pool-deposit.ts";
+import { SOLANA_POOL_NEXT_PAGE_WINDOW, solanaPoolNoteFloor } from "../../../kit/src/trade/solana/pool-deposit.ts";
 import { pinnedSignBuy, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolProofBinding, type EvmPoolVenueList } from "../../../kit/src/trade/evm/buy-unpinned.ts";
 import { EVM_SELL_SIM, pinnedSignSell, pinnedSignSellAuthorization, pinnedSignSimSell, type EvmPoolSell, type EvmPoolSellAuthorization, type EvmSellSim } from "../../../kit/src/trade/evm/sell-unpinned.ts";
 import { evmIsQuotedBuy, evmIsQuotedSell } from "../../../kit/src/trade/evm/quoted.ts";
@@ -549,7 +549,10 @@ export type SolanaSellSurplus = { full: boolean; lamports: bigint; fee: bigint; 
 
 /** A Solana pool sell: the kit's venue sell of the request's amount from W at a min out no lower than the device's
  *  floor, then, last, by W, the deposit into the pinned pool of exactly that min out less `reserve`, the lamports the
- *  device keeps on W for the sell's own fees (its own number, never a server's); the draw shows that deposit. */
+ *  device keeps on W for the sell's own fees (its own number, never a server's); the draw shows that deposit. A deposit
+ *  back under the kit's solanaPoolNoteFloor at `surplus.rent` (the Rent sysvar both RPCs read) is refused by name,
+ *  deposit_floor (card sol-sell-deposit-back-floor: no release could take it whole); there the sell is the venue's
+ *  alone, its whole min out left on W, and the draw shows no deposit. No rent read: refused. */
 export function checkSolanaSell(
   wire: Uint8Array,
   ask: PoolAsk,
@@ -575,22 +578,14 @@ export function checkSolanaSell(
   if (d.signers.length !== 1 || d.signers[0] !== ctx.wallet) return refuse("signers");
   const n = head(d.ixs);
   const body = d.ixs.slice(n);
-  const dep = body.at(-1);
-  const sell = body.slice(0, -1);
-  if (!dep) return refuse("instructions");
-  // the min out the bytes carry: the venue sell's last 8 data bytes (pump's and PumpSwap's sell(amount, min_out))
-  const venueIx = sell.find((x) => x.data.length === 24);
+  if (body.length === 0) return refuse("instructions");
+  // the min out the bytes carry: the venue sell's last 8 data bytes (pump's and PumpSwap's sell(amount, min_out)); the
+  // pool's deposit is 41 bytes, so it is never read as the venue's
+  const venueIx = body.find((x) => x.data.length === 24 && x.program !== pin.program);
   if (!venueIx) return refuse("sell");
   const minOut = u64le(venueIx.data, 16);
   if (minOut < floor) return refuse("min_out");
   const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);
-  if (sell.length !== want.length) return refuse("sell");
-  for (let i = 0; i < want.length; i++) {
-    const w = want[i]!;
-    const g = sell[i]!;
-    if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
-    if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
-  }
   if (typeof reserve !== "bigint" || reserve >= minOut) return refuse("reserve");
   // A sell that empties W's holding (card sol-w-sweep; `surplus.full`) is priced exactly as the device prices it
   // (solanaSellReserve), at any reserve: what W holds (`lamports`, the lower of both RPCs) against the fee, what the
@@ -617,10 +612,28 @@ export function checkSolanaSell(
     if (reserve !== (keeps ? keep : short + r0)) return refuse("reserve");
     if (keeps) swept = full - r0;
   } else if (reserve < 0n) return refuse("reserve");
-  // the note is one the pool takes, on every path (review 3 L-a of 446d830f: on the fallback a 999,999 note passed
-  // here, refused by the device and the program, deposit.rs's least deposit)
-  if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return refuse("reserve");
-  const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);
+  if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");
+  // the note is one a release can take whole, on every path (card sol-sell-deposit-back-floor; it is never under the
+  // pool's least deposit, so review 3 L-a of 446d830f's 999,999 note is refused here too), at the rent both RPCs read
+  const rent = p?.rent;
+  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");
+  const kept = minOut - reserve < solanaPoolNoteFloor(rent);
+  // under the floor: the venue's sell alone, nothing after it; a deposit there is refused by name
+  const last = body.at(-1)!;
+  if (kept && last.program === pin.program) return refuse("deposit_floor");
+  const sell = kept ? body : body.slice(0, -1);
+  if (sell.length !== want.length) return refuse("sell");
+  for (let i = 0; i < want.length; i++) {
+    const w = want[i]!;
+    const g = sell[i]!;
+    if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");
+    if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");
+  }
+  if (kept) {
+    passedWire(wire);
+    return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };
+  }
+  const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads, true);
   if (back !== minOut - reserve) return refuse("deposit_amount");
   passedWire(wire);
   return { chain: "solana", op: ask.kind, token: ask.token, amount: ask.amount, feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back };

@@ -354,7 +354,7 @@ test("words: every word has a source; the drafts left are the overflow button's 
   for (const k of ["cash", "noPositions", "noActivity", "open", "closed", "offline", "noRoute", "reverted", "held", "today", "yesterday", "notRestorable"] as const) assert.equal(WORDS[k].draft, false, k);
   // owner 3 Nov 09:17Z, keep (card balances-per-chain)
   for (const k of ["privateBalance", "balance", "ready", "pending", "noBalance"] as const) assert.equal(WORDS[k].draft, false, k);
-  assert.deepEqual([...DRAFTS], ["more", "exportKey", "wallets"]);
+  assert.deepEqual([...DRAFTS], ["more"], "Export key and Wallets were kept (owner 8 Nov 07:55Z)");
 });
 
 test("export (card app-export-every-wallet): each row names the wallets that hold it; Wallets lists every money wallet with no position, a deposit wallet with money left among them", () => {

@@ -51,6 +51,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-buy-quote-ends-on-node.mjs",
   "scripts/live-checks/evm-fee-collector.mjs",
   "scripts/live-checks/evm-mainnet-senders.mjs",
+  "scripts/live-checks/evm-pool-index.mjs",
   "scripts/live-checks/evm-quote-lag-held.mjs",
   "scripts/live-checks/evm-quote-read-gas-starve.mjs",
   "scripts/live-checks/evm-quote-warm-round.mjs",
@@ -103,6 +104,7 @@ export const CHANGED = [
   "scripts/live-checks/kit-oneclick-pins-frozen.mjs",
   "scripts/live-checks/page-evm-rpc-csp.mjs",
   "scripts/live-checks/wallet-deposit-follow.mjs",
+  "scripts/live-checks/words-nov8-final.mjs",
   "scripts/live-checks/wallet-refund-move.mjs",
   "scripts/live-checks/kit-renewal-read-bounded.mjs",
   "scripts/live-checks/market-data-evm.mjs",
@@ -144,6 +146,8 @@ export const CHANGED = [
   "scripts/live-checks/evm-pool-sync-wide-pages.mjs",
   "scripts/live-checks/wallet-near-prepay-taken.mjs",
   "scripts/live-checks/held-deposit-way-out.mjs",
+  "scripts/live-checks/held-move-forgotten-tx.mjs",
+  "scripts/live-checks/wallet-restore-id-reader.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",
   "scripts/live-checks/signpage-pool-flow.mjs",
   "scripts/live-checks/signpage-pool-kinds.mjs",
@@ -173,6 +177,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-w-sweep.mjs",
   "scripts/live-checks/sol-rent-back-dust-burn.mjs",
   "scripts/live-checks/kit-sol-pool-deposit-floor.mjs",
+  "scripts/live-checks/sol-sell-deposit-back-floor.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
   "scripts/live-checks/solana-release-reads-paced.mjs",
   "scripts/live-checks/token-page-fills-after.mjs",
@@ -195,6 +200,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
+  "scripts/live-checks/verify-pools.mjs",
 ];
 
 // Scripts in the searched folders that open no connection from Node, and why.

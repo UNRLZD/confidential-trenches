@@ -15,7 +15,7 @@ export interface Word {
 }
 
 export const WORDS = {
-  placeholder: { text: "Name, symbol or address", source: "draft, card app-header-search-chain: R5 app.js P.topbar .sph P.dc(\"Name, symbol or address\", \"CN-10\")", draft: true },
+  placeholder: { text: "Name, symbol or address", source: "8 Nov 19:40Z, kept as drawn; drawn from card app-header-search-chain: R5 app.js P.topbar .sph P.dc(\"Name, symbol or address\", \"CN-10\")", draft: false },
   // the field's, the icon button's and the phone button's accessible name (R5 aria-label="Search"), Portfolio's signed word
   search: PORTFOLIO.search,
   all: { text: "All", source: "R5 app.js P.chainChip (`chainLabel || \"All\"`)", draft: false },

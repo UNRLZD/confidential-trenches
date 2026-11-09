@@ -367,7 +367,9 @@ async function main() {
   const release = VERIFY_RELEASES[network];
   if (!release) throw new Error(`--network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
-  const route = harness ? await harnessRoute(build, release.rpcs) : null;
+  // the pool rows' RPCs (card verify-pools) are reached live too, so the panel's pool reads end as on the hosts
+  const pools = Object.values(release.pools).flatMap((p) => p?.rpcs ?? []);
+  const route = harness ? await harnessRoute(build, [...release.rpcs, ...pools]) : null;
   const source = harness ? `harness, terminal build ${named(build)}, the release's ${network} RPCs live` : `live ${APP_HOST}`;
   const rec = await collect({ shots, route, network, source });
   const record = opt("--record");

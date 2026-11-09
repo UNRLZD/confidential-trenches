@@ -20,11 +20,19 @@
 //   usually `gas`: how much NEAR U needs, sent from the typed account.
 // - Never twice: the signed bytes are written into the op (follow.out) by a compare-and-set before they are sent; an op
 //   that holds one signs nothing new. A reload sends the same bytes again and reads them. A record is gone, never to land,
-//   only when it reads FINAL and failed on both RPCs (nothing moved); or unknown on both and either expired (U's key nonce
-//   below it at a height past its block + TX_VALIDITY_BLOCKS) or taken (U's key nonce at or past it SETTLE_BLOCKS below
-//   the read height too: nearcore refuses a nonce at or below the key's, so those bytes never land, and a tx included
-//   that far back has run every receipt). A gone record goes to follow.out_past, and a new transaction is signed only on
-//   the user's tap (a typed account), never on a resume (null): review of d791adda, M1 and L6.
+//   only when it reads FINAL and failed on both RPCs (nothing moved); or, unless both read it FINAL success, either
+//   expired (no side reads the tx and U's key nonce is below it at a height past its block + TX_VALIDITY_BLOCKS) or
+//   settled (U's key nonce at or past it SETTLE_BLOCKS below the read height too: nearcore refuses a nonce at or below
+//   the key's, so those bytes never land again, and a tx included that far back has run every receipt). Money in U is
+//   always movable (card held-move-forgotten-tx): a settled record with U holding more than 1 base unit on the pair's
+//   equal read is replaced, whatever any host says of the tx (a tap moves it); with U empty it is read once more on
+//   every one of the network's archival RPCs, since the pair forgets old txs, and settled only when all answer the same:
+//   FINAL success a move that landed (the op ends moved_out), FINAL failure a failed one, UNKNOWN_TRANSACTION from a
+//   host that serves the record's own block a replaced one (another tx of U used the nonce), never drawn as "not
+//   moved"; any other mix, or no answer, leaves it as it is. A landed move reads Moved only while U holds at most 1 base
+//   unit, in every path (follow() and a moved op's resume too). A gone record goes to follow.out_past,
+//   and a new transaction is signed only on the user's tap (a typed account), never on a resume (null): review of
+//   d791adda, M1 and L6.
 // - One move of U at a time: the read, the signature and the compare-and-set run under deps.uLock (the page's
 //   FOLLOW_LOCK/<network>/<U>, taken only if free, so no deposit follow of U binds U's USDC meanwhile), and while another
 //   op of U holds a live record, that record is followed and nothing is signed.
@@ -40,7 +48,7 @@ import { readTokenStorageMin } from "../arming/accounts.ts";
 import { depositId } from "../derive/keys.ts";
 import type { WalletStore } from "../store/index.ts";
 import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
-import { type FollowRpc, followRpc, type DepositOp } from "./follow.ts";
+import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, statusFacts } from "./follow.ts";
 
 /** What the op keeps of its move out (op.follow.out), written before the send: plain values, the signed bytes public. */
 export interface MoveOutRecord {
@@ -54,6 +62,9 @@ export interface MoveOutRecord {
   /** The transaction's hash (base58 sha256 of its bytes) and its signed bytes (base64). */
   hash: string;
   signed: string;
+  /** Signed for an op already moved_out (a later deposit in U reopened it): the op's own money went with an earlier
+   *  record, so this one carries later money only, and the op needs nothing of it to read Moved again (landed). */
+  later?: true;
 }
 
 export type MoveOutOutcome =
@@ -61,8 +72,15 @@ export type MoveOutOutcome =
   | { kind: "moved"; to: string; amount: bigint; hash: string }
   /** Sent (or sent again), not yet read FINAL on both: a later call reads it again and signs nothing. */
   | { kind: "sent"; to: string; amount: bigint; hash: string }
-  /** The record can never land (FINAL and failed on both RPCs, expired, or its nonce taken): the next tap signs anew. */
+  /** The record can never land (FINAL and failed, or expired): the next tap signs anew. */
   | { kind: "failed"; to: string; amount: bigint; hash: string }
+  /**
+   * The record never ran and never will (another tx of U used its nonce: both of the pair and every archival RPC answer
+   * UNKNOWN_TRANSACTION for it), or it landed and U holds more than 1 base unit again (a later deposit), or no equal word
+   * on it came while U holds more: the record is history now and nothing is moving; the account is typed again for the
+   * next tap. Never "not moved" for it: the tx that took the nonce may be U's own.
+   */
+  | { kind: "open" }
   /** U's NEAR is short of the transaction's cost: `need` yocto more, from the typed account. */
   | { kind: "gas"; need: bigint; u: string }
   /** U holds one base unit or less on the token: nothing to move. */
@@ -110,6 +128,50 @@ export function moveOutRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs
   };
 }
 
+/** How many times an archival host is asked one read in all, and the longest wait between two asks (ms). */
+export const ARCHIVAL_ASKS = 4;
+export const ARCHIVAL_WAIT_MAX_MS = 10_000;
+/** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
+function retryAfterMs(h: string | null, now: number): number | null {
+  if (h === null || h.trim() === "") return null;
+  const s = Number(h);
+  if (Number.isFinite(s)) return s >= 0 ? s * 1000 : null;
+  const t = Date.parse(h);
+  return Number.isFinite(t) ? Math.max(0, t - now) : null;
+}
+/**
+ * An archival host (NEAR_NETWORKS[network].archival) by URL: moveOutRpc's, but a read it throttles or cannot serve
+ * (HTTP 429 or 5xx, a JSON-RPC error code -429 as fastnear answers a rate limit, or no connection) is asked again
+ * after the host's Retry-After, else 1 s doubled per ask, ARCHIVAL_WAIT_MAX_MS at most (the wait pool/evm.ts's
+ * throttleWaitMs takes), ARCHIVAL_ASKS asks in all (as the card's live check asks near.org's, which rate-limits a few
+ * quick reads with HTTP 429, read 8 Nov 2026), then its failure. A read that times out is not asked again. Delta review
+ * 3 of held-move-forgotten-tx (F4): one throttled ask no longer leaves a landed forgotten move unread.
+ */
+export function archivalRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS, sleep: (ms: number) => Promise<void> = (ms) => new Promise((ok) => setTimeout(ok, ms))): MoveOutRpc {
+  const post = async (method: string, params: unknown): Promise<unknown> => {
+    for (let ask = 1; ; ask++) {
+      let after: number | null = null;
+      let why: string;
+      try {
+        const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: AbortSignal.timeout(timeoutMs) });
+        if (res.status === 200) {
+          const body: unknown = await res.json();
+          if (!(isObj(body) && isObj(body.error) && body.error.code === -429)) return body;
+          why = "JSON-RPC -429";
+        } else if (res.status === 429 || res.status >= 500) why = `HTTP ${res.status}`;
+        else throw new Error(`HTTP ${res.status}`);
+        after = retryAfterMs(res.headers.get("retry-after"), Date.now());
+      } catch (e) {
+        if ((e as Error).name === "TimeoutError" || (e as Error).message.startsWith("HTTP ")) throw e;
+        why = String(e);
+      }
+      if (ask >= ARCHIVAL_ASKS) throw new Error(`${url}: ${why} after ${ARCHIVAL_ASKS} asks`);
+      await sleep(Math.min(ARCHIVAL_WAIT_MAX_MS, Math.max(after ?? 0, 1_000 * 2 ** (ask - 1))));
+    }
+  };
+  return { ...moveOutRpc(url, fetchFn, timeoutMs), tx: (params) => post("tx", params), block: (params) => post("block", params) };
+}
+
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
 const DIGITS = /^(0|[1-9][0-9]*)$/;
@@ -142,10 +204,11 @@ function keyNonce(keys: unknown, at: number, own: string): bigint | null {
   const k = resultAt(keys, at);
   const list = k?.keys;
   if (!Array.isArray(list) || list.length !== 1 || !isObj(list[0]) || list[0].public_key !== own || !isObj(list[0].access_key)) return null;
-  // below 2^64 - 1, so the nonce signed next (this + 1) fits the u64 nearcore reads; a string answer is not capped by
-  // isSafeInteger, and Borsh keeps only 8 bytes of a larger one
+  // a u64, as nearcore keeps it: a string answer is not capped by isSafeInteger, and Borsh keeps only 8 bytes of a
+  // larger one. 2^64 - 1 itself is read (a move that landed at it is read back as landed); the tap refuses to sign past
+  // it (U64_MAX at the signing below), since the nonce signed next would not fit
   const n = big(list[0].access_key.nonce);
-  return n !== null && n < U64_MAX ? n : null;
+  return n !== null && n <= U64_MAX ? n : null;
 }
 const U64_MAX = 2n ** 64n - 1n;
 /** U's key nonce at block `at` on both RPCs, equal, else null. */
@@ -328,16 +391,23 @@ function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint,
 // ---------- reading the transaction back ----------
 /**
  * One RPC's read of the move's tx: ok (FINAL, every receipt a success), failed (FINAL, a failure), absent (the RPC's own
- * UNKNOWN_TRANSACTION, as scripts/ci/money-gate.mjs reads "missing"), or unknown: a timeout, a 429 or 5xx, receipts
- * still running or any other answer is no word on whether the tx exists. Asked with wait_until NONE, which answers at
+ * UNKNOWN_TRANSACTION, as scripts/ci/money-gate.mjs reads "missing"), pending (an answer naming this tx, its hash and
+ * U as signer, at any final_execution_status short of FINAL: its receipts still run, so it can still move U's USDC), or
+ * unknown: a timeout, a 429 or 5xx or any other answer is no word on whether the tx exists. The release RPCs answer a
+ * tx still running, to wait_until NONE, with its transaction, its outcomes so far and a final_execution_status of
+ * INCLUDED, EXECUTED_OPTIMISTIC, INCLUDED_FINAL or EXECUTED (rpc.mainnet.fastnear.com and near.drpc.org, a just-included
+ * mainnet tx read at once on both, 8 Nov 2026 13:57-13:58Z). NONE (not yet included) carries no transaction to name, so it
+ * is no word here: U's nonce is not past a record whose tx was never included. Asked with wait_until NONE, which answers at
  * once with the tx's outcome so far: to FINAL a hash the RPC does not know never answers UNKNOWN_TRANSACTION (the
  * release RPCs, read 8 Nov 2026: fastnear times out, dRPC answers 408), so FINAL is checked on the answer instead.
  */
-async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "failed" | "absent" | "unknown"> {
+const PENDING: ReadonlySet<unknown> = new Set(["INCLUDED", "EXECUTED_OPTIMISTIC", "INCLUDED_FINAL", "EXECUTED"]);
+async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "failed" | "absent" | "pending" | "unknown"> {
   try {
     const a = await r.tx({ tx_hash: hash, sender_account_id: u, wait_until: "NONE" });
     if (isObj(a) && isObj(a.error) && isObj(a.error.cause) && a.error.cause.name === "UNKNOWN_TRANSACTION") return "absent";
     const res = isObj(a) && a.error === undefined ? a.result : undefined;
+    if (isObj(res) && PENDING.has(res.final_execution_status) && isObj(res.transaction) && res.transaction.hash === hash && res.transaction.signer_id === u) return "pending";
     if (!isObj(res) || res.final_execution_status !== "FINAL" || !isObj(res.transaction) || res.transaction.hash !== hash || res.transaction.signer_id !== u) return "unknown";
     const outs = res.receipts_outcome;
     if (!Array.isArray(outs) || outs.length === 0) return "unknown";
@@ -348,8 +418,8 @@ async function txState(r: MoveOutRpc, hash: string, u: string): Promise<"ok" | "
     return "unknown";
   }
 }
-/** The tx on both RPCs: ok, failed, absent or unknown when both read the same; split when they differ (then nothing is decided). */
-async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "absent" | "unknown" | "split"> {
+/** The tx on both RPCs: ok, failed, absent, pending or unknown when both read the same; split when they differ (then nothing is decided). */
+async function readBoth(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, u: string): Promise<"ok" | "failed" | "absent" | "pending" | "unknown" | "split"> {
   const [a, b] = await Promise.all(rpcs.map((r) => txState(r, hash, u)));
   return a === b ? a! : "split";
 }
@@ -372,9 +442,18 @@ export interface MoveOutDeps {
   /** Opens the seed for the signature only: a fresh copy each call, zeroed here once U's key is derived. */
   seed64: () => Promise<Uint8Array>;
   seedLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * The network's archival RPCs: none, or exactly NEAR_NETWORKS[network].archival, each once (else refused). Every one
+   * is asked, and only for a record whose nonce U's nonce is settled past while U holds at most 1 base unit: none given,
+   * or any two answering apart (no answer included), and the record stays as it is.
+   */
+  archival?: readonly MoveOutRpc[];
   /** U's own lock (the page's FOLLOW_LOCK/<network>/<U>, exclusive), taken only if free: null when another holds it. */
   uLock?: <T>(fn: () => Promise<T>) => Promise<T | null>;
   sleep?: (ms: number) => Promise<void>;
+  /** The helper's 1Click status read (the follow's reader, follow.ts readDepositStatus): asked once at the tap for each
+   *  op of U whose stored status is none, PENDING_DEPOSIT or INCOMPLETE_DEPOSIT. Default: fetch. */
+  fetchFn?: typeof fetch;
   pollMs?: number;
 }
 
@@ -391,23 +470,101 @@ export async function heldOpOf(ops: Pick<WalletStore, "get">, opId: string): Pro
 /** How far below the read height U's key nonce must already be at or past a record's nonce for the record to be taken. */
 export const SETTLE_BLOCKS = 100;
 
+/**
+ * The block hash record `signed` was signed over (its Transaction's block_hash, borsh: signer_id string, the key's type
+ * byte and 32 bytes, nonce u64, receiver_id string, block_hash 32 bytes), when its signer is `u`; else null.
+ */
+export function signedBlockHash(signed: string, u: string): string | null {
+  try {
+    const b = base64.decode(signed);
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    let o = 0;
+    const str = (): string => {
+      const n = dv.getUint32(o, true);
+      const v = new TextDecoder().decode(b.subarray(o + 4, o + 4 + n));
+      o += 4 + n;
+      return v;
+    };
+    if (str() !== u || b[o] !== 0) return null;
+    o += 1 + 32 + 8;
+    str();
+    if (o + 32 > b.length) return null;
+    return base58.encode(b.subarray(o, o + 32));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One archival host's word on record `had` of U: its tx read, but UNKNOWN_TRANSACTION only once the same host serves
+ * the block the record was signed over (block_id had.height, its header hash the block_hash inside had.signed): a host
+ * pruned of that era, or of another chain, has no word ("unknown").
+ */
+async function archivedState(h: MoveOutRpc, had: MoveOutRecord, U: string): Promise<"ok" | "failed" | "absent" | "unknown"> {
+  const st = await txState(h, had.hash, U);
+  // an archival host is asked only of a tx the pair forgot: a running one there is no word
+  if (st === "pending") return "unknown";
+  if (st !== "absent") return st;
+  const want = signedBlockHash(had.signed, U);
+  if (want === null) return "unknown";
+  try {
+    const a = await h.block({ block_id: had.height });
+    const head = isObj(a) && isObj(a.result) && isObj(a.result.header) ? a.result.header : undefined;
+    return head && head.height === had.height && head.hash === want ? "absent" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** A record that is gone (can never land): why, with U's USDC when it was read. */
-type Gone = { gone: "failed" | "expired" | "taken"; usdc: bigint | null };
-/** Whether record `had` of U can still land (live: follow it), or is gone, read on both RPCs. */
-async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<"live" | Gone> {
+type Gone = { gone: "failed" | "expired" | "replaced"; usdc: bigint | null };
+/**
+ * Whether record `had` of U can still land (live: follow it), landed (its nonce settled, every archival RPC reads it
+ * FINAL and a success, U holds at most 1 base unit), or is gone, read on both RPCs and, once U's nonce is settled past
+ * it and U is empty, on the archival RPCs.
+ */
+async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: readonly [MoveOutRpc, MoveOutRpc], archival: readonly MoveOutRpc[]): Promise<"live" | "landed" | Gone> {
   const sides = await Promise.all(rpcs.map((r) => txState(r, had.hash, U)));
   if (sides.every((x) => x === "failed")) return { gone: "failed", usdc: null };
-  // a side that reads the tx (ok, or failed on one only) keeps it live; otherwise (absent or no answer, in any mix) U's
-  // nonce decides: expired needs no tx read, taken needs both RPCs to answer UNKNOWN_TRANSACTION
-  if (sides.some((x) => x === "ok" || x === "failed")) return "live";
-  const st = sides.every((x) => x === "absent") ? "absent" : "unknown";
+  // FINAL success on both: follow() reads it, and U with it
+  if (sides.every((x) => x === "ok")) return "live";
+  // otherwise (one side's word, or none, in any mix) U's nonce decides: expired needs no tx read; settled needs U's nonce
+  // at or past the record's SETTLE_BLOCKS below the read height too
   const r = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
   if (r === null) return "live";
+  // expired before any one side's word (delta review 4, item 3; delta review 5, item 2): U's nonce below the record's,
+  // read equal on the pair, at a height past its validity window means the tx was never included and never can be, so
+  // a side that reads it running, FINAL ok or FINAL failed is wrong, never a hold. The tap signs at that same nonce and
+  // the old bytes are past their window, so at most one of the two can land; unequal nonce reads hold (readMoveOut null)
   if (r.nonce < BigInt(had.nonce) && BigInt(r.height) > BigInt(had.height) + TX_VALIDITY_BLOCKS) return { gone: "expired", usdc: r.usdc };
-  // taken: only when both RPCs say the tx does not exist; a read that times out may be U's own move still running
-  if (st === "absent" && r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {
+  // its receipts still run on either RPC: it can still move U's USDC, so it is followed, whatever U holds or its nonce
+  // says (delta review 3, F1: a receipt delayed past SETTLE_BLOCKS)
+  if (sides.some((x) => x === "pending")) return "live";
+  if (r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {
     const past = await keyNonceAt(U, r.height - SETTLE_BLOCKS, rpcs).catch(() => null);
-    if (past !== null && past >= BigInt(had.nonce)) return { gone: "taken", usdc: r.usdc };
+    if (past !== null && past >= BigInt(had.nonce)) {
+      // U's nonce is settled past it on both RPCs: the record's bytes can never land again (nearcore refuses a nonce at or
+      // below the key's, and a tx included that far back has run every receipt). It landed, or another tx of U took its
+      // nonce. Money in U is always movable (delta reviews of c3e71713): U holding more than 1 base unit on the pair's
+      // equal read is replaced, whatever any host says of the tx (one of the pair forgetting it before the other, about 16
+      // to 37 h after it, or a tx read that fails, included), so a tap moves what U holds. For an empty U the archival
+      // hosts decide, which keep every tx (fastnear keeps about 100,000 to 180,000 mainnet blocks, dRPC under 230,000,
+      // read 8 Nov 2026), every listed one, settled only on an equal word from all (review M1: both read one backend,
+      // 8 Nov 07:56Z): FINAL success a landed move, FINAL failure a failed one, UNKNOWN_TRANSACTION from a host that
+      // serves the record's block (archivedState) a replaced one. An empty U with no equal word stays as it is.
+      // The hosts are asked only for an empty U (delta review 4, item 2: their word is not read otherwise, and their asks
+      // wait inside U's lock), and U is read again once they answered, the decision on that read (item 1: their asks may
+      // wait about 70 s, and a deposit reaching U meanwhile is open, never Moved); no new read and it stays as it is.
+      if (r.usdc > 1n) return { gone: "replaced", usdc: r.usdc };
+      if (archival.length === 0) return "live";
+      const words = await Promise.all(archival.map((h) => archivedState(h, had, U)));
+      const a = words.every((w) => w === words[0]) ? words[0]! : "unknown";
+      const now = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
+      if (now === null) return "live";
+      if (a === "ok" && now.usdc <= 1n) return "landed";
+      if (a === "failed" && now.usdc <= 1n) return { gone: "failed", usdc: now.usdc };
+      if (a === "absent" || now.usdc > 1n) return { gone: "replaced", usdc: now.usdc };
+    }
   }
   return "live";
 }
@@ -420,28 +577,179 @@ async function recordState(U: string, token: string, had: MoveOutRecord, rpcs: r
 export async function moveOutHeld(opId: string, to: string | null, deps: MoveOutDeps): Promise<MoveOutOutcome> {
   // the typed account is a string or nothing, before any read (checkMoveCalls refuses it again)
   if (to !== null && typeof to !== "string") throw new MoveOutRefused("U, the typed account, the token and every account id are strings");
+  return moveOut(opId, to, deps, true, { asked: new Set() });
+}
+/** One tap's status re-read (delta review 9, ruling 1): the ops it asked, once each over both of a tap's passes, and its
+ *  one budget, DEPOSIT_STATUS_TIMEOUT_MS from its first read (delta review 10, F2). */
+type TapReads = { asked: Set<string>; budget?: AbortSignal };
+// `again`: a tap whose followed record (one written before it: never its own new one) turns out landed with a later
+// deposit in U (open) runs once more, so that one tap signs (delta review 2 of c3e71713, L5); once only, so a tap signs
+// one move at most and no pair's word can make it sign in a loop
+async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again: boolean, tap: TapReads): Promise<MoveOutOutcome> {
   const { ops, rpcs } = deps;
+  const archival = deps.archival ?? [];
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
   const seedLock = deps.seedLock ?? (<T>(fn: () => Promise<T>) => fn());
   const uLock = deps.uLock ?? (<T>(fn: () => Promise<T>) => fn());
   let op = await heldOpOf(ops, opId);
   const network = op.follow.network as NearNetwork;
   if (nearPairNetwork(rpcs) !== network) throw new MoveOutRefused("the RPCs are not the op's network's release pair");
+  // none, or exactly the network's archival list, each host once (delta review L4: a part of it settles on fewer words)
+  const listed = NEAR_NETWORKS[network].archival as readonly string[];
+  const names = archival.map((h) => h.name);
+  if (archival.length !== 0 && (names.length !== listed.length || new Set(names).size !== names.length || names.some((n) => !listed.includes(n)))) throw new MoveOutRefused("an archival RPC is not the op's network's: the list must be none or exactly the network's");
   const U = op.follow.u;
   const token = NEAR_NETWORKS[network].usdc;
   const shownOf = (r: MoveOutRecord) => ({ to: r.to, amount: BigInt(r.amount), hash: r.hash });
 
+  // a gone record of op `id` leaves follow.out for follow.out_past (a compare-and-set on its hash)
+  const clear = (id: string, r: MoveOutRecord) =>
+    ops.update("ops", id, (v) => {
+      const o = v as DepositOp | undefined;
+      if (!isObj(o) || o.follow.out?.hash !== r.hash) return undefined;
+      const { out: _gone, ...rest } = o.follow;
+      return { ...o, follow: { ...rest, out_past: [...(o.follow.out_past ?? []), r] } };
+    });
+  // the filter landed() walks and re-checks inside each write: a held deposit op of U on this network, never one inside
+  // intents.near (a follower may have moved it on between the walk's read and the write: delta review 7, item 3)
+  const ofU = (o: DepositOp | undefined): o is DepositOp => isObj(o) && o.kind === "deposit" && o.stage === "held" && isObj(o.follow) && o.follow.u === U && o.follow.network === network && o.follow.intents_struck !== true;
+  // record r of op `owner` landed with U empty: U's held ops (the owner among them) end moved_out while the move covers
+  // them: the sum of their needs at most r's amount + 1 (what U held when it was signed), as follow.ts caps done by U's
+  // bound sum (delta review 6, F1 and F2). Ops this record already marked count first, at their own needs, so a second
+  // landed() on one record (two SIGN_HOST tabs: settleHeld runs on every load) never marks past the cap (delta review 7,
+  // item 2). Then every op 1Click named delivered, oldest first, each needing max(min_out, delivered); then each op whose
+  // own status last read a send in flight (sent, KNOWN_DEPOSIT_TX or PROCESSING) when U's bind stopped (follow.ts
+  // holdAll holds every op of U, and reads each one's status once as it does), oldest first, needing its min_out, the
+  // device's own signed floor; then each op whose status is PENDING_DEPOSIT or none (a read that failed at holdAll, or a
+  // page closed before the user paid), oldest first, at its min_out too: its worst case is a quote never paid read Moved,
+  // which hides no money, and a later USDC in U reopens it (delta review 8, ruling 1). One 1Click REFUNDED (into
+  // intents.near: every refund-moved op among them, its USDC in 1Click's own later tx), FAILED or INCOMPLETE_DEPOSIT
+  // has no need and is never marked (delta review 3, F3; delta review 5, item 1; delta review 7, item 1). An op
+  // reopened with no record (its money went with an earlier landed move: a later deposit reopened it, or follow.ts ended
+  // it so), and the owner of a `later` record, need nothing. The owner is no exception (the page picks it by key order,
+  // heldOpFor, not by whose money is in U): left unmarked, its landed record is history (out_past) and it stays held.
+  // Each marked op gets the record, so it reads Moved as the owner does (delta review item 8). A known limit, follow.ts's
+  // D2: `delivered` is 1Click's status through the helper, so a stranger's USDC in U can still cover a forged op; the
+  // cap keeps the ops read Moved within what the move took. The same helper picks the ranks: one that answers REFUNDED
+  // for a paid op leaves it no need, so its tap moves its money and it stays held (the page still answers moved; delta
+  // review 9, ruling 3). Answers whether the owner ends marked.
+  const landed = async (owner: string, r: MoveOutRecord): Promise<boolean> => {
+    const cap = BigInt(r.amount) + 1n;
+    const walk: { k: string; marked: boolean; rank: number; created: number; need: bigint | null }[] = [];
+    for (const k of await ops.keys("ops")) {
+      const o = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+      if (!ofU(o)) continue;
+      if (k === owner ? o.follow.out?.hash !== r.hash : o.follow.out !== undefined && o.follow.out.hash !== r.hash) continue;
+      const marked = o.follow.why === "moved_out" && o.follow.out?.hash === r.hash;
+      const reopened = o.follow.why === "moved_out" && o.follow.out === undefined;
+      const min = big(o.follow.min_out);
+      const got = o.follow.delivered === undefined ? null : big(o.follow.delivered);
+      const told = o.follow.delivered !== undefined;
+      const flight = o.follow.sent === true && (o.follow.status === "KNOWN_DEPOSIT_TX" || o.follow.status === "PROCESSING");
+      // the stale read (delta review 8, ruling 1): PENDING_DEPOSIT or none, held before any later status was read
+      const stale = o.follow.status === undefined || o.follow.status === "PENDING_DEPOSIT";
+      const need = reopened || (k === owner && r.later === true) ? 0n : min === null ? null : told ? (got === null ? null : got > min ? got : min) : flight || stale ? min : null;
+      const rank = marked ? 0 : told ? 1 : flight ? 2 : 3;
+      walk.push({ k, marked, rank, created: Number.isFinite(o.created_ms) ? o.created_ms : 0, need });
+    }
+    walk.sort((x, y) => x.rank - y.rank || x.created - y.created || (x.k < y.k ? -1 : x.k > y.k ? 1 : 0));
+    let sum = 0n;
+    let mine = false;
+    for (const { k, marked, need } of walk) {
+      if (marked) {
+        sum += need ?? 0n;
+        if (k === owner) mine = true;
+        continue;
+      }
+      if (need === null || sum + need > cap) continue;
+      let wrote = false;
+      await ops.update("ops", k, (v) => {
+        const o = v as DepositOp | undefined;
+        if (!ofU(o) || (o.follow.out !== undefined && (o.follow.out.hash !== r.hash || o.follow.why === "moved_out"))) return undefined;
+        wrote = true;
+        return { ...o, follow: { ...o.follow, why: "moved_out", out: r } };
+      });
+      if (!wrote) continue;
+      sum += need;
+      if (k === owner) mine = true;
+    }
+    if (!mine) await clear(owner, r);
+    return mine;
+  };
+  // what the page answers once a landed record was read: Moved on the page's own op's record when it is marked (delta
+  // review 7, item 4); else Moved on r when it marked any op of U (the page picks its op by key order, heldOpFor: delta
+  // review 8, ruling 3; a cap of amount + 1 can mark an op whose min_out is the whole move); else Moved on r when it
+  // left U having held at least MIN_DEPOSIT (r's amount + 1, the cap's base and follow.ts needOf's floor for a
+  // refund-moved op: delta review 11, F1), since a landed move that carried money never answers empty (delta review 8,
+  // point 3 fold); under it, with none marked, it is never an op of ours but a stranger's dust: nothing to move (delta
+  // review 10, F1)
+  const stored = async (r: MoveOutRecord): Promise<MoveOutOutcome> => {
+    const me = (await ops.get("ops", opId).catch(() => undefined)) as DepositOp | undefined;
+    if (isObj(me) && isObj(me.follow) && me.follow.why === "moved_out" && me.follow.out !== undefined) return { kind: "moved", ...shownOf(me.follow.out) };
+    for (const k of await ops.keys("ops")) {
+      const o = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+      if (ofU(o) && o.follow.why === "moved_out" && o.follow.out?.hash === r.hash) return { kind: "moved", ...shownOf(r) };
+    }
+    return BigInt(r.amount) + 1n >= VAULT_CONSTANTS.MIN_DEPOSIT ? { kind: "moved", ...shownOf(r) } : { kind: "empty" };
+  };
+  // the ops record r marked, reopened: its record history (out_past), why kept moved_out
+  const reopen = async (r: MoveOutRecord) => {
+    for (const k of await ops.keys("ops"))
+      await ops.update("ops", k, (v) => {
+        const o = v as DepositOp | undefined;
+        if (!ofU(o) || o.follow.why !== "moved_out" || o.follow.out?.hash !== r.hash) return undefined;
+        const { out: _gone, ...rest } = o.follow;
+        return { ...o, follow: { ...rest, out_past: [...(o.follow.out_past ?? []), r] } };
+      });
+  };
+  // at the tap, before the other ops' records are read (so a landed one is walked on fresh ranks) and before the walk:
+  // each op of U whose status is none, PENDING_DEPOSIT or INCOMPLETE_DEPOSIT (holdAll's one read failed, or came before
+  // a top-up 1Click then delivered) is read once again on the follow's reader, inside U's lock, the user present, and
+  // its facts kept (delta review 9, ruling 1; delta review 10, F4 and order). The reads run at once under the tap's one
+  // budget, an abort a failed read (delta review 10, F2); a failed read keeps its stored status, and the tap signs with
+  // the ranks it has; each op asked once a tap, never in a loop
+  const reread = async () => {
+    const stale: [string, DepositOp][] = [];
+    for (const k of await ops.keys("ops")) {
+      if (tap.asked.has(k)) continue;
+      const o = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
+      if (!ofU(o) || o.follow.why === "moved_out" || !(o.follow.status === undefined || o.follow.status === "PENDING_DEPOSIT" || o.follow.status === "INCOMPLETE_DEPOSIT")) continue;
+      tap.asked.add(k);
+      stale.push([k, o]);
+    }
+    if (stale.length === 0) return;
+    tap.budget ??= AbortSignal.timeout(DEPOSIT_STATUS_TIMEOUT_MS);
+    const budget = tap.budget;
+    const read1 = ([, o]: [string, DepositOp]) => readDepositStatus(o.follow.address, U, deps.fetchFn ?? fetch, budget, Date.now()).catch(() => null);
+    const reads = await Promise.all(stale.map(read1));
+    for (let j = 0; j < stale.length; j++)
+      await ops.update("ops", stale[j]![0], (v) => {
+        const x = v as DepositOp | undefined;
+        if (!ofU(x)) return undefined;
+        const read = statusFacts(x.follow, reads[j]!);
+        return Object.keys(read).length === 0 ? undefined : { ...x, follow: { ...x.follow, ...read } };
+      });
+  };
   // record r of op `owner`: its same bytes again, read until FINAL on both
   const follow = async (r: MoveOutRecord, owner: string): Promise<MoveOutOutcome> => {
     const shown = shownOf(r);
     for (let k = 0; k < FINAL_TRIES; k++) {
       const st = await readBoth(rpcs, r.hash, U);
       if (st === "ok") {
-        await ops.update("ops", owner, (v) => {
-          const o = v as DepositOp | undefined;
-          return isObj(o) && o.follow.out?.hash === r.hash && o.follow.why !== "moved_out" ? { ...o, follow: { ...o.follow, why: "moved_out" } } : undefined;
-        });
-        return { kind: "moved", ...shown };
+        // landed: Moved only while U holds at most 1 base unit (delta review item 2, every path); more there (a late
+        // deposit) is history for this record and open for the next tap; no equal read of U, no word yet
+        const now = await readMoveOut(U, r.to, token, rpcs).catch(() => null);
+        if (now === null) return { kind: "unread" };
+        if (now.usdc > 1n) {
+          // landed with a later deposit in U: the ops it carried are marked by it, then reopened (the record history,
+          // why kept moved_out), so the next tap carries `later` and they read Moved again; the money in U is open
+          // (delta review 8, ruling 2)
+          await landed(owner, r);
+          await reopen(r);
+          return { kind: "open" };
+        }
+        await landed(owner, r);
+        return stored(r);
       }
       if (st === "failed") return { kind: "failed", ...shown };
       if (k === 0) {
@@ -453,43 +761,60 @@ export async function moveOutHeld(opId: string, to: string | null, deps: MoveOut
     }
     return { kind: "sent", ...shown };
   };
-  // a gone record of op `id` leaves follow.out for follow.out_past (a compare-and-set on its hash)
-  const clear = (id: string, r: MoveOutRecord) =>
-    ops.update("ops", id, (v) => {
-      const o = v as DepositOp | undefined;
-      if (!isObj(o) || o.follow.out?.hash !== r.hash) return undefined;
-      const { out: _gone, ...rest } = o.follow;
-      return { ...o, follow: { ...rest, out_past: [...(o.follow.out_past ?? []), r] } };
-    });
 
   // a move already written: its bytes again, never a new signature while they can land
   const had = op.follow.out;
-  if (had !== undefined) {
-    if (op.follow.why === "moved_out") return { kind: "moved", ...shownOf(had) };
-    const st = await recordState(U, token, had, rpcs);
-    if (st === "live") return follow(had, opId);
-    // gone: a new signature only on the user's tap
-    if (to === null) return st.gone === "taken" && st.usdc !== null && st.usdc <= 1n ? { kind: "empty" } : { kind: "failed", ...shownOf(had) };
+  if (had !== undefined && op.follow.why === "moved_out") {
+    // moved, while U holds at most 1 base unit; a later deposit in U is history for this record and open for the next
+    // tap (money in U is always movable, delta review item 2); no equal read of U keeps it moved
+    const now = await readMoveOut(U, had.to, token, rpcs).catch(() => null);
+    if (now === null || now.usdc <= 1n) return { kind: "moved", ...shownOf(had) };
+    await clear(opId, had);
+    if (to === null) return { kind: "open" };
+  } else if (had !== undefined) {
+    const st = await recordState(U, token, had, rpcs, archival);
+    if (st === "live") {
+      const f = await follow(had, opId);
+      return f.kind === "open" && to !== null && again ? moveOut(opId, to, deps, false, tap) : f;
+    }
+    if (st === "landed") {
+      await landed(opId, had);
+      return stored(had);
+    }
+    // gone: a new signature only on the user's tap; a replaced record is never shown as a move that failed
+    if (to === null && st.gone === "replaced") {
+      if (st.usdc !== null && st.usdc <= 1n) return { kind: "empty" };
+      await clear(opId, had);
+      return { kind: "open" };
+    }
+    if (to === null) return { kind: "failed", ...shownOf(had) };
     await clear(opId, had);
   }
   if (to === null) throw new MoveOutRefused("no typed account");
   const typed = to;
 
-  type Signed = { follow: MoveOutRecord; owner: string } | { outcome: MoveOutOutcome };
+  type Signed = { follow: MoveOutRecord; owner: string; fresh?: true } | { outcome: MoveOutOutcome };
   const signed = await uLock(async (): Promise<Signed> => {
     op = await heldOpOf(ops, opId);
     if (op.follow.out !== undefined) return { follow: op.follow.out, owner: opId }; // another tab wrote one meanwhile
+    await reread();
     // another op of U with a live record: that move is U's one move; gone ones are cleared
     for (const k of await ops.keys("ops")) {
       if (k === opId) continue;
       const o = (await ops.get("ops", k).catch(() => undefined)) as DepositOp | undefined;
       const r = isObj(o) && o.kind === "deposit" && isObj(o.follow) && o.follow.u === U && o.follow.network === network && o.follow.why !== "moved_out" ? o.follow.out : undefined;
       if (r === undefined) continue;
-      if ((await recordState(U, token, r, rpcs)) === "live") return { follow: r, owner: k };
-      await clear(k, r);
+      const st = await recordState(U, token, r, rpcs, archival);
+      if (st === "live") return { follow: r, owner: k };
+      if (st === "landed") await landed(k, r);
+      else await clear(k, r);
     }
+    // another op's landed record marked this op too: it reads Moved, nothing to sign
+    const mine = await heldOpOf(ops, opId);
+    if (mine.follow.why === "moved_out" && mine.follow.out !== undefined) return { outcome: { kind: "moved", ...shownOf(mine.follow.out) } };
     const read = await readMoveOut(U, typed, token, rpcs);
-    if (read === null) return { outcome: { kind: "unread" } };
+    // U's nonce at 2^64 - 1: the nonce signed next (this + 1) would not fit the u64 nearcore reads
+    if (read === null || read.nonce >= U64_MAX) return { outcome: { kind: "unread" } };
     if (read.usdc <= 1n) return { outcome: { kind: "empty" } };
     const storageMin = read.registered ? 0n : await readTokenStorageMin(network, rpcs);
     const calls = moveCalls(typed, read.usdc - 1n, !read.registered, storageMin);
@@ -514,16 +839,22 @@ export async function moveOutHeld(opId: string, to: string | null, deps: MoveOut
         seed.fill(0);
       }
     });
-    const record: MoveOutRecord = { to: typed, amount: (read.usdc - 1n).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed };
+    const record: MoveOutRecord = { to: typed, amount: (read.usdc - 1n).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed, ...(op.follow.why === "moved_out" ? { later: true as const } : {}) };
     // written before it is sent; of two writers only the first sends, the other follows it
     await ops.update("ops", opId, (v) => {
       const o = v as DepositOp | undefined;
-      return isObj(o) && o.stage === "held" && o.follow.out === undefined ? { ...o, follow: { ...o.follow, out: record } } : undefined;
+      // an op follow.ts ended moved_out with no move of its own (follow.ts:1023) is held again from this move on, so its
+      // state reads it, its resume follows it and the other-op scan sees it (delta review item 3)
+      if (!isObj(o) || o.stage !== "held" || o.follow.out !== undefined) return undefined;
+      const { why, ...rest } = o.follow;
+      return { ...o, follow: { ...rest, ...(why === undefined || why === "moved_out" ? {} : { why }), out: record } };
     });
     const now = await heldOpOf(ops, opId);
     if (now.follow.out === undefined) throw new MoveOutRefused("the move could not be written");
-    return { follow: now.follow.out, owner: opId };
+    return now.follow.out.hash === record.hash ? { follow: record, owner: opId, fresh: true } : { follow: now.follow.out, owner: opId };
   });
   if (signed === null) return { kind: "unread" }; // U's lock is held: another op of U is being followed
-  return "outcome" in signed ? signed.outcome : follow(signed.follow, signed.owner);
+  if ("outcome" in signed) return signed.outcome;
+  const f = await follow(signed.follow, signed.owner);
+  return f.kind === "open" && again && signed.fresh !== true ? moveOut(opId, typed, deps, false, tap) : f;
 }

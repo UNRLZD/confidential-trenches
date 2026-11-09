@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { CHECKS, collect, harnessRoute, judge } from "../../../../scripts/live-checks/app-verify-mount.mjs";
 import { VERIFY_RELEASES } from "../../src/screens/verify/release.ts";
 import { WORDS } from "../../src/screens/verify/words.ts";
+import { CHAIN_NAME } from "../../src/screens/verify/pools.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TERMINAL = path.resolve(HERE, "../..");
@@ -61,7 +62,8 @@ const own = opt("--build") ? null : await build();
 const dir = path.resolve(opt("--build") ?? own);
 const shots = opt("--shots");
 const fails = [];
-const known = new Set(Object.values(WORDS).map((w) => w.text));
+// the panel's words, and the pool rows' chain names (data, card verify-pools)
+const known = new Set([...Object.values(WORDS).map((w) => w.text), ...Object.values(CHAIN_NAME)]);
 /** Every check Unverified, both rows amber, and only the panel's own words; else the reason. */
 function unverified(p) {
   const n = (p?.words ?? []).filter((x) => x === WORDS.unverified.text).length;

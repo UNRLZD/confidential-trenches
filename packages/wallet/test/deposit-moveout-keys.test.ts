@@ -42,7 +42,7 @@ const TO = "alice.testnet";
 const opened: { close(): void }[] = [];
 after(() => opened.forEach((s) => s.close()));
 
-// both RPCs: U with 0.1 N, 2.5 USDC, one own key at nonce 7, TO registered; every send lands
+// both RPCs: U with 0.1 N, 2.5 USDC, one own key at nonce 7, TO registered; every send lands, leaving U 1 base unit
 function rpcs() {
   const own = `ed25519:${base58.encode(Uint8Array.from(U.match(/../g)!, (x) => parseInt(x, 16)))}`;
   const view = (v: unknown, h: number) => ({ result: { block_height: h, result: [...Buffer.from(JSON.stringify(v))] } });
@@ -57,7 +57,7 @@ function rpcs() {
       const h = p.block_id as number;
       if (p.request_type === "view_access_key_list") return { result: { block_height: h, keys: [{ public_key: own, access_key: { nonce: 7, permission: "FullAccess" } }] } };
       if (p.request_type === "view_account") return { result: { block_height: h, amount: (10n ** 23n).toString(), locked: "0", storage_usage: 182, code_hash: p.account_id === NET.usdc ? VAULT_TOKEN_CODE_HASH : "11111111111111111111111111111111" } };
-      if (p.method_name === "ft_balance_of") return view("2500000", h);
+      if (p.method_name === "ft_balance_of") return view(landed.size > 0 ? "1" : "2500000", h); // a landed move leaves 1
       if (p.method_name === "storage_balance_of") return view({ total: "1", available: "0" }, h);
       throw new Error(String(p.method_name));
     },
@@ -80,7 +80,7 @@ function rpcs() {
 async function heldStore() {
   const ops = await openWalletStore({ indexedDB: new IDBFactory() });
   opened.push(ops);
-  await ops.put("ops", "op1", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, follow: { network: "testnet", s: "1", i: 0, u: U, address: "a", deadline_ms: 1, origin: "nep141:x", min_out: "1", why: "sender_struck" } });
+  await ops.put("ops", "op1", { kind: "deposit", stage: "held", txs: [], created_ms: 1, held_id: U, follow: { network: "testnet", s: "1", i: 0, u: U, address: "a", deadline_ms: 1, origin: "nep141:x", min_out: "1", sent: true, status: "PROCESSING", why: "sender_struck" } }); // its send in flight when held: its USDC in U
   return ops;
 }
 const seedLock = async <T,>(fn: () => Promise<T>): Promise<T> => {

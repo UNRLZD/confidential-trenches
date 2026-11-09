@@ -219,7 +219,7 @@ test("edge rows: huge numbers stay short, hostile text stays text, a curve shows
 test("WORDS: every visible word sits in one table; the drafts are the list's age line (card app-list-age) and the launchpad menu's title (CN-137, card app-discover-toolbar)", () => {
   for (const [k, w] of Object.entries(WORDS)) assert.ok(w.text && w.source, k);
   assert.deepEqual(DRAFTS, (Object.keys(WORDS) as (keyof typeof WORDS)[]).filter((k) => WORDS[k].draft));
-  assert.deepEqual(DRAFTS, ["updated", "padMenuTitle"]);
+  assert.deepEqual(DRAFTS, [], "Updated {age} ago and Launchpads by tokens now were kept (owner 8 Nov 07:55Z, 8 Nov 19:40Z)");
 });
 
 test("Graduating holds J19's curve rule, the token page's (card app-token-page): a launchpad and whole basis points 0-9999", () => {

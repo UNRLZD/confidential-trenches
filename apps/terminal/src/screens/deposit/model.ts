@@ -27,6 +27,7 @@ export type SheetState =
   | "S4.17" // refunded to the one-time id (FR-D1)
   | "refund-move" // the kit's refund move in flight (FR-D2)
   | "held" // the money under its id, the vault keeps refusing or 1Click cannot route (FR-D3)
+  | "moved" // card held-move-forgotten-tx: the held money moved out to the account the user typed (the kit's moved_out)
   | "held-halted" // CH-119: USDC halted, or our relayer down or holding
   | "held-not-caught-up" // CH-119: the relayer's status not caught up
   | "held-vault-blocked" // CH-119: the vault's account blocked on USDC
@@ -170,7 +171,7 @@ export function statusState(s: DepositStatus | null, deadline: string, now: numb
     case "done":
       return "S4.16";
     case "held":
-      return "held";
+      return s.moved_out === true ? "moved" : "held";
     case "halted":
       return s.hold === "not_caught_up" ? "held-not-caught-up" : s.hold === "vault_blocked" ? "held-vault-blocked" : "held-halted";
   }
@@ -239,7 +240,7 @@ export function pickAsset(assets: readonly Asset[] | null, picked: { symbol: str
 /** A row of the sheet's Recent block: a deposit of this account, its stage's word, and what it credited once done. */
 export interface RecentRow {
   id: string;
-  word: "deposited" | "waiting" | "processing" | "short" | "refunded" | "held" | "expired";
+  word: "deposited" | "waiting" | "processing" | "short" | "refunded" | "held" | "moved" | "expired";
   amount_usd?: string;
 }
 
@@ -263,7 +264,8 @@ export function recentRows(ops: readonly Operation[] | undefined): RecentRow[] {
   const rows: RecentRow[] = [];
   for (const op of [...(ops ?? [])].reverse()) {
     if (op.kind !== "deposit") continue;
-    const word = op.refunded && op.stage !== "done" && RECENT_WORD[op.stage] === "processing" ? "refunded" : RECENT_WORD[op.stage];
+    // a held deposit moved out (the kit's moved_out, card held-move-forgotten-tx) is no longer held
+    const word = op.moved_out === true && op.stage === "held" ? "moved" : op.refunded && op.stage !== "done" && RECENT_WORD[op.stage] === "processing" ? "refunded" : RECENT_WORD[op.stage];
     rows.push(op.stage === "done" && op.amount_usd !== undefined ? { id: op.id, word, amount_usd: op.amount_usd } : { id: op.id, word });
     if (rows.length === 3) break;
   }
