@@ -83,6 +83,7 @@
 .drecent .hd { display: flex; justify-content: space-between; align-items: center; font: 600 15px var(--font-ui); height: 28px; color: var(--text-1); }
 .drecent .it { height: 52px; display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--border-row); font: 13px var(--font-ui); color: var(--text-1); }
 .drecent .it .num { margin-left: auto; text-align: right; }
+.drecent .it .pl { margin-left: auto; text-align: right; color: var(--text-2); } /* card deposit-to-pool-pools: a pool row's pool, where a done vault row shows the USD */
 .drecent .empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 14px 0 8px; color: var(--text-2); font: 13px var(--font-ui); }
 /* card deposit-to-pool: under the To row the phone's form leaves Recent less than its header; it draws nothing rather
    than a cut header. After Recent's own rules, at (0,3,0), so their display (0,2,0) cannot draw a child back. */

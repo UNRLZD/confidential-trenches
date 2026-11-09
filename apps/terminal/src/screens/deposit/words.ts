@@ -55,6 +55,10 @@ export const WORDS = {
   // card deposit-to-pool (v2 A3): the To row's label, over the NEAR vault and the three pools (their names are data);
   // kept as drafted (the 8 Nov words page)
   to: ok("To", "owner 8 Nov 07:55Z, kept; drafted on card deposit-to-pool: the label over where the money goes (the NEAR vault, the Solana, Base and Robinhood pools)"),
+  // card deposit-to-pool-pools: a pool deposit's notes in the pool, the part ready to buy and the rest still being proved;
+  // the same words, in the same sense, as Portfolio's per-chain pool rows (src/screens/portfolio/words.ts ready, pending)
+  ready: ok("Ready", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part with a proof ready to buy (src/screens/portfolio/words.ts ready), drawn on the deposit sheet's in-the-pool state by card deposit-to-pool-pools"),
+  pending: ok("Pending", "owner 3 Nov 09:17Z, keep; drafted on card balances-per-chain: the part still being proved (src/screens/portfolio/words.ts pending), drawn on the deposit sheet's in-the-pool state by card deposit-to-pool-pools"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
