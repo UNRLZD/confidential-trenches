@@ -11,7 +11,7 @@ import { after, before, mock, test } from "node:test";
 import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
-import { createRpc } from "./rpc/rpc.ts";
+import { createRpc, RPC_UPSTREAMS } from "./rpc/rpc.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
 import { randomBytes } from "node:crypto";
@@ -226,6 +226,7 @@ test("the server writes no line while it answers (no request log)", async () => 
 });
 
 const JSON_H = { "content-type": "application/json", origin: APP };
+const RPC_FALLBACK_BASE = RPC_UPSTREAMS.base.fallback;
 const rpcBody = (method: string) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: [] });
 
 test("POST /v1/rpc/{chain}: an unlisted method is refused 400 method_not_allowed, with the commit and CORS", async () => {
@@ -278,6 +279,36 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
     stub.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => stub.close(() => ok())));
   }
+});
+
+test("card evm-pool-leaves-any-source: POST /v1/rpc/{chain}?keyed=only reads the keyed URLs alone (none set: 503 upstream, nothing fetched); without it the public fallback as before; any other keyed value 400 before any call", async () => {
+  const KEYED = "https://keyed.test/v2/projectsegment0123456789";
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => (asked.push(url), new Response(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } }));
+  const bare = own(start(COMMIT, 0, undefined, createRpc({}, { fetch: fetch as never })));
+  const keyed = own(start(COMMIT, 0, undefined, createRpc({ BASE_RPC_URL: KEYED }, { fetch: fetch as never, pinned: { base: ["https://p1.test"] } })));
+  await Promise.all([bare, keyed].map((s) => new Promise<void>((ok) => (s.listening ? ok() : s.on("listening", () => ok())))));
+  const to = (s: ReturnType<typeof createServer>) => (s.address() as AddressInfo).port;
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
+  for (const q of ["?keyed=bogus", "?keyed=", "?keyed=ONLY", "?keyed=only&keyed=only", "?keyed"]) {
+    const r = await call("POST", `/v1/rpc/base${q}`, JSON_H, body, to(keyed));
+    assert.equal(r.status, 400, q);
+    assert.deepEqual(JSON.parse(r.body), { error: { code: "method_not_allowed" } }, q);
+    assert.equal(r.headers["access-control-allow-origin"], APP, q);
+  }
+  assert.deepEqual(asked, [], "a refused flag reaches no provider");
+  const none = await call("POST", "/v1/rpc/base?keyed=only", JSON_H, body, to(bare));
+  assert.equal(none.status, 503, none.body);
+  assert.deepEqual(JSON.parse(none.body), { error: { code: "upstream" } });
+  assert.equal(none.headers["access-control-allow-origin"], APP);
+  assert.deepEqual(asked, [], "no keyed URL: nothing fetched");
+  const plain = await call("POST", "/v1/rpc/base", JSON_H, body, to(bare));
+  assert.equal(plain.status, 200, plain.body);
+  assert.deepEqual(asked, [RPC_FALLBACK_BASE], "without the flag the public fallback answers, as before");
+  asked.length = 0;
+  const only = await call("POST", "/v1/rpc/base?keyed=only", JSON_H, body, to(keyed));
+  assert.equal(only.status, 200, only.body);
+  assert.deepEqual(asked, [KEYED]);
 });
 
 test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {
