@@ -11,7 +11,7 @@ import * as kit from "../src/index.ts";
 import { EVM_NOOP_HOOK_CODE, evmPoolBuildQuoted, EvmPoolBuyError, evmPoolSignBuy, EvmQuoteError, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../src/index.ts";
 import { evmPoolBuyQuoteWith, evmProviders, evmReadsPerCall, type EvmRpc, type EvmRpcCall } from "../src/checks/evm/quote.ts";
 import { evmPoolVenues, pinnedBuild } from "../src/trade/evm/buy-unpinned.ts";
-import { asRecorded, gasRoundAnswers, withMarker } from "./evm-quote-gas-fx.ts";
+import { asRecorded, codeAnswer, codeResult, gasRoundAnswers, withMarker } from "./evm-quote-gas-fx.ts";
 // the recordings (fixtures/evm-quote.json) were made at 6 reads an aggregate3 call, and their exchanges are matched call
 // for call: these replays send 6 a call (Robinhood's venue sends 64, card evm-buy-quote-in-window: QE9)
 evmReadsPerCall(6);
@@ -53,8 +53,10 @@ const replay = (ex: Exchange[], edit?: Edit): EvmRpc => async (sent) => {
   const e = ex.find((x) => JSON.stringify(x.calls) === JSON.stringify(calls));
   const a = e !== undefined ? structuredClone(e.answers) : (structuredClone(byCall(ex, calls)) ?? (gasRoundAnswers(ex, calls) as Answer[] | undefined));
   if (a === undefined) throw new Error("no recorded answer for these calls");
+  // each edit is made on the answer as EVM_READ_GAS_CODE gives it (card evm-quote-gas-used)
+  withMarker(sent, a);
   if (edit !== undefined) edit(a, calls);
-  return withMarker(sent, a);
+  return a;
 };
 // the fixture keeps the request's token as "buys" (see evm-quote-record.ts)
 const request = (name: string): EvmPoolBuyQuoteRequest => {
@@ -113,25 +115,17 @@ function callsOf(data: string): string[] {
     return h.slice(2 * (e + 128), 2 * (e + 128 + w(e + 96)));
   });
 }
-type El = { ok: boolean; data: string };
+// a read's result as EVM_READ_GAS_CODE answers it (success, gasUsed, returnData; card evm-quote-gas-used)
+type El = { ok: boolean; data: string; used?: bigint };
 function decode(r: string): El[] {
   const h = r.slice(2);
   const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
   return Array.from({ length: at(32) }, (_, i) => {
     const e = 64 + at(64 + 32 * i);
-    return { ok: at(e) === 1, data: h.slice(2 * (e + 96), 2 * (e + 96 + at(e + 64))) };
+    return { ok: at(e) === 1, used: BigInt(at(e + 32)), data: h.slice(2 * (e + 128), 2 * (e + 128 + at(e + 96))) };
   });
 }
-function encode(els: El[]): string {
-  const body = els.map((x) => W(x.ok ? 1n : 0n) + W(0x40n) + W(BigInt(x.data.length / 2)) + x.data.padEnd(Math.ceil(x.data.length / 64) * 64, "0"));
-  let at = 32 * els.length;
-  const offs = body.map((b) => {
-    const o = W(BigInt(at));
-    at += b.length / 2;
-    return o;
-  });
-  return "0x" + W(0x20n) + W(BigInt(els.length)) + offs.join("") + body.join("");
-}
+const encode = (els: El[]): string => codeAnswer(els.map((x) => codeResult(x.ok ? 1n : 0n, x.used ?? 0n, x.data)));
 /** Edits every multicall read `f` names: f returns the new answer, or undefined to keep it. */
 const plant = (f: (r: Read, el: El) => El | undefined): Edit => (a, calls) => {
   calls.forEach((c, i) => {
@@ -399,7 +393,7 @@ test("Q9 a provider error or a malformed answer refuses", async () => {
       if (x.method !== "eth_call" || p.to?.toLowerCase() !== MULTICALL3 || !a[i]!.result) return;
       const r = a[i]!.result!;
       const e = 2 + 2 * (64 + Number(BigInt("0x" + r.slice(2 + 128, 2 + 192))));
-      a[i]!.result = r.slice(0, e + 128) + W(0x10000n) + r.slice(e + 192);
+      a[i]!.result = r.slice(0, e + 192) + W(0x10000n) + r.slice(e + 256);
     });
   };
   await refused(quote("base-ok", longer, longer), "rpc_error");

@@ -6,6 +6,7 @@ import * as kit from "../src/index.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
 import type { EvmPoolChain } from "../src/trade/evm/buy-unpinned.ts";
+import { codeAnswer, codeResult } from "./evm-quote-gas-fx.ts";
 const { EVM_READ_CALL_GAS, EVM_READ_GAS_CODE } = quoteMod;
 const MULTICALL3_ADDR = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
@@ -58,17 +59,12 @@ export function decodeAggregate(data: string): string[] {
     return h.slice(2 * (e + 128), 2 * (e + 128 + dl));
   });
 }
-/** aggregate3's answer as EVM_READ_GAS_CODE gives it, its marker after the last result (card evm-quote-read-gas-starve) */
+/** aggregate3's answer as EVM_READ_GAS_CODE gives it, its marker after the last result (card evm-quote-read-gas-starve),
+ *  each result with the gas it used beside it (card evm-quote-gas-used: a read that ran out used its whole share, here
+ *  39M; any other 100,000) */
 export function encodeAggregate(outs: (bigint | null | "gas")[]): string {
   // "gas": the code's success word 2, a read that ran out of its gas
-  const body = outs.map((x) => (x === "gas" ? W(2n) + W(0x40n) + W(0n) : x === null ? W(0n) + W(0x40n) + W(0n) : W(1n) + W(0x40n) + W(64n) + W(x) + W(0n)));
-  let at = 32 * outs.length;
-  const offs = body.map((b) => {
-    const o = W(BigInt(at));
-    at += b.length / 2;
-    return o;
-  });
-  return "0x" + W(0x20n) + W(BigInt(outs.length)) + offs.join("") + body.join("") + "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+  return codeAnswer(outs.map((x) => (x === "gas" ? codeResult(2n, 39_000_000n, "") : x === null ? codeResult(0n, 100_000n, "") : codeResult(1n, 100_000n, W(x) + W(0n)))));
 }
 
 export type Model = {
