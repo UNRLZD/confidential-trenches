@@ -175,7 +175,7 @@ async function main() {
   const [bu, ba, bx] = before.holdings.map(amt), [au, aa, ax] = after.holdings.map(amt);
   if (au !== 1n || aa !== 0n || ax !== bx! + bu! - 1n + ba!) throw new Error(`read-back: U ${au}, A ${aa}, X ${ax}`);
   const lines = [
-    "CARD exit-ids-out / testnet money run: PASS",
+    "CARD exit-ids-out / live: PASS",
     "Money path: yes",
     ...txs.map(([h, s]) => `Tx: near-testnet ${h} ${s}`),
     "",

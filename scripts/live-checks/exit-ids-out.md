@@ -1,4 +1,4 @@
-CARD exit-ids-out / testnet money run: PASS
+CARD exit-ids-out / live: PASS
 Money path: yes
 Tx: near-testnet HTbnXmDWa5aC7xRWS6VKGMTaWmEHjFKXLYqw48SiYcFt holder.bf-usdc-20261101t022248.testnet
 Tx: near-testnet BRSKJ2fjBuPwC4VNDrA1hGf43DGurf7vhns3BZeEA993 holder.bf-usdc-20261101t022248.testnet
