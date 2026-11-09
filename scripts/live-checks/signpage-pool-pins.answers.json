@@ -1,15 +1,19 @@
 {
  "good": {
   "check": "signpage-pool-pins",
-  "at": "2026-11-05T16:29:00.336Z",
-  "source": "harness: this checkout's bundle and _headers as SIGN_HOST's, the pair read live",
-  "treeBundle": "sha384-QnlB+Xsr3tTffLcHN34Ah8aghh7NXpldzu+htm/0DCP7T+3fXVlgKV28lY3wuc1c",
+  "at": "2026-11-09T17:06:26.505Z",
+  "source": "harness: this checkout's bundle and _headers as SIGN_HOST's, the pair, the helper and the chain read live",
+  "treeBundle": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-QnlB+Xsr3tTffLcHN34Ah8aghh7NXpldzu+htm/0DCP7T+3fXVlgKV28lY3wuc1c",
-   "testnet": []
+   "sha384": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
+   "testnet": [],
+   "program": true,
+   "feePayers": [
+    "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU"
+   ]
   },
-  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "rent": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
@@ -17,19 +21,82 @@
    ],
    "lamportsPerByte": "5080",
    "factor": "1"
+  },
+  "deploy": {
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
+  },
+  "helperFee": {
+   "status": 200,
+   "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+   "body": {
+    "chain": "solana",
+    "cluster": "mainnet",
+    "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+    "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+    "fee_payer": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+    "epoch_ms": 60000,
+    "epoch_start_ms": 1794243960000,
+    "fee": "1300000",
+    "step": "100000"
+   }
+  },
+  "chain": {
+   "rpcs": [
+    "https://api.mainnet-beta.solana.com",
+    "https://solana-rpc.publicnode.com"
+   ],
+   "program": [
+    {
+     "url": "https://api.mainnet-beta.solana.com",
+     "address": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+     "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+     "executable": true,
+     "lamports": "833120",
+     "space": 36
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com",
+     "address": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+     "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+     "executable": true,
+     "lamports": "833120",
+     "space": 36
+    }
+   ],
+   "feePayer": [
+    {
+     "url": "https://api.mainnet-beta.solana.com",
+     "address": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+     "owner": "11111111111111111111111111111111",
+     "executable": false,
+     "lamports": "10000000",
+     "space": 0
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com",
+     "address": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+     "owner": "11111111111111111111111111111111",
+     "executable": false,
+     "lamports": "10000000",
+     "space": 0
+    }
+   ]
   }
  },
  "bad": {
   "check": "signpage-pool-pins",
-  "at": "2026-11-05T16:29:02.160Z",
+  "at": "2026-11-09T17:06:30.435Z",
   "source": "live https://confidential.unrealized.trade",
-  "treeBundle": "sha384-QnlB+Xsr3tTffLcHN34Ah8aghh7NXpldzu+htm/0DCP7T+3fXVlgKV28lY3wuc1c",
+  "treeBundle": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-moFpXAKDW+v/OHxtNORsvwP1605bHzjTRTtbd9f498Vj+OQfksrpJ8vuS02HZU0S",
-   "testnet": []
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "testnet": [],
+   "program": true,
+   "feePayers": []
   },
-  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "rent": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
@@ -37,6 +104,50 @@
    ],
    "lamportsPerByte": "5080",
    "factor": "1"
+  },
+  "deploy": {
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
+  },
+  "helperFee": {
+   "status": 200,
+   "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+   "body": {
+    "chain": "solana",
+    "cluster": "mainnet",
+    "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+    "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+    "fee_payer": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+    "epoch_ms": 60000,
+    "epoch_start_ms": 1794243960000,
+    "fee": "1300000",
+    "step": "100000"
+   }
+  },
+  "chain": {
+   "rpcs": [
+    "https://api.mainnet-beta.solana.com",
+    "https://solana-rpc.publicnode.com"
+   ],
+   "program": [
+    {
+     "url": "https://api.mainnet-beta.solana.com",
+     "address": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+     "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+     "executable": true,
+     "lamports": "833120",
+     "space": 36
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com",
+     "address": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+     "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+     "executable": true,
+     "lamports": "833120",
+     "space": 36
+    }
+   ],
+   "feePayer": []
   }
  }
 }

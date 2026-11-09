@@ -267,8 +267,11 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins no pool today, so a restore there reads nothing and ends done", () => {
-  assert.deepEqual(pagePools(), []);
+test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
+  const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+  const { pageSolanaRpcs } = await import("../src/pool-testnet.ts");
+  const pin = SOL_POOLS.mainnet!;
+  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaRpcs }]);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so

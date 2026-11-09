@@ -1,6 +1,6 @@
-// src/main.ts booted top-level as SIGN_HOST's build, the mainnet one (card signpage-pool-mainnet), with a mainnet pool
-// pin planted by a load hook (SOL_POOLS.mainnet is empty until pool-sol-deploy-mainnet; the devnet pool's program
-// stands in for it, and a lookup table for MAINNET_TABLE): the same pool flow and proof queue the testnet build runs
+// src/main.ts booted top-level as SIGN_HOST's build, the mainnet one (card signpage-pool-mainnet), on the wallet's
+// mainnet pool pin (SOL_POOLS.mainnet, card sol-pools-mainnet-pin) and its lookup table (MAINNET_TABLE, the deploy
+// record's): the same pool flow and proof queue the testnet build runs
 // (src/pool-testnet.ts) run here. The shell's state lists the pinned pool with the queue's ready proof as `ready`, the
 // page's own price and tap_max from the Rent read on the page's mainnet pair; pool.deposit, pool.buy, pool.sell and
 // pool.withdraw reach that flow, never refused not_allowed. Stand-ins as test/main-testnet-pools.test.ts: testnetPool's
@@ -18,10 +18,6 @@ import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 
-const DEVNET_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
-const DEVNET_FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
-const SOL_LINE = `  POOL_TESTNET ? { devnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) } : {},`;
-const TABLE_LINE = "export const MAINNET_TABLE: string | null = null;";
 const wrap = (src: string, name: string, body: string): string => {
   const anchor = `export function ${name}(`;
   if (!src.includes(anchor)) throw new Error(`${name}: its line moved; update this test's hook`);
@@ -31,12 +27,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
-    if (url.endsWith("/wallet/src/pool/solana.ts")) {
-      const src = String(r.source);
-      if (!src.includes(SOL_LINE)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");
-      return { ...r, source: src.replace(SOL_LINE, SOL_LINE.replace(": {},", `: { mainnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) },`)) };
-    }
+      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -257,9 +248,12 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
 });
 
 test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
-  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN } = await import("../src/pool-testnet.ts");
+  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN, MAINNET_TABLE } = await import("../src/pool-testnet.ts");
+  const { SOL_MAINNET_DEPLOY } = await import("../../wallet/src/pool/solana.ts");
   assert.equal(PAGE_CLUSTER, "mainnet");
   assert.equal(PAGE_SOL_PIN, SOL_POOLS.mainnet, "the mainnet pin, never the devnet one");
+  assert.ok(PAGE_SOL_PIN !== undefined && PAGE_SOL_PIN.program === SOL_MAINNET_DEPLOY.program, "the deploy record's program");
+  assert.equal(MAINNET_TABLE, SOL_MAINNET_DEPLOY.table, "pool.buy loads the deploy record's lookup table");
   // the pair: one read each, to two hosts
   const before = rentReads.length;
   const [a, b] = pageSolanaRpcs();

@@ -48,7 +48,7 @@ import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/sr
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
-import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_MAINNET_DEPLOY, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
@@ -274,8 +274,9 @@ export type TestnetOver = {
  *  tx 4M7F8EG164qLBH4Noecx6TW22Tak9nH9oVhFeLidfbgf7W7BNfYtvULwCYRm8SzcgyaLWkDrYRvLCxGA7iszjFe8 for the pool 92YuYhb4… and read back the same on
  *  both devnet RPCs (scripts/live-checks/signpage-pool-flow.mjs reads it after every deploy). */
 export const DEVNET_TABLE: string | null = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
-/** The mainnet pool's lookup table: none until pool-sol-deploy-mainnet makes it, so pool.buy is refused until then. */
-export const MAINNET_TABLE: string | null = null;
+/** The mainnet pool's lookup table: the wallet's SOL_MAINNET_DEPLOY.table (card pool-sol-deploy-mainnet's record,
+ *  frozen with no authority; card sol-pools-mainnet-pin wires it here beside SOL_POOLS.mainnet, the pin it serves). */
+export const MAINNET_TABLE: string | null = SOL_MAINNET_DEPLOY.table;
 /** The page network's lookup table. */
 const PAGE_TABLE: string | null = POOL_TESTNET ? DEVNET_TABLE : MAINNET_TABLE;
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
