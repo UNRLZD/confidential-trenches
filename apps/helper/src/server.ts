@@ -26,6 +26,7 @@ import { HELPER_BIND_ANSWER_MS, HELPER_CODE_STATUS, HELPER_COMMIT_HEADER, HELPER
 import { createSolanaLists } from "./data/solana/lists.ts";
 import { createEvmLists, type EvmChain } from "./data/evm/lists.ts";
 import { createSwaps, INDEX_RPCS, SWAP_RPCS, TRADES_MAX, type EvmSwaps } from "./data/evm/swaps.ts";
+import { createEvmToken, type EvmToken } from "./data/evm/token.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, type GeckoBudget } from "./data/gecko.ts";
 import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "./data/solana/token.ts";
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
@@ -61,6 +62,8 @@ type EvmLists = Partial<Record<EvmChain, ReturnType<typeof createEvmLists>>>;
  *  Solana (src/data/solana/trades.ts). */
 type Swaps = Partial<Record<EvmChain, EvmSwaps>> & { solana?: SolanaTrades };
 type Token = ReturnType<typeof createSolanaToken>;
+/** The EVM chains' token page and holders (src/data/evm/token.ts, card market-data-evm-token). */
+type EvmTokens = Partial<Record<EvmChain, EvmToken>>;
 type Fee = ReturnType<typeof feeQuoterFromEnv>;
 // The routes of every part this server mounts (each path's part is the kit's HELPER_V1_PATHS). /v1/health reads its
 // "up" parts from these keys and the dispatch below reads each route from here, so a part is up exactly when its
@@ -215,6 +218,7 @@ export function handler(
   solana: () => Partial<Record<SlotName, SlotState>> = () => ({ rpc: rpc.slot.state() }),
   // card app-console-429: every caller 429, one log line a window per route and reason with its count
   refusals: { count(route: string, why: string): void } = refusalLog(),
+  evmTokens: EvmTokens = {},
 ) {
   if (!SHA.test(commit)) throw new Error("HELPER_COMMIT must be a full 40-hex commit");
   // card helper-id-intents: a mainnet withdrawal that landed to an arming account A makes A a seen signer on POST
@@ -467,7 +471,8 @@ export function handler(
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // the token page's reads: exactly one chain and exactly one token. Solana's page, holders and candles
         // (src/data/solana/token.ts); candles and trades of an EVM chain whose own swap reads this helper runs
-        // (src/data/evm/swaps.ts). Candles also exactly one tf, and at most one `to` (unix seconds) and one `limit` (1 to
+        // (src/data/evm/swaps.ts); the page and holders of an EVM chain whose token page this helper runs
+        // (src/data/evm/token.ts, card market-data-evm-token). Candles also exactly one tf, and at most one `to` (unix seconds) and one `limit` (1 to
         // CANDLES_MAX, default it); trades at most one `limit` (1 to TRADES_MAX, default it)
         const q = new URL(req.url ?? "/", "http://helper.invalid").searchParams;
         const one = (k: string) => (q.getAll(k).length === 1 ? q.get(k)! : null);
@@ -475,7 +480,8 @@ export function handler(
         const chain = one("chain");
         const mint = one("token");
         const swaps = chain !== null && Object.hasOwn(evmSwaps, chain) ? evmSwaps[chain as EvmChain | "solana"] : undefined;
-        if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana")) return send(404, { error: { code: "not_found" } }, cors(req));
+        const evmToken = chain !== null && Object.hasOwn(evmTokens, chain) ? evmTokens[chain as EvmChain] : undefined;
+        if (mint === null || (path === MARKET_TRADES ? swaps === undefined : path === MARKET_CANDLES ? chain !== "solana" && swaps === undefined : chain !== "solana" && evmToken === undefined)) return send(404, { error: { code: "not_found" } }, cors(req));
         const began = performance.now();
         let read: Promise<DataAnswer>;
         if (path === MARKET_TRADES) {
@@ -490,7 +496,8 @@ export function handler(
             return send(404, { error: { code: "not_found" } }, cors(req));
           }
           read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit));
-        } else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
+        } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint) : evmToken.holders(mint);
+        else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
         void read
           .then((a) => {
             if (a.status === 429) return reply(throttled(a.retryAfterS ?? 1, undefined, a.why));
@@ -868,12 +875,12 @@ export function readyGate(warm: Promise<void>, checked: Promise<void>): { ready:
   return { ready: () => ready, warmed };
 }
 
-export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>): Server {
+export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, watches?: TokenWatches, lists?: Lists, fee?: Fee, withdraw?: WithdrawSender, token?: Token, bind?: BindSender, pools?: ReadonlyMap<string, SolanaPoolSender>, evmLists?: EvmLists, evmSwaps?: Swaps, ready?: () => boolean, senders: Promise<unknown> = Promise.resolve(), solana?: () => Partial<Record<SlotName, SlotState>>, release?: number | null, evmPools?: ReadonlyMap<string, EvmPoolSender>, evmTokens?: EvmTokens): Server {
   const server = createServer(
     // Caddy keeps its upstream connections idle for 30 s (deploy/Caddyfile); ours outlive that, so no reused
     // connection is closed under a request
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
-    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana),
+    handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens),
   );
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
@@ -998,6 +1005,9 @@ if (import.meta.main) {
     // both pool kinds' start checks run from here, and ready (below) waits for them
     const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
+    // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
+    // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
+    const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();
@@ -1014,7 +1024,7 @@ if (import.meta.main) {
     // that cluster's rent reads fail (each failure logged, pool/solana.ts), and redeploy.sh keeps the old one serving.
     const { ready, warmed } = readyGate(warmUntilReady({ lists, evmLists, token }), checked);
     const listen = () => {
-      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools); // warms both relayers once the senders are ours
+      server = start(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders.held, () => Object.fromEntries([...slots].map(([k, v]) => [k, v.state()])), release, evmPools, evmTokens); // warms both relayers once the senders are ours
       drain = drainer(server);
       server.on("listening", () => console.log(`helper: listening on ${port}, commit ${commit}${ready() ? "" : ", warming"}`));
     };
