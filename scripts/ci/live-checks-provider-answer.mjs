@@ -63,7 +63,6 @@ export const NOT_MOVED = Object.freeze([
   "relayer-cost-guards.mjs",
   "relayer-withdraw-fee.mjs",
   "rh-cold-quote.mjs",
-  "robinhood-mainnet-rpcs.mjs",
   "signpage-solana-trade.mjs",
   "solana-quote-under-1s.mjs",
   "vault-mainnet-money.mjs",
