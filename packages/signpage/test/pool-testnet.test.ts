@@ -866,3 +866,115 @@ test("the page's buy host writes W's buy record in the wallet store's meta/owed/
     (s as { end?: () => void }).end?.();
   }
 });
+
+// Review of fcd67b72, P1: a sell with no deposit back makes no note, so a state read that settles sells only on an
+// INCOMING return or R note never read its record: a page closed after its send (or a sell that ended "sent" past its
+// read budget) left the op "sent" for good. The state read settles sells when a kept record is there too.
+for (const withNote of [false, true]) {
+  test(`a load whose store holds a sell kept on W left sent${withNote ? ", beside another sell's INCOMING note" : ", and no INCOMING note"}: the state read settles it not_landed and drops its record`, async () => {
+    const seed64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+    const w = await openWalletStore({ indexedDB: new IDBFactory() });
+    await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+    const ns = await openNoteStore(w);
+    try {
+      const sig = base58.encode(new Uint8Array(64).fill(9));
+      const wire = new Uint8Array(1 + 64 + 8);
+      wire[0] = 1;
+      wire.set(new Uint8Array(64).fill(9), 1);
+      // what the sell leaves when its page closes after the send: its kept record and the op "sent"
+      await w.update("meta", "owed/kept-sell-sol", () => ({ [sig]: { signature: sig, tx: base64.encode(wire), last: 151 } }));
+      await w.put("ops", "op1", { kind: "sell", pool: "sol", sha: "00", stage: "sent", txs: [{ chain: "solana", hash: sig }], created_ms: 1 });
+      if (withNote) {
+        const ref = { kind: "return", c: "sol", l: 8n, j: 0 } as const;
+        const n = await ns.add({ ref, scope: solanaPoolOf(SOL_POOLS.devnet!.program).scope, precommitment: noteSecrets(seed64, ref).precommitment, state: "PLANNED" });
+        await ns.move(n.id, "PLANNED", "INCOMING", { send: { signature: base58.encode(new Uint8Array(64).fill(3)), value: 5_000_000n, last_valid_block_height: 1_000_000n } });
+      }
+      // both RPCs: no such transaction, past its blockhash, and no status of it at a slot past that
+      const rpc = () => async (m: string) => {
+        if (m === "getTransaction") return null;
+        if (m === "getEpochInfo") return { blockHeight: 1_000, absoluteSlot: 500, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+        if (m === "getSignatureStatuses") return { context: { slot: 600 }, value: [null] };
+        throw new Error("offline");
+      };
+      const t = testnetPool({ store: async () => w, seed64: async () => seed64.slice() }, { rpcs: [rpc(), rpc()] as never, prover: { vault: signalsProver(), stop: () => {} } });
+      await t.stateRead();
+      assert.equal(((await w.get("ops", "op1")) as { stage: string }).stage, "not_landed");
+      assert.deepEqual(Object.keys(((await w.get("meta", "owed/kept-sell-sol")) as Record<string, unknown> | undefined) ?? {}), []);
+    } finally {
+      ns.close();
+      w.close();
+    }
+  });
+}
+
+// Review of 5de2165e, P3-1 and P3-2: the state read's settle of a kept sell, under a failed ops write and a kept list
+// read that always fails. A store left with a kept sell's record and its op "sent", both RPCs reading it gone.
+async function keptWorld() {
+  const seed64 = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  (await openNoteStore(w)).close();
+  const sig = base58.encode(new Uint8Array(64).fill(9));
+  const wire = new Uint8Array(1 + 64 + 8);
+  wire[0] = 1;
+  wire.set(new Uint8Array(64).fill(9), 1);
+  await w.update("meta", "owed/kept-sell-sol", () => ({ [sig]: { signature: sig, tx: base64.encode(wire), last: 151 } }));
+  await w.put("ops", "op1", { kind: "sell", pool: "sol", sha: "00", stage: "sent", txs: [{ chain: "solana", hash: sig }], created_ms: 1 });
+  const gone = () => async (m: string) => {
+    if (m === "getTransaction") return null;
+    if (m === "getEpochInfo") return { blockHeight: 1_000, absoluteSlot: 500, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+    if (m === "getSignatureStatuses") return { context: { slot: 600 }, value: [null] };
+    throw new Error("offline");
+  };
+  const pool = (store: WalletStore) => testnetPool({ store: async () => store, seed64: async () => seed64.slice() }, { rpcs: [gone(), gone()] as never, prover: { vault: signalsProver(), stop: () => {} } });
+  const stage = async (k = "op1") => ((await w.get("ops", k)) as { stage: string }).stage;
+  const kept = async () => Object.keys(((await w.get("meta", "owed/kept-sell-sol")) as Record<string, unknown> | undefined) ?? {});
+  return { w, sig, pool, stage, kept };
+}
+/** The wallet store, one method of it changed. */
+const storeWith = (w: WalletStore, key: "get" | "update", f: (orig: (...a: unknown[]) => Promise<unknown>, ...a: unknown[]) => Promise<unknown>): WalletStore =>
+  new Proxy(w, {
+    get(target, k, recv) {
+      const v = Reflect.get(target, k, recv);
+      if (k === key) return (...a: unknown[]) => f((...b: unknown[]) => (v as (...c: unknown[]) => Promise<unknown>).apply(target, b), ...a);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  }) as WalletStore;
+
+// P3-1: the kept record was dropped before the op's stage was written, and that write's failure swallowed, so one
+// failed write left the op "sent" for good (at 5de2165e: {"stage":"sent","kept":[]}). The record is dropped only once
+// the op's stage is written; the next read settles it.
+test("a kept sell settled while the ops write fails once: the record stays, and the next state read settles its op", async () => {
+  const k = await keptWorld();
+  let fail = true;
+  const flaky = storeWith(k.w, "update", (orig, store, ...rest) => {
+    if (store === "ops" && fail) {
+      fail = false;
+      return Promise.reject(new Error("ops write failed"));
+    }
+    return orig(store, ...rest);
+  });
+  try {
+    const t = k.pool(flaky);
+    await t.stateRead();
+    assert.deepEqual({ stage: await k.stage(), kept: await k.kept() }, { stage: "sent", kept: [k.sig] }, "the write failed: the record kept");
+    await t.stateRead();
+    assert.deepEqual({ stage: await k.stage(), kept: await k.kept() }, { stage: "not_landed", kept: [] });
+  } finally {
+    k.w.close();
+  }
+});
+
+// P3-2: the state read's kept list read is guarded (a failed read counts as none): one that always fails never ends the
+// read early, so the dead sell request's settle after it (and the proofs, the onward sends, the rent backs) still run.
+test("a kept list read that always fails: the same state read still settles a dead pending sell request", async () => {
+  const k = await keptWorld();
+  await k.w.put("ops", "op2", { kind: "sell", pool: "sol", sha: "00", stage: "pending", txs: [], created_ms: 1 });
+  const flaky = storeWith(k.w, "get", (orig, store, key, ...rest) => (store === "meta" && key === "owed/kept-sell-sol" ? Promise.reject(new Error("meta read failed")) : orig(store, key, ...rest)));
+  try {
+    await k.pool(flaky).stateRead();
+    assert.equal(await k.stage("op2"), "refused");
+  } finally {
+    k.w.close();
+  }
+});

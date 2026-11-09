@@ -38,9 +38,13 @@ export const SPAN = 10_000;
 export const SPANS = 3;
 export const SPAN_LOGS = 10_000;
 export const TIMEOUT_MS = 10_000;
-/** A span's tries on one reader (the kit's INDEX_TRIES) and the wait between them. */
+/** A span's or a receipt's tries on one reader, and the wait before each try past the first: the kit's own (pool-index.ts
+ *  INDEX_TRIES and BACKOFF_MS * 2 ** n: 1, 2 then 4 s, which the kit's entry does not export), so a supplier the kit
+ *  waits out does not fail a good deploy (review 5 of 610ffe32: base.api.pocket.network needed 4 tries in 3 of 40
+ *  batches of 10 receipts, a fixed 1.5 s wait about 3-5% false FAILs a run). */
 export const TRIES = 4;
-export const RETRY_MS = 1_500;
+export const BACKOFF_MS = 500;
+export const waitBefore = (tries) => BACKOFF_MS * 2 ** (tries - 1);
 /** Receipts read a span on each reader, in one batch: the kit's INDEX_RECEIPT_BATCH. */
 export const RECEIPTS = 10;
 /** A rate limit answered inside a batch, in the kit's words (pool-index.ts `limited`, which the kit does not export). */
@@ -130,7 +134,7 @@ export async function readSpan(u, pm, a, b, fetchFn, sleep) {
       last = { logs: -1, ids: [], last: null, head: null, ms: TIMEOUT_MS + 1, tries, error: String(e?.message ?? e).slice(0, 120) };
     }
     if (last.last !== null && last.logs >= 0) return last;
-    if (tries < TRIES) await sleep(RETRY_MS);
+    if (tries < TRIES) await sleep(waitBefore(tries + 1));
   }
   return last;
 }
@@ -142,7 +146,7 @@ export async function readReceipts(u, pm, firsts, fetchFn, sleep) {
   const out = firsts.map(() => null);
   let left = firsts.map((_, i) => i);
   for (let tries = 1; tries <= TRIES && left.length > 0; tries++) {
-    if (tries > 1) await sleep(RETRY_MS);
+    if (tries > 1) await sleep(waitBefore(tries));
     try {
       const { byId, ms } = await post(u, left.map((i) => ({ jsonrpc: "2.0", id: i, method: "eth_getTransactionReceipt", params: [firsts[i].tx] })), fetchFn);
       const again = [];

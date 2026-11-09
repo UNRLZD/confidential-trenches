@@ -2,7 +2,8 @@
 // (sol-w-sweep.answers.json). good: this card's build, a full sell depositing W's surplus, keeping what the sweep needs
 // at a page boundary and each owed claim's cost (rent(0) when its note would land under the floor), checked exactly by
 // the sell's rule, and a sweep that leaves W only an owed claim's cost: PASS. bad: 11c963f9's build (the sell left W's surplus on W, the sweep stopped at
-// any kept account): FAIL, every mark named. Planted on the good one: another /app.js, no pin, each mark taken away:
+// any kept account): FAIL, every mark named. beforeFloor: main 383b1ffe's build, whose sell's rule lets a deposit back
+// under the kit's release floor through: FAIL on that rule alone. Planted on the good one: another /app.js, no pin, each mark taken away:
 // each FAIL; and planted bundles with a mark's line changed: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -40,6 +41,14 @@ test("recorded answer beforeFold8 (5697d7a1's build): FAIL on the seen and own-c
   assert.deepEqual(v.lines, [ALL[11], ALL[26]]);
 });
 
+// This card's base: main 383b1ffe's build signs a sell's deposit back under the kit's release floor (its rule refuses
+// only one under the pool's least deposit): FAIL on the sell's rule alone
+test("recorded answer beforeFloor (main 383b1ffe's build): FAIL on the sell's rule alone", () => {
+  const v = judge(ANSWERS.beforeFloor);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, [ALL[6]]);
+});
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -55,7 +64,7 @@ const JS = [
   "ie=k.kind===`pumpswap`?gf:Qu,[ae,oe]=await Promise.all([UR(g,p,v,F,c),Promise.all([Qu,gf].map(async e=>k.cashback&&e===ie?!0:(await wR(g,t=>TR(t,Sf(f.address,e),`confirmed`))).some(t=>!(`none`in t)&&t.owner===e&&Mf(e,t.data)>0n))).then(e=>e.filter(Boolean).length)]),se=I?vy(k,_):GE(_,oe),ce=HE(_)>1000000n?HE(_):FE,",
   "let a=ay(_,0),o=BR({fee:r,made:M,rents:UE(_,v,ae,e),after:se,lamports:b,minOut:ee,keeps:I,...I?{}:{swept:se-a,base:a,floor:ce}});",
   "var sd=5000n,ad=1000000n,nE=sd+BigInt(14e5)*ad/1000000n,rE=6960n,iE=nE+145n*rE+2n*216n*rE;",
-  "let _=wE(g.data,16);if(_<u)return X(`min_out`);let v=ly(r,n.wallet,t.amount,_);if(typeof s!=`bigint`||s>=_)return X(`reserve`);let y=0n,b=c;if(b!==void 0&&b.full===!0){if(typeof b.lamports!=`bigint`||typeof b.fee!=`bigint`||typeof b.made!=`bigint`||b.fee<0n||b.made<0n||typeof b.next!=`boolean`||typeof b.rent?.lamportsPerByte!=`bigint`||typeof b.rent.factor!=`bigint`||b.rent.lamportsPerByte<0n||b.rent.factor<0n||b.rent.lamportsPerByte*b.rent.factor>6960n||!Number.isSafeInteger(b.owed)||b.owed<0||b.owed>2)return X(`reserve`);let e=b.fee+b.made+UE(b.rent,o,b.held,b.next)-b.lamports,t=GE(b.rent,b.owed),n=ay(b.rent,0),r=HE(b.rent)>1000000n?HE(b.rent):FE,i=e+t,a=i-(t-n)<=iE&&i<_&&_-i>=r;if(s!==(a?i:e+n))return X(`reserve`);a&&(y=t-n)}else if(s<0n)return X(`reserve`);if(s-y>iE||_-s<1000000n)return X(`reserve`);let x=OE(m,l,n.wallet,n.precommitment,o,!0);return x===_-s?",
+  "let _=wE(g.data,16);if(_<u)return X(`min_out`);let v=ly(r,n.wallet,t.amount,_);if(typeof s!=`bigint`||s>=_)return X(`reserve`);let y=0n,b=c;if(b!==void 0&&b.full===!0){if(typeof b.lamports!=`bigint`||typeof b.fee!=`bigint`||typeof b.made!=`bigint`||b.fee<0n||b.made<0n||typeof b.next!=`boolean`||typeof b.rent?.lamportsPerByte!=`bigint`||typeof b.rent.factor!=`bigint`||b.rent.lamportsPerByte<0n||b.rent.factor<0n||b.rent.lamportsPerByte*b.rent.factor>6960n||!Number.isSafeInteger(b.owed)||b.owed<0||b.owed>2)return X(`reserve`);let e=b.fee+b.made+UE(b.rent,o,b.held,b.next)-b.lamports,t=GE(b.rent,b.owed),n=ay(b.rent,0),r=HE(b.rent)>1000000n?HE(b.rent):FE,i=e+t,a=i-(t-n)<=iE&&i<_&&_-i>=r;if(s!==(a?i:e+n))return X(`reserve`);a&&(y=t-n)}else if(s<0n)return X(`reserve`);if(s-y>iE)return X(`reserve`);let w=b?.rent;if(w===void 0||typeof w.lamportsPerByte!=`bigint`||w.lamportsPerByte<1n||w.lamportsPerByte>1000000n||w.factor!==1n&&w.factor!==2n)return X(`reserve`);let k=_-s<Qy(w),x=p.at(-1);if(k&&x.program===l.program)return X(`deposit_floor`);let S=k?p:p.slice(0,-1);if(S.length!==v.length)return X(`sell`);for(let e=0;e<v.length;e++){let t=v[e],n=S[e];if(n.program!==t.program||n.data.length!==t.data.length||n.data.some((e,n)=>e!==t.data[n]))return X(`sell`);if(!jE(n.accounts,t.accounts))return X(`sell_accounts`)}if(k)return uE(e),{chain:`solana`,op:t.kind,token:t.token,amount:t.amount,feeCap:0n,pool:l.pool,to:n.wallet,decimals:t.decimals,back:null};let C=OE(x,l,n.wallet,n.precommitment,o,!0);return C===_-s?",
   "var UE=(e,t)=>t===0?0n:iy(e,0)+BigInt(t)*(sd+iy(e,165));",
   "return typeof r!=`bigint`||!Number.isSafeInteger(o)||o<0||o>2?X(`sweep_reads`):l+5000n+HE(i,n,a)+UE(i,o)===r?l:X(`sweep_amount`)}",
   "function qR(e){return e.length>2||e.some(e=>e.cashback!==!0)?null:e.length}",
@@ -104,12 +113,20 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     [JS.replace("&&_-i>=r;", ";"), 6],
     [JS.replace("s!==(a?i:e+n)", "s!==i&&s!==e+n"), 6],
     [JS.replace("i<_&&_-i>=r", "i<u&&u-i>=r"), 6],
-    [JS.replace("||_-s<1000000n)", ")"), 6],
-    [JS.replace("_-s<1000000n", "u-s<1000000n"), 6],
+    // the sell's rule refuses a deposit back under the kit's release floor at the rent read, by name, on the last
+    // instruction, and a kept sell's deposit is read from that instruction too
+    [JS.replace("return X(`deposit_floor`)", "return X(`sell`)"), 6],
+    [JS.replace("if(k&&x.program", "if(!1&&k&&x.program"), 6],
+    [JS.replace("_-s<Qy(w)", "_-s<1000000n"), 6],
+    [JS.replace("_-s<Qy(w)", "u-s<Qy(w)"), 6],
+    [JS.replace("_-s<Qy(w)", "_-s<Qy(b.rent)"), 6],
+    [JS.replace("let w=b?.rent;", "let w=FE;"), 6],
+    [JS.replace("x=p.at(-1)", "x=p.at(0)"), 6],
+    [JS.replace("let C=OE(x,l,", "let C=OE(m,l,"), 6],
     [JS.replace("<=iE&&", "<=nE&&"), 6],
     [JS.replace("iE=nE+145n*rE+2n*216n*rE", "iE=nE+145n*rE+2n*217n*rE"), 6],
     [JS.replace("rE=6960n", "rE=6961n"), 6],
-    [JS.replace("if(s-y>iE||", "if(s>iE||"), 6],
+    [JS.replace("if(s-y>iE)", "if(s>iE)"), 6],
     [JS.replace("iy(e,0)+BigInt(t)*", "BigInt(t)*"), 7],
     [JS.replace("+UE(i,o)===r", "===r"), 8],
     [JS.replace("||o>2?", "?"), 8],

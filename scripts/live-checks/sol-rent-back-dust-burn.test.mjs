@@ -34,6 +34,16 @@ test("recorded answer beforeFix: FAIL on the stranger's-balance rule alone", () 
   assert.deepEqual(v.lines, [ALL[1]]);
 });
 
+// Review of fcd67b72, P2: the rule's "never landed" (review F3 of b38cd8c2) is held through the function the rule calls
+// and the one that gives it its slots. Each recorded from a real build of a planted pool-sell.ts: FAIL on that rule alone.
+for (const k of ["plantedSlot", "plantedHeight", "plantedPastAt"]) {
+  test(`recorded answer ${k}: FAIL on the stranger's-balance rule alone`, () => {
+    const v = judge(ANSWERS[k]);
+    assert.equal(v.ok, false);
+    assert.deepEqual(v.lines, [ALL[1]]);
+  });
+}
+
 test("planted on the good answer: each fact taken away FAILs", () => {
   const g = ANSWERS.good;
   assert.deepEqual(judge({ ...g, sha384: "sha384-other" }).lines, ["BAD SIGN_HOST's served /app.js is not the one index.html pins"]);
@@ -44,8 +54,10 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 
 // The minified lines as the good build spells them (each mark's text and the code it is tied to).
 const JS = [
+  "async function WR(e,t){try{let n=await Promise.all(e.map(async e=>{let n=await e(`getEpochInfo`,[{commitment:`finalized`}]);return AR(n?.blockHeight)>t?AR(n?.absoluteSlot):null}));return n[0]!==null&&n[1]!==null?[n[0],n[1]]:null}catch{return null}}",
+  "async function kR(e,t,n){let r=await WR(e,n);if(r===null)return!1;try{let n=await Promise.all(e.map(async(e,n)=>{let i=await e(`getSignatureStatuses`,[[t],{searchTransactionHistory:!0}]);return AR(i?.context?.slot)>=r[n]&&Array.isArray(i?.value)&&i.value.length===1&&i.value[0]===null}));return n[0]===!0&&n[1]===!0}catch{return!1}}",
   "Se.sell={...t?.sell,[l]:{tx:F.encode(ve),last:M.lastHeight}},await e.owed?.put(Se).catch(()=>{})}await e.signed?.(",
-  "r=async e=>{let n=t.sell?.[e];if(n===void 0)return`no`;let r=F.decode(n.tx);if(r.length<65||r[0]!==1)throw Error(`the owed record's sell is not one signed transaction`);let i=await YH(s,e=>NR(e,I.encode(r.subarray(1,65)),r,`finalized`));if(i.every(e=>e.got===`failed`))return`no`;if(i.every(e=>e.got===`none`))return await kR(s,n.last)?`no`:`unsure`;if(!i.every(e=>e.got===`ok`))throw Error(`the sell reads ${i.map(e=>e.got).join(`/`)}`);let[a,o]=i.map(t=>yU(t.meta,c.address,e));if(a===null||o===null||a!==o)throw Error(`the sell's meta does not say plainly what W's account held after it`);return`yes`},a=async e=>{let i=new Map;for(let e of t.mints)t.sell?.[e.mint]!==void 0&&i.set(e.mint,await r(e.mint).catch(e=>({fault:e})));let a=await YH(s,e=>ZH(e,[c.address,...n]))",
+  "r=async e=>{let n=t.sell?.[e];if(n===void 0)return`no`;let r=F.decode(n.tx);if(r.length<65||r[0]!==1)throw Error(`the owed record's sell is not one signed transaction`);let i=await YH(s,e=>NR(e,I.encode(r.subarray(1,65)),r,`finalized`));if(i.every(e=>e.got===`failed`))return`no`;if(i.every(e=>e.got===`none`))return await kR(s,I.encode(r.subarray(1,65)),n.last)?`no`:`unsure`;if(!i.every(e=>e.got===`ok`))throw Error(`the sell reads ${i.map(e=>e.got).join(`/`)}`);let[a,o]=i.map(t=>yU(t.meta,c.address,e));if(a===null||o===null||a!==o)throw Error(`the sell's meta does not say plainly what W's account held after it`);return`yes`},a=async e=>{let i=new Map;for(let e of t.mints)t.sell?.[e.mint]!==void 0&&i.set(e.mint,await r(e.mint).catch(e=>({fault:e})));let a=await YH(s,e=>ZH(e,[c.address,...n]))",
   "async function NR(e,t,n,r=`confirmed`){let i=await e(`getTransaction`,[t,{encoding:`base64`,commitment:r,",
   "function yU(e,t,n){let r=e?.postTokenBalances;if(!Array.isArray(r))return null;let i=null;for(let e of r){let r=e;if(typeof r!=`object`||!r)return null;if(r.mint!==n||r.owner!==t)continue;let a=r.uiTokenAmount?.amount;if(typeof a!=`string`||!/^(0|[1-9][0-9]{0,77})$/.test(a))return null;i=(i??0n)+BigInt(a)}return i}",
   "return n>0n?[{ata:t,mint:e.mint}]:[]}),u=`yes`;for(let e of l){let t=i.get(e.mint)??`no`;if(typeof t==`object`)throw t.fault;t===`no`?u=`no`:t===`unsure`&&u===`yes`&&(u=`unsure`)}if(u!==`yes`)return{k:`holds`,steady:u===`no`};let d=l.map(e=>e.ata);try{return{k:`plan`,held:a,accounts:o,burn:d,plan:fC(c.address,o,e,d)}}",
@@ -72,6 +84,48 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs o
       "a balance a full sell left held as W's own",
       "the sell's meta does not say plainly what W's account held after it`);return`yes`}",
       "the sell's meta does not say plainly what W's account held after it`);if(a!==0n)return`no`;return`yes`}",
+      1
+    ],
+    [
+      "a status read at any slot",
+      "AR(i?.context?.slot)>=r[n]&&",
+      "!0&&",
+      1
+    ],
+    [
+      "the never-landed read on the height alone",
+      "{let r=await WR(e,n);if(r===null)return!1;try{",
+      "{let r=await WR(e,n);if(r!==null)return!0;try{",
+      1
+    ],
+    [
+      "a status of another signature",
+      "[[t],{searchTransactionHistory:!0}]",
+      "[[n],{searchTransactionHistory:!0}]",
+      1
+    ],
+    [
+      "the status's own history only",
+      "{searchTransactionHistory:!0}",
+      "{searchTransactionHistory:!1}",
+      1
+    ],
+    [
+      "pastAt past at any height",
+      "AR(n?.blockHeight)>t?",
+      "AR(n?.blockHeight)>=0?",
+      1
+    ],
+    [
+      "a value of any length",
+      "i.value.length===1&&",
+      "",
+      1
+    ],
+    [
+      "a sell past its blockhash W's own on the height alone, no status read for its signature (review F3 of b38cd8c2)",
+      "return await kR(s,I.encode(r.subarray(1,65)),n.last)?",
+      "return await kR(s,n.last)?",
       1
     ],
     [

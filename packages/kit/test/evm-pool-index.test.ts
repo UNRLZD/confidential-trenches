@@ -607,13 +607,14 @@ for (const N of [500, 2000]) test(`S1: a liar's ${N} made-up Initialize txs of r
   let slept = 0;
   const r = await evmPoolIndexSync(null, cfgOf(honest, liar, { cap: 131_072, nap: async (ms) => void (slept += ms) }));
   const asked = receiptAsks(honest).flat().filter((c) => c.method === "eth_getTransactionReceipt").length;
+  // the bound is the budget's 500 receipts, tries included (its batches depend on N: 125 pools take 52)
   assert.ok(asked <= 500, `${asked} receipts asked of the honest reader`);
-  assert.ok(receiptAsks(honest).length <= 50, `${receiptAsks(honest).length} receipt batches`);
   assert.ok(slept <= 1_000, `${slept} ms of receipt backoff`);
   assert.equal(r.coversThrough, null);
   assert.equal(r.pools, null);
   assert.equal(r.error?.code, "rpc_disagree");
-  assert.match(r.error!.message, /index reader 2's one-reader pools took index reader 1 past its receipt budget of 500/);
+  // N=500: all asked once, none asked again; N=2000: 1,500 never asked, 500 not asked again
+  assert.match(r.error!.message, new RegExp(`index reader 2's one-reader pools took index reader 1 past its receipt budget of 500 \\(${N} pool\\(s\\) left unread by it, ${N - 500} of them never asked\\)`));
   const made = new Set(old.map((p) => evmPoolIdOf(p.key)));
   assert.ok(!r.index!.pools.some((p) => made.has(p.id)));
   assert.ok(!r.index!.spans.some(([a, b]) => old.some((p) => a <= p.block && p.block <= b)), JSON.stringify(r.index!.spans));
