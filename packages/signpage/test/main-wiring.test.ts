@@ -336,6 +336,14 @@ test("main.ts wires the restore kind: answered started, its progress reading the
   w.close();
 });
 
+// review of e31892ef (P3-5): the page's restore host tells each reason a run ends stalled; the run tells it however it
+// ends (src/pool-restore.ts, its planted test)
+test("main.ts wires the restore's end: a stalled run's reasons go to this device's console", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const host = /const restore = !framed\n  \? poolRestore\(\{\n([\s\S]*?)\n    \}\)\n  : null;/.exec(src)?.[1] ?? "";
+  assert.match(host, /^      ended: \(stage, why\) => void \(stage === "stalled" && console\.warn\(`restore stalled: \$\{why\.join\("; "\)\}`\)\),$/m);
+});
+
 // fold 5 (review LOW): the page's seed re-read on another tab's write is walletSeedMoved's call, which skips an owed
 // send's write (meta owed/<op id>); its behaviour is the store's test (packages/wallet/test/store.test.ts)
 test("main.ts reads its seed again on another tab's write only as walletSeedMoved says: an owed send's write is none", () => {

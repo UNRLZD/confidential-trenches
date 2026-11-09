@@ -56,10 +56,9 @@ const deps = {
   cfg: { vault: input.vault, token: input.token, marginK: BigInt(input.marginK) },
   reads: createSendReads(rpcs, { vault: input.vault, token: input.token }),
   store,
-  // the sandbox node keeps every block, so it stands in for the archival provider too
   // the validity period read live from both providers (EXPERIMENTAL_protocol_config), as the relayer starts
   // the relayer key's nonce counter and the blocks D it found live in the same store, so a restart signs the next nonce
-  relayer: await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault, store, input.waitMs),
+  relayer: await startRelayer(rpcs, null, input.relayer.account_id, input.relayer.secret_key, input.vault, store, input.waitMs),
   tokenStatus,
   pausedAt,
 };

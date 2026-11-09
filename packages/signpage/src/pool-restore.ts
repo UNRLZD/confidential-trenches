@@ -16,9 +16,37 @@
 //   means every pinned pool was read.
 // - What they find goes to the note store through the wallet's writeRestored (parents first; a note the store holds in
 //   flight is left as it is), the pools' notes together. A pool that fails leaves the others' notes written.
+// - Then restore step 5 (card wallet-restore-id-reader-wired; docs/plan1/wallet.md §2.3 "Restore" step 5): each pool
+//   walked has its deposit ids U_{s,i} read under its own scope s, in every lane up to the lane's highest with a note,
+//   a trace or money, plus DEPOSIT_ID_MARGIN more (../../wallet/src/restore/wallets.ts restoreDepositIds), each lane held
+//   to its walk's end (../../wallet/src/notes/restore.ts walkEnd at RESTORE_GAP, the pools' walk). A pool deposit's
+//   refund lands under U_{s,i}'s id inside intents.near, so an id can hold money, or show it was used, where no note
+//   does. Each id is read by the wallet's IdReader (../../wallet/src/restore/id-reader.ts nearIdReader) on the
+//   release's pair on the network 1Click pays out on (pageIdReads: FastNEAR and dRPC on mainnet), every view at one
+//   block agreed on both (openRestorePass, one pass for the whole run), the stronger answer of the two taken.
+//   - The walk's notes are the floor: they are written before any id is read, whatever the ids then show.
+//   - An id unread on both providers (after the IdReader's retries) stops the reads at once: no id is read after it,
+//     and the run ends stalled, never done, so the app's Retry reads again. A pass the providers refuse, a lane stopped
+//     past its walk's end (the restore unfinished) or any read that throws ends it stalled the same way.
+//   - The testnet build reads no deposit id: it makes no 1Click quote (src/pool-deposit-address.ts), so no id of its
+//     pools can hold a trace on NEAR.
+//   - A pool scope is never "done" here (POOL_CHAIN_UNREAD): a pool deposit's money can also wait at its one-time
+//     account U_X on the pool's own chain (1Click's delivery there, or a refund carry moved back), which step 5 does not
+//     read yet (card wallet-restore-reads-ux). Every pool walked whose ids are read ends the run stalled, with that
+//     reason named, so the app's Retry stays offered and no run says done while U_X is unread.
+//   - Every deposit note the walk gave for a pool is of that pool's scope; one of another scope is a drift that stalls
+//     the run by name, and that pool's ids are not read on it.
+//   - Each reason a run ends stalled is named (the host's `ended`, told once however the run ends: an abort and a throw
+//     included); the op record holds the kit's stage only.
 // - No request names a note: each restore reads its pool's whole public set and finds the seed's own notes on the
-//   device (solana-restore.ts, evm-restore.ts headers). The seed is read under the store's seed lock, shared (a sign out
-//   waits for the run), and zeroed at its end; this tab's sign out aborts the run first.
+//   device (solana-restore.ts, evm-restore.ts headers). The seed is opened only for one use at a time (a SeedUse,
+//   ../../wallet/src/notes/restore.ts): under the store's seed lock, shared, after a check that it is still stored and
+//   still this run's own (an in-memory HMAC of it under a key drawn for the run, taken at its first use: words signed
+//   in by another tab between two uses stop the run), for one walk's match or one window of a lane's deposit ids (at
+//   most DEPOSIT_ID_MARGIN of them), and zeroed when that use ends; no read and no wait holds
+//   the lock (review P2-2: held for the whole run, it made a queued seed write, and every pool.buy, sell, deposit and
+//   follow behind it, wait for step 5). The floor's write runs under the same lock and check, so a sign out in another
+//   tab is never written over; this tab's sign out aborts the run, checked before every id.
 // - One run at a time on the page: a request while one runs is answered "started" and follows that run. Across tabs,
 //   runs take RESTORE_LOCK in turn, so two tabs' writes never race on one note.
 // - A run's op records stay "started" or "reading" only while it lives: each follower holds RESTORE_LOCK/<op id> for
@@ -27,15 +55,23 @@
 //   that never ends.
 // - "Empty" for the run with no tap: no note but PLANNED ones (a deposit index this page named ahead, src/deposit-name.ts,
 //   holds no money until it lands).
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
 import type { RestoreStage } from "../../kit/src/signpage/messages.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { writeRestored, type RestoredNote } from "../../wallet/src/notes/restore.ts";
+import { NEAR_NETWORKS, type NearRpc } from "../../wallet/src/deposit/account.ts";
+import { POOL_DEPOSIT_NETWORK } from "../../wallet/src/deposit/quote.ts";
+import { RESTORE_GAP, RESTORE_LANES, walkEnd, writeRestored, type RestoredNote, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { evmRestoreNotes } from "../../wallet/src/pool/evm-restore.ts";
-import { EVM_POOLS, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
+import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes } from "../../wallet/src/pool/solana-restore.ts";
+import { nearIdReader, openRestorePass, type IdReaderOpts, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
+import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import type { Deferred, KindContext } from "./api.ts";
 import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
 
@@ -45,27 +81,109 @@ export const RESTORE_LOCK = "ct-pool/restore";
 /** The gap between two "reading" progress events: within the 10 s the kit's client names. */
 export const RESTORE_BEAT_MS = 5_000;
 
-/** One pinned pool to restore, with its reads (null when this page has none for it: the run ends stalled). */
+/** One pinned pool to restore, with its scope (its deposit ids') and its reads (null when this page has none for it: the run ends stalled). */
 export type RestorePool =
-  | { chain: "solana"; program: string; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null }
-  | { chain: "evm"; pin: EvmPoolPin; rpcs: (() => readonly EvmRpc[]) | null };
+  | { chain: "solana"; program: string; scope: bigint; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null }
+  | { chain: "evm"; pin: EvmPoolPin; scope: bigint; rpcs: (() => readonly EvmRpc[]) | null };
+
+/** Step 5's reads: the NEAR pair, the readers' options and each scope's answer (tests only, both). */
+export type IdReads = {
+  rpcs: () => readonly [NearRpc, NearRpc];
+  opts?: Omit<PassOpts, "after"> & IdReaderOpts;
+  read?: (scope: bigint, ids: DepositIds) => void;
+};
+
+/**
+ * Where this build reads the deposit ids: the release pair (one FastNEAR URL and dRPC, ../../kit's NEAR_NETWORKS) on
+ * POOL_DEPOSIT_NETWORK, the network 1Click pays a pool deposit out and refunds it on, each provider reading block headers
+ * too (relayRpc), so the pass keeps its block's time. null on the testnet build, which quotes no deposit.
+ */
+export function pageIdReads(): IdReads | null {
+  if (POOL_TESTNET) return null;
+  const net = NEAR_NETWORKS[POOL_DEPOSIT_NETWORK];
+  return { rpcs: () => [relayRpc(net.fastnear[0]), relayRpc(net.drpc)] };
+}
+
+/**
+ * Why a pool scope's step 5 is not done until card wallet-restore-reads-ux: its deposits' one-time accounts U_X on the
+ * pool's own chain are not read, so money 1Click delivered there, or a refund carry moved back there, is not seen.
+ */
+export const POOL_CHAIN_UNREAD = "the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done";
+
+/** Why step 5 on one scope is not done (empty: every id read and every lane at its margin), each reason named. */
+export function idsUndone(r: DepositIds): string[] {
+  const why: string[] = [];
+  for (const x of r.lanes) {
+    if (x.reach !== null) why.push(`lane ${x.lane} stopped at ${x.reach}, past the note walk's end: restore again from there`);
+    if (x.unread.length > 0) why.push(`lane ${x.lane}: ${x.unread.length} id${x.unread.length === 1 ? "" : "s"} unread (${x.unread[0]!.error})`);
+  }
+  if (!r.complete && why.length === 0) why.push("the ids' read is unfinished");
+  return why;
+}
+
+/**
+ * Each lane's highest deposit note of `scope` and its walk's end, as the pools' walk read it (walkLane at RESTORE_GAP
+ * from the lane's first index, no reach: ../../wallet/src/pool/solana-restore.ts, evm-restore.ts).
+ */
+export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHighest: (number | null)[]; laneWalked: number[] } {
+  const laneHighest: (number | null)[] = Array<number | null>(RESTORE_LANES).fill(null);
+  for (const n of notes) if (n.ref.kind === "deposit" && n.ref.s === scope) laneHighest[n.ref.i % RESTORE_LANES] = Math.max(laneHighest[n.ref.i % RESTORE_LANES] ?? n.ref.i, n.ref.i);
+  return { laneHighest, laneWalked: laneHighest.map((h, lane) => walkEnd(lane, h === null ? [] : [h], RESTORE_GAP)) };
+}
+
+/**
+ * Step 5 on every pool walked, in order, on one pass and one IdReader: each reason it is not done, named, pushed to `why`
+ * as found (never none while a pool scope's U_X is unread: POOL_CHAIN_UNREAD), so a throw keeps the reasons before it. The first id unread on both providers stops every read
+ * after it (each throws at once, so its lane ends with restoreDepositIds's error); a sign out stops them the same way,
+ * checked before each id (the id in flight then ends its lane, and the run's end checks it again). `seed` opens the seed for each window of a lane's ids only.
+ */
+async function readDepositIds(seed: SeedUse, walked: readonly { label: string; scope: bigint; notes: readonly RestoredNote[] }[], ids: IdReads, signal: AbortSignal, why: string[]): Promise<void> {
+  const rpcs = ids.rpcs();
+  const pass = await openRestorePass(POOL_DEPOSIT_NETWORK, rpcs, ids.opts ?? {});
+  const reader = await nearIdReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
+  let stop: unknown;
+  const holds: IdReader = async (u) => {
+    signal.throwIfAborted();
+    if (stop !== undefined) throw stop;
+    try {
+      return await reader(u);
+    } catch (e) {
+      stop ??= e;
+      throw e;
+    }
+  };
+  for (const w of walked) {
+    // the walk's deposit notes are all of its pool's scope: one of another is a drift, never read on
+    const drift = w.notes.filter((n) => n.ref.kind === "deposit" && n.ref.s !== w.scope);
+    if (drift.length > 0) {
+      why.push(`${w.label}: ${drift.length} deposit note${drift.length === 1 ? "" : "s"} of scope ${String((drift[0]!.ref as { s: bigint }).s)} in the walk of scope ${w.scope}; its ids are not read`);
+      continue;
+    }
+    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, holds);
+    ids.read?.(w.scope, r);
+    for (const y of idsUndone(r)) why.push(`${w.label}: ${y}`);
+    why.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
+  }
+}
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
 /** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads. */
 export function pagePools(): RestorePool[] {
   const out: RestorePool[] = [];
-  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, rpcs: pageSolanaRpcs });
+  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaRpcs });
   for (const chain of ["base", "robinhood"] as const) {
     const pin = EVM_POOLS[EVM_PAGE[chain]];
     if (pin === undefined) continue;
     const net = pin.network;
+    // the pool's scope as src/pools.ts names it (evmPoolScopeOf on the pool's lowercased address and chain id)
+    const scope = evmPoolScopeOf(pin.pool.toLowerCase(), EVM_CHAIN_IDS[net]);
     // the testnet lists sit behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them
     if (POOL_TESTNET && (net === "base-sepolia" || net === "robinhood-testnet"))
-      out.push({ chain: "evm", pin, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)) });
+      out.push({ chain: "evm", pin, scope, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)) });
     // mainnet: the page has no EVM pool list yet (src/pool-testnet.ts testnetPoolDeps answers null), so a pin there is
     // read by no one until its list lands, and the run says so (stalled), never done
-    else out.push({ chain: "evm", pin, rpcs: null });
+    else out.push({ chain: "evm", pin, scope, rpcs: null });
   }
   return out;
 }
@@ -82,6 +200,10 @@ export type PoolRestoreHost = {
   locks?: Pick<LockManager, "request" | "query">;
   /** After the notes are written: the page's proof queue's pass, so a restored note can pay the next buy. */
   written?: () => void;
+  /** Step 5's reads (pageIdReads unless given; null: no deposit id is read). */
+  ids?: IdReads | null;
+  /** The run's end and each reason it is not done (empty when done): the op record holds the kit's stage only. */
+  ended?: (stage: RestoreStage, why: readonly string[]) => void;
   /** Tests only: the beat, the clock and the two restores (the wallet's otherwise). */
   beatMs?: number;
   now?: () => number;
@@ -113,38 +235,91 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
     const pools = (h.pools ?? pagePools)();
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
-    // the restore lock, then the seed's (shared): a sign out waits only for the run that holds the seed
-    return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, () => locks().request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
-      const seed64 = await h.seed64();
-      const found: RestoredNote[] = [];
-      let failed = false;
+    const ids = h.ids === undefined ? pageIdReads() : h.ids;
+    // each reason the run is not done, as found; the run's end is told once with them (`ended`), a throw or an abort
+    // included (review of e31892ef, P3-5)
+    const why: string[] = [];
+    let told = false;
+    const end = (stage: RestoreStage): RestoreStage => {
+      if (!told) {
+        told = true;
+        h.ended?.(stage, why);
+      }
+      return stage;
+    };
+    // the restore lock, held for the run (each tab's runs in turn); the seed's lock only for each use of the seed
+    return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, async (): Promise<RestoreStage> => {
+      // the run's seed: an HMAC of it under a key drawn for this run, taken at its first use and held in memory only
+      // (never stored, logged or sent), so a sign out and a sign in with other words in another tab between two uses
+      // stops the run before one more use, never deriving those words' ids on this run's lanes nor writing this run's
+      // notes into that store (review of e31892ef, P3-2)
+      const runKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
+      let mark = null as Uint8Array | null;
+      // under the seed lock, shared, while this run's seed is still the one stored: a sign out (exclusive) never runs
+      // inside a use; `fn` gets the seed, zeroed when it ends
+      const seedHeld = <T,>(fn: (seed64: Uint8Array) => Promise<T>): Promise<T> =>
+        locks().request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+          signal.throwIfAborted();
+          if (!(await h.signedIn())) throw new Error("signed out during the restore");
+          const s = await h.seed64();
+          try {
+            const m = hmac(sha256, runKey, s);
+            if (mark === null) mark = m;
+            else {
+              const same = m.length === mark.length && m.every((x, k) => x === mark![k]);
+              m.fill(0);
+              if (!same) throw new Error("other words were signed in during the restore");
+            }
+            return await fn(s);
+          } finally {
+            s.fill(0);
+          }
+        }) as Promise<T>;
+      // the seed for one use
+      const seed: SeedUse = (use) => seedHeld(async (s) => use(s));
       try {
+        const found: RestoredNote[] = [];
         // each pool on its own: one that fails leaves the others' notes found
+        const label = (p: RestorePool): string => (p.chain === "solana" ? "solana" : p.pin.network);
         const reads = pools.map(async (p): Promise<RestoredNote[]> => {
-          if (p.rpcs === null) throw new Error(`${p.chain === "solana" ? "solana" : p.pin.network}: no reads on this page`);
-          if (p.chain === "solana") return (await solana({ seed64, program: p.program, rpcs: p.rpcs(), signal })).notes;
+          if (p.rpcs === null) throw new Error("no reads on this page");
+          if (p.chain === "solana") return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), signal })).notes;
           // the notes only: no W is read or named to a provider for a record the page keeps none of
-          return (await evm({ seed64, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false })).notes;
+          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false })).notes;
         });
-        for (const r of await Promise.allSettled(reads)) {
-          if (r.status === "fulfilled") found.push(...r.value);
-          else failed = true;
+        const walked: { label: string; scope: bigint; notes: RestoredNote[] }[] = [];
+        (await Promise.allSettled(reads)).forEach((r, k) => {
+          if (r.status === "fulfilled") {
+            found.push(...r.value);
+            walked.push({ label: label(pools[k]!), scope: pools[k]!.scope, notes: r.value });
+          } else why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
+        });
+        signal.throwIfAborted();
+        // the floor: the walk's notes are written before any id is read
+        if (found.length > 0) {
+          await seedHeld(async () => {
+            const notes = await openNoteStore(await h.store());
+            try {
+              await writeRestored(notes, { notes: found });
+            } finally {
+              notes.close();
+            }
+          });
+          h.written?.();
         }
+        // step 5 on each pool walked; each reason it is not done stalls the run, a throw among them
+        if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, signal, why).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
+        signal.throwIfAborted();
+        return end(why.length > 0 ? "stalled" : "done");
       } finally {
-        seed64.fill(0);
+        runKey.fill(0);
+        mark?.fill(0);
       }
-      signal.throwIfAborted();
-      if (found.length > 0) {
-        const notes = await openNoteStore(await h.store());
-        try {
-          await writeRestored(notes, { notes: found });
-        } finally {
-          notes.close();
-        }
-        h.written?.();
-      }
-      return failed ? "stalled" : "done";
-    }));
+    }).catch((e: unknown): never => {
+      why.push(`the restore stopped: ${e instanceof Error ? e.message : "it threw"}`);
+      end("stalled");
+      throw e;
+    }) as Promise<RestoreStage>;
   };
 
   const start = (): Run => {

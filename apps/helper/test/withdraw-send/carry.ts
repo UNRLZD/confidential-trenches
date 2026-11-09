@@ -32,7 +32,7 @@ const input = JSON.parse(readFileSync(0, "utf8")) as Input;
 const rpcs = [nearRpc(input.rpc[0]), nearRpc(input.rpc[1])] as const;
 const nonces = createFileStore(input.nonces);
 const store = createWithdrawSendStore(input.store, { release: 1, keys: nonces });
-const relayer = await startRelayer(rpcs, rpcs[0], input.relayer.account_id, input.relayer.secret_key, input.vault, nonces);
+const relayer = await startRelayer(rpcs, null, input.relayer.account_id, input.relayer.secret_key, input.vault, nonces);
 const logs: string[] = [];
 let asks = 0;
 const tokenStatus = async (): Promise<TokenStatus> => {

@@ -148,3 +148,12 @@ test("rentOnce: one read at a time, kept once it lands, the state told once; a f
   assert.equal(reads, 2, "kept once it lands");
   assert.equal(told, 1);
 });
+
+// card wallet-restore-id-reader-wired: the restore reads each pool's deposit ids under the scope its notes carry, the
+// one this table names (a pool restored under another scope would read another pool's ids)
+test("the restore's pools are this table's, each under the same scope", async () => {
+  const { pagePools } = await import("../src/pool-restore.ts");
+  const restore = pagePools();
+  assert.ok(restore.length >= 1);
+  assert.deepEqual(restore.map((p) => [p.chain === "solana" ? "solana" : p.pin.network === "base-sepolia" ? "base" : "robinhood", p.scope]), pools.PAGE_POOLS.map((p) => [p.chain, p.scope]));
+});

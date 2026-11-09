@@ -42,7 +42,7 @@ const M = [
   ["the reads in the notes' order", WAL, [["for (const [s, chain] of shuffled(slots.flatMap((s) => READS[s.c].map((chain) => [s, chain] as const)), pick))", "for (const [s, chain] of slots.flatMap((s) => READS[s.c].map((chain) => [s, chain] as const)))"]], RW, "step 4"],
   ["no hop target read", WAL, [["await readAll(hops.flat());", ""]], RW, "step 4"],
   ["one arm per label", WAL, [["    const k = `${s.l}:${s.j}`;", "    const k = `${s.l}`;"]], RW, "step 4"],
-  ["the deposit ids read one short of the margin", WAL, [["+ RESTORE_LANES * margin;", "+ RESTORE_LANES * (margin - 1);"]], RW, "step 5"],
+  ["the deposit ids read one short of the margin", WAL, [["(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);", "(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * (margin - 1));"]], RW, "step 5"],
   ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: why(e) });"]], RW, "step 5"],
   ["history does not move the lane's highest", WAL, [['      (state === "money" ? money : used).push(i);\n      highest = Math.max(highest ?? i, i);', '      (state === "money" ? money : used).push(i);']], RW, "step 5"],
   ["a used id does not reset the margin (review: money past 21 used ids)", WAL, [['      if (state === "unused") continue;', '      if (state !== "money") continue;']], RW, "step 5"],

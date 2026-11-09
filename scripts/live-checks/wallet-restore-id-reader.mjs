@@ -8,17 +8,27 @@
 //     card's rules that the page carries (string literals and patterns that minifying keeps): the walk's reach, the
 //     index a walk-end error names, which a restore reads to before its gap counts (the walk's error says "restore again
 //     with reach[lane] = i"): the reach checked as an index of its lane, the floor it sets, and misses counted only past it;
+//     and, since card wallet-restore-id-reader-wired (the page's restore kind, src/pool-restore.ts, runs step 5 through
+//     the IdReader), the IdReader's rules: an id is a 64-hex implicit account, storage on the token is null or a
+//     balance, intents.near's list is a token list, the stronger of the two providers' answers taken (money over used
+//     over unused), the pass's finals meet or the restore does not start, a stale pass refused, step 5's lane stopped
+//     after DEPOSIT_ID_MARGIN failed reads, and the page's own wiring: the first id unread stops every read after it, and
+//     a lane unread or unfinished ends the run stalled by name; since the review of 9583f571 also: a pool scope ends
+//     stalled with its U_X on the pool's chain named unread (never done, until card wallet-restore-reads-ux), a step 5
+//     that throws ends stalled with its error named (the catch's own words: a catch that ends it done has none), a
+//     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored;
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
 //       (storage_balance_of a balance, view_account an account), and a fresh implicit id, 32 random bytes made for the
-//       run, reads unused (storage_balance_of null, view_account UNKNOWN_ACCOUNT).
-// What this check cannot read, and why (verify, never assume): the IdReader's own code is not in the served bundle. At
-// f11b13ac nothing in packages/signpage/src imports restore/id-reader.ts, arms.ts or after.ts (the page's restore kind,
-// src/pool-restore.ts, imports only notes/restore.ts's writeRestored), and a build of the card carries none of the
-// IdReader's strings ("an id is a 64-hex implicit account id", "mt_tokens_for_owner" and the rest read 0 in public/app.js);
-// the card's change to the page's bundle is the walk's reach (notes/restore.ts, restore/walk.ts). The markers are those.
-// When the page imports the IdReader, its rules join MARK here.
+//       run, reads unused (storage_balance_of null, view_account UNKNOWN_ACCOUNT); intents.near's mt_tokens_for_owner
+//       answers each a token list; and the provider's final block header reads (`block`, the pass's block time), all
+//       with CORS for the page's origin, as step 5 reads each.
+// Until card wallet-restore-id-reader-wired the IdReader's code was not in the served bundle (at f11b13ac nothing in
+// packages/signpage/src imported restore/id-reader.ts, and main 610143c2's public/app.js holds none of the id_ and ids_
+// markers below); its rules joined MARK once src/pool-restore.ts imported it. What this check cannot read: whether a
+// restore on SIGN_HOST reads any id today, as the mainnet build pins no pool yet (src/pool-restore.ts pagePools), so its
+// step 5 runs on the first pool pinned there.
 // After: sign
 //   node scripts/live-checks/wallet-restore-id-reader.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-restore-id-reader.mjs --local [--root <signpage dir>] [--record <file>]
@@ -53,6 +63,43 @@ export const MARK = Object.freeze({
   reach_floor: /let ([\w$]+)=([\w$]+)\?\?-1,/g,
   // a miss counts only past the floor: `r(l)?(s.push(a),u=0):a>o&&u++` (the index pushed is the one compared, the counter is the one reset)
   reach_misses: /\)\?\([\w$]+\.push\(([\w$]+)\),([\w$]+)=0\):\1>[\w$]+&&\2\+\+/g,
+  // the IdReader (packages/wallet/src/restore/id-reader.ts nearIdReader, openRestorePass) and step 5
+  // (restore/wallets.ts restoreDepositIds), as the page's restore kind imports them
+  id_hex: "an id is a 64-hex implicit account id",
+  id_storage: "storage_balance_of: neither null nor a balance",
+  id_intents: "mt_tokens_for_owner: not a token list",
+  // the stronger answer of the two providers: `{unused:0,used:1,money:2}`
+  id_rank: "{unused:0,used:1,money:2}",
+  id_pass_meet: "did not meet; the restore does not start",
+  id_pass_stale: "blocks past it; open a fresh pass",
+  ids_margin: "id reads failed with none showing history between them",
+  // the page's wiring (src/pool-restore.ts readDepositIds): the first unread id stops every read after it,
+  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}`
+  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+)\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
+  // and a lane unfinished ends the run stalled by name (src/pool-restore.ts idsUndone)
+  ids_undone: "past the note walk's end: restore again from there",
+  // a pool scope is never done while its U_X on the pool's chain is unread (POOL_CHAIN_UNREAD)
+  ids_ux_unread: "the pool's own chain is not read for a deposit's money",
+  // a step 5 that throws ends stalled, its error named: the catch's words (a catch that ends it done holds none)
+  ids_catch: "step 5 did not finish: ",
+  // a deposit note of another scope in a pool's walk stalls by name
+  ids_drift: "; its ids are not read",
+  // the seed opened per use, under the seed lock, only while still stored
+  seed_per_use: "signed out during the restore",
+  // review of e31892ef (P3-3): the end stage is read off the very array step 5's catch pushes to (a stage line that
+  // drops some reasons, as `why.some((y)=>!y.endsWith(U_X))?"stalled":"done"`, holds none),
+  // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
+  ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
+  // each pool scope's step 5 pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
+  // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
+  // (delta review 2: no condition in front of it):
+  // `var hV=`the pool's own chain is not read ...`; ... for(let e of gV(a))i.push(`${r.label}: ${e}`);i.push(`${r.label}: ${hV}`)}}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?\)([\w$]+)\.push\(`\$\{([\w$]+)\.label\}: \$\{[\w$]+\}`\);\2\.push\(`\$\{\3\.label\}: \$\{\1\}`\)\}\}/g,
+  // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, its HMAC kept
+  // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
+  // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
+  // that request per use (a run-long lock, with the run inside one request, holds none)
+  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);
@@ -71,14 +118,14 @@ export function judgeBundle(rec) {
     `/app.js is the script / names: its sha384 is the integrity (HTTP ${a.status ?? "?"}, ${a.bytes ?? "?"} bytes)`);
   const m = a.markers ?? {};
   const missing = MARKERS.filter((k) => !(Number.isSafeInteger(m[k]) && m[k] >= 1));
-  say(missing.length === 0, `/app.js carries the restore walk's reach (${missing.length ? `missing ${missing.join(", ")}` : `${MARKERS.length} marks found`})`);
+  say(missing.length === 0, `/app.js carries the restore walk's reach and the IdReader's rules (${missing.length ? `missing ${missing.join(", ")}` : `${MARKERS.length} marks found`})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
 // what one provider's reads must answer, as the IdReader decides on them
 const WANT = Object.freeze({
-  registered: { storage: "registered", account: "account" },
-  unused: { storage: "null", account: "UNKNOWN_ACCOUNT" },
+  registered: { storage: "registered", account: "account", intents: "list" },
+  unused: { storage: "null", account: "UNKNOWN_ACCOUNT", intents: "list" },
 });
 const hasWord = (list, word) => (list ?? "").split(",").map((x) => x.trim().toLowerCase()).some((x) => x === "*" || x === word);
 
@@ -96,9 +143,12 @@ export function judge(rec) {
     const f = p.preflight ?? {};
     say([200, 204].includes(f.http) && cors(f.acao) && hasWord(f.acam, "post") && hasWord(f.acah, "content-type"),
       `provider ${i} answers the page's preflight for its origin (POST, content-type: ${f.http ?? "?"}, CORS ${f.acao ?? "none"}, methods ${f.acam ?? "none"}, headers ${f.acah ?? "none"})`);
+    const b = p.block ?? {};
+    say(b.http === 200 && cors(b.acao) && b.read === "header", `provider ${i} reads its final block's header for the page's origin (${b.read ?? b.error ?? "no answer"} ${b.http ?? "?"} CORS ${b.acao ?? "none"})`);
     for (const [who, want] of Object.entries(WANT)) {
       const r = p[who] ?? {};
-      const s = r.storage ?? {}, a = r.account ?? {};
+      const s = r.storage ?? {}, a = r.account ?? {}, t = r.intents ?? {};
+      say(t.http === 200 && cors(t.acao) && t.read === want.intents, `provider ${i} reads intents.near's token list of the ${who} id for the page's origin (${t.read ?? t.error ?? "no answer"} ${t.http ?? "?"} CORS ${t.acao ?? "none"})`);
       say(s.http === 200 && cors(s.acao) && s.read === want.storage && a.http === 200 && cors(a.acao) && a.read === want.account,
         `provider ${i} reads the ${who} id ${who === "registered" ? "registered" : "unused"} for the page's origin (storage ${s.read ?? s.error ?? "no answer"} ${s.http ?? "?"} CORS ${s.acao ?? "none"}; account ${a.read ?? a.error ?? "no answer"} ${a.http ?? "?"} CORS ${a.acao ?? "none"})`);
     }
@@ -158,7 +208,7 @@ async function ask(fetchFn, url, init, wait) {
     return { out, j: null };
   }
 }
-const rpcBody = (params) => JSON.stringify({ jsonrpc: "2.0", id: KEY, method: "query", params });
+const rpcBody = (params, method = "query") => JSON.stringify({ jsonrpc: "2.0", id: KEY, method, params });
 const JSON_POST = { method: "POST", headers: { "content-type": "application/json" } };
 const errorName = (j) => (j?.error ? String(j.error.cause?.name ?? j.error.name ?? "error") : undefined);
 const asText = (bytes) => {
@@ -172,9 +222,10 @@ const asText = (bytes) => {
 /** What one provider answers for one id: storage_balance_of on USDC (registered | null | other | an error's name) and view_account (account | UNKNOWN_ACCOUNT | other | an error's name). */
 async function readId(fetchFn, url, id, wait) {
   const args = Buffer.from(JSON.stringify({ account_id: id })).toString("base64");
-  const [st, ac] = await Promise.all([
+  const [st, ac, mt] = await Promise.all([
     ask(fetchFn, url, { ...JSON_POST, body: rpcBody({ request_type: "call_function", account_id: USDC, method_name: "storage_balance_of", args_base64: args, finality: "final" }) }, wait),
     ask(fetchFn, url, { ...JSON_POST, body: rpcBody({ request_type: "view_account", account_id: id, finality: "final" }) }, wait),
+    ask(fetchFn, url, { ...JSON_POST, body: rpcBody({ request_type: "call_function", account_id: "intents.near", method_name: "mt_tokens_for_owner", args_base64: args, finality: "final" }) }, wait),
   ]);
   const storage = { http: st.out.http, acao: st.out.acao, error: st.out.error };
   if (st.j) {
@@ -183,15 +234,28 @@ async function readId(fetchFn, url, id, wait) {
   }
   const account = { http: ac.out.http, acao: ac.out.acao, error: ac.out.error };
   if (ac.j) account.read = errorName(ac.j) ?? (typeof ac.j.result?.amount === "string" && DIGITS.test(ac.j.result.amount) ? "account" : "other");
-  return { storage, account };
+  const intents = { http: mt.out.http, acao: mt.out.acao, error: mt.out.error };
+  if (mt.j) {
+    const v = Array.isArray(mt.j.result?.result) ? asText(mt.j.result.result) : undefined;
+    intents.read = errorName(mt.j) ?? (Array.isArray(v) && v.every((t) => t && typeof t.token_id === "string") ? "list" : "other");
+  }
+  return { storage, account, intents };
+}
+
+/** One provider's final block header (the `block` method the pass reads its block's time with): header | other | an error's name. */
+async function readBlock(fetchFn, url, wait) {
+  const b = await ask(fetchFn, url, { ...JSON_POST, body: rpcBody({ finality: "final" }, "block") }, wait);
+  const out = { http: b.out.http, acao: b.out.acao, error: b.out.error };
+  if (b.j) out.read = errorName(b.j) ?? (Number.isSafeInteger(b.j.result?.header?.height) && typeof b.j.result?.header?.hash === "string" ? "header" : "other");
+  return out;
 }
 
 /** Each provider's preflight and reads of the registered id and the fresh one, keyed by PLACES. */
 async function rpcRead(fetchFn, ids, wait) {
   const one = async (url) => {
     const pre = await ask(fetchFn, url, { method: "OPTIONS", headers: { "access-control-request-method": "POST", "access-control-request-headers": "content-type" } }, wait);
-    const [registered, unused] = await Promise.all([readId(fetchFn, url, ids.registered, wait), readId(fetchFn, url, ids.unused, wait)]);
-    return { preflight: pre.out, registered, unused };
+    const [registered, unused, block] = await Promise.all([readId(fetchFn, url, ids.registered, wait), readId(fetchFn, url, ids.unused, wait), readBlock(fetchFn, url, wait)]);
+    return { preflight: pre.out, registered, unused, block };
   };
   return Object.fromEntries(await Promise.all(PAIR.map(async (u, i) => [PLACES[i], await one(u)])));
 }
