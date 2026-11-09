@@ -573,22 +573,48 @@ test("M369 (M1): a rebroadcast goes to the region that took the first send only,
   const engine = blockEngine(() => (refuse ? "rpc_error" : "ok"));
   let path: SolanaSendPath | undefined;
   let b64 = "";
-  const s = mainnet({ engine, intervalMs: 50, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
-  const a = await s.carry(body(tipped()));
-  assert.equal(code(a), "ok");
-  const sig = (a.body as { signature: string }).signature;
+  let sig = "";
+  let fill = () => {};
+  // the send stays open while its ticks go (a tick waiting at the send's end is dropped, the next test)
+  const s = mainnet({ engine, intervalMs: 50, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), (sig = x.sig), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  await sleep(10);
   assert.equal(path!.name, "jito");
   assert.equal(path!.paceKey, engine.seen[0]!.url, "the kit paces it per region, shared by every carry rebroadcasting there");
   // card helper-jito-pace-margin: the kit's pacer runs at the region's own pace plus the tick slack (./jito.ts)
   assert.equal(path!.minIntervalMs, 50 + JITO_TICK_SLACK_MS);
-  await assert.rejects(path!.send(b64), /block engine busy/, "the first send's second: not sent, and the kit's record says so");
+  // the first send's second: a tick waits for the region's next one (card helper-pace-tick-refused-flake); a second
+  // tick while it waits is not sent, and the kit's record says so
+  const held = path!.send(b64);
+  await assert.rejects(path!.send(b64), /block engine busy/);
   assert.equal(engine.seen.length, 1);
-  await sleep(60);
-  assert.equal(await path!.send(b64), sig);
+  assert.equal(await held, sig);
+  assert.equal(engine.seen.length, 2);
   await sleep(60);
   refuse = true;
   await assert.rejects(path!.send(b64), /block engine refused/);
   assert.equal(new Set(engine.seen.map((x) => x.url)).size, 1, "never another region");
+  fill();
+  assert.equal(code(await a), "ok");
+});
+
+// Card helper-pace-tick-refused-flake: a tick waiting for its region's next second when the carry's send ends (here
+// the fill) is dropped unsent, so a decided send never takes a region's second.
+test("a rebroadcast waiting for its region's second is dropped unsent once the carry's send has ended", async () => {
+  const engine = blockEngine(() => "ok");
+  let path: SolanaSendPath | undefined;
+  let b64 = "";
+  let fill = () => {};
+  const s = mainnet({ engine, intervalMs: 1_000, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  await sleep(10);
+  const held = path!.send(b64); // inside the first send's second: it waits
+  const t0 = performance.now();
+  fill();
+  assert.equal(code(await a), "ok");
+  await assert.rejects(held, /block engine busy: the send ended/);
+  assert.ok(performance.now() - t0 < 500, "dropped at the send's end, not at the region's next second");
+  assert.equal(engine.seen.length, 1, "never sent");
 });
 
 // Review of 48c11e3c, P3: the kit's pacer ticks on whole Date.now() ms from its last tick (packages/kit send.ts paceArm
