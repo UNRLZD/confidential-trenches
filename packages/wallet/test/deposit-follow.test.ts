@@ -237,7 +237,7 @@ const mover = (send: (u: string, m: MoveRecord, ask: FollowMoveAsk) => Promise<v
   const m: MoveRecord = { nonce: versionedNonce(ask.salt, deadline_ms), deadline_ms, asset: ask.asset, amount: ask.reads[0].held.toString(), height: ask.height };
   await ask.record(m);
   await send(ask.u, m, ask);
-  return { kind: "sent", move: m, status: 200, code: null };
+  return { kind: "sent", move: m, status: 200, code: null, tx: null };
 };
 
 // ---------- the status read ----------
