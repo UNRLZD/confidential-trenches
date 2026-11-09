@@ -3,7 +3,9 @@
 // asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded (9 Nov
 // 01:51Z) by card wallet-restore-id-reader-wired's fold of its delta review (P3-3), whose MARK gained ids_end,
 // ids_ux_push and seed_per_use_lock, so every record counts them (the fold before it, 00:52Z, added the stall's named
-// reasons, intents.near's mt_tokens_for_owner and the final block header):
+// reasons, intents.near's mt_tokens_for_owner and the final block header). Re-recorded again (9 Nov 03:48Z) by card
+// wallet-id-reader-paced, whose MARK gained busy_wait and pair_wrong, each record as below from that card's tree (the
+// mutants built in a worktree of its commit with its own install, whose fresh build matched the committed one):
 // - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
 // - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
 //   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
