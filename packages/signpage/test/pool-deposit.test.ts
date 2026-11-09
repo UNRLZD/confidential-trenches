@@ -2432,7 +2432,7 @@ test("from a fixed U_X (review X2): U_X with a deposit note still landing answer
   // through the kind, as the follow's deposit runs it (depositToEnd)
   const ac = new AbortController();
   const kind = (_p: Record<string, unknown>, ctx: { id: string; sha: string; progress(s: string): void }) => poolDepositKind(() => slow())(ask(RUNG), ctx as never, from);
-  assert.equal(await depositToEnd(kind, "solana", 9, RUNG, ac.signal), "not_landed");
+  assert.deepEqual(await depositToEnd(kind, "solana", 9, RUNG, ac.signal), { end: "not_landed", txs: [] });
   // through the follow: U_X over the floor on both RPCs, the deposit not landed: never in_pool, nothing signed
   const stages: string[] = [];
   let rounds = 0;

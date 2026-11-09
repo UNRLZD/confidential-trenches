@@ -12,7 +12,11 @@
 // and the planted ones from its own build (kit 1.7, kit-v1.6 and kit-v1.5 levels, the pool_deposit op left out below
 // 1.7), and added badLive: SIGN_HOST as served on 9 Nov 2026 (release-107), kit 1.6 with no kit-v1.6 level: FAIL;
 // badPoolOpsKept: kit-v1.6 sent its pool ops: FAIL; badNoV16Level: kit-v1.6 read at kit-v1.5's level: FAIL. And every SIGN live check that acts as an app on the page names the kit's version first, as the kit's client
-// does: without it the page reads it as kit-v1.4 and sends it no pools.
+// does: without it the page reads it as kit-v1.4 and sends it no pools. Card pool-deposit-op-txs re-recorded good and
+// every planted one from its own build, badLive from SIGN_HOST as served at 11:09Z on 9 Nov 2026 (kit 1.6, no op tx
+// reads), kept bad (release-61) as recorded then (both now also name the three op tx lines), and added badOpTxsOneRpc,
+// badNearOneRpc and badMoveHeardShown: a pool deposit tx kept on some RPC's read, a NEAR move tx final on one RPC's
+// word, a move tx shown as heard: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -29,6 +33,11 @@ const KIT_LINE = (v) => `BAD the page reads an app in full from kit-v${v}, not k
 const LEVELS_LINE = (l) => `BAD the page's levels below the current one are ${JSON.stringify(l)}, not ["1.6","1.5"]: a kit-v1.6 app is sent what it has no kind for`;
 const POOL_LINE = "BAD the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out";
 const RESULT16_LINE = "BAD kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out";
+const OPTX_LINES = [
+  "BAD the pool deposit op's txs are not read on both of the pool chain's RPCs: a tx one RPC alone names may be shown, or a landed deposit shows none",
+  "BAD a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near",
+  "BAD the pool deposit op shows a refund move's tx before it is read final",
+];
 const POSTS = (n) => `BAD the bundle holds ${n} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`;
 
 test("recorded good answer: this card's build reads the hello, maps every deposit stage for kit-v1.4, keeps its fields: PASS", () => {
@@ -41,7 +50,7 @@ test("recorded bad answer: SIGN_HOST as served before this card (release-61): FA
   assert.equal(ANSWERS.bad.sha384, "sha384-mKDl+6Ec+mdtOuvuzY/rIwJaYOf61XWAJGXN1BRdzleanUyVMUPlG2/wAkkI0Isr");
   const v = judge(ANSWERS.bad);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, BEFORE);
+  assert.deepEqual(v.lines, [...BEFORE, ...OPTX_LINES]);
 });
 
 test("recorded bad answer badNoHello: the good build reading a hello and ignoring it: FAIL, the hello named", () => {
@@ -89,9 +98,28 @@ test("pool-deposit-stages: the good build reads kit 1.7 in full, kit-v1.6 and ki
   assert.match(ANSWERS.good.hello.poolOps, /if\(([\w$]+)===`1\.6`\)return\{\.\.\.([\w$]+),ops:([\w$]+)\(\2\.ops\)\};if\(\1===`1\.5`\)return\{\.\.\.\2,ops:\3\(\2\.ops\)\.map\($/);
 });
 
-test("recorded bad answer badLive: SIGN_HOST as served before this card (release-107, kit 1.6): FAIL, the version, the level and the pool filter named", () => {
-  assert.equal(ANSWERS.badLive.sha384, "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE");
-  assert.deepEqual(judge(ANSWERS.badLive).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE]);
+test("recorded bad answer badLive: SIGN_HOST as served before this card (9 Nov 11:09Z, kit 1.6): FAIL, the version, the level, the pool filter and the op tx reads named", () => {
+  assert.equal(ANSWERS.badLive.sha384, "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN");
+  assert.deepEqual(judge(ANSWERS.badLive).lines, [KIT_LINE("1.6"), LEVELS_LINE(["1.5"]), POOL_LINE, RESULT16_LINE, ...OPTX_LINES]);
+});
+
+test("card pool-deposit-op-txs: recorded bad answers badOpTxsOneRpc, badNearOneRpc and badMoveHeardShown, each the good build with that one cut: FAIL, named", () => {
+  assert.equal(typeof ANSWERS.good.opTxs.landed, "string");
+  assert.deepEqual(Object.keys(ANSWERS.good.opTxs), ["landed", "every", "nearFinal", "moveShown"]);
+  for (const k of ["landed", "every", "nearFinal", "moveShown"]) assert.equal(typeof ANSWERS.good.opTxs[k], "string", k);
+  assert.equal(ANSWERS.badOpTxsOneRpc.opTxs.every, null);
+  assert.deepEqual(judge(ANSWERS.badOpTxsOneRpc).lines, [OPTX_LINES[0]]);
+  assert.equal(ANSWERS.badNearOneRpc.opTxs.nearFinal, null);
+  assert.deepEqual(judge(ANSWERS.badNearOneRpc).lines, [OPTX_LINES[1]]);
+  assert.equal(ANSWERS.badMoveHeardShown.opTxs.moveShown, null);
+  assert.deepEqual(judge(ANSWERS.badMoveHeardShown).lines, [OPTX_LINES[2]]);
+  for (const k of ["badOpTxsOneRpc", "badNearOneRpc", "badMoveHeardShown"]) {
+    assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
+    assert.deepEqual(ANSWERS[k].hello, ANSWERS.good.hello, k);
+  }
+  // planted on good's facts: each read taken away FAILs
+  for (const k of ["landed", "every", "nearFinal", "moveShown"]) assert.equal(judge({ ...ANSWERS.good, opTxs: { ...ANSWERS.good.opTxs, [k]: null } }).ok, false, k);
+  assert.equal(judge({ ...ANSWERS.good, opTxs: undefined }).ok, false, "no op tx facts");
 });
 
 test("review P3 2: recorded bad answers badEventsUnshaped and badNoResult16: state events through a shaper that shapes nothing, kit-v1.6's answers through no level of its own: each FAIL, named", () => {

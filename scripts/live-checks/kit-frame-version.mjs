@@ -20,6 +20,11 @@
 //     and the state shaper the shaper calls leaves every pool_deposit op out at both (`e.filter(e=>e.kind!==\`pool_deposit\`)`):
 //     kit-v1.6 and before have no kind for a pool deposit's op; the answer shaper it calls has kit-v1.6's own branch,
 //     its state through that state shaper and every other result (deposit.confirm's moved_out) as it is.
+//   - (card pool-deposit-op-txs) a kit-v1.7 app's pool_deposit op carries the txs that moved its money, each shown only
+//     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
+//     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
+//     a refund move's NEAR tx is read wait_until FINAL, sent by the release relayer to intents.near, with SuccessValue
+//     on both RPCs (`return i&&a`), and the op adds it only once tx_final is set.
 // A page without them sends a kit-v1.4 app a state with a stage or field that kit refuses whole, so that app stops
 // receiving states. That the page applies them to every state, answer and event it posts is
 // packages/signpage/test/kit-version.test.ts's, against kit-v1.4's own schema, with its mutant sweep.
@@ -118,6 +123,16 @@ function helloPath(js) {
   };
 }
 
+/** The pool deposit op's tx reads, as minified (card pool-deposit-op-txs): U_X's listing, the tx kept only when every
+ *  RPC reads it, the NEAR move tx read FINAL on both, and the op adding a move tx only once final. */
+const OP_TXS = {
+  landed: /`getSignaturesForAddress`,\[[\w$]+\.u,\{commitment:`finalized`,limit:1e3\}\]/,
+  every: /`getTransaction`,\[[\w$]+,\{commitment:`finalized`,encoding:`json`,maxSupportedTransactionVersion:0\}\]\)\.catch\(\(\)=>null\)\)\)\)\.every\(/,
+  nearFinal: /sender_account_id:([\w$]+),wait_until:`FINAL`\}\)[^]{0,300}?final_execution_status!==`FINAL`[^]{0,200}?`SuccessValue`[^]{0,200}?\.signer_id===\1&&[\w$]+\.receiver_id===`intents\.near`\}catch\{return!1\}\},\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[[\w$]+\([\w$]+\[0\]\),[\w$]+\([\w$]+\[1\]\)\]\);return \2&&\3\}/,
+  moveShown: /([\w$]+)\.tx_final===!0&&typeof \1\.tx==`string`\?[\w$]+\([\w$]+,\[\{chain:`near`,hash:\1\.tx\}\]\):[\w$]+\}/,
+};
+const opTxsOf = (js) => Object.fromEntries(Object.entries(OP_TXS).map(([k, re]) => [k, re.exec(js)?.[0] ?? null]));
+
 /** Every post to the frame's parent, as written or as minified: the one through the shaper is the only one there may be. */
 const POSTS = /parent\.postMessage\(/g;
 
@@ -128,7 +143,7 @@ export function facts(index, js) {
     .map((m) => pairsOf(m[1]))
     .filter((o) => Object.hasOwn(o, "quote_checked") && Object.hasOwn(o, "halted"));
   const keys = [...js.matchAll(ARRAYS)].map((m) => m[1].split(",").map((s) => s.slice(1, -1))).filter((l) => l[0] === "release" && l.includes("ops"));
-  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js), posts: (js.match(POSTS) ?? []).length };
+  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js), posts: (js.match(POSTS) ?? []).length, opTxs: opTxsOf(js) };
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -167,6 +182,11 @@ export function judge(a) {
     for (const [from, to] of Object.entries(MAP)) if (map[from] !== to) bad(`the map sends kit-v1.4 ${from} as ${map[from]}, not ${to}`);
   }
   if (!(a?.keys ?? []).some((l) => same([...l].sort(), [...V1_4_KEYS].sort()))) bad("the bundle has no kit-v1.4 state field list of exactly its twelve fields");
+  // card pool-deposit-op-txs: a tx shown on the pool_deposit op is one the device read on both RPCs
+  const o = a?.opTxs;
+  if (typeof o?.landed !== "string" || typeof o?.every !== "string") bad("the pool deposit op's txs are not read on both of the pool chain's RPCs: a tx one RPC alone names may be shown, or a landed deposit shows none");
+  if (typeof o?.nearFinal !== "string") bad("a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near");
+  if (typeof o?.moveShown !== "string") bad("the pool deposit op shows a refund move's tx before it is read final");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

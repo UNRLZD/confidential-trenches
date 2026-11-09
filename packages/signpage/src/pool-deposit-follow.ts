@@ -24,12 +24,21 @@
 //   carried on by the rounds above, refund_move). A REFUNDED with nothing read there moves no stage: an unsent quote
 //   still shows expired past its deadline, and a delivery that lands normally never reads as refunded. With no `refund`
 //   given nothing is read, so nothing is shown for it, and the follow does not end (followed on at every landing).
+// - The txs (card pool-deposit-op-txs): the op's txs hold each tx that moved its money, and only once the device read it
+//   on both RPCs. After each deposit run, and once more before the follow ends, `landed` reads U_X's own deposits into
+//   X's pool (on Solana: U_X's finalized signatures and the txs the run's answer named, each kept only when both RPCs
+//   read it finalized, paid by U_X, with no error, running the pool program), so a later rung's send, which the kind
+//   tells only as a stage, is shown too. A refund move's NEAR tx, as the relayer answered it, is kept on the move and
+//   shown only once its nonce reads used and the tx reads FINAL with success on FastNEAR and dRPC, sent by the release's
+//   relayer (poolRefundMover's settle); the follow ends only once that is read or the move's deadline is past.
 // - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS.
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
-import type { PoolChain, PoolDepositStage } from "../../kit/src/signpage/messages.ts";
+import type { PoolChain, PoolDepositStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
-import { type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
+import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
+import { type BindRpc, RELEASE_RELAYER } from "../../wallet/src/deposit/bind.ts";
 import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
@@ -58,8 +67,12 @@ export interface PoolFollowRecord {
   origin: string;
   min_out: string;
   /** The refund carry's last move (poolRefundMover), written before it is sent. */
-  move?: MoveRecord;
+  move?: PoolMove;
 }
+
+/** A refund move as the op keeps it: the wallet's record, and (card pool-deposit-op-txs) its NEAR tx as the relayer
+ *  answered it (`tx`, heard: never shown) and `tx_final` once the device read it final on both RPCs (shown). */
+export type PoolMove = MoveRecord & { tx?: string; tx_final?: true };
 
 /** The pool follow's stages: kit messages.ts PoolDepositStage, the stages the app reads on the op (card pool-deposit-stages). */
 export type PoolFollowStage = PoolDepositStage;
@@ -82,6 +95,9 @@ const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expir
 /** A deposit run's end as the page's pool.deposit kind tells it (pool-deposit.ts poolDepositKind: the answer, then its
  *  end as progress), or its refusal code. */
 export type PoolDepositEnd = "filled" | "part_filled" | "not_landed" | "sent" | "not_allowed" | "not_funded" | "failed" | "down";
+/** A deposit run (depositToEnd): its end, and the txs its answer named, as heard (card pool-deposit-op-txs): the direct
+ *  answer's landed txs, or the sent answer's sends. Heard, never shown: the follow shows only what `landed` reads. */
+export type PoolDepositRun = { end: PoolDepositEnd; txs: TxRef[] };
 
 /** The refund carry's answer (poolRefundMover): "moved" and "held" read money under U_{s,i} inside intents.near on both
  *  of NEAR's RPCs (moved on, or not moved this round); "none" read nothing there; "wait" read nothing that counts (the
@@ -98,14 +114,20 @@ export interface PoolFollowDeps {
   costs(f: PoolFollowRecord): Promise<{ floor: bigint; perRung: bigint; keep: bigint }>;
   /** The pool's ladder on X. */
   ladder: Ladder;
-  /** The page's pool.deposit on X from U_X, for `amount`, to its end. */
-  deposit(f: PoolFollowRecord, amount: bigint, signal: AbortSignal): Promise<PoolDepositEnd>;
+  /** The page's pool.deposit on X from U_X, for `amount`, to its end, with the txs its answer named. */
+  deposit(f: PoolFollowRecord, amount: bigint, signal: AbortSignal): Promise<PoolDepositRun>;
   /** The quote's deadline past on both RPCs' clocks. */
   past(f: PoolFollowRecord): Promise<boolean>;
-  /** The refund carry: what U_{s,i} holds inside intents.near moved back to X's coin, to U_X; none, and a refund waits. */
-  refund?(f: PoolFollowRecord, signal: AbortSignal): Promise<RefundRead>;
+  /** The refund carry: what U_{s,i} holds inside intents.near moved back to X's coin, to U_X; none, and a refund waits.
+   *  Its `settle` (poolRefundMover's) reads a heard move tx final; true once nothing is left to read. */
+  refund?: ((f: PoolFollowRecord, signal: AbortSignal) => Promise<RefundRead>) & { settle?(f: PoolFollowRecord): Promise<boolean> };
+  /** The txs of U_X's deposits into X's pool that both RPCs read landed: `heard` (a run's answer) and U_X's own, less
+   *  `known` (already shown). Throws when a read fails (card pool-deposit-op-txs). */
+  landed?(f: PoolFollowRecord, heard: readonly TxRef[], known?: ReadonlySet<string>): Promise<TxRef[]>;
   /** The op's stage written (and posted to the app in state.ops). */
   stage(s: PoolFollowStage): Promise<void>;
+  /** Txs read landed, added to the op's txs (each once). */
+  txs?(t: TxRef[]): Promise<void>;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
   signal: AbortSignal;
 }
@@ -139,6 +161,15 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   };
   let landed = shown === "in_pool";
   let slow = POOL_FOLLOW_SLOW_MS;
+  // the txs written this follow (card pool-deposit-op-txs): each written once, and never read again
+  const written = new Set<string>();
+  const carryTxs = async (heard: readonly TxRef[]): Promise<void> => {
+    if (!deps.landed || !deps.txs) return;
+    const t = (await deps.landed(f, heard, written)).filter((x) => !written.has(x.hash));
+    if (t.length === 0) return;
+    await deps.txs(t);
+    for (const x of t) written.add(x.hash);
+  };
   for (;;) {
     if (deps.signal.aborted) return shown;
     let fast = false;
@@ -151,7 +182,7 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
       if (c !== null && low >= c.floor) {
         const amount = askOf(deps.ladder, low, c.perRung, c.keep);
         if (amount > 0n) {
-          const end = await deps.deposit(f, amount, deps.signal);
+          const { end, txs } = await deps.deposit(f, amount, deps.signal);
           // landed: the next round reads what is left at once; anything else (not landed, refused, down) is read again
           // at the slow pace, so a deposit that cannot go is never asked in a tight loop
           if (end === "filled" || end === "part_filled") {
@@ -159,11 +190,18 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
             fast = true;
             await show("in_pool");
           }
+          // its txs as both RPCs read them; a read that fails leaves them to the read before the end
+          await carryTxs(txs).catch(() => {});
         }
       } else if (landed) {
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too
         if (shown !== "in_pool") await show("in_pool");
-        if (await deps.past(f)) return shown;
+        if (await deps.past(f)) {
+          // the end only once every landed tx is read (a failed read throws: read again next round), and a refund move's
+          // heard tx is read final or past its move's deadline
+          await carryTxs([]);
+          if (!deps.refund?.settle || (await deps.refund.settle(f))) return shown;
+        }
       } else {
         const st = await deps.status(f, deps.signal);
         let refund: RefundRead | null = null;
@@ -203,7 +241,21 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
  *  stage first said the money was sent (any stage but quote_checked and expired), `refunded` true from the refunded
  *  stage on (card pool-deposit-stages): the facts src/state.ts opOf sends the app on the stages they belong to (kit
  *  messages.ts PoolDepositFacts). */
-export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true; untimed?: true };
+export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: TxRef[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true; untimed?: true };
+
+/** The op with `t` added to its txs, each hash once; the op itself when nothing is new (no write). */
+export function withTxs(op: PoolDepositOp, t: readonly TxRef[]): PoolDepositOp {
+  const had = Array.isArray(op.txs) ? op.txs : [];
+  const add = t.filter((x, k) => !had.some((y) => y.hash === x.hash) && t.findIndex((y) => y.hash === x.hash) === k).map((x) => ({ chain: x.chain, hash: x.hash }));
+  return add.length === 0 ? op : { ...op, txs: [...had, ...add] };
+}
+
+/** The op with its refund move `m` kept, and the move's tx added to its txs once it was read final (card
+ *  pool-deposit-op-txs): a tx only heard is never shown. */
+export function withMove(op: PoolDepositOp, m: PoolMove): PoolDepositOp {
+  const next: PoolDepositOp = { ...op, follow: { ...op.follow, move: m } };
+  return m.tx_final === true && typeof m.tx === "string" ? withTxs(next, [{ chain: "near", hash: m.tx }]) : next;
+}
 
 /** A stage that says the money was sent: any but quote_checked and expired. */
 const SENT = (s: PoolFollowStage): boolean => s !== "quote_checked" && s !== "expired";
@@ -255,7 +307,7 @@ export interface PoolFollowHost {
   store(): Promise<{ get(s: "ops", k: string): Promise<unknown>; update(s: "ops", k: string, change: (v: unknown) => unknown): Promise<unknown>; keys(s: "ops"): Promise<string[]> }>;
   /** The chain reads and the deposit for X's pool (its pinned pair, the page's pool.deposit), or null when the page
    *  pins no pool there: the op waits, followed again at the next landing. */
-  deps(f: PoolFollowRecord, op: { move(): Promise<MoveRecord | undefined>; record(m: MoveRecord): Promise<void> }): Omit<PoolFollowDeps, "stage" | "signal"> | null;
+  deps(f: PoolFollowRecord, op: { move(): Promise<PoolMove | undefined>; record(m: PoolMove): Promise<void> }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> | null;
   /** The decimals of X's coin (kit POOL_ASSET_DECIMALS). */
   decimals(chain: PoolChain): number;
   locks?: () => Pick<LockManager, "request"> | null;
@@ -283,13 +335,20 @@ export function poolFollows(h: PoolFollowHost) {
           const v = await ops.get("ops", id);
           return isPoolOp(v) ? v.follow.move : undefined;
         },
-        record: async (m) => void (await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, follow: { ...v.follow, move: m } } : undefined))),
+        record: async (m) => void (await ops.update("ops", id, (v) => (isPoolOp(v) ? withMove(v, m) : undefined))),
       });
       if (d === null) return;
       const stage = async (s: PoolFollowStage) => {
         await ops.update("ops", id, (v) => (isPoolOp(v) ? withStage(v, s, (h.now ?? Date.now)()) : undefined));
       };
-      const end = await followPoolQuote(f, { ...d, stage, signal }, now.stage);
+      const txs = async (t: TxRef[]) => {
+        await ops.update("ops", id, (v) => {
+          if (!isPoolOp(v)) return undefined;
+          const next = withTxs(v, t);
+          return next === v ? undefined : next;
+        });
+      };
+      const end = await followPoolQuote(f, { ...d, stage, txs, signal }, now.stage);
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
       if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true } : undefined));
     };
@@ -352,24 +411,28 @@ export function depositToEnd(
   decimals: number,
   amount: bigint,
   signal: AbortSignal,
-): Promise<PoolDepositEnd> {
-  return new Promise<PoolDepositEnd>((resolve) => {
+): Promise<PoolDepositRun> {
+  return new Promise<PoolDepositRun>((resolve) => {
     let done = false;
+    // the txs the answer named (card pool-deposit-op-txs): the direct answer's landed txs, or the sent answer's sends,
+    // whose end then comes as a stage-only progress event. Heard: the follow shows only what its own reads find
+    let heard: TxRef[] = [];
     const fin = (e: PoolDepositEnd): void => {
       if (done) return;
       done = true;
       signal.removeEventListener("abort", stop);
-      resolve(e);
+      resolve({ end: e, txs: heard });
     };
     const stop = (): void => fin("down");
     if (signal.aborted) return fin("down");
     signal.addEventListener("abort", stop, { once: true });
     const ENDS = new Set(["filled", "part_filled", "not_landed"]);
     const codeOf = (c: unknown): PoolDepositEnd => (c === "not_allowed" || c === "not_funded" || c === "failed" ? c : "down");
-    type Answer = { result: { stage: string } } | { error: string };
+    type Answer = { result: { stage: string; txs?: unknown } } | { error: string };
     const read = (a: Answer | null | undefined): void => {
       if (!a) return fin("not_allowed");
       if ("error" in a) return fin(codeOf(a.error));
+      heard = Array.isArray(a.result.txs) ? a.result.txs.filter((t): t is TxRef => typeof t === "object" && t !== null && (t as TxRef).chain === chain && typeof (t as TxRef).hash === "string").map((t) => ({ chain: t.chain, hash: t.hash })) : [];
       if (ENDS.has(a.result.stage)) fin(a.result.stage as PoolDepositEnd);
       // "sent": its end comes as progress
     };
@@ -421,19 +484,63 @@ export interface PoolRefundHost {
   /** The 64-byte seed, opened under the wallet's seed lock (shared), zeroed here. */
   seed64(): Promise<Uint8Array>;
   seedLock<T>(fn: () => Promise<T>): Promise<T>;
-  /** The op's recorded move, and its write (before the send). */
-  move(): Promise<MoveRecord | undefined>;
-  record(m: MoveRecord): Promise<void>;
+  /** The op's recorded move, and its write (before the send; and the move's tx as heard, then read final). */
+  move(): Promise<PoolMove | undefined>;
+  record(m: PoolMove): Promise<void>;
+  /** A heard move tx read FINAL with success on both of NEAR's RPCs, sent by the release's relayer (nearTxFinal on
+   *  FastNEAR and dRPC unless given). */
+  tx?(hash: string): Promise<boolean>;
   fetch?: typeof fetch;
   now?: () => number;
 }
 
-export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal: AbortSignal) => Promise<RefundRead> {
+/**
+ * True only when both RPCs read the NEAR tx `hash` FINAL (every receipt done) with a success status, the tx itself
+ * (its hash) sent by the release's relayer (RELEASE_RELAYER.mainnet, which carries every id's intent from
+ * bind.<ours>.near) to intents.near. Anything else, an error or no answer on either, is false (card pool-deposit-op-txs).
+ */
+export async function nearTxFinal(rpcs: readonly [Pick<BindRpc, "tx">, Pick<BindRpc, "tx">], hash: string): Promise<boolean> {
+  const relayer = RELEASE_RELAYER.mainnet;
+  if (relayer === null) return false;
+  const one = async (rpc: Pick<BindRpc, "tx">): Promise<boolean> => {
+    try {
+      const a = (await rpc.tx({ tx_hash: hash, sender_account_id: relayer, wait_until: "FINAL" })) as { error?: unknown; result?: unknown } | null;
+      const r = a !== null && typeof a === "object" && a.error === undefined ? (a.result as Record<string, unknown> | undefined) : undefined;
+      if (r === null || typeof r !== "object" || r.final_execution_status !== "FINAL") return false;
+      const st = r.status as Record<string, unknown> | null;
+      if (st === null || typeof st !== "object" || !Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "Failure")) return false;
+      const t = r.transaction as Record<string, unknown> | null;
+      return t !== null && typeof t === "object" && t.hash === hash && t.signer_id === relayer && t.receiver_id === "intents.near";
+    } catch {
+      return false;
+    }
+  };
+  const [a, b] = await Promise.all([one(rpcs[0]), one(rpcs[1])]);
+  return a && b;
+}
+
+/** The refund carry, and its `settle`: a heard move tx read final (true once nothing is left to read). */
+export type PoolRefundMover = ((f: PoolFollowRecord, signal: AbortSignal) => Promise<RefundRead>) & { settle(f: PoolFollowRecord): Promise<boolean> };
+
+export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
   const now = h.now ?? Date.now;
-  return async (f, signal) => {
+  const txFinal = h.tx ?? ((hash: string) => nearTxFinal([followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)], hash));
+  // a heard move tx (card pool-deposit-op-txs): final once its nonce reads used on both RPCs at one block (`r`) and the
+  // tx reads FINAL with success on both; past the move's deadline unread, it is let go, never shown. True: nothing left
+  const settleWith = async (m: PoolMove | undefined, r: MoveRead | null): Promise<boolean> => {
+    if (m === undefined || m.tx === undefined || m.tx_final === true) return true;
+    if (r === null) return false;
+    if (r.used === true && (await txFinal(m.tx).catch(() => false))) {
+      await h.record({ ...m, tx_final: true });
+      return true;
+    }
+    return r.timeMs > m.deadline_ms;
+  };
+  const mover = async (f: PoolFollowRecord, signal: AbortSignal): Promise<RefundRead> => {
     const m = await h.move();
     const r = await h.read(f, m?.nonce ?? null);
     if (r === null) return "wait";
+    await settleWith(m, r).catch(() => false);
     let prior: number | null = null;
     if (m !== undefined) {
       // through on its nonce: that money is on its way to U_X (the rounds carry it); anything held now is other money
@@ -484,8 +591,18 @@ export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal
         ...(h.fetch ? { fetchFn: h.fetch } : {}),
       },
     ).catch(() => null);
+    // the relayer's tx as heard, kept on the move it carried (never shown until settle reads it final); a write that
+    // fails changes nothing of the move's outcome
+    if (res !== null && res.kind === "sent" && res.tx !== null) await h.record({ ...res.move, tx: res.tx }).catch(() => {});
     return res !== null && res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "held";
   };
+  return Object.assign(mover, {
+    settle: async (f: PoolFollowRecord): Promise<boolean> => {
+      const m = await h.move();
+      if (m === undefined || m.tx === undefined || m.tx_final === true) return true;
+      return settleWith(m, await h.read(f, m.nonce));
+    },
+  });
 }
 
 // ------------------------------------------------------------------------------------------------ Solana's reads
@@ -496,13 +613,34 @@ const lamports = (v: unknown): bigint => {
   return BigInt(x as number);
 };
 
+/** A Solana signature: base58 of 64 bytes. */
+const SOL_SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+
+/**
+ * A finalized getTransaction answer (json encoding) of `sig` that is a deposit from U_X into the pool: its first
+ * signature is `sig`, U_X its fee payer (solanaPoolDepositTx: the depositor is its one signer and fee payer), no error,
+ * and a top-level instruction of `program`. Anything else, null included, is not.
+ */
+function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): boolean {
+  if (t === null || typeof t !== "object") return false;
+  const meta = (t as { meta?: unknown }).meta as { err?: unknown } | null | undefined;
+  const tx = (t as { transaction?: unknown }).transaction as { signatures?: unknown; message?: unknown } | null | undefined;
+  if (meta === null || typeof meta !== "object" || meta.err !== null || tx === null || typeof tx !== "object") return false;
+  if (!Array.isArray(tx.signatures) || tx.signatures[0] !== sig) return false;
+  const msg = tx.message as { accountKeys?: unknown; instructions?: unknown } | null | undefined;
+  if (msg === null || typeof msg !== "object" || !Array.isArray(msg.accountKeys) || msg.accountKeys[0] !== u || !Array.isArray(msg.instructions)) return false;
+  const keys = msg.accountKeys;
+  return msg.instructions.some((ix) => ix !== null && typeof ix === "object" && Number.isSafeInteger((ix as { programIdIndex?: unknown }).programIdIndex) && keys[(ix as { programIdIndex: number }).programIdIndex] === program);
+}
+
 /**
  * The follow's reads on Solana (the pool kinds' own pair, two operators): 1Click's status through the helper for U_X
  * and U_{s,i}; U_X's balance at finalized on each RPC; one deposit's costs from the fee and the Rent sysvar read now
  * (readSolanaPoolCosts: the floor the quote was held to, its worst-case cost per rung and the rent U_X keeps); the
- * quote's deadline past on both RPCs' finalized block time. `deposit` is the page's pool.deposit (depositToEnd).
+ * quote's deadline past on both RPCs' finalized block time; U_X's deposits into the pool that both RPCs read landed
+ * (`landed`, isPoolDepositTx). `deposit` is the page's pool.deposit (depositToEnd).
  */
-export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal"> {
+export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> {
   const both = <T,>(f: (r: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0]), f(o.rpcs[1])]);
   return {
     status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
@@ -522,6 +660,21 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
         return (t as number) * 1000;
       });
       return times.every((t) => t > f.deadline_ms);
+    },
+    landed: async (f, heard, known) => {
+      const skip = known ?? new Set<string>();
+      // U_X's own finalized signatures on both RPCs (a listing that fails throws: read again), and the run's heard ones
+      const lists = await both((r) => r("getSignaturesForAddress", [f.u, { commitment: "finalized", limit: 1000 }]));
+      const cands: string[] = [];
+      const add = (h: unknown) => void (typeof h === "string" && SOL_SIG.test(h) && !skip.has(h) && !cands.includes(h) && cands.push(h));
+      for (const t of heard) if (t.chain === "solana") add(t.hash);
+      for (const l of lists) if (Array.isArray(l)) for (const x of l) if (x !== null && typeof x === "object" && (x as { err?: unknown }).err === null) add((x as { signature?: unknown }).signature);
+      const out: TxRef[] = [];
+      for (const sig of cands) {
+        const reads = await Promise.all(o.rpcs.map((r) => r("getTransaction", [sig, { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 }]).catch(() => null)));
+        if (reads.every((t) => isPoolDepositTx(t, sig, f.u, o.program))) out.push({ chain: "solana", hash: sig });
+      }
+      return out;
     },
     ...(o.refund ? { refund: o.refund } : {}),
     sleep: o.sleep ?? ((ms, signal) => new Promise<void>((ok) => {
