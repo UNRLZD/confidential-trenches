@@ -84,5 +84,21 @@
    }
   ],
   "note": "the same run on origin/main f6066882, before this card: both routes 503 upstream with no Retry-After, a busy answer naming no wait; FAIL"
+ },
+ "sign_good": {
+  "part": "sign",
+  "sign": "http://127.0.0.1:55972",
+  "want": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "pin": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "sha384": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "note": "this card's signing page build (branch card/withdraw-fee-busy-waits at 71baf5eb: packages/signpage/index.html and public/app.js, build-app --check rc 0) served on 127.0.0.1 as SIGN_HOST serves / and /app.js (scratchpad wfbw-serve-sign.mjs), read 2026-11-09T13:11:11Z: the index pins this commit's /app.js and serves it; PASS"
+ },
+ "sign_bad_pre_card": {
+  "part": "sign",
+  "sign": "https://confidential.unrealized.trade",
+  "want": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "pin": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+  "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+  "note": "SIGN_HOST as served before this card, read 2026-11-09T13:10:41Z: its index pins and serves sha384-1aGrtaUQ..., not this commit's build; FAIL"
  }
 }

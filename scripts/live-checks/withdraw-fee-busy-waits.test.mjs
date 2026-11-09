@@ -4,12 +4,15 @@
 // bad_pre_card: origin/main's helper the same way, 503 upstream with no Retry-After: FAIL. Planted from them: a 500, a
 // busy answer with another code, a Retry-After of 0 or past 75, Retry-After not exposed, another origin: FAIL; a route
 // that answers nothing: INCONCLUSIVE.
+// The sign part: sign_good (this card's build served locally, the index pinning this commit's /app.js and serving it):
+// PASS; sign_bad_pre_card (SIGN_HOST before this card, another build): FAIL; planted: a served /app.js that is not the
+// pinned one, no pin: FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { asks, DEVNET_POOL, judge, MAINNET_USDC, read, SIGN } from "./withdraw-fee-busy-waits.mjs";
+import { asks, COMMIT_PIN, DEVNET_POOL, judge, judgeSign, MAINNET_USDC, read, readSign, SIGN } from "./withdraw-fee-busy-waits.mjs";
 import { TOKENS } from "./relayer-withdraw-fee.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -65,4 +68,38 @@ test("planted: a 500, a busy status with another code, a Retry-After of 0 or pas
   ]) assert.equal(judge(run).verdict, "FAIL", what);
   const quiet = judge(edit(A.good, "pool-fee", (r) => ({ route: r.route, asked: r.asked, noAnswer: "127.0.0.1: no answer (ECONNREFUSED)" })));
   assert.equal(quiet.verdict, "INCONCLUSIVE", quiet.lines.join("\n"));
+});
+
+test("sign part: the commit's own pin is read from this checkout's packages/signpage/index.html", () => {
+  assert.match(String(COMMIT_PIN), /^sha384-[A-Za-z0-9+/=]{64}$/);
+});
+
+test("sign part, recorded good answer (this card's build served, the index pinning this commit's /app.js): PASS", async () => {
+  const g = A.sign_good;
+  const served = async (url) => {
+    const p = new URL(url).pathname;
+    assert.ok(p === "/" || p === "/app.js", p);
+    return new Response(p === "/" ? `<script type="module" src="/app.js" integrity="${g.pin}"></script>` : "x");
+  };
+  // the replay re-reads only what the run kept: the pin and the served file's sha384
+  const r = judgeSign(g);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  const fresh = await readSign("http://127.0.0.1:1", served, g.want);
+  assert.equal(fresh.pin, g.want);
+  assert.equal(judgeSign(fresh).verdict, "FAIL", "a served /app.js that is not the pinned file");
+});
+
+test("sign part, recorded bad answer (SIGN_HOST before this card, another build): FAIL", () => {
+  const r = judgeSign(A.sign_bad_pre_card);
+  assert.equal(r.verdict, "FAIL");
+  assert.ok(r.lines.some((l) => l.startsWith("BAD SIGN_HOST's index.html pins")), r.lines.join("\n"));
+});
+
+test("sign part, planted: no pin, a served /app.js other than the pinned, no commit pin: FAIL", () => {
+  const g = A.sign_good;
+  for (const [what, a] of [
+    ["no pin", { ...g, pin: null }],
+    ["another served file", { ...g, sha384: "sha384-x" }],
+    ["no commit pin", { ...g, want: undefined }],
+  ]) assert.equal(judgeSign(a).verdict, "FAIL", what);
 });
