@@ -17,6 +17,11 @@
 // would go at once too. What the read cannot say is who is spending the budget while it is idle (a build in flight with
 // room left reads idle: solana-jupiter-build running, probe 1 read idle in 47 ms, 7 Nov): the group has one check
 // at a time, so the budget it reads is the budget the previous member left.
+// The probe's search is itself one of the window's sends: a probe that went at once as the 6th of the own reads' 6 left
+// none for the check's first page (live run 42662889061, 17:20:26.89Z: the check's page 0.3 s after the probe waited 702
+// ms for a turn and was named on chain; card helper-live-red). So once a probe reads idle, the gate waits DRAIN_MS, the
+// helper's window (proxy.ts BURST_MS), for the probe's own send to leave it before the check runs: the check reads the
+// budget the previous member left, never the one the gate spent.
 // Until then the next probe goes when the helper says: a 429 or 503's Retry-After (whole seconds, 1 to RETRY_MAX_S), else
 // POLL_MS; it never goes sooner than that, and never past IDLE_MAX_MS in all (a minute's window and the page's 16 a counted
 // minute drain in a minute; past three, something other than this run is spending the budget, and a check run now would
@@ -31,6 +36,9 @@ import { APP, BASE, LIMIT_MS, POOL_URL, cold } from "../live-checks/helper-token
 export const POLL_MS = 5_000;
 export const RETRY_MAX_S = 15;
 export const IDLE_MAX_MS = 180_000;
+/** How long an idle probe's own search counts in the helper's Jupiter window: proxy.ts BURST_MS (a test holds the two
+ *  equal). */
+export const DRAIN_MS = 10_000;
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 // the Server-Timing entries a page that did not get its Jupiter row names (token.ts: searchMetric, jupiterWithin)
 const WAITED = /(^|,\s*)(search-[a-z0-9]+|jup;desc="late")/;
@@ -105,7 +113,10 @@ export async function waitIdle({ base = BASE, fetchFn = fetch, sleep = (ms) => n
     const v = judge(read);
     const waitedMs = Math.round(now() - t0);
     log(`probe ${probes} at +${(waitedMs / 1000).toFixed(1)} s: ${v.idle ? "idle" : "busy"}: ${v.why}`);
-    if (v.idle) return { idle: true, probes, waitedMs, why: v.why };
+    if (v.idle) {
+      await sleep(DRAIN_MS);
+      return { idle: true, probes, waitedMs: Math.round(now() - t0), why: v.why };
+    }
     const next = retryMs(read.retryAfter) ?? POLL_MS;
     if (now() - t0 + next > IDLE_MAX_MS) return { idle: false, probes, waitedMs: Math.round(now() - t0), why: v.why };
     await sleep(next);

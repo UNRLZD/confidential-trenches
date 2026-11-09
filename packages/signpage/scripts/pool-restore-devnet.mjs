@@ -8,7 +8,9 @@
 // Then, for the record: every note the store holds (its ref kind, state, value and leaf index), and each SPENT note's
 // W (derived from the words, the only W a release of the device's pays: ../../wallet/src/pool/evm-restore.ts header)
 // with its lamports and token accounts read on both devnet RPCs at finalized. The seed is never printed or written;
-// the record holds addresses, values and leaf indices only. Exit 0 only when the restore ended done.
+// the record holds addresses, values and leaf indices only. Exit 0 only when the restore ended as the testnet build's
+// must (card wallet-restore-reads-ux): stalled with exactly one reason per pool walked, POOL_UX_UNREAD_TESTNET, since that
+// build reads no deposit id nor any U_X; any other reason, or done, exits 1.
 import { readFileSync, writeFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
 
@@ -19,7 +21,7 @@ const { openWalletStore } = await import("../../wallet/src/store/index.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { jOf } = await import("../../wallet/src/pool/queue.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
-const { pagePools, poolRestore } = await import("../src/pool-restore.ts");
+const { pagePools, poolRestore, POOL_UX_UNREAD_TESTNET } = await import("../src/pool-restore.ts");
 const { TESTNET_RPCS, pageSolanaRpcs } = await import("../src/pool-testnet.ts");
 if (POOL_TESTNET !== true) throw new Error("not the testnet build's pins");
 
@@ -39,7 +41,8 @@ const ns0 = await openNoteStore(w);
 const before = (await ns0.list()).length;
 ns0.close();
 const t0 = performance.now();
-const r = poolRestore({ store: async () => w, seed64: async () => seed64Of(), signedIn: async () => true });
+let why = null;
+const r = poolRestore({ store: async () => w, seed64: async () => seed64Of(), signedIn: async () => true, ended: (_, y) => void (why = [...y]) });
 const stage = await r.auto();
 const ms = Math.round(performance.now() - t0);
 log(`store B held ${before} notes; the restore with no tap ended ${stage} in ${ms} ms`);
@@ -74,4 +77,7 @@ entropy.fill(0);
 ns.close();
 writeFileSync(OUT, `${JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", pools: pools.map((p) => (p.chain === "solana" ? { chain: "solana", program: p.program } : { chain: "evm", network: p.pin.network })), before, stage, ms, ops, notes, wallets: ws }, null, 1)}\n`);
 log(`written ${OUT}`);
-process.exit(stage === "done" ? 0 : 1);
+const want = pools.map((p) => `${p.chain === "solana" ? "solana" : p.pin.network}: ${POOL_UX_UNREAD_TESTNET}`);
+const named = stage === "stalled" && why !== null && why.length === want.length && why.every((y, k) => y === want[k]);
+log(named ? "the restore stalled by the testnet build's one name, as it must" : `the restore did not end as the testnet build's must: ${stage}, ${JSON.stringify(why)}`);
+process.exit(named ? 0 : 1);

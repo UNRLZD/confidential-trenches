@@ -95,7 +95,7 @@ import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
-import { poolRestore } from "./pool-restore.ts";
+import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
 type State =
@@ -154,8 +154,14 @@ const restore = !framed
         return s !== undefined;
       },
       written: () => void testnet?.proofs().catch(() => {}),
+      // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
+      // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
+      // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain
+      // the follow has no reads for (the restore then names U_X unread there)
+      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program),
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
-      // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts); no key, no words
+      // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
+      // and its balance; no key, no words
       ended: (stage, why) => void (stage === "stalled" && console.warn(`restore stalled: ${why.join("; ")}`)),
     })
   : null;
@@ -166,6 +172,8 @@ const follows = !framed ? depositFollows({ network: () => PAGE_NETWORK, store: (
 // (src/pool-deposit-follow.ts, card pool-deposit-follow): top-level only; its chain reads are set below, where the pool
 // kinds' pairs are made, and until then (or on a chain the page pins no pool on) an op waits for the next landing
 let poolFollowDeps: PoolFollowHost["deps"] = () => null;
+// the op a restore's U_X reads are taken under: it moves no refund (only the follow's refund carry asks these)
+const UX_ONLY = { move: async () => undefined, record: async () => Promise.reject(new Error("a restore records no refund move")) };
 const poolFollow = !framed
   ? poolFollows({ store: () => open(), decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]], deps: (f, op) => poolFollowDeps(f, op) })
   : null;

@@ -1,5 +1,6 @@
 // node --test scripts/live-checks/held-move-forgotten-tx.test.mjs: the live check's verdict on its recorded answers, with
-// no network. Each record is a real run of the check (2026-11-08), each archival host asked with Origin SIGN_ORIGIN:
+// no network. Each record is a real run of the check (2026-11-08; good re-recorded 2026-11-09 05:1xZ on card
+// wallet-restore-reads-ux's build, whose CSP adds Pocket's Solana gateway), each archival host asked with Origin SIGN_ORIGIN:
 // - good: this card's build (index.html, public/app.js and public/_headers at the card's branch, --local), with both
 //   archival hosts' real reads of the 7 Nov mainnet tx and its block: PASS;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose CSP reaches no archival RPC and whose bundle

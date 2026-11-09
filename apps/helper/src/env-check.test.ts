@@ -12,6 +12,8 @@ import { POOL_SOLANA_ENV } from "./pool/solana.ts";
 
 // test values only: no key here holds or moves anything
 const EVM = ["0x" + "ab".repeat(20), "0x" + "11".repeat(32), "10000000000000", "0x" + "cd".repeat(20), "https://a.example,https://b.example"];
+// the pool a network's senders start with: the kit's pin for it (evmPoolSendersFromEnv, card helper-evm-mainnet-pools)
+const PIN_OF = (network: string): string => evmPoolVenues()[network as keyof ReturnType<typeof evmPoolVenues>].pool!;
 const SOL = ["11111111111111111111111111111111", "not-a-key-test-value", "5000", "https://a.example,https://b.example"];
 const subsets = (n: number) => Array.from({ length: (1 << n) - 1 }, (_, m) => [...Array(n).keys()].filter((i) => (m + 1) & (1 << i)));
 const refusal = (env: Record<string, string>) => {
@@ -31,7 +33,7 @@ test("an EVM network with only some of its names set is refused, naming one of i
     const { feeProviders: _, ...bare } = v!;
     for (const [venues, paired] of [[kit, v?.feeProviders !== undefined], [{ ...kit, [network]: bare }, false]] as const) {
       for (const set of subsets(names.length)) {
-        const env = Object.fromEntries(set.map((i) => [names[i]!, EVM[i]!]));
+        const env = Object.fromEntries(set.map((i) => [names[i]!, i === 0 ? PIN_OF(network) : EVM[i]!]));
         const keyed = [0, 1].every((i) => set.includes(i));
         const whole = keyed && (set.includes(4) || paired);
         const why = (() => {
@@ -55,7 +57,7 @@ test("an EVM network with only some of its names set is refused, naming one of i
     // every network the senders run on has the kit's fee pair today (packages/kit/src/trade/evm/buy-unpinned.ts), so the
     // deploy's own check, which reads the kit's list, takes the address and key alone
     assert.ok(v?.feeProviders !== undefined, `${network}: no fee pair in the kit`);
-    assert.equal(refusal({ [names[0]]: EVM[0]!, [names[1]]: EVM[1]! }), null, `${network}: the address and key alone`);
+    assert.equal(refusal({ [names[0]]: PIN_OF(network), [names[1]]: EVM[1]! }), null, `${network}: the address and key alone`);
     assert.ok(refusal({ [POOL_EVM_SELL_ENV[network as keyof typeof POOL_EVM_SELL_ENV]]: "0x" + "22".repeat(32) })?.includes(POOL_EVM_SELL_ENV[network as keyof typeof POOL_EVM_SELL_ENV]), `${network}: a sell key alone`);
   }
 });
@@ -221,7 +223,7 @@ test("node src/env-check.ts exits 2 on the deploy's half set (a sender key alone
   assert.equal(half.status, 2, half.stdout + half.stderr);
   assert.match(half.stderr, /POOL_EVM_[A-Z_]+_BASE_SEPOLIA/);
   assert.ok(!(half.stdout + half.stderr).includes(EVM[1]!.slice(2)), "the key was printed");
-  const whole = run(Object.fromEntries(names.map((n, i) => [n, EVM[i]!])));
+  const whole = run(Object.fromEntries(names.map((n, i) => [n, i === 0 ? PIN_OF("base-sepolia") : EVM[i]!])));
   assert.equal(whole.status, 0, whole.stdout + whole.stderr);
 });
 
@@ -230,7 +232,7 @@ test("node src/env-check.ts exits 2 on the deploy's half set (a sender key alone
 // provider's word, and the start refuses them with the reason, naming the variable and the operator, never a URL's
 // path or query (a key may sit there).
 test("fold B: POOL_EVM_RPCS_* of two URLs of one operator is refused at the start, naming the variable and the operator; two operators, and the kit's fee pairs, are taken", () => {
-  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: EVM[0]!, POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
+  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: PIN_OF("robinhood"), POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
   for (const rpcs of ["https://rpc.mainnet.chain.robinhood.com,https://rpc.testnet.chain.robinhood.com/v2/s3cr3tKEY", "https://a.robinhood.com,https://b.robinhood.com", "http://127.0.0.1:1,http://127.0.0.1:2"]) {
     const why = refusal(env(rpcs));
     assert.ok(why !== null, `${rpcs}: taken`);
@@ -239,13 +241,13 @@ test("fold B: POOL_EVM_RPCS_* of two URLs of one operator is refused at the star
   }
   assert.equal(refusal(env("https://rpc.mainnet.chain.robinhood.com,https://robinhood.api.pocket.network")), null);
   // unset: the kit's fee pair, of two operators on every network
-  for (const [network, names] of Object.entries(POOL_EVM_ENV)) assert.equal(refusal({ [names[0]]: EVM[0]!, [names[1]]: EVM[1]! }), null, network);
+  for (const [network, names] of Object.entries(POOL_EVM_ENV)) assert.equal(refusal({ [names[0]]: PIN_OF(network), [names[1]]: EVM[1]! }), null, network);
 });
 
 // review L-2 and L-3 (op-edges): the start's operator is the kit's one rule (evmRpcOperator), so no spelling of one
 // operator passes as two, no text that is not a URL passes at all, and one URL written twice is one URL
 test("L-2/L-3: POOL_EVM_RPCS_* of one operator however written, a CNAME of the other, or Pocket's words twice is refused; a non-URL is refused naming no key; a trailing slash is the same URL", () => {
-  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: EVM[0]!, POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
+  const env = (rpcs: string) => ({ POOL_EVM_ADDRESS_ROBINHOOD: PIN_OF("robinhood"), POOL_EVM_SENDER_KEY_ROBINHOOD: EVM[1]!, POOL_EVM_RPCS_ROBINHOOD: rpcs });
   const one: [string, string][] = [
     ["https://rpc.mainnet.chain.robinhood.com.,https://robinhood.com", "robinhood.com"],
     ["https://a.robinhood.com.,https://b.robinhood.com", "robinhood.com"],

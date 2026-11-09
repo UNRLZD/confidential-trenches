@@ -2,8 +2,9 @@
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
 // runtime of wrangler 4.151.1 (re-recorded on a Linux build machine for card signpage-solana-trade's connect-src, and on a Mac for card page-evm-rpc-csp's,
 // deploy.mjs --dry-run's build, 2026-11-07, its pre-card answer kept as beforeEvm: FAIL; and on a Mac for card held-move-forgotten-tx's
-// archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; and on a Mac for card evm-pool-sync-holds' Base
-// bloXroute (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
+// archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; on a Mac for card wallet-restore-reads-ux's Pocket
+// Solana gateway, deploy.mjs --build's build, 2026-11-09, the answer before it kept as beforePocket: FAIL; and on a Mac for card evm-pool-sync-holds' Base bloXroute beside it
+// (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
@@ -101,6 +102,29 @@ test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in
   for (const o of history) assert.equal(pinned.filter((x) => x === o).length, 1, `${o} once in the pinned connect-src`);
   const venues = evmOrigins();
   assert.deepEqual(POOL_HISTORY.split(" "), history.filter((o) => !venues.includes(o)));
+});
+
+test("recorded bad answer: the good build before card wallet-restore-reads-ux (no Pocket Solana gateway in connect-src): FAIL on connect-src alone", () => {
+  const r = judge(ANSWERS.beforePocket);
+  assert.equal(r.ok, false);
+  const site = ANSWERS.beforePocket.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  const want = CSP.find(([k]) => k === "connect-src")[1];
+  assert.ok(want.includes(" https://solana.api.pocket.network "), "the policy names the restore's second U_X operator");
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+});
+
+test("an origin not on the list beside Pocket's Solana gateway, or in its place, is still refused: FAIL", () => {
+  for (const to of [
+    "https://solana.api.pocket.network https://solana.api.pocket.network.example.com",
+    "https://solana.api.pocket.network https://api.mainnet-beta.solana.com.example.com",
+    "https://solana.api.example.network",
+    "https://*.pocket.network",
+    "https:",
+  ]) {
+    const r = judge(withCsp("https://solana.api.pocket.network", to));
+    assert.equal(r.ok, false, to);
+    assert.ok(r.lines.some((l) => l.startsWith("BAD CSP connect-src: ")), `${to}: ${r.lines.join("\n")}`);
+  }
 });
 
 test("frame-src other than APP_HOST alone, and Origin-Agent-Cluster gone: FAIL", () => {
