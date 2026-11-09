@@ -20,7 +20,7 @@
 //   node scripts/live-checks/signpage-prover-host.mjs [--record <file>]                       the live SIGN_HOST
 //   node scripts/live-checks/signpage-prover-host.mjs --harness [--site <dir>] [--record <file>]
 //     the harness: SIGN_HOST answered from a build folder under its own _headers, every rule that matches joined as
-//     Pages joins them (default: a fresh `node packages/signpage/scripts/deploy.mjs --dry-run` build, which passed the
+//     Pages joins them (default: a fresh `node packages/signpage/scripts/deploy.mjs --build` build, which passed the
 //     deploy gate); APP_HOST, which the page frames, from a blank page; every other host refused.
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 // packages/signpage/scripts/deploy.mjs refuses a _headers whose worker rule is not WORKER_CSP, exactly.
@@ -362,11 +362,11 @@ async function readPage(serve) {
   }
 }
 
-/** A fresh deploy build that passed the deploy gate (deploy.mjs --dry-run keeps it); the caller removes it. */
+/** A fresh deploy build that passed the build's gate (deploy.mjs --build keeps it; a branch's build, released or not); the caller removes it. */
 export function gateBuild() {
-  const r = spawnSync(process.execPath, [path.join(REPO, "packages/signpage/scripts/deploy.mjs"), "--dry-run"], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [path.join(REPO, "packages/signpage/scripts/deploy.mjs"), "--build"], { encoding: "utf8" });
   const dir = /gate ok on (\S+);/.exec(r.stdout ?? "")?.[1];
-  if (r.status !== 0 || !dir) throw new Error(`deploy.mjs --dry-run: exit ${r.status}: ${(r.stderr || r.stdout || "").trim()}`);
+  if (r.status !== 0 || !dir) throw new Error(`deploy.mjs --build: exit ${r.status}: ${(r.stderr || r.stdout || "").trim()}`);
   return dir;
 }
 
