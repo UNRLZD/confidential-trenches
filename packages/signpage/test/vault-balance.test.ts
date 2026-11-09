@@ -35,14 +35,46 @@ test("signed in: vault_balance is the USDC of the vault's UNSPENT and HELD notes
   assert.equal(SIGNED_IN.vault_balance, "0", "the state handed in is not changed");
 });
 
-test("a note spent, reserved for a withdrawal, taken or not landed is never counted", async () => {
+/** A RESERVED note whose stored request withdraws `withdrawn` (public_signals[2], as withdraw/handoff.ts storedRequest reads it). */
+const reserved = (id: string, value: bigint, withdrawn: unknown): NoteRecord => ({
+  ...note(id, VAULT, value, "RESERVED"),
+  request: JSON.stringify({ proof: {}, public_signals: ["1", "2", withdrawn, "4"], withdrawal: { recipient: "r.near" } }),
+});
+
+test("a note spent, taken or not landed is never counted; a reserved one counts its change only", async () => {
   const counted: NoteState[] = ["UNSPENT", "HELD"];
   for (const s of NOTE_STATES) {
+    if (s === "RESERVED") continue;
     const v = vaultBalanceOf([note("x", VAULT, 1_000_000n, s)], VAULT);
     assert.equal(v, counted.includes(s) ? 1_000_000n : 0n, s);
   }
-  const out = await withVaultBalance(SIGNED_IN, async () => [note("s", VAULT, 5_000_000n, "SPENT"), note("r", VAULT, 3_000_000n, "RESERVED"), note("u", VAULT, 1n)], VAULT);
-  assert.equal(out.vault_balance, "0.000001");
+  const out = await withVaultBalance(SIGNED_IN, async () => [note("s", VAULT, 5_000_000n, "SPENT"), reserved("r", 3_000_000n, "3000000"), note("u", VAULT, 1n)], VAULT);
+  assert.equal(out.vault_balance, "0.000001", "a reserved note withdrawing all of it leaves no change");
+});
+
+test("review P2-1: a 100 USDC note reserved for a 10 USDC withdrawal reads 90 while the withdrawal is in flight", async () => {
+  const out = await withVaultBalance(SIGNED_IN, async () => [reserved("r", 100_000_000n, "10000000")], VAULT);
+  assert.equal(out.vault_balance, "90");
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(out), true);
+  // its change note landed: the parent reads SPENT (readNotes), so the 90 is counted once, as the change
+  const landed = [{ ...reserved("r", 100_000_000n, "10000000"), state: "SPENT" as const }, { ...note("c", VAULT, 90_000_000n), parent: "r" }];
+  assert.equal((await withVaultBalance(SIGNED_IN, async () => landed, VAULT)).vault_balance, "90");
+  // the withdrawal expired: the note is UNSPENT again at its full value
+  assert.equal((await withVaultBalance(SIGNED_IN, async () => [note("r", VAULT, 100_000_000n)], VAULT)).vault_balance, "100");
+});
+
+test("a reserved note whose request is missing, malformed or withdraws more than the note: the state as it is, as a failed read", async () => {
+  const bad: NoteRecord[] = [
+    { ...note("r", VAULT, 100_000_000n, "RESERVED") },
+    { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "{not json" },
+    { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: JSON.stringify({ public_signals: "x" }) },
+    { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "null" },
+    reserved("r", 100_000_000n, 10_000_000),
+    reserved("r", 100_000_000n, "-1"),
+    reserved("r", 100_000_000n, "010"),
+    reserved("r", 100_000_000n, "100000001"),
+  ];
+  for (const r of bad) assert.equal(await withVaultBalance(SIGNED_IN, async () => [note("u", VAULT, 5_000_000n), r], VAULT), SIGNED_IN, String(r.request));
 });
 
 test("whole and small amounts read as exact decimals: no float, no trailing zeros", async () => {
