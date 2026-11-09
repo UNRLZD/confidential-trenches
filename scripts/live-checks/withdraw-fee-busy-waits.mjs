@@ -30,6 +30,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 import { EXIT, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "withdraw-fee-busy-waits";
@@ -43,13 +44,13 @@ export const RETRY_AFTER_MAX_S = 75;
 export const TIMEOUT_MS = 15_000;
 const FEE_FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px", "g_w", "valid_until_block"];
 const BUSY = { 429: "rate_limited", 503: "upstream" };
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PIN = /src="\/app\.js" integrity="(sha384-[A-Za-z0-9+/=]+)"/;
 /** The /app.js sha384 an index.html pins, or undefined. */
 export const pinOf = (index) => PIN.exec(index)?.[1];
-/** The /app.js sha384 this checkout's signing page pins: the commit's own build. scripts/ci/bundle-checks.mjs passes the
- *  pin of the build it serves instead (its planted copies re-pin their own app.js). */
-export const COMMIT_PIN = pinOf(readFileSync(path.join(ROOT, "packages/signpage/index.html"), "utf8"));
+/** The /app.js sha384 this checkout's signing page pins: the commit's own build, made from its sources (signBuilt: the
+ *  build is never committed), read only by the sign part, never at load, so the helper part never builds the page.
+ *  scripts/ci/bundle-checks.mjs passes the pin of the build it serves instead (its planted copies re-pin their own app.js). */
+export const commitPin = () => pinOf(readFileSync(path.join(signBuilt(), "index.html"), "utf8"));
 
 export const asks = (pool = DEVNET_POOL) => [
   { route: "withdraw-fee", path: `/v1/withdraw/fee?token=${MAINNET_USDC}` },
@@ -127,7 +128,7 @@ export function judge(run, pool = DEVNET_POOL) {
 // ---- the sign part ----
 
 /** SIGN_HOST's index and the sha384 of its served /app.js, with the pin this commit wants. */
-export async function readSign(sign = SIGN, fetchFn = fetch, want = COMMIT_PIN) {
+export async function readSign(sign = SIGN, fetchFn = fetch, want = commitPin()) {
   const get = async (p) => {
     const r = await fetchFn(`${sign.replace(/\/$/, "")}${p}`, { redirect: "error", headers: { "cache-control": "no-cache" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (r.status !== 200) throw new Error(`${p}: HTTP ${r.status}`);
