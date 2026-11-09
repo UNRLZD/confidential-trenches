@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { verifyGate } from "./verify-gate.mjs";
+import { verifyGate, verifyGroup } from "./verify-gate.mjs";
 
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), "verify-gate-"));
@@ -390,5 +390,102 @@ test("a new list on that branch may name the merge base's tree when its SIGN_HOS
     assert.equal(refusals(r, base, head), "");
   } finally {
     r.done();
+  }
+});
+
+// ---------- a merge queue group: main, then one queue merge commit per pull request, each judged as its pull request ----------
+
+/**
+ * main with the kit, then each pull request on its own branch from main, then the queue's branch: main with a merge
+ * commit per pull request, its message as GitHub's queue writes it with the repository's "Pull request title and
+ * description" default (the title and number, a blank line, the description). prs: [{ n, title, body, commits }].
+ */
+function group(prs, { base: baseFiles = { "README.md": "x\n" } } = {}) {
+  const r = repo();
+  const main = r.commit("Card kickoff-kit: kit", baseFiles);
+  for (const pr of prs) {
+    r.g("checkout", "-q", "-b", `pr-${pr.n}`, main);
+    for (const [msg, files] of pr.commits) r.commit(msg, files);
+  }
+  r.g("checkout", "-q", "-b", "gh-readonly-queue/main/pr", main);
+  for (const pr of prs) r.g("merge", "-q", "--no-ff", "-m", `${pr.title} (#${pr.n})`, "-m", pr.body ?? "", `pr-${pr.n}`);
+  return { r, main, head: r.g("rev-parse", "HEAD") };
+}
+const groupRefusals = (q) => verifyGroup(q.r.dir, q.main, q.head).refusals.join("\n");
+const shell = { n: 1, title: "Card app-shell: merge (the shell)", commits: [["Card app-shell: shell", { "apps/terminal/src/main.ts": "export {}\n", "scripts/live-checks/app-shell.mjs": check }]] };
+const plan = { n: 2, title: "Card docs-plan: merge (a plan)", body: "A plan.\n\nLive check: none (docs only)", commits: [["Card docs-plan: a plan", { "docs/plans/app.md": "# app\n" }]] };
+
+test("a clean two-card group passes: one card's live check is in its tree, the other's exemption is in its own merge commit's description", () => {
+  const q = group([shell, plan]);
+  try {
+    const out = verifyGroup(q.r.dir, q.main, q.head);
+    assert.deepEqual(out.refusals, []);
+    assert.deepEqual(out.cards.sort(), ["app-shell", "docs-plan"]);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a group whose card commit names no card is refused", () => {
+  const q = group([shell, { ...plan, commits: [["add a plan", { "docs/plans/app.md": "# app\n" }]] }]);
+  try {
+    assert.match(groupRefusals(q), /names no card .*: add a plan$/m);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a two-card group with one bad card is refused for that card alone", () => {
+  const q = group([shell, { ...plan, body: "A plan." }]);
+  try {
+    const out = groupRefusals(q);
+    assert.match(out, /card docs-plan has no live check/);
+    assert.doesNotMatch(out, /app-shell/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: one pull request's exemption never covers another's card in the same group", () => {
+  const other = { n: 3, title: "Card app-copy: merge (copy)", commits: [["Card app-copy: copy", { "apps/terminal/src/copy.ts": "export {}\n" }]] };
+  const q = group([{ ...plan, body: "Live check: none (docs only)\nLive check: app-copy: none (copy only)" }, other]);
+  try {
+    const out = groupRefusals(q);
+    assert.match(out, /card app-copy has no live check/);
+    assert.doesNotMatch(out, /docs-plan/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a group commit on the queue's line that is not a merge (a squash or a rebase) is refused", () => {
+  const q = group([shell]);
+  try {
+    q.r.commit("Card docs-plan: merge (a plan) (#2)", { "docs/plans/app.md": "# app\n", "scripts/live-checks/docs-plan.mjs": check });
+    const out = verifyGroup(q.r.dir, q.main, q.r.g("rev-parse", "HEAD")).refusals.join("\n");
+    assert.match(out, /is not a merge commit/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a group with no queued pull request is refused", () => {
+  const q = group([shell]);
+  try {
+    assert.match(verifyGroup(q.r.dir, q.head, q.main).refusals.join("\n"), /no queued pull request/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a group judged from a main that already holds its first pull request judges the second alone", () => {
+  const q = group([shell, { ...plan, body: "" }]);
+  try {
+    const first = q.r.g("rev-parse", `${q.head}^1`);
+    const out = verifyGroup(q.r.dir, first, q.head);
+    assert.deepEqual(out.cards, ["docs-plan"]);
+    assert.match(out.refusals.join("\n"), /card docs-plan has no live check/);
+  } finally {
+    q.r.done();
   }
 });

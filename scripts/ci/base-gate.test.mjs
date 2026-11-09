@@ -1,7 +1,9 @@
 // On a pull request, ci.yml runs money-gate, verify-gate, vault-sandbox's rule and quote-speed as the base commit has them, so a pull
-// request cannot change the gate that judges it. This test finds every ci.yml step that runs a gate from "$RUNNER_TEMP", replays its
-// "$RUNNER_TEMP" lines in a temp clone and checks that each gate loads (no ERR_MODULE_NOT_FOUND), runs as the base
-// has it (the head's tampered copy never runs) and judges the head's checkout (the head's own record and live check).
+// request cannot change the gate that judges it; on a merge queue group, as main has them, from main (the merge base of
+// main and the group's head) to the group's head. This test finds every ci.yml step that runs a gate from
+// "$RUNNER_TEMP", replays its whole run block in a temp clone as a pull request and as a group, and checks that each
+// gate's job runs on both, that each gate loads (no ERR_MODULE_NOT_FOUND), runs as the base has it (the head's tampered
+// copy never runs) and judges the head's checkout (the head's own record and live check).
 //   node --test scripts/ci/base-gate.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,16 +18,18 @@ const CI = path.join(ROOT, ".github/workflows/ci.yml");
 const PROBE = "base-gate-probe";
 const TAMPER = 'console.log("TAMPERED"); process.exit(0);\n';
 
-// the steps of ci.yml that run a gate from "$RUNNER_TEMP": { job, gate, env, lines }
+// the steps of ci.yml that run a gate from "$RUNNER_TEMP": { job, jobIf, gate, env, lines, run }; lines are its
+// "$RUNNER_TEMP" lines, run its whole run block
 export function baseGateSteps(yml) {
   const steps = [];
   let job = null;
   let cur = null;
+  const ifs = new Map(); // each job's own if:
   const flush = () => {
     if (cur && /\bnode\s+"\$RUNNER_TEMP\//.test(cur.run.join("\n"))) {
       const lines = cur.run.filter((l) => l.includes("$RUNNER_TEMP")).map((l) => l.trim().replace(/\s*;;$/, ""));
       const gate = lines.map((l) => /^node\s+"\$RUNNER_TEMP\/(?:\S*\/)?([a-z-]+)\.mjs"/.exec(l)?.[1]).find(Boolean);
-      steps.push({ job, gate, env: cur.env, lines });
+      steps.push({ job, jobIf: ifs.get(job) ?? "", gate, env: cur.env, lines, run: cur.run });
     }
     cur = null;
   };
@@ -37,6 +41,8 @@ export function baseGateSteps(yml) {
       job = j[1];
       continue;
     }
+    const jobIf = /^ {4}if: (.*)$/.exec(raw);
+    if (jobIf && job) ifs.set(job, jobIf[1].trim());
     if (/^ {6}- /.test(raw)) {
       flush();
       cur = { env: {}, run: [] };
@@ -62,16 +68,31 @@ export function baseGateSteps(yml) {
   return steps;
 }
 
-// a step's env as a pull request from base to head sets it
-function prEnv(env, base, head) {
+// a step's env as a pull request from base to head sets it, or as a merge queue group whose head is head (its main is
+// the clone's origin/main, the base)
+function prEnv(env, base, head, event = "pull_request") {
   const out = {};
   for (const [k, v] of Object.entries(env)) {
-    if (/pull_request\.base\.sha/.test(v)) out[k] = base;
-    else if (/pull_request\.head\.sha/.test(v)) out[k] = head;
-    else if (/github\.event_name/.test(v)) out[k] = "pull_request";
+    if (/github\.event_name/.test(v)) out[k] = event;
+    else if (event === "pull_request") out[k] = /pull_request\.base\.sha/.test(v) ? base : /pull_request\.head\.sha/.test(v) ? head : "";
+    else if (/merge_group\.head_sha|\|\| github\.sha/.test(v)) out[k] = head;
+    else if (/merge_group\.base_ref/.test(v)) out[k] = "refs/heads/main";
     else out[k] = "";
   }
   return out;
+}
+
+// a job's if: as GitHub reads it for an event (the shapes ci.yml uses: event_name compares, always(), && and ||)
+export function jobRuns(jobIf, event) {
+  if (!jobIf) return true;
+  const js = jobIf
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, "")
+    .replace(/github\.event_name/g, JSON.stringify(event))
+    .replace(/always\(\)/g, "true")
+    .replace(/'([^']*)'/g, (_, x) => JSON.stringify(x))
+    .replace(/([!=])=/g, "$1==");
+  if (!/^(?:\s|"[a-z_]*"|true|===|!==|&&|\|\||\(|\))*$/.test(js)) throw new Error(`a job if this test cannot read: ${jobIf}`);
+  return Function(`return (${js});`)();
 }
 
 const git = (cwd, args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -96,13 +117,23 @@ function prClone() {
   return { dir, repo, base, head: git(repo, ["rev-parse", "HEAD"]) };
 }
 
+// the pull request's clone, its head merged as GitHub's queue merges it (a merge commit on main, merge method MERGE),
+// and origin/main at the base: { dir, repo, base, head }, head the group's head
+function groupClone() {
+  const pr = prClone();
+  git(pr.repo, ["update-ref", "refs/remotes/origin/main", pr.base]);
+  git(pr.repo, ["checkout", "--quiet", "--detach", pr.base]);
+  git(pr.repo, ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid", "merge", "--quiet", "--no-ff", "-m", `Card ${PROBE}: merge (#1)`, pr.head]);
+  return { ...pr, head: git(pr.repo, ["rev-parse", "HEAD"]) };
+}
+
 // runs the lines as GitHub runs a step's run block (bash -e), in the checkout, with a fresh RUNNER_TEMP
-function replay(pr, lines, env) {
+function replay(pr, lines, env, event = "pull_request") {
   const runnerTemp = mkdtempSync(path.join(pr.dir, "runner-temp-"));
   const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", lines.join("\n")], {
     cwd: pr.repo,
     encoding: "utf8",
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, ...prEnv(env, pr.base, pr.head) },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, ...prEnv(env, pr.base, pr.head, event) },
   });
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
@@ -121,17 +152,52 @@ test("ci.yml runs money-gate, verify-gate, vault-sandbox's rule and quote-speed 
   assert.deepEqual(steps.map((s) => s.gate).sort(), ["money-gate", "quote-speed", "vault-sandbox", "verify-gate"], JSON.stringify(steps, null, 2));
 });
 
-test("each base gate loads with every file it imports and judges the head's checkout", (t) => {
-  const pr = prClone();
+for (const [event, clone] of [["pull_request", prClone], ["merge_group", groupClone]])
+  test(`each base gate runs on ${event}, loads with every file it imports and judges the head's checkout, never the head's own copy`, (t) => {
+    const pr = clone();
+    t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
+    for (const step of baseGateSteps(readFileSync(CI, "utf8"))) {
+      assert.ok(jobRuns(step.jobIf, event), `${step.job} does not run on ${event} (if: ${step.jobIf}): a skipped required check passes`);
+      const { status, out } = replay(pr, step.run, step.env, event);
+      const what = `${event} ${step.job}: ${step.run.join(" / ")}\n${out}`;
+      assert.doesNotMatch(out, /ERR_MODULE_NOT_FOUND/, what);
+      assert.doesNotMatch(out, /TAMPERED/, `the head's gate ran, not the base's: ${what}`);
+      assert.match(out, EXPECT[step.gate], what);
+      assert.equal(status, 0, what);
+    }
+  });
+
+test("a job that runs only on pull_request is read as skipped on merge_group, and != 'schedule' as run", () => {
+  assert.equal(jobRuns("github.event_name == 'pull_request'", "merge_group"), false);
+  assert.equal(jobRuns("github.event_name == 'pull_request' || github.event_name == 'merge_group'", "merge_group"), true);
+  assert.equal(jobRuns("always() && github.event_name != 'schedule'", "merge_group"), true);
+  assert.throws(() => jobRuns("needs.plan.outputs.run == 'true'", "merge_group"));
+});
+
+// planted: a group step that runs its gate from merge_group.base_sha, the group's parent commit, which is the queue
+// entry ahead (not main) for every pull request but the first, runs that entry's copy of the gate
+test("planted: a group judged from base_sha, the queue entry ahead, runs that entry's gate, not main's", (t) => {
+  const pr = groupClone();
   t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
-  for (const step of baseGateSteps(readFileSync(CI, "utf8"))) {
-    const { status, out } = replay(pr, step.lines, step.env);
-    const what = `${step.job}: ${step.lines.join(" / ")}\n${out}`;
-    assert.doesNotMatch(out, /ERR_MODULE_NOT_FOUND/, what);
-    assert.doesNotMatch(out, /TAMPERED/, `the head's gate ran, not the base's: ${what}`);
-    assert.match(out, EXPECT[step.gate], what);
-    assert.equal(status, 0, what);
-  }
+  // the second pull request, queued behind the first (whose own copy of the gate is tampered): its group's parent
+  // commit, base_sha, is the first entry's group head
+  const id = ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid"];
+  git(pr.repo, ["checkout", "--quiet", "-b", "second", pr.base]);
+  writeFileSync(path.join(pr.repo, "second.txt"), "2\n");
+  git(pr.repo, ["add", "--", "second.txt"]);
+  git(pr.repo, [...id, "commit", "--quiet", "--no-verify", "-m", "Card second: two"]);
+  git(pr.repo, ["checkout", "--quiet", "--detach", pr.head]);
+  git(pr.repo, [...id, "merge", "--quiet", "--no-ff", "-m", "Card second: merge (#2)", "second"]);
+  const bad = ['mkdir -p "$RUNNER_TEMP/base"', 'git archive "$MQ_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"', 'node "$RUNNER_TEMP/base/scripts/ci/verify-gate.mjs" --group "$MQ_BASE" "$MQ_HEAD"'];
+  const runnerTemp = mkdtempSync(path.join(pr.dir, "runner-temp-"));
+  const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", bad.join("\n")], {
+    cwd: pr.repo,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, MQ_BASE: pr.head, MQ_HEAD: git(pr.repo, ["rev-parse", "HEAD"]) },
+  });
+  assert.match(`${r.stdout}${r.stderr}`, /TAMPERED/);
+  const verify = baseGateSteps(readFileSync(CI, "utf8")).find((s) => s.gate === "verify-gate");
+  assert.doesNotMatch(verify.run.join("\n"), /base_sha|MQ_BASE\b/, "the group's main is the merge base of main and its head");
 });
 
 // planted case: 03cb57f's step copied the base's money-gate.mjs alone, so its import of ../net-window.mjs failed
