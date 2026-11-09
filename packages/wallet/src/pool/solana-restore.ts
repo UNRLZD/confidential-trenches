@@ -342,11 +342,11 @@ export function solanaMarkCounts(marks: SolanaMarks, counts: readonly (readonly 
   const d = marks.pre.size;
   const r = marks.spent.size;
   if (counts.some(([state, label]) => label !== d || state !== d + r))
-    throw new Error(`the lister listed ${d} deposits and ${r} releases (${d} label and ${d + r} state leaves), but rpc 0's pages hold ${counts[0]![0]} state and ${counts[0]![1]} label leaves and rpc 1's hold ${counts[1]![0]} state and ${counts[1]![1]} label leaves`);
+    throw new Error(`restore: the lister listed ${d} deposits and ${r} releases (${d} label and ${d + r} state leaves), but rpc 0's pages hold ${counts[0]![0]} state and ${counts[0]![1]} label leaves and rpc 1's hold ${counts[1]![0]} state and ${counts[1]![1]} label leaves`);
   const nonces = new Set([...marks.pre.values()].map((m) => m.nonce));
-  if (nonces.size !== d || [...nonces].some((n) => n < 1n || n > BigInt(d))) throw new Error(`the listed deposits' nonces are not 1 to ${d}`);
+  if (nonces.size !== d || [...nonces].some((n) => n < 1n || n > BigInt(d))) throw new Error(`restore: the listed deposits' nonces are not 1 to ${d}`);
   const numbers = new Set([...marks.spent.values()].map((m) => m.number));
-  if (numbers.size !== r || [...numbers].some((n) => n < 0 || n >= r)) throw new Error(`the listed releases' numbers are not 0 to ${r - 1}`);
+  if (numbers.size !== r || [...numbers].some((n) => n < 0 || n >= r)) throw new Error(`restore: the listed releases' numbers are not 0 to ${r - 1}`);
 }
 
 /**
@@ -357,15 +357,16 @@ export async function solanaRestoreNotes(a: {
   /** the seed, or a SeedUse opened only for the walk's match, after every read */ seed64: Uint8Array | SeedUse;
   program: string;
   rpcs: readonly [SolanaRpc, SolanaRpc];
-  /** lists the marks' addresses; the two RPCs read each one (solanaMarksListed). No mark counts on a list alone. */
-  lister: SolanaRpc;
+  /** lists the marks' addresses (rpcs[0] when not given); the two RPCs read each one (solanaMarksListed). No mark
+   *  counts on a list alone, so any RPC may list. */
+  lister?: SolanaRpc;
   signal?: AbortSignal;
   gap?: number;
   /** tests only */ lagWait?: SolanaLagWait;
 }) {
   const sync = solanaTreeSync(a.rpcs, a.program, a.lagWait);
   const scope = solanaPoolOf(a.program).scope;
-  const marksAt = (minSlots?: readonly [number, number]): Promise<SolanaMarks> => solanaMarksListed(a.lister, a.rpcs, a.program, a.signal, minSlots, a.lagWait, held);
+  const marksAt = (minSlots?: readonly [number, number]): Promise<SolanaMarks> => solanaMarksListed(a.lister ?? a.rpcs[0], a.rpcs, a.program, a.signal, minSlots, a.lagWait, held);
   // the marks taken so far, which a listed read does not read again
   let held: SolanaMarks | undefined;
   let marks: SolanaMarks = await marksAt();
@@ -392,7 +393,7 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * The one place a Solana pool send the chain refused as already spent (the pool's NullifierAlreadySpent, error 16: the
  * note's spent mark exists) is settled, by whatever sends a release. Never on the refusal's word: the helper, the
  * simulation and the send are hostile input, and the nullifier hash is no longer secret once the send has left. Every
- * mark is listed by `lister` and read by its address on both RPCs (solanaMarksListed, as a restore reads them: no read
+ * mark is listed by `lister` (rpcs[0] when not given) and read by its address on both RPCs (solanaMarksListed, as a restore reads them: no read
  * names the note), then the pages past them, and the marks must count every leaf of each RPC's own pages with no hole in
  * their counters (solanaMarkCounts) before anything is decided. So a mark the lister hides, or lists under an address
  * that is no account, is refused, never read as "no spend". Only when the note's spent mark is there and its change note
@@ -409,12 +410,12 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * RPCs is past its deadline with no spent mark. minSlots: each RPC's reads at or past it (minContextSlot). cache: marks
  * read on both RPCs before (a mark is never closed or rewritten), not read again; set to this read's marks.
  */
-export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister: SolanaRpc; signal?: AbortSignal; minSlots?: readonly [number, number]; cache?: { marks?: SolanaMarks }; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
+export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStore; noteId: string; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; signal?: AbortSignal; minSlots?: readonly [number, number]; cache?: { marks?: SolanaMarks }; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaSettled> {
   if (!(a.seed64 instanceof Uint8Array) || a.seed64.length !== 64) throw new Error("seed64: not 64 bytes");
   const scope = solanaPoolOf(a.program).scope;
   const note = await a.notes.get(a.noteId);
   if (note === undefined || note.leaf === undefined || note.scope !== scope) throw new Error(`note ${a.noteId}: not a landed note of this pool`);
-  const marks = await solanaMarksListed(a.lister, a.rpcs, a.program, a.signal, a.minSlots, a.lagWait, a.cache?.marks);
+  const marks = await solanaMarksListed(a.lister ?? a.rpcs[0], a.rpcs, a.program, a.signal, a.minSlots, a.lagWait, a.cache?.marks);
   if (a.cache !== undefined) a.cache.marks = marks;
   const leaves = await solanaTreeSync(a.rpcs, a.program, a.lagWait).leaves(marks.slot, a.signal);
   // review P2-1 and P1 of 369a87a8: no decision on a list alone; each RPC's own pages, publicnode's among them on mainnet
@@ -466,7 +467,7 @@ export type SolanaReservedPass = { spent: string[]; freed: string[]; held: strin
  *   be in flight.
  * - A read or write that fails holds that note; the others still run. Nothing here names a note to an RPC.
  */
-export async function solanaSettleReserved(a: { seed64: Uint8Array; notes: NoteStore; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister: SolanaRpc; signal?: AbortSignal; cache?: { marks?: SolanaMarks }; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaReservedPass> {
+export async function solanaSettleReserved(a: { seed64: Uint8Array; notes: NoteStore; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; signal?: AbortSignal; cache?: { marks?: SolanaMarks }; /** tests only */ lagWait?: SolanaLagWait }): Promise<SolanaReservedPass> {
   const scope = solanaPoolOf(a.program).scope;
   const out: SolanaReservedPass = { spent: [], freed: [], held: [] };
   const reserved = (await a.notes.list()).filter((n) => n.scope === scope && n.state === "RESERVED");

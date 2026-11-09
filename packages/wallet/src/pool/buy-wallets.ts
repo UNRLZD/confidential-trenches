@@ -346,7 +346,7 @@ export function solanaSpentNotes(r: { notes: readonly SolanaRestoredNote[]; spen
 }
 
 /** Restore of the Solana pool (./solana-restore.ts on its two RPCs), then the Ws its buys used, read on `holdings`. */
-export async function solanaRestoreWallets(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister: SolanaRpc; holdings: HoldingsReader; signal?: AbortSignal; gap?: number }) {
+export async function solanaRestoreWallets(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; holdings: HoldingsReader; signal?: AbortSignal; gap?: number }) {
   const r = await solanaRestoreNotes(a);
   const w = await buyWallets(a.seed64, [{ id: a.program, chain: "sol", spent: solanaSpentNotes(r), reader: a.holdings }], a.signal ? { signal: a.signal } : {});
   return { ...r, ...w };
