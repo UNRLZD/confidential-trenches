@@ -2324,10 +2324,12 @@ test("RC2-3: one provider's final far ahead (broken or hostile) never makes a li
 
 test("F's hash differing between the providers keeps the round, past the window as inside it", async () => {
   const node = new Node();
-  let fork = true;
+  // the fork after the signing: b0 forked at the signing refuses it (review P2-2, below)
+  let fork = false;
   const rs = edited(node, 1, async (m, p, real) => (fork && m === "block" && p.block_id === Number(node.final) ? otherHash(real) : real()));
   const r = node.relayerOn(rs, 50);
   const tx = await unsent(node, r);
+  fork = true;
   node.final += 150n;
   assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
   node.final += 1n;
@@ -2336,12 +2338,18 @@ test("F's hash differing between the providers keeps the round, past the window 
   assert.equal((await r.resolve(tx, noResend)).kind, "dropped");
 });
 
-test("b0's hash answered otherwise by the other provider keeps the round", async () => {
+test("b0's hash answered otherwise by the other provider keeps the round; answered so at the signing, nothing is signed (review P2-2)", async () => {
   const node = new Node();
   let fork = true;
   const rs = edited(node, 1, async (m, p, real) => (fork && m === "block" && p.block_id === 1000 ? otherHash(real) : real()));
   const r = node.relayerOn(rs, 50);
+  const before = node.relayerStore.nonceNext(r.key);
+  const none: TxRef[] = [];
+  await assert.rejects(r.send(prepayAction(1n), open, keep(none)), /disagree on block 1000/);
+  assert.deepEqual([none.length, node.sent.length, node.relayerStore.nonceNext(r.key)], [0, 0, before], "nothing signed, sent or counted");
+  fork = false;
   const tx = await unsent(node, r);
+  fork = true;
   assert.equal(tx.height, "1000");
   node.final += 150n;
   assert.equal((await r.resolve(tx, noResend)).kind, "unknown");
@@ -3127,6 +3135,10 @@ test("two-agree (review P1-1): built as the wiring builds it (archival rpcs[0], 
       const out = await createRelayer([liar, forgot], archival, RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50).resolve(tx, noResend);
       assert.equal(out.kind, "unknown", `${name}: ${how}`);
     }
+    // the liar as provider 1 and as the archival one: it never stands in for provider 0, which forgot
+    const forgot0 = wrap(rs[0], forgets);
+    const liar1 = wrap(rs[1], failedAtD);
+    assert.equal((await createRelayer([forgot0, liar1], liar1, RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50).resolve(tx, noResend)).kind, "unknown", `${name}: archival rpcs[1], the liar`);
     // honest and agreeing, with no archival one: final
     assert.equal((await createRelayer(rs, null, RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50).resolve(tx, noResend)).kind, "final", name);
   });
