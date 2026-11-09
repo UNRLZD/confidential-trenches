@@ -1,9 +1,9 @@
 // node --test scripts/live-checks/wallet-restore-id-reader.test.mjs: the live check's verdict on its recorded answers, with
 // no network. Each record is a real run of the check (the 8-9 Nov 2026 clock of the recording machine), both providers
 // asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded (9 Nov
-// 00:52Z) by card wallet-restore-id-reader-wired's fold of its review, whose MARK gained the stall's named reasons and
-// whose reads gained intents.near's mt_tokens_for_owner and the final block header (step 5 reads both), so every record
-// holds them:
+// 01:51Z) by card wallet-restore-id-reader-wired's fold of its delta review (P3-3), whose MARK gained ids_end,
+// ids_ux_push and seed_per_use_lock, so every record counts them (the fold before it, 00:52Z, added the stall's named
+// reasons, intents.near's mt_tokens_for_owner and the final block header):
 // - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
 // - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
 //   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
@@ -17,7 +17,7 @@
 //     probe(SIGN_ORIGIN, localFetch, strip)   // written as JSON as --record writes it
 // - bad_catch_done: this card's build with step 5's catch swallowing its throw (`.catch(() => {})`, the review's
 //   mutant B3: a step 5 that throws would end the run done), built and run with --local --root <that folder>: FAIL on
-//   the markers alone, ids_catch at 0;
+//   the markers alone, ids_catch and ids_end at 0;
 // - and the good record with another script's integrity, each marker gone, a provider out of the CSP, and each provider's
 //   preflight or reads unknown, wrong, failed or with no CORS for the page: each FAIL.
 import assert from "node:assert/strict";
@@ -87,7 +87,7 @@ test("the recorded good answer (the card's build and both providers' real reads)
 test("main's build before the IdReader was wired (the walk's reach, none of the IdReader's rules) fails, on the markers alone", () => {
   assert.equal(answers.bad_main_bundle.url, "local build of main-610143c2");
   assert.deepEqual(BAD(answers.bad_main_bundle), [MARKS]);
-  assert.equal(ID_MARKERS.length, 13);
+  assert.equal(ID_MARKERS.length, 16);
   for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], m.startsWith("reach_") ? 1 : 0, m);
 });
 
@@ -96,10 +96,10 @@ test("the live SIGN_HOST before the card's release fails, on the markers alone",
   assert.deepEqual(BAD(answers.bad_live_before), [MARKS]);
 });
 
-test("this card's build with step 5's catch swallowing its throw (the review's mutant B3) fails, on ids_catch alone", () => {
+test("this card's build with step 5's catch swallowing its throw (the review's mutant B3) fails, on ids_catch and ids_end alone", () => {
   assert.equal(answers.bad_catch_done.url, "local build of catch-mutant");
   assert.deepEqual(BAD(answers.bad_catch_done), [MARKS]);
-  for (const m of MARKERS) assert.equal(answers.bad_catch_done.app.markers[m], m === "ids_catch" ? 0 : 1, m);
+  for (const m of MARKERS) assert.equal(answers.bad_catch_done.app.markers[m], m === "ids_catch" || m === "ids_end" ? 0 : 1, m);
 });
 
 test("a provider answering with no CORS (dRPC, every access-control header gone) fails, on its preflight and reads alone", () => {
@@ -246,4 +246,29 @@ test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s 
     assert.equal(asks, 4 * 7 * PAIR.length, `${ra}: four asks of each of the seven reads on each provider`);
     assert.deepEqual(new Set(waits), new Set([ms]), `${ra}: each wait ${ms} ms`);
   }
+});
+
+// review of e31892ef (P3-3): the end stage, the U_X push and the seed per use, each bound to its names; each planted
+// bundle line below is this build's own line with one change, and fails its marker
+test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never a stage that drops reasons, another constant or a run-long lock", () => {
+  const n = (text, k) => [...text.matchAll(MARK[k])].length;
+  const end = (stage, to = "s") => `.catch(e=>void ${to}.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)),t.throwIfAborted(),${stage}`;
+  assert.equal(n(end("l(s.length>0?`stalled`:`done`)"), "ids_end"), 1);
+  // the review's mutant: a stage that drops the U_X reasons
+  assert.equal(n(end("l(s.some(e=>!e.endsWith(hV))?`stalled`:`done`)"), "ids_end"), 0);
+  assert.equal(n(end("l(s.length>0?`stalled`:`done`)", "x"), "ids_end"), 0, "the catch pushes to another array");
+  assert.equal(n(end("l(s.length>1?`stalled`:`done`)"), "ids_end"), 0);
+  const ux = (push) => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}${push}}}var yV={}`;
+  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 1);
+  assert.equal(n(ux("i.push(`${r.label}: ${gV}`)"), "ids_ux_push"), 0, "another constant pushed");
+  assert.equal(n(ux("i.push(`${r.label}: done`)"), "ids_ux_push"), 0);
+  const lock = (check, mark, zero, use) =>
+    `d=n=>r().request(Io,{mode:\`shared\`,signal:t},async()=>{if(t.throwIfAborted(),${check})throw Error(\`signed out during the restore\`);let r=await e.seed64();try{let e=re(We,c,r);if(u===null)u=e;else{let t=e.length===u.length&&e.every((e,t)=>e===u[t]);if(e.fill(0),!t)throw Error(\`${mark}\`)}return await n(r)}finally{${zero}}}),${use}`;
+  const good = ["!await e.signedIn()", "other words were signed in during the restore", "r.fill(0)", "f=e=>d(async t=>e(t))"];
+  assert.equal(n(lock(...good), "seed_per_use_lock"), 1);
+  assert.equal(n(lock("!1", good[1], good[2], good[3]), "seed_per_use_lock"), 0, "no signed-in check");
+  assert.equal(n(lock(good[0], "the words changed", good[2], good[3]), "seed_per_use_lock"), 0, "no run mark");
+  assert.equal(n(lock(good[0], good[1], "void 0", good[3]), "seed_per_use_lock"), 0, "the seed not zeroed");
+  // the run-long lock: the run's SeedUse hands out one seed held for the run, not a request per use
+  assert.equal(n(lock(good[0], good[1], good[2], "f=e=>e(S)"), "seed_per_use_lock"), 0, "a run-long seed");
 });

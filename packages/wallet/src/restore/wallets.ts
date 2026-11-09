@@ -230,13 +230,14 @@ export async function restoreDepositIds(
     // ends the lane at its walk's end, never at 2^32, and the restore still returns what it found
     let reach: number | null = null;
     let readTo = lane - RESTORE_LANES;
-    // the ids are derived a window at a time (the indices up to the lane's bound now), the seed opened for that alone
+    // the ids are derived a window at a time (at most `margin` indices, none past the lane's bound now), the seed opened
+    // for that alone; the bound is still checked at each index
     let win = new Map<number, string>();
     const bound = (): number => Math.min(U32, (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);
     for (let i = lane; i <= U32 && i <= bound(); i += RESTORE_LANES) {
       readTo = i;
       if (!win.has(i)) {
-        const from = i, to = bound();
+        const from = i, to = Math.min(bound(), i + RESTORE_LANES * (margin - 1));
         win = await withSeed(seed64, (s) => {
           const m = new Map<number, string>();
           for (let k = from; k <= to; k += RESTORE_LANES) m.set(k, depositAccount(s, scope, k).account);

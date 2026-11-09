@@ -2,19 +2,19 @@
  "good": {
   "key": "held-move-forgotten-tx",
   "url": "local build",
-  "at": "2026-11-09T00:53:55.046Z",
+  "at": "2026-11-09T01:52:16.969Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-Xxg/5GH86LjPYiNvZtuK3QtPS1pnO59Fe8Y6NP8tbRLvxDuYZQAPv9jelG1Ih/q6",
+   "integrity": "sha384-T88i7kQj1BnivxaMrNeN8ZznnSlYLiHq+D/VEc+Icyzqt4amVUUZPfJz1QQnGVFH",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 809263,
-   "sha384": "sha384-Xxg/5GH86LjPYiNvZtuK3QtPS1pnO59Fe8Y6NP8tbRLvxDuYZQAPv9jelG1Ih/q6",
+   "bytes": 809757,
+   "sha384": "sha384-T88i7kQj1BnivxaMrNeN8ZznnSlYLiHq+D/VEc+Icyzqt4amVUUZPfJz1QQnGVFH",
    "markers": {
     "archival_0": 1,
     "archival_1": 1,

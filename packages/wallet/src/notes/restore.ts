@@ -59,9 +59,11 @@ export const RESTORE_LANES = 8;
  * lock for that use alone, so a restore's reads never hold the lock; card wallet-restore-id-reader-wired, review P2-2).
  * `use` is synchronous: nothing of the seed outlives it.
  */
-export type SeedUse = <T>(use: (seed64: Uint8Array) => T) => Promise<T>;
+export type SeedUse = <T>(use: (seed64: Uint8Array) => Sync<T>) => Promise<T>;
+/** A use's result that is no promise: a use that awaits would hold the seed past its end (review of e31892ef, P3-5). */
+export type Sync<T> = T extends PromiseLike<unknown> ? never : T;
 /** `use` on the seed: a SeedUse opens it for that use; a seed given as bytes is the caller's to hold and zero. */
-export function withSeed<T>(seed: Uint8Array | SeedUse, use: (seed64: Uint8Array) => T): Promise<T> {
+export function withSeed<T>(seed: Uint8Array | SeedUse, use: (seed64: Uint8Array) => Sync<T>): Promise<T> {
   return typeof seed === "function" ? seed(use) : Promise.resolve().then(() => use(seed));
 }
 const U32 = 0xffffffff;

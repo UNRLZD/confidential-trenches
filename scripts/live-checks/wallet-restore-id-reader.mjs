@@ -86,6 +86,17 @@ export const MARK = Object.freeze({
   ids_drift: "; its ids are not read",
   // the seed opened per use, under the seed lock, only while still stored
   seed_per_use: "signed out during the restore",
+  // review of e31892ef (P3-3): the end stage is read off the very array step 5's catch pushes to (a stage line that
+  // drops some reasons, as `why.some((y)=>!y.endsWith(U_X))?"stalled":"done"`, holds none),
+  // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
+  ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
+  // each pool scope's step 5 pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
+  // places before readDepositIds: `var hV=`the pool's own chain is not read ...`; ... i.push(`${r.label}: ${hV}`)}}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?\.push\(`\$\{[\w$]+\.label\}: \$\{\1\}`\)\}\}/g,
+  // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, held to the
+  // run's own seed (its mark), handed to that one use and zeroed when it ends; and the run's SeedUse is that request per
+  // use (a run-long lock, with the run inside one request, holds none)
+  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{[^}]{0,400}`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\5\(\6\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);

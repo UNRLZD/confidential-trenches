@@ -24,7 +24,7 @@ import { APP_ORIGIN, startApi } from "../src/api.ts";
 import * as restoreKind from "../src/pool-restore.ts";
 import { idsUndone, lanesOf, pagePools, POOL_CHAIN_UNREAD, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { RESTORE_GAP, walkEnd } from "../../wallet/src/notes/restore.ts";
+import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 
 const SOL_SCOPE = 11n;
 const EVM_SCOPE = 22n;
@@ -537,3 +537,68 @@ const laneOf = (u: string): number => {
   for (let i = 0; i <= 8 * 21; i += 8) if (idOf(SOL_SCOPE, i) === u) return i;
   return NaN;
 };
+
+// review of e31892ef (P3-1): the signed-in check under the seed lock, with no sign out in this tab: another tab's sign
+// out lands after the walk, so the floor's write finds no seed stored, writes nothing and opens no seed after it
+test("planted (review P3-1): no seed stored after the walk, with no sign out in this tab: stalled, no note written, no seed opened after", async () => {
+  let walked = false;
+  let opened = 0;
+  const w = await world({
+    signedIn: async () => !walked,
+    seed64: async () => (opened++, new Uint8Array(64).fill(7)),
+    solana: (async () => ((walked = true), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    pools: () => SOL_ONLY,
+  });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(await listed(w.store), []);
+  assert.equal(opened, 0, "a seed opened after the flip");
+  assert.deepEqual(w.ends.map((x) => [x.stage, x.why]), [["stalled", ["the restore stopped: signed out during the restore"]]]);
+});
+
+// review of e31892ef (P3-2): another tab signs out and in with other words between two of this run's seed uses, and
+// this tab hears of it late: the run is tied to its own seed, so it stops before the next use and writes nothing
+test("planted (review P3-2): other words signed in between two seed uses: stalled, nothing written, no id derived from them", async () => {
+  let opened = 0;
+  const n = nearOf();
+  const w = await world({
+    // the walk's use opens the run's seed; every opening after is the other words'
+    seed64: async () => new Uint8Array(64).fill(opened++ === 0 ? 7 : 9),
+    solana: (async (a: { seed64: SeedUse }) => (await a.seed64(() => 0), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never,
+    pools: () => SOL_ONLY,
+    ids: n.ids,
+  });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(await listed(w.store), []);
+  assert.deepEqual(n.log, [], "no id read");
+  assert.deepEqual(w.ends.map((x) => [x.stage, x.why]), [["stalled", ["the restore stopped: other words were signed in during the restore"]]]);
+});
+
+// review of e31892ef (P3-5): the run's end is told with its reasons however it ends: an abort (this tab's sign out) and
+// a floor write that throws included
+test("planted (review P3-5): `ended` is told once on an abort and on a floor write that throws", async () => {
+  let release: () => void = () => {};
+  const slow = new Promise<void>((r) => (release = r));
+  const a = await world({ pools: () => SOL_ONLY, solana: (async (x: { signal: AbortSignal }) => (await slow, x.signal.throwIfAborted(), { notes: notesOf(SOL_SCOPE, LABEL_S, 1000n), spends: [] })) as never });
+  const run = a.r.auto();
+  await until("reading", async () => (await a.store.keys("ops")).length === 1);
+  a.r.signedOut();
+  release();
+  assert.equal(await run, "stalled");
+  assert.equal(a.ends.length, 1);
+  assert.equal(a.ends[0]!.stage, "stalled");
+  assert.match(a.ends[0]!.why.join("\n"), /^the restore stopped: /m);
+  // the floor's write throws: the store holds one of the walk's notes with another precommitment
+  const b = await world({ pools: () => SOL_ONLY });
+  const ns = await openNoteStore(b.store);
+  try {
+    await writeRestored(ns, { notes: notesOf(SOL_SCOPE, LABEL_S, 5000n).slice(0, 1) });
+  } finally {
+    ns.close();
+  }
+  const q = api(b.r.kind);
+  const id = q.ask();
+  await until("stalled", () => q.posted.some((m) => m.id === id && m.stage === "stalled"));
+  assert.equal(b.ends.length, 1);
+  assert.equal(b.ends[0]!.stage, "stalled");
+  assert.match(b.ends[0]!.why.join("\n"), /^the restore stopped: note .* in the store has another precommitment$/m);
+});
