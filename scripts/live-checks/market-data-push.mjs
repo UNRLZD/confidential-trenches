@@ -4,7 +4,7 @@
 // helper's Solana 5-minute trending list (pickToken, Origin APP_HOST), then opens the socket for it with each Origin below, by a bare RFC 6455
 // handshake over node:https (no WebSocket library, so the Origin header is exactly the one written here):
 //   - APP_HOST: the handshake is answered 101 with the RFC 6455 accept key, and within FRAME_WAIT_MS the socket sends
-//     a text frame that is the token's tape (JSON with a `trades` array whose rows have t_ms, side and tx), holding a
+//     a text frame that is the token's tape (JSON with a `trades` array whose rows have t_ms, side "b" or "s" and tx), holding a
 //     trade whenever the polled route held one for the token: the first frame is the tape as the helper holds it, and
 //     the frames after it are its changes, so the check reads frames until one holds a trade or the wait ends;
 //   - SIGN_HOST, https://example.com, "*", "null" and no Origin at all: each is answered 403 with no upgrade, no frame
@@ -124,7 +124,9 @@ export async function read(base = BASE, fetchFn = fetch) {
 }
 
 const show = (v) => (v === undefined || v === null ? "absent" : JSON.stringify(v));
-const ROW = (r) => r !== null && typeof r === "object" && Number.isSafeInteger(r.t_ms) && (r.side === "buy" || r.side === "sell") && typeof r.tx === "string" && r.tx.length > 0;
+/** A tape row as the helper sends it (06b Trades: side "b" | "s"; apps/helper/src/data/candles.ts TapeRow), the shape the
+ *  terminal reads (apps/terminal/src/screens/token/trades.ts toTrades). */
+const ROW = (r) => r !== null && typeof r === "object" && Number.isSafeInteger(r.t_ms) && (r.side === "b" || r.side === "s") && typeof r.tx === "string" && r.tx.length > 0;
 
 /** The check on one recorded run. */
 export function judge({ held, app, refused }) {

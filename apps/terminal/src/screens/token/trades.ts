@@ -27,8 +27,13 @@ const DECIMAL = /^\d{1,40}(\.\d{1,40})?$/;
 
 export type Side = "buy" | "sell";
 
-/** One trade as the helper sends it: `usd` and `amt` are positive decimal strings, `trader` is null when the helper
- *  could not name the wallet. */
+/** The helper's side of a trade (06b `Trades`, side "b" | "s"; apps/helper/src/data/candles.ts TapeRow), as the page
+ *  names it. Any other word, "buy" and "sell" included, is not of the shape (card market-data-push: the page asked for
+ *  "buy" | "sell", so it refused every tape the deployed helper sent, read 9 Nov 21:58Z on Solana and Base). */
+const SIDE: Readonly<Record<string, Side>> = { b: "buy", s: "sell" };
+
+/** One trade as the page draws it, read from the helper's row: `usd` and `amt` are positive decimal strings, `trader`
+ *  is null when the helper could not name the wallet. */
 export interface Trade {
   t_ms: number;
   side: Side;
@@ -46,11 +51,12 @@ function toTrade(r: unknown): Trade | null {
   if (!isObject(r)) return null;
   const { t_ms, side, usd, amt, trader, tx } = r;
   if (typeof t_ms !== "number" || !Number.isSafeInteger(t_ms) || t_ms < 0) return null;
-  if (side !== "buy" && side !== "sell") return null;
+  const s = typeof side === "string" && Object.hasOwn(SIDE, side) ? SIDE[side]! : null;
+  if (s === null) return null;
   if (!positive(usd) || !positive(amt)) return null;
   if (trader !== null && !named(trader)) return null;
   if (!named(tx)) return null;
-  return { t_ms, side, usd, amt, trader: trader as string | null, tx };
+  return { t_ms, side: s, usd, amt, trader: trader as string | null, tx };
 }
 
 /** The answer as trades, or null when any part of it is not of the shape. */

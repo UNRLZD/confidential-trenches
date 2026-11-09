@@ -59,7 +59,8 @@ class FakeSocket implements PushSocket {
 }
 
 const trade = (tx: string, t_ms: number, usd = "10"): Trade => ({ t_ms, side: "buy", usd, amt: "1000", trader: "Trader111", tx });
-const body = (trades: Trade[]) => JSON.stringify({ trades, src: "chain", as_of_ms: 1 });
+/** The helper's tape body (06b Trades): its sides are "b" and "s". */
+const body = (trades: Trade[]) => JSON.stringify({ trades: trades.map((t) => ({ ...t, side: t.side === "buy" ? "b" : "s" })), src: "chain", as_of_ms: 1 });
 const answer = (status: number, text: string) => new Response(text, { status, headers: { "content-type": "application/json" } });
 
 function rig(fetchFn: typeof fetch) {
@@ -160,9 +161,10 @@ test("a message that is not a tape drops the socket and the route is read: over 
     `{"trades":[],"pad":"${"x".repeat(1_000_001)}"}`,
     new Uint8Array([123, 125]),
     "<html>",
-    JSON.stringify({ trades: [{ t_ms: "soon", side: "buy", usd: "1", amt: "1", trader: null, tx: "x" }] }),
-    JSON.stringify({ trades: Array.from({ length: 51 }, (_, i) => trade(`t${i}`, i)) }),
-    JSON.stringify({ trades: [{ ...trade("x", 1), usd: "-1" }] }),
+    JSON.stringify({ trades: [{ t_ms: "soon", side: "b", usd: "1", amt: "1", trader: null, tx: "x" }] }),
+    body(Array.from({ length: 51 }, (_, i) => trade(`t${i}`, i))),
+    JSON.stringify({ trades: [{ ...trade("x", 1), side: "b", usd: "-1" }] }),
+    JSON.stringify({ trades: [trade("x", 1)] }), // side "buy": not the helper's word
   ];
   for (const m of bad) {
     let reads = 0;

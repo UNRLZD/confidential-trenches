@@ -15,7 +15,7 @@ import { APP, judge, REFUSED } from "./market-data-push.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "market-data-push.answers.json"), "utf8"));
 const clone = (v) => structuredClone(v);
-const TAPE = JSON.stringify({ trades: [{ t_ms: 1794257000000, side: "buy", usd: "12.5", amt: "1000", trader: null, tx: "5tx" }], src: "chain", as_of_ms: 1794257000001 });
+const TAPE = JSON.stringify({ trades: [{ t_ms: 1794257000000, side: "b", usd: "12.5", amt: "1000", trader: null, tx: "5tx" }], src: "chain", as_of_ms: 1794257000001 });
 
 /** The good answer with Origin `origin` upgraded and sent the tape. */
 function accepted(origin) {
@@ -92,4 +92,17 @@ test("the socket is held to the polled route: a trade there and none pushed fail
   full.held = 3;
   full.app.frame = TAPE;
   assert.equal(judge(full).ok, true, judge(full).lines.join("\n"));
+});
+
+test("a row's side is the helper's word (06b Trades: \"b\" or \"s\"), the one the terminal reads; \"buy\" spelled out fails", () => {
+  const long = clone(A.good);
+  long.held = 1;
+  long.app.frame = JSON.stringify({ trades: [{ t_ms: 1794257000000, side: "buy", usd: "12.5", amt: "1000", trader: null, tx: "5tx" }], src: "chain", as_of_ms: 1 });
+  assert.equal(judge(long).ok, false);
+  for (const side of ["b", "s"]) {
+    const ok = clone(A.good);
+    ok.held = 1;
+    ok.app.frame = JSON.stringify({ trades: [{ t_ms: 1794257000000, side, usd: "12.5", amt: "1000", trader: null, tx: "5tx" }], src: "chain", as_of_ms: 1 });
+    assert.equal(judge(ok).ok, true, side);
+  }
 });
