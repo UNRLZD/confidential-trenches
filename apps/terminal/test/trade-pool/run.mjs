@@ -12,6 +12,8 @@
 //   - over one tap ($0.17) and a proof still making: the button is off and a tap sends nothing; the amount field is
 //     marked wrong over one tap, never while the proof is making;
 //   - Base: a whole chunk's USD ($3.50) sends pool.buy for 0.001 ETH; any other amount ($3.00) sends nothing;
+//   - the presets row: Solana and the vault keep the four; on Base it is one button, the row's width, holding the chunk's
+//     USD ($3.50), whose tap fills 3.50 and sends that pool.buy; with no proof ready yet its value is unknown: "—", off;
 //   - no pool: the vault's buy as before (data-path vault, no proof label);
 //   - the sell on a pool chain sends pool.sell for the same units the vault's sell would, and its line reads
 //     "Back to Cash"; with no pool the vault's sell goes as before.
@@ -51,11 +53,25 @@ const BUYS = [
   ["sol-making", "pool=sol-making&amt=0.16", "pool", "making", "Bal $0.93", "Making proof", false, null],
   ["base-chunk", "pool=base-ready&amt=3.50", "pool", "ready", "Bal $10.50", "Proof ready Max $3.50", true, { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } }],
   ["base-other", "pool=base-ready&amt=3", "pool", "ready", "Bal $10.50", "Proof ready Max $3.50", false, null],
+  ["base-making", "pool=base-making&amt=3.50", "pool", "making", "Bal $10.50", "Making proof", false, null],
   ["vault", "amt=25", "vault", null, "Bal $73.18", "Max $100", true, { kind: "buy", params: { chain: "solana", token: MINT, side: "buy", amount: "25.00", slippage_bps: 1000 } }],
 ];
 // the amount field marked wrong: over one tap, or not a whole chunk on Base; never while a proof is still making (the
 // amount is not what is wrong) or on an amount the pool can take
-const BAD = { "sol-ready": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", vault: "false" };
+const BAD = { "sol-ready": "false", "sol-over": "true", "sol-making": "false", "base-chunk": "false", "base-other": "true", "base-making": "false", vault: "false" };
+// the presets row as data-preset:disabled:text per button: the four on Solana (all over one tap's most on the pool, $100
+// over the vault's max); on Base the chunk's one button, "—" and off while no proof is ready
+const FOUR_OFF = "10.00:true:$10 25.00:true:$25 50.00:true:$50 100.00:true:$100";
+const PRESET_ROW = {
+  "sol-ready": FOUR_OFF,
+  "sol-over": FOUR_OFF,
+  "sol-making": FOUR_OFF,
+  "base-chunk": "3.50:false:$3.50",
+  "base-other": "3.50:false:$3.50",
+  "base-making": ":true:—",
+  vault: "10.00:false:$10 25.00:false:$25 50.00:false:$50 100.00:true:$100",
+};
+const BASE_ASK = { kind: "pool.buy", params: { chain: "base", token: EVM, amount: "0.001", slippage_bps: 1000 } };
 const SELLS = [
   ["sell-pool", "f=up&pool=sol", "Back to Cash", { kind: "pool.sell", params: { chain: "solana", token: MINT, amount: HALF, slippage_bps: 1000 } }],
   ["sell-vault", "f=up", "", { kind: "buy", params: { chain: "solana", token: MINT, side: "sell", amount: HALF_UNITS, slippage_bps: 1000 } }],
@@ -163,10 +179,13 @@ try {
         const marked = await page.locator(".trb-amount").getAttribute("data-bad");
         check(marked === BAD[name], `${tag}: the amount field marked wrong ${marked}, want ${BAD[name]}`);
         check((await cta.isDisabled()) === !on, `${tag}: the button is ${(await cta.isDisabled()) ? "off" : "on"}, want ${on ? "on" : "off"}`);
-        // the presets: on the pool every one is over one tap's most ($10 and up), so all are off; the vault keeps $100 off
-        const presets = await page.$$eval("[data-preset]", (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}`).join(" "));
-        const wantPresets = pathWant === "pool" ? "10.00:true 25.00:true 50.00:true 100.00:true" : "10.00:false 25.00:false 50.00:false 100.00:true";
-        check(presets === wantPresets, `${tag}: presets ${presets}, want ${wantPresets}`);
+        const presets = await page.$$eval('[data-testid="trade-presets"] [data-preset]', (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}:${b.textContent.trim()}`).join(" "));
+        check(presets === PRESET_ROW[name], `${tag}: presets ${presets}, want ${PRESET_ROW[name]}`);
+        // Base's one button fills the row, never a quarter of it
+        if (name.startsWith("base")) {
+          const [row, btn] = await page.$$eval('[data-testid="trade-presets"], [data-testid="trade-presets"] [data-preset]', (els) => els.map((e) => e.getBoundingClientRect().width));
+          check(Math.abs(row - btn) < 1, `${tag}: the chunk button is ${btn}px of a ${row}px row`);
+        }
         await common(page, w, tag, external, dialogs);
         if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) }), shots++);
         // one tap: the ask the box's own checks passed, or nothing
@@ -181,6 +200,18 @@ try {
           check(filled === "Filled 1.1s Final", `${tag}: after the tap "${filled}", want "Filled 1.1s Final"`);
           if (SHOTS && name === "sol-ready") (await page.screenshot({ path: path.join(SHOTS, `${name}-filled-${w.name}-${scheme}.png`) }), shots++);
         } else check(calls.length === 0, `${tag}: a tap on an off button sent ${JSON.stringify(calls)}`);
+        // the chunk button: a tap fills the amount with the chunk's USD and buys it, as a preset does; off, it does nothing
+        if (name === "base-other" || name === "base-making") {
+          await page.locator('[data-testid="trade-presets"] [data-preset]').click({ force: true });
+          await page.clock.runFor(100);
+          const after = await page.evaluate(() => window.__calls);
+          const typed = await page.locator(".trb-input").inputValue();
+          if (name === "base-other") {
+            check(typed === "3.50", `${tag}: the chunk button filled "${typed}", want "3.50"`);
+            check(after.length === 1 && JSON.stringify({ kind: after[0].kind, params: after[0].params }) === JSON.stringify(BASE_ASK), `${tag}: the chunk button sent ${JSON.stringify(after)}, want ${JSON.stringify(BASE_ASK)}`);
+            if (SHOTS) (await page.screenshot({ path: path.join(SHOTS, `base-chunk-tap-${w.name}-${scheme}.png`) }), shots++);
+          } else check(after.length === 0 && typed === "3.50", `${tag}: the off chunk button sent ${JSON.stringify(after)} and left "${typed}"`);
+        }
         await ctx.close();
       }
       for (const [name, query, toPool, ask] of SELLS) {
@@ -214,4 +245,4 @@ if (fails.length) {
   console.log(`FAIL ${fails.length} of ${checks} checks over ${n} states`);
   process.exit(1);
 }
-console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, a proof making, a Base chunk and not, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
+console.log(`PASS ${checks} checks over ${n} states (the pool buy, over one tap, a proof making, a Base chunk and not, Base's chunk button, the vault's buy; the pool and vault sell) at 390 and 1440, dark and light${SHOTS ? `; ${shots} shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);

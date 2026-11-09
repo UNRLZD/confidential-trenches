@@ -10,6 +10,7 @@ import { headerModel } from "../signin/model.ts";
 import { useSigninSheet } from "../signin/source.tsx";
 import {
   amountOk,
+  amountText,
   amountWrong,
   busy,
   centsToDecimal,
@@ -18,7 +19,7 @@ import {
   parseUsd,
   poolBuyAsk,
   poolView,
-  PRESETS,
+  presetsOf,
   proofStatus,
   tradeBal,
   presetOn,
@@ -233,15 +234,18 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   }
 
   // a preset, in the box or the phone bar's chip (card app-quick-buy-one-tap): one tap is one buy of its size, through
-  // buy() and its checks; signed out it opens the sign-in sheet
-  const presetOff = (p: Cents) => !signedOut && (!ready || !presetOn(p, max, balance, running) || !askable(p));
-  function tapPreset(p: Cents) {
+  // buy() and its checks; signed out it opens the sign-in sheet. On Base and Robinhood the row is the chunk's one button
+  // (presetsOf), off while its value is unknown (null).
+  const presets = presetsOf(chain, pool);
+  const presetOff = (p: Cents | null) => !signedOut && (p === null || !ready || !presetOn(p, max, balance, running) || !askable(p));
+  function tapPreset(p: Cents | null) {
     if (signedOut) return openSignin(true);
-    setText(String(p / 100n));
+    if (p === null) return;
+    setText(amountText(p));
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -271,7 +275,7 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
 export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
-  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview } = t;
+  const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
@@ -334,19 +338,19 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
           <span data-pending={pending || undefined}>{est}</span>
         </span>
       </label>
-      <div className="trb-presets" data-testid="trade-presets">
-        {PRESETS.map((p) => (
+      <div className="trb-presets" data-testid="trade-presets" data-one={presets.length === 1 || undefined}>
+        {presets.map((p) => (
           <button
             key={String(p)}
             type="button"
             className="trb-preset"
-            data-preset={centsToDecimal(p)}
-            data-on={amount === p || undefined}
+            data-preset={p === null ? "" : centsToDecimal(p)}
+            data-on={(p !== null && amount === p) || undefined}
             disabled={presetOff(p)}
             onClick={() => tapPreset(p)}
           >
             <Bolt />
-            {fmtUsd(p)}
+            {p === null ? "—" : fmtUsd(p)}
           </button>
         ))}
       </div>

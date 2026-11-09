@@ -27,6 +27,7 @@
 .trb-unit > span:first-child { font-size: 14px; font-weight: 600; }
 .trb-unit > span:last-child { font-size: 11px; color: var(--text-3); }
 .trb-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.trb-presets[data-one] { grid-template-columns: minmax(0, 1fr); }
 .trb .trb-preset { height: 40px; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 10px; font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; background: var(--bg-raised); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .trb .trb-preset svg { color: var(--acc); flex: none; }
 .trb .trb-preset[data-on] { background: rgba(var(--acc-rgb), 0.14); color: var(--acc); }
