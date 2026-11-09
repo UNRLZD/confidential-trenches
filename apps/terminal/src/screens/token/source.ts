@@ -4,8 +4,9 @@
 // app-no-test-token) draws the top of Discover's Trending column on the shell's chain filter (card app-chains-evm-rail):
 // one read of every chain's lists (Discover's own read, ../discover/data.ts sharedAllLists, shared with the rail's read
 // in flight), narrowed to the pick (pickSnapshot), the first row of the Trending column as Discover orders it
-// (columnRows), then the same token read for that token, on its own chain. Display only: nothing here feeds a signature. A failed or wrong read is the
-// error state, never another token; an empty column is the empty state. The page (TokenPage.tsx) takes `TokenData`.
+// (columnRows), then the same token read for that token, on its own chain. Display only: nothing here feeds a
+// signature. A failed or wrong read is the error state, never another token; an empty column is the empty state. The
+// page (TokenPage.tsx) takes `TokenData`.
 //
 // Card token-page-fills-after (M384): a cold page's row may be the helper's row named on chain (src "chain", helper
 // card helper-page-jup-429), its symbol and name read from the mint and its Jupiter fields null. The page's `filling`
