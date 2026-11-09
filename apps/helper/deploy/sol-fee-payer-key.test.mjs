@@ -157,9 +157,9 @@ test("writes the four mainnet names once: the record's program, a real fee payer
   const order = r.stdout.split("\n").filter((l) => /^sol-fee-payer-key: [1-3]\. /.test(l));
   assert.equal(order.length, 3);
   assert.equal(order[0], `sol-fee-payer-key: 1. apps/helper/deploy/redeploy.sh ${COMMIT} again (the commit the helper runs, whose image made the key), so the helper starts with the four lines`);
-  assert.equal(order[1], `sol-fee-payer-key: 2. the owner sends 0.01 SOL (10000000 lamports) to ${address}: the low mark ${mark} and 32 failed sends at 217245 each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back over the page`);
+  assert.equal(order[1], `sol-fee-payer-key: 2. the owner sends 0.01 SOL (10000000 lamports) to ${address}: the low mark ${mark} and 32 failed sends at 217245 each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back on average`);
   assert.ok(!/pays it back more than it fronts/.test(r.stdout), "no claim that every release pays back more than it fronts (a page-opening one does not)");
-  assert.match(order[2], /helper-sol-fee-payer-mainnet among them$/);
+  assert.equal(order[2], "sol-fee-payer-key: 3. once it has landed: node scripts/live-checks/helper-sol-fee-payer-mainnet.mjs (PASS), then its After: helper line goes in");
 });
 
 test("the trace (bash -x) shows no secret", async (t) => {
@@ -298,7 +298,7 @@ test("two runs at once: one writes, the other refuses on the lock (exit 9); one 
   const [a, b] = await Promise.all([first, second]);
   assert.equal(a.status, 0, a.stderr);
   assert.equal(b.status, 9, b.stderr);
-  assert.match(b.stderr, /another key step holds deploy\/\.env\.lock/);
+  assert.match(b.stderr, /another key step holds deploy\/\.env\.lock \(a run in progress; if none is, remove the folder and any deploy\/\.env\.solfee\.\* file a killed run left\); nothing changed/);
   const env = s.envText();
   assert.equal(env.split("\n").filter((l) => l.startsWith("POOL_SOLANA_FEE_PAYER_KEY_MAINNET=")).length, 1);
   const addresses = [a, b].flatMap((r) => [...r.stdout.matchAll(/^sol-fee-payer-key: fee payer (\S+)$/gm)].map((m) => m[1]));
@@ -328,4 +328,26 @@ test("an 85-character key passes the form check and is written", async (t) => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(valueOf(s.envText(), "POOL_SOLANA_FEE_PAYER_KEY_MAINNET"), key);
   assert.equal(feePayerKey(key).address, base58(pub));
+});
+
+// review 2 P3-5: the key maker's refusal names the helper's error with the key cut out; .replace cut only the first
+// copy, so an error that carried the key twice printed it once (an image whose start check echoed its input)
+test("an error from the helper's start check that carries the key twice prints neither copy", async (t) => {
+  const pair = await rpcs(t);
+  const planted = mkdtempSync(path.join(tmpdir(), "sol-fee-echo-image-"));
+  cpSync(path.join(HELPER, "src"), path.join(planted, "src"), { recursive: true });
+  copyFileSync(path.join(HELPER, "package.json"), path.join(planted, "package.json"));
+  symlinkSync(path.join(HELPER, "node_modules"), path.join(planted, "node_modules"));
+  const file = path.join(planted, "src/pool/solana.ts");
+  const text = readFileSync(file, "utf8");
+  const head = "export function solanaPoolSendersFromEnv(";
+  assert.equal(text.split(head).length, 2);
+  writeFileSync(file, text.replace(head, `export function solanaPoolSendersFromEnv(env: Record<string, string | undefined>, _f?: unknown): never {\n  const k = env.POOL_SOLANA_FEE_PAYER_KEY_MAINNET;\n  throw new Error(\`\${k} is not taken; \${k} again\`);\n}\nfunction solanaPoolSendersFromEnvUnused(`));
+  const s = server({ helper: planted });
+  const r = await s.run({ SOL_FEE_PAYER_RPCS: pair });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /the helper's start does not take the four lines \(<key> is not taken; <key> again\); nothing changed/);
+  assert.doesNotMatch(r.stdout + r.stderr, /[1-9A-HJ-NP-Za-km-z]{80,90}/, "no key in the output");
+  assert.equal(s.envText(), BASE_ENV);
+  assert.deepEqual(files(s), [".env", "sol-fee-payer-key.sh"]);
 });

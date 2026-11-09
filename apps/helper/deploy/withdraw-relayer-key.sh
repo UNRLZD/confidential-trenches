@@ -83,7 +83,8 @@ JS
 # both pass the check and both rename (two accounts printed, one key kept); a second run refuses (exit 9). A folder
 # (mkdir is atomic; flock is not on macOS, where the tests run). The lock and the temporary file are removed at any end:
 # the script's own exits, a signal (HUP, INT, TERM end it through exit, so the EXIT trap runs), an error under set -e. A
-# run killed with SIGKILL leaves the folder: remove it once no run is going.
+# run killed with SIGKILL leaves the folder, and its temporary file deploy/.env.relayer.XXXXXX (mode 600, which may hold a
+# new key nobody was shown) when killed after that file was made: once no run is going, remove both.
 LOCK=""
 TMP=""
 cleanup() {
@@ -116,7 +117,7 @@ main() {
   [[ -e "$record" ]] || record="$root/contracts/vault/deployments/mainnet-test.json"
 
   if ! mkdir "$env.lock" 2>/dev/null; then
-    echo "withdraw-relayer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder); nothing changed" >&2
+    echo "withdraw-relayer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder and any deploy/.env.relayer.* file a killed run left); nothing changed" >&2
     exit 9
   fi
   LOCK="$env.lock"

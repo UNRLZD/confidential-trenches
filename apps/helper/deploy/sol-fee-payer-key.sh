@@ -16,8 +16,9 @@
 #      bind-relayer-key.sh, each of which replaces deploy/.env whole), held from the check below through the rename and
 #      removed at the end, whatever the end: a second run while one holds it refuses (exit 9), so two runs never both
 #      pass the check and both rename (two addresses printed, one key kept). A folder (mkdir is atomic on every
-#      filesystem; flock is not on macOS, where the tests run). A run killed with SIGKILL leaves it: remove the folder
-#      once no run is going;
+#      filesystem; flock is not on macOS, where the tests run). A run killed with SIGKILL leaves it, and, when killed
+#      after step 4 began, its temporary file deploy/.env.solfee.XXXXXX (mode 600, which may hold a new key nobody was
+#      shown): once no run is going, remove the folder and that file;
 #   1. refuses (exit 3) when any line of deploy/.env sets one of the four names below (redeploy.sh's lines_of matcher),
 #      so a second run never replaces a key the fee payer already holds SOL on; when deploy/.env names no image
 #      (HELPER_COMMIT, exit 6); when the pool's mainnet deploy record, contracts/pool-solana/deployments/mainnet.json, does
@@ -46,8 +47,9 @@
 # (src/data/solana/trades.ts TRADES_RPCS); SOL_FEE_PAYER_RPCS in this shell replaces them ("<a>,<b>", two different
 # https URLs). The fee payer holds gas only; the Jito tip comes from the pool, and on mainnet a tag 3 that fails on chain
 # never lands (bundle-only, M362 (4), M369).
-# An ordinary release pays the fee payer back more than it fronts, and the one in 1,024 that opens a page costs it that
-# page's rent, which the 715 lamports every release leaves for it (the page reserve, M356 (5)) pay back over the page.
+# On average a release pays the fee payer back more than it fronts: one that opens a state-tree page (deposits fill those
+# pages too, deposit.rs:28, so it comes about once in 1,024 entries, not exactly once in 1,024 releases) costs it that
+# page's rent, which the 715 lamports every release leaves for it (the page reserve, M356 (5)) pay back on average.
 # exit 0 done, 2 usage, 3 a name already set, 4 no or a bad mainnet pool record, 5 the rent not read, 6 no image,
 # 7 the image predates this step, 9 another key step holds the lock, 1 any other failure
 set -euo pipefail
@@ -56,8 +58,8 @@ NAMES=(POOL_SOLANA_PROGRAM_MAINNET POOL_SOLANA_FEE_PAYER_KEY_MAINNET POOL_SOLANA
 RPCS_DEFAULT="https://api.mainnet-beta.solana.com,https://solana-rpc.publicnode.com"
 # The failed plain sends the funding covers past the low mark: a mainnet tag 2, or a tag 3 whose every block engine
 # failed on transport, pays its two signatures and its priority even when it fails on chain (M356 (1), M362 (4)), one
-# per nullifier per epoch at most. Landed releases balance over each page through the page reserve (above), so only
-# failures take the balance down.
+# per nullifier per epoch at most. On average landed releases balance through the page reserve (above), so over time
+# only failures take the balance down.
 FAILED_SENDS=32
 # The funding is rounded up to this many lamports (0.01 SOL).
 ROUND=10000000
@@ -128,7 +130,7 @@ try {
   served = senders.size === 1 ? senders.get(pool) : undefined;
   if (served === undefined || served.feePayer !== address || served.program !== program || served.cluster !== "mainnet") throw new Error("the helper would not serve the record's pool from this fee payer");
 } catch (e) {
-  process.stderr.write(`sol-fee-payer-key: the helper's start does not take the four lines (${e instanceof Error ? e.message.replace(key, "<key>") : "?"}); nothing changed\n`);
+  process.stderr.write(`sol-fee-payer-key: the helper's start does not take the four lines (${e instanceof Error ? e.message.replaceAll(key, "<key>") : "?"}); nothing changed\n`);
   process.exit(1);
 }
 process.stdout.write(Object.entries(lines).map(([k, v]) => `${k}=${v}\n`).join(""));
@@ -169,7 +171,7 @@ main() {
   rpcs="${SOL_FEE_PAYER_RPCS:-$RPCS_DEFAULT}"
 
   if ! mkdir "$env.lock" 2>/dev/null; then
-    echo "sol-fee-payer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder); nothing changed" >&2
+    echo "sol-fee-payer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder and any deploy/.env.solfee.* file a killed run left); nothing changed" >&2
     exit 9
   fi
   LOCK="$env.lock"
@@ -272,8 +274,8 @@ main() {
   echo "sol-fee-payer-key: the fee payer needs at least $mark lamports, its low mark: its own rent floor, one worst release fronted before the pool pays its fee back (spent mark, change entry, a new page, two signatures) and the whole priority budget"
   echo "sol-fee-payer-key: Next, in this order:"
   echo "sol-fee-payer-key: 1. apps/helper/deploy/redeploy.sh $commit again (the commit the helper runs, whose image made the key), so the helper starts with the four lines"
-  echo "sol-fee-payer-key: 2. the owner sends $sol SOL ($need lamports) to $address: the low mark $mark and $FAILED_SENDS failed sends at $fail each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back over the page"
-  echo "sol-fee-payer-key: 3. once it has landed: the helper's live checks, helper-sol-fee-payer-mainnet among them"
+  echo "sol-fee-payer-key: 2. the owner sends $sol SOL ($need lamports) to $address: the low mark $mark and $FAILED_SENDS failed sends at $fail each, rounded up to 0.01 SOL; a page-opening release costs it the page's rent, which the page reserve pays back on average"
+  echo "sol-fee-payer-key: 3. once it has landed: node scripts/live-checks/helper-sol-fee-payer-mainnet.mjs (PASS), then its After: helper line goes in"
 }
 
 main "$@"
