@@ -8,12 +8,18 @@
 import { createHash } from "node:crypto";
 
 /** An unrelated copy change, as a signing page card makes one: the first words in the bundle (a literal such as
- *  `Sign out`) that no string of `avoid` (the check's marks) holds or is held by, written in capitals. Any build has
- *  such words, so the plant names none of today's; it throws when there are none, so a plant never plants nothing. */
+ *  `Sign out`) that no string of `avoid` (the check's marks) holds or is held by, and that no match of a pattern of
+ *  `avoid` covers, written in capitals. Any build has such words, so the plant names none of today's; it throws when
+ *  there are none, so a plant never plants nothing. */
 export function copyChange(text, avoid = []) {
   const marks = avoid.filter((a) => typeof a === "string");
+  const spans = avoid
+    .filter((a) => a instanceof RegExp)
+    .flatMap((re) => [...text.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`))])
+    .map((m) => [m.index, m.index + m[0].length]);
   for (const m of text.matchAll(/`([A-Z][a-z]+(?: [a-z]+)+)`/g)) {
     if (marks.some((a) => a.includes(m[1]) || m[1].includes(a))) continue;
+    if (spans.some(([from, to]) => m.index < to && m.index + m[0].length > from)) continue;
     return text.slice(0, m.index) + `\`${m[1].toUpperCase()}\`` + text.slice(m.index + m[0].length);
   }
   throw new Error("planted-build: the tree's /app.js holds no words to change");
