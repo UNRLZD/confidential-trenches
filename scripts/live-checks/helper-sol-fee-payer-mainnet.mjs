@@ -14,12 +14,8 @@
 // left out, never judged a wrong answer; with fewer than two RPCs answering the rent or the balance, what needs both is
 // not judged and the run is INCONCLUSIVE (exit 3), a FAIL where any answer is wrong. A run keeps each RPC's last raw
 // answer and the judge reads it by provider-answer.mjs's classify, so a replay judges exactly what the run read.
-// Red until the fee payer exists and is funded: apps/helper/deploy/sol-fee-payer-key.sh on the server, redeploy.sh, then
-// the owner's SOL send to the printed address (today the helper answers this pool 404 not_found). So it is in no host's
-// list yet: listed, it would turn every helper deploy red, the key step's own two redeploys included, and a red check
-// undoes the deploy. It is listed `After: helper` in a later commit on this card, once the send has landed, with a good
-// answer recorded on mainnet. Until then it is run by hand.
-// Runs: pending helper-sol-fee-payer-mainnet, it fails on every helper until the owner's SOL send to the fee payer lands, so a list would undo each deploy; it joins the helper's runs with a mainnet good answer once the send has landed
+// Listed after the owner's SOL send to the fee payer (9 Nov 10:36Z: PASS, 10000000 lamports on both RPCs).
+// After: helper
 //   node scripts/live-checks/helper-sol-fee-payer-mainnet.mjs [--base <url>] [--record <file>] [--rpcs <a>,<b>]   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 //   (--rpcs replaces RPCS for a local recording only)
 import "../net-window.mjs";
