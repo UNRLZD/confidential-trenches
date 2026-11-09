@@ -4,7 +4,10 @@
 //   node --test test/restore-arms.test.ts      (from packages/wallet)
 // Test secrets: the all-zero BIP-39 entropy (test/vectors/a8.json), never money.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
+import { resetPaces } from "../src/pace.ts";
+// each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
+beforeEach(() => resetPaces());
 import type { VaultSpendRow } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import type { NoteRestore, RestoredSpend } from "../src/notes/restore.ts";

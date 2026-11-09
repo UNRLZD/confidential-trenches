@@ -146,6 +146,7 @@ export const CHANGED = [
   "scripts/live-checks/evm-pool-sync-wide-pages.mjs",
   "scripts/live-checks/wallet-near-prepay-taken.mjs",
   "scripts/live-checks/held-deposit-way-out.mjs",
+  "scripts/live-checks/signpage-state-holdings.mjs",
   "scripts/live-checks/held-move-forgotten-tx.mjs",
   "scripts/live-checks/wallet-restore-id-reader.mjs",
   "scripts/live-checks/signpage-buy-route-events.mjs",

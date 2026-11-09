@@ -81,6 +81,8 @@ const pick = (o: AfterOpts): Omit<IdReaderOpts, "indexer" | "first"> => ({
   ...(o.tries === undefined ? {} : { tries: o.tries }),
   ...(o.backoffMs === undefined ? {} : { backoffMs: o.backoffMs }),
   ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
+  // a given sleep's own clock goes with it (delta review 4, P3-2)
+  ...(o.now === undefined ? {} : { now: o.now }),
 });
 const readerOpts = (o: AfterOpts): IdReaderOpts => ({ ...pick(o), ...(o.first === undefined ? {} : { first: o.first }), ...(o.indexer === undefined ? {} : { indexer: o.indexer }) });
 
