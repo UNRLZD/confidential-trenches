@@ -16,14 +16,17 @@
 // signing page's state land while the run clicks through the shell. A screen that moves when an answer is slow (card
 // app-shell-cls-zero: CI's "CLS 0.0010 inside the shell" on 1 Nov, the phone tabs and the header) then fails every
 // run, not only on a slow runner.
-//   node apps/terminal/test/bar10/run.mjs [--shots <dir>] [--record <file>]     PASS exit 0, FAIL exit 1
+//   node apps/terminal/test/bar10/run.mjs [--shots <dir>] [--record <file>] [--outage footer|solana|base|robinhood]
+//     PASS exit 0, FAIL exit 1
 // --record writes the answers-at-once read to <file> for app-shell.test.mjs to replay through judge().
+// --outage makes a real RPC outage in the browser's own requests (app-shell.mjs withOutage, card
+// app-shell-rpc-outage-judge) so the recorded read holds the failed loads and the rows the page draws for them.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
-import { collect, INIT, judge, MEASURE, WIDTHS } from "../../../../scripts/live-checks/app-shell.mjs";
+import { collect, INIT, judge, MEASURE, WIDTHS, withOutage } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { edgy, solana } from "../discover-screens/snapshots.ts";
 
@@ -33,6 +36,8 @@ const shotsAt = args.indexOf("--shots");
 const SHOTS = shotsAt >= 0 ? path.resolve(args[shotsAt + 1]) : undefined;
 const recordAt = args.indexOf("--record");
 const RECORD = recordAt >= 0 ? path.resolve(args[recordAt + 1]) : undefined;
+const outageAt = args.indexOf("--outage");
+const OUTAGE = outageAt >= 0 ? args[outageAt + 1] : undefined;
 
 const LISTS_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
 const isTokenRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/token";
@@ -121,7 +126,8 @@ async function states(browser, route, prepare) {
 const dir = await build();
 let code = 1;
 try {
-  const route = await harnessRoute(dir, "signed");
+  const harness = await harnessRoute(dir, "signed");
+  const route = OUTAGE ? withOutage(harness, OUTAGE) : harness;
   // the bytes served for a script are the build's own file at its path
   const fetchFn = async (u) => new Response(readFileSync(path.join(dir, decodeURIComponent(new URL(u).pathname))));
   // `late`: the answers come late (LATE); a page closed meanwhile drops its answer, which is no fault of the screen
@@ -174,7 +180,7 @@ try {
   let ok = true;
   let loads = 0;
   for (const late of [false, true]) {
-    const rec = await collect({ url: APP_HOST, shots: SHOTS && (late ? path.join(SHOTS, "late") : SHOTS), fetchFn, route, prepare: answering(late), source: `bar10, the build inside the stand-in shell, answers ${late ? "late" : "at once"}` });
+    const rec = await collect({ url: APP_HOST, shots: SHOTS && (late ? path.join(SHOTS, "late") : SHOTS), fetchFn, route, prepare: answering(late), source: `bar10, the build inside the stand-in shell, answers ${late ? "late" : "at once"}${OUTAGE ? `, ${OUTAGE} RPC answering 503` : ""}` });
     const j = judge(rec);
     // the answers-at-once read, as app-shell.mjs --record writes it: the shell check's recorded good answer
     if (RECORD && !late) writeFileSync(RECORD, `${JSON.stringify(rec, null, 1)}\n`);

@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import { consoleError, consoleLine, pageError, pageErrorUrl, resourceOf, watchErrors } from "./console-errors.mjs";
+import { consoleError, consoleLine, isFooterUrl, pageError, pageErrorUrl, resourceOf, watchErrors } from "./console-errors.mjs";
 
 // sign live run 41843186760: eight lines of this text that named no host
 const TEXT = "Failed to load resource: the server responded with a status of 429 ()";
@@ -82,4 +82,23 @@ test("watchErrors keeps the console errors and page errors its filter picks, and
   p2.emit("console", msg("shell 429", { url: "https://confidential.unrealized.trade/s.js" }));
   p2.emit("pageerror", thrown(Error, "shell threw", ["f (https://confidential.unrealized.trade/s.js:1:2)"]));
   assert.deepEqual(all, ["shell 429 (https://confidential.unrealized.trade/s.js)", "pageerror Error: shell threw (https://confidential.unrealized.trade/s.js)"]);
+});
+
+test("a failed footer read is tagged by isFooterUrl's one rule (the root, the query exactly ?ct=footer), and no other address is (card app-shell-rpc-outage-judge)", () => {
+  const fail = "Failed to load resource: net::ERR_FAILED";
+  const rpc = "https://rpc.mainnet.fastnear.com";
+  assert.equal(consoleLine(fail, `${rpc}/?ct=footer`), `${fail} (${rpc}/) [footer read]`);
+  assert.equal(consoleLine(fail, `${rpc}/?ct=footer#x`), `${fail} (${rpc}/) [footer read]`);
+  assert.equal(consoleLine(`Access to fetch at '${rpc}/?ct=footer' blocked`, APP), `Access to fetch at '${rpc}/' blocked (${APP}/) [footer read]`);
+  // the look-alikes: another path, a query before or after it or doubled, a nested ?, the fragment, another case or escape
+  for (const url of [rpc + "/", `${rpc}/?ct=footers`, `${rpc}/?xct=footer`, `${rpc}/?ct=footer-x`, `${rpc}/#ct=footer`, `${rpc}/x?ct=footer`, `${rpc}/?a=b?ct=footer`, `${rpc}/?a=1&ct=footer`, `${rpc}/?ct=footer&ct=x`, `${rpc}/#x?ct=footer`, `${rpc}/?CT=footer`, `${rpc}/?ct=%66ooter`, `${rpc}?ct=footer-0`]) {
+    assert.equal(consoleLine(fail, url).endsWith("[footer read]"), false, url);
+    assert.equal(consoleLine(`Access to fetch at '${url}' blocked`, APP).endsWith("[footer read]"), false, url);
+    assert.equal(isFooterUrl(url), false, url);
+  }
+  // an app error that merely quotes a footer address is no footer read
+  assert.equal(consoleLine(`Verify read failed at ${rpc}/?ct=footer`, `${APP}/a.js`), `Verify read failed at ${rpc}/ (${APP}/a.js)`);
+  assert.equal(isFooterUrl(`${rpc}/?ct=footer`), true);
+  assert.equal(isFooterUrl("not a url"), false);
+  assert.equal(consoleLine("no address", ""), "no address");
 });
