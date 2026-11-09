@@ -261,6 +261,8 @@ export function recordText(run, filled = {}) {
   });
   const buys = run.steps.filter((x) => x.step.startsWith("buy")).length;
   const sells = run.steps.filter((x) => x.step.startsWith("sell")).length;
+  const count = (re) => run.steps.filter((x) => re.test(x.step)).length;
+  out.push(`Books: the run adds ${count(/^(deposit|sell on .*, deposited back|rent back sweep)$/)} deposits and ${count(/^(buy on |exit release)/)} releases (the live check's --expect deposits=${count(/^(deposit|sell on .*, deposited back|rent back sweep)$/)},releases=${count(/^(buy on |exit release)/)}).`);
   out.push(`Speed series: ${buys} buys and ${sells} sells of the old gate's 20 and 20${buys >= 20 && sells >= 20 ? "" : " (n: the test money allowed these)"}.`);
   out.push(...run.lines.map((l) => `Read: ${l}`), "");
   return out.join("\n");

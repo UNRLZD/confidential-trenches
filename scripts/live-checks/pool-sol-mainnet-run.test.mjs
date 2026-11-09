@@ -75,6 +75,7 @@ test("the record tool finds the dry run from its window alone, and the money gat
   assert.equal(p.moneyPath, true);
   assert.deepEqual(p.txs.map((t) => t.hash), r.steps.map((s) => s.sig));
   assert.match(text, /buy on pump\.fun's curve: \S+, slot \d+, .*tap to filled 9\.3 s \(buy1, the trade box\)/);
+  assert.match(text, /^Books: the run adds 2 deposits and 2 releases \(the live check's --expect deposits=2,releases=2\)\.$/m);
 });
 
 test("a window that ends before the exit: FAIL, no exit found", async () => {
