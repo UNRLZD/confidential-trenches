@@ -310,6 +310,43 @@ export async function exitStorageMin(network: NearNetwork, rpcs: readonly [Vault
   }
 }
 
+/** The typed account's registration on the token as exitReadStorage read it; exitBuildWithdraw takes only these. */
+export type ExitStorage = { readonly network: NearNetwork; readonly account: string; readonly storageMin: bigint; readonly registered: boolean };
+const STORAGE_READ = new WeakSet<object>();
+/** Whether `s` is a registration exitReadStorage read for typed account `to`. */
+export function exitStorageFor(s: unknown, to: ExitRecipient): s is ExitStorage {
+  return isObj(s) && STORAGE_READ.has(s) && s.network === to.network && s.account === to.account;
+}
+/**
+ * What a withdrawal to typed account `to` attaches for its registration on the token, read on both RPCs of `network`'s
+ * release pair (card exit-withdraw, delta review P3-3/P3-4): the token's storage minimum (exitStorageMin) and whether
+ * `to` is registered already (storage_balance_of at one final block, null or a balance, equal on both). A registered
+ * account gets register_deposit 0: NEP-145 refunds a registered account's storage_deposit to its caller, the keyless
+ * vault, where no one can take it. Throws ExitRpcRefused before any read for an unknown network, a pair not the
+ * release's or a typed account exitRecipient did not check; ExitOutStopped when a read fails or the two differ.
+ */
+export async function exitReadStorage(network: NearNetwork, to: ExitRecipient, rpcs: readonly [VaultSyncRpc, VaultSyncRpc], sleep: (ms: number) => Promise<void> = realSleep): Promise<ExitStorage> {
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
+  const storageMin = await exitStorageMin(network, rpcs);
+  const token = EXIT_TOKENS[network];
+  const at = await finalAt(rpcs, token, sleep);
+  const [x, y] = await Promise.all(
+    rpcs.map(async (r) => {
+      const what = `${r.name} storage_balance_of(${to.account})`;
+      const v = viewValue(await ask(r, { request_type: "call_function", account_id: token, method_name: "storage_balance_of", args_base64: args64({ account_id: to.account }), block_id: at }, sleep), at, what);
+      if (v === null) return false;
+      if (isObj(v) && typeof v.total === "string" && DIGITS.test(v.total)) return true;
+      throw new ExitOutStopped(`${what}: neither null nor a storage balance`);
+    }),
+  );
+  if (x !== y) throw new ExitOutStopped("the two RPCs differ on the typed account's registration on the token");
+  const s: ExitStorage = Object.freeze({ network, account: to.account, storageMin, registered: x! });
+  STORAGE_READ.add(s);
+  return s;
+}
+
 // ---------- the settle (step 4) ----------
 /** The spends of ours the tool settles: refund_pending or paid, not yet settled (in_flight waits for its callback). */
 export function exitSettleDue(spends: readonly RestoredSpend[]): RestoredSpend[] {

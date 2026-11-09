@@ -8,12 +8,26 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { vaultCommitment, VaultTree, type VaultProver, type VaultSpendRow, type VaultSyncRpc } from "@blindfill/kit";
-import { MoveOutRefused, noteSecrets, wordsToSeed64, type BuiltMove, type DeleteReadFor, type RestoredNote, type SettleReadFor } from "@blindfill/kit/core";
+import { vaultCommitment, VaultTree, vaultWithdrawYocto, type VaultProver, type VaultSpendRow, type VaultSyncRpc } from "@blindfill/kit";
+import { MoveOutRefused, noteSecrets, SETTLE_BLOCKS, wordsToSeed64, type BuiltMove, type DeleteReadFor, type RestoredNote, type SettleReadFor } from "@blindfill/kit/core";
 import { EXIT_NETWORKS } from "../src/rpc.ts";
 import { EXIT_TOKENS } from "../src/scan.ts";
-import { exitKey, ExitOutStopped, exitRecipient, type ExitRecipient } from "../src/out.ts";
-import { exitBuildDelete, exitBuildWithdraw, exitReadDelete, exitWithdrawIndex, exitWithdrawOne, type ExitSent, type ExitWithdrawSteps } from "../src/withdraw.ts";
+import { exitKey, ExitOutStopped, exitReadStorage, exitRecipient, type ExitRecipient, type ExitStorage } from "../src/out.ts";
+import { ExitRpcRefused } from "../src/rpc.ts";
+import {
+  EXIT_CLOSE_SEND_BLOCKS,
+  EXIT_CLOSE_WAITS_MS,
+  EXIT_REFUND_WHY,
+  exitBuildDelete,
+  exitBuildWithdraw,
+  exitCloseOne,
+  exitReadDelete,
+  exitWithdrawIndex,
+  exitWithdrawOne,
+  type ExitSent,
+  type ExitTxRecord,
+  type ExitWithdrawSteps,
+} from "../src/withdraw.ts";
 
 const SEED = wordsToSeed64("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
 const NET = "testnet" as const;
@@ -43,6 +57,21 @@ const aOf = (l: bigint, j: number) => {
   return k.id;
 };
 
+const view = (v: unknown, at: number) => ({ result: { block_height: at, result: [...new TextEncoder().encode(JSON.stringify(v))] } });
+/** The release pair as exitReadStorage reads it: the token's bounds, its final height 1000 and storage_balance_of(typed) on each. */
+const storagePair = (reg: readonly [unknown, unknown], names: readonly [string, string] = EXIT_NETWORKS[NET].rpcs): readonly [VaultSyncRpc, VaultSyncRpc] =>
+  names.map((name, k) => ({
+    name,
+    query: async (p: Record<string, unknown>) => {
+      if (p.request_type === "view_account") return { result: { block_height: 1000, amount: "1", code_hash: BH } };
+      if (p.method_name === "storage_balance_bounds") return view({ min: REG.toString(), max: null }, 1000);
+      if (p.method_name === "storage_balance_of") return view(reg[k], p.block_id as number);
+      return null;
+    },
+  })) as unknown as readonly [VaultSyncRpc, VaultSyncRpc];
+const BAL = { total: REG.toString(), available: "0" };
+const storageOf = async (registered: boolean, to?: ExitRecipient) => exitReadStorage(NET, to ?? (await typed()), storagePair(registered ? [BAL, BAL] : [null, null]));
+
 /** A note the restore found: its ref, scope, precommitment and leaf (index 0 of a one-leaf tree). */
 function noteOf(ref: RestoredNote["ref"]): RestoredNote {
   const s = noteSecrets(SEED, ref);
@@ -64,7 +93,7 @@ function fakeProver(note: RestoredNote, l: bigint, j: number, seen: Record<strin
   };
 }
 
-async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: string[]) => string[]; keys?: Uint8Array[] } = {}) {
+async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: string[]) => string[]; keys?: Uint8Array[]; storage?: ExitStorage } = {}) {
   const { l, j } = exitWithdrawIndex(note);
   const seen: Record<string, unknown>[] = [];
   const st = new VaultTree([note.leaf.commitment]);
@@ -75,7 +104,7 @@ async function build(note: RestoredNote, o: { to?: ExitRecipient; tamper?: (s: s
     o.keys?.push(k.secretKey);
     return k;
   };
-  const out = await exitBuildWithdraw({ seed64: SEED, network: NET, note, to: o.to ?? (await typed()), prover: fakeProver(note, l, j, seen, o.tamper), stateTree: st, labelTree: lt, newestStateRoot: st.root!, newestLabelRoot: lt.root!, registerDeposit: REG, nowMs: NOW, deadlineMs: NOW + 500_000, read }, keyOf);
+  const out = await exitBuildWithdraw({ seed64: SEED, network: NET, note, to: o.to ?? (await typed()), prover: fakeProver(note, l, j, seen, o.tamper), stateTree: st, labelTree: lt, newestStateRoot: st.root!, newestLabelRoot: lt.root!, storage: o.storage ?? (await storageOf(false)), nowMs: NOW, deadlineMs: NOW + 500_000, read }, keyOf);
   return { out, seen, l, j };
 }
 const txText = (m: BuiltMove) => Buffer.from(m.signed, "base64").toString("latin1");
@@ -125,6 +154,25 @@ test("exitBuildWithdraw refuses: a typed account exitRecipient did not check, a 
   await assert.rejects(build(noteOf({ kind: "deposit", s: 1n, i: 0 }), { tamper: (s) => s.map((x, i) => (i === 7 ? "5" : x)) }), /context/);
 });
 
+test("P3-3/P3-4: register_deposit comes from exitReadStorage's own reads on both RPCs: 0 for a typed account already registered (NEP-145 would refund it into the keyless vault), the storage minimum for one that is not; a registration from anywhere else is refused", async () => {
+  const note = noteOf({ kind: "deposit", s: 1n, i: 0 });
+  const reg = await storageOf(true);
+  assert.deepEqual({ ...reg }, { network: NET, account: X, storageMin: REG, registered: true });
+  const { out } = await build(note, { storage: reg });
+  const w = (out.built.calls[0]!.args as { withdrawal: Record<string, unknown> }).withdrawal;
+  assert.equal(w.register_deposit, "0");
+  assert.equal(out.built.calls[0]!.deposit, vaultWithdrawYocto(0n, 0n, true));
+  // the same facts, not read by exitReadStorage: refused, so no caller's number reaches register_deposit
+  await assert.rejects(build(note, { storage: { network: NET, account: X, storageMin: REG, registered: true } }), /not one exitReadStorage read/);
+  const other = await exitRecipient("d".repeat(64), NET, pair());
+  assert.ok(other.ok);
+  await assert.rejects(build(note, { storage: await storageOf(true, other.recipient) }), /not one exitReadStorage read for this typed account/);
+  await assert.rejects(exitReadStorage(NET, await typed(), storagePair([null, BAL])), ExitOutStopped, "the RPCs differ on the registration");
+  await assert.rejects(exitReadStorage(NET, await typed(), storagePair([null, { total: "x" }])), ExitOutStopped, "a balance that is not one");
+  await assert.rejects(exitReadStorage(NET, await typed(), storagePair([{ total: "x" }, { total: "x" }])), /neither null nor a storage balance/, "the same balance that is not one on both");
+  await assert.rejects(exitReadStorage(NET, await typed(), storagePair([null, null], EXIT_NETWORKS.mainnet.rpcs)), ExitRpcRefused, "another network's pair");
+});
+
 test("a note read under another scope is refused by the exit's own context check, before A's key is ever derived", async () => {
   const keys: Uint8Array[] = [];
   await assert.rejects(build({ ...noteOf({ kind: "deposit", s: 1n, i: 0 }), scope: SCOPE + 1n }, { keys }), /the note's scope is not this vault's/);
@@ -135,7 +183,7 @@ const NH = noteSecrets(SEED, { kind: "deposit", s: 1n, i: 0 }).nullifierHash;
 const L = LABEL, J = 0;
 const delRead = (o: Partial<DeleteReadFor> = {}): DeleteReadFor => ({
   network: NET, a: aOf(L, J), to: X, token: TOKEN, height: 1000, blockHash: BH, nonce: 9n, beneficiary: "exists", spend: { nullifierHash: NH, status: "settled", reserve: 0n },
-  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settle: { by: "self", tx: "final" }, ...o,
+  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, ...o,
 });
 const fires = (re: RegExp) => (e: unknown) => e instanceof MoveOutRefused && re.test(e.message);
 
@@ -144,14 +192,17 @@ test("exitBuildDelete: A's DeleteAccount to the typed account on a read with not
   const m = exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to, read: delRead(), nullifierHash: NH });
   assert.equal(m.receiver, aOf(L, J));
   assert.deepEqual(m.calls, [{ action: "DeleteAccount", beneficiary_id: X }]);
+  // P1-S fix 3: settled SETTLE_BLOCKS back, the withdraw (before the settle) needs no FINAL read: a reload lost its hash
+  exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to, read: delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - SETTLE_BLOCKS }), nullifierHash: NH });
   for (const [why, r, re] of [
     ["the typed account missing (its NEAR would burn)", delRead({ beneficiary: "absent" }), /fund the typed account first/],
     ["before settle: in_flight", delRead({ spend: { nullifierHash: NH, status: "in_flight", reserve: 5n } }), /settled with reserve 0/],
     ["before settle: paid", delRead({ spend: { nullifierHash: NH, status: "paid", reserve: 5n } }), /settled with reserve 0/],
     ["before settle: refund_pending", delRead({ spend: { nullifierHash: NH, status: "refund_pending", reserve: 5n } }), /settled with reserve 0/],
     ["reserve above 0", delRead({ spend: { nullifierHash: NH, status: "settled", reserve: 1n } }), /settled with reserve 0/],
-    ["the withdraw tx not FINAL", delRead({ withdrawTx: "unread" }), /withdraw tx is not read FINAL/],
-    ["A's settle not FINAL", delRead({ settle: { by: "self", tx: "unread" } }), /past its refunds/],
+    ["the withdraw tx not FINAL, no lookback", delRead({ withdrawTx: "unread" }), /not read past their refunds/],
+    ["A's settle not FINAL, no lookback", delRead({ settleTx: "unread" }), /not read past their refunds/],
+    ["settled too recently, no tx read", delRead({ withdrawTx: "unread", settleTx: "none", settledBack: 1001 - SETTLE_BLOCKS }), /not read past their refunds/],
     ["USDC halted", delRead({ usdc: { state: "halted" } }), /USDC is not read at zero/],
     ["USDC left in A", delRead({ usdc: { state: "held", amount: 3n } }), /USDC is not read at zero/],
     ["a token under A in intents.near", delRead({ intents: "holds" }), /stranded/],
@@ -159,11 +210,17 @@ test("exitBuildDelete: A's DeleteAccount to the typed account on a read with not
     assert.throws(() => exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to, read: r, nullifierHash: NH }), fires(re), why);
 });
 
-/** Fake steps: the spends row's states in turn, what each send reads, and the sends in order by their one action. */
-function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Record<string, ExitSent>>; del?: Partial<DeleteReadFor> }) {
+/**
+ * Fake steps: the spends row's states in turn (the last one stays), A's existence, the close reads in turn (the last one
+ * stays), the head after each, and every call in order: "record <step>" before each send, the sends by their one action.
+ */
+function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Record<string, ExitSent>>; del?: Partial<DeleteReadFor>[]; account?: "exists" | "absent" | "unread"; heads?: (number | null)[]; recordThrows?: boolean }) {
   const order: string[] = [];
-  const asked: { withdraw: string; settle: string | null }[] = [];
-  const rows = [...o.rows];
+  const asked: { withdraw: string | null; settle: string | null }[] = [];
+  const records: ExitTxRecord[] = [];
+  const slept: number[] = [];
+  const rows = [...o.rows], dels = [...(o.del ?? [{}])], heads = [...(o.heads ?? [1000])];
+  const next = <T,>(q: T[]): T => (q.length > 1 ? q.shift()! : q[0]!);
   const steps: ExitWithdrawSteps = {
     withdraw: async () => (await build(noteOf({ kind: "deposit", s: 1n, i: 0 }))).out,
     send: async (m) => {
@@ -172,67 +229,154 @@ function world(o: { rows: (Partial<VaultSpendRow> | null)[]; sent?: Partial<Reco
       order.push(what);
       return o.sent?.[what] ?? "ok";
     },
-    spend: async () => {
-      const r = rows.shift();
-      return r === null || r === undefined ? null : ({ index: 3, nullifierHash: NH, status: "paid", reserve: 5n, ...r } as VaultSpendRow);
+    record: async (r) => {
+      if (o.recordThrows) throw new Error("the store is full");
+      order.push(`record ${r.step}`);
+      records.push(r);
     },
+    spend: async () => {
+      const r = rows.length === 0 ? null : next(rows);
+      return r === null ? null : ({ index: 3, nullifierHash: NH, status: "paid", reserve: 5n, ...r } as VaultSpendRow);
+    },
+    account: async () => o.account ?? "exists",
     readA: async (a) => ({ height: 100, blockHash: BH, nonce: 8n, free: 10n ** 24n, gasPrice: 100_000_000n, a }),
     readDelete: async (a, index, nh, txs) => {
       order.push(`read ${index}`);
-      asked.push(txs);
-      return { ...delRead({ a, spend: { nullifierHash: nh, status: "settled", reserve: 0n }, settle: txs.settle === null ? { by: "other", back: 900 } : { by: "self", tx: "final" } }), ...o.del };
+      asked.push({ ...txs });
+      return { ...delRead({ a, spend: { nullifierHash: nh, status: "settled", reserve: 0n }, withdrawTx: txs.withdraw === null ? "unread" : "final", settleTx: txs.settle === null ? "none" : "final" }), ...next(dels) };
+    },
+    head: async () => next(heads),
+    sleep: async (ms) => {
+      slept.push(ms);
     },
   };
-  return { steps, order, asked };
+  return { steps, order, asked, records, slept };
 }
+const BACK = { settledBack: 1000 - SETTLE_BLOCKS };
+const closeOne = async (w: ReturnType<typeof world>, txs?: { withdraw?: string | null; settle?: string | null }) => exitCloseOne({ seed64: SEED, network: NET, to: await typed(), l: L, j: J, nullifierHash: NH, txs, steps: w.steps });
 
-test("exitWithdrawOne runs withdraw, then settle, then A's DeleteAccount, each once the one before landed, and hands the close read both tx hashes; a spend another settled needs no settle", async () => {
+test("exitWithdrawOne: withdraw, then settle, then A's DeleteAccount, each hash kept before its send and each step once the one before landed; the close read gets both hashes", async () => {
   const to = await typed();
   const a = world({ rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }] });
   const out = await exitWithdrawOne({ seed64: SEED, network: NET, to, steps: a.steps });
   assert.equal(out.stage, "closed");
-  assert.deepEqual(a.order, ["withdraw", "settle", "read 3", "DeleteAccount"]);
+  assert.equal(out.refund, false);
+  assert.deepEqual(a.order, ["record withdraw", "withdraw", "record settle", "settle", "read 3", "record close", "DeleteAccount"]);
   assert.equal(out.txs.length, 3);
+  assert.deepEqual(a.records.map((r) => [r.step, r.hash, r.l, r.j, r.nullifierHash]), [["withdraw", out.txs[0], L, J, NH], ["settle", out.txs[1], L, J, NH], ["close", out.txs[2], L, J, NH]]);
   assert.deepEqual(a.asked, [{ withdraw: out.txs[0], settle: out.txs[1] }]);
-  const b = world({ rows: [{ status: "settled", reserve: 0n }] });
+  // another settled the spend: no settle, and the close read has the withdraw's hash alone
+  const b = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK] });
   assert.equal((await exitWithdrawOne({ seed64: SEED, network: NET, to, steps: b.steps })).stage, "closed");
-  assert.deepEqual(b.order, ["withdraw", "read 3", "DeleteAccount"]);
-  assert.equal(b.asked[0]!.settle, null, "another's settle: the close read looks back SETTLE_BLOCKS");
+  assert.deepEqual(b.order, ["record withdraw", "withdraw", "read 3", "record close", "DeleteAccount"]);
+  assert.deepEqual(b.asked[0], { withdraw: b.records[0]!.hash, settle: null });
 });
 
-test("a payout the token refused (refund_pending) stops with the refund outcome: the note is spent, exitSettleDue settles it; never 'the withdrawal read failed', and nothing more is signed", async () => {
+test("P1-S fix 2: a hash that cannot be kept sends nothing", async () => {
+  const x = world({ rows: [{ status: "paid", reserve: 5n }], recordThrows: true });
+  await assert.rejects(exitWithdrawOne({ seed64: SEED, network: NET, to: await typed(), steps: x.steps }), /the store is full/);
+  assert.deepEqual(x.order, []);
+});
+
+test("a payout the token refused (refund_pending): A settles it (the value becomes a refund note) and closes, the outcome says refund; a withdraw tx read failed goes on only when the vault wrote the spend", async () => {
   const to = await typed();
   for (const sent of ["failed", "ok"] as const) {
-    const x = world({ rows: [{ status: "refund_pending", reserve: 5n }], sent: { withdraw: sent } });
+    const x = world({ rows: [{ status: "refund_pending", reserve: 5n }, { status: "refund_pending", reserve: 5n }, { status: "settled", reserve: 0n }].slice(sent === "ok" ? 1 : 0) as Partial<VaultSpendRow>[], sent: { withdraw: sent } });
     const out = await exitWithdrawOne({ seed64: SEED, network: NET, to, steps: x.steps });
-    assert.equal(out.stage, "refund", sent);
-    assert.ok("why" in out && /note is now spent/.test(out.why) && /exitSettleDue/.test(out.why) && !/withdrawal read/.test(out.why), sent);
-    assert.deepEqual(x.order, ["withdraw"], sent);
+    assert.equal(out.stage, "closed", sent);
+    assert.equal(out.refund, true, sent);
+    assert.deepEqual(x.order, ["record withdraw", "withdraw", "record settle", "settle", "read 3", "record close", "DeleteAccount"], sent);
   }
+  assert.match(EXIT_REFUND_WHY, /the note is spent/);
+  const lost = world({ rows: [], sent: { withdraw: "failed" } });
+  const out = await exitWithdrawOne({ seed64: SEED, network: NET, to, steps: lost.steps });
+  assert.equal(out.stage, "withdraw");
+  assert.deepEqual(lost.order, ["record withdraw", "withdraw"]);
 });
 
 test("exitWithdrawOne never sends a DeleteAccount before the settle landed: a withdrawal or settle that did not land, a spend still paid or with reserve above 0 after it, USDC halted or left in A stop it", async () => {
   const to = await typed();
   const cases: [string, Parameters<typeof world>[0], string, string[]][] = [
-    ["the withdrawal failed", { rows: [], sent: { withdraw: "failed" } }, "withdraw", ["withdraw"]],
+    ["the withdrawal failed, no spend", { rows: [], sent: { withdraw: "failed" } }, "withdraw", ["record withdraw", "withdraw"]],
+    ["the withdrawal unread, no spend", { rows: [], sent: { withdraw: "unread" } }, "withdraw", ["record withdraw", "withdraw"]],
     // a later row reading settled (another's settle, or a stale word) does not stand in for this settle's own landing
-    ["the settle failed", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "failed" } }, "settle", ["withdraw", "settle"]],
-    ["the settle unread", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "unread" } }, "settle", ["withdraw", "settle"]],
-    ["still paid after the settle", { rows: [{ status: "paid", reserve: 5n }, { status: "paid", reserve: 5n }] }, "settle", ["withdraw", "settle"]],
-    ["settled with reserve above 0", { rows: [{ status: "settled", reserve: 1n }] }, "settle", ["withdraw"]],
-    ["the payout still in flight", { rows: [{ status: "in_flight", reserve: 5n }] }, "settle", ["withdraw"]],
-    ["the spend not read", { rows: [null] }, "settle", ["withdraw"]],
-    ["USDC halted at the close", { rows: [{ status: "settled", reserve: 0n }], del: { usdc: { state: "halted" } } }, "close", ["withdraw", "read 3"]],
-    ["USDC left in A at the close", { rows: [{ status: "settled", reserve: 0n }], del: { usdc: { state: "held", amount: 1n } } }, "close", ["withdraw", "read 3"]],
-    ["the typed account missing at the close", { rows: [{ status: "settled", reserve: 0n }], del: { beneficiary: "absent" } }, "close", ["withdraw", "read 3"]],
-    ["reserve above 0 at the close read", { rows: [{ status: "settled", reserve: 0n }], del: { spend: { nullifierHash: NH, status: "settled", reserve: 2n } } }, "close", ["withdraw", "read 3"]],
+    ["the settle failed", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "failed" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["the settle unread", { rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], sent: { settle: "unread" } }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["still paid after the settle", { rows: [{ status: "paid", reserve: 5n }, { status: "paid", reserve: 5n }] }, "settle", ["record withdraw", "withdraw", "record settle", "settle"]],
+    ["settled with reserve above 0", { rows: [{ status: "settled", reserve: 1n }] }, "settle", ["record withdraw", "withdraw"]],
+    ["the payout still in flight", { rows: [{ status: "in_flight", reserve: 5n }] }, "settle", ["record withdraw", "withdraw"]],
+    ["the spend not read", { rows: [null] }, "settle", ["record withdraw", "withdraw"]],
+    ["USDC halted at the close", { rows: [{ status: "settled", reserve: 0n }], del: [{ ...BACK, usdc: { state: "halted" } }] }, "close", ["record withdraw", "withdraw", "read 3"]],
+    ["USDC left in A at the close", { rows: [{ status: "settled", reserve: 0n }], del: [{ ...BACK, usdc: { state: "held", amount: 1n } }] }, "close", ["record withdraw", "withdraw", "read 3"]],
+    ["the typed account missing at the close", { rows: [{ status: "settled", reserve: 0n }], del: [{ ...BACK, beneficiary: "absent" }] }, "close", ["record withdraw", "withdraw", "read 3"]],
+    ["reserve above 0 at the close read", { rows: [{ status: "settled", reserve: 0n }], del: [{ ...BACK, spend: { nullifierHash: NH, status: "settled", reserve: 2n } }] }, "close", ["record withdraw", "withdraw", "read 3"]],
+    ["the DeleteAccount failed", { rows: [{ status: "settled", reserve: 0n }], del: [BACK], sent: { DeleteAccount: "failed" } }, "close", ["record withdraw", "withdraw", "read 3", "record close", "DeleteAccount"]],
   ];
   for (const [why, w, stage, order] of cases) {
     const x = world(w);
     const out = await exitWithdrawOne({ seed64: SEED, network: NET, to, steps: x.steps });
     assert.equal(out.stage, stage, why);
     assert.deepEqual(x.order, order, why);
-    assert.ok(!x.order.includes("DeleteAccount"), `${why}: a DeleteAccount was sent`);
+  }
+});
+
+test("P1-S fix 1: exitCloseOne resumes any A after a reload, no hash kept: a paid or refund_pending spend is settled first, then A closes; a settled one closes; an A already gone is closed; in_flight waits", async () => {
+  // the withdraw's hash is lost: A's own settle reads FINAL, yet the close waits for the spend settled SETTLE_BLOCKS back
+  const paid = world({ rows: [{ status: "paid", reserve: 5n }, { status: "settled", reserve: 0n }], del: [{}, BACK] });
+  const p = await closeOne(paid);
+  assert.equal(p.stage, "closed");
+  assert.deepEqual(paid.order, ["record settle", "settle", "read 3", "read 3", "record close", "DeleteAccount"]);
+  assert.deepEqual(paid.asked[0], { withdraw: null, settle: paid.records[0]!.hash });
+  assert.equal(paid.slept.length, 1);
+  const refund = world({ rows: [{ status: "refund_pending", reserve: 5n }, { status: "settled", reserve: 0n }], del: [BACK] });
+  const r = await closeOne(refund);
+  assert.deepEqual([r.stage, r.refund], ["closed", true]);
+  const settled = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK] });
+  assert.equal((await closeOne(settled)).stage, "closed");
+  assert.deepEqual(settled.order, ["read 3", "record close", "DeleteAccount"]);
+  // the hashes a run kept go to the close read
+  const kept = world({ rows: [{ status: "settled", reserve: 0n }] });
+  assert.equal((await closeOne(kept, { withdraw: "W1", settle: "S1" })).stage, "closed");
+  assert.deepEqual(kept.asked, [{ withdraw: "W1", settle: "S1" }]);
+  const gone = world({ rows: [{ status: "settled", reserve: 0n }], account: "absent" });
+  assert.deepEqual(await closeOne(gone), { stage: "closed", txs: [], refund: false });
+  assert.deepEqual(gone.order, []);
+  for (const [why, w, stage, re] of [
+    ["A gone with its spend unsettled", world({ rows: [{ status: "paid", reserve: 5n }], account: "absent" }), "settle", /is not on chain, and its spend reads paid/],
+    ["A not read the same", world({ rows: [{ status: "settled", reserve: 0n }], account: "unread" }), "close", /not read the same/],
+    ["in_flight", world({ rows: [{ status: "in_flight", reserve: 5n }] }), "settle", /callback has not run yet/],
+    ["no spend", world({ rows: [null] }), "settle", /not read in the vault's spends/],
+  ] as const) {
+    const out = await closeOne(w);
+    assert.equal(out.stage, stage, why);
+    assert.ok("why" in out && re.test(out.why), why);
+    assert.deepEqual(w.order, [], why);
+  }
+});
+
+test("P1-S fix 4: a settle too recent (another's, just after the withdraw) is waited out and read again, then A closes; past the waits it stops, nothing sent", async () => {
+  const late = world({ rows: [{ status: "settled", reserve: 0n }], del: [{ settledBack: null }, { settledBack: null }, BACK] });
+  const out = await exitWithdrawOne({ seed64: SEED, network: NET, to: await typed(), steps: late.steps });
+  assert.equal(out.stage, "closed");
+  assert.deepEqual(late.slept, [EXIT_CLOSE_WAITS_MS[0], EXIT_CLOSE_WAITS_MS[1]]);
+  assert.deepEqual(late.order, ["record withdraw", "withdraw", "read 3", "read 3", "read 3", "record close", "DeleteAccount"]);
+  const never = world({ rows: [{ status: "settled", reserve: 0n }], del: [{ settledBack: null }] });
+  const n = await closeOne(never);
+  assert.equal(n.stage, "close");
+  assert.ok("why" in n && /run the close again/.test(n.why));
+  assert.equal(never.slept.length, EXIT_CLOSE_WAITS_MS.length);
+  assert.ok(!never.order.includes("DeleteAccount"));
+});
+
+test("P3-2: a DeleteAccount is sent within EXIT_CLOSE_SEND_BLOCKS of its read, else dropped unsent and signed again on a new read; never sent late", async () => {
+  const once = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [1000 + EXIT_CLOSE_SEND_BLOCKS + 1, 1000 + EXIT_CLOSE_SEND_BLOCKS] });
+  assert.equal((await closeOne(once)).stage, "closed");
+  assert.deepEqual(once.order, ["read 3", "read 3", "record close", "DeleteAccount"]);
+  for (const head of [1000 + EXIT_CLOSE_SEND_BLOCKS + 1, null]) {
+    const x = world({ rows: [{ status: "settled", reserve: 0n }], del: [BACK], heads: [head] });
+    const out = await closeOne(x);
+    assert.equal(out.stage, "close", String(head));
+    assert.ok(!x.order.includes("DeleteAccount") && !x.order.includes("record close"), String(head));
   }
 });
 
@@ -244,11 +388,10 @@ const b58 = (b: Uint8Array) => {
   for (const x of b) if (x === 0) s = "1" + s; else break;
   return s;
 };
-const view = (v: unknown, at: number) => ({ result: { block_height: at, result: [...new TextEncoder().encode(JSON.stringify(v))] } });
 const PAUSED = { error: { cause: { name: "CONTRACT_EXECUTION_ERROR" }, data: 'wasm execution failed with error: HostError(GuestPanic { panic_msg: "FiatToken: paused" })' } };
 const MISSING = { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: {} } } };
 const WTX = "W".repeat(44), STX = "S".repeat(44);
-type Side = { row?: Record<string, unknown>; back?: Record<string, unknown>; usdc?: string | "halt"; to?: "exists" | "absent"; intents?: unknown[] | "absent"; tx?: Record<string, string> };
+type Side = { row?: Record<string, unknown>; back?: Record<string, unknown>; usdc?: string | "halt"; to?: "exists" | "absent"; intents?: unknown[] | "absent" | "unread"; tx?: Record<string, string> };
 /** One fake RPC of the release pair, answering readSettle's, view_account's, the spends view's, exitHoldings', intents.near's and the tx reads. */
 function side(name: string, aId: string, pk: Uint8Array, o: Side = {}) {
   const row = (at: number) => ({ index: 3, nullifier_hash: NH.toString(), withdrawn: "1000000", new_leaf_index: 1, refund_precommitment: "7", refund_value: "0", refund_label: "0", refund_leaf_index: 0, status: "settled", payer: aId, reserve: "0", recipient: X, fee: "0", context: "9", ...(at === 1000 ? o.row : (o.back ?? o.row)) });
@@ -261,27 +404,28 @@ function side(name: string, aId: string, pk: Uint8Array, o: Side = {}) {
       const at = p.block_id as number;
       if (p.request_type === "view_access_key_list") return { result: { block_height: at, keys: [{ public_key: `ed25519:${b58(pk)}`, access_key: { nonce: 9, permission: "FullAccess" } }] } };
       if (p.request_type === "view_account") {
+        if (p.account_id === "intents.near" && o.intents === "unread") return null;
         const missing = p.account_id === "intents.near" ? (o.intents ?? "absent") === "absent" : p.account_id === X ? o.to === "absent" : false;
         return missing ? MISSING : { result: { block_height: at, amount: "2000000000000000000000000", storage_usage: 182, code_hash: BH } };
       }
       if (p.method_name === "spends") return view([row(at)], at);
       if (p.method_name === "ft_balance_of") return o.usdc === "halt" ? PAUSED : view(o.usdc ?? "0", at);
-      if (p.method_name === "mt_tokens_for_owner") return view(o.intents === "absent" ? null : (o.intents ?? []), at);
+      if (p.method_name === "mt_tokens_for_owner") return view(o.intents, at);
       return null;
     },
   };
 }
-async function readDel(x: Side = {}, y: Side = x, o: { settle?: string | null; names?: readonly [string, string] } = {}) {
+async function readDel(x: Side = {}, y: Side = x, o: { txs?: { withdraw: string | null; settle: string | null }; names?: readonly [string, string] } = {}) {
   const k = exitKey(SEED, { kind: "A", l: L, j: J });
   k.secretKey.fill(0);
   const [na, nb] = EXIT_NETWORKS[NET].rpcs;
   const r = [side(na, k.id, k.publicKey, x), side(nb, k.id, k.publicKey, y)] as const;
   const m = o.names ? ([side(o.names[0], k.id, k.publicKey, x), side(o.names[1], k.id, k.publicKey, y)] as const) : r;
-  return exitReadDelete({ network: NET, aId: k.id, to: await typed(), spendIndex: 3, nullifierHash: NH, txs: { withdraw: WTX, settle: o.settle === undefined ? STX : o.settle }, rpcs: r as never, moveRpcs: m as never });
+  return exitReadDelete({ network: NET, aId: k.id, to: await typed(), spendIndex: 3, nullifierHash: NH, txs: o.txs ?? { withdraw: WTX, settle: STX }, rpcs: r as never, moveRpcs: m as never });
 }
 const closeOn = async (r: DeleteReadFor) => exitBuildDelete({ seed64: SEED, network: NET, l: L, j: J, to: await typed(), read: r, nullifierHash: NH });
 
-test("exitReadDelete reads at one block on both RPCs: A's nonce, the typed account, the spend's row, A's USDC, intents.near and both txs FINAL; the close goes only on that read", async () => {
+test("exitReadDelete reads at one block on both RPCs: A's nonce, the typed account, the spend's row now and SETTLE_BLOCKS back, A's USDC, intents.near and both kept txs FINAL; the close goes only on that read", async () => {
   const ok = await readDel();
   assert.equal(ok.height, 1000);
   assert.equal(ok.nonce, 9n);
@@ -290,8 +434,7 @@ test("exitReadDelete reads at one block on both RPCs: A's nonce, the typed accou
   assert.deepEqual(ok.spend, { nullifierHash: NH, status: "settled", reserve: 0n });
   assert.deepEqual(ok.usdc, { state: "held", amount: 0n });
   assert.equal(ok.intents, "no-intents", "testnet's pair reads no intents.near (UNKNOWN_ACCOUNT on both, 9 Nov 17:25Z)");
-  assert.equal(ok.withdrawTx, "final");
-  assert.deepEqual(ok.settle, { by: "self", tx: "final" });
+  assert.deepEqual([ok.withdrawTx, ok.settleTx, ok.settledBack], ["final", "final", 1000 - SETTLE_BLOCKS]);
   await closeOn(ok);
 });
 
@@ -302,29 +445,38 @@ test("P1: a typed account that does not exist (an implicit one too) reads absent
   await assert.rejects(readDel({ to: "absent" }, {}), ExitOutStopped, "the RPCs differ on the typed account");
 });
 
-test("P2-2: a withdraw or settle tx read EXECUTED (its refunds may still run) is unread, and the close is refused; another's settle needs the row settled SETTLE_BLOCKS back", async () => {
-  const w = await readDel({ tx: { [WTX]: "EXECUTED" } });
-  assert.equal(w.withdrawTx, "unread");
-  await assert.rejects(closeOn(w), fires(/withdraw tx is not read FINAL/));
-  const s = await readDel({ tx: { [STX]: "EXECUTED" } }, {});
-  assert.deepEqual(s.settle, { by: "self", tx: "unread" });
-  await assert.rejects(closeOn(s), fires(/past its refunds/));
-  const other = await readDel({}, {}, { settle: null });
-  assert.deepEqual(other.settle, { by: "other", back: 900 });
-  await closeOn(other);
-  const recent = await readDel({ back: { status: "paid", reserve: "5" } }, { back: { status: "paid", reserve: "5" } }, { settle: null });
-  assert.deepEqual(recent.settle, { by: "other", back: null });
-  await assert.rejects(closeOn(recent), fires(/past its refunds/));
+test("P2-2 / P1-S fix 3: a tx read EXECUTED is unread and a hash not kept is unread or none; the close goes on them only when the spend read settled SETTLE_BLOCKS back", async () => {
+  const recent = { back: { status: "paid", reserve: "5" } };
+  const w = await readDel({ ...recent, tx: { [WTX]: "EXECUTED" } });
+  assert.deepEqual([w.withdrawTx, w.settledBack], ["unread", null]);
+  await assert.rejects(closeOn(w), fires(/not read past their refunds/));
+  const s = await readDel({ ...recent, tx: { [STX]: "EXECUTED" } }, recent);
+  assert.equal(s.settleTx, "unread");
+  await assert.rejects(closeOn(s), fires(/not read past their refunds/));
+  // a reload: no hash kept, settled long ago (fix 3)
+  const none = await readDel({}, {}, { txs: { withdraw: null, settle: null } });
+  assert.deepEqual([none.withdrawTx, none.settleTx, none.settledBack], ["unread", "none", 1000 - SETTLE_BLOCKS]);
+  await closeOn(none);
+  // another settled just now: the row SETTLE_BLOCKS back is not settled
+  const now = await readDel(recent, recent, { txs: { withdraw: WTX, settle: null } });
+  assert.deepEqual([now.withdrawTx, now.settleTx, now.settledBack], ["final", "none", null]);
+  await assert.rejects(closeOn(now), fires(/not read past their refunds/));
+  // the RPCs differ on the row back there: no lookback
+  assert.equal((await readDel({}, recent, { txs: { withdraw: null, settle: null } })).settledBack, null);
 });
 
-test("intents.near holding any token under A (mt_tokens_for_owner not empty) gates the close; an empty list passes", async () => {
+test("intents.near: any token under A gates the close, an empty list passes; a split or unread read of intents.near itself is a stop, never 'no intents.near'", async () => {
   const holds = await readDel({ intents: [{ token_id: "nep141:wrap.near" }] });
   assert.equal(holds.intents, "holds");
   await assert.rejects(closeOn(holds), fires(/stranded/));
   const empty = await readDel({ intents: [] });
   assert.equal(empty.intents, "empty");
   await closeOn(empty);
-  await assert.rejects(readDel({ intents: [] }, { intents: [{ token_id: "nep141:wrap.near" }] }), ExitOutStopped, "the RPCs differ on intents.near");
+  await assert.rejects(readDel({ intents: [] }, { intents: [{ token_id: "nep141:wrap.near" }] }), ExitOutStopped, "the RPCs differ on the tokens");
+  // P3-1: one RPC reads intents.near missing, the other there; or neither answers
+  await assert.rejects(readDel({ intents: "absent" }, { intents: [] }), /intents.near is not read the same/, "a split on intents.near");
+  await assert.rejects(readDel({ intents: "unread" }), /intents.near is not read the same/, "intents.near unread on both");
+  await assert.rejects(readDel({ intents: "unread" }, { intents: "absent" }), /intents.near is not read the same/, "unread on one, absent on the other");
 });
 
 test("P2-1: a pair that is not the network's is refused before any read; a halt, a split or another spend stops or gates the close", async () => {

@@ -15,15 +15,19 @@
 //   sealed signer (the kit's ./core): buildVaultWithdrawOut, exitBuildSettle (out.ts) and buildDeleteOut. Nothing here
 //   sends: the signed bytes go to the caller's send.
 // - The order (V:951-967): settle sends the spend's remaining reserve to its payer, A, so a DeleteAccount before it
-//   would see A made again by that Transfer. exitWithdrawOne runs withdraw, then settle when the spend reads paid
-//   (nobody else settled it), then A's DeleteAccount, each step only once the one before reads FINAL with every receipt
-//   a success on both RPCs. A payout the token refused (refund_pending) stops it: the note is spent, and its value
-//   waits in the vault as a refund note once settled (exitSettleDue). The DeleteAccount comes only on exitReadDelete's
-//   read, at one block on both RPCs of the network's pair: the typed account exists (a DeleteAccount to a missing one
-//   burns A's NEAR), the spend settled with reserve 0, the withdraw tx and A's own settle tx FINAL (their refunds ran),
-//   or another's settle read SETTLE_BLOCKS back too, A's USDC held at 0 (a halted read is not a zero) and no token of
-//   any kind under A in intents.near; the gate buildDeleteOut holds itself. One withdrawal at a time: the next note's A is funded by the typed account
-//   (the first A's NEAR came back there), never by another account of the seed.
+//   would see A made again by that Transfer. exitWithdrawOne runs the withdraw, then hands the spend to exitCloseOne:
+//   settle when the spend reads paid or refund_pending (a payout the token refused: the note is spent and its value
+//   becomes a refund note in the vault, which the next scan finds), then A's DeleteAccount. exitCloseOne is also the
+//   resume (delta review P1-S): any A whose spend is due or settled, after a reload, an interrupted run or another's
+//   settle, is settled and closed by it alone. Each tx hash is kept (steps.record) before its send.
+// - The close: only on exitReadDelete's read, at one block on both RPCs of the network's pair, through buildDeleteOut's
+//   gate: the typed account exists (a DeleteAccount to a missing one burns A's NEAR), the spend settled with reserve 0,
+//   every receipt that can pay A has run (closeRefundsRan: the spend settled SETTLE_BLOCKS back, or the withdraw tx and
+//   A's own settle tx FINAL; a settle too recent is waited out and read again), A's USDC held at 0 (a halted read is
+//   not a zero) and no token of any kind under A in intents.near. A signed DeleteAccount is sent within
+//   EXIT_CLOSE_SEND_BLOCKS of its read or dropped and signed again on a new read: it stays valid on chain about a day,
+//   and a late send could find the typed account deleted. One withdrawal at a time: the next note's A is funded by the
+//   typed account (the first A's NEAR came back there), never by another account of the seed.
 import {
   type VaultProver,
   vaultProveWithdraw,
@@ -38,6 +42,7 @@ import {
   buildVaultWithdrawOut,
   changeIndex,
   noteSecrets,
+  closeRefundsRan,
   readSettle,
   SETTLE_BLOCKS,
   type BuiltMove,
@@ -48,7 +53,7 @@ import {
 } from "@blindfill/kit/core";
 import { EXIT_NETWORKS, ExitRpcRefused } from "./rpc.ts";
 import { EXIT_TOKENS } from "./scan.ts";
-import { exitAccountAt, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipientFor, type ExitRecipient } from "./out.ts";
+import { exitAccountAt, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipientFor, exitStorageFor, type ExitRecipient, type ExitStorage } from "./out.ts";
 import { nearPairNetwork, nearPairRule, type NearNetwork } from "@blindfill/kit";
 
 /** A signed transaction of A: its withdrawal or settle (FunctionCall), or its DeleteAccount. */
@@ -75,8 +80,8 @@ export type ExitWithdrawArgs = {
   labelTree: VaultTree;
   newestStateRoot: bigint;
   newestLabelRoot: bigint;
-  /** NEAR for the typed account's registration on the token: the token's storage minimum (exitStorageMin), exactly */
-  registerDeposit: bigint;
+  /** the typed account's registration on the token, exitReadStorage's read: register_deposit 0 when registered, else the token's storage minimum */
+  storage: ExitStorage;
   /** the vault's block time now and the deadline, ms (block time, never the device clock) */
   nowMs: number;
   deadlineMs: number;
@@ -96,6 +101,8 @@ export async function exitBuildWithdraw(a: ExitWithdrawArgs, keyOf: typeof exitK
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
   if (note.state !== "UNSPENT") throw new ExitRpcRefused(`a ${String(note.state)} note has nothing to withdraw`);
+  if (!exitStorageFor(a.storage, to)) throw new ExitRpcRefused("the registration is not one exitReadStorage read for this typed account");
+  const { storageMin, registered } = a.storage;
   // the seed copied before the first await, the copy zeroed on every path
   const seed64 = new Uint8Array(a.seed64);
   try {
@@ -110,7 +117,7 @@ export async function exitBuildWithdraw(a: ExitWithdrawArgs, keyOf: typeof exitK
       vaultId: vault,
       token: EXIT_TOKENS[network],
       recipient: to.account,
-      registerDeposit: a.registerDeposit,
+      registerDeposit: registered ? 0n : storageMin,
       feeRecipient: to.account,
       relayFee: 0n,
       refundPrecommitment: refund.precommitment,
@@ -136,7 +143,7 @@ export async function exitBuildWithdraw(a: ExitWithdrawArgs, keyOf: typeof exitK
     if (proved.publicSignals[7] !== req.context) throw new ExitRpcRefused("the proof's context is not the request's: the note's scope is not this vault's");
     const key = keyOf(seed64, { kind: "A", l, j });
     try {
-      const built = buildVaultWithdrawOut({ read: a.read, key, vault, to: to.account, withdrawal: req.withdrawal, proof: vaultProof(proved.proof), publicSignals: proved.publicSignals, storageMin: a.registerDeposit, nowMs: a.nowMs });
+      const built = buildVaultWithdrawOut({ read: a.read, key, vault, to: to.account, withdrawal: req.withdrawal, proof: vaultProof(proved.proof), publicSignals: proved.publicSignals, storageMin, registered, nowMs: a.nowMs });
       return { built, l, j, nullifierHash: own.nullifierHash };
     } finally {
       key.secretKey.fill(0);
@@ -227,8 +234,8 @@ async function intentsAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], aId: strin
  * Everything A's close is gated on, at one block on both RPCs of `network`'s release pair: A's nonce and the block (the
  * wallet's readSettle, A's own key alone), then at that block whether the typed account exists, the spend's row (the
  * vault's spends(index, 1), equal byte for byte), A's USDC (exitHoldings: halted, never a zero, while USDC is halted)
- * and what intents.near holds under A (mt_tokens_for_owner, any token); the withdraw tx and, when A settled it, A's
- * settle tx read FINAL on both; when another settled it, the row read settled with reserve 0 SETTLE_BLOCKS back too.
+ * and what intents.near holds under A (mt_tokens_for_owner, any token); the withdraw tx and A's own settle tx, when
+ * their hashes were kept, read FINAL on both; and the row SETTLE_BLOCKS back, settled with reserve 0 or not.
  * Refused (ExitRpcRefused) for a pair that is not `network`'s; throws ExitOutStopped when a read fails or the two
  * differ, or the row at `spendIndex` is not the spend of `nullifierHash`.
  */
@@ -238,8 +245,8 @@ export async function exitReadDelete(a: {
   to: ExitRecipient;
   spendIndex: number;
   nullifierHash: bigint;
-  /** the withdraw tx's hash, and A's own settle tx's, or null when another settled the spend */
-  txs: { withdraw: string; settle: string | null };
+  /** the withdraw tx's hash and A's own settle tx's as kept, each null when not kept (or another settled the spend) */
+  txs: { withdraw: string | null; settle: string | null };
   rpcs: readonly [VaultSyncRpc, VaultSyncRpc];
   moveRpcs: readonly [MoveOutRpc, MoveOutRpc];
 }): Promise<DeleteReadFor> {
@@ -257,84 +264,146 @@ export async function exitReadDelete(a: {
   const spend = await spendAt(a.rpcs, vault, a.spendIndex, a.nullifierHash, at);
   const { holdings } = await exitHoldings({ network, ids: [aId], rpcs: a.rpcs, at });
   const intents = await intentsAt(a.rpcs, aId, at);
-  const withdrawTx = await txFinal(a.moveRpcs, a.txs.withdraw, aId);
-  let settle: DeleteReadFor["settle"];
-  if (a.txs.settle !== null) settle = { by: "self", tx: await txFinal(a.moveRpcs, a.txs.settle, aId) };
-  else {
-    const back = at - SETTLE_BLOCKS;
-    const then = back > 0 ? await spendAt(a.rpcs, vault, a.spendIndex, a.nullifierHash, back).catch(() => null) : null;
-    settle = { by: "other", back: then !== null && then.status === "settled" && then.reserve === 0n ? back : null };
-  }
-  return { network, a: aId, to: to.account, token: EXIT_TOKENS[network], height: at, blockHash: s.blockHash, nonce: s.nonce, beneficiary, spend, usdc: holdings[0]!.token, intents, withdrawTx, settle };
+  const withdrawTx = a.txs.withdraw === null ? "unread" : await txFinal(a.moveRpcs, a.txs.withdraw, aId);
+  const settleTx = a.txs.settle === null ? "none" : await txFinal(a.moveRpcs, a.txs.settle, aId);
+  // the row SETTLE_BLOCKS back: settled with reserve 0 there, every receipt of the withdraw and the settle has run
+  // (a row not there yet, a split or a failed read: null, and the close waits or is refused)
+  const back = at - SETTLE_BLOCKS;
+  const then = back > 0 ? await spendAt(a.rpcs, vault, a.spendIndex, a.nullifierHash, back).catch(() => null) : null;
+  const settledBack = then !== null && then.status === "settled" && then.reserve === 0n ? back : null;
+  return { network, a: aId, to: to.account, token: EXIT_TOKENS[network], height: at, blockHash: s.blockHash, nonce: s.nonce, beneficiary, spend, usdc: holdings[0]!.token, intents, withdrawTx, settleTx, settledBack };
 }
 
 /** How one signed transaction ended: FINAL on both RPCs with every receipt a success, or not (failed, or no equal word). */
 export type ExitSent = "ok" | "failed" | "unread";
-/** Where exitWithdrawOne stopped: done (A closed); the vault's payout refused (the note spent, its value a refund note once settled); or the step that did not land or was refused, with its why. */
+/** A tx hash the tool keeps before it sends that tx (delta review P1-S): after a reload, the resume reads it FINAL. */
+export type ExitTxRecord = { l: bigint; j: number; nullifierHash: bigint; step: "withdraw" | "settle" | "close"; hash: string };
+/**
+ * Where a run stopped: closed (A deleted, its NEAR at the typed account), or the step that did not land or was refused,
+ * with its why. `refund`: the vault's payout was refused (refund_pending), so the note is spent and its value is a
+ * refund note in the vault once settled (EXIT_REFUND_WHY); the next scan finds it.
+ */
 export type ExitWithdrawOutcome =
-  | { stage: "closed"; txs: string[] }
-  | { stage: "refund" | "withdraw" | "settle" | "close"; why: string; txs: string[] };
+  | { stage: "closed"; txs: string[]; refund: boolean }
+  | { stage: "withdraw" | "settle" | "close"; why: string; txs: string[]; refund: boolean };
 
-/** What exitWithdrawOne runs on: each of its reads on both RPCs of the release pair, and the self-submit. */
-export type ExitWithdrawSteps = {
-  /** the withdrawal proved and signed (exitBuildWithdraw) */
-  withdraw(): Promise<{ built: BuiltMove; l: bigint; j: number; nullifierHash: bigint }>;
-  /** self-submits the signed bytes through a public RPC, then reads the tx on both RPCs */
+/** What exitCloseOne runs on: each read on both RPCs of the release pair, the hash keeper and the self-submit. */
+export type ExitCloseSteps = {
+  /** self-submits the signed bytes once through a public RPC, then reads the tx on both RPCs; never sends them again */
   send(m: ExitSigned): Promise<ExitSent>;
+  /** keeps a tx's hash where a reload finds it; called before that tx is sent, and a throw sends nothing */
+  record(r: ExitTxRecord): Promise<void>;
   /** the spend's row of this nullifier hash in the vault's spends, read on both RPCs, or null when not there */
   spend(nullifierHash: bigint): Promise<VaultSpendRow | null>;
+  /** whether A exists, read at one final block on both RPCs (exitAccountAt) */
+  account(aId: string): Promise<"exists" | "absent" | "unread">;
   /** readSettle's read of A */
   readA(aId: string): Promise<SettleReadFor | null>;
-  /** exitReadDelete's read, given the withdraw tx and A's own settle tx (null when another settled the spend) */
-  readDelete(aId: string, spendIndex: number, nullifierHash: bigint, txs: { withdraw: string; settle: string | null }): Promise<DeleteReadFor>;
+  /** exitReadDelete's read, given the tx hashes kept (null when not kept) */
+  readDelete(aId: string, spendIndex: number, nullifierHash: bigint, txs: { withdraw: string | null; settle: string | null }): Promise<DeleteReadFor>;
+  /** the final height, the lower of both RPCs', or null */
+  head(): Promise<number | null>;
+  sleep(ms: number): Promise<void>;
 };
+/** What exitWithdrawOne runs on: the withdrawal proved and signed (exitBuildWithdraw), then exitCloseOne's steps. */
+export type ExitWithdrawSteps = ExitCloseSteps & { withdraw(): Promise<{ built: BuiltMove; l: bigint; j: number; nullifierHash: bigint }> };
 
-const REFUND = "the vault's payout to the typed account was refused (refund_pending): the note is now spent, and its value waits in the vault as a refund note once the spend is settled (exitSettleDue settles it; the next restore finds the refund note)";
+/** The waits before the close reads again while a settle is too recent (closeRefundsRan): 9 of 20 s, past SETTLE_BLOCKS of blocks. */
+export const EXIT_CLOSE_WAITS_MS: readonly number[] = Object.freeze(Array<number>(9).fill(20_000));
+/** A signed DeleteAccount is sent at most this many blocks past its read, else dropped and signed again on a new read. */
+export const EXIT_CLOSE_SEND_BLOCKS = 30;
+export const EXIT_REFUND_WHY = "the vault's payout to the typed account was refused (refund_pending): the note is spent, and its value is now a refund note in the vault, settled here; scan again to withdraw it";
 
 /**
- * One note out, in the order the vault paper sets (V:951-967): withdraw, then settle when the spend reads paid (nobody
- * settled it yet), then A's DeleteAccount to the typed account on exitReadDelete's read; each step only once the one
- * before read "ok". A spend that reads refund_pending stops it with the refund outcome (never "the withdrawal read
- * failed": the withdrawal landed, the token refused the payout). It stops at the first step that does not land or is
- * refused, naming it, and signs nothing after.
+ * A_{l,j}'s close, for the spend of `nullifierHash` (delta review P1-S): the resume for any A whose spend is due or
+ * settled, and exitWithdrawOne's tail. On a fresh read of the spend: an A already deleted with its spend settled is
+ * closed; in_flight waits for its callback (run again); paid or refund_pending is settled by A first (its hash kept, then
+ * sent) and read again; then, on a spend settled with reserve 0, exitReadDelete's read until every receipt that can pay
+ * A has run (EXIT_CLOSE_WAITS_MS), and A's DeleteAccount, its hash kept, sent within EXIT_CLOSE_SEND_BLOCKS of its read.
+ * `txs` are the hashes a run kept before (exitTxRecord), when it has them. Signs nothing past a step that did not land.
+ */
+export async function exitCloseOne(
+  a: { seed64: Uint8Array; network: NearNetwork; to: ExitRecipient; l: bigint; j: number; nullifierHash: bigint; txs?: { withdraw?: string | null; settle?: string | null }; steps: ExitCloseSteps },
+  keyOf: typeof exitKey = exitKey,
+): Promise<ExitWithdrawOutcome> {
+  const { network, to, steps, l, j, nullifierHash } = a;
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
+  const txs: string[] = [];
+  const kept = { withdraw: a.txs?.withdraw ?? null, settle: a.txs?.settle ?? null };
+  let refund = false;
+  const stop = (stage: "settle" | "close", why: string): ExitWithdrawOutcome => ({ stage, why, txs, refund });
+  const aKey = keyOf(a.seed64, { kind: "A", l, j });
+  const aId = aKey.id;
+  aKey.secretKey.fill(0);
+  let row = await steps.spend(nullifierHash);
+  if (row === null) return stop("settle", "the spend is not read in the vault's spends");
+  refund = row.status === "refund_pending";
+  const there = await steps.account(aId);
+  if (there === "unread") return stop("close", `A ${aId} is not read the same on both RPCs`);
+  if (there === "absent") return row.status === "settled" ? { stage: "closed", txs, refund } : stop("settle", `A ${aId} is not on chain, and its spend reads ${row.status}`);
+  if (row.status === "in_flight") return stop("settle", "the payout's callback has not run yet (in_flight): run the close again once it has");
+  if (row.status === "paid" || row.status === "refund_pending") {
+    const read = await steps.readA(aId);
+    if (read === null) return stop("settle", "A is not read equal on both RPCs");
+    const s = exitBuildSettle({ seed64: a.seed64, network, spend: { l, j, note: "", spend: row }, read }, keyOf);
+    await steps.record({ l, j, nullifierHash, step: "settle", hash: s.hash });
+    txs.push(s.hash);
+    kept.settle = s.hash;
+    const settled = await steps.send(s);
+    if (settled !== "ok") return stop("settle", `the settle read ${settled}`);
+    row = await steps.spend(nullifierHash);
+    if (row === null) return stop("settle", "the spend is not read in the vault's spends");
+  }
+  if (row.status !== "settled" || row.reserve !== 0n) return stop("settle", `the spend reads ${row.status} with reserve ${row.reserve}`);
+  for (let i = 0; ; i++) {
+    const wait = EXIT_CLOSE_WAITS_MS[i];
+    let read: DeleteReadFor;
+    try {
+      read = await steps.readDelete(aId, row.index, nullifierHash, kept);
+    } catch (e) {
+      return stop("close", e instanceof Error ? e.message : String(e));
+    }
+    if (!closeRefundsRan(read)) {
+      // a settle too recent (another's, just after the withdraw, or a run whose hashes were lost): read again later
+      if (wait === undefined) return stop("close", `the settle is not yet ${SETTLE_BLOCKS} blocks old and the txs are not read FINAL: run the close again`);
+      await steps.sleep(wait);
+      continue;
+    }
+    let d: ReturnType<typeof buildDeleteOut>;
+    try {
+      d = exitBuildDelete({ seed64: a.seed64, network, l, j, to, read, nullifierHash }, keyOf);
+    } catch (e) {
+      return stop("close", e instanceof Error ? e.message : String(e));
+    }
+    const now = await steps.head();
+    if (now === null || now - read.height > EXIT_CLOSE_SEND_BLOCKS) {
+      // the signed bytes are dropped unsent: signed again on a new read, at the same nonce
+      if (wait === undefined) return stop("close", `the DeleteAccount could not be sent within ${EXIT_CLOSE_SEND_BLOCKS} blocks of its read: run the close again`);
+      continue;
+    }
+    await steps.record({ l, j, nullifierHash, step: "close", hash: d.hash });
+    txs.push(d.hash);
+    const closed = await steps.send(d);
+    if (closed !== "ok") return stop("close", `the DeleteAccount read ${closed}`);
+    return { stage: "closed", txs, refund };
+  }
+}
+
+/**
+ * One note out, in the order the vault paper sets (V:951-967): the withdraw (its hash kept, then sent), then
+ * exitCloseOne: settle when the spend reads paid or refund_pending, then A's DeleteAccount to the typed account. A
+ * withdraw tx that read failed or unread goes on only when the vault wrote its spend (a payout the token refused fails a
+ * receipt of the withdraw tx, yet the spend is there). It stops at the first step that does not land or is refused,
+ * naming it, and signs nothing after.
  */
 export async function exitWithdrawOne(a: { seed64: Uint8Array; network: NearNetwork; to: ExitRecipient; steps: ExitWithdrawSteps }, keyOf: typeof exitKey = exitKey): Promise<ExitWithdrawOutcome> {
   const { network, to, steps } = a;
   if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
-  const txs: string[] = [];
   const w = await steps.withdraw();
-  txs.push(w.built.hash);
+  await steps.record({ l: w.l, j: w.j, nullifierHash: w.nullifierHash, step: "withdraw", hash: w.built.hash });
   const sent = await steps.send(w.built);
-  // the payout refused fails a receipt of the withdraw tx, yet the vault wrote the spend: read the row before naming it
-  let row = sent === "unread" ? null : await steps.spend(w.nullifierHash);
-  if (row !== null && row.status === "refund_pending") return { stage: "refund", why: REFUND, txs };
-  if (sent !== "ok") return { stage: "withdraw", why: `the withdrawal read ${sent}`, txs };
-  if (row === null) return { stage: "settle", why: "the spend is not read in the vault's spends", txs };
-  const aKey = keyOf(a.seed64, { kind: "A", l: w.l, j: w.j });
-  const aId = aKey.id;
-  aKey.secretKey.fill(0);
-  let settleTx: string | null = null;
-  if (row.status === "paid") {
-    const read = await steps.readA(aId);
-    if (read === null) return { stage: "settle", why: "A is not read equal on both RPCs", txs };
-    const s = exitBuildSettle({ seed64: a.seed64, network, spend: { l: w.l, j: w.j, note: "", spend: row }, read }, keyOf);
-    txs.push(s.hash);
-    settleTx = s.hash;
-    const settled = await steps.send(s);
-    if (settled !== "ok") return { stage: "settle", why: `the settle read ${settled}`, txs };
-    row = await steps.spend(w.nullifierHash);
-    if (row === null) return { stage: "settle", why: "the spend is not read in the vault's spends", txs };
-  }
-  if (row.status !== "settled" || row.reserve !== 0n) return { stage: "settle", why: `the spend reads ${row.status} with reserve ${row.reserve}`, txs };
-  let d: ReturnType<typeof buildDeleteOut>;
-  try {
-    const read = await steps.readDelete(aId, row.index, w.nullifierHash, { withdraw: w.built.hash, settle: settleTx });
-    d = exitBuildDelete({ seed64: a.seed64, network, l: w.l, j: w.j, to, read, nullifierHash: w.nullifierHash }, keyOf);
-  } catch (e) {
-    return { stage: "close", why: e instanceof Error ? e.message : String(e), txs };
-  }
-  txs.push(d.hash);
-  const closed = await steps.send(d);
-  if (closed !== "ok") return { stage: "close", why: `the DeleteAccount read ${closed}`, txs };
-  return { stage: "closed", txs };
+  if (sent !== "ok" && (await steps.spend(w.nullifierHash)) === null) return { stage: "withdraw", why: `the withdrawal read ${sent}`, txs: [w.built.hash], refund: false };
+  const out = await exitCloseOne({ seed64: a.seed64, network, to, l: w.l, j: w.j, nullifierHash: w.nullifierHash, txs: { withdraw: w.built.hash }, steps }, keyOf);
+  return { ...out, txs: [w.built.hash, ...out.txs] };
 }
