@@ -31,6 +31,7 @@ import { base58, base64 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
 import { type DepositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, readDepositAccount } from "./account.ts";
 import { readCapped } from "./capped.ts";
+import { askWhileBusy, type BusyOpts } from "../busy.ts";
 
 /** W: the delegate's window in blocks over the lower of the two RPC heights (V:670-672). */
 export const DEPOSIT_WINDOW = 120;
@@ -222,17 +223,27 @@ export type BindAnswer = { ok: true; tx_hash: string } | { ok: false; code: Help
  * The answer is hostile input: only a tx hash of 32 bytes in base58 on 200, or a code from HELPER_BIND_DEPOSIT_CODES
  * with its own HTTP status, is taken;
  * the deposit itself is confirmed from the vault's deposits pages, never from this answer (W:418). It waits
- * SEND_TIMEOUT_MS, or until `signal` (the bind's stop) aborts.
+ * SEND_TIMEOUT_MS each ask, or until `signal` (the bind's stop) aborts. A busy helper (429 rate_limited, 503 upstream) is
+ * waited out for its Retry-After, capped, and the same bytes go again, BUSY_ASKS asks at most (../busy.ts, card
+ * withdraw-fee-busy-waits): one signed call, so at most one runs; the last busy answer is no bind answer (the bind
+ * settles it from the pages, as before).
  */
-export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<BindAnswer> {
-  const res = await fetchFn(RELEASE_BIND_URL, {
-    ...HELPER_FETCH_INIT,
-    redirect: "error",
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ signed_delegate: signed.signed_delegate }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
-  });
+export async function sendDepositDelegate(
+  signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal, sleep?: BusyOpts["sleep"],
+): Promise<BindAnswer> {
+  const bytes = JSON.stringify({ signed_delegate: signed.signed_delegate });
+  const res = await askWhileBusy(
+    () =>
+      fetchFn(RELEASE_BIND_URL, {
+        ...HELPER_FETCH_INIT,
+        redirect: "error",
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: bytes,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
+      }),
+    { signal, sleep },
+  );
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));

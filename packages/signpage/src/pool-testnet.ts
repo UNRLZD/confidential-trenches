@@ -51,6 +51,7 @@ import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
 import { SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
+import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
@@ -309,11 +310,15 @@ export async function helperPoolSend(pool: string, tx: Uint8Array, fetchFn: type
 const FEE_TIMEOUT_MS = 10_000;
 
 /** GET /v1/pool/fee for the page network's pool and one epoch, as solanaPool's relayFee: the answer as the helper gave it, which
- *  solanaPool's bind refuses unless every field is this pool's, this epoch's and the fee the device computes. */
-export async function poolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = fetch): Promise<SolanaFeeAnswer> {
+ *  solanaPool's bind refuses unless every field is this pool's, this epoch's and the fee the device computes. A busy
+ *  helper (429 rate_limited, 503 upstream) is waited out and asked again, bounded (wallet busy.ts, card
+ *  withdraw-fee-busy-waits); any other status refuses at once. */
+export async function poolRelayFee(pool: string, epochStartMs: bigint, signal?: AbortSignal, fetchFn: typeof fetch = fetch, sleep?: BusyOpts["sleep"]): Promise<SolanaFeeAnswer> {
   const url = `${TRADE_HELPER}/v1/pool/fee?cluster=${PAGE_CLUSTER}&pool=${encodeURIComponent(pool)}&epoch=${epochStartMs}`;
-  const timeout = AbortSignal.timeout(FEE_TIMEOUT_MS);
-  const res = await fetchFn(url, { ...HELPER_FETCH_INIT, redirect: "error", method: "GET", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  const res = await askWhileBusy(() => {
+    const timeout = AbortSignal.timeout(FEE_TIMEOUT_MS);
+    return fetchFn(url, { ...HELPER_FETCH_INIT, redirect: "error", method: "GET", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  }, { signal, sleep });
   if (res.status !== 200) throw new Error(`pool fee: HTTP ${res.status}`);
   // the helper's fee answer is this small (its v1 table's limit for GET /v1/pool/fee)
   const FEE_ANSWER_MAX = HELPER_V1_PATHS.find((p) => p.method === "GET" && p.path === "/v1/pool/fee")!.limitBytes!;

@@ -18,6 +18,7 @@ import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
 import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, WITHDRAW_FEE_URL, WITHDRAW_URL, withdrawAnswerOf, WithdrawRelayRefused } from "../src/withdraw/relay.ts";
 import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "../src/withdraw/request.ts";
+import { BUSY_ASKS, BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
 import { argsFor, BLOCK_MS, closeVaults, FEE_MAX, type FeeEdit, feeReplay, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
 
 after(closeVaults);
@@ -73,13 +74,93 @@ test("the fee: every recorded bad answer is refused, and the amount bounds a goo
   assert.equal(over.relayFee, FEE_MAX + 1n);
   const v = await vaultWith();
   await assert.rejects(withdrawRequest(argsFor(v, signalsProver(), { relayFee: over.relayFee })), /fee_max/);
-  await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.busy))), (e: WithdrawRelayRefused) => e.code === "helper" && /upstream/.test(e.message));
+  const busySent: Sent[] = [];
+  await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.busy, busySent), { sleep: async () => {} })), (e: WithdrawRelayRefused) => e.code === "helper" && /upstream/.test(e.message));
+  assert.equal(busySent.length, BUSY_ASKS); // a busy answer is asked again, BUSY_ASKS asks at most (the busy tests below)
   // the amount, exactly at the fee, is refused; one above it takes the fee
   assert.equal((await askWithdrawFee(feeArgs(helper(() => A.fee.good), { amount: RELAY_FEE + 1n }))).relayFee, RELAY_FEE);
   await assert.rejects(askWithdrawFee(feeArgs(helper(() => A.fee.good), { amount: RELAY_FEE })), (e: WithdrawRelayRefused) => e.code === "fee");
   // an answer over the size limit is refused unread
   const big = { status: 200, body: { ...GOOD_FEE, px: `1.${"0".repeat(1_100)}` } };
   await assert.rejects(askWithdrawFee(feeArgs(helper(() => big))), WithdrawRelayRefused);
+});
+
+// ---------- the fee: a busy helper (card withdraw-fee-busy-waits) ----------
+// The mainnet run's fee ask met 429 rate_limited (helper log 9 Nov ~04:08Z) and the withdrawal stopped. A busy answer
+// (429 rate_limited, 503 upstream) is waited out for its Retry-After, capped, and asked again, bounded; any other refuses
+// at once.
+const RATE_LIMITED = { error: { code: "rate_limited" } };
+const UPSTREAM = { error: { code: "upstream" } };
+type Timed = Answer & { retryAfter?: string };
+function timedHelper(answers: readonly Timed[], sent: string[] = []): typeof fetch {
+  return (async (url: string | URL | Request) => {
+    sent.push(String(url));
+    const a = answers[Math.min(sent.length - 1, answers.length - 1)]!;
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (a.retryAfter !== undefined) headers["retry-after"] = a.retryAfter;
+    return new Response(JSON.stringify(a.body), { status: a.status, headers });
+  }) as typeof fetch;
+}
+const waits = (into: number[]) => async (ms: number) => void into.push(ms);
+
+test("the fee, busy: a 429 rate_limited with Retry-After 1, then a 200, gives the fee after a 1 s wait", async () => {
+  const sent: string[] = [];
+  const slept: number[] = [];
+  const fee = await askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "1" }, A.fee.good], sent), { sleep: waits(slept) }));
+  assert.equal(fee.relayFee, BigInt(GOOD_FEE.relay_fee));
+  assert.deepEqual(slept, [1_000]);
+  assert.equal(sent.length, 2);
+  // a 503 upstream with no Retry-After waits BUSY_WAIT_FIRST_MS, then asks again
+  const slept503: number[] = [];
+  assert.equal((await askWithdrawFee(feeArgs(timedHelper([{ status: 503, body: UPSTREAM }, A.fee.good]), { sleep: waits(slept503) }))).relayFee, BigInt(GOOD_FEE.relay_fee));
+  assert.deepEqual(slept503, [BUSY_WAIT_FIRST_MS]);
+});
+
+test("the fee, busy: a 429 that never clears ends, named rate_limited, after BUSY_ASKS asks within the bound", async () => {
+  const sent: string[] = [];
+  const slept: number[] = [];
+  await assert.rejects(
+    askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "75" }], sent), { sleep: waits(slept) })),
+    (e: WithdrawRelayRefused) => e.code === "helper" && /rate_limited/.test(e.message),
+  );
+  assert.equal(sent.length, BUSY_ASKS);
+  assert.equal(slept.length, BUSY_ASKS - 1);
+  assert.ok(slept.reduce((x, y) => x + y, 0) <= (BUSY_ASKS - 1) * BUSY_WAIT_MAX_MS);
+});
+
+test("the fee, busy: a 400, a 404 and a 429 or 503 not the helper's busy answer refuse at once, never asked again", async () => {
+  for (const a of [
+    { status: 400, body: { error: { code: "bad_shape" } }, retryAfter: "1" },
+    { status: 404, body: { error: { code: "not_found" } } },
+    { status: 429, body: { error: { code: "in_flight" } }, retryAfter: "1" },
+    { status: 503, body: { error: { code: "upstream" }, more: 1 }, retryAfter: "1" },
+    { status: 503, body: RATE_LIMITED, retryAfter: "1" },
+  ] as const) {
+    const sent: string[] = [];
+    const slept: number[] = [];
+    await assert.rejects(askWithdrawFee(feeArgs(timedHelper([a, A.fee.good], sent), { sleep: waits(slept) })), WithdrawRelayRefused, `HTTP ${a.status}`);
+    assert.equal(sent.length, 1, `HTTP ${a.status} ${JSON.stringify(a.body)}: one ask`);
+    assert.deepEqual(slept, []);
+  }
+});
+
+test("the fee, busy: a Retry-After over the cap waits only the cap", async () => {
+  for (const retryAfter of ["3600", "99999999999999999999999", new Date(Date.now() + 3_600_000).toUTCString()]) {
+    const slept: number[] = [];
+    const fee = await askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter }, A.fee.good]), { sleep: waits(slept) }));
+    assert.equal(fee.relayFee, BigInt(GOOD_FEE.relay_fee));
+    assert.deepEqual(slept, [BUSY_WAIT_MAX_MS], retryAfter);
+  }
+});
+
+test("the fee, busy: the caller's signal ends a wait at once", async () => {
+  const stop = new AbortController();
+  const sent: string[] = [];
+  const t0 = Date.now();
+  setTimeout(() => stop.abort(new Error("stopped")), 50);
+  await assert.rejects(askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "10" }], sent), { signal: stop.signal })), /stopped/);
+  assert.equal(sent.length, 1);
+  assert.ok(Date.now() - t0 < 2_000);
 });
 
 // ---------- the send's answers ----------
