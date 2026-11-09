@@ -91,15 +91,19 @@ export const BUSY_BACKOFF_MS = 500;
 export const BUSY_BACKOFF_CAP_MS = 8_000;
 export const BUSY_WAIT_MAX_MS = 60_000;
 /**
- * Each provider's pace, a token bucket per provider object (GCRA): `perSec` views a second, `burst` at once, each under
- * the release pair's free plans as read 9 Nov 01:27-01:38Z (the IdReader's three views of fresh random ids, one at a
- * time at a fixed pace, 20 s apart between phases): FastNEAR answered 136 of 136 at 1.5 a second over 90 s, 109 of 121
- * at 2 a second (its first 429 at view 96, so about 1.8 a second holds), none at 3 a second, and 11 flat out after a
- * 20 s rest before its first 429. dRPC answered 181 of 181 at 3 a second, 151 of 151 asked at 5 a second (3.8 a second
- * answered, p50 253 ms) and 300 of 300 flat out, with no 429. A 429 that still comes is waited out as above, and holds
- * that provider's bucket.
+ * Each provider's pace, a token bucket per provider object (GCRA): `perSec` views a second, `burst` at once. FastNEAR's
+ * is its sustained rate, read 9 Nov 02:59-03:20Z (scratchpad wirp-probe sustain.mjs and hold.mjs: the IdReader's three
+ * views of fresh random ids, one at a time on the clock). Offered 2.5 a second for 360 s it answered 75 of the first 75,
+ * then about 1.6 a second for 90 s, then stopped answering at all for about 3 minutes (460 failed fetches, 32
+ * timeouts): 0.389 a second answered over the last 270 s. After a drain (its first 429 at view 101), held at 0.66 a
+ * second for 600 s it answered every view for 7 minutes, then 60 of 99 over the last 150 s (0.40 a second). So 0.39 a
+ * second is what it holds over time, and asking faster earns its block, which no wait outlasts. Its 429 carries
+ * access-control-allow-origin: * (read 03:20Z with the page's Origin), so the page sees the status and waits it out.
+ * dRPC answered 181 of 181 at 3 a second, 151 of 151 asked at 5 a second (3.8 a second answered, p50 253 ms) and 300 of
+ * 300 flat out, with no 429 (9 Nov 01:27-01:38Z). A 429 that still comes is waited out as above, and holds that
+ * provider's bucket.
  */
-export const PACE: Readonly<Record<"fastnear" | "drpc", { perSec: number; burst: number }>> = Object.freeze({ fastnear: Object.freeze({ perSec: 1.5, burst: 8 }), drpc: Object.freeze({ perSec: 3.5, burst: 10 }) });
+export const PACE: Readonly<Record<"fastnear" | "drpc", { perSec: number; burst: number }>> = Object.freeze({ fastnear: Object.freeze({ perSec: 0.39, burst: 8 }), drpc: Object.freeze({ perSec: 3.5, burst: 10 }) });
 const HALT = "FiatToken: paused";
 const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;

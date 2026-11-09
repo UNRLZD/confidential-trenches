@@ -225,7 +225,9 @@ test("retries: a view is retried with doubling backoff on its provider, then the
   const flaky = (p: Record<string, unknown>) => (p.method_name === "storage_balance_of" && n++ < 3 ? new Error("HTTP 429") : undefined);
   assert.equal(ID_READ_TRIES, 4);
   assert.equal(await nearIdReader("mainnet", [provider(FAST, empty, flaky), provider(DRPC, empty)], { first: () => 0, sleep })(U1), "unused");
-  assert.deepEqual(waits, [250, 500, 1000]);
+  // the backoff's waits, in order; any other is a pace slot (card wallet-id-reader-paced), no longer than FastNEAR's gap
+  assert.deepEqual(waits.slice(0, 3), [250, 500, 1000]);
+  assert.ok(waits.slice(3).every((w) => w <= 1000 / IDR.PACE.fastnear.perSec), `pace slots ${waits.slice(3).join(", ")}`);
   // FastNEAR down: dRPC reads the id, and an unused answer needs FastNEAR's, so the id's read fails
   const down = () => new Error("HTTP 503");
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, empty, down), provider(DRPC, empty)], { first: () => 0, sleep: noSleep })(U1), /rpc\.mainnet\.fastnear\.com: .*HTTP 503|HTTP 503/);
@@ -765,7 +767,8 @@ test("the busy waits are bounded: a provider busy for good fails its read after 
   const w = vclock();
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), () => http(429, 600_000)), provider(DRPC, W({}))], { first: () => 0, sleep: w.sleep, now: w.now })(U1), /busy past 60000 ms of waits/);
   // (the pace's own slots for the pass's reads aside: no wait near the Retry-After's)
-  assert.ok(w.now() < 10_000 && w.c.waits.every((x) => x < 60_000), `waited ${w.now()} ms on a Retry-After of 600 s`);
+  // (card wallet-id-reader-paced: the pace's slots at 0.39 a second add up to more, each a few seconds at most)
+  assert.ok(w.now() < 60_000 && w.c.waits.every((x) => x < 10_000), `waited ${w.now()} ms on a Retry-After of 600 s: ${w.c.waits.join(", ")}`);
   const x = vclock();
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), () => FAST_429), provider(DRPC, W({}))], { first: () => 0, sleep: x.sleep, now: x.now, busyMaxMs: 5_000 })(U1), /busy past 5000 ms of waits/);
   assert.equal(IDR.BUSY_WAIT_MAX_MS, 60_000);
@@ -867,4 +870,47 @@ test("a Retry goes on where the last run stopped: every id answered at the kept 
   assert.equal(keep.answers.size, 0);
   assert.deepEqual(shape(await restoreDepositIds(SEED, SCOPE, R, later.reader)), calm);
   assert.ok(asked.some((u) => kept.has(u)));
+});
+
+// virtual time for many waiters at once: each sleep resolves when the clock reaches its end, and the clock jumps to the
+// earliest pending end only once every promise has settled (a macrotask turn with nothing else to run)
+const vtime = () => {
+  let t = 0;
+  const due: { at: number; go: () => void }[] = [];
+  let turning = false;
+  const turn = (): void => {
+    if (turning) return;
+    turning = true;
+    setImmediate(() => {
+      turning = false;
+      if (due.length === 0) return;
+      due.sort((a, b) => a.at - b.at);
+      const at = due[0]!.at;
+      t = Math.max(t, at);
+      for (const d of due.splice(0, due.findIndex((x) => x.at > at) === -1 ? due.length : due.findIndex((x) => x.at > at))) d.go();
+      turn();
+    });
+  };
+  return { now: () => t, sleep: (ms: number): Promise<void> => new Promise<void>((go) => (due.push({ at: t + ms, go }), turn())) };
+};
+
+// FastNEAR's sustained rate, read 9 Nov 02:59-03:20Z (id-reader.ts PACE)
+const FASTNEAR_SUSTAINED = 0.39;
+// card wallet-id-reader-paced: FastNEAR's pace is its sustained rate (PACE's comment cites the 10-minute read), so a
+// restore's views on it, once its burst is spent, come exactly that far apart, never faster
+test("FastNEAR's views come at its measured sustained rate once its burst is spent", async () => {
+  const v = vtime();
+  const at: Record<string, number[]> = { [FAST]: [], [DRPC]: [] };
+  const timed = (rpc: NearRpc): NearRpc => ({ name: rpc.name, query: async (p, signal) => (at[rpc.name]!.push(v.now()), rpc.query(p, signal)) });
+  const rpcs = [timed(provider(FAST, W({}))), timed(provider(DRPC, W({})))] as const;
+  const o = { sleep: v.sleep, now: v.now, first: () => 0 };
+  const pass = await openRestorePass("mainnet", rpcs, o);
+  const read = await idReaderAt("mainnet", rpcs, pass, o);
+  for (let k = 0; k < 12; k++) assert.equal(await read(k.toString(16).padStart(2, "0").repeat(32)), "unused");
+  assert.equal(IDR.PACE.fastnear.perSec, FASTNEAR_SUSTAINED);
+  const gaps = (xs: number[]) => xs.slice(1).map((x, k) => x - xs[k]!);
+  // past the burst every FastNEAR view waits its full slot (FastNEAR is the slower of the two, so it is always asked)
+  const fast = gaps(at[FAST]!).slice(IDR.PACE.fastnear.burst);
+  assert.ok(fast.length >= 20, `${fast.length} paced FastNEAR views`);
+  for (const g of fast) assert.ok(Math.abs(g - 1000 / FASTNEAR_SUSTAINED) < 1e-6, `FastNEAR asked ${g} ms apart, not ${1000 / FASTNEAR_SUSTAINED}`);
 });
