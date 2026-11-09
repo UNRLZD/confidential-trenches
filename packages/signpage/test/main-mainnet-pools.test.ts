@@ -279,12 +279,13 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
 });
 
 test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
-  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN, MAINNET_TABLE } = await import("../src/pool-testnet.ts");
-  const { SOL_MAINNET_DEPLOY } = await import("../../wallet/src/pool/solana.ts");
+  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN, PAGE_TABLES } = await import("../src/pool-testnet.ts");
+  const { SOL_MAINNET_DEPLOY, SOL_POOL_TABLES } = await import("../../wallet/src/pool/solana.ts");
   assert.equal(PAGE_CLUSTER, "mainnet");
   assert.equal(PAGE_SOL_PIN, SOL_POOLS.mainnet, "the mainnet pin, never the devnet one");
   assert.ok(PAGE_SOL_PIN !== undefined && PAGE_SOL_PIN.program === SOL_MAINNET_DEPLOY.program, "the deploy record's program");
-  assert.equal(MAINNET_TABLE, SOL_MAINNET_DEPLOY.table, "pool.buy loads the deploy record's lookup table");
+  assert.equal(PAGE_TABLES, SOL_POOL_TABLES.mainnet, "pool.buy loads the mainnet tables by venue");
+  assert.equal(PAGE_TABLES["pump-curve"], SOL_MAINNET_DEPLOY.table, "the curve's is the deploy record's lookup table");
   // the pair: one read each, to two hosts
   const before = rentReads.length;
   const [a, b] = pageSolanaRpcs();

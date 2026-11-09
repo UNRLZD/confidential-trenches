@@ -22,10 +22,10 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
+const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -92,9 +92,10 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
   assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
 });
 
-test("the testnet build pins the devnet pool's lookup table, so its pool.buy runs (card signpage-pool-flow-run)", async () => {
-  // created by devnet tx 4M7F8EG1… for the pool 92YuYhb4…, read back the same on both devnet RPCs at finalized 7 Nov
-  assert.equal(DEVNET_TABLE, "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ");
+test("the testnet build pins the devnet pool's lookup tables by venue, so its pool.buy runs (cards signpage-pool-flow-run, sol-pool-venue-tables)", async () => {
+  // the wallet's SOL_POOL_TABLES.devnet: the curve's created by devnet tx 4M7F8EG1… for the pool 92YuYhb4…
+  assert.equal(PAGE_TABLES, SOL_POOL_TABLES.devnet);
+  assert.ok(PAGE_TABLES["pump-curve"] !== undefined);
   let opened = 0;
   const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }).flow;
   const r = poolKinds(testnetPoolDeps(flow))["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
@@ -480,14 +481,14 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
   const page = { store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) };
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const k = poolKinds(testnetPoolDeps(testnetPool(page, { table: base58.encode(new Uint8Array(32).fill(9)), rpcs: [offline("a"), offline("b")] }).flow));
+  const k = poolKinds(testnetPoolDeps(testnetPool(page, { tables: { "pump-curve": base58.encode(new Uint8Array(32).fill(9)) }, rpcs: [offline("a"), offline("b")] }).flow));
   const r = k["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the buy runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
   assert.equal(opened, 1);
   assert.deepEqual(reads, [], "no proof ready: no read");
-  const none = poolKinds(testnetPoolDeps(testnetPool(page, { table: null }).flow));
+  const none = poolKinds(testnetPoolDeps(testnetPool(page, { tables: {} }).flow));
   assert.deepEqual(none["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
   assert.equal(opened, 1, "no table: no store opened, no read");
 });

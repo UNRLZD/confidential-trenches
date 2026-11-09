@@ -133,7 +133,12 @@ type Plant = {
   /** RPC p's first this-many read-back reads (getTransaction at confirmed) answer this very transaction with an
    *  unreadable meta, then as `readBack` says */
   metaJunkReads?: number;
+  /** the host's tables by venue ({ "pump-curve": the fixture's table } when not given); OTHER_TABLE reads as a table */
+  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>>;
 };
+const OTHER_TABLE = base58.encode(new Uint8Array(32).fill(8));
+/** The fixture's table address (solana-pool-buy-fx.ts setup). */
+const s0 = { tableAddr: base58.encode(new Uint8Array(32).fill(9)) };
 
 /** The keys a v0 transaction's lookups load, as getTransaction's meta gives them (loadedAddresses): every lookup's
  *  writable indexes, then its readonly ones, read from the table's addresses. */
@@ -174,6 +179,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const txReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
+    [OTHER_TABLE]: { owner: ALT, data: s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
@@ -255,7 +261,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const rpcs = [rpc(0), rpc(1)] as const;
   const host: PoolBuyHost = {
     pin: PIN,
-    table: s.tableAddr,
+    tables: plant.tables ?? { "pump-curve": s.tableAddr },
     cluster: "mainnet",
     rpcs,
     ready: async () => (st === "HELD" ? readies[Math.min(readyCalls++, readies.length - 1)]! : []),
@@ -324,6 +330,32 @@ test("a buy: checked, signed by W in slot 1, taken before it leaves, read back o
   assert.ok(ed25519.verify(tx.subarray(65, 129), message, base58.decode(W.address)), "W's signature over the message");
   const m = solanaDecodeMessage(message);
   assert.equal(m.blockhash, BLOCKHASH);
+});
+
+// Card sol-pool-venue-tables: the page pins a table per venue and the build loads the buy's venue's own; a venue with no
+// pinned table is refused venue_not_pinned after the reads and before the pick, so no note is claimed, taken or signed
+test("a buy loads its venue's own pinned table, never another venue's", async () => {
+  const w = await world({ tables: { pumpswap: OTHER_TABLE, "pump-curve": s0.tableAddr } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  const m = solanaDecodeMessage(w.sentTx()!.subarray(129));
+  assert.deepEqual(m.lookups.map((l) => l.table), [s0.tableAddr], "the curve buy loads the curve's table only");
+});
+test("a venue with no pinned table is refused venue_not_pinned: read, never picked, taken, signed or sent", async () => {
+  const w = await world({ tables: { pumpswap: OTHER_TABLE } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "venue_not_pinned" });
+  assert.equal(w.state(), "HELD");
+  assert.equal(w.sentTx(), null);
+  assert.ok(!w.log.some((x) => x.startsWith("take:") || x === "seed" || x === "send"), w.log.join(","));
+  assert.ok(w.log.includes("0:getMultipleAccounts"), "the venue was read: the refusal names the venue the quote picked");
+  assert.equal(w.host.claimed?.size ?? 0, 0, "no note claimed");
+});
+test("no table pinned for any venue: refused not_allowed before any read", async () => {
+  const w = await world({ tables: {} });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" });
+  assert.ok(!w.log.some((x) => /^[01]:/.test(x)), w.log.join(","));
+  // an inherited venue key is no pin (a polluted prototype names none)
+  const v = await world({ tables: Object.create({ "pump-curve": s0.tableAddr }) });
+  assert.deepEqual(await runPoolBuy(v.host, ASK), { error: "not_allowed" });
 });
 
 // Card sol-w-sweep, delta review 7 of 08290868: the buy writes W's buy mint (and its token program, the venue's) before

@@ -17,7 +17,7 @@
 //   which frees its notes and zeroes its seed copy, and ends the prover's worker; a landing after it finds no seed.
 // - pool.buy (card signpage-pool-buy): src/pool-buy.ts on the queue's ready proofs, sent through the helper's POST
 //   /v1/pool/solana/send and settled through the wallet's solanaSettleSpent once it reads back. A tag 3 loads its
-//   accounts from the pin's lookup table (DEVNET_TABLE, card signpage-pool-flow-run). Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
+//   accounts from its venue's pinned lookup table (PAGE_TABLES, the wallet's SOL_POOL_TABLES; card sol-pool-venue-tables). Each state read also settles the pool's RESERVED notes (solanaSettleReserved:
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
 //   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
@@ -30,7 +30,7 @@
 //   (pool-sell.ts settlePoolSells), writing its record's stage.
 // - On the page's own network (card signpage-pool-mainnet): main.ts builds this on every build. Nothing differs between
 //   SIGN_HOST's build and the testnet build but what the network pins and reads: the Solana pool's pin (SOL_POOLS.mainnet
-//   or .devnet), its lookup table (MAINNET_TABLE or DEVNET_TABLE), the Solana pair (SIGN_HOST's provider A and the
+//   or .devnet), its lookup tables by venue (PAGE_TABLES), the Solana pair (SIGN_HOST's provider A and the
 //   helper's keyed route, main.ts's pair for every Solana read, or the two devnet RPCs), the fee route's cluster, the EVM
 //   pins' networks, and where a sell reads its Ws' holdings (mainnet: the helper's keyed route, never a public RPC
 //   naming W; the testnet choice above). With no pin on the page's network, every pool kind is refused not_allowed and
@@ -48,7 +48,7 @@ import { openProofQueue, type ProofQueue, type QueuePass } from "../../wallet/sr
 import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./pool-deposit.ts";
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
-import { SOL_MAINNET_DEPLOY, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
+import { SOL_POOL_TABLES, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
@@ -281,8 +281,8 @@ export type TestnetOver = {
   lister?: SolanaRpc;
   fetch?: typeof fetch;
   hardwareConcurrency?: number;
-  /** The lookup table pool.buy loads (the network's, PAGE_TABLE, otherwise). */
-  table?: string | null;
+  /** The lookup tables pool.buy loads, by venue (the network's, PAGE_TABLES, otherwise). */
+  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>>;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
   /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool. */
@@ -304,16 +304,9 @@ export type TestnetOver = {
   tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
 };
 
-/** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
- *  its pages to entry 2,047, the token programs, wSOL and the pump curve venue's program-wide accounts, created by devnet
- *  tx 4M7F8EG164qLBH4Noecx6TW22Tak9nH9oVhFeLidfbgf7W7BNfYtvULwCYRm8SzcgyaLWkDrYRvLCxGA7iszjFe8 for the pool 92YuYhb4… and read back the same on
- *  both devnet RPCs (scripts/live-checks/signpage-pool-flow.mjs reads it after every deploy). */
-export const DEVNET_TABLE: string | null = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
-/** The mainnet pool's lookup table: the wallet's SOL_MAINNET_DEPLOY.table (card pool-sol-deploy-mainnet's record,
- *  frozen with no authority; card sol-pools-mainnet-pin wires it here beside SOL_POOLS.mainnet, the pin it serves). */
-export const MAINNET_TABLE: string | null = POOL_TESTNET ? null : SOL_MAINNET_DEPLOY.table;
-/** The page network's lookup table. */
-const PAGE_TABLE: string | null = POOL_TESTNET ? DEVNET_TABLE : MAINNET_TABLE;
+/** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads its
+ *  venue's own, and a venue with none is refused venue_not_pinned (card sol-pool-venue-tables). */
+export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>> = SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {};
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
  *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
  *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers once both RPCs read its transaction back, or at its
@@ -584,7 +577,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await Promise.all((await evmOpen()).map(settleEvm));
   };
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
-  const table = over.table === undefined ? PAGE_TABLE : over.table;
+  const tables = over.tables === undefined ? PAGE_TABLES : over.tables;
   const claimed = new Set<string>();
   const buyHost = (): PoolBuyHost & { end(): void } => {
     let notes: NoteStore | null = null;
@@ -600,7 +593,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
     return {
       pin: pin!,
-      table,
+      tables,
       cluster: PAGE_CLUSTER,
       rpcs: rpcs(),
       claimed,
@@ -1025,7 +1018,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"
           ? deposit(ask, ctx)
-          : ask.kind === "pool.buy" && table !== null
+          : ask.kind === "pool.buy" && Object.keys(tables).length > 0
             ? buy(ask, ctx)
             : ask.kind === "pool.sell"
               ? sell(ask, ctx)

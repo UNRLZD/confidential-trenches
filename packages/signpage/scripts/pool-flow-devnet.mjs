@@ -3,7 +3,7 @@
 // testnet build) on the devnet pool it pins: one pool.deposit of 0.01 SOL, the proof queue's pass, one pool.buy of a
 // devnet pump.fun coin sent through the helper's POST /v1/pool/solana/send, then one pool.sell of all W holds of it,
 // back into the pool as a return note.
-//   node packages/signpage/scripts/pool-flow-devnet.mjs <table> <mint> <spend SOL | max> <out.json>
+//   node packages/signpage/scripts/pool-flow-devnet.mjs <tables> <mint> <spend SOL | max> <out.json>
 // - <spend> "max": the most the ready proof can spend on the coin's own venue (the kit's solanaPoolBuyMaxSpend on the
 //   venue readSolanaPoolBuyVenue reads, the rung's chunk, the relay fee the helper gave the proof's pass, the devnet tip
 //   of 0), so the buy leaves W exactly what its sell needs up front (the review of signpage-pool-sell 4b6223a), and
@@ -13,8 +13,8 @@
 //   lamports it needs (the rung, the mark's rent, two page entries and the fee, from the Rent sysvar both RPCs give), then
 //   waits for U to hold exactly that, or that plus at least an empty account's rent. Someone else funds U.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process, the one
-//   the prover worker makes (the setup files checked by sha256 against ZK_SETUP_FILES); <table> is the lookup table
-//   (DEVNET_TABLE once pinned); the RPCs are the page's own (src/page-rpc.ts: its bounded retry of a 429, a 5xx,
+//   the prover worker makes (the setup files checked by sha256 against ZK_SETUP_FILES); <tables> are the lookup tables
+//   by venue: "pinned" (the testnet build's own, PAGE_TABLES) or venue=address pairs, comma-separated; the RPCs are the page's own (src/page-rpc.ts: its bounded retry of a 429, a 5xx,
 //   -32029/-32429, a non-JSON answer or a stall is the page's, never this script's), each answer of 429 or 5xx logged,
 //   and a call that still fails logged with its named fault; the helper's answers are logged by status. Every check,
 //   the send and every read-back are the page's own code.
@@ -68,12 +68,18 @@ const { refKey } = await import("../../wallet/src/notes/store.ts");
 const { readSolanaRent, solanaRentMin, readSolanaPoolBuyVenue, solanaPoolBuyMaxSpend, solanaPoolBuySellNeed } = await import("../../kit/src/trade/solana/pool-buy.ts");
 const { ZK_SETUP_FILES } = await import("../../kit/src/zk/setup-files.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc, PAGE_TABLES } = await import("../src/pool-testnet.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
 
 const [TABLE, MINT, SPEND, OUT] = process.argv.slice(2);
-if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <table> <mint> <spend SOL> <out.json>");
+if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <pinned | venue=table,...> <mint> <spend SOL> <out.json>");
+// the tables by venue: the build's pinned ones, or the pairs given (a table not pinned yet, before its pin commit)
+const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntries(TABLE.split(",").map((x) => {
+  const [v, a] = x.split("=");
+  if ((v !== "pump-curve" && v !== "pumpswap") || !a) throw new Error(`not a venue=table pair: ${x}`);
+  return [v, a];
+})));
 const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
@@ -210,7 +216,7 @@ const helperFetch = async (url, init) => {
   if (new URL(url).pathname === "/v1/pool/fee" && r.status === 200) relayFee = BigInt(JSON.parse(await r.clone().text()).fee);
   return r;
 };
-const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, table: TABLE, fetch: helperFetch });
+const t = testnetPool(page, { rpcs, prover: { vault, stop: () => {} }, tables: TABLES, fetch: helperFetch });
 const kinds = poolKinds({ ...testnetPoolDeps(t.flow), rpcs: (c) => (c === "solana" ? rpcs : testnetPoolDeps().rpcs(c)) });
 const ctx = (id) => ({ id, sha: "00", progress: (s) => log(`${id} progress ${JSON.stringify(s)}`) });
 // a kind answers at its send and its run goes on (the app learns the end from its state reads): each run holds the seed's
@@ -336,7 +342,7 @@ if (RESUME) {
   deposit = { resumed: RESUME, notes: await noteList() };
   log(`resumed from the seed file: ${JSON.stringify(deposit.notes)}`);
 } else {
-  log(`pool ${pool}; table ${TABLE}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
+  log(`pool ${pool}; tables ${JSON.stringify(TABLES)}; fund U ${U} with exactly ${NEED} lamports (or at least ${NEED + EMPTY}) on devnet`);
   for (let b = await balance(); !(b === NEED || b >= NEED + EMPTY); b = await balance()) {
     if (b > 0n) log(`U holds ${b}: waiting for exactly ${NEED} or at least ${NEED + EMPTY}`);
     await sleep(10_000);
@@ -480,7 +486,7 @@ const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent"
 const dusted = !DUST || (dust.sent && dust.burned?.amount === "1" && rentBack !== null && Object.entries(rentBack).every(([k, v]) => k === "W" || v === null));
 const filled = dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, table: TABLE, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

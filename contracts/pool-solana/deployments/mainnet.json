@@ -40,6 +40,48 @@
     "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
     "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
   ],
+  "tables": {
+    "pump-curve": {
+      "table": "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
+      "addresses": [
+        "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+        "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+        "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+        "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+        "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+        "11111111111111111111111111111111",
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "So11111111111111111111111111111111111111112",
+        "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+        "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+        "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+        "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+        "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+        "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+        "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+        "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+        "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+        "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+        "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+        "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+        "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+        "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+      ],
+      "txs": [
+        {
+          "step": "lookup table: create and extend with 25 addresses",
+          "signature": "23QX9RfcjLb271ZPWCStKA6mWoQA86o9HDSoKq727q8qRPpoKYnPiUotGJVQm4azQpBGqTayLB1UjhQpGREVzTEb"
+        },
+        {
+          "step": "lookup table: freeze (authority none)",
+          "signature": "2gwDsZqzGQnUsY5fDVujjcmgfdPzyaPKJRtVUSePTkJBkVHYNwQxau9c4vgvu8zwvL6SaXhwxFKFEacnBD1Qemp1"
+        }
+      ]
+    }
+  },
   "need": "449137520",
   "need_parts": {
     "program_account": "833120",

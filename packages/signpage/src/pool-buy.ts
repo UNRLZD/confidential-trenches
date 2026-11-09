@@ -14,13 +14,14 @@
 // - The venue and the quote, on two RPCs: the reference (the kit's readSolanaReference, for exactly the spend) names the
 //   venue that gives the most; readSolanaPoolBuyVenue reads it; min out is that venue's expected out less the ask's
 //   slippage. The blockhash is read on one RPC (its slot is the device's own slot for the quote's age) and must be valid
-//   on the other. The lookup table is the pin's, read on both.
+//   on the other. The lookup tables are the pin's, one per venue (card sol-pool-venue-tables), each read on both; the
+//   build loads the venue's own, and a venue with no pinned table is refused venue_not_pinned before anything is signed.
 // - Built by the kit (buildSolanaPoolBuy), checked by the rule (rules/pool.ts checkSolanaBuy: the request is the ask's,
 //   then every byte), signed by W only through signSolana (it signs nothing a check did not pass). W is derived here
 //   from the seed (freshWallet, l and j of the note) right before it signs, and must be the proof's recipient; its key
 //   and the seed are zeroed when the run ends.
 // - The order, so the quote is fresh when W signs (the check refuses a reference over 25 slots behind the device's own
-//   slot): the rent, the table, the trees' sizes and the root indexes of every ready proof first; then the reference,
+//   slot): the rent, the pinned tables, the trees' sizes and the root indexes of every ready proof first; then the reference,
 //   the venue and the blockhash (its slot); then the pick, from the ready proofs read again, filtered and claimed in one
 //   turn; then build, check and sign. A proof remade meanwhile onto a root not yet found runs the reads once more.
 // - The fee: the proof's relay fee cap must be at most the epoch fee the device works out from the Rent sysvar it read on
@@ -109,8 +110,9 @@ export type PoolBuyHost = {
   pin: SolanaPoolPin;
   /** Where the buy writes W's buy mint before its send (BuyMints); a write that fails sends nothing. */
   bought?: BuyMints;
-  /** The pin's lookup table (the address every tag 3 loads its accounts from); none pinned: refused not_allowed. */
-  table: string | null;
+  /** The pin's lookup table per venue (wallet SOL_POOL_TABLES: the address a tag 3 on that venue loads its accounts
+   *  from); none pinned: refused not_allowed; the buy's venue with none: refused venue_not_pinned before any signature. */
+  tables: Readonly<Partial<Record<SolanaPoolBuyVenue["kind"], string>>>;
   cluster: "mainnet" | "devnet";
   /** Two RPCs of different operators. */
   rpcs: readonly [SolanaRpc, SolanaRpc];
@@ -146,7 +148,7 @@ export type PoolBuyHost = {
   pick?: (n: number) => number;
 };
 
-export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down" };
+export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "failed" | "down" };
 
 /** The helper's busy answer to a send (its 429: rate_limited when a pool provider throttled a read, in_flight when this
  *  caller holds too many sends open, or its per-caller throttle), with the wait its Retry-After names. The send is
@@ -187,7 +189,7 @@ const POOL_DISC = /* @__PURE__ */ new TextEncoder().encode("bfpool01");
 const TREE_LEN = 8 + 1 + 33 * 32;
 const OFF_TREES = 49;
 
-type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "failed";
+type Code = "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "failed";
 class Refused extends Error {
   readonly code: Code;
   constructor(code: Code) {
@@ -300,6 +302,10 @@ export function releaseOf(r: ReadyProof<SolanaReleaseRequest>, pin: SolanaPoolPi
     salt: Uint8Array.from(q.salt.match(/../g)!.map((x) => parseInt(x, 16))),
   };
 }
+
+/** The pinned tables, venue and address, of the venues the kit builds. */
+const pinnedTables = (h: PoolBuyHost): (readonly [SolanaPoolBuyVenue["kind"], string])[] =>
+  (["pump-curve", "pumpswap"] as const).flatMap((v) => (Object.hasOwn(h.tables, v) && typeof h.tables[v] === "string" ? [[v, h.tables[v]!] as const] : []));
 
 /** The lookup table on both RPCs, the same bytes. */
 async function tableOf(h: PoolBuyHost, address: string): Promise<{ table: SolanaLookupTable; reads: Record<string, [{ owner: string; data: Uint8Array } | null, { owner: string; data: Uint8Array } | null]> }> {
@@ -438,7 +444,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     }
   };
   try {
-    if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || h.table === null) no("not_allowed");
+    const pinned = pinnedTables(h);
+    if (ask.kind !== "pool.buy" || ask.chain !== "solana" || ask.token === null || pinned.length === 0) no("not_allowed");
     const token = ask.token!;
     const pool = solanaPoolAccount(h.pin.program);
     const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
@@ -447,7 +454,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     // the reads that do not age, each on both RPCs
     const rent: SolanaRent = await readSolanaRent(h.rpcs);
     const feeCap = solanaPoolFee(rent);
-    const { table, reads: tables } = await tableOf(h, h.table!);
+    const tableReads = new Map(await Promise.all(pinned.map(async ([v, address]) => [v, { address, ...(await tableOf(h, address)) }] as const)));
     const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
@@ -469,6 +476,9 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
       const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
+      // the venue's own table: a venue the page pins none for is refused before the pick, so no note is claimed
+      const own = tableReads.get(venue.kind);
+      if (own === undefined) return no("venue_not_pinned");
       const bh = await blockhashOf(h.rpcs);
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
@@ -492,10 +502,10 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const cuPrice = budget < SOLANA_CU_PRICE_MAX ? budget : SOLANA_CU_PRICE_MAX;
       const req: SolanaPoolBuyRequest = { wallet: r.wallet.address, feePayer: h.pin.feePayer, token, spend: ask.amount, minOut, tip, cuPrice, cluster: h.cluster };
       const cfg = { program: h.pin.program, pool };
-      const built = buildSolanaPoolBuy(cfg, release, venue, req, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight, table: { address: h.table!, table }, stateSize: sizes.stateSize, rent }, h.pick ? { pick: h.pick } : {});
+      const built = buildSolanaPoolBuy(cfg, release, venue, req, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight, table: { address: own.address, table: own.table }, stateSize: sizes.stateSize, rent }, h.pick ? { pick: h.pick } : {});
       // the device's own fee cap: the epoch fee from the Rent sysvar it read, never the binding's word
       const ctx = { nowMs: h.now?.() ?? BigInt(Date.now()), wallet: r.wallet.address, feeCap, solana: h.pin };
-      checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
+      checkSolanaBuy(built.wire, ask, ctx, release, venue, req, { blockhash: bh.blockhash, slot: bh.slot, tables: own.reads, stateSize: sizes.stateSize, rent, reference: { amount: ask.amount, ref, slippageBps: ask.slippageBps } });
       // W, from the seed, right before it signs: it must be the proof's recipient the bytes were built and checked for
       signing = true;
       seed = await h.seed64();
