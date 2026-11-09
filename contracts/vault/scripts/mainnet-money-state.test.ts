@@ -583,7 +583,7 @@ test("LC: record reads a tx older than the release pair keeps on the money gate'
   assert.match(SRC, /async function landedOf\(network: Network,[\s\S]{0,300}mine\(await recordRead\(network, hash, signer\)\)/);
 });
 
-// R1: at 9 Nov 04:24Z archival-rpc.mainnet.near.org (FastNEAR's) answered the owner's Mac 429 with Retry-After 447,
+// R1: at 9 Nov 04:24Z archival-rpc.mainnet.near.org (FastNEAR's) answered the run's machine 429 with Retry-After 447,
 // after FastNEAR and dRPC had read the tx, and the record waited it out. T02's recorded reads, each mainnet host
 // answered by its testnet twin (a proof checks the chain its status names, so a proven read runs on the testnet list,
 // whose third host is FastNEAR's too); `limited` answers a host's n-th request 429 with that Retry-After (null: as recorded)
