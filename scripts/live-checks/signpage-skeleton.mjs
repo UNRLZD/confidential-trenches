@@ -34,7 +34,7 @@ const SOLANA = "https://solana-rpc.publicnode.com https://sender.helius-rpc.com 
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists
 const EVM = evmOrigins().join(" ");
 // the signing page's deep public pool sources the kit's venue origins (EVM above) leave out (card evm-pool-sync-holds:
-// the kit's EVM_POOL_HISTORY, which the page reads as MAINNET_POOL_HISTORY; Tenderly's and Sentio's are in EVM already);
+// the kit's EVM_POOL_HISTORY, which the page reads as MAINNET_POOL_HISTORY; Tenderly's is in EVM already);
 // signpage-skeleton.test.mjs holds this to exactly those origins
 export const POOL_HISTORY = "https://base.rpc.blxrbdn.com";
 

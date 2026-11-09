@@ -306,12 +306,13 @@ test("evm-pool-sync-holds: a keyed Base or Robinhood URL whose operator runs tha
   for (const [name, url, op] of [
     ["BASE_RPC_URL", `https://base.rpc.blxrbdn.com/${KEY}`, "blxrbdn.com"],
     ["BASE_RPC_URL_QUICKNODE", `https://base.gateway.tenderly.co/${KEY}`, "tenderly.co"],
-    ["BASE_RPC_URL_DRPC_1", `https://rpc.sentio.xyz/${KEY}/base`, "sentio.xyz"],
   ] as const) {
     const m = why({ [name]: url });
     assert.equal(m, `${name}: its operator ${op} runs the device's base pool history`, url);
     assert.ok(!m!.includes(url) && !m!.includes(KEY), `a URL or key in: ${m}`);
   }
+  // Sentio is in neither list (its 429 range cap reads as a throttle to the page's pager): its keyed URL passes
+  assert.equal(why({ BASE_RPC_URL_DRPC_1: `https://rpc.sentio.xyz/${KEY}/base` }), null);
   // a keyed URL that is not http(s) has no operator: refused the same way, naming the variable only
   for (const [name, url] of [["BASE_RPC_URL_DRPC_2", `ws://lb.drpc.live/base/${KEY}`], ["ROBINHOOD_RPC_URL_QUICKNODE", `not a url/${KEY}`]] as const) {
     const m = why({ [name]: url });

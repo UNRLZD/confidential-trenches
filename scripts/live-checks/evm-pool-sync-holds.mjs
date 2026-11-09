@@ -54,7 +54,6 @@ export const CHAINS = Object.freeze([
       { op: "helper", url: `${HELPER}/v1/rpc/base?keyed=only` },
       { op: "blxrbdn.com", url: "https://base.rpc.blxrbdn.com" },
       { op: "tenderly.co", url: "https://base.gateway.tenderly.co" },
-      { op: "sentio.xyz", url: "https://rpc.sentio.xyz/base" },
     ],
   },
   {

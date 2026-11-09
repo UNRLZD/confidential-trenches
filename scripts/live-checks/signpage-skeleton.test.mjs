@@ -96,7 +96,7 @@ test("recorded bad answer: the good build before card evm-pool-sync-holds (no Ba
 test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in the pinned connect-src, and POOL_HISTORY is exactly those the kit's venue origins leave out", async () => {
   const { EVM_POOL_HISTORY } = await import("../../packages/kit/src/index.ts");
   const history = [...new Set(Object.values(EVM_POOL_HISTORY).flat().map((u) => new URL(u).origin))];
-  assert.ok(history.length >= 3, `the kit's history origins: ${history.join(" ")}`);
+  assert.ok(history.length >= 2, `the kit's history origins: ${history.join(" ")}`);
   const pinned = CSP.find(([k]) => k === "connect-src")[1].split(" ");
   for (const o of history) assert.equal(pinned.filter((x) => x === o).length, 1, `${o} once in the pinned connect-src`);
   const venues = evmOrigins();

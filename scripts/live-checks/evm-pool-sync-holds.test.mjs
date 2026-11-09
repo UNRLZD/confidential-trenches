@@ -15,7 +15,7 @@ const run = (log, chains = A.good.chains) => check(replayer(log), chains);
 test("the good run is a run on both pools' sources as the signing page lists them, the helper's keyed-only route one of them", () => {
   assert.deepEqual(A.good.chains, JSON.parse(JSON.stringify(CHAINS)));
   for (const c of A.good.chains) assert.ok(c.sources.some((s) => s.op === "helper" && s.url.endsWith(`/v1/rpc/${c.name}?keyed=only`)));
-  assert.deepEqual(A.good.chains[0].sources.map((s) => s.url), ["https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", "https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co", "https://rpc.sentio.xyz/base"]);
+  assert.deepEqual(A.good.chains[0].sources.map((s) => s.url), ["https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", "https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]);
 });
 
 test("the recorded good run passes: each chain two operators or more reach the deploy block 7 days out, each source's floor and date named", async () => {
