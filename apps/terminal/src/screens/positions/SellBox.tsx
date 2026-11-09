@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { cents, units, usd } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
 import { busy } from "../trade/model.ts";
@@ -42,7 +43,8 @@ const Coins = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><ellipse cx="6.5" cy="5" rx="4.5" ry="2.5" /><path d="M2 5v3c0 1.4 2 2.5 4.5 2.5M11 5v1" /><ellipse cx="10" cy="10.5" rx="4" ry="2.2" /></svg>
 );
 
-export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void }) {
+/** `footer` draws inside the panel under the Route & fees line, as the buy side's does (the token page's safety grid). */
+export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode }) {
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview } | null>(null);
@@ -185,6 +187,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
           <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="sell-fee">{(shown ?? last) ? pct((shown ?? last)!.fee_bps) : "—"}</span></span>
         </div>
       </div>
+      {footer}
     </div>
   );
 }

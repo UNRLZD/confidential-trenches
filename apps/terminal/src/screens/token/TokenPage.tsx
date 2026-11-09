@@ -673,8 +673,8 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
             ))}
           </div>
           <div className="tkp-trade2">
-            <button type="button" className="tkp-sell" onClick={sheet.open}><W id="sell" /></button>
-            <button type="button" className="tkp-buy" onClick={sheet.open}><span className="tkp-buylbl" title={`${WORDS.buy.text} ${v.symbol}`}><W id="buy" /> {v.symbol}</span></button>
+            <button type="button" className="tkp-sell" onClick={() => { if (t.held) t.setSide("sell"); sheet.open(); }}><W id="sell" /></button>
+            <button type="button" className="tkp-buy" onClick={() => { t.setSide("buy"); sheet.open(); }}><span className="tkp-buylbl" title={`${WORDS.buy.text} ${v.symbol}`}><W id="buy" /> {v.symbol}</span></button>
           </div>
         </div>
       )}

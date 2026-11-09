@@ -291,6 +291,16 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
   return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now), pools: pools(s, offline) };
 }
 
+/** The open position the trade box's Sell side sells (card app-sell-mount): the row of `rows` on `chain` whose token is
+ *  `token`, holding more than nothing; null otherwise. Never another chain's row of the same address. An EVM address
+ *  matches in any case (its checksum is case alone) and a NEAR account id is lower case by rule; a Solana mint is
+ *  case-sensitive base58, so it matches exactly. */
+export function heldOf(rows: readonly Row[], chain: Chain, token: string): Row | null {
+  if (!token) return null;
+  const same = chain === "solana" ? (t: string) => t === token : (t: string) => t.toLowerCase() === token.toLowerCase();
+  return rows.find((r) => r.chain === chain && same(r.token) && /^[0-9.]+$/.test(r.units) && /[1-9]/.test(r.units)) ?? null;
+}
+
 /** The one balance the app draws: Portfolio's Cash (totals(); design-lock-r5 S10.3 shows Cash in the header), for the
  *  header, the deposit and withdraw screens and the restore screen alike, so no two of them ever differ; null before the
  *  first state. */

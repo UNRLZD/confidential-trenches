@@ -1,0 +1,92 @@
+{
+ "good": {
+  "check": "app-sell-mount",
+  "at": "2026-11-09T05:59:01.468Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-CtAPu9ie.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "token",
+    "sellOn": true,
+    "before": {
+     "state": "S8.29",
+     "held": "1K DJT held"
+    },
+    "asked": [
+     {
+      "type": "pool.sell",
+      "params": {
+       "chain": "solana",
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+       "amount": "250",
+       "slippage_bps": 1000
+      }
+     }
+    ],
+    "after": {
+     "state": "S8.32",
+     "held": "1K DJT held"
+    },
+    "shot": "desktop-sold.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "sellOn": null,
+    "before": {
+     "state": "S8.29",
+     "held": "1K DJT held"
+    },
+    "asked": [
+     {
+      "type": "pool.sell",
+      "params": {
+       "chain": "solana",
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+       "amount": "250",
+       "slippage_bps": 1000
+      }
+     }
+    ],
+    "after": {
+     "state": "S8.32",
+     "held": "1K DJT held"
+    },
+    "shot": "phone-sold.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "app-sell-mount",
+  "at": "2026-11-09T06:02:30.454Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-DQm2uIN5.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "token",
+    "sellOn": false,
+    "before": null,
+    "asked": [],
+    "after": null,
+    "shot": "desktop-sold.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "token",
+    "sellOn": null,
+    "before": null,
+    "asked": [],
+    "after": null,
+    "shot": "phone-sold.png"
+   }
+  ]
+ }
+}
