@@ -131,6 +131,7 @@ export const OUT = {
   "app-header-search-chain": "the helper's lists and token answers (its behaviour run is in test:e2e)",
   "app-token-route": "a browser and the helper",
   "app-chains-evm": "a browser and the helper",
+  "app-chains-evm-rail": "a browser and the helper",
   "app-trade-box-mount": "a browser",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",

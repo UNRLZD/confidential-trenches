@@ -9,6 +9,7 @@ import { Avatar } from "../market/Avatar.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
+import { usePick } from "../../shell/chain-pick.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeView, useTrade } from "../trade/TradeBox.tsx";
 import type { Trade } from "../trade/TradeBox.tsx";
@@ -724,7 +725,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 }
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
- *  not-found, with no read. / draws the top Trending token. */
+ *  not-found, with no read. / draws the top Trending token on the shell's chain filter. */
 export function TokenRoute() {
   const params = useParams();
   if (params.chain === undefined) return <TopToken />;
@@ -733,8 +734,14 @@ export function TokenRoute() {
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
+/** / on the shell's chain filter: a new pick draws that pick's top Trending token. */
 function TopToken() {
-  const { data, nowMs, retry } = useTopToken();
+  const pick = usePick();
+  return <TopTokenOn key={pick} pick={pick} />;
+}
+
+function TopTokenOn({ pick }: { pick: MarketChain | "all" }) {
+  const { data, nowMs, retry } = useTopToken(pick);
   return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }
 

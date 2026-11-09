@@ -1,9 +1,10 @@
 // Where the token page's data comes from. Two routes draw the page. /token/<chain>/<id> (card app-token-route) reads
 // GET /v1/market/token for that chain and id (the helper's apps/helper/src/data/solana/token.ts, 06b `TokenPage`) and
 // draws its `row`: an id the helper does not know (it answers 404) is the empty state, the page's not-found. / (card
-// app-no-test-token) draws the top of Discover's Trending column: one read of GET /v1/market/lists?chain=solana
-// (Discover's own read, ../discover/data.ts, shared with the rail's read in flight: rail.ts sharedLists), the first row of the Trending column as Discover orders it (columnRows),
-// then the same token read for that mint. Display only: nothing here feeds a signature. A failed or wrong read is the
+// app-no-test-token) draws the top of Discover's Trending column on the shell's chain filter (card app-chains-evm-rail):
+// one read of every chain's lists (Discover's own read, ../discover/data.ts sharedAllLists, shared with the rail's read
+// in flight), narrowed to the pick (pickSnapshot), the first row of the Trending column as Discover orders it
+// (columnRows), then the same token read for that token, on its own chain. Display only: nothing here feeds a signature. A failed or wrong read is the
 // error state, never another token; an empty column is the empty state. The page (TokenPage.tsx) takes `TokenData`.
 //
 // Card token-page-fills-after (M384): a cold page's row may be the helper's row named on chain (src "chain", helper
@@ -14,11 +15,11 @@
 // Jupiter's or the page closes.
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
-import type { MarketChain, MarketRow } from "../discover/fields.ts";
+import { pickSnapshot, sharedAllLists } from "../discover/data.ts";
+import type { MarketChain, MarketRow, MarketSnapshot } from "../discover/fields.ts";
 import { columnRows } from "../discover/model.ts";
 import type { RiskRead } from "../trade/safety.ts";
 import { chainNamed } from "./model.ts";
-import { sharedLists } from "./rail.ts";
 
 /** `risk` is the token read's own `risk` part, which the safety grid draws (what the row lacks: insiders, tax, LP, honeypot).
  *  `filling`: the helper says the row's Jupiter fields are still coming (true only when it sends `filling: true`). */
@@ -58,10 +59,11 @@ export async function loadToken(chain: MarketChain, id: string, fetchFn: typeof 
   }
 }
 
-/** The page's data: the top Trending token's row, the empty state when the column is empty, else the error state. */
-export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<TokenData> {
+/** The page's data: the top Trending token's row on the chain filter's pick (every chain, or one), the empty state when
+ *  that column is empty, else the error state. `read` is the lists read (every chain's, shared while in flight). */
+export async function loadTopToken(fetchFn: typeof fetch = fetch, pick: MarketChain | "all" = "all", read: (f: typeof fetch) => Promise<MarketSnapshot> = sharedAllLists): Promise<TokenData> {
   try {
-    const top = columnRows(await sharedLists(fetchFn), "trending")[0];
+    const top = columnRows(pickSnapshot(await read(fetchFn), pick), "trending")[0];
     if (!top) return { status: "empty" };
     return { status: "ready", ...(await readRow(top.chain, top.token, fetchFn)) };
   } catch {
@@ -144,8 +146,8 @@ function useLoaded(load: () => Promise<TokenData>): Loaded {
   return { data, nowMs, retry };
 }
 
-/** The data for /: the top Trending token. */
-export const useTopToken = (): Loaded => useLoaded(() => loadTopToken());
+/** The data for /: the top Trending token on the chain filter's pick. The caller keys the component by the pick. */
+export const useTopToken = (pick: MarketChain | "all"): Loaded => useLoaded(() => loadTopToken(fetch, pick));
 
 /** The data for /token/<chain>/<id>. */
 export const useToken = (chain: MarketChain, id: string): Loaded => useLoaded(() => loadToken(chain, id));
