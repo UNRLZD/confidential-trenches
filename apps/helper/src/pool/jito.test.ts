@@ -3,7 +3,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_JITO_TIP_MIN } from "@blindfill/kit";
-import { JITO_QUEUE_MAX_MS, JITO_TIMEOUT_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
+import { JITO_QUEUE_MAX_MS, JITO_TIMEOUT_MS, jitoSender as sender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
+
+// JITO_TEST_PAUSE_MS=5 (card helper-jito-pace-margin): every fetch stub here stalls that long, synchronously, before its
+// request is taken, so every timed test runs with a pause between a region's mark and its request.
+const PAUSE_MS = Number(process.env.JITO_TEST_PAUSE_MS ?? 0);
+const jitoSender: typeof sender = (o = {}) =>
+  sender(PAUSE_MS > 0 && o.fetch ? { ...o, fetch: (u, i) => { for (const until = performance.now() + PAUSE_MS; performance.now() < until; ); return o.fetch!(u, i); } } : o);
 
 const SIG = "5".repeat(88);
 const answer = (body: string, status = 200) => async () => new Response(body, { status });
@@ -253,4 +259,42 @@ test("G7: a late first send leaves the next booking in place", async () => {
   );
   assert.equal(probe, "busy", "the rebroadcast took b's booked second");
   assert.ok((await Promise.all([a, b])).every((x) => x.kind === "ok"));
+});
+
+// Card helper-jito-pace-margin: PR #531's run 42627030736 saw G5's sends 197.7 ms apart against intervalMs 200: a
+// region was marked before its fetch, so a pause between the mark and the request shortened the real gap. A fetch that
+// pauses 5 ms (a synchronous stall, as a busy runner) before its request goes, on one send of each pair: every gap a
+// region sees is still at least the interval, first sends and rebroadcasts alike.
+const pausing = (pauseOn: (n: number) => boolean) => {
+  const at: number[] = [];
+  let n = 0;
+  const fetch = async () => {
+    if (pauseOn(n++)) for (const until = performance.now() + 5; performance.now() < until; );
+    at.push(performance.now());
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG }));
+  };
+  return { at, fetch };
+};
+
+test("a 5 ms pause between a region's mark and its request never brings the next request inside the interval: first sends", async () => {
+  const e = pausing((n) => n % 2 === 0);
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], intervalMs: 200 });
+  const r = await Promise.all([0, 1, 2, 3].map(() => j.send("AA==", SIG)));
+  assert.ok(r.every((x) => x.kind === "ok"));
+  assert.equal(e.at.length, 4);
+  for (let k = 1; k < e.at.length; k++) assert.ok(e.at[k]! - e.at[k - 1]! >= 200, `sends ${k - 1} and ${k} went ${(e.at[k]! - e.at[k - 1]!).toFixed(1)} ms apart`);
+});
+
+test("a 5 ms pause between a region's mark and its request never brings the next request inside the interval: a rebroadcast after a first send", async () => {
+  const e = pausing((n) => n === 0);
+  const j = jitoSender({ fetch: e.fetch, regions: [R0], intervalMs: 200 });
+  assert.equal((await j.send("AA==", SIG)).kind, "ok");
+  // 197.5 ms after the first send's request (inside its interval, past a mark taken 5 ms before it), then every 1 ms
+  // until the region takes a rebroadcast
+  await new Promise((ok) => setTimeout(ok, Math.max(0, e.at[0]! + 190 - performance.now())));
+  for (const until = e.at[0]! + 197.5; performance.now() < until; );
+  let r = await j.rebroadcast(R0, "AA==", SIG);
+  while (r.kind === "busy") r = await new Promise<typeof r>((ok) => setTimeout(() => void j.rebroadcast(R0, "AA==", SIG).then(ok), 1));
+  assert.equal(r.kind, "ok");
+  assert.ok(e.at[1]! - e.at[0]! >= 200, `the rebroadcast went ${(e.at[1]! - e.at[0]!).toFixed(1)} ms after the first send`);
 });

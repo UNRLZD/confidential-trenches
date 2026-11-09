@@ -70,7 +70,6 @@ import {
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
-  SOLANA_KEYLESS_PATH_INTERVAL_MS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_POOL_SEND_MARGIN_MS,
   solanaPoolStepPrograms,
@@ -595,7 +594,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           through = [
             {
               name: "jito",
-              minIntervalMs: SOLANA_KEYLESS_PATH_INTERVAL_MS,
+              // the region's own pace (./jito.ts JITO_REGION_INTERVAL_MS): a tick sooner would only be refused unsent
+              minIntervalMs: jito.intervalMs,
               paceKey: region,
               send: async (b64) => {
                 const r = await jito.rebroadcast(region, b64, sig);
