@@ -37,7 +37,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
-import { watchErrors } from "./console-errors.mjs";
+import { isFooterUrl, watchErrors } from "./console-errors.mjs";
+import { confirmDown, downNote, footerEvidence, footerReadCap, isHeightRead, outages, readAnswered, readCap, releaseOrigins, verifyEvidence, watchPreflights } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-verify-mount";
@@ -76,20 +77,12 @@ export function pinsProblems(network, pins, record) {
 /** The footer's block read (card app-footer-bar, apps/terminal/src/shell/footer.ts): at the RPC's root with
  *  ?ct=footer, JSON-RPC id "ct-footer", `block` at finality final, naming no account. Not Verify's: it is left out of
  *  the panel's reads and its timing, and held to that exact form, on the named pair, in every phase. */
-const isFooterUrl = (u) => {
-  try {
-    const x = new URL(u);
-    return x.pathname === "/" && x.search === "?ct=footer";
-  } catch {
-    return false;
-  }
-};
 const isFooterRead = (x) => isFooterUrl(x.url) && x.rpcId === "ct-footer" && x.rpcMethod === "block" && x.rpcParams === JSON.stringify({ finality: "final" }) && x.account === null;
 const nearPosts = (reqs) => (reqs ?? []).filter((x) => x.method === "POST" && operatorOf(x.url) !== null && !isFooterUrl(x.url));
 const footerPosts = (reqs) => (reqs ?? []).filter((x) => x.method === "POST" && operatorOf(x.url) !== null && isFooterUrl(x.url));
 
 /** One drawn panel and the requests of that open, judged for a network with or without a vault named. */
-function judgePanel(say, n, p, reqs, rec, named) {
+function judgePanel(say, n, p, reqs, rec, named, conf = confirmDown([], [])) {
   const posts = nearPosts(reqs);
   if (!named) {
     const allWarn = CHECKS.every((c) => p.checks[c] === "warn") && Object.keys(p.checks).length === CHECKS.length;
@@ -97,15 +90,24 @@ function judgePanel(say, n, p, reqs, rec, named) {
     say(p.rpcs.length === 0 && posts.length === 0, `${n}: no vault named: the panel names ${p.rpcs.join(" and ") || "no RPC"}; ${posts.length} request(s) to a NEAR RPC${posts.length ? ` (${[...new Set(posts.map((x) => host(x.url)))].join(", ")})` : ""}`);
     return;
   }
-  const allOk = CHECKS.every((c) => p.checks[c] === "ok") && Object.keys(p.checks).length === CHECKS.length;
-  say(p.state === "read" && p.code === "ok" && p.funds === "ok" && allOk, `${n}: panel ${p.state}, code ${p.code}, funds ${p.funds}; checks ${CHECKS.map((c) => `${c} ${p.checks[c] ?? "none"}`).join(", ")}`);
+  // a NEAR RPC down that the page shows (rpc-outage.mjs: its failed load let through by amber Code and Funds rows) holds
+  // every check Unverified instead of ok, and only when this open's own recorded reads of it bear that out: one was
+  // failed (5xx, 429, or no answer with a failure text) and none answered 200, so every check its reads feed is amber. A
+  // failed load that no read of this open failed, a read that answered 200, any other warn, or a mix, fails as before
+  // (card app-shell-rpc-outage-judge)
+  const { all } = conf;
+  const nearDown = [...all].some((o) => (rec.rpcs ?? []).some((u) => originOf(u) === o));
+  const every = (v) => CHECKS.every((c) => p.checks[c] === v) && Object.keys(p.checks).length === CHECKS.length;
+  const allOk = nearDown ? every("warn") : every("ok");
+  say(p.state === "read" && p.code === (nearDown ? "warn" : "ok") && p.funds === (nearDown ? "warn" : "ok") && allOk, `${n}: panel ${p.state}, code ${p.code}, funds ${p.funds}; checks ${CHECKS.map((c) => `${c} ${p.checks[c] ?? "none"}`).join(", ")}`);
   const ops = p.rpcs.map(operatorOf);
   const nets = p.rpcs.map(networkOf);
   const two = p.rpcs.length === 2 && ops.every(Boolean) && ops[0] !== ops[1] && nets.every((x) => x === rec.network);
   say(two, `${n}: the panel names ${p.rpcs.join(" and ") || "no RPC"} (${ops.map((o) => o ?? "unknown").join(", ")}; ${nets.map((x) => x ?? "unknown").join(", ")}), want two operators on ${rec.network}`);
   const asked = p.rpcs.map((u) => {
     const q = posts.filter((x) => sameHost(x.url, u));
-    return { u, n: q.length, ok: q.length > 0 && q.every((x) => x.status === 200) };
+    // a read of an RPC the page shows down answers 5xx, 429 or nothing; a 4xx is no outage and fails
+    return { u, n: q.length, ok: q.length > 0 && q.every((x) => readAnswered(x) || conf.isDown(x)) };
   });
   const other = posts.filter((x) => !p.rpcs.some((u) => sameHost(x.url, u)) || networkOf(x.url) !== rec.network);
   say(asked.length === 2 && asked.every((a) => a.ok) && other.length === 0, `${n}: this page read ${asked.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ") || "no RPC"}${other.length ? `; and ${[...new Set(other.map((x) => host(x.url)))].join(", ")}, which the panel does not name or is not on ${rec.network}` : ""}`);
@@ -113,7 +115,8 @@ function judgePanel(say, n, p, reqs, rec, named) {
 }
 
 /** One open of the panel against the timing read in the frame: from loading, left only after every NEAR read it began answered. */
-function judgeTiming(say, n, r, k, since, rec, named) {
+function judgeTiming(say, n, r, k, since, rec, named, shown = new Set()) {
+  // `shown`: the origins this open's own reads bear out as down (confirmDown().some), whose reads need not have answered
   const tl = (r.timeline ?? []).filter((e) => e.open === k);
   const leave = tl.find((e) => e.state !== "loading");
   if (!tl.length || tl[0].state !== "loading" || !leave) {
@@ -122,9 +125,11 @@ function judgeTiming(say, n, r, k, since, rec, named) {
   }
   if (!named) return say(true, `${n}: from loading to ${leave.state}`);
   const began = (r.rpcTiming ?? []).filter((e) => operatorOf(e.name) !== null && !isFooterUrl(e.name) && e.start >= since && e.start < leave.t);
-  const pending = began.filter((e) => !(e.end > 0 && e.end <= leave.t));
   const rpcs = rec.rpcs ?? [];
-  const answered = rpcs.filter((u) => began.some((e) => sameHost(e.name, u) && e.end > 0 && e.end <= leave.t));
+  // a read of an RPC the page shows down need not have been answered
+  const unshown = (e) => !rpcs.some((u) => sameHost(e.name, u) && shown.has(originOf(u)));
+  const pending = began.filter((e) => !(e.end > 0 && e.end <= leave.t) && unshown(e));
+  const answered = rpcs.filter((u) => shown.has(originOf(u)) || began.some((e) => sameHost(e.name, u) && e.end > 0 && e.end <= leave.t));
   say(pending.length === 0 && answered.length === 2, `${n}: left loading for ${leave.state} at ${Math.round(leave.t - since)} ms, ${answered.length} of 2 RPCs answered by then, ${pending.length} NEAR read(s) of this open still unanswered`);
 }
 
@@ -138,15 +143,32 @@ function judgeAllRequests(say, n, r, rec, named) {
   const outside = posts.filter((x) => x.rpcId === "verify" && x.phase !== "open" && x.phase !== "reopen");
   const footer = footerPosts(r.requests);
   const footerBad = footer.filter((x) => !isFooterRead(x) || !(rec.rpcs ?? []).some((u) => sameHost(x.url, u)));
-  const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`), ...footerBad.map((x) => `a footer-tagged ${x.rpcMethod ?? "request"} to ${host(x.url)}${x.account ? ` naming ${x.account}` : ""} in ${x.phase}, not the footer's block read on the pair`)];
+  // the footer reads each RPC at most once at its mount and once per BLOCK_EVERY_MS (the load's clock, read last), so more
+  // than that of one origin is a leak of ours: the storm it draws is no RPC's outage (card app-shell-rpc-outage-judge)
+  // a run with no footer clock (no .ft drawn) allows no footer reads
+  const capped = Number.isFinite(r.dom?.footer?.ms) ? footerReadCap(r.dom.footer.ms) : 0;
+  const perOrigin = new Map();
+  for (const x of footer) perOrigin.set(originOf(x.url), (perOrigin.get(originOf(x.url)) ?? 0) + 1);
+  const leaks = [...perOrigin].filter(([, k]) => k > capped).map(([o, k]) => `${k} footer reads of ${host(o)}, the footer makes ${capped} in ${r.dom?.footer?.ms ?? "no clock"} ms`);
+  const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`), ...leaks, ...footerBad.map((x) => `a footer-tagged ${x.rpcMethod ?? "request"} to ${host(x.url)}${x.account ? ` naming ${x.account}` : ""} in ${x.phase}, not the footer's block read on the pair`)];
   say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${footer.length ? `; and ${footer.length} footer block read(s)` : ""}${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
 }
+
+const originOf = (u) => {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+};
 
 /** The check's error hooks on its page: every console error and page error of the terminal's frame (an APP_HOST
  *  address), and every one with no address, kept through the shared collector (console-errors.mjs) as its text and its
  *  address's origin and path (card live-pageerror-hooks). */
 export function watch(page, errors) {
-  watchErrors(page, errors, (url) => url.startsWith(APP_HOST));
+  // the terminal frame's, and the failed loads of the release's RPCs (their address is the RPC's), which outages() judges
+  const rpcs = releaseOrigins();
+  watchErrors(page, errors, (url) => url.startsWith(APP_HOST) || rpcs.has(originOf(url)));
 }
 
 export function judge(rec) {
@@ -164,16 +186,29 @@ export function judge(rec) {
       say(false, `${n}: no Verify panel in the terminal's frame (${r.frame ?? "no frame"})`);
       continue;
     }
-    judgePanel(say, n, r.panel, (r.requests ?? []).filter((x) => x.phase === "open"), rec, named);
-    judgeTiming(say, n, r, 0, 0, rec, named);
+    // what the page shows of a down RPC, from this run's console errors and the DOM (rpc-outage.mjs)
+    const { kept, down, verifyDown } = outages(r.errors ?? [], r.dom?.verify, rec.network, r.dom?.footer);
+    const shown = new Set(verifyDown);
+    const reads = (phase) => nearPosts((r.requests ?? []).filter((x) => x.phase === phase));
+    // what this open's own reads bear out: the reads that feed a check (not the height read), beside the preflights'
+    // statuses; the reads of every frame, the height read too, counted against the most one open makes
+    const confirm = (phase) =>
+      confirmDown(shown, reads(phase).filter((x) => !isHeightRead(x)), {
+        pre: r.preflights ?? [],
+        volume: [...reads(phase), ...(r.otherReads ?? []).filter((x) => x.phase === phase)],
+        cap: (o) => readCap(o, rec.network),
+      });
+    judgePanel(say, n, r.panel, (r.requests ?? []).filter((x) => x.phase === "open"), rec, named, confirm("open"));
+    judgeTiming(say, n, r, 0, 0, rec, named, confirm("open").some);
     judgeAllRequests(say, n, r, rec, named);
-    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
-    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error"}`);
+    // a down RPC the page shows is no error (rpc-outage.mjs, card app-shell-rpc-outage-judge): the same judgment as app-shell's
+    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept.map((e) => `console ${e}`)];
+    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error${downNote(down)}`}`);
     if (r.width !== "desktop") continue;
     const f = r.footer ?? {};
     say(f.opened === true && f.firstState === "loading" && f.newOpens === 1, `${n}: closed, then the footer's Verify pill ${f.opened ? `opens it again ${f.newOpens ?? 0} time(s), starting ${f.firstState ?? "nowhere"}` : "does not open it"}`);
-    if (f.panel) judgePanel(say, `${n} again`, f.panel, (r.requests ?? []).filter((x) => x.phase === "reopen"), rec, named);
-    if (f.panel) judgeTiming(say, `${n} again`, r, f.openIndex, f.clickAt ?? Infinity, rec, named);
+    if (f.panel) judgePanel(say, `${n} again`, f.panel, (r.requests ?? []).filter((x) => x.phase === "reopen"), rec, named, confirm("reopen"));
+    if (f.panel) judgeTiming(say, `${n} again`, r, f.openIndex, f.clickAt ?? Infinity, rec, named, confirm("reopen").some);
     else say(false, `${n} again: no panel read after the pill`);
     say(f.closedTo === "/", `${n}: close ${f.closedTo ? `returns to ${f.closedTo}` : "returns nowhere"}`);
   }
@@ -257,7 +292,16 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
     // the terminal frame's requests, each tagged with the open it belongs to: the first ("open"), the pill's ("reopen")
     let phase = "open";
     const byReq = new Map();
+    run.otherReads = [];
+    const rpcOrigins = releaseOrigins();
     page.on("request", (q) => {
+      // a read of a release RPC from any other frame (the signing page's own, say): not the panel's, but it counts against
+      // the most one open makes of that RPC, so a storm of ours is not taken for the RPC's outage
+      if (q.method() === "POST" && rpcOrigins.has(originOf(q.url())) && !(q.frame().url().startsWith(APP_HOST) && q.frame() !== page.mainFrame())) {
+        const e = { url: q.url(), method: q.method(), status: null, phase };
+        byReq.set(q, e);
+        run.otherReads.push(e);
+      }
       if (q.frame().url().startsWith(APP_HOST) && q.frame() !== page.mainFrame()) {
         const e = { url: q.url(), method: q.method(), type: q.resourceType(), status: null, phase };
         if (q.method() === "POST" && operatorOf(q.url()) !== null) {
@@ -280,12 +324,22 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
       const e = byReq.get(res.request());
       if (e) e.status = res.status();
     });
+    // a read that got no answer: the browser's own reason, which tells a refused or reset read from one the page aborted
+    page.on("requestfailed", (q) => {
+      const e = byReq.get(q);
+      if (e) e.failure = q.failure()?.errorText ?? "";
+    });
+    // every preflight, with the status the browser got: the only thing that tells an RPC refusing our origin (4xx) from one down
+    run.preflights = [];
+    watchPreflights(ctx, page, run.preflights);
     watch(page, run.errors);
     await page.goto(APP_HOST + PATH, { waitUntil: "commit" });
     const f = await appFrame(page);
     if (!f) return run;
     run.frame = f.url();
     run.panel = await readPanel(f);
+    // what the page shows of the RPCs it read, for judge()'s outages(): the panel's rows once its reads end, the footer
+    run.dom = { verify: await verifyEvidence(f), footer: await footerEvidence(f) };
     phase = "between";
     if (shots) await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}.png`) });
     if (w.name === "desktop") {
@@ -319,6 +373,9 @@ async function runOne({ browser, w, shots, route, beforeReopen, duringReopen }) 
       timeline: window.__ctVerifyTimeline ?? [],
       rpcTiming: performance.getEntriesByType("resource").filter((e) => e.initiatorType === "fetch").map((e) => ({ name: e.name, start: e.startTime, end: e.responseEnd })),
     })));
+    // the footer's clock for outages()'s read cap is read last, as the error list closes: a footer read after the first
+    // DOM read adds a console line, and the cap counts the time those lines had
+    run.dom.footer = await footerEvidence(f);
     return run;
   } finally {
     await ctx.close();

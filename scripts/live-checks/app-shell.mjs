@@ -5,7 +5,11 @@
 // (phone, dpr 2, touch) and 1440 x 900 (desktop, dpr 1) and reads:
 //   - the page is served under a CSP and an Integrity-Policy (app-host-gate's headers, app.md 2.3);
 //   - each load runs inside SIGN_HOST's shell (the top window on SIGN_HOST, the terminal in its frame);
-//   - no CSP violation and no console error on any load;
+//   - no CSP violation and no console error on any load, except an RPC outage the page shows (card
+//     app-shell-rpc-outage-judge): a failed load ("Failed to load resource: net::ERR_..." or a status of 5xx or 429) of an
+//     RPC origin the release names (VERIFY_RELEASES: the NEAR pair, each pool's pair) is no error when the same load's
+//     Verify panel shows that RPC's rows amber (Unverified), read from the DOM after the panel's reads end; every other
+//     console error, a failed load of any other origin, one the page shows ok or never drew, still fails;
 //   - every script tag carries an integrity equal to the sha384 of the bytes served, no script is inline, and every
 //     script an APP_HOST document loaded is one of those tags (the shell's own scripts are SIGN_HOST's to check);
 //   - each route draws its own screen (main[data-route]), not the fallback;
@@ -17,7 +21,7 @@
 // A screenshot of every load is kept at both widths.
 // After: app
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
-//   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] ...   the hosts' real names answered from local
+//   node scripts/live-checks/app-shell.mjs --harness [--build <dir>] [--outage footer|footer-pair|solana|base|robinhood] ...   the hosts' real names answered from local
 //     files by Playwright's route, as app-in-shell.mjs --harness does: APP_HOST the terminal's build (apps/terminal/dist
 //     or <dir>) under its own _headers, SIGN_HOST app-in-shell's stand-in shell
 //     PASS exit 0, FAIL exit 1, error exit 2
@@ -32,6 +36,9 @@ import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
+import { downNote, footerEvidence, outages, rpcRows, verifyEvidence, VERIFY_RELEASES } from "./rpc-outage.mjs";
+
+export { outages, rpcRows, verifyEvidence };
 
 const KEY = "app-shell";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -85,10 +92,11 @@ export function judge(rec) {
   say(loads.length === ROUTES.length * WIDTHS.length, `${loads.length} loads of ${ROUTES.length * WIDTHS.length} (every route at both widths)`);
   for (const l of loads) {
     const bad = [];
+    const errors = outages(l.consoleErrors, l.verify, rec.network, l.footer);
     if (l.framed !== true) bad.push(`not inside SIGN_HOST's shell (top window at ${l.top ?? "unknown"})`);
     if (l.route !== l.expect) bad.push(`drew ${l.route ?? "nothing"}`);
     if (l.violations.length) bad.push(`CSP violation: ${l.violations.map((v) => `${v.directive} ${v.blocked}`).join("; ")}`);
-    if (l.consoleErrors.length) bad.push(`console error: ${l.consoleErrors.join("; ")}`);
+    if (errors.kept.length) bad.push(`console error: ${errors.kept.join("; ")}`);
     // every load holds still at both widths (card app-shell-tabbar-cls: a phone tab bar drawn before the frame had its
     // size moved 0.0806 under the old 0.1 limit and passed)
     if (l.cls !== 0) bad.push(`CLS ${l.cls.toFixed(4)} above 0${shiftsOf(l.shifts)}`);
@@ -96,13 +104,14 @@ export function judge(rec) {
     if (l.smallText.length) bad.push(`text under 11 px: ${l.smallText.join(", ")}`);
     if (l.smallTaps.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
     if (!l.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${l.width} ${l.path} (${l.expect}): ${bad.length ? bad.join("; ") : `CLS ${l.cls.toFixed(4)}, no violation, no error`}`);
+    say(bad.length === 0, `${l.width} ${l.path} (${l.expect}): ${bad.length ? bad.join("; ") : `CLS ${l.cls.toFixed(4)}, no violation, no error${downNote(errors.down)}`}`);
   }
 
   const shells = rec.inShell ?? [];
   say(shells.length === WIDTHS.length, `the shell clicked through at ${shells.length} width(s) of ${WIDTHS.length}`);
   for (const s of shells) {
     const bad = [];
+    const errors = outages(s.consoleErrors, s.verify, rec.network, s.footer);
     if (s.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (s.cls !== 0) bad.push(`CLS ${s.cls.toFixed(4)} inside the shell${shiftsOf(s.shifts)}`);
     if (s.steps.length === 0) bad.push("no navigation link");
@@ -110,8 +119,8 @@ export function judge(rec) {
       if (st.reloaded) bad.push(`${st.href} reloaded the page`);
       if (st.route !== st.expect) bad.push(`${st.href} drew ${st.route ?? "nothing"}`);
     }
-    if (s.violations.length || s.consoleErrors.length) bad.push(`${s.violations.length} CSP violation(s), ${s.consoleErrors.length} console error(s)${s.consoleErrors.length ? `: ${s.consoleErrors.join("; ")}` : ""}`);
-    say(bad.length === 0, `${s.width} inside the shell, ${s.steps.length} link(s): ${bad.length ? bad.join("; ") : "CLS 0, no reload"}`);
+    if (s.violations.length || errors.kept.length) bad.push(`${s.violations.length} CSP violation(s), ${errors.kept.length} console error(s)${errors.kept.length ? `: ${errors.kept.join("; ")}` : ""}`);
+    say(bad.length === 0, `${s.width} inside the shell, ${s.steps.length} link(s): ${bad.length ? bad.join("; ") : `CLS 0, no reload${downNote(errors.down)}`}`);
   }
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -194,7 +203,7 @@ export function onConsole(consoleErrors) {
   return (m) => m.type() === "error" && originOf(m.location()?.url ?? "") !== SIGN_HOST && consoleErrors.push(consoleError(m));
 }
 
-function watch(page, origin) {
+export function watch(page, origin) {
   const consoleErrors = [];
   const loadedScripts = [];
   page.on("console", onConsole(consoleErrors));
@@ -219,7 +228,7 @@ async function terminalFrame(page, origin) {
 }
 
 /** The document a load is judged on: the terminal's frame inside the shell, or, when there is none, the top window. */
-async function open(page, url, origin) {
+export async function open(page, url, origin) {
   const resp = await page.goto(url, { waitUntil: "load" });
   const f = await terminalFrame(page, origin);
   if (f) await f.waitForLoadState("load").catch(() => {});
@@ -230,11 +239,11 @@ async function open(page, url, origin) {
 // `route`: the harness's answers for the hosts' real names (app-in-shell.mjs harnessRoute). `prepare(context)` runs on
 // each fresh browser context after it, before any page opens: the terminal's own browser test (test/bar10) answers the
 // helper there.
-export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null } = {}) {
+export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null, network = "mainnet" } = {}) {
   const origin = new URL(url).origin;
   mkdirSync(shots, { recursive: true });
   const browser = await launchBrowser("chromium");
-  const rec = { url: origin, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
+  const rec = { url: origin, network, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
   const seen = new Map();
   try {
     for (const w of WIDTHS) {
@@ -252,13 +261,16 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         }
         await doc.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(SETTLE_MS);
+        const verify = id === "verify" ? await verifyEvidence(doc) : null;
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
         const shot = `${w.name}-${id}.png`;
         await page.screenshot({ path: path.join(shots, shot) });
+        // the footer's clock for outages()'s read cap is read last, as the load's error list closes
+        const footer = await footerEvidence(doc);
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn
@@ -270,16 +282,19 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       const start = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       const hrefs = await doc.$$eval(w.nav, (as) => as.map((a) => a.getAttribute("href")));
       const steps = [];
+      let verify = null;
       // with no link drawn there is nothing to click; judge() reads the empty steps as a failure
       for (const href of hrefs.length ? [...hrefs.slice(1), hrefs[0]] : []) {
         await doc.click(`${w.nav.split(",").map((s) => `${s.trim()}[href="${href}"]`).join(", ")}`);
         await page.waitForTimeout(400);
+        // Verify's panel read from its DOM once its reads end, as on a load of its own
+        if (href === "/verify") verify = await verifyEvidence(doc);
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
         steps.push({ href, expect: ROUTES.find(([, p]) => p === href)?.[0] ?? null, route: m.route, reloaded: m.doc !== start.doc });
       }
       const end = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       await page.screenshot({ path: path.join(shots, `${w.name}-in-shell.png`) });
-      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls, shifts: end.shiftLog, violations: end.violations, consoleErrors: seenBy.consoleErrors });
+      rec.inShell.push({ width: w.name, framed, steps, cls: end.cls, shifts: end.shiftLog, violations: end.violations, consoleErrors: seenBy.consoleErrors, verify, footer: await footerEvidence(doc) });
       await ctx.close();
     }
   } finally {
@@ -295,6 +310,26 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
   return rec;
 }
 
+/** A real outage in the harness (the recorder's, card app-shell-rpc-outage-judge): the browser's own request answered 503
+ *  by the first RPC of a release pool's pair (`what` solana, base or robinhood: every request to it); by the first NEAR
+ *  RPC for the footer's block reads alone (`footer`: Verify's reads on it are answered, the footer's other RPC answers its
+ *  read, so the footer shows Stable while the page logs a failed load); or by both NEAR RPCs for the footer's block
+ *  reads alone (`footer-pair`: the footer shows Offline). Every other request goes to `base`, the harness's answers. The
+ *  origins come from the release, never typed. */
+export function withOutage(base, what, network = "mainnet") {
+  const release = VERIFY_RELEASES[network];
+  const footer = what === "footer" || what === "footer-pair";
+  const urls = footer ? (what === "footer" ? release?.rpcs?.slice(0, 1) : release?.rpcs) : release?.pools?.[what]?.rpcs?.slice(0, 1);
+  const origins = new Set((urls ?? []).map((u) => originOf(u)).filter(Boolean));
+  if (origins.size === 0) throw new Error(`--outage takes footer, footer-pair, solana, base or robinhood, naming an RPC on ${network}: ${what}`);
+  return async (route) => {
+    const u = new URL(route.request().url());
+    // the footer's block reads carry a ?ct= query (src/shell/footer.ts footerUrl); Verify's reads go to the bare address
+    if (!origins.has(u.origin) || (footer && !u.searchParams.has("ct"))) return base(route);
+    return route.fulfill({ status: 503, headers: { "content-type": "text/plain", "access-control-allow-origin": APP_HOST }, body: "Service Unavailable" });
+  };
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
@@ -304,7 +339,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const build = path.resolve(opt("--build", fileURLToPath(new URL("../../apps/terminal/dist", import.meta.url))));
       // the bytes served for a script are the build's own file at its path
       const fetchFn = async (u) => new Response(readFileSync(path.join(build, decodeURIComponent(new URL(u).pathname))));
-      rec = await collect({ shots: opt("--shots", undefined), fetchFn, route: await harnessRoute(build), source: `harness, ${named(build)}` });
+      const outage = opt("--outage", null);
+      const base = await harnessRoute(build);
+      rec = await collect({ shots: opt("--shots", undefined), fetchFn, route: outage ? withOutage(base, outage) : base, source: `harness, ${named(build)}${outage ? `, ${outage} RPC answering 503` : ""}` });
     } else rec = await collect({ url: opt("--url", APP_HOST), shots: opt("--shots", undefined) });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots

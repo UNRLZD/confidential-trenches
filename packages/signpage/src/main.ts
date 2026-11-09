@@ -151,6 +151,9 @@ const restore = !framed
         return s !== undefined;
       },
       written: () => void testnet?.proofs().catch(() => {}),
+      // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
+      // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts); no key, no words
+      ended: (stage, why) => void (stage === "stalled" && console.warn(`restore stalled: ${why.join("; ")}`)),
     })
   : null;
 // a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
@@ -226,7 +229,7 @@ else {
       deposit: (g, amount, signal) =>
         depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
       refund: poolRefundMover({
-        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair()),
+        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
         floor: async (g) => readSolanaPoolFloor(pair, program, g.u),
         priced: (g) => pricedFor(g.chain, g.origin),
         decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],

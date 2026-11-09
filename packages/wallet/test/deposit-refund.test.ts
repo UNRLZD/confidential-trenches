@@ -43,7 +43,7 @@ test("the payload is one spelling: the five keys in order, one transfer of one a
 });
 
 /** A run with stand-in checks: each step logged in order. */
-function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () => unknown; request?: (u: string, asset: string, amount: bigint, now: number) => import("@blindfill/kit").OneClickRequest; sent?: unknown[] } = {}) {
+function run(o: { quote?: () => unknown; held?: [bigint, bigint]; registered?: [boolean, boolean]; intent?: () => unknown; request?: (u: string, asset: string, amount: bigint, now: number) => import("@blindfill/kit").OneClickRequest; sent?: unknown[] } = {}) {
   const log: string[] = [];
   const check: RefundMoveCheck<{ q: true }, { i: true }> = {
     quote: (req) => (log.push(`check ${req.depositType}`), o.sent?.push(req), (o.quote?.() as { q: true }) ?? { q: true }),
@@ -54,7 +54,7 @@ function run(o: { quote?: () => unknown; held?: [bigint, bigint]; intent?: () =>
   const fetchFn = (async (url: string) => (log.push(url === DEPOSIT_QUOTE_URL ? "quote" : url === RELEASE_INTENTS_URL ? "send" : url), Response.json({}, { status: url === DEPOSIT_QUOTE_URL ? 201 : 200 }))) as typeof fetch;
   const held = o.held ?? [25_000_000n, 25_000_000n];
   const p = runRefundMove(
-    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0] }, { blockTimeNs: T + 5_000_000n, held: held[1] }], salt: "252812b3", priorMs: null, height: 223_478_949 },
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: held[0], registered: o.registered?.[0] ?? true }, { blockTimeNs: T + 5_000_000n, held: held[1], registered: o.registered?.[1] ?? true }], salt: "252812b3", priorMs: null, height: 223_478_949 },
     { check, fetchFn, now: () => NOW, openKey: async (fn) => (log.push("key"), fn(new Uint8Array(32))), record: async () => void log.push("record"), ...(o.request ? { request: o.request } : {}) },
   );
   return { p, log };
@@ -102,7 +102,7 @@ function relayRun(answer: () => Response, o: { probe?: boolean; probeAnswer?: ()
     return (log.push("send"), answer());
   }) as typeof fetch;
   const p = runRefundMove(
-    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n }, { blockTimeNs: T, held: 25_000_000n }], salt: "252812b3", priorMs: null, height: 223_478_949, probe: o.probe },
+    { u: U, asset: ASSET, reads: [{ blockTimeNs: T, held: 25_000_000n, registered: true }, { blockTimeNs: T, held: 25_000_000n, registered: true }], salt: "252812b3", priorMs: null, height: 223_478_949, probe: o.probe },
     { check, fetchFn, now: () => NOW, openKey: async (fn) => fn(new Uint8Array(32)), record: o.record ?? (async () => void log.push("record")) },
   );
   return { p, log };
@@ -171,4 +171,12 @@ test("card pool-deposit-follow: a pool refund's move asks the request it is give
   const v: { destinationAsset?: string }[] = [];
   await run({ sent: v }).p;
   assert.equal(v[0]!.destinationAsset, refundMoveRequest(U, ASSET, 1n, NOW).destinationAsset);
+});
+
+test("card intents-u-registered-first: U not registered on USDC on either RPC: refused unregistered, no quote asked, nothing signed or sent", async () => {
+  for (const registered of [[false, true], [true, false], [false, false]] as [boolean, boolean][]) {
+    const r = run({ registered });
+    assert.deepEqual(await r.p, { kind: "refused", why: "unregistered" }, String(registered));
+    assert.deepEqual(r.log, [], String(registered));
+  }
 });

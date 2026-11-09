@@ -74,8 +74,8 @@ const refundQuote = (o: Partial<OneClickRequest> = {}, role: OneTimeId["role"] =
 // ---------- the intent ----------
 const BLOCK_MS = NOW + 1_000;
 const reads = (o: Partial<IdIntentRead> = {}, o1: Partial<IdIntentRead> = {}): [IdIntentRead, IdIntentRead] => [
-  { blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY], ...o },
-  { blockTimeNs: BigInt(BLOCK_MS + 400) * 1_000_000n + 123n, held: AMOUNT, keys: [OWN_KEY], ...o1 },
+  { blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY], registered: true, ...o },
+  { blockTimeNs: BigInt(BLOCK_MS + 400) * 1_000_000n + 123n, held: AMOUNT, keys: [OWN_KEY], registered: true, ...o1 },
 ];
 const ictx = (o: Partial<IdIntentContext> = {}): IdIntentContext => ({ network: "mainnet", signer: signer(), reads: reads(), priorDeadline: null, ...o });
 const DEADLINE = new Date(BLOCK_MS + R.ID_INTENT_WINDOW_MS).toISOString();
@@ -518,7 +518,7 @@ test("id intent: it dies before the quote's deposit address does", () => {
   const quoteMs = Date.parse(q.deadline as string);
   const at = (blockMs: number) => {
     const d = new Date(blockMs + R.ID_INTENT_WINDOW_MS).toISOString();
-    const r: [IdIntentRead, IdIntentRead] = [{ blockTimeNs: BigInt(blockMs) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY] }, { blockTimeNs: BigInt(blockMs) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY] }];
+    const r: [IdIntentRead, IdIntentRead] = [{ blockTimeNs: BigInt(blockMs) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY], registered: true }, { blockTimeNs: BigInt(blockMs) * 1_000_000n, held: AMOUNT, keys: [OWN_KEY], registered: true }];
     return () => R.checkIdTransferIntent(transferPayload({}, { deadline: d, nonce: nonceOf(d) }), q, ictx({ reads: r }));
   };
   refused("deadline", at(quoteMs - R.ID_INTENT_WINDOW_MS + 1));
@@ -645,4 +645,30 @@ test("no rule reads a field from our servers: refund.ts imports no helper module
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../src/rules/refund.ts", import.meta.url), "utf8");
   assert.doesNotMatch(src, /apps\/helper|kit\/src\/helper|fetch\(|XMLHttpRequest|WebSocket/);
+});
+
+test("card intents-u-registered-first: every intent kind of a deposit id U is refused while storage_balance_of(U) on USDC reads null on either RPC, signed once both read it registered", () => {
+  const uw = { signer: signer("U"), reads: reads({ held: AMOUNT + 1n }, { held: AMOUNT + 1n }) };
+  const uwQuote = () => {
+    const req = withdrawReq();
+    return R.checkIdWithdrawQuote(req, answerTo(req), { network: "mainnet", signer: signer("U"), origin: NEAR_USDC, typed: TYPED_SOL, check: OPTS });
+  };
+  // each kind, from U, with the reads' registration as given: the refund move (and the pool refund carry, whose intent
+  // is this same refund-kind transfer), the withdraw to another chain, the ft_withdraw to a typed NEAR account
+  const kinds: [string, (o: Partial<IdIntentRead>, o1: Partial<IdIntentRead>) => unknown][] = [
+    ["refund move", (o, o1) => R.checkIdTransferIntent(transferPayload(), refundQuote(), ictx({ reads: reads(o, o1) }))],
+    ["withdraw to another chain", (o, o1) => R.checkIdTransferIntent(wPayload(), uwQuote(), ictx({ ...uw, reads: reads({ held: AMOUNT + 1n, ...o }, { held: AMOUNT + 1n, ...o1 }) }))],
+    ["ft_withdraw", (o, o1) => R.checkIdFtWithdrawIntent(ft(), "alice.near", { ...ictx({ ...uw, reads: reads({ held: AMOUNT + 1n, ...o }, { held: AMOUNT + 1n, ...o1 }) }), ft: ftReads() })],
+  ];
+  for (const [name, run] of kinds) {
+    refused("unregistered", () => run({ registered: false }, {}));
+    refused("unregistered", () => run({}, { registered: false }));
+    refused("unregistered", () => run({ registered: false }, { registered: false }));
+    // a read that is not a boolean (missing, or a server's string) is no registration
+    refused("unregistered", () => run({ registered: undefined as unknown as boolean }, {}));
+    refused("unregistered", () => run({}, { registered: "true" as unknown as boolean }));
+    assert.ok(run({}, {}), `${name}: signed once both RPCs read U registered`);
+  }
+  // R and V are not deposit ids: their intents do not wait on it
+  assert.equal(R.checkIdTransferIntent(transferPayload(), refundQuote({}, "V"), ictx({ signer: signer("V"), reads: reads({ registered: false }, { registered: false }) })).amount, AMOUNT);
 });

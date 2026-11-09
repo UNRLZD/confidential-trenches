@@ -62,7 +62,7 @@ import { base58, base64 } from "@scure/base";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { SOLANA_POOL_SPENT_MARK_LEN, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import { CHAINS, type Chain, freshWallet, type SecondId } from "../derive/index.ts";
-import { RESTORE_GAP, RESTORE_LANES, walkLane } from "../notes/restore.ts";
+import { RESTORE_GAP, RESTORE_LANES, type SeedUse, walkLane, withSeed } from "../notes/restore.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../notes/secrets.ts";
 import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../notes/store.ts";
 import { checkSolanaRpcs, type SolanaLagWait, solanaFinalTimes, solanaLagRetry, solanaPda, solanaPoolOf, solanaTreeSync } from "./solana.ts";
@@ -387,7 +387,7 @@ export function solanaMarksUnion(x: SolanaMarks, y: SolanaMarks): SolanaMarks {
  * Restore of the Solana pool from the 12 words, on two RPCs: the marks, then rounds of the pages and the marks again past
  * them until a read gives no new mark (header), then solanaRestore once on those marks and pages.
  */
-export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number; /** tests only */ lagWait?: SolanaLagWait }) {
+export async function solanaRestoreNotes(a: { /** the seed, or a SeedUse opened only for the walk's match, after every read */ seed64: Uint8Array | SeedUse; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; signal?: AbortSignal; gap?: number; /** tests only */ lagWait?: SolanaLagWait }) {
   const sync = solanaTreeSync(a.rpcs, a.program, a.lagWait);
   const scope = solanaPoolOf(a.program).scope;
   const first = await solanaMarks(a.rpcs, a.program, a.signal, undefined, a.lagWait);
@@ -405,7 +405,7 @@ export async function solanaRestoreNotes(a: { seed64: Uint8Array; program: strin
       // the pages hold exactly the marks' leaves (header): pages short of them, or past them, are refused on every device
       if (leaves.label.length !== marks.pre.size || leaves.state.length !== marks.pre.size + marks.spent.size)
         throw new Error(`restore: the pages hold ${leaves.state.length} state and ${leaves.label.length} label leaves for ${marks.pre.size} deposits and ${marks.spent.size} releases`);
-      return solanaRestore({ seed64: a.seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) });
+      return withSeed(a.seed64, (seed64) => solanaRestore({ seed64, program: a.program, scope, stateLeaves: leaves.state, labelLeaves: leaves.label, marks, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
     }
     marks = again;
   }

@@ -29,6 +29,12 @@
 //     less one base unit.
 //   A withdraw (both kinds) is signed only while the id's key list reads exactly its own key, or no account at all,
 //   on two RPCs (W:928).
+//   Every intent of a deposit id U (the refund move, the pool refund carry, a withdraw from inside intents.near of
+//   either kind) is signed only while storage_balance_of(U) on the network's USDC reads registered on both RPCs (card
+//   intents-u-registered-first): the registration is U's lasting public trace, which restore's storage rule reads as
+//   used whatever intents.near later deletes (a zero balance) or prunes (a nonce). The relayer registers U; a helper
+//   that skips it gets no signature, and until it lands the money stays under U inside intents.near, where restore
+//   reads it as money.
 // - W's return send: only from a W whose arm is the device's own withdrawal; one native send of exactly the quote's
 //   signed amount in to its signed deposit address, within W's balance less the fee, nothing else in the transaction
 //   (Solana: one System transfer, W the only signer; EVM: one type 2 send with no data).
@@ -306,6 +312,9 @@ export interface IdIntentRead {
   /** view_access_key_list(id): every public key ("ed25519:<base58>"), or "absent" when the id has no account. A
    *  withdraw needs it; the refund move does not (W:928). */
   keys?: readonly string[] | "absent";
+  /** storage_balance_of(id) on the network's USDC not null: the id registered on the token. Every intent of a U needs
+   *  it true on both RPCs (card intents-u-registered-first). */
+  registered: boolean;
 }
 
 export interface IdIntentContext {
@@ -354,6 +363,8 @@ function intentFrame(payload: string, ctx: IdIntentContext, s: Readonly<OneTimeI
   if (!Array.isArray(reads) || reads.length !== 2) return refuse("reads");
   for (const r of reads) if (!isObj(r) || typeof r.blockTimeNs !== "bigint" || r.blockTimeNs <= 0n || !isU(r.held)) return refuse("reads");
   const held = agreed([reads[0].held, reads[1].held], isU, "held");
+  // a deposit id's intent only once it is registered on the token on both RPCs: its lasting public trace for restore
+  if (s.role === "U" && (reads[0].registered !== true || reads[1].registered !== true)) return refuse("unregistered");
   const t0 = reads[0].blockTimeNs / 1_000_000n, t1 = reads[1].blockTimeNs / 1_000_000n;
   const lowMs = Number(t0 < t1 ? t0 : t1), highMs = Number(t0 < t1 ? t1 : t0);
 

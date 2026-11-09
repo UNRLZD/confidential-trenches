@@ -13,18 +13,32 @@
 //      refundTo the signer with refundType INTENTS, its deadline not passed;
 //   5. expired: the intent's deadline not ahead of the newer final block time of the two providers;
 //   6. sender_struck (403): three failed sends of this signer here, kept across a restart; signer_cap (429): it has had
-//      INTENTS_SENDS_MAX sends carried, landed or not (an id makes two or three moves), so a seen signer cannot
-//      spend the gas account's NEAR by sends that land;
+//      INTENTS_SENDS_MAX sends carried, landed or not (an id makes two or three moves), a receiver's registration (9b)
+//      counted as one, so a seen signer cannot spend the gas account's NEAR by sends that land;
 //   7. in_flight: the same intent (signer and nonce) while one send of it is out;
 //   8. simulation_refused: simulate_intents on both providers at one block, both ran it and their bytes agree;
-//   9. (ft_withdraw) the receiver's registration: storage_balance_of on both; null on both and the token the release's
+//   9. the signer's own registration on the release's USDC (card intents-u-registered-first): storage_balance_of(signer)
+//      on both; null gets one storage_deposit (registration_only, REGISTRATION_YOCTO) for the signer, sent before its
+//      intent and only once it ran, so every id leaves a lasting public trace on the token before its first intent
+//      (restore's storage rule reads that trace as used, whatever intents.near later deletes or prunes). A second
+//      intent of a registered signer sends none. The same registration also starts when a status answer first shows
+//      the signer money (registerSeen, from the proxy's status hook): the signing page signs no intent of U's until
+//      it reads U registered on two RPCs, so the device's first intent can only come after it;
+//  9b. (ft_withdraw) the receiver's registration: storage_balance_of on both; null on both and the token the release's
 //      USDC gets one storage_deposit (registration_only, REGISTRATION_YOCTO) per signer, sent before the intent and
-//      only once it ran; a second one, or another token, gets receiver_not_registered (409);
+//      only once it ran; a second one, or another token, gets receiver_not_registered (409). Each one signed takes a
+//      slot under INTENTS_SENDS_MAX and goes only while one is left for the intent (signer_cap). A receiver that is the
+//      signer itself on USDC is the signer's own registration (9);
 //  10. relayer_low (503): the gas account under INTENTS_FLOOR_YOCTO, 1 NEAR above the deposits' floor; then expired
 //      again, read after the registration (which can take until the deadline);
-//  11. the send: execute_intents with nothing attached. A send that fails on chain counts toward the signer's three, as
-//      does a registration that fails (registration_failed, no intent sent).
+//  11. the send: execute_intents with nothing attached. A send that fails on chain counts toward the signer's three; a
+//      registration that fails (registration_failed, no intent sent) never does: its receipt refunds the deposit, so it
+//      costs gas only, and USDC's pause refuses every storage_deposit (review F1). No registration goes while the token
+//      watch holds (in_flight, nothing sent): the hold is the relayer queue's guard, read right before the signing, and
+//      a registration's bytes are not sent again while it holds. An earlier registration whose final outcome did not
+//      run (one lookup's word) is freed and answers registration_failed, never paid again at once (P1 fold).
 // No prepay, and never token_halted: neither kind calls the token into the vault (H4.3 "No hold on a halt").
+import { randomUUID } from "node:crypto";
 import { HELPER_CODE_STATUS, type HelperIntentsCode, type HelperSignedIntent } from "@blindfill/kit";
 import { base58decode, RELAYER_FLOOR_YOCTO, type Relayer, type TxOutcome, type TxRef } from "../bind/send.ts";
 import { isAccountId } from "../withdraw/checks.ts";
@@ -45,7 +59,8 @@ export const REGISTRATION_YOCTO = 1_250_000_000_000_000_000_000n;
  */
 /**
  * The most sends this endpoint carries for one signer, landed or failed (review H1): an id makes two or three moves, so
- * four leave one spare. The fifth answers signer_cap (429), final for that signer here as sender_struck is.
+ * four leave one spare, which a receiver's registration (9b) takes when its withdrawal needs one. The fifth answers
+ * signer_cap (429), final for that signer here as sender_struck is.
  * signer_cap is the helper's own code until the kit lists it (HELPER_INTENTS_CODES and HELPER_CODE_STATUS in
  * packages/kit/src/helper/v1.ts are frozen with kit-v1: adding it there is a kit change with its own tag); the
  * device reads an unlisted code as a refusal and backs off, sending nothing.
@@ -75,6 +90,12 @@ export type IntentsDeps = {
   store: IntentsStore;
   reads: IntentsReads;
   relayer: Pick<Relayer, "send" | "resolve" | "balance">;
+  /**
+   * The token watch's hold at the higher final (status.ts tokenHeld of statusAt("higher")): true while USDC is halted
+   * or the watch is not caught up. USDC's storage_deposit refuses while paused (circlefin/stablecoin-near
+   * fiat_token.rs:839), so no registration is sent while it holds (review F1); a throw holds too.
+   */
+  held: () => Promise<boolean>;
   now?: () => number;
   resolveEveryMs?: number;
 };
@@ -149,9 +170,36 @@ export function intentOf(x: Parsed, vault: string): Transfer | Withdraw | null {
 
 export type IntentsCarry = {
   carry(body: unknown): Promise<IntentsAnswer>;
+  /**
+   * A status answer showed money to `signer` (records.ts onStatusAnswer saw it): its own registration on USDC, as 9
+   * sends it, so the device can sign its first intent. Nothing for a signer not seen, struck, or read registered; the
+   * answer's code, "registered" when nothing is left to do. Never throws.
+   */
+  registerSeen(signer: string): Promise<IntentsCode | "registered">;
+  /** One pass over the signers still owed their own registration (records.ts owing), each due one tried once. */
+  sweep(): Promise<void>;
+  /** Starts the sweep: one pass now, then one every SWEEP_MS; returns its stop. */
+  start(): () => void;
   /** Every send's background read done (a test's wait; a stop does not need it: the chain keeps the outcome). */
   idle(): Promise<void>;
 };
+
+/** How long a registration started by registerSeen is read (and resent) for: an id intent's own window (the signing
+ *  page's ID_INTENT_WINDOW_MS). One still unread after it stays pending under its transaction and is read first next time. */
+export const SEEN_REGISTER_MS = 120_000;
+/**
+ * A signer's own registration read ran, while its account does not read registered on both providers at their final
+ * block this long after: it never landed (a lookup takes one provider's word, review F4), and a new one may go. "Landed"
+ * is the two providers' storage read, never the outcome read alone.
+ */
+export const OWN_SETTLE_MS = 120_000;
+/**
+ * The registration sweep (review F2): every SWEEP_MS each signer still owed its own registration (records.ts owing) is
+ * tried again, on the helper's own pace and not the device's polls; a failed one waits SWEEP_MS doubled per failure, at
+ * most RETRY_MAX_MS (a registration that keeps failing, as for an account USDC blocklists, costs gas only that often).
+ */
+export const SWEEP_MS = 60_000;
+export const RETRY_MAX_MS = 24 * 3_600_000;
 
 /** A send's outcome: ran when every receipt ran. */
 const ran = (out: TxOutcome) => out.kind === "final" && out.receipts.length > 0 && out.receipts.every((r) => r.ok);
@@ -163,96 +211,367 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
   /** The intents out: "<signer>/<nonce>". Set and read with no await between. */
   const out = new Set<string>();
   const tasks = new Set<Promise<void>>();
-  /** The signers whose registration this process is sending now. A pending claim with no transaction that no send here
-   *  holds was never signed (the process stopped before): free again. */
+  /** The registrations this process is sending now ("<slot>/<signer>"). A pending claim with no transaction that no send
+   *  here holds was never signed (the process stopped before): free again. */
   const registering = new Set<string>();
+  /** The signers read or seen registered on USDC here: their own registration is never read again. */
+  const ownDone = new Set<string>();
   const strike = (signer: string) => {
     const rec = store.signer(signer);
     store.putSigner({ ...rec, failed: rec.failed + 1 });
   };
-  const unsend = (signer: string) => {
-    const rec = store.signer(signer);
-    store.putSigner({ ...rec, sent: Math.max(0, (rec.sent ?? 0) - 1) });
-  };
   const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms).unref?.());
+  /** The intent `i` is the one its signer's receiver registration reserved a slot for. */
+  const reservedFor = (rec: SignerRecord, i: Transfer | Withdraw) => {
+    const g = rec.registration;
+    return i.intent === "ft_withdraw" && i.token === usdc && g !== null && g.receiver === i.receiver_id && g.reserved === true;
+  };
+  /**
+   * Slots a stopped process left taken with nothing signed (review PROBE-5), given back, with no await: an intent's in
+   * `taking` that no send here holds (`out`), and a receiver's claim with no transaction that no registration here
+   * holds (`registering`). A live one always holds its key from the take to its signing.
+   */
+  const reclaim = (signer: string) => {
+    const r = store.signer(signer);
+    const stale = (r.taking ?? []).filter((n) => !out.has(`${signer}/${n}`));
+    const g = r.registration;
+    const claim = g !== null && g.state === "pending" && g.tx === null && !registering.has(`receiver/${signer}`);
+    if (stale.length === 0 && !claim) return;
+    const back = stale.length + (claim ? 1 + (g.reserved === true ? 1 : 0) : 0);
+    store.putSigner({ ...r, sent: Math.max(0, (r.sent ?? 0) - back), taking: (r.taking ?? []).filter((n) => !stale.includes(n)), registration: claim ? null : g });
+  };
+  /**
+   * The rule for every write after an await (delta review 3): it is a compare-and-set on the registration it judged.
+   * A registration's identity is its claim's id, written at the claim, or for a record written before ids its
+   * transaction's hash. `cas` reads the slot ("registration", the receiver's, or "own") with no await before the write
+   * and writes only while it still holds that identity; else it leaves the record alone and answers false. No write
+   * after an await sets `reserved` or a state from what it judged before: it keeps the current record's.
+   */
+  const idOf = (g: Registration | null | undefined): string | undefined => g?.id ?? g?.tx?.tx_hash;
+  const cas = (signer: string, slot: "registration" | "own", id: string | undefined, f: (g: Registration, r: SignerRecord) => SignerRecord): boolean => {
+    const r = store.signer(signer);
+    const g = r[slot] ?? null;
+    if (id === undefined || g === null || idOf(g) !== id) return false;
+    store.putSigner(f(g, r));
+    return true;
+  };
+  /**
+   * The receiver's registration `id` freed, when it is still the current one: `n` 2 gives back its own slot and the
+   * reserved one, 1 only the reserved one (its own was paid); a reservation an intent already spent is not given back.
+   */
+  const free = (signer: string, id: string | undefined, n: 1 | 2) =>
+    cas(signer, "registration", id, (g, r) => ({ ...r, sent: Math.max(0, (r.sent ?? 0) - ((n === 2 ? 1 : 0) + (g.reserved === true ? 1 : 0))), registration: null }));
+  /** U's own registration `id` freed, when it is still the current one. */
+  const freeOwn = (signer: string, id: string | undefined) => cas(signer, "own", id, (_g, r) => ({ ...r, own: null }));
 
-  /** Reads a send of ours until its outcome is known or `untilMs` passed (it can no longer land). */
-  const settle = async (tx: TxRef, first: TxOutcome, untilMs: number): Promise<TxOutcome> => {
+  /**
+   * Reads a send of ours until its outcome is known or `untilMs` passed (it can no longer land). `held`: a registration's
+   * bytes go out again only while the token watch does not hold (USDC paused refuses every storage_deposit).
+   */
+  const settle = async (tx: TxRef, first: TxOutcome, untilMs: number, held?: () => Promise<boolean>): Promise<TxOutcome> => {
     let o = first;
     while (o.kind === "unknown" && now() <= untilMs) {
       await sleep(every);
-      o = await relayer.resolve(tx, { resend: now() <= untilMs });
+      o = await relayer.resolve(tx, { resend: now() <= untilMs && !(held !== undefined && (await held())) });
     }
     return o;
   };
 
-  /** The receiver's registration, once per signer: null to go on, or the answer. */
-  const register = async (signer: string, w: Withdraw, untilMs: number): Promise<IntentsAnswer | null> => {
-    let st: "registered" | "none";
+  const codeOf = (a: IntentsAnswer): IntentsCode => ("error" in a.body ? a.body.error.code : "upstream");
+  /** The token watch's hold; a watch that throws holds. */
+  const holds = async (): Promise<boolean> => {
     try {
-      st = await reads.storage(w.token, w.receiver_id);
+      return await deps.held();
     } catch {
-      return no("upstream");
-    }
-    if (st === "registered") return null;
-    if (w.token !== usdc) return no("receiver_not_registered");
-    const used = (g: Registration | null) => g !== null && (g.receiver !== w.receiver_id || g.state === "landed");
-    const was = store.signer(signer).registration;
-    if (used(was)) return no("receiver_not_registered");
-    // an earlier registration of this receiver whose outcome was not read: read it before any new one
-    if (was !== null && was.tx !== null) {
-      const o = await relayer.resolve(was.tx, { resend: false });
-      if (o.kind === "unknown") return no("in_flight");
-      const r = store.signer(signer);
-      if (ran(o)) {
-        store.putSigner({ ...r, registration: { ...was, state: "landed" } });
-        return null;
-      }
-      store.putSigner({ ...r, registration: null, failed: r.failed + (o.kind === "final" ? 1 : 0) });
-    }
-    if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
-    // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
-    const rec: SignerRecord = store.signer(signer);
-    if (used(rec.registration)) return no("receiver_not_registered");
-    if (rec.registration !== null && (rec.registration.tx !== null || registering.has(signer))) return no("in_flight");
-    registering.add(signer);
-    try {
-      return await registerOnce(signer, w, untilMs, rec);
-    } finally {
-      registering.delete(signer);
+      return true;
     }
   };
 
-  const registerOnce = async (signer: string, w: Withdraw, untilMs: number, rec: SignerRecord): Promise<IntentsAnswer | null> => {
-    store.putSigner({ ...rec, registration: { receiver: w.receiver_id, state: "pending", tx: null } });
+  /**
+   * One storage_deposit (registration_only) of `account` on `token`, read until its outcome is known or `untilMs`.
+   * The token watch's hold is the relayer queue's guard, read right before the signing, so no await between the check
+   * and the send lets a hold start unseen; `held` true: nothing was signed. `live`, read in the same guard, is whether
+   * the caller's claim is still the current one: a claim another poll replaced meanwhile (its done() read the account
+   * registered) signs nothing (delta review 5, P3-1).
+   */
+  const sendRegistration = async (token: string, account: string, untilMs: number, onTx: (tx: TxRef) => void, live?: () => boolean): Promise<{ o: TxOutcome; tx: TxRef | undefined; held?: true }> => {
     const sentTx: TxRef[] = [];
     let o: TxOutcome;
     try {
       const a = await relayer.send(
-        { kind: "call", receiver: w.token, method: "storage_deposit", args: JSON.stringify({ account_id: w.receiver_id, registration_only: true }), gas: REGISTER_GAS, deposit: REGISTRATION_YOCTO },
-        async () => null,
+        { kind: "call", receiver: token, method: "storage_deposit", args: JSON.stringify({ account_id: account, registration_only: true }), gas: REGISTER_GAS, deposit: REGISTRATION_YOCTO },
+        async () => ((await holds()) || (live !== undefined && !live()) ? "in_flight" : null),
         (tx) => {
           sentTx.push(tx);
-          const r = store.signer(signer);
-          store.putSigner({ ...r, registration: { receiver: w.receiver_id, state: "pending", tx } });
+          onTx(tx);
         },
       );
-      o = a.kind === "guarded" ? { kind: "dropped", tx_hash: "", why: "guarded" } : a;
+      if (a.kind === "guarded") return { o: { kind: "dropped", tx_hash: "", why: "held" }, tx: undefined, held: true };
+      o = a;
     } catch {
       // a throw after the signing (its bytes written, then maybe broadcast) is read as an unknown outcome, never freed
       o = sentTx.length > 0 ? { kind: "unknown", tx_hash: sentTx[0]!.tx_hash, why: "the send threw after the signing" } : { kind: "dropped", tx_hash: "", why: "the send threw" };
     }
     const tx = sentTx[0];
-    if (tx !== undefined && o.kind === "unknown") o = await settle(tx, o, untilMs);
-    const r = store.signer(signer);
-    if (ran(o)) {
-      store.putSigner({ ...r, registration: { receiver: w.receiver_id, state: "landed", tx: tx ?? null } });
+    if (tx !== undefined && o.kind === "unknown") o = await settle(tx, o, untilMs, holds);
+    return { o, tx };
+  };
+
+  /**
+   * The receiver's registration (9b), once per signer: null to go on, or the answer. A failed one is free again and
+   * never counted toward the signer's strikes (its receipt refunds the deposit: it costs gas only; review F1).
+   * Slots (P1 fold): its claim takes two under INTENTS_SENDS_MAX, its own and one reserved for the intent it is paid
+   * for (`reserved`, spent by that intent at step 11), so no concurrent intent can take the intent's slot and no
+   * provider's answer can make the helper pay a signer's receivers without a bound. Nothing signed, or dropped (read on
+   * both providers: it never landed and cost nothing), gives both back; a final that did not run gives back the
+   * reserved one. A repeat on a receiver that was registered after all costs gas only: USDC's storage_deposit refunds
+   * the whole deposit to an account already registered (circlefin/stablecoin-near 80e2760c locks
+   * near-contract-standards 4.1.1, fungible_token/storage_impl.rs:52-56). Landed is a read on both providers (F4).
+   */
+  const register = async (signer: string, token: string, account: string, untilMs: number): Promise<IntentsAnswer | null> => {
+    let st: "registered" | "none";
+    try {
+      st = await reads.storage(token, account);
+    } catch {
+      return no("upstream");
+    }
+    if (st === "registered") {
+      // read and written with no await between: the current record is the one judged
+      const r = store.signer(signer);
+      const g = r.registration;
+      if (g !== null && g.receiver === account && g.tx !== null && g.state !== "landed") store.putSigner({ ...r, registration: { ...g, state: "landed" } });
       return null;
     }
-    if (o.kind === "unknown") return no("in_flight"); // kept pending under its transaction: no second one meanwhile
-    // failed or never landed: the registration is free again, and a failure on chain counts
-    store.putSigner({ ...r, registration: null, failed: r.failed + (o.kind === "final" ? 1 : 0) });
-    return no("registration_failed");
+    if (token !== usdc) return no("receiver_not_registered");
+    const used = (g: Registration | null) => g !== null && (g.receiver !== account || g.state === "landed");
+    const was = store.signer(signer).registration;
+    if (used(was)) return no("receiver_not_registered");
+    // an earlier registration of this receiver whose outcome was not read: read it before any new one, its same bytes
+    // sent again unless the token is held (delta review F3, as U's own below)
+    if (was !== null && was.tx !== null) {
+      // every write below is on `was` only, by its identity: another request may have freed it and claimed again
+      const id = idOf(was);
+      const o = await relayer.resolve(was.tx, { resend: !(await holds()) });
+      if (o.kind === "unknown") return no("in_flight");
+      if (ran(o)) {
+        // landed is a read on both providers (F4), read again now that it ran
+        let after: "registered" | "none" = "none";
+        try {
+          after = await reads.storage(token, account);
+        } catch {
+          return no("in_flight");
+        }
+        if (after === "registered") {
+          cas(signer, "registration", id, (g, r) => ({ ...r, registration: { ...g, state: "landed" } }));
+          return null;
+        }
+        // ran, yet the receiver reads unregistered on both: no landing; within the settle time it may still read
+        const at = was.at ?? now();
+        if (was.at === undefined) cas(signer, "registration", id, (g, r) => ({ ...r, registration: { ...g, at: g.at ?? at } }));
+        if (now() - at < OWN_SETTLE_MS) return no("in_flight");
+        // a failure is reported only by the request that freed the registration it judged (delta review 4, P2-1)
+        return free(signer, id, 1) ? no("registration_failed") : no("in_flight");
+      }
+      // a final that did not run is one lookup's word (a lying provider can call a landed one failed): freed, never
+      // paid again at once; the next request reads the receiver on both providers first. Dropped is read on both
+      // (its key's nonce at F): both slots back, and a new one may go now (the claim below reads the record again).
+      if (o.kind === "final") return free(signer, id, 1) ? no("registration_failed") : no("in_flight");
+      free(signer, id, 2);
+    }
+    // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
+    if (await holds()) return no("in_flight");
+    if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
+    // the claim, read again after the awaits and written before the send, so two requests never pay two registrations
+    const rec: SignerRecord = store.signer(signer);
+    if (used(rec.registration)) return no("receiver_not_registered");
+    const key = `receiver/${signer}`;
+    if (registering.has(key) || (rec.registration !== null && rec.registration.tx !== null)) return no("in_flight");
+    // its slot and the intent's, reserved together
+    if ((rec.sent ?? 0) + 2 > INTENTS_SENDS_MAX) return no("signer_cap");
+    registering.add(key);
+    try {
+      // the claim's identity: every later write is on this claim only, and keeps its current `reserved` and state
+      const claim = randomUUID();
+      store.putSigner({ ...rec, sent: (rec.sent ?? 0) + 2, registration: { id: claim, receiver: account, state: "pending", tx: null, reserved: true } });
+      const { o, tx, held } = await sendRegistration(token, account, untilMs, (t) => void cas(signer, "registration", claim, (g, r) => ({ ...r, registration: { ...g, tx: t } })));
+      if (held === true || tx === undefined || o.kind === "dropped") {
+        free(signer, claim, 2); // nothing signed, or it never landed: both slots back, no failure
+        return no(held === true ? "in_flight" : "upstream");
+      }
+      if (o.kind === "unknown") return no("in_flight"); // kept pending under its transaction: no second one meanwhile
+      // the reserved slot back; the paid one stays counted. Freed already by another request's read: its failure to report
+      if (!ran(o)) return free(signer, claim, 1) ? no("registration_failed") : no("in_flight");
+      // landed is a read: both providers at their final block (F4); until then pending under its transaction
+      cas(signer, "registration", claim, (g, r) => ({ ...r, registration: { ...g, at: g.at ?? now() } }));
+      let after: "registered" | "none" = "none";
+      try {
+        after = await reads.storage(token, account);
+      } catch {
+        // not read: in flight, read again next time
+      }
+      if (after !== "registered") return no("in_flight");
+      cas(signer, "registration", claim, (g, r) => ({ ...r, registration: { ...g, state: "landed" } }));
+      return null;
+    } finally {
+      registering.delete(key);
+    }
+  };
+
+  /**
+   * The signer's own registration on USDC (9): null once storage_balance_of(signer) reads registered on both providers
+   * at their final block, else the answer. A transaction of an earlier one decides only whether a new one may go:
+   * its same signed bytes go out again while the token is not held (they land at most once); unknown, or read ran less
+   * than OWN_SETTLE_MS ago, holds it (a restart never pays twice); failed or dropped frees it; ran but still unregistered
+   * on both after OWN_SETTLE_MS is registration_failed, so the next payment waits the backoff (ownStep). Nothing new is
+   * sent while the token watch holds; a failure is never counted toward the signer's strikes.
+   */
+  const registerOwn = async (signer: string, untilMs: number): Promise<IntentsAnswer | null> => {
+    let st: "registered" | "none";
+    try {
+      st = await reads.storage(usdc, signer);
+    } catch {
+      return no("upstream");
+    }
+    if (st === "registered") return null;
+    const key = `own/${signer}`;
+    const was = store.signer(signer).own ?? null;
+    // read registered by another poll since this one's storage read: done, and its record is never judged or freed
+    if (was?.read === true) return null;
+    if (was !== null && was.tx !== null) {
+      // the same signed bytes go out again unless the token is held (as the deposit carry, bind/send.ts): they land
+      // at most once, so a crash between the claim and the broadcast never leaves U unregistered (delta review F3).
+      // Every write below is on `was` only, by its identity.
+      const id = idOf(was);
+      const o = await relayer.resolve(was.tx, { resend: !(await holds()) });
+      if (o.kind === "unknown") return no("in_flight");
+      if (ran(o)) {
+        const at = was.at ?? now();
+        if (was.at === undefined) cas(signer, "own", id, (g, r) => ({ ...r, own: { ...g, state: "landed", at: g.at ?? at } }));
+        if (now() - at < OWN_SETTLE_MS) return no("in_flight");
+        // ran, yet U still reads unregistered on both providers past the settle time (its owner unregistered it, or a
+        // provider lags): a failure for the backoff, so the next payment waits its step (delta review F1). Reported only
+        // by the request that freed it, so one failure is one try (delta review 4, P2-1)
+        return freeOwn(signer, id) ? no("registration_failed") : no("in_flight");
+      }
+      const freed = freeOwn(signer, id);
+      // a final that did not run is one lookup's word (a lying provider can call a landed one failed): freed, never
+      // paid again at once; the next payment waits the backoff and goes only once both providers read U unregistered
+      // (the storage read above, next time). Dropped is read on both (its key's nonce at F), so a new one may go now.
+      if (o.kind === "final") return freed ? no("registration_failed") : no("in_flight");
+    }
+    // held: refused early, with no balance read and no relayer start; the queue's guard reads it again at the signing
+    if (await holds()) return no("in_flight");
+    if ((await relayer.balance()) < INTENTS_FLOOR_YOCTO + REGISTRATION_YOCTO) return no("relayer_low");
+    // the claim, read again after the awaits and written before the send: a U read registered meanwhile (another poll
+    // registered it end to end while this one waited) is done, never paid twice (review PROBE-1)
+    const rec = store.signer(signer);
+    if (ownDone.has(signer) || rec.own?.read === true) return null;
+    // the backoff read again at the claim: another poll's failure may have written it while this one waited (delta
+    // review 3, F3)
+    if ((store.owed(signer)?.next_ms ?? 0) > now()) return no("in_flight");
+    if (registering.has(key) || (rec.own != null && rec.own.tx !== null)) return no("in_flight");
+    registering.add(key);
+    try {
+      // the claim's identity: every later write is on this claim only
+      const claim = randomUUID();
+      store.putSigner({ ...rec, own: { id: claim, receiver: signer, state: "pending", tx: null } });
+      const { o, tx, held } = await sendRegistration(usdc, signer, untilMs, (t) => void cas(signer, "own", claim, (g, r) => ({ ...r, own: { ...g, tx: t } })), () => idOf(store.signer(signer).own) === claim);
+      if (held === true) {
+        freeOwn(signer, claim); // nothing signed: free, no backoff
+        return no("in_flight");
+      }
+      if (o.kind === "unknown") return no("in_flight"); // kept pending under its transaction
+      if (tx === undefined || o.kind === "dropped") {
+        // nothing signed (the relayer refused before its signing), or dropped (read on both providers: it never landed
+        // and cost nothing): free, and no failure for the backoff (review PROBE-2)
+        freeOwn(signer, claim);
+        return no("upstream");
+      }
+      if (!ran(o)) return freeOwn(signer, claim) ? no("registration_failed") : no("in_flight");
+      cas(signer, "own", claim, (g, r) => ({ ...r, own: { ...g, state: "landed", at: g.at ?? now() } }));
+    } finally {
+      registering.delete(key);
+    }
+    // landed is a read: both providers at their final block (F4)
+    try {
+      if ((await reads.storage(usdc, signer)) === "registered") return null;
+    } catch {
+      // not read: held as in flight, read again next time
+    }
+    return no("in_flight");
+  };
+
+  /**
+   * Step 9 with its record (review F2): the signer written owed at first sight (records.ts owe), so the sweep tries it
+   * again until it reads registered, whatever the device does; a failure waits its backoff; registered clears it.
+   */
+  const ownStep = async (signer: string, untilMs: number): Promise<IntentsAnswer | null> => {
+    if (ownDone.has(signer)) return null;
+    // read registered once, on both providers: done for good, a restart included (review PROBE-4)
+    if (store.signer(signer).own?.read === true) {
+      store.paid(signer); // an owed record a done() left when its removal failed (delta review 5, P3-2)
+      ownDone.add(signer);
+      return null;
+    }
+    /** Registered on both: its record kept as read (never cleared, so no later claim pays again), owed no more. */
+    const done = () => {
+      // a record of its own identity: a claim still out leaves it alone (its writes are on its own identity)
+      const r = store.signer(signer);
+      store.putSigner({ ...r, own: { id: randomUUID(), receiver: signer, state: "landed", tx: r.own?.tx ?? null, read: true } });
+      // done in memory only once its owed record is gone: a removal that throws is tried again by the next pass, which
+      // reads the read record (delta review 5, P3-2)
+      store.paid(signer);
+      ownDone.add(signer);
+      return null;
+    };
+    const owed = store.owed(signer);
+    if (owed === null) store.owe({ signer, tries: 0, next_ms: 0 });
+    else if (owed.next_ms > now()) {
+      // the backoff not due: nothing is paid, but a U registered meanwhile (by anyone) reads so and goes on (PROBE-6)
+      try {
+        return (await reads.storage(usdc, signer)) === "registered" ? done() : no("in_flight");
+      } catch {
+        return no("upstream");
+      }
+    }
+    const a = await registerOwn(signer, untilMs);
+    if (a === null) return done();
+    // U read registered on both by another poll meanwhile (its done() ran): done, whatever this one judged; no
+    // backoff for it (delta review 4, P2-2)
+    if (ownDone.has(signer)) return null;
+    if (codeOf(a) === "registration_failed") {
+      const tries = (store.owed(signer)?.tries ?? 0) + 1; // read at the write: another poll's failure counted too
+      store.owe({ signer, tries, next_ms: now() + Math.min(SWEEP_MS * 2 ** tries, RETRY_MAX_MS) });
+    }
+    return a;
+  };
+
+  const registerSeen = async (signer: string): Promise<IntentsCode | "registered"> => {
+    try {
+      if (ownDone.has(signer)) return "registered";
+      if (!store.seen(signer)) return "id_not_ours";
+      // a struck signer is carried no more here: nothing paid for it, and the sweep lets it go
+      if (store.signer(signer).failed >= STRUCK_AT) {
+        store.paid(signer);
+        return "sender_struck";
+      }
+      const a = await ownStep(signer, now() + SEEN_REGISTER_MS);
+      return a === null ? "registered" : codeOf(a);
+    } catch {
+      return "upstream";
+    }
+  };
+  let sweeping = false;
+  const sweep = async (): Promise<void> => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      for (const o of store.owing()) if (o.next_ms <= now()) await registerSeen(o.signer);
+    } catch {
+      // a store that does not read: the next pass reads it again
+    } finally {
+      sweeping = false;
+    }
   };
 
   const carryOne = async (body: unknown): Promise<IntentsAnswer> => {
@@ -283,7 +602,9 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (BigInt(deadlineMs) <= finalMs) return no("expired");
     // 6. the strike
     if (store.signer(x.signer).failed >= STRUCK_AT) return no("sender_struck");
-    if ((store.signer(x.signer).sent ?? 0) >= INTENTS_SENDS_MAX) return no("signer_cap");
+    reclaim(x.signer);
+    const capped = (rec: SignerRecord) => (rec.sent ?? 0) >= INTENTS_SENDS_MAX && !reservedFor(rec, i);
+    if (capped(store.signer(x.signer))) return no("signer_cap");
     // 7. the send lock: test-and-set with no await between
     const key = `${x.signer}/${x.nonce}`;
     if (out.has(key)) return no("in_flight");
@@ -295,9 +616,12 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       // the intent can land until its deadline; a send's outcome is read until then (and a little past: the chain's
       // time runs behind the helper's)
       const untilMs = deadlineMs + 60_000;
-      // 9. the receiver's registration (ft_withdraw only)
-      if (i.intent === "ft_withdraw") {
-        const r = await register(x.signer, i, untilMs);
+      // 9. the signer's own registration on USDC, before its first intent: its lasting public trace
+      const own = await ownStep(x.signer, untilMs);
+      if (own !== null) return own;
+      // 9b. the receiver's registration (ft_withdraw only); the signer itself on USDC is 9's
+      if (i.intent === "ft_withdraw" && !(i.receiver_id === x.signer && i.token === usdc)) {
+        const r = await register(x.signer, i.token, i.receiver_id, untilMs);
         if (r !== null) return r;
       }
       // 10. the gas account
@@ -309,21 +633,37 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
         return no("upstream");
       }
       // 11. the send: the device's signed intent as it signed it, nothing attached. Its slot under the cap is taken
-      // here, with no await since the check, and given back only when nothing was signed.
+      // here, with no await since the check (the one its receiver's registration reserved, when it has one), written
+      // in `taking` until its transaction is signed, and given back only when nothing was signed.
       const rec = store.signer(x.signer);
-      if ((rec.sent ?? 0) >= INTENTS_SENDS_MAX) return no("signer_cap");
-      store.putSigner({ ...rec, sent: (rec.sent ?? 0) + 1 });
+      if (capped(rec)) return no("signer_cap");
+      const spend = reservedFor(rec, i);
+      const spentFrom = spend ? idOf(rec.registration) : undefined;
+      store.putSigner({ ...rec, sent: (rec.sent ?? 0) + (spend ? 0 : 1), taking: [...(rec.taking ?? []), x.nonce], registration: spend ? { ...rec.registration!, reserved: false } : rec.registration });
+      // nothing signed: its slot back; a spent reservation goes back to the registration it was spent from only, by
+      // its identity, else its slot is given back
+      const giveBack = () => {
+        const r = store.signer(x.signer);
+        const taking = (r.taking ?? []).filter((n) => n !== x.nonce);
+        if (spend && cas(x.signer, "registration", spentFrom, (g, c) => ({ ...c, taking, registration: { ...g, reserved: true } }))) return;
+        store.putSigner({ ...r, taking, sent: Math.max(0, (r.sent ?? 0) - 1) });
+      };
       const refs: TxRef[] = [];
       let o: TxOutcome | { kind: "guarded"; code: string };
       try {
-        o = await relayer.send({ kind: "call", receiver: INTENTS_CONTRACT, method: "execute_intents", args: JSON.stringify({ signed: [x.signed] }), gas: EXECUTE_GAS, deposit: 0n }, async () => null, (t) => void refs.push(t), { wait: false });
+        o = await relayer.send({ kind: "call", receiver: INTENTS_CONTRACT, method: "execute_intents", args: JSON.stringify({ signed: [x.signed] }), gas: EXECUTE_GAS, deposit: 0n }, async () => null, (t) => {
+          refs.push(t);
+          // signed: its slot is the transaction's now, out of `taking`, durable before it is sent
+          const r = store.signer(x.signer);
+          store.putSigner({ ...r, taking: (r.taking ?? []).filter((n) => n !== x.nonce) });
+        }, { wait: false });
       } catch (e) {
-        if (refs.length === 0) unsend(x.signer);
+        if (refs.length === 0) giveBack();
         throw e;
       }
       const tx = refs[0];
       if (o.kind === "guarded" || tx === undefined) {
-        if (tx === undefined) unsend(x.signer);
+        if (tx === undefined) giveBack();
         return no("upstream");
       }
       // the answer goes now; the outcome is read after it, and a failure on chain counts
@@ -353,6 +693,14 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       } catch {
         return no("upstream");
       }
+    },
+    registerSeen,
+    sweep,
+    start() {
+      void sweep();
+      const t = setInterval(() => void sweep(), SWEEP_MS);
+      t.unref?.();
+      return () => clearInterval(t);
     },
     idle: async () => {
       while (tasks.size > 0) await Promise.all([...tasks]);

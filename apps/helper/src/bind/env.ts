@@ -11,11 +11,11 @@
 // both providers); a network
 // with no watch is held, and its paused-error sends stay pending, never counted (send.ts sendState).
 import { join } from "node:path";
-import { HELPER_CODE_STATUS } from "@blindfill/kit";
+import { HELPER_CODE_STATUS, HELPER_INTENTS_CODES } from "@blindfill/kit";
 import { decodeSignedDelegate } from "./checks.ts";
 import { type CreateDeps, deliveryReads, onStatusAnswer } from "./create.ts";
 import { carryDeposit, createFileStore, createSendReads, nearRpc, relayerKey, RPC_TIMEOUT_MS, startLockRounds, startRelayer, type Answer, type Rpc, type SendDeps } from "./send.ts";
-import { readUrls, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
+import { readUrls, tokenHeld, tokenWatchesFromEnv, WATCHED, type TokenNetwork, type TokenWatch } from "../token-status/status.ts";
 import { isAccountId } from "../withdraw/checks.ts";
 import { agreedBlock, RELAYER_ENV, STORE_ENV, viewAt } from "../withdraw/fee.ts";
 import { MAINNET_VAULT, OUTCOME_ROUND_MS, RELEASE_ENV, SEND_ENV } from "../withdraw/send.ts";
@@ -74,6 +74,16 @@ const QUIET: ReadonlySet<string> = new Set(["delivery_used", "exists", "no_deliv
  * start error: they can name the id (withdraw/send.ts accountAt, send.ts RpcError), and the log keeps no deposit's id
  * or address. null: not logged.
  */
+/**
+ * A seen id's registration's log line (card intents-u-registered-first): its code only, one of the listed ones (any
+ * other text reads as upstream), so no id or account ever reaches the log. null: not logged (registered, in_flight).
+ */
+export function registerLine(code: string): string | null {
+  if (code === "registered" || code === "in_flight") return null;
+  const listed = (HELPER_INTENTS_CODES as readonly string[]).includes(code) || code === "signer_cap" || code === "upstream";
+  return `helper: intents register ${listed ? code : "upstream"}`;
+}
+
 export function createLine(a: { code: string; tx_hash?: string } | null): string | null {
   if (a === null || QUIET.has(a.code)) return null;
   return `helper: create ${a.code}${typeof a.tx_hash === "string" && /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a.tx_hash) ? ` ${a.tx_hash}` : ""}`;
@@ -172,7 +182,9 @@ export function bindSenderFromEnv(
     const store = createFileStore(join(storeDir, `bind-${net.network}`));
     // a start that fails after the store opens closes it, so the next try can take its lock again
     try {
-      const relayer = await startRelayer(rpcs, rpcs[0], net.account, net.key, net.vault, store);
+      // no archival provider of a third operator (the kit's archival hosts are one operator): none stands in for a
+      // provider that forgot a transaction, so an outcome is always both providers' word (card helper-judge-two-agree)
+      const relayer = await startRelayer(rpcs, null, net.account, net.key, net.vault, store);
       const watch = watches[net.network];
       const deps: SendDeps = {
         cfg: { vault: net.vault, token, marginK: BigInt(k) },
@@ -219,6 +231,11 @@ export function bindSenderFromEnv(
         store: openIntents()!,
         reads: intentsReads(urls.mainnet.map((u) => nearRpc(u, fetchFn, RPC_TIMEOUT_MS)) as unknown as readonly [Rpc, Rpc]),
         relayer: { send: async (...a) => (await relayer()).send(...a), resolve: async (...a) => (await relayer()).resolve(...a), balance: async () => (await relayer()).balance() },
+        // card intents-u-registered-first (review F1): no storage_deposit while mainnet's token watch holds; no watch holds
+        held: async () => {
+          const w = watches.mainnet;
+          return w === undefined ? true : tokenHeld(await w.statusAt("higher"));
+        },
       });
     }
     return intentsCarry;
@@ -242,7 +259,16 @@ export function bindSenderFromEnv(
       }
       return carryDeposit(body, deps);
     },
-    warm: () => carried.forEach((net) => void warmNet(net)),
+    warm: () => {
+      carried.forEach((net) => void warmNet(net));
+      // card intents-u-registered-first (review F2): the owed registrations' sweep, on the helper's own pace
+      if (mainnet !== undefined)
+        try {
+          stops.push(intentsOf(mainnet).start());
+        } catch {
+          console.error(registerLine("upstream"));
+        }
+    },
     async intents(body) {
       if (mainnet === undefined) {
         const code = parseBody(body) === null ? "bad_shape" : "id_not_ours";
@@ -276,17 +302,29 @@ export function bindSenderFromEnv(
     },
     carried: () => Object.fromEntries([...carried.values()].map((net) => [net.network, net.account])),
     delivered(body) {
+      let who: string | null = null;
       try {
         const s = openIntents();
-        if (s !== null) onIntentsStatus(body, s);
+        if (s !== null) who = onIntentsStatus(body, s);
       } catch {
         console.error("helper: intents status_record_failed");
       }
+      // card intents-u-registered-first: the id the answer showed money to is registered on USDC now, before the
+      // device can sign its first intent (the signing page waits for that registration on two RPCs)
+      const own =
+        who === null || mainnet === undefined
+          ? Promise.resolve()
+          : Promise.resolve()
+              .then(() => intentsOf(mainnet).registerSeen(who!))
+              // registerSeen never throws; a carry that does not open reads as upstream, logged on the one line below
+              .catch(() => "upstream" as const)
+              .then((c) => void ((l) => l !== null && console.error(l))(registerLine(c)));
       const nets = new Map([...carried].map(([token, net]) => [token, () => started(net).then(() => creates.get(net.network)!)]));
-      return onStatusAnswer(body, nets).then(
+      const created = onStatusAnswer(body, nets).then(
         (a) => void ((l) => l !== null && console.log(l))(createLine(a)),
         () => console.error(CREATE_START_FAILED),
       );
+      return Promise.all([created, own]).then(() => undefined);
     },
     stop: () => {
       stopped = true;

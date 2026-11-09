@@ -704,9 +704,9 @@ test("the fee answer names the sell sender's address as sell_sender (null with n
 // checked again after the queue.
 
 const tick = () => new Promise((ok) => setTimeout(ok, 5));
-/** A receipt as a node answers one: status, the gas used, its price and (OP chains) the L1 fee. */
+/** A receipt as a node answers one: status, its block, the gas used, its price and (OP chains) the L1 fee. */
 const receiptOf = (status: "0x0" | "0x1", o: { gasUsed?: bigint; price?: bigint; l1Fee?: bigint } = {}) => ({
-  status, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
+  status, blockHash: `0x${"e".repeat(64)}`, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
 });
 const reads = (calls: Calls, m: string) => calls.filter((c) => c.method === m).length;
 /** FeeCollector's Paid topic, written out here (card evm-fee-collector: event Paid(address indexed from, uint256 value)). */
@@ -731,12 +731,13 @@ const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}
   return { pool: POOL, w: s.w, data: sellData(s, o.fee ?? FEE, sign65(k, digestOf(s))), authorization: authOf(k, CHAIN_ID, DELEGATE, 7n) };
 };
 
-test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt with status 0 on either provider, or no transaction on either past the deadline; a success or a sale still waiting keeps the first hash; no count of frees, only W's unpaid cap", async () => {
+test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt with status 0 on both providers in the same block, or no transaction on either past the deadline; a success, one provider's revert or a sale still waiting keeps the first hash; no count of frees, only W's unpaid cap", async () => {
+  const inBlock = (status: "0x0" | "0x1", h: string) => ({ ...receiptOf(status), blockHash: `0x${h.repeat(64)}` });
   // reverted: the repeat reads the first hash's receipt on both providers and sends a new Sell at the same nonce
   {
     const x: Calls = [];
     const y: Calls = [];
-    const s = senderOf(x, { receipt: () => null, tx: () => ({}) }, y, { receipt: () => receiptOf("0x0") });
+    const s = senderOf(x, { receipt: () => inBlock("0x0", "a") }, y, { receipt: () => inBlock("0x0", "A") });
     const first = await s.sell(body());
     assert.equal(first.status, 200, JSON.stringify(first.body));
     const again = await s.sell(body({ sell: { deadline: NOW_S + 500n, minOut: SELL.minOut / 2n } }));
@@ -749,6 +750,10 @@ test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt w
   for (const [name, oa, ob] of [
     ["landed", { receipt: () => receiptOf("0x1") }, { receipt: () => null, tx: () => ({}) }],
     ["landed on one, reverted on the other", { receipt: () => receiptOf("0x1") }, { receipt: () => receiptOf("0x0") }],
+    // card helper-judge-two-agree: one provider's revert is never the outcome (a liar would free (W, nonce) for a second send)
+    ["reverted on one, no receipt on the other", { receipt: () => null, tx: () => ({}) }, { receipt: () => receiptOf("0x0") }],
+    ["reverted on the other, no receipt on one", { receipt: () => receiptOf("0x0") }, { receipt: () => null, tx: () => ({}) }],
+    ["reverted on both in different blocks", { receipt: () => inBlock("0x0", "a") }, { receipt: () => inBlock("0x0", "b") }],
     ["waiting", { receipt: () => null, tx: () => ({}) }, { receipt: () => null, tx: () => ({}) }],
     ["no receipt, before the deadline", { receipt: () => null, tx: () => null }, { receipt: () => null, tx: () => null }],
   ] as [string, Opts, Opts][]) {
@@ -1388,6 +1393,18 @@ test("a withdraw repeat whose first send the lane's replacement took the nonce o
   assert.equal(again.status, 200, JSON.stringify(again.body));
   assert.notEqual((again.body as { hash: string }).hash, r.hash);
   assert.equal(sends(r.x).length, 3, "the withdraw sent again");
+});
+
+test("a withdraw whose replacement was sent but whose first send landed (status 1 on both) keeps its nullifier: the repeat gets the first hash, nothing sent again", async () => {
+  const fee = withdrawFee();
+  const deadlineMs = NOW + 300_000; // withdrawData's
+  const data = withdrawData(fee, 0x86n, NOW + 500_000);
+  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x86n), epoch: NOW }), deadlineMs, { base: 2n * BASE });
+  assert.equal(r.replaced, 2, "the lane's replacement at 7");
+  r.opts.receipt = (h: string) => (h === r.hash ? receiptOf("0x1") : null); // both providers (b reads a's answers)
+  const again = await r.s.carry({ pool: POOL, data, epoch: NOW });
+  assert.equal((again.body as { hash: string }).hash, r.hash, JSON.stringify(again.body));
+  assert.equal(sends(r.x).length, 2, "landed: never sent again");
 });
 
 test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but whose tip is under the providers' is raised again; at their tip it is left", async () => {
