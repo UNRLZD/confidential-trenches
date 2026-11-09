@@ -9,11 +9,13 @@ import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import type { EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm.ts";
-import { evmSourceOperator } from "../../wallet/src/pool/evm.ts";
 
+// the network is set before any pool module loads (the wallet's network.ts reads it once, and evm.ts imports it): a
+// static import of one would load it first, as mainnet, so they are imported after the set, and the file checks it
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool } = await import("../src/pool-testnet.ts");
-const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_POOLS, evmSourceOperator } = await import("../../wallet/src/pool/evm.ts");
+assert.equal((await import("../../wallet/src/pool/network.ts")).POOL_TESTNET, true, "this file runs as the testnet build");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16)));
