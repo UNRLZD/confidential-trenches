@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "../net-window.mjs";
 import { buildOutputProblems } from "../ci/no-tracked-build-output.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
