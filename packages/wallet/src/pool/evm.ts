@@ -1166,6 +1166,10 @@ export type EvmSyncArgs = {
   /** Where the device holds this pool's sync between syncs (evmMemoryHold, or the device's store): none, the sync
    * starts from the pin's deploy block. */
   held?: EvmSyncHold;
+  /** Where else the pool's logs may be read when the seats cannot give them (card evm-pool-leaves-any-source): any
+   * providers, the helper's route (POST /v1/rpc/{chain}) or a recorded page answering eth_getLogs, asked after the
+   * providers of `rpcs` in this order. None is trusted: see evmTreeSync. */
+  history?: readonly EvmRpc[];
   /** tests only: the wait between lag retries */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
@@ -1258,9 +1262,28 @@ const depthOf = (size: number): number => {
  * The pool's tree sync on two RPCs. Every leaf event read at an EVM_POOL_TAG anchor on both RPCs, the same on both and
  * matching the pool's views at the anchor, is kept: it can never change. Each round reads only past what it holds. A
  * tail past the finalized block is read again on every round and never kept. Rounds run one at a time.
+ *
+ * Any source (card evm-pool-leaves-any-source): a keyless provider keeps logs for a window only (base.api.pocket.network
+ * answered 200 with no logs 2-3M blocks back where publicnode and Tenderly answered, and publicnode refuses past about
+ * 4.05M blocks with HTTP 403, read 2026-11-09 06:37Z), while the views at the head anchor are head state, never pruned.
+ * So when the seats' agreed read fails (not a lag) or its trees are not the pool's, the round reads the same blocks
+ * from each source alone, in order: the providers of `rpcs`, then `history`. A source's logs are taken only when the
+ * trees from them, after the held leaves, have the size and root (state and label) the two seats agree on at the newest
+ * anchor, every log in an anchor's block carries that anchor's hash, and a source of another provider gave the very
+ * same logs byte for byte. The root binds every leaf and its order, so a source that omits, adds, forges or reorders a
+ * leaf, or answers empty, is passed over and the next one asked. It does not bind a release's other fields (its
+ * nullifier, W, value, token), which a restore reads to tell spent notes: a second provider's same bytes hold those, so
+ * no one source's word (a broken-in helper's included) is ever taken, and with no two the round is refused and nothing
+ * is kept. A source can stall the sync, never steer it.
  */
 export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   const rpcs = evmPair(a.rpcs);
+  // the sources, each provider once: a pair's seats are no source (each reads a provider of the list in turn)
+  const sources: EvmRpc[] = [];
+  for (const r of [...a.rpcs, ...(a.history ?? [])]) {
+    if (typeof r !== "function") throw new Error("history: providers");
+    if (!SEATS.has(r) && !sources.some((s) => solanaSameProvider(s, r))) sources.push(r);
+  }
   const pool = lower(a.pin.pool);
   addr20(pool, "pool");
   const chainId = EVM_CHAIN_IDS[a.pin.network];
@@ -1342,32 +1365,92 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
     // the logs are read by range, not at a hash: a reorg between the views and the logs gives a tail of another chain
     // on one RPC or both. That is a retry, told apart from a lie by the newest anchor's height holding another hash now.
-    const refuse = async (why: string): Promise<never> => {
+    const still = async (): Promise<void> => {
       const now = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig, sleep), signal);
-      if (now.some((b) => b === null || b.hash !== anchor.hash)) return lag(`block ${anchor.number} moved under the read (a reorg)`);
-      throw new Error(why);
+      if (now.some((b) => b === null || b.hash !== anchor.hash)) lag(`block ${anchor.number} moved under the read (a reorg)`);
     };
-    const fresh = anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : [];
-    const events = [...held, ...fresh];
-    const stateTree = new VaultTree(events.map((e) => e.state));
-    const labels = events.flatMap((e) => (e.label === null ? [] : [e.label]));
-    const labelTree = new VaultTree(labels);
-    const wrong =
-      BigInt(stateTree.size) !== size || (stateTree.root ?? 0n) !== root ? `the state tree from the logs (${stateTree.size} leaves) is not the pool's at ${anchor.hash} (${size})`
-      : BigInt(labelTree.size) !== labelSize || (labelTree.root ?? 0n) !== labelRoot ? `the label tree from the logs (${labelTree.size} leaves) is not the pool's at ${anchor.hash} (${labelSize})`
-      : null;
-    if (wrong !== null && fromHold) {
-      // a reorg under the read is a retry, the held part kept; else the held part is not the pool's: dropped, and the
-      // pool read again from its deploy block (once: the read again holds nothing from the hold)
-      await refuse(wrong).catch((e: unknown) => {
-        if (e instanceof EvmLagError) throw e;
-      });
-      held = [];
-      heldTo = writtenTo = a.pin.fromBlock - 1n;
-      fromHold = false;
-      return round(signal);
+    // the trees from the held leaves and `fresh`, and why they are not the pool's at the anchor (null: they are)
+    const build = (fresh: Ev[]) => {
+      const events = [...held, ...fresh];
+      const stateTree = new VaultTree(events.map((e) => e.state));
+      const labelTree = new VaultTree(events.flatMap((e) => (e.label === null ? [] : [e.label])));
+      const wrong =
+        BigInt(stateTree.size) !== size || (stateTree.root ?? 0n) !== root ? `the state tree from the logs (${stateTree.size} leaves) is not the pool's at ${anchor.hash} (${size})`
+        : BigInt(labelTree.size) !== labelSize || (labelTree.root ?? 0n) !== labelRoot ? `the label tree from the logs (${labelTree.size} leaves) is not the pool's at ${anchor.hash} (${labelSize})`
+        : null;
+      return { events, stateTree, labelTree, wrong };
+    };
+    // the blocks past what is held from each source alone (evmTreeSync's comment): the first logs two providers give
+    // byte for byte whose trees are the pool's at the anchor, else refused with the seats' own refusal (`why`) first
+    const fromSources = async (why: string): Promise<ReturnType<typeof build>> => {
+      const from = heldTo + 1n;
+      const seen: { i: number; fresh: Ev[] }[] = [];
+      const whys: string[] = [];
+      for (let i = 0; i < sources.length; i++) {
+        signal?.throwIfAborted();
+        // two that agree can no longer be had: no source is read for nothing
+        if (seen.length === 0 && sources.length - i < 2) break;
+        const src = sources[i]!;
+        const url = (src as { url?: unknown }).url;
+        const name = `source ${i}${typeof url === "string" ? ` (${url})` : ""}`;
+        let fresh: Ev[];
+        try {
+          fresh = from > anchor.number ? [] : await readLogs(src, i, poolFilter, poolDecode, from, anchor.number, pager, signal, sleep);
+        } catch (e) {
+          if (signal?.aborted) throw e;
+          whys.push(`${name}: ${String((e as Error)?.message ?? e)}`);
+          continue;
+        }
+        const off = fresh.find((e) => (e.block === fin.number && e.blockHash !== fin.hash) || (e.block === anchor.number && e.blockHash !== anchor.hash));
+        const b = off === undefined ? build(fresh) : null;
+        if (b === null || b.wrong !== null) {
+          whys.push(`${name}: ${b === null ? `a log of block ${off!.block} is not of the anchor` : b.wrong}`);
+          continue;
+        }
+        if (seen.some((x) => !solanaSameProvider(sources[x.i]!, src) && x.fresh.length === fresh.length && x.fresh.every((e, j) => e.bytes === fresh[j]!.bytes))) return b;
+        seen.push({ i, fresh });
+      }
+      throw new Error(`${why}; no two sources of two providers gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
+    };
+    let why = "";
+    let got: ReturnType<typeof build> | null = null;
+    try {
+      got = build(anchor.number > heldTo ? await evmAgreedLogs(rpcs, poolFilter, poolDecode, heldTo + 1n, { fin, anchor }, pager, held.length, signal, sleep) : []);
+    } catch (e) {
+      // a lag stays a lag; any other refusal of the seats' read (two lists that differ, a seat that refuses a page) goes
+      // to the sources
+      if (e instanceof EvmLagError || signal?.aborted) throw e;
+      why = String((e as Error)?.message ?? e);
     }
-    if (wrong !== null) await refuse(wrong);
+    if (got !== null && got.wrong !== null) {
+      // a reorg under the read is a retry, the held part kept (a held part's check that cannot be read drops it, as
+      // a held part that is not the pool's)
+      why = got.wrong;
+      await still().catch((e: unknown) => {
+        if (!fromHold || e instanceof EvmLagError) throw e;
+      });
+    }
+    if (got === null || got.wrong !== null) {
+      // the sources, unless a held part read whole on the seats is not the pool's: a held part no source makes the
+      // pool's trees with is dropped, and the pool read again from its deploy block (once: the read again holds nothing
+      // from the hold)
+      let found: ReturnType<typeof build> | null = null;
+      if (!(fromHold && got !== null)) {
+        try {
+          found = await fromSources(why);
+        } catch (e) {
+          if (!fromHold || e instanceof EvmLagError || signal?.aborted) throw e;
+        }
+      }
+      if (found === null) {
+        held = [];
+        heldTo = writtenTo = a.pin.fromBlock - 1n;
+        fromHold = false;
+        return round(signal);
+      }
+      got = found;
+    }
+    const { events, stateTree, labelTree } = got;
     checked = true;
     fromHold = false;
     // the cache only ever rises
@@ -1529,6 +1612,8 @@ export type EvmPoolArgs = {
   feeRpcs: readonly EvmRpc[];
   /** Where the device holds the pool's sync between syncs (EvmSyncArgs held). */
   held?: EvmSyncHold;
+  /** Where else the pool's logs may be read (EvmSyncArgs history), after the providers of `rpcs`. */
+  history?: readonly EvmRpc[];
   /** GET /v1/pool/fee?pool=&epoch= on the helper: its answer, refused unless every field is this pool's and its fee
    * the device's own. */
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
@@ -1547,7 +1632,8 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   const feeRecipient = lower(a.pin.feeRecipient);
   addr20(feeRecipient, "feeRecipient");
   if (feeRecipient === pool || BigInt(feeRecipient) === 0n) throw new Error("feeRecipient: the pool or the zero address");
-  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
+  // the sources: the list's providers (the pair's seats are none), then the caller's
+  const sync = evmTreeSync({ rpcs, pin: a.pin, history: [...a.rpcs, ...(a.history ?? [])], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
   return {

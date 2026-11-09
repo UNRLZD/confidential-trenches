@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -1783,13 +1783,23 @@ const lyingList = () => {
 };
 
 test("card helper-evm-range-cap-walk (re-check of 6e90f580, HIGH): one pair per read: the pool's trees() and the restore on P-C's list refuse the first provider's lie; evmPair hands back a pair it made as it is and refuses its seat in any other list", async () => {
+  // on the pair alone (a pair passed in: its seats are no source, card evm-pool-leaves-any-source), the lie is refused
   const a = lyingList();
-  const pool = evmPool({ pin: PIN, rpcs: a.list, feeRpcs: a.list.slice(2), relayFee: async () => { throw new Error("unused"); }, epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => {} });
+  const pool = evmPool({ pin: PIN, rpcs: evmPair(a.list), feeRpcs: a.list.slice(2), relayFee: async () => { throw new Error("unused"); }, epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => {} });
   await assert.rejects(pool.trees(after(399_000)), /the two RPCs differ/);
   assert.equal(a.twice(), 0, "a publicnode page asked on both seats");
   const b = lyingList();
-  await assert.rejects(evmRestoreNotes({ seed64: new Uint8Array(64), pin: PIN, rpcs: b.list, wallets: false, gap: 4, sleep: async () => {} }), /the two RPCs differ/);
+  await assert.rejects(evmRestoreNotes({ seed64: new Uint8Array(64), pin: PIN, rpcs: evmPair(b.list), wallets: false, gap: 4, sleep: async () => {} }), /the two RPCs differ/);
   assert.equal(b.twice(), 0, "a publicnode page asked on both seats");
+  // on the list, each provider is a source too: the liar's value (outside the root) is passed over, and the two honest
+  // providers' same logs are the pool's
+  const c = lyingList();
+  const honest = evmPool({ pin: PIN, rpcs: c.list, feeRpcs: c.list.slice(2), relayFee: async () => { throw new Error("unused"); }, epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => {} });
+  assert.equal((await honest.trees(after(399_000))).stateTree.size, 3);
+  // the restore's sync gets past the liar too: it reaches the events, where this fixture's one precommitment (rawLogs'
+  // 77 on every deposit) stops it
+  const d = lyingList();
+  await assert.rejects(evmRestoreNotes({ seed64: new Uint8Array(64), pin: PIN, rpcs: d.list, wallets: false, gap: 4, sleep: async () => {} }), /^Error: leaf 1: a precommitment deposited twice$/);
   const pair = evmPair(lyingList().list);
   assert.equal(evmPair(pair), pair);
   assert.equal(evmPair([pair[0], pair[1]]), pair);
@@ -2062,4 +2072,84 @@ test("card helper-evm-range-cap-walk (review of a81876ab, M7 and M11): a provide
   });
   assert.deepEqual(x, ["D"]);
   assert.equal(s0.url, "https://d.example");
+});
+
+// card evm-pool-leaves-any-source: Base's keyless seats keep logs for a window only (base.api.pocket.network answered
+// HTTP 200 `result: []` 2-3M blocks back where publicnode and Tenderly answered; publicnode refuses past about 4.05M
+// blocks with HTTP 403, read 2026-11-09 06:37Z). The views at the head are head state, never pruned, so the pool's logs
+// may come from any source, taken only when two providers give the same bytes and their trees are the pool's at the
+// head anchor on the two seats.
+const ANY_HEAD = 2_000_000;
+// a pool over 2M blocks: a deposit, a release and a deposit before Pocket's window, a deposit inside it
+const anyChain = () => longChain([deps(PP, [10])[0]!, { block: 1_100_000, kind: "wd", leaf: 999n }, ...deps(PP, [10, 1_200_000, 1_990_000]).slice(1)], ANY_HEAD);
+const blockOf = (x: Record<string, unknown>): number => Number(BigInt(x.blockNumber as string));
+// Pocket's words for an old range: HTTP 200 and no logs past its window (500,000 blocks here)
+const pocketPruned = (l: Record<string, unknown>[]) => l.filter((x) => blockOf(x) >= ANY_HEAD - 500_000);
+const word = (x: Record<string, unknown>, i: number, v: bigint) => ({ ...x, data: `${(x.data as string).slice(0, 2 + 64 * i)}${w64(v)}${(x.data as string).slice(2 + 64 * (i + 1))}` });
+const anySeats = (c: Chain, log: string[] = []): [EvmRpc, EvmRpc] => [
+  rpc(c, { url: "https://publicnode.example", cap: 50_000, log }),
+  rpc(c, { url: "https://pocket.example", cap: 10_000, logs: pocketPruned }),
+];
+// the pool's events as two honest seats read them
+const truth = async (c: Chain) => (await evmTreeSync({ rpcs: pair(c, c), pin: PIN, ...noWait }).events()).events.map((e) => e.bytes);
+const helperSrc = (c: Chain, logs?: Over["logs"], url = "https://helper.example") => rpc(c, { url, cap: 10_000, ...(logs ? { logs } : {}) });
+
+test("card evm-pool-leaves-any-source (P3-2 plant): a seat that answers every page empty is refused at log 0, with no other source", async () => {
+  const c = anyChain();
+  await assert.rejects(evmTreeSync({ rpcs: [rpc(c, { url: "https://a.example" }), rpc(c, { url: "https://b.example", logs: () => [] })], pin: PIN, ...noWait }).events(), /the two RPCs differ at log 0/);
+});
+
+test("card evm-pool-leaves-any-source: a pool over 2M blocks whose old logs one seat answers empty syncs from an honest source, its leaves the pool's", async () => {
+  const c = anyChain();
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.block), [10n, 1_100_000n, 1_200_000n, 1_990_000n]);
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+});
+
+test("card evm-pool-leaves-any-source: a source missing one leaf, one forged leaf, or answering empty is refused against the two seats' root at the head", async () => {
+  const liars: [string, Over["logs"]][] = [
+    ["missing", (l) => l.filter((x) => blockOf(x) !== 1_200_000)],
+    ["forged", (l) => l.map((x) => (blockOf(x) === 1_200_000 ? word(x, 0, 4242n) : x))],
+    ["empty", () => []],
+  ];
+  for (const [name, lie] of liars) {
+    const c = anyChain();
+    await assert.rejects(
+      evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, lie)], ...noWait }).events(),
+      (e: Error) => /^the two RPCs differ at log 0 .*no two sources of two providers gave the same logs/.test(e.message) && /source 2 \(https:\/\/helper\.example\): the state tree from the logs \(\d+ leaves\) is not the pool's/.test(e.message),
+      name,
+    );
+  }
+});
+
+test("card evm-pool-leaves-any-source: a lying source is passed over and the next one asked; the pool's own leaves come back", async () => {
+  const c = anyChain();
+  const asked: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, (l) => l.map((x) => (blockOf(x) === 10 ? word(x, 1, 7n) : x)), "https://liar.example"), rpc(c, { url: "https://tenderly.example", cap: 1_000, log: asked })], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
+  assert.ok(asked.length > 0, "the next source asked");
+});
+
+test("card evm-pool-leaves-any-source: a release's nullifier, outside the root, is never one source's word: refused alone, taken only as two providers give it", async () => {
+  const c = anyChain();
+  const forged = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
+  // publicnode alone and the forger both make the root; no two agree, so nothing is taken
+  await assert.rejects(evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forged)], ...noWait }).events(), /no two sources of two providers gave the same logs/);
+  // the same forger before an honest source: publicnode and the honest one agree, the forger's nullifier is not taken
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forged), helperSrc(c, undefined, "https://tenderly.example")], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.nullifier), [null, 55n + 1n, null, null]);
+});
+
+test("card evm-pool-leaves-any-source: a held tree resumes from its last block: the next sync reads only the blocks past it", async () => {
+  const c = anyChain();
+  const hold = evmMemoryHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: hold, ...noWait }).events();
+  const h = await hold.read();
+  assert.equal(h?.to, BigInt(c.finalized));
+  assert.equal(h?.events.length, 4);
+  const log: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c, log), pin: PIN, history: [helperSrc(c, () => assert.fail("no source asked past a held tree"))], held: hold, ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  const froms = log.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  assert.ok(froms.length > 0 && froms.every((f) => f > c.finalized), `froms ${froms}`);
 });

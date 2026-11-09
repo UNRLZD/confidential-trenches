@@ -73,7 +73,7 @@ import { nearIdReader, openRestorePass, type IdReaderOpts, type PassOpts } from 
 import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import type { Deferred, KindContext } from "./api.ts";
-import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
+import { PAGE_SOL_PIN, TESTNET_RPCS, pageEvmHistory, pageEvmHold, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
@@ -285,7 +285,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), signal })).notes;
           // the notes only: no W is read or named to a provider for a record the page keeps none of
-          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false })).notes;
+          // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
+          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin), history: pageEvmHistory(p.pin) })).notes;
         });
         const walked: { label: string; scope: bigint; notes: RestoredNote[] }[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {

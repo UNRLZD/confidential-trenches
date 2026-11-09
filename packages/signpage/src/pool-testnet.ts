@@ -53,8 +53,8 @@ import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/s
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
-import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { buyWallets, evmHelperRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
@@ -82,6 +82,20 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
  *  other directly; both with the page's retry. */
 export const testnetRpc = (url: string): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, init: HELPER_FETCH_INIT }) : pageRpc(url));
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
+/** Each EVM pool's synced tree on this page (card evm-pool-leaves-any-source): one hold per pool, which the deposit's
+ *  sync and the restore's both keep and read, so each reads only the blocks past the last one's. */
+const EVM_HOLDS = new Map<string, EvmSyncHold>();
+export const pageEvmHold = (pin: EvmPoolPin): EvmSyncHold => {
+  const key = `${pin.network}:${pin.pool.toLowerCase()}`;
+  let h = EVM_HOLDS.get(key);
+  if (h === undefined) EVM_HOLDS.set(key, (h = evmMemoryHold()));
+  return h;
+};
+/** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
+ *  helper's keyed route (POST /v1/rpc/{chain}, its archive providers: a keyless seat keeps a window of logs only), held
+ *  to the pool's root at the head like any source and never taken on its word alone; none on a testnet, whose helper
+ *  has no route for the chain. */
+export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => (pin.network === "base" || pin.network === "robinhood" ? [evmHelperRpc(TRADE_HELPER, pin.network)] : []);
 /** The Solana pool the page's network pins: none on mainnet until pool-sol-deploy-mainnet pins it. */
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
@@ -227,7 +241,7 @@ export type TestnetOver = {
    *  its pool's event round (evmTreeSync over that pair otherwise): tests run the EVM deposit flow on a fake pool. */
   evmPin?: (chain: "base" | "robinhood") => EvmPoolPin | undefined;
   evmRpcs?: (chain: "base" | "robinhood") => readonly [EvmRpc, EvmRpc] | null;
-  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc]) => () => Promise<EvmDepositRound>;
+  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], list?: readonly EvmRpc[]) => () => Promise<EvmDepositRound>;
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
    *  (its sign-out signal and its pass, fold review 3). */
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
@@ -428,8 +442,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmRpcs = over.evmRpcs ?? ((chain: "base" | "robinhood") => (POOL_TESTNET ? ([testnetRpc(TESTNET_RPCS[chain][0]), testnetRpc(TESTNET_RPCS[chain][1])] as const) : null));
   const evmRound =
     over.evmRound ??
-    ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc]) => {
-      const sync = evmTreeSync({ rpcs: r, pin: p });
+    ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc], list: readonly EvmRpc[] = []) => {
+      // the deposit's own pair (one evmPair, its seats bound by every read), the page's hold, and as sources the list's
+      // providers, then the page's history
+      const sync = evmTreeSync({ rpcs: r, pin: p, held: pageEvmHold(p), history: [...list, ...pageEvmHistory(p)] });
       return async (): Promise<EvmDepositRound> => {
         const round = await sync.events();
         return { events: round.events, finalBlock: round.fin.number };
@@ -441,7 +457,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     if (!evmPools.has(chain)) {
       const p = evmPin(chain);
       const r = p === undefined ? null : evmRpcs(chain);
-      evmPools.set(chain, p === undefined || r === null ? null : { pin: p, rpcs: r, round: evmRound(p, r), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
+      // one pair for the deposit's reads and its sync's (review of evm-pool-lists-mainnet, P3-1)
+      const pair = r === null ? null : evmPair(r);
+      evmPools.set(chain, p === undefined || r === null || pair === null ? null : { pin: p, rpcs: pair, round: evmRound(p, pair, r), scope: evmPoolScopeOf(p.pool, EVM_CHAIN_IDS[p.network]) });
     }
     return evmPools.get(chain)!;
   };

@@ -28,17 +28,18 @@ const page = () => ({
   },
   seed64: async () => SEED.slice(),
 });
-/** Two RPCs over an empty U: a block, U's nonce 0 and balance 0, and the calls each was asked. */
+/** Two RPCs (two providers: the page's deposit reads them as one evmPair, which refuses one provider twice) over an
+ *  empty U: a block, U's nonce 0 and balance 0, and the calls both were asked. */
 function rpcs() {
   const calls: string[] = [];
-  const rpc: EvmRpc = async (method, params) => {
+  const rpc = (url: string): EvmRpc => Object.assign(async (method: string, params: readonly unknown[]) => {
     calls.push(method);
     if (method === "eth_getBlockByNumber") return { number: "0x64", hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: "0xf4240" };
     if (method === "eth_getTransactionCount" || method === "eth_getBalance") return "0x0";
     if (method === "eth_call") return "0x" + "0".repeat(64);
     throw new Error(`unmocked ${method} ${JSON.stringify(params)}`);
-  };
-  return { calls, pair: [rpc, rpc] as const };
+  }, { url });
+  return { calls, pair: [rpc("https://a.example"), rpc("https://b.example")] as const };
 }
 
 test("with the chain's EVM pin, an EVM pool.deposit reaches the EVM deposit runner (its reads made, an empty U answered not_funded)", async () => {
@@ -240,4 +241,31 @@ test("pool-deposit-follow review H1: depositFrom runs the Solana deposit kind wi
   assert.equal(sol.length, 2);
   assert.equal((sol[1]!.ask as { kind: string }).kind, "pool.deposit");
   assert.equal(evm.length, 0, "no EVM kind runs from depositFrom");
+});
+
+// card evm-pool-leaves-any-source (review of evm-pool-lists-mainnet, P3-1): the deposit's reads and its round's sync are
+// one evmPair, so no provider's answer stands on both sides of a read; the round gets the list's providers as sources,
+// and the page's one hold per pool
+test("card evm-pool-leaves-any-source: the EVM deposit and its round's sync read one evmPair; the round is given the list as sources", async () => {
+  const { evmPair } = await import("../../wallet/src/pool/evm.ts");
+  const r = rpcs();
+  const got: { pair: readonly EvmRpc[]; list: readonly EvmRpc[] | undefined }[] = [];
+  const flow = testnetPool(page(), { evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: () => r.pair, evmRound: (_p, pair, list) => (got.push({ pair, list }), async () => ({ events: [], finalBlock: 100n })) }).flow;
+  const run = flow(ASK, ctx) as { running: true; after: Promise<void>; answer(): unknown };
+  await run.after;
+  assert.equal(got.length, 1);
+  const { pair, list } = got[0]!;
+  assert.equal(evmPair(pair), pair, "a pair evmPair made: the deposit's reads bind its seats");
+  assert.notEqual(pair[0], r.pair[0], "seats, never the bare providers");
+  assert.deepEqual(list, r.pair, "the list's providers are the sync's sources");
+});
+
+test("card evm-pool-leaves-any-source: one hold per pool on the page; the helper's route a history source on mainnet only", async () => {
+  const { pageEvmHold, pageEvmHistory } = await import("../src/pool-testnet.ts");
+  assert.equal(pageEvmHold(PIN), pageEvmHold({ ...PIN, pool: PIN.pool.toUpperCase().replace("0X", "0x") }));
+  assert.notEqual(pageEvmHold(PIN), pageEvmHold({ ...PIN, network: "robinhood-testnet" }));
+  assert.deepEqual(pageEvmHistory(PIN), [], "no route for a testnet chain");
+  const base = pageEvmHistory({ ...PIN, network: "base" });
+  assert.equal(base.length, 1);
+  assert.equal(pageEvmHistory({ ...PIN, network: "base" })[0], base[0], "one paced route, the same each time");
 });
