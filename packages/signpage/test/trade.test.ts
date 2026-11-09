@@ -235,7 +235,7 @@ test("a buy: the ladder split's READY wallets from the arm records, answered at 
   assert.ok(txs.txs.every((t) => t.chain === "solana" && base58.decode(t.hash).length === 64));
   assert.deepEqual(p.progress, ["filled"]);
   // the record keeps each leg's known end on its tx (re-check of 91fb908e); the answer names {chain, hash} only
-  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("17")), stage: "filled", txs: txs.txs.map((t) => ({ ...t, state: "filled" })), created_ms: 1_700_000_000_000 });
+  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("17")), stage: "filled", txs: txs.txs.map((t) => ({ ...t, state: "filled" })), created_ms: 1_700_000_000_000, chain: "solana", token: MINT, amount_usd: "17" });
   assert.deepEqual((p.calls[0] as { wallets?: readonly string[] }).wallets, [0, 1, 2, 3].map((j) => W[j]!.address), "the kit gets every one of the user's Solana wallets");
   assert.ok([0, 1, 2, 3].every((j) => mark(s, j) === undefined), "every mark is off once the fill is read");
   assert.deepEqual([0, 1, 2, 3].map((j) => (s.m.wallets!.get(armKey("sol", L, j)) as ArmRecord).state), ["IN_POSITION", "IN_POSITION", "IN_POSITION", "READY"]);
@@ -278,7 +278,7 @@ test("a wallet without this device's own arm record is refused before any signat
   const { id, answer } = await p.ask(buy("10"));
   assert.deepEqual(answer, { error: "not_armed" });
   assert.equal(p.opened(), 0, "the seed was never opened, so nothing was signed");
-  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("10")), stage: "refused", txs: [], code: "not_armed", created_ms: 1_700_000_000_000 });
+  assert.deepEqual(s.m.ops!.get(id), { kind: "buy", sha: shaOf(buy("10")), stage: "refused", txs: [], code: "not_armed", created_ms: 1_700_000_000_000, chain: "solana", token: MINT, amount_usd: "10" });
   assert.equal(mark(s, 0), undefined, "nothing signed: the mark is off");
   // and a record that lacks the own-withdrawal mark gives no leg at all
   const t = store({ [armKey("sol", L, 0)]: { ...rec(0, 1_000n), own: undefined } });
@@ -420,7 +420,7 @@ test("the op is written, with the request's hash, before the trade runs", async 
   let atRun: unknown;
   const p = page(s, { final: "filled", atStart: () => (atRun = structuredClone(s.m.ops!.get(id))) });
   await p.ask(buy("10"), id);
-  assert.deepEqual(atRun, { kind: "buy", sha: shaOf(buy("10")), stage: "pending", txs: [], created_ms: 1_700_000_000_000 });
+  assert.deepEqual(atRun, { kind: "buy", sha: shaOf(buy("10")), stage: "pending", txs: [], created_ms: 1_700_000_000_000, chain: "solana", token: MINT, amount_usd: "10" });
   assert.deepEqual(mark(s, 0) ?? (s.m.wallets!.get(armKey("sol", L, 0)) as ArmRecord).state, "IN_POSITION");
 });
 
@@ -744,7 +744,7 @@ test("a read that fails before the answer refuses the trade as failed, and the o
   const p = page(s, {}, [down, down]);
   const { id, answer } = await p.ask(sell("1"));
   assert.deepEqual(answer, { error: "failed" });
-  assert.deepEqual(s.m.ops!.get(id), { kind: "sell", sha: shaOf(sell("1")), stage: "refused", txs: [], code: "failed", created_ms: 1_700_000_000_000 });
+  assert.deepEqual(s.m.ops!.get(id), { kind: "sell", sha: shaOf(sell("1")), stage: "refused", txs: [], code: "failed", created_ms: 1_700_000_000_000, chain: "solana", token: MINT });
 });
 
 // Card signpage-error-after-timeout: a trade refused after the client's 10 s window (its answer dropped by the kit's
