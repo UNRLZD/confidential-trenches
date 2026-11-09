@@ -101,7 +101,7 @@ const M = [
   // review of 7eb8cfb9: the hold proven by the pool's root times (P2-1), its events their bytes (P3-1), written on new
   // leaves or a day of blocks (P3-4)
   [S, "if (!(await heldProven(anchor.hash, signal))) {", "if (false) {", TE, "7eb8cfb9, P2-1"],
-  [S, "const lt = await agreed(", "const lt = st || await agreed(", TE, "7eb8cfb9, P2-1: a stored hold whose label"],
+  [S, "const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", "const lt = st || await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", TE, "7eb8cfb9, P2-1: a stored hold whose label"],
   [S, "        await a.held!.drop(bad).catch(() => {});\n", "", TE, "7eb8cfb9, P2-1: a stored hold that lacks"],
   [H, "to === to ? null : undefined", "to === to ? null : null", "test/pool-evm-hold-store.test.ts", "7eb8cfb9, P2-1"],
   [S, " || !rebuilt(e, from, to, pool)) return false;", ") return false;", TE, "7eb8cfb9, P3-1"],
