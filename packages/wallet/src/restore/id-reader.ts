@@ -255,16 +255,16 @@ function askOpts(o: Pick<IdReaderOpts, "tries" | "backoffMs" | "sleep" | "signal
   if (!Number.isSafeInteger(busyMax) || busyMax < 0) throw new Error("busyMaxMs is a time in ms");
   const signal = o.signal;
   const given = o.sleep;
-  // a given sleep (tests) is still cut short by the signal, and moves the pace's clock by what it was asked to wait
-  // (unless a clock is given too), so a stubbed sleep keeps the pace's arithmetic
-  let slept = 0;
+  // a given sleep (tests) comes with its own clock, which the caller's waits move (delta review 4, P3-2: a clock made
+  // here from the sleep was one per options build, so the pass's, the setup's and each header's waits moved apart);
+  // it is still cut short by the signal
+  if (given !== undefined && o.now === undefined) throw new Error("a given sleep needs its own clock (now)");
   const sleep = given ? async (ms: number): Promise<void> => {
     signal?.throwIfAborted();
-    slept += ms;
     await given(ms);
     signal?.throwIfAborted();
   } : sleepMs;
-  const now = o.now ?? (given ? () => performance.now() + slept : () => performance.now());
+  const now = o.now ?? (() => performance.now());
   return { tries, backoff, sleep, signal, now, busyMax };
 }
 

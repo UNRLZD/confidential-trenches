@@ -102,7 +102,7 @@ function replay(url: string, as: ReadonlyMap<string, As>, log: string[]): NearRp
 function nearOf(as: ReadonlyMap<string, As> = new Map()) {
   const log: string[] = [];
   const found = new Map<bigint, DepositIds>();
-  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {} }, read: (scope, r) => void found.set(scope, r) };
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() }, read: (scope, r) => void found.set(scope, r) };
   return { ids, log, found };
 }
 
@@ -415,7 +415,7 @@ test("deposit ids: a pass the providers refuse (their blocks at one height diffe
       return p.block_id === REC.pass.h && url === DRPC ? { ...a, result: { ...a.result, block_hash: "4".repeat(44) } } : a;
     } };
   };
-  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {} } } });
+  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() } } });
   assert.equal(await w.r.auto(), "stalled");
   assert.deepEqual(log, []);
   assert.equal((await listed(w.store)).length, 6);

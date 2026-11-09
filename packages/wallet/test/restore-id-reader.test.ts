@@ -33,6 +33,12 @@ const REC = JSON.parse(readFileSync(new URL("./vectors/id-reader-mainnet.json", 
   intents: Record<string, { tokens: unknown; held: unknown }>;
 };
 const noSleep = async (): Promise<void> => {};
+// a sleep that waits nothing, with the clock its waits move (a given sleep needs its own clock: delta review 4, P3-2):
+// the real clock plus what it was asked to wait, one per call
+const noWait = (): { sleep: (ms: number) => Promise<void>; now: () => number } => {
+  let slept = 0;
+  return { sleep: async (ms: number): Promise<void> => void (slept += ms), now: () => performance.now() + slept };
+};
 // the pair's disagreement (card wallet-id-reader-paced), naming the provider with the stronger answer
 const isPair = (e: unknown, stronger: string): boolean => e instanceof Error && e.name === "PairDisagrees" && (e as { stronger?: unknown }).stronger === stronger;
 // the readers read at a restore pass's one block (openRestorePass). These open one for each reader on its own
@@ -44,15 +50,15 @@ let LIVE: RestorePass | undefined;
 // pace at the process's real time, which a virtual clock starting at 0 then waited out (PR #521's fresh run, 06:19Z: a
 // read that fails at once on a Retry-After past the bound waited 21.7 s, each test's clock its own)
 const passFor = (rpcs: readonly [NearRpc, NearRpc], opts: { tries?: number; sleep?: (ms: number) => Promise<void>; now?: () => number; signal?: AbortSignal }): Promise<RestorePass> =>
-  REPLAYED.has(rpcs[0]) && REPLAYED.has(rpcs[1]) && LIVE ? Promise.resolve(LIVE) : openRestorePass("mainnet", rpcs, { sleep: noSleep, ...(opts.tries === undefined ? {} : { tries: opts.tries }), ...(opts.sleep ? { sleep: opts.sleep } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
+  REPLAYED.has(rpcs[0]) && REPLAYED.has(rpcs[1]) && LIVE ? Promise.resolve(LIVE) : openRestorePass("mainnet", rpcs, { ...noWait(), ...(opts.tries === undefined ? {} : { tries: opts.tries }), ...(opts.sleep ? { sleep: opts.sleep } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
 const nearIdReader = (network: "mainnet", rpcs: readonly [NearRpc, NearRpc], opts: Parameters<typeof idReaderAt>[3] = {}): IdReader => {
   // the pace's waits are stubbed unless a test gives its own sleep (its virtual clock moves by them)
-  const p = passFor(rpcs, opts).then((pass) => idReaderAt(network, rpcs, pass, { sleep: noSleep, ...opts }));
+  const p = passFor(rpcs, opts).then((pass) => idReaderAt(network, rpcs, pass, { ...noWait(), ...opts }));
   p.catch(() => {});
   return (u) => p.then((f) => f(u));
 };
 const nearBalanceReader = (network: "mainnet", rpcs: readonly [NearRpc, NearRpc], opts: Parameters<typeof balanceAt>[3] = {}) => {
-  const p = passFor(rpcs, opts).then((pass) => balanceAt(network, rpcs, pass, { sleep: noSleep, ...opts }));
+  const p = passFor(rpcs, opts).then((pass) => balanceAt(network, rpcs, pass, { ...noWait(), ...opts }));
   p.catch(() => {});
   return (what: "usdc" | "near" | "intents", u: string) => p.then((f) => f(what, u));
 };
@@ -91,7 +97,7 @@ function replay(url: string, log: string[] = [], swap: (p: Record<string, unknow
   return rpc;
 }
 // the recorded pass, opened once on the recorded answers: both finals, the one behind re-read, the block on both
-LIVE = await openRestorePass("mainnet", [replay(FAST), replay(DRPC)], { sleep: noSleep });
+LIVE = await openRestorePass("mainnet", [replay(FAST), replay(DRPC)], { ...noWait() });
 assert.deepEqual([LIVE.h, LIVE.hash], [REC.pass.h, REC.pass.hash]);
 
 test("each rule on mainnet's answers: never used, used by storage on the token, used by its NEAR account, money on the token", async () => {
@@ -178,7 +184,7 @@ const U1 = "11".repeat(32), U2 = "22".repeat(32);
 test("unused only when both providers say so; a pair that disagrees at the pass's block concludes nothing and names the provider with the stronger answer; an indexer may add used, never unused", async () => {
   const empty = W({});
   const used = W({ [U1]: { account: true } });
-  const read = (a: Map<string, Id>, b: Map<string, Id>, opts = {}) => nearIdReader("mainnet", [provider(FAST, a), provider(DRPC, b)], { first: () => 0, sleep: noSleep, ...opts });
+  const read = (a: Map<string, Id>, b: Map<string, Id>, opts = {}) => nearIdReader("mainnet", [provider(FAST, a), provider(DRPC, b)], { first: () => 0, ...noWait(), ...opts });
   assert.equal(await read(empty, empty)(U1), "unused");
   assert.equal(await read(used, used)(U1), "used");
   assert.equal(await read(W({ [U1]: { usdc: 5n } }), W({ [U1]: { usdc: 5n } }))(U1), "money");
@@ -207,7 +213,7 @@ test("unused only when both providers say so; a pair that disagrees at the pass'
 
 test("hostile answers fail the read, never read as unused: a halt, an error, a malformed view, UNKNOWN_ACCOUNT on a call", async () => {
   const empty = W({});
-  const bad = (f: (p: Record<string, unknown>) => unknown) => nearIdReader("mainnet", [provider(FAST, empty, f), provider(DRPC, empty, f)], { first: () => 0, sleep: noSleep, tries: 2 })(U1);
+  const bad = (f: (p: Record<string, unknown>) => unknown) => nearIdReader("mainnet", [provider(FAST, empty, f), provider(DRPC, empty, f)], { first: () => 0, ...noWait(), tries: 2 })(U1);
   const on = (m: string, x: unknown) => (p: Record<string, unknown>) => (p.method_name === m || p.request_type === m ? x : undefined);
   await assert.rejects(bad(on("storage_balance_of", { jsonrpc: "2.0", result: { error: "wasm execution failed with error: Smart contract panicked: FiatToken: paused", logs: [], block_height: 1, block_hash: hashOf(1) } })), /the token is halted \(FiatToken: paused\)/);
   await assert.rejects(bad(on("storage_balance_of", { jsonrpc: "2.0", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } })), /storage_balance_of: HANDLER_ERROR/);
@@ -218,7 +224,7 @@ test("hostile answers fail the read, never read as unused: a halt, an error, a m
   await assert.rejects(bad(on("view_account", { jsonrpc: "2.0", error: { name: "TIMEOUT_ERROR" } })), /view_account: TIMEOUT_ERROR/);
   await assert.rejects(bad(on("view_account", "nope")), /not a JSON-RPC answer/);
   const money = W({ [U1]: { storage: true, tokens: { "nep141:a": 1n } } });
-  const r = (f: (p: Record<string, unknown>) => unknown) => nearIdReader("mainnet", [provider(FAST, money, f), provider(DRPC, money, f)], { first: () => 0, sleep: noSleep, tries: 1 })(U1);
+  const r = (f: (p: Record<string, unknown>) => unknown) => nearIdReader("mainnet", [provider(FAST, money, f), provider(DRPC, money, f)], { first: () => 0, ...noWait(), tries: 1 })(U1);
   await assert.rejects(r(on("ft_balance_of", view(-1))), /ft_balance_of: not a decimal string/);
   await assert.rejects(r(on("mt_batch_balance_of", view(["1", "2"]))), /not one balance per token/);
 });
@@ -237,12 +243,12 @@ test("retries: a view is retried with doubling backoff on its provider, then the
   assert.ok(waits.slice(3).every((w) => w <= 1000 / IDR.PACE.fastnear.perSec), `pace slots ${waits.slice(3).join(", ")}`);
   // FastNEAR down: dRPC reads the id, and an unused answer needs FastNEAR's, so the id's read fails
   const down = () => new Error("HTTP 503");
-  await assert.rejects(nearIdReader("mainnet", [provider(FAST, empty, down), provider(DRPC, empty)], { first: () => 0, sleep: noSleep })(U1), /rpc\.mainnet\.fastnear\.com: .*HTTP 503|HTTP 503/);
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, empty, down), provider(DRPC, empty)], { first: () => 0, ...noWait() })(U1), /rpc\.mainnet\.fastnear\.com: .*HTTP 503|HTTP 503/);
   // money on the provider that answers is that provider's word alone, so the read fails too (card
   // wallet-id-reader-paced; step 5 counts a failed id as money all the same, and never reads a lane on at one word)
-  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({ [U1]: { usdc: 1n } }), down), provider(DRPC, W({ [U1]: { usdc: 1n } }))], { first: () => 0, sleep: noSleep })(U1), /HTTP 503/);
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({ [U1]: { usdc: 1n } }), down), provider(DRPC, W({ [U1]: { usdc: 1n } }))], { first: () => 0, ...noWait() })(U1), /HTTP 503/);
   // a trace alone is not enough with the other provider down: it may hide money there (review F1)
-  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({ [U2]: { account: true } })), provider(DRPC, W({}), down)], { first: () => 1, sleep: noSleep })(U2), /HTTP 503/);
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({ [U2]: { account: true } })), provider(DRPC, W({}), down)], { first: () => 1, ...noWait() })(U2), /HTTP 503/);
 });
 
 // review F1: a provider that hides money behind a trace (answers used) never decides the id: the read stops, naming the
@@ -257,7 +263,7 @@ test("a provider hiding money behind a trace stops the read, on either side and 
       for (const f of [0, 1]) {
         const worlds = liarAt === 0 ? [liar, honest] : [honest, liar];
         const honestName = liarAt === 0 ? DRPC : FAST;
-        await assert.rejects(nearIdReader("mainnet", [provider(FAST, worlds[0]!), provider(DRPC, worlds[1]!)], { first: () => f, sleep: noSleep, tries: 1 })(U1),
+        await assert.rejects(nearIdReader("mainnet", [provider(FAST, worlds[0]!), provider(DRPC, worlds[1]!)], { first: () => f, ...noWait(), tries: 1 })(U1),
           (e: unknown) => isPair(e, honestName) && /answered money where .* answered used/.test((e as Error).message),
           `${label} money, the liar ${liarAt === 0 ? "FastNEAR" : "dRPC"}, ${f === liarAt ? "the liar" : "the honest one"} drawn first`);
       }
@@ -283,10 +289,10 @@ test("one block for the pass: money moved out between two views still reads as m
       return a;
     },
   });
-  assert.equal(await nearIdReader("mainnet", [chain(FAST), chain(DRPC)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), "money");
+  assert.equal(await nearIdReader("mainnet", [chain(FAST), chain(DRPC)], { first: () => 0, ...noWait(), tries: 1 })(U1), "money");
   assert.deepEqual(asked, [hashOf(10), hashOf(10), hashOf(10), hashOf(10)], "every view at the pass's block, by its hash (both providers, each to its money)");
   tip = 10;
-  await assert.rejects(nearIdReader("mainnet", [chain(FAST, 1), chain(DRPC, 1)], { first: () => 0, sleep: noSleep, tries: 1 })(U1), new RegExp(`answered at block 11 ${hashOf(11)}, not 10 ${hashOf(10)}`));
+  await assert.rejects(nearIdReader("mainnet", [chain(FAST, 1), chain(DRPC, 1)], { first: () => 0, ...noWait(), tries: 1 })(U1), new RegExp(`answered at block 11 ${hashOf(11)}, not 10 ${hashOf(10)}`));
 });
 
 // review N1 and its fold: no single provider picks the block. The pass's floor is the higher final, the provider behind
@@ -311,15 +317,18 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
     };
   };
   const waits: number[] = [];
-  const sleep = async (ms: number): Promise<void> => void waits.push(ms);
+  // the waits recorded, and the clock they move (a given sleep needs its own clock: delta review 4, P3-2)
+  let slept = 0;
+  const sleep = async (ms: number): Promise<void> => void (waits.push(ms), (slept += ms));
+  const now = (): number => performance.now() + slept;
   // a liar's low final (950, a real block, before the money at 980): the floor is the honest 1000, the liar re-read
   // until it gives 1000, and U reads money at block 1000 whichever is read first
   for (const f of [0, 1]) {
     const liar = chain(FAST, [950, 1000]), honest = chain(DRPC, [1000]);
-    const pass = await openRestorePass("mainnet", [liar, honest], { sleep: noSleep, tries: 1 });
+    const pass = await openRestorePass("mainnet", [liar, honest], { ...noWait(), tries: 1 });
     assert.equal(pass.h, 1000);
-    assert.equal(await (await idReaderAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 }))(U1), "money");
-    assert.equal(await (await balanceAt("mainnet", [liar, honest], pass, { first: () => f, sleep: noSleep, tries: 1 }))("usdc", U1), 9n);
+    assert.equal(await (await idReaderAt("mainnet", [liar, honest], pass, { first: () => f, ...noWait(), tries: 1 }))(U1), "money");
+    assert.equal(await (await balanceAt("mainnet", [liar, honest], pass, { first: () => f, ...noWait(), tries: 1 }))("usdc", U1), 9n);
   }
   // a liar's high final (1050) the honest one never reaches: refused after PASS_TRIES re-reads, PASS_WAIT_MS apart
   assert.equal(PASS_TRIES, 10);
@@ -327,21 +336,21 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
   // (each part of this test on its own clock: the pace is one per provider URL)
   resetPaces();
   waits.length = 0;
-  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1050]), chain(DRPC, [1000], { reads: { n: 0 } })], { sleep, tries: 1 }), /^Error: the RPCs' finals did not meet; the restore does not start \(https:\/\/near\.drpc\.org at 1000, the other at 1050\)$/);
+  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1050]), chain(DRPC, [1000], { reads: { n: 0 } })], { sleep, now, tries: 1 }), /^Error: the RPCs' finals did not meet; the restore does not start \(https:\/\/near\.drpc\.org at 1000, the other at 1050\)$/);
   assert.deepEqual(waits, Array(10).fill(1_000), "about 10 s in all");
   // a liar that stays low is behind and never meets either: a stop, never a pass at its block
-  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [950], { reads: { n: 0 } }), chain(DRPC, [1000])], { sleep: noSleep, tries: 1 }), /finals did not meet/);
+  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [950], { reads: { n: 0 } }), chain(DRPC, [1000])], { ...noWait(), tries: 1 }), /finals did not meet/);
   // the two hashes of the floor block disagreeing: refused
-  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000], { fake: 1000 }), chain(DRPC, [1000])], { sleep: noSleep, tries: 1 }), new RegExp(`the RPCs' blocks at 1000 differ \\(${"F".padEnd(44, "a")}, ${hashOf(1000)}\\); the restore does not start`));
+  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000], { fake: 1000 }), chain(DRPC, [1000])], { ...noWait(), tries: 1 }), new RegExp(`the RPCs' blocks at 1000 differ \\(${"F".padEnd(44, "a")}, ${hashOf(1000)}\\); the restore does not start`));
   // heads over 120 apart: refused at once, with no wait
   resetPaces();
   waits.length = 0;
-  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [1121])], { sleep, tries: 1 }), /the RPCs' final heights 1000 and 1121 are over 120 blocks apart; the restore does not start/);
+  await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [1121])], { sleep, now, tries: 1 }), /the RPCs' final heights 1000 and 1121 are over 120 blocks apart; the restore does not start/);
   assert.deepEqual(waits, []);
   // a lagging honest provider that catches up within the bound: opens at the higher final
   resetPaces();
   waits.length = 0;
-  const lag = await openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [995, 996, 998, 1000])], { sleep, tries: 1 });
+  const lag = await openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [995, 996, 998, 1000])], { sleep, now, tries: 1 });
   assert.deepEqual([lag.h, lag.hash, waits.length], [1000, hashOf(1000), 3]);
   // a pass is taken only from openRestorePass, and only on the providers it was opened on
   const a = chain(FAST, [1000]), b = chain(DRPC, [1000]);
@@ -365,7 +374,7 @@ test("a stale pass is refused; a fresh one reads money; providers by identity", 
     },
   });
   const rpcs = [chain(FAST), chain(DRPC)] as const;
-  const o = { sleep: noSleep, tries: 1 };
+  const o = { ...noWait(), tries: 1 };
   const old = await openRestorePass("mainnet", rpcs, o);
   assert.equal(old.h, 1000);
   tip = 1700;
@@ -453,7 +462,7 @@ function stepPair(base: StepWorld) {
   const clear = { vault: undefined, intents: undefined, skip: undefined, finalMs: undefined, restoreHash: undefined, restoreMs: undefined, retain: undefined, blockMs: undefined, failBlock: undefined, blockTip: undefined };
   return { rpcs, set: (x: Partial<StepWorld>, y: Partial<StepWorld> = x) => void (Object.assign(a, clear, x), Object.assign(b, clear, y)) };
 }
-const so = { sleep: noSleep, tries: 1, first: () => 0 };
+const so = { ...noWait(), tries: 1, first: () => 0 };
 // the reviewer's probe5 chain: a note at 3 (lane 3), money landing at index 11 (lane 3, k=1) at block 1100
 const r5 = (): Pick<NoteRestore, "notes" | "laneHighest" | "laneWalked"> => ({ notes: [dep(3)], laneHighest: [null, null, null, 3, null, null, null, null], laneWalked: Array.from({ length: 8 }, (_, l) => (l === 3 ? 3 : l - 8) + 8 * 10_000) });
 const store = { lane: 0, raiseDepositIndex: async (_s: bigint, m: number) => m };
@@ -584,7 +593,7 @@ test("step 7's clock: header reads retried as the views (a 429, a node a block b
   {
     const { rpcs, set } = stepPair({ tip: 1000, money: [] });
     set({}, { failBlock: 3 });
-    const pass = await openRestorePass("mainnet", rpcs, { sleep: noSleep });
+    const pass = await openRestorePass("mainnet", rpcs, { ...noWait() });
     assert.equal(passTimeMs(pass), T0);
     set({}, { failBlock: 1 });
     await assert.rejects(openRestorePass("mainnet", rpcs, so), /^Error: https:\/\/near\.drpc\.org: the pass's block 1000 is not served \(UNKNOWN_BLOCK\)$/);
@@ -595,7 +604,7 @@ test("step 7's clock: header reads retried as the views (a 429, a node a block b
   {
     const { rpcs, set } = stepPair({ tip: 1000, money: [mid(at(0, 1))] });
     const restored = await openRestorePass("mainnet", rpcs, so);
-    const o = { sleep: noSleep, first: () => 0 };
+    const o = { ...noWait(), first: () => 0 };
     set({ tip: 1722, failBlock: 2 }, { tip: 1722, failBlock: 2 });
     assert.equal((await secondScan({ seed64: SEED, network: "mainnet", rpcs, restored, wallets: { wallets: [], unread: [] }, gap: 3, opts: { ...o, margin: 2 } })).due, true);
     const plan = { scope: SCOPE, lane: 0, next: 0, after: restored.h, rereads: [] };
@@ -636,7 +645,7 @@ test("the R/V/A balance reader on mainnet's answers, and only a balance both pro
   }
   const empty = W({});
   const rich = W({ [U1]: { usdc: 7n, tokens: { "nep141:a": 2n, "nep141:b": 3n }, account: true } });
-  const b = (x: Map<string, Id>, y: Map<string, Id>, fx?: () => unknown) => nearBalanceReader("mainnet", [provider(FAST, x, fx), provider(DRPC, y)], { first: () => 0, sleep: noSleep });
+  const b = (x: Map<string, Id>, y: Map<string, Id>, fx?: () => unknown) => nearBalanceReader("mainnet", [provider(FAST, x, fx), provider(DRPC, y)], { first: () => 0, ...noWait() });
   // one provider hiding money, or faking it, decides nothing: the pair disagrees, naming the higher (before, the higher
   // was taken on its one word)
   await assert.rejects(b(empty, rich)("usdc", U1), (e: unknown) => isPair(e, DRPC) && /near\.drpc\.org answered 7 where https:\/\/rpc\.mainnet\.fastnear\.com answered 0 at block 1/.test((e as Error).message));
@@ -646,7 +655,7 @@ test("the R/V/A balance reader on mainnet's answers, and only a balance both pro
   await assert.rejects(b(empty, empty, () => new Error("HTTP 503"))("usdc", U1), /HTTP 503/, "a 0 needs both providers");
   await assert.rejects(b(rich, rich, () => new Error("HTTP 503"))("usdc", U1), /HTTP 503/, "and so does any balance");
   const halted = () => ({ jsonrpc: "2.0", result: { error: "Smart contract panicked: FiatToken: paused", logs: [], block_height: 1, block_hash: hashOf(1) } });
-  await assert.rejects(nearBalanceReader("mainnet", [provider(FAST, rich, halted), provider(DRPC, rich, halted)], { first: () => 0, sleep: noSleep, tries: 1 })("usdc", U1), /FiatToken: paused/);
+  await assert.rejects(nearBalanceReader("mainnet", [provider(FAST, rich, halted), provider(DRPC, rich, halted)], { first: () => 0, ...noWait(), tries: 1 })("usdc", U1), /FiatToken: paused/);
   await assert.rejects(b(rich, rich)("gas" as "usdc", U1), /unknown read/);
 });
 
@@ -671,7 +680,7 @@ function rng(seed: number): () => number {
 const shape = (lanes: Awaited<ReturnType<typeof restoreDepositIds>>) => lanes.map((x) => [x.lane, x.money, x.used, x.highest]);
 
 test("restores at 10% and at 20% per-read failures finish, 40 of 40 each, and find every money and trace", { timeout: 120_000 }, async () => {
-  const want = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { sleep: noSleep })));
+  const want = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { ...noWait() })));
   assert.deepEqual(want[2], [2, [at(2, 14)], [], at(2, 14)]);
   assert.deepEqual(want[5], [5, [at(5, 39)], [at(5, 20)], at(5, 39)]);
   const seen: Record<string, number> = {};
@@ -681,7 +690,7 @@ test("restores at 10% and at 20% per-read failures finish, 40 of 40 each, and fi
     for (let k = 0; k < 40; k++) {
       const r = rng(1_000 * rate + k);
       const fail = () => (r() < rate ? new Error("HTTP 429") : undefined);
-      const got = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD, fail), provider(DRPC, WORLD, fail)], { sleep: noSleep, first: () => (r() < 0.5 ? 0 : 1) }));
+      const got = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD, fail), provider(DRPC, WORLD, fail)], { ...noWait(), first: () => (r() < 0.5 ? 0 : 1) }));
       finished++;
       for (const [lane, , , ] of want) {
         const x = got[lane as number]!;
@@ -707,7 +716,7 @@ test("a provider always down ends the restore with the lane's named error; so do
   const down = () => new Error("HTTP 503");
   for (const rpcs of [[provider(FAST, WORLD, down), provider(DRPC, WORLD)], [provider(FAST, WORLD), provider(DRPC, WORLD, down)], [provider(FAST, WORLD, down), provider(DRPC, WORLD, down)]] as const) {
     await assert.rejects(
-      restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", rpcs, { sleep: noSleep })),
+      restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", rpcs, { ...noWait() })),
       new RegExp(`^Error: lane 0: ${DEPOSIT_ID_MARGIN} id reads failed with none showing history between them \\(the last at index ${at(0, DEPOSIT_ID_MARGIN - 1)}: .*HTTP 503\\); the restore stops, to be retried$`),
     );
   }
@@ -721,7 +730,7 @@ test("a faked money on a used, empty id stops step 5 at that id, naming the prov
   const world = W({ [id(u)]: { storage: true } });
   const fake = (p: Record<string, unknown>) => (argsOf(p).account_id === id(u) && p.method_name === "ft_balance_of" ? view("5") : undefined);
   await assert.rejects(
-    restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, sleep: noSleep, tries: 1 })),
+    restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, world, fake), provider(DRPC, world)], { first: () => 0, ...noWait(), tries: 1 })),
     new RegExp(`^PairDisagrees: lane 3: at index ${u}, https://rpc\\.mainnet\\.fastnear\\.com answered money where https://near\\.drpc\\.org answered used at block 1: one of the pair is wrong at one block, so the restore stops, to be retried$`),
   );
 });
@@ -751,7 +760,7 @@ test("a busy provider is waited out and asked again past FastNEAR's 1.9 s runs: 
 });
 
 test("FastNEAR busy in 1.9 s runs every 4 s for a whole restore: every id read, nothing unread, the same lanes as a calm chain", { timeout: 60_000 }, async () => {
-  const calm = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { sleep: noSleep })));
+  const calm = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { ...noWait() })));
   const v = vclock();
   const fail = () => (v.now() % 4_000 < 1_900 ? http(429) : undefined);
   const lanes = await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD, fail), provider(DRPC, WORLD)], { sleep: v.sleep, now: v.now }));
@@ -877,7 +886,7 @@ test("a liar over a whole scope: one provider answering used, or money, on every
       const honest = provider(liarAt === 0 ? DRPC : FAST, WORLD, undefined, count);
       const rpcs = (liarAt === 0 ? [liar, honest] : [honest, liar]) as [NearRpc, NearRpc];
       await assert.rejects(
-        restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", rpcs, { sleep: noSleep })),
+        restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", rpcs, { ...noWait() })),
         (e: unknown) => isPair(e, liar.name) && new RegExp(`^lane 0: at index 0, ${liar.name.replaceAll(".", "\\.")} answered ${said} where ${honest.name.replaceAll(".", "\\.")} answered unused at block 1: `).test((e as Error).message),
       );
       // the pass's reads and one id's views on each side: the liar never moves a lane on
@@ -906,7 +915,7 @@ const tipped = (url: string, world: Map<string, Id>, tip: { h: number }, fail: (
 test("a Retry goes on where the last run stopped: every id answered at the kept pass is not asked again; a stale pass keeps only the agreed used", async () => {
   const tip = { h: 1000 };
   const WORLD = W({ [id(at(0, 3))]: { storage: true }, [id(at(1, 7))]: { account: true }, [id(at(0, 9))]: { usdc: 2n }, [id(at(2, 14))]: { usdc: 9n }, [id(at(5, 20))]: { storage: true }, [id(at(5, 39))]: { tokens: { "nep141:wrap.near": 4n } } });
-  const calm = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { sleep: noSleep })));
+  const calm = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { ...noWait() })));
   let broken = true;
   const seen = new Set<string>();
   // dRPC breaks (a wrong answer, not busy) once the run has asked of 40 ids, so the first run stops in its lane 2
@@ -914,7 +923,7 @@ test("a Retry goes on where the last run stopped: every id answered at the kept 
   const asked: string[] = [];
   const rpcs = [tipped(FAST, WORLD, tip, undefined, asked), tipped(DRPC, WORLD, tip, breaks)] as const;
   const keep = IDR.idReadKeep();
-  const o = { sleep: noSleep, tries: 1, first: () => 0 };
+  const o = { ...noWait(), tries: 1, first: () => 0 };
   const first = await IDR.keptIdReader("mainnet", () => rpcs, keep, o);
   await assert.rejects(restoreDepositIds(SEED, SCOPE, R, first.reader), /id reads failed with none showing history between them/);
   const kept = new Set(keep.answers.keys());
@@ -947,7 +956,7 @@ test("a stale pass asks again an id kept used on the indexer's word", async () =
   const asked: string[] = [];
   const rpcs = [tipped(FAST, WORLD, tip, undefined, asked), tipped(DRPC, WORLD, tip)] as const;
   const keep = IDR.idReadKeep();
-  const o = { sleep: noSleep, first: () => 0, indexer: async (x: string) => x === u };
+  const o = { ...noWait(), first: () => 0, indexer: async (x: string) => x === u };
   assert.equal(await (await IDR.keptIdReader("mainnet", () => rpcs, keep, o)).reader(u), "used");
   tip.h = 1121;
   asked.length = 0;
@@ -998,4 +1007,18 @@ test("FastNEAR's views come at its measured sustained rate once its burst is spe
   const fast = gaps(at[FAST]!).slice(IDR.PACE.fastnear.burst);
   assert.ok(fast.length >= 20, `${fast.length} paced FastNEAR views`);
   for (const g of fast) assert.ok(Math.abs(g - 1000 / FASTNEAR_SUSTAINED) < 1e-6, `FastNEAR asked ${g} ms apart, not ${1000 / FASTNEAR_SUSTAINED}`);
+});
+
+// delta review 4, P3-2: a sleep given without its clock made a clock per options build (askOpts: the pass's, the
+// setup's and each header's their own `performance.now() + slept`), so one reader's waits moved several clocks; a given
+// sleep now needs its own `now`
+test("a sleep given without its own clock is refused, by the pass, the IdReader and the balance reader", async () => {
+  const rpcs = [provider(FAST, W({})), provider(DRPC, W({}))] as const;
+  const refused = /^Error: a given sleep needs its own clock \(now\)$/;
+  await assert.rejects(async () => openRestorePass("mainnet", rpcs, { sleep: noSleep }), refused);
+  const v = vclock();
+  const pass = await openRestorePass("mainnet", rpcs, { sleep: v.sleep, now: v.now });
+  await assert.rejects(async () => (await idReaderAt("mainnet", rpcs, pass, { sleep: noSleep }))(U1), refused);
+  await assert.rejects(async () => (await balanceAt("mainnet", rpcs, pass, { sleep: noSleep }))("usdc", U1), refused);
+  assert.equal(await (await idReaderAt("mainnet", rpcs, pass, { first: () => 0, sleep: v.sleep, now: v.now }))(U1), "unused");
 });

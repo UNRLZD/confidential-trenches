@@ -9,7 +9,10 @@
 // A request on pacedFetch waits for its slot under its caller's own signal only, and its deadline (RPC_TIMEOUT_MS)
 // starts when the slot comes; a wait its caller ends gives the slot back (delta review 2, P1: with the deadline
 // started before the queue, the fourth request queued on FastNEAR's 2.56 s gap timed out unsent, its slot lost and its
-// retry queued behind it again, so four chains at once stalled for good).
+// retry queued behind it again, so four chains at once stalled for good). Every ended wait gives its own slot back,
+// never one inside a busy hold (delta review 4: giving back only the queue's tail kept every slot a sign-out ended but
+// the last, since one signal's listeners run in slot order, 51.2 s for the next request after 20 queued; lowering tat
+// one gap for a slot in the middle instead put the next request on the tail's slot, 12 at one instant on a burst of 8).
 import { NEAR_NETWORKS, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./deposit/account.ts";
 
 /**
@@ -27,8 +30,10 @@ import { NEAR_NETWORKS, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./deposit/
  */
 export const PACE: Readonly<Record<"fastnear" | "drpc", { perSec: number; burst: number }>> = Object.freeze({ fastnear: Object.freeze({ perSec: 0.39, burst: 8 }), drpc: Object.freeze({ perSec: 3.5, burst: 10 }) });
 
-/** A provider URL's pace: the theoretical arrival time of its next request, and the gap one request takes. */
-export type Pace = { tat: number; every: number; burst: number };
+/** A provider URL's pace: the theoretical arrival time of its next request, the gap one request takes, the floor the
+ *  last busy hold set (tat as it held it: a slot given back never takes tat below it), and the slots given back that
+ *  are still ahead (send times, in order), which the next requests take before a new slot. */
+export type Pace = { tat: number; every: number; burst: number; floor: number; holes: number[] };
 const PACES = new Map<string, Pace>();
 /** The one pace of provider `url` (a FastNEAR URL or a dRPC URL of NEAR_NETWORKS; any other URL is not paced). */
 export function paceOf(url: string): Pace {
@@ -36,25 +41,47 @@ export function paceOf(url: string): Pace {
   if (p === undefined) {
     const net = Object.values(NEAR_NETWORKS).find((n) => (n.fastnear as readonly string[]).includes(url) || n.drpc === url);
     const pace = net === undefined ? null : PACE[(net.fastnear as readonly string[]).includes(url) ? "fastnear" : "drpc"];
-    p = pace === null ? { tat: 0, every: 0, burst: 1 } : { tat: 0, every: 1000 / pace.perSec, burst: pace.burst };
+    p = pace === null ? { tat: 0, every: 0, burst: 1, floor: 0, holes: [] } : { tat: 0, every: 1000 / pace.perSec, burst: pace.burst, floor: 0, holes: [] };
     PACES.set(url, p);
   }
   return p;
 }
-/** The wait before this provider's next request (and the slot taken): `burst` at once, then one every `every` ms. */
-export function paceSlot(p: Pace, now: number): number {
+/** The send time of this provider's next request (and the slot taken): the first slot given back still ahead and not
+ *  inside a busy hold, else a new one: `burst` at once, then one every `every` ms. A slot given back is one the pace
+ *  had already let out, so the sends stay within it (GCRA) whichever order waits end in. */
+export function paceTake(p: Pace, now: number): number {
+  const held = p.floor - (p.burst - 1) * p.every; // the last busy hold's end
+  while (p.holes.length > 0 && (p.holes[0]! < now || p.holes[0]! < held)) p.holes.shift();
+  const hole = p.holes.shift();
+  if (hole !== undefined) return hole;
   p.tat = Math.max(p.tat, now);
   const at = p.tat - (p.burst - 1) * p.every;
   p.tat += p.every;
-  return Math.max(0, at - now);
+  return Math.max(at, now);
 }
-/** The queue's last slot, taken and not used (its wait ended by its caller), given back; pacedFetch gives back only that one. */
-export function paceGiveBack(p: Pace, now: number): void {
-  p.tat = Math.max(now, p.tat - p.every);
+/** The wait before this provider's next request (and the slot taken: paceTake). */
+export function paceSlot(p: Pace, now: number): number {
+  return paceTake(p, now) - now;
 }
-/** A busy answer holds the provider's every request for `ms`, its burst spent. */
+/** A slot taken and not used (its wait, ending at `at`, ended by its caller) given back (delta review 4): the next
+ *  request takes it; the queue's tail slots come off tat, never below a busy hold's floor (P3-1: a hold tat had already
+ *  passed was cut short by one slot given back). Tail by its send time to a microsecond, not float equality (P2-1:
+ *  `===` on tat missed about 1.2% of the time). */
+export function paceGiveBack(p: Pace, at: number): void {
+  const i = p.holes.findIndex((h) => h > at);
+  p.holes.splice(i < 0 ? p.holes.length : i, 0, at);
+  for (;;) {
+    const last = p.holes.at(-1);
+    if (last === undefined || Math.abs(last - (p.tat - p.burst * p.every)) > 1e-3 || p.tat <= p.floor) break;
+    p.holes.pop();
+    p.tat = Math.max(p.tat - p.every, p.floor);
+  }
+}
+/** A busy answer holds the provider's every request for `ms`, its burst spent; the hold is the floor a slot given back
+ *  stops at (delta review 4, P3-1: a hold tat had already passed was cut short by one slot given back). */
 export function paceHold(p: Pace, now: number, ms: number): void {
-  p.tat = Math.max(p.tat, now + ms + (p.burst - 1) * p.every);
+  p.floor = Math.max(p.floor, now + ms + (p.burst - 1) * p.every);
+  p.tat = Math.max(p.tat, p.floor);
 }
 /** Forgets every provider's pace (tests: each test's clock starts at its own zero). */
 export function resetPaces(): void {
@@ -74,19 +101,19 @@ export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(
   const f = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     const signal = init?.signal ?? undefined;
     signal?.throwIfAborted();
-    const w = paceSlot(p, performance.now());
-    // the slot this request took is the queue's tail while tat still stands where it put it
-    const mine = p.tat;
+    const t = performance.now();
+    const at = paceTake(p, t);
+    const w = at - t;
     if (w > 0) {
       await new Promise<void>((res, rej) => {
-        const t = setTimeout(() => {
+        const k = setTimeout(() => {
           signal?.removeEventListener("abort", stop);
           res();
         }, w);
         const stop = (): void => {
-          clearTimeout(t);
-          // only the queue's tail is given back: any later slot or busy hold stands (delta review 3, P2-1)
-          if (p.tat === mine) paceGiveBack(p, performance.now());
+          clearTimeout(k);
+          // every ended wait gives its own slot back (delta review 4)
+          paceGiveBack(p, at);
           rej(signal!.reason);
         };
         signal?.addEventListener("abort", stop, { once: true });

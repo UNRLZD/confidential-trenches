@@ -162,3 +162,90 @@ test("five FastNEAR chains at once on relayRpc.block and pacedNearRpc: every req
     globalThis.fetch = real;
   }
 });
+
+// delta review 4: the real pacedFetch on a virtual clock (performance.now and setTimeout replaced for the body's length)
+async function onVirtualClock(body: (c: { now: () => number; setNow: (t: number) => void; runTo: (t: number) => Promise<void>; turn: () => Promise<void> }) => Promise<void>): Promise<void> {
+  const realNow = Object.getOwnPropertyDescriptor(performance, "now");
+  const [realSet, realClear] = [globalThis.setTimeout, globalThis.clearTimeout];
+  let now = 0, id = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  Object.defineProperty(performance, "now", { value: () => now, configurable: true });
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => (timers.set(++id, { at: now + Math.max(0, ms ?? 0), fn }), id)) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((k: number) => void timers.delete(k)) as unknown as typeof clearTimeout;
+  const turn = () => new Promise<void>((r) => setImmediate(r));
+  const runTo = async (t: number): Promise<void> => {
+    for (;;) {
+      await turn(); await turn();
+      let best: [number, { at: number; fn: () => void }] | null = null;
+      for (const [k, v] of timers) if (v.at <= t && (best === null || v.at < best[1].at || (v.at === best[1].at && k < best[0]))) best = [k, v];
+      if (best === null) break;
+      timers.delete(best[0]);
+      now = Math.max(now, best[1].at);
+      best[1].fn();
+    }
+    now = t;
+    await turn(); await turn();
+  };
+  try {
+    await body({ now: () => now, setNow: (t) => void (now = t), runTo, turn });
+  } finally {
+    if (realNow) Object.defineProperty(performance, "now", realNow); else delete (performance as { now?: unknown }).now;
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+  }
+}
+
+// delta review 4, P2-1: a sign-out ends many queued waits on one signal, whose listeners run in slot order, so a give-back
+// of the queue's tail alone freed only the last (8 burst + 20 queued on FastNEAR, one abort: the next request waited
+// 51.2 s); and `===` on a float tat missed the tail about 1.2% of the time, which kept every slot before it
+test("one signal ending the burst and 20 queued waits frees every queued slot: the next request waits at most one gap", async () => {
+  await onVirtualClock(async ({ now, setNow, runTo, turn }) => {
+    const sends: number[] = [];
+    const f = P.pacedFetch(FAST, async () => (sends.push(now()), answer()));
+    const p = P.paceOf(FAST);
+    const c = new AbortController();
+    for (let k = 0; k < 28; k++) void f(FAST, { signal: c.signal }).catch(() => {});
+    await runTo(100);
+    c.abort(new Error("signed out"));
+    await turn();
+    assert.equal(sends.length, 8);
+    const t0 = now();
+    void f(FAST).catch(() => {});
+    await runTo(t0 + 120_000);
+    assert.equal(sends.length, 9);
+    assert.ok(sends[8]! - t0 <= p.every, `the next request waited ${sends[8]! - t0} ms, over one gap of ${p.every} ms`);
+    // waits ended last first on a fractional clock: every queued slot comes back (8 gaps ahead, the burst's, stay)
+    P.resetPaces();
+    setNow(1234.5678901);
+    const q = P.pacedFetch(FAST, async () => answer());
+    const p2 = P.paceOf(FAST);
+    const cs = Array.from({ length: 40 }, () => new AbortController());
+    for (const x of cs) void q(FAST, { signal: x.signal }).catch(() => {});
+    await runTo(now() + 0.3333);
+    for (let i = cs.length - 1; i >= 8; i--) { cs[i]!.abort(new Error("x")); await turn(); }
+    assert.ok(Math.abs(p2.tat - now() - 8 * p2.every) < 1, `tat ${p2.tat - now()} ms ahead, the burst's ${8 * p2.every} ms`);
+  });
+});
+
+// delta review 4, P3-1: a busy hold that moved nothing (tat already past its end) was cut short by one ended wait: 11
+// requests at 0, a 9000 ms Retry-After at 10, the queue's tail ended, and a new request went at 7692 ms
+test("a busy hold stands when an ended wait gives a slot back, even a hold the queue already reached past", async () => {
+  await onVirtualClock(async ({ now, runTo, turn }) => {
+    const sends: number[] = [];
+    const f = P.pacedFetch(FAST, async () => (sends.push(now()), answer()));
+    const p = P.paceOf(FAST);
+    const cs = Array.from({ length: 11 }, () => new AbortController());
+    for (const c of cs) void f(FAST, { signal: c.signal }).catch(() => {});
+    await runTo(10);
+    P.paceHold(p, now(), 9_000);
+    const end = now() + 9_000;
+    cs[10]!.abort(new Error("x"));
+    await turn();
+    const t0 = now();
+    void f(FAST).catch(() => {});
+    await runTo(t0 + 60_000);
+    const last = sends[sends.length - 1]!;
+    assert.equal(sends.length, 11);
+    assert.ok(last >= end, `the new request went at ${last} ms, inside the hold that ends at ${end} ms`);
+  });
+});
