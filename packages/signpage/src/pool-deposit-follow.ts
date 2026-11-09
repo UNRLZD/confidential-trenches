@@ -83,8 +83,8 @@ export type PoolMove = MoveRecord & { txs?: PoolHeardTx[] };
 /** How long past a move's (or the quote's) deadline the device keeps reading a tx that does not read final, or reads
  *  that do not agree, before it lets them go (review P2-b): a follow always ends. */
 export const POOL_TX_READ_MARGIN_MS = 10 * 60_000;
-/** How long past its move's deadline a heard tx is read at all (re-check 2 P3): past it, on the chain's clock (the
- *  device's when the reads do not agree), a tx not read final is never read again. Non-archival NEAR nodes keep a tx's
+/** How long past its move's deadline a heard tx is read at all (re-check 2 P3): past it, on the chain's clock only
+ *  (re-check 3 P3: never the device's), a tx not read final is never read again. Non-archival NEAR nodes keep a tx's
  *  result about 5 epochs (about 2.5 days). */
 export const POOL_TX_READ_LIMIT_MS = 48 * 3_600_000;
 /** A heard tx still to read: neither final, dropped nor unread. */
@@ -590,8 +590,8 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
   // land. It holds the end while it may still settle: past its deadline and the margin (the chain's clock, or the
   // device's when the reads do not agree; review P2-b), or with no finite deadline (re-check P3-1), it no longer holds
   // it and stays open, read again at later landings (re-check P3-2: a move that landed late still shows its tx), until
-  // POOL_TX_READ_LIMIT_MS past its deadline (or at once with no finite deadline): then unread, never read again (re-check
-  // 2 P3). `r` is the round's read at the move `m`'s nonce. True: nothing holds the end
+  // POOL_TX_READ_LIMIT_MS past its deadline on the chain's clock (or at once with no finite deadline): then unread, never
+  // read again (re-check 2 and 3 P3). `r` is the round's read at the move `m`'s nonce. True: nothing holds the end
   const settleAll = async (f: PoolFollowRecord, m: PoolMove | undefined, r?: MoveRead | null): Promise<boolean> => {
     const open = (m?.txs ?? []).filter(openTx);
     if (m === undefined || open.length === 0) return true;
@@ -603,7 +603,8 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
       const late = (clock: number) => !timed || clock > t.deadline_ms + POOL_TX_READ_MARGIN_MS;
       if (at !== null && at.used === true && (await txFinal(t.hash, { signer: f.refund_id, nonce: t.nonce }).catch(() => false))) done.push({ ...t, final: true });
       else if (at !== null && at.used !== true && timed && at.timeMs > t.deadline_ms) done.push({ ...t, dropped: true });
-      else if (!timed || (at === null ? now() : at.timeMs) > t.deadline_ms + POOL_TX_READ_LIMIT_MS) done.push({ ...t, unread: true });
+      // unread on the chain's clock only (re-check 3 P3): a device clock set ahead never retires a live tx
+      else if (!timed || (at !== null && at.timeMs > t.deadline_ms + POOL_TX_READ_LIMIT_MS)) done.push({ ...t, unread: true });
       else if (!late(at === null ? now() : at.timeMs)) holds++;
     }
     if (done.length > 0) await h.record({ ...m, txs: done });

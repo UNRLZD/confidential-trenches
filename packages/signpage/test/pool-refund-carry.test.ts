@@ -266,7 +266,16 @@ test("re-check P3-2: an ended op whose refund tx is still open is read again at 
   assert.equal((rows.get("op-1") as { final?: true }).final, true);
 });
 
-test("re-check 2 P3: a heard tx not read final 48 h past its move's deadline (chain time, or the device's when the reads do not agree) is unread: never shown, never read again; one inside the limit is still read at each landing", async () => {
+test("re-check 3 P3: a device clock 49 h ahead with reads that never agree never marks a just-sent tx unread: it only stops holding the end, and stays open", async () => {
+  const realNow = 1_800_000_000_000;
+  const tx = { hash: HASH, nonce: "N", deadline_ms: realNow + 120_000 };
+  const records: unknown[] = [];
+  const m = poolRefundMover({ ...world({ read: null }).host, read: async () => null, move: async () => ({ ...MOVE, nonce: "N", deadline_ms: tx.deadline_ms, txs: [tx] }), record: async (x) => void records.push(x), tx: async () => true, now: () => realNow + 49 * 3_600_000 });
+  assert.equal(await m.settle(F), true, "it does not hold the end");
+  assert.deepEqual(records, [], "not unread, not dropped: open");
+});
+
+test("re-check 2 P3: a heard tx not read final 48 h past its move's deadline on the chain's clock is unread: never shown, never read again; one inside the limit, or with reads that never agree (the device's clock is not the chain's), is still read at each landing", async () => {
   const { poolFollows, POOL_TX_READ_LIMIT_MS } = await import("../src/pool-deposit-follow.ts");
   const rows = new Map<string, unknown>();
   const store = {
@@ -306,7 +315,8 @@ test("re-check 2 P3: a heard tx not read final 48 h past its move's deadline (ch
   await host.settle();
   await host.idle();
   assert.deepEqual(reads.sort(), ["inside", "nulls", "past"]);
-  for (const k of ["past", "nulls"]) {
+  assert.equal((rows.get("nulls") as { follow: { move: { txs: { unread?: true }[] } } }).follow.move.txs[0]!.unread, undefined, "null reads: open");
+  for (const k of ["past"]) {
     const t = (rows.get(k) as { follow: { move: { txs: { unread?: true; dropped?: true; final?: true }[] } }; txs: unknown[] });
     assert.equal(t.follow.move.txs[0]!.unread, true, k);
     assert.equal(t.follow.move.txs[0]!.dropped, undefined, k);
@@ -315,7 +325,7 @@ test("re-check 2 P3: a heard tx not read final 48 h past its move's deadline (ch
   reads.length = 0;
   await host.settle();
   await host.idle();
-  assert.deepEqual(reads, ["inside"], "past the limit: read zero times at the next landing; inside it: read again");
+  assert.deepEqual(reads.sort(), ["inside", "nulls"], "past the limit on the chain's clock: read zero times at the next landing; inside it, or unread by the chain: read again");
 });
 
 test("review P3 1: a new move never loses an earlier move's heard tx: each is kept and settled on its own nonce", async () => {
