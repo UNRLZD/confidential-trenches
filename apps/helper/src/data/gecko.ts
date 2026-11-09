@@ -103,6 +103,32 @@ export type GeckoBudget = {
   minute(): string | null;
 };
 
+/**
+ * The longest a caller's cold GeckoTerminal read waits for the budget's next free call (card helper-crowd-429). [design:
+ * 4 s: a cold chart is two calls (its top pool, then its bars), so 8 s of waits and GeckoTerminal's answers stay inside
+ * the app's 10 s request (apps/terminal/src/screens/token/candles.ts TIMEOUT_MS), which then reads a 429 again after its
+ * Retry-After (THROTTLE_RETRIES 2); the live checks wait on the answer with no timeout of their own.]
+ */
+export const GT_PAGE_WAIT_MS = 4_000;
+/** Rounds a cold read takes the budget's next free call before it gives up: each round is one wait to the window's
+ *  next free call, so another caller taking that call first costs a round, never an unbounded wait. */
+const WAIT_ROUNDS = 8;
+
+/**
+ * One call in `lane` now; for a caller's cold read (the "pages" lane), the budget's next free call when it comes by
+ * `untilMs`, waited for instead of a 429 (card helper-crowd-429; card evm-holders-never-starve for the EVM token's info).
+ * A "stale", "refresh" or "ahead" read never waits: what is held is served meanwhile. Returns null once a call is taken,
+ * else when a page call can next be taken, the wait a refused read names.
+ */
+export async function takeOrWait(b: GeckoBudget, lane: string, what: string, untilMs: number, now: () => number, sleep: (ms: number) => Promise<unknown>): Promise<number | null> {
+  for (let round = 0; !b.take(lane, false, false, what); round++) {
+    const at = b.retryAt("pages");
+    if (lane !== "pages" || round >= WAIT_ROUNDS || at > untilMs) return at;
+    await sleep(Math.max(at - now(), 0) + 5);
+  }
+  return null;
+}
+
 /** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
  *  "0" (as it did at 14:58Z, still refusing 30 s later); returns the pause's end, the wait a page names. */
 export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs: number): number {

@@ -3,16 +3,18 @@
 // the committed public/prover-worker.js is the kit's prover worker build (packages/kit/src/prover/build.mjs), byte for
 // byte; and the deploy build's copies of the six setup files and their licences are the pinned files (copyServed).
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { bundle, bundleModuleProblems, check, copyServed, SERVED, sha384 } from "./build-app.mjs";
+import { bundle, bundleModuleProblems, check, copyServed, outputFiles, outsideTsconfigs, SERVED, sha384 } from "./build-app.mjs";
+import { SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { proverThreadSource, proverWorkerSource } from "../../kit/src/prover/build.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { BUILD_COMMAND, runBuild, signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 
 test("public/app.js and index.html match a fresh build", async () => {
   assert.deepEqual(await check(), []);
@@ -147,4 +149,53 @@ test("planted: a test file, a fixture, a test-only package, Node's test runner, 
   assert.match(bundleModuleProblems([]).join("\n"), /module list is empty/);
   // a runtime dependency is no test path: only the package's devDependencies are
   assert.deepEqual(bundleModuleProblems([clean, "/r/node_modules/.pnpm/@noble+curves@2.4.0/node_modules/@noble/curves/esm/ed25519.js"], src("")), []);
+});
+
+// card signpage-generated-merge-free: the four files are build output, made by every reader from the sources first
+test("signBuilt leaves the four output files in the package as a fresh build; a failed build names the command that makes it", async () => {
+  assert.equal(signBuilt(), PKG);
+  assert.deepEqual(await check(), []);
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-built-"));
+  try {
+    writeFileSync(join(d, "fail.mjs"), 'console.error("vite: planted failure"); process.exit(1);\n');
+    assert.throws(() => runBuild(join(d, "fail.mjs")), (e) => e.message.includes(BUILD_COMMAND) && e.message.includes("vite: planted failure"));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// review P1(b): the bundler applies the nearest tsconfig.json above a module, so one above the repository root (the
+// reviewer's plant: useDefineForClassFields false, app.js changed) would change the release build unseen; bundle()
+// refuses to build while one is there
+test("planted: a tsconfig.json above the repository root refuses the build before anything is bundled", async () => {
+  const d = mkdtempSync(join(tmpdir(), "ct-signpage-above-"));
+  try {
+    mkdirSync(join(d, "repo"));
+    writeFileSync(join(d, "tsconfig.json"), JSON.stringify({ compilerOptions: { useDefineForClassFields: false } }));
+    assert.deepEqual(outsideTsconfigs(join(d, "repo")), [join(d, "tsconfig.json")]);
+    await assert.rejects(bundle(PKG, { repo: join(d, "repo") }), /tsconfig\.json above the repository root[\s\S]*useDefineForClassFields|tsconfig\.json above the repository root/);
+    rmSync(join(d, "tsconfig.json"));
+    assert.deepEqual(outsideTsconfigs(join(d, "repo")), []);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+  assert.deepEqual(outsideTsconfigs(), [], "none above this checkout");
+});
+
+// review of 31f81cbd (P3): the files a build writes are exactly SIGN_BUILD_OUTPUTS, the set CI's bundle scan copies and
+// scans and .gitignore ignores, in the package and, by the same names, in the served layout the deploy uploads: a fifth
+// output would be uploaded unscanned
+test("build-app writes exactly SIGN_BUILD_OUTPUTS: in the package, and by the same names in the served layout", () => {
+  const b = { js: "", html: "", worker: "", thread: "" };
+  assert.deepEqual(Object.keys(outputFiles(b, false)).map((f) => `packages/signpage/${f}`).sort(), [...SIGN_BUILD_OUTPUTS].sort());
+  const served = SIGN_BUILD_OUTPUTS.map((f) => f.replace(/^packages\/signpage\/(public\/)?/, "")).sort();
+  assert.deepEqual(Object.keys(outputFiles(b, true)).sort(), served);
+  const out = mkdtempSync(join(tmpdir(), "ct-signpage-test-out-"));
+  try {
+    const r = spawnSync(process.execPath, [join(PKG, "scripts", "build-app.mjs"), "--out", out], { encoding: "utf8" });
+    assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+    assert.deepEqual(readdirSync(out, { recursive: true }).sort(), served);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });

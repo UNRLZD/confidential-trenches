@@ -42,6 +42,7 @@ import { fileURLToPath } from "node:url";
 import { readSolanaRent, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaPoolAccount, solanaPoolFee, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-pins";
 export const SIGN_HOST = "https://confidential.unrealized.trade";
@@ -53,10 +54,11 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const CHAIN_PAIR = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
 const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const SYSTEM = "11111111111111111111111111111111";
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
 const DEPLOY_RECORD = path.join(REPO, "contracts/pool-solana/deployments/mainnet.json");
 /** A fee payer literal in the minified bundle: the pin's `feePayer:` key and a base58 key in any quote. */
 const FEE_PAYER_LITERAL = /feePayer:[`"']([1-9A-HJ-NP-Za-km-z]{32,44})[`"']/g;
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const TREE_HEADERS = path.join(REPO, "packages/signpage/public/_headers");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 
@@ -162,7 +164,7 @@ async function accountRead(url, address) {
 
 export async function collect({ harness = false } = {}) {
   const at = new Date().toISOString();
-  const tree = readFileSync(TREE_BUNDLE);
+  const tree = readFileSync(treeBundlePath());
   const treeBundle = sha384(tree);
   const r = JSON.parse(readFileSync(DEPLOY_RECORD, "utf8"));
   const deploy = r.cluster === "mainnet" && typeof r.program_id === "string" ? { program: r.program_id, pool: solanaPoolAccount(r.program_id) } : null;

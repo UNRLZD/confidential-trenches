@@ -51,6 +51,9 @@ export const PATHS = [
   // the shared read that waits out a rate limit, which vault-skeleton.mjs and vault-testnet-t01.mjs read through
   "scripts/ci/rpc-wait.mjs",
   "scripts/net-window.mjs",
+  // the signing page's build, which near-rpc-operators.mjs makes before it scans the served bundle (card
+  // signpage-generated-merge-free, review P3-1)
+  "scripts/signpage-built.mjs",
   // the install every script runs on
   "package.json",
   "pnpm-lock.yaml",
