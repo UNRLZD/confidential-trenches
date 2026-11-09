@@ -168,12 +168,13 @@ async function readDepositIds(seed: SeedUse, walked: readonly { label: string; s
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
-/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads. */
-export function pagePools(): RestorePool[] {
+/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads.
+ *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
+export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
   const out: RestorePool[] = [];
   if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaRpcs });
   for (const chain of ["base", "robinhood"] as const) {
-    const pin = EVM_POOLS[EVM_PAGE[chain]];
+    const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
     const net = pin.network;
     // the pool's scope as src/pools.ts names it (evmPoolScopeOf on the pool's lowercased address and chain id)
