@@ -43,6 +43,7 @@ import {
   changeIndex,
   noteSecrets,
   closeRefundsRan,
+  keyNonceAt,
   readSettle,
   SETTLE_BLOCKS,
   type BuiltMove,
@@ -53,7 +54,7 @@ import {
 } from "@blindfill/kit/core";
 import { EXIT_NETWORKS, ExitRpcRefused } from "./rpc.ts";
 import { EXIT_TOKENS } from "./scan.ts";
-import { exitAccountAt, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipientFor, exitStorageFor, type ExitRecipient, type ExitStorage } from "./out.ts";
+import { exitAccountAt, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipientFor, exitStorageTake, type ExitRecipient, type ExitStorage } from "./out.ts";
 import { nearPairNetwork, nearPairRule, type NearNetwork } from "@blindfill/kit";
 
 /** A signed transaction of A: its withdrawal or settle (FunctionCall), or its DeleteAccount. */
@@ -101,7 +102,7 @@ export async function exitBuildWithdraw(a: ExitWithdrawArgs, keyOf: typeof exitK
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
   if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
   if (note.state !== "UNSPENT") throw new ExitRpcRefused(`a ${String(note.state)} note has nothing to withdraw`);
-  if (!exitStorageFor(a.storage, to)) throw new ExitRpcRefused("the registration is not one exitReadStorage read for this typed account");
+  if (!exitStorageTake(a.storage, to)) throw new ExitRpcRefused("the registration is not one exitReadStorage read for this typed account");
   const { storageMin, registered } = a.storage;
   // the seed copied before the first await, the copy zeroed on every path
   const seed64 = new Uint8Array(a.seed64);
@@ -205,20 +206,23 @@ async function spendAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], vault: strin
 }
 /**
  * A's tx read FINAL on both RPCs (final_execution_status FINAL, its hash and signer A): every receipt of it ran, its
- * refunds to A included (EXECUTED does not hold the refunds, nearcore views.rs l.2193-2199). Anything else is unread.
+ * refunds to A included (EXECUTED does not hold the refunds, nearcore views.rs l.2193-2199), with its nonce as both
+ * read it. Anything else is unread, its nonce null.
  */
-async function txFinal(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, signer: string): Promise<"final" | "unread"> {
-  const one = async (r: MoveOutRpc) => {
+async function txFinal(rpcs: readonly [MoveOutRpc, MoveOutRpc], hash: string, signer: string): Promise<{ tx: "final" | "unread"; nonce: bigint | null }> {
+  const one = async (r: MoveOutRpc): Promise<bigint | null> => {
     try {
       const a = await r.tx({ tx_hash: hash, sender_account_id: signer, wait_until: "NONE" });
       const res = isObj(a) && a.error === undefined ? a.result : undefined;
-      return isObj(res) && res.final_execution_status === "FINAL" && isObj(res.transaction) && res.transaction.hash === hash && res.transaction.signer_id === signer;
+      if (!isObj(res) || res.final_execution_status !== "FINAL" || !isObj(res.transaction) || res.transaction.hash !== hash || res.transaction.signer_id !== signer) return null;
+      const n = res.transaction.nonce;
+      return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? BigInt(n) : typeof n === "string" && DIGITS.test(n) ? BigInt(n) : null;
     } catch {
-      return false;
+      return null;
     }
   };
   const [x, y] = await Promise.all(rpcs.map(one));
-  return x && y ? "final" : "unread";
+  return x !== null && x === y ? { tx: "final", nonce: x } : { tx: "unread", nonce: null };
 }
 /** What intents.near holds under A at `at`: the pair reads no intents.near at all, no token of any kind, or something. */
 async function intentsAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], aId: string, at: number): Promise<DeleteReadFor["intents"]> {
@@ -264,14 +268,18 @@ export async function exitReadDelete(a: {
   const spend = await spendAt(a.rpcs, vault, a.spendIndex, a.nullifierHash, at);
   const { holdings } = await exitHoldings({ network, ids: [aId], rpcs: a.rpcs, at });
   const intents = await intentsAt(a.rpcs, aId, at);
-  const withdrawTx = a.txs.withdraw === null ? "unread" : await txFinal(a.moveRpcs, a.txs.withdraw, aId);
-  const settleTx = a.txs.settle === null ? "none" : await txFinal(a.moveRpcs, a.txs.settle, aId);
+  const withdrawTx = a.txs.withdraw === null ? "unread" : (await txFinal(a.moveRpcs, a.txs.withdraw, aId)).tx;
+  const settled = a.txs.settle === null ? null : await txFinal(a.moveRpcs, a.txs.settle, aId);
+  const settleTx = settled === null ? "none" : settled.tx;
+  const settleNonce = settled === null ? null : settled.nonce;
   // the row SETTLE_BLOCKS back: settled with reserve 0 there, every receipt of the withdraw and the settle has run
   // (a row not there yet, a split or a failed read: null, and the close waits or is refused)
   const back = at - SETTLE_BLOCKS;
   const then = back > 0 ? await spendAt(a.rpcs, vault, a.spendIndex, a.nullifierHash, back).catch(() => null) : null;
   const settledBack = then !== null && then.status === "settled" && then.reserve === 0n ? back : null;
-  return { network, a: aId, to: to.account, token: EXIT_TOKENS[network], height: at, blockHash: s.blockHash, nonce: s.nonce, beneficiary, spend, usdc: holdings[0]!.token, intents, withdrawTx, settleTx, settledBack };
+  // A's key nonce there (delta review P3-2): equal to its nonce now, no tx of A (a settle of its own held back) since
+  const nonceBack = settledBack === null ? null : await keyNonceAt(aId, settledBack, a.moveRpcs);
+  return { network, a: aId, to: to.account, token: EXIT_TOKENS[network], height: at, blockHash: s.blockHash, nonce: s.nonce, beneficiary, spend, usdc: holdings[0]!.token, intents, withdrawTx, settleTx, settledBack, nonceBack, settleNonce };
 }
 
 /** How one signed transaction ended: FINAL on both RPCs with every receipt a success, or not (failed, or no equal word). */
@@ -338,7 +346,8 @@ export async function exitCloseOne(
   aKey.secretKey.fill(0);
   let row = await steps.spend(nullifierHash);
   if (row === null) return stop("settle", "the spend is not read in the vault's spends");
-  refund = row.status === "refund_pending";
+  // refund_value > 0 exactly when the payout was refused (on_payout, payout.rs l.146-147): kept after the settle too
+  refund = row.status === "refund_pending" || row.refundValue > 0n;
   const there = await steps.account(aId);
   if (there === "unread") return stop("close", `A ${aId} is not read the same on both RPCs`);
   if (there === "absent") return row.status === "settled" ? { stage: "closed", txs, refund } : stop("settle", `A ${aId} is not on chain, and its spend reads ${row.status}`);
@@ -351,8 +360,10 @@ export async function exitCloseOne(
     txs.push(s.hash);
     kept.settle = s.hash;
     const settled = await steps.send(s);
-    if (settled !== "ok") return stop("settle", `the settle read ${settled}`);
     row = await steps.spend(nullifierHash);
+    // A's settle that did not land while the spend reads settled: another settled it first (delta review P3-4); the
+    // close's own read decides when A's txs can no longer pay it
+    if (settled !== "ok" && (row === null || row.status !== "settled" || row.reserve !== 0n)) return stop("settle", `the settle read ${settled}`);
     if (row === null) return stop("settle", "the spend is not read in the vault's spends");
   }
   if (row.status !== "settled" || row.reserve !== 0n) return stop("settle", `the spend reads ${row.status} with reserve ${row.reserve}`);
@@ -376,13 +387,14 @@ export async function exitCloseOne(
     } catch (e) {
       return stop("close", e instanceof Error ? e.message : String(e));
     }
+    await steps.record({ l, j, nullifierHash, step: "close", hash: d.hash });
+    // the head after the record, right before the send (delta review P3-3): a slow record cannot carry it past the window
     const now = await steps.head();
     if (now === null || now - read.height > EXIT_CLOSE_SEND_BLOCKS) {
-      // the signed bytes are dropped unsent: signed again on a new read, at the same nonce
+      // the signed bytes are dropped unsent (the kept hash reads unread on a resume): signed again on a new read
       if (wait === undefined) return stop("close", `the DeleteAccount could not be sent within ${EXIT_CLOSE_SEND_BLOCKS} blocks of its read: run the close again`);
       continue;
     }
-    await steps.record({ l, j, nullifierHash, step: "close", hash: d.hash });
     txs.push(d.hash);
     const closed = await steps.send(d);
     if (closed !== "ok") return stop("close", `the DeleteAccount read ${closed}`);
