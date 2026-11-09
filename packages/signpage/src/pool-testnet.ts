@@ -687,23 +687,28 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     { ...over.positions, kept: async () => (scope === null ? null : keptPositions(await (await page.store()).get("meta", POSITIONS_KEPT_KEY))) },
   );
   // a full sell this device signs (W's rent-back record names it, written before the sell leaves the device): noted for
-  // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell
-  const soldNoted = (owed: ReturnType<typeof owedRentBacks>): ReturnType<typeof owedRentBacks> => ({
-    ...owed,
-    put: async (rec) => {
-      await owed.put(rec);
-      const mints = Object.keys(rec.sell ?? {});
-      if (mints.length === 0) return;
-      await (await page.store())
-        .update("meta", POSITIONS_SOLD_KEY, (v) => {
-          const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) };
-          const had = Array.isArray(all[rec.address]) ? (all[rec.address] as unknown[]).filter((m): m is string => typeof m === "string") : [];
-          all[rec.address] = [...new Set([...had, ...mints])];
-          return all;
-        })
-        .catch(() => {});
-    },
-  });
+  // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell. The store's own
+  // rent-back records (pool-sell.ts owedRentBacks) underneath, as the host has always named them (scripts/live-checks/
+  // sol-w-sweep.mjs reads the host's owed: and bought: from its store)
+  const owedNoted = (store: TestnetPage["store"]): ReturnType<typeof owedRentBacks> => {
+    const owed = owedRentBacks(store);
+    return {
+      ...owed,
+      put: async (rec) => {
+        await owed.put(rec);
+        const mints = Object.keys(rec.sell ?? {});
+        if (mints.length === 0) return;
+        await (await page.store())
+          .update("meta", POSITIONS_SOLD_KEY, (v) => {
+            const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) };
+            const had = Array.isArray(all[rec.address]) ? (all[rec.address] as unknown[]).filter((m): m is string => typeof m === "string") : [];
+            all[rec.address] = [...new Set([...had, ...mints])];
+            return all;
+          })
+          .catch(() => {});
+      },
+    };
+  };
   positions.watch(() => {
     for (const f of watchers) f();
   });
@@ -772,7 +777,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64: page.seed64,
       wallets: async () => poolBuyWallets(await store(), r),
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
-      owed: soldNoted(owedRentBacks(page.store)),
+      owed: owedNoted(page.store),
       bought: buyMints(page.store),
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
