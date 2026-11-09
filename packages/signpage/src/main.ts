@@ -79,6 +79,7 @@ import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
+import { withVaultBalance } from "./vault-balance.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
@@ -261,7 +262,12 @@ else {
         // thrown inside withPools, whose own catch answers the state without pools, as before: state never throws
         const both = s.signed_in && testnet && PAGE_POOLS.length > 0 ? await testnet.readyWith(notesOrError).catch(() => null) : null;
         const notes = both ? async () => ("e" in both.value ? Promise.reject(both.value.e) : both.value.v) : pageNotes;
-        const out = await withPools(s, notes, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
+        // the vault's USDC from the same notes (src/vault-balance.ts, card signpage-state-holdings): one read shared
+        // with state.pools, so both totals come from one view of the store
+        let read: Promise<NoteRecord[]> | null = null;
+        const shared = () => (read ??= notes());
+        const withVault = await withVaultBalance(s, shared, pageScope());
+        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
         prices.refresh((out.pools ?? []).map((p) => p.chain));
         return out;
       }),
