@@ -115,7 +115,7 @@ export const pageEvmPoolRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] 
   const urls = pageEvmPoolUrls(chain);
   return urls.length < 2 ? null : urls.map((u) => testnetRpc(u));
 };
-/** The Solana pool the page's network pins: none on mainnet until pool-sol-deploy-mainnet pins it. */
+/** The Solana pool the page's network pins: SOL_POOLS.devnet in the testnet build, SOL_POOLS.mainnet (card sol-pools-mainnet-pin) on SIGN_HOST's. */
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
@@ -286,7 +286,7 @@ export type TestnetOver = {
 export const DEVNET_TABLE: string | null = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
 /** The mainnet pool's lookup table: the wallet's SOL_MAINNET_DEPLOY.table (card pool-sol-deploy-mainnet's record,
  *  frozen with no authority; card sol-pools-mainnet-pin wires it here beside SOL_POOLS.mainnet, the pin it serves). */
-export const MAINNET_TABLE: string | null = SOL_MAINNET_DEPLOY.table;
+export const MAINNET_TABLE: string | null = POOL_TESTNET ? null : SOL_MAINNET_DEPLOY.table;
 /** The page network's lookup table. */
 const PAGE_TABLE: string | null = POOL_TESTNET ? DEVNET_TABLE : MAINNET_TABLE;
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait

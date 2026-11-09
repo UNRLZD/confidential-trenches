@@ -191,7 +191,7 @@ export type SolanaPoolPin = { readonly program: string; readonly feePayer: strin
  *  none), each written here from contracts/pool-solana/deployments/mainnet.json, which the owner's paste
  *  (contracts/pool-solana/scripts/mainnet-deploy.sh) wrote once both RPCs read them back.
  *  test/pool-sol-mainnet-pin.test.ts fails whenever this differs from the record. */
-export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } = Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
+export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } = /* @__PURE__ */ Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
 
 /** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
  *  Mainnet, in SIGN_HOST's build (card sol-pools-mainnet-pin): SOL_MAINNET_DEPLOY's program (its pool

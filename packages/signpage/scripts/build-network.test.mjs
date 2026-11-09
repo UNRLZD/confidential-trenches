@@ -23,11 +23,12 @@ const TESTNET_ONLY = [
   "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
   "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
 ];
-/** The mainnet pin's fee payer (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet, card sol-pools-mainnet-pin): the
- *  testnet build must not carry it. The mainnet program EN1Wb2iW… and table BShWZ8Fb… stay in the testnet build, since
- *  src/pool-testnet.ts's MAINNET_TABLE reads SOL_MAINNET_DEPLOY at module level, so a pure mark does not fold them out. */
+/** The mainnet pin (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
+ *  sol-pools-mainnet-pin): the testnet build carries none of it. */
 const MAINNET_ONLY = [
   "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU", // the helper's mainnet fee payer
+  "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // the mainnet pool program
+  "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ", // its lookup table
 ];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {

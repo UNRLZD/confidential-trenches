@@ -12,7 +12,8 @@
 // Since card sol-pools-mainnet-pin the page's network pins the Solana pool on mainnet (SOL_POOLS.mainnet; EVM_POOLS is
 // empty), so each run there reads that pool for the vector's seed, which holds no note there, then step 5's deposit ids
 // and each id's U_X on Solana (card wallet-restore-reads-ux), and ends done; a pool it cannot read ends stalled, which
-// this check fails. The devnet and Base Sepolia notes themselves are the card's run record
+// this check fails. Its marks are read through the helper's two routes (/v1/rpc/solana and /v1/rpc/solana-marks, since
+// no keyless mainnet RPC answers that scan), so it passes only once the helper serving solana-marks is deployed. The devnet and Base Sepolia notes themselves are the card's run record
 // (pool-restore-wired.run.json), read on two RPCs.
 // After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
