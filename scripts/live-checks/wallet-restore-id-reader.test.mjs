@@ -3,7 +3,9 @@
 // asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded (9 Nov
 // 01:51Z) by card wallet-restore-id-reader-wired's fold of its delta review (P3-3), whose MARK gained ids_end,
 // ids_ux_push and seed_per_use_lock, so every record counts them (the fold before it, 00:52Z, added the stall's named
-// reasons, intents.near's mt_tokens_for_owner and the final block header):
+// reasons, intents.near's mt_tokens_for_owner and the final block header). Card wallet-restore-reads-ux re-anchored
+// ids_stop (the id and its index) and ids_ux_push (the push only where the pool's chain has no U_X reads) and re-recorded
+// good alone from its build (9 Nov, --local); the bad records keep the counts their builds gave then:
 // - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
 // - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
 //   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
@@ -216,10 +218,12 @@ test("reach_misses and reach_floor match a miss counted only past the floor, nev
 // the page's wiring (src/pool-restore.ts readDepositIds): the error kept is the one thrown again
 test("ids_stop matches the first unread id stopping every read after it, never another", () => {
   const n = (text, k) => [...text.matchAll(MARK[k])].length;
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 1);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw p;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 0);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw e}", "ids_stop"), 0);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=x,e}", "ids_stop"), 0);
+  // the id and its index handed on (card wallet-restore-reads-ux: the U_X reads beside the id take the index)
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=e,e}", "ids_stop"), 1);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw p;try{return await a(e,t)}catch(e){throw o??=e,e}", "ids_stop"), 0);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw e}", "ids_stop"), 0);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=x,e}", "ids_stop"), 0);
+  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 0, "the index dropped");
 });
 
 test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks it is the answer", async () => {
@@ -259,8 +263,12 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end("l(s.length>0?`stalled`:`done`)", "x"), "ids_end"), 0, "the catch pushes to another array");
   assert.equal(n(end("l(s.length>1?`stalled`:`done`)"), "ids_end"), 0);
   // this build's two statements: each reason idsUndone names, then the U_X reason, with nothing between them
-  const ux = (push) => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}async function vV(e,t,n,r,i){for(let r of t){let a=1;for(let e of gV(a))i.push(\`\${r.label}: \${e}\`);${push}}}var yV={}`;
+  // card wallet-restore-reads-ux: the push is the branch of a pool whose chain has no U_X reads (its `ux` null), then the next pool
+  const ux = (push, head = "let o=r.ux;if(o===null){") => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}async function vV(e,t,n,r,i){for(let r of t){${head}let a=await fV(e,r.scope,{notes:[...r.notes]},c);n.read?.(r.scope,a);for(let e of gV(a))i.push(\`\${r.label}: \${e}\`);${push};continue}let u=1}}var yV={}`;
   assert.equal(n(ux("i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 1);
+  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o!==null){"), "ids_ux_push"), 0, "pushed where the chain has U_X reads");
+  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o===null||r.notes.length>0){"), "ids_ux_push"), 0, "another condition beside the chain's");
+  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=x.ux;if(o===null){"), "ids_ux_push"), 0, "another pool's reads");
   assert.equal(n(ux("i.push(`${r.label}: ${gV}`)"), "ids_ux_push"), 0, "another constant pushed");
   assert.equal(n(ux("i.push(`${r.label}: done`)"), "ids_ux_push"), 0);
   // delta review 2 (P3): a condition before the push (a pool with no notes would end done, its U_X unread)
