@@ -34,6 +34,13 @@
 // within HOLD_WAIT_MS is waited out by the callers inside it, the throttled send sent once more, and their sends paced
 // from its end, instead of a 429 to each.
 //
+// Keyed-only (card evm-pool-leaves-any-source): POST /v1/rpc/{chain}?keyed=only asks the chain's keyed URLs alone (the
+// env-named ones in RPC_UPSTREAMS keyed order, each holding a key: readUpstreams' keyless ones are public endpoints set
+// under a keyed name), never an EVM chain's pinned public list, the chain's public fallback or Solana's public endpoint.
+// None set, or none answering, is 503 upstream (a throttle still its 429), never a public provider's answer: the device's
+// EVM pool sync keeps old logs only when two operators agree, and a public provider it reads itself, relayed here, would
+// count as two. Any other value of `keyed` is the route's 400 method_not_allowed (server.ts), before any call.
+//
 // Refusals, in the kit's error shape { error: { code } } (v1.ts HelperRpcCode and the common codes):
 //   404 not_found           a chain that is not one of RPC_CHAINS;
 //   413 too_large           a body over RPC_BODY_MAX bytes, or a batch of more than RPC_BATCH_MAX;
@@ -650,15 +657,16 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    * One call: `chain` as the caller wrote it, `contentType` its Content-Type header, `body` the request body, `client`
    * the caller's address (../limits/limits.ts clientOf). The helper's own cached reads (Discover's lists, the token
    * page) pass none: they draw from the provider's total, never a caller's share; `reserved` marks the ones RPC_RESERVE
-   * holds room for (Discover's), which alone may draw it.
+   * holds room for (Discover's), which alone may draw it. `keyedOnly`: the caller's ?keyed=only (card
+   * evm-pool-leaves-any-source), the chain's keyed URLs alone.
    */
-  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false): Promise<Answer> {
+  async function handle(chain: string, contentType: string | undefined, body: string, client?: string, reserved = false, keyedOnly = false): Promise<Answer> {
     const t: Trace = { waitMs: 0 };
-    const a = await traces.run(t, () => route(chain, contentType, body, client, reserved));
+    const a = await traces.run(t, () => route(chain, contentType, body, client, reserved, keyedOnly));
     return { ...a, timing: timingOf(t) };
   }
 
-  async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean): Promise<Answer> {
+  async function route(chain: string, contentType: string | undefined, body: string, client: string | undefined, reserved: boolean, keyedOnly: boolean): Promise<Answer> {
     if (!(RPC_CHAINS as readonly string[]).includes(chain)) return error(404, "not_found");
     const c = chain as RpcChain;
     if (upstreams[c].off) return UPSTREAM();
@@ -695,6 +703,11 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
     // review L4: the read's whole walk, every path below, ends by `by`
     const by = now() + WALK_MS;
+    // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public one
+    if (keyedOnly) {
+      const own = upstreams[c].keyed.filter((k) => !k.keyless).map((k) => k.url);
+      return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);
+    }
     if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
     if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
     if (c === "solana" && keyed && !slot.useKeyed()) return solanaRest(forward, methods, client, reserved, by);
