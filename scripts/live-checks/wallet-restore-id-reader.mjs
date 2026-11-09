@@ -16,7 +16,10 @@
 //     a lane unread or unfinished ends the run stalled by name; since the review of 9583f571 also: a pool scope ends
 //     stalled with its U_X on the pool's chain named unread (never done, until card wallet-restore-reads-ux), a step 5
 //     that throws ends stalled with its error named (the catch's own words: a catch that ends it done has none), a
-//     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored;
+//     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored; since card
+//     wallet-id-reader-paced: a busy provider (HTTP 429 or 5xx, its JSON -429, dRPC's code 30, no answer in time) is
+//     waited out at its pace and asked again within BUSY_WAIT_MAX_MS (busy_wait), and two providers that answer
+//     differently at one block stop the read and step 5, naming the stronger (pair_wrong);
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
@@ -55,6 +58,48 @@ export const USDC = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36
 export const REGISTERED = "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1";
 const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;
+
+// Card wallet-id-reader-paced. Each of its two markers is a function of the bundle's text: an exact pattern that
+// captures a name the minifier gave (a class, a function), then exact patterns that use that very name, so a rule held
+// by other code than the one pattern found counts 0. No pattern has a free gap: every character between the bound names
+// is the build's own, so a guard, a condition or an always-true compare added anywhere in them counts 0.
+const N = String.raw`[\w$]+`;
+const esc = (x) => x.replace(/[$]/g, "\\$&");
+const all = (text, re) => [...text.matchAll(re)];
+/**
+ * busy_wait: ProviderBusy, busyOf (a ProviderBusy, HTTP 429 or 5xx, a TimeoutError; nothing else) and busyAnswer (the
+ * JSON -429 or 429, dRPC's code 30 with "timeout"), as one run of the build, `function Y(e){...}var A=e=>...`; hold
+ * (the busy wait holds the provider's every view: `function H(e,t,n){e.tat=Math.max(e.tat,t+n+(e.burst-1)*e.every)}`);
+ * a view whose JSON answer busyAnswer reads busy throws ProviderBusy; and asked's whole loop: the pace's slot waited,
+ * the request, and a busyOf answer waited out by its Retry-After or 500 ms doubling to 8 s, the count bumped, the sum
+ * of waits held to busyMax (past it the read fails by name), the wait held on the provider's pace, and asked again.
+ * The count is asked's loops found (0 unless the others are each found once).
+ */
+export const BUSY_WAIT = (text) => {
+  const head = all(text, new RegExp(String.raw`(${N})=class extends Error\{retryAfterMs;constructor\((${N}),(${N})\)\{super\(\2\),this\.name=` + "`ProviderBusy`" + String.raw`,this\.retryAfterMs=\3\}\};function (${N})\((${N})\)\{if\(\5 instanceof \1\)return\{retryAfterMs:\5\.retryAfterMs\};if\(!(${N})\(\5\)\)return null;let (${N})=\5\.status;return typeof \7==` + "`number`" + String.raw`&&\(\7===429\|\|\7>=500&&\7<=599\)\?\{retryAfterMs:typeof \5\.retryAfterMs==` + "`number`" + String.raw`\?\5\.retryAfterMs:void 0\}:\5\.name===` + "`TimeoutError`" + String.raw`\?\{retryAfterMs:void 0\}:null\}var (${N})=(${N})=>\6\(\9\)&&\(\9\.code===-429\|\|\9\.code===429\|\|\9\.code===30&&/timeout/i\.test\(String\(\9\.message\)\)\),`, "g"));
+  const hold = all(text, new RegExp(String.raw`function (${N})\((${N}),(${N}),(${N})\)\{\2\.tat=Math\.max\(\2\.tat,\3\+\4\+\(\2\.burst-1\)\*\2\.every\)\}`, "g"));
+  if (head.length !== 1 || hold.length !== 1) return 0;
+  const [Y, busyOf, busyAnswer, H] = [head[0][1], head[0][4], head[0][8], hold[0][1]].map(esc);
+  const json = all(text, new RegExp(String.raw`if\(${busyAnswer}\((${N})\.error\)\)throw new ${Y}\(` + "`" + String.raw`\$\{(${N})\.name\}: \$\{(${N})\}: busy` + "`" + String.raw`\);`, "g"));
+  if (json.length < 1) return 0;
+  return all(text, new RegExp(String.raw`async function (${N})\((${N}),(${N}),(${N})\)\{let (${N})=(${N})\(\2\),(${N})=0,(${N})=0,(${N})=0;for\(;;\)\{\4\.signal\?\.throwIfAborted\(\);let (${N})=(${N})\(\5,\4\.now\(\)\);\10>0&&await \4\.sleep\(\10,\4\.signal\);try\{return await \3\(\4\.signal\)\}catch\((${N})\)\{if\(\4\.signal\?\.aborted\)throw \4\.signal\.reason;let (${N})=${busyOf}\(\12\);if\(\13!==null\)\{let (${N})=\13\.retryAfterMs\?\?Math\.min\(8e3,500\*2\*\*\8\);if\(\8\+\+,\9\+\14>\4\.busyMax\)throw Error\(` + "`" + String.raw`\$\{\2\.name\}: busy past \$\{\4\.busyMax\} ms of waits \(\$\{\12 instanceof Error\?\12\.message:` + "`busy`" + String.raw`\}\)` + "`" + String.raw`\.slice\(0,200\)\);\9\+=\14,${H}\(\5,\4\.now\(\),\14\);continue\}if\(\+\+\7>=\4\.tries\)throw \12;await \4\.sleep\(\4\.backoff\*2\*\*\(\7-1\),\4\.signal\)\}\}\}`, "g")).length;
+};
+/**
+ * pair_wrong: PairDisagrees (`P=class extends Error{stronger;constructor(e,t){super(t),this.name=`PairDisagrees`,
+ * this.stronger=e}}`); the IdReader's read of one id, whole from both providers asked at once to the end of its checks:
+ * two answers that differ throw P naming the stronger ("one of the pair is wrong at one block, so the restore stops"),
+ * and any failed read throws (every state needs both answers); and step 5's catch, whose first statement throws P on
+ * at once, naming its lane and index, before an id is counted unread. The count is the reads found (0 unless P is
+ * found once and step 5's catch at least once).
+ */
+export const PAIR_WRONG = (text) => {
+  const cls = all(text, new RegExp(String.raw`(${N})=class extends Error\{stronger;constructor\((${N}),(${N})\)\{super\(\3\),this\.name=` + "`PairDisagrees`" + String.raw`,this\.stronger=\2\}\}`, "g"));
+  if (cls.length !== 1) return 0;
+  const P = esc(cls[0][1]);
+  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\(\1 instanceof ${P}\)throw new ${P}\(\1\.stronger,` + "`" + String.raw`lane \$\{(${N})\}: at index \$\{(${N})\}, \$\{\1\.message\}, to be retried` + "`" + String.raw`\);if\((${N})\.push\(\{i:\3,id:(${N}),error:(${N})\(\1\)\}\),`, "g"));
+  if (stop.length < 1) return 0;
+  return all(text, new RegExp(String.raw`async function (${N})\((${N})\)\{let (${N})=(${N})\(\)===0\?0:1,(${N})=\[\3,1-\3\],(${N})=await Promise\.allSettled\(\5\.map\((${N})=>(${N})\((${N})\[\7\],\2\)\)\);(${N})\.signal\?\.throwIfAborted\(\);let (${N})=\6\.flatMap\(\((${N}),(${N})\)=>\12\.status===` + "`fulfilled`" + String.raw`\?\[\{p:\5\[\13\],x:\12\.value\}\]:\[\]\);if\(\11\.length===2&&\11\[0\]\.x!==\11\[1\]\.x\)\{let\[(${N}),(${N})\]=(${N})\[\11\[0\]\.x\]>\16\[\11\[1\]\.x\]\?\[\11\[1\],\11\[0\]\]:\[\11\[0\],\11\[1\]\];throw new ${P}\(\9\[\15\.p\]\.name,` + "`" + String.raw`\$\{\9\[\15\.p\]\.name\} answered \$\{\15\.x\} where \$\{\9\[\14\.p\]\.name\} answered \$\{\14\.x\} at block \$\{(${N})\.h\}: one of the pair is wrong at one block, so the restore stops` + "`" + String.raw`\)\}let (${N})=\6\.find\((${N})=>\19\.status===` + "`rejected`" + String.raw`\);if\(\18\)throw \18\.reason instanceof Error\?\18\.reason:Error\(` + "`the read failed`" + String.raw`\);`, "g")).length;
+};
 
 /** The card's strings in the bundle, as the minifier writes them. The two patterns bind the minifier's names. */
 export const MARK = Object.freeze({
@@ -99,11 +144,15 @@ export const MARK = Object.freeze({
   // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
   // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
   // that request per use (a run-long lock, with the run inside one request, holds none)
+  // card wallet-id-reader-paced: busy waited out (BUSY_WAIT), one of the pair is wrong at one block (PAIR_WRONG)
+  busy_wait: BUSY_WAIT,
+  pair_wrong: PAIR_WRONG,
   seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);
-const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
+/** How many times marker `k` (a string, a pattern, or a function of the bundle's text: BUSY_WAIT, PAIR_WRONG) is in `text`. */
+export const countOf = (text, k) => (typeof k === "function" ? k(text) : k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 const cors = (v) => v === "*" || v === SIGN_ORIGIN;
 
 /** The bundle's lines of the verdict on a record: { pass, lines } (no network, no headers: a build alone answers them). */
