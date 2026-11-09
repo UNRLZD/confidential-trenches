@@ -172,6 +172,9 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
   };
   let landed = shown === "in_pool";
   let slow = POOL_FOLLOW_SLOW_MS;
+  // the device's clock at this follow's first end attempt (re-check P2): a page opened long past the quote's deadline
+  // still reads a failing tx read again for the whole margin
+  let endSince: number | null = null;
   // the txs written this follow (card pool-deposit-op-txs): each written once, and never read again
   const written = new Set<string>();
   const carryTxs = async (heard: readonly TxRef[]): Promise<void> => {
@@ -208,11 +211,14 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too
         if (shown !== "in_pool") await show("in_pool");
         if (await deps.past(f)) {
-          // the end only once every landed tx is read (a failed read: read again next round, until the quote's deadline
-          // and the margin are past on the device's clock, then the end with the txs read so far; review P2-b), and each
-          // refund move's heard tx is read final or let go (poolRefundMover's settle, bounded the same way)
+          // the end only once every landed tx is read (a failed read: read again next round, until the margin past the
+          // later of the quote's deadline and this follow's first end is past on the device's clock, then the end with
+          // the txs read so far; review P2-b, re-check P2), and no refund move's heard tx holds it (poolRefundMover's
+          // settle, bounded the same way)
           const read = await carryTxs([]).then(() => true, () => false);
-          if (!read && (deps.now ?? Date.now)() <= f.deadline_ms + POOL_TX_READ_MARGIN_MS) throw new Error("read the txs again");
+          const t = (deps.now ?? Date.now)();
+          endSince ??= t;
+          if (!read && t <= Math.max(f.deadline_ms, endSince) + POOL_TX_READ_MARGIN_MS) throw new Error("read the txs again");
           if (!deps.refund?.settle || (await deps.refund.settle(f))) return shown;
         }
       } else {
@@ -316,6 +322,9 @@ const isPoolOp = (v: unknown): v is PoolDepositOp =>
   typeof v === "object" && v !== null && (v as PoolDepositOp).kind === "pool_deposit" && typeof (v as PoolDepositOp).follow === "object" && (v as PoolDepositOp).follow !== null;
 /** A pool op's follow ended: in_pool read on past its quote's deadline. Every other op is followed again at each landing. */
 export const poolFollowEnded = (op: Pick<PoolDepositOp, "stage" | "final">): boolean => op.stage === "in_pool" && op.final === true;
+/** A refund move's heard tx neither read final nor let go (re-check P3-2): an ended op with one is read again at each
+ *  landing (its refund carry's settle only), so a move that landed late still shows its tx. */
+const openHeard = (op: PoolDepositOp): boolean => (op.follow.move?.txs ?? []).some((t) => t.final !== true && t.dropped !== true);
 
 const DEC = /^[0-9]+(\.[0-9]+)?$/;
 /** A decimal at `decimals` in base units, exactly; null otherwise. */
@@ -348,7 +357,9 @@ export function poolFollows(h: PoolFollowHost) {
     const body = async () => {
       const ops = await h.store();
       const read = await ops.get("ops", id);
-      if (!isPoolOp(read) || poolFollowEnded(read)) return;
+      if (!isPoolOp(read)) return;
+      const ended = poolFollowEnded(read);
+      if (ended && !openHeard(read)) return;
       const now = resumeOf(read);
       if (now !== read) await ops.update("ops", id, (v) => (isPoolOp(v) ? resumeOf(v) : undefined));
       // the refund carry's move, kept in the op's follow record (written before its send)
@@ -360,6 +371,7 @@ export function poolFollows(h: PoolFollowHost) {
         record: async (m) => void (await ops.update("ops", id, (v) => (isPoolOp(v) ? withMove(v, m) : undefined))),
       });
       if (d === null) return;
+      if (ended) return void (await d.refund?.settle?.(f).catch(() => {}));
       const stage = async (s: PoolFollowStage) => {
         await ops.update("ops", id, (v) => (isPoolOp(v) ? withStage(v, s, (h.now ?? Date.now)()) : undefined));
       };
@@ -409,7 +421,7 @@ export function poolFollows(h: PoolFollowHost) {
       const ops = await h.store();
       for (const k of await ops.keys("ops")) {
         const v = await ops.get("ops", k).catch(() => undefined);
-        if (isPoolOp(v) && !poolFollowEnded(v)) void follow(k, v.follow);
+        if (isPoolOp(v) && (!poolFollowEnded(v) || openHeard(v))) void follow(k, v.follow);
       }
     },
     /** This tab's sign out, or the store closing: every follow stops; settle() starts them again. */
@@ -567,23 +579,26 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
   const txFinal = h.tx ?? ((hash: string, intent: { signer: string; nonce: string }) => nearTxFinal([followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)], hash, intent));
   // each heard move tx, on its own (card pool-deposit-op-txs; review P3 1): final once its move's nonce reads used on
   // both RPCs at one block and the tx reads FINAL with success on both, carrying that move's intent alone (review P1).
-  // Let go, never shown: its nonce read unused past its deadline on the chain's clock (it can never land), or reads
-  // that do not settle it past its deadline and the margin (the chain's clock, or the device's when the reads do not
-  // agree; review P2-b). `r` is the round's read at the move `m`'s nonce. True: nothing left to read
+  // Let go (dropped, never shown) only when its nonce reads unused past its deadline on the chain's clock: it can never
+  // land. It holds the end while it may still settle: past its deadline and the margin (the chain's clock, or the
+  // device's when the reads do not agree; review P2-b), or with no finite deadline (re-check P3-1), it no longer holds
+  // it and stays open, read again at later landings (re-check P3-2: a move that landed late still shows its tx). `r` is
+  // the round's read at the move `m`'s nonce. True: nothing holds the end
   const settleAll = async (f: PoolFollowRecord, m: PoolMove | undefined, r?: MoveRead | null): Promise<boolean> => {
     const open = (m?.txs ?? []).filter((t) => t.final !== true && t.dropped !== true);
     if (m === undefined || open.length === 0) return true;
     const done: PoolHeardTx[] = [];
+    let holds = 0;
     for (const t of open) {
       const at = r !== undefined && t.nonce === m.nonce ? r : await h.read(f, t.nonce).catch(() => null);
-      const late = (clock: number) => clock > t.deadline_ms + POOL_TX_READ_MARGIN_MS;
-      if (at === null) {
-        if (late(now())) done.push({ ...t, dropped: true });
-      } else if (at.used === true && (await txFinal(t.hash, { signer: f.refund_id, nonce: t.nonce }).catch(() => false))) done.push({ ...t, final: true });
-      else if (at.used === true ? late(at.timeMs) : at.timeMs > t.deadline_ms) done.push({ ...t, dropped: true });
+      const timed = Number.isFinite(t.deadline_ms);
+      const late = (clock: number) => !timed || clock > t.deadline_ms + POOL_TX_READ_MARGIN_MS;
+      if (at !== null && at.used === true && (await txFinal(t.hash, { signer: f.refund_id, nonce: t.nonce }).catch(() => false))) done.push({ ...t, final: true });
+      else if (at !== null && at.used !== true && timed && at.timeMs > t.deadline_ms) done.push({ ...t, dropped: true });
+      else if (!late(at === null ? now() : at.timeMs)) holds++;
     }
     if (done.length > 0) await h.record({ ...m, txs: done });
-    return done.length === open.length;
+    return holds === 0;
   };
   const mover = async (f: PoolFollowRecord, signal: AbortSignal): Promise<RefundRead> => {
     const m = await h.move();

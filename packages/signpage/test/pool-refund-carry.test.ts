@@ -187,12 +187,13 @@ test("pool-deposit-op-txs: a heard tx is final only once its move's nonce reads 
   const late = world({ read: readOf(0n, false, MOVE.deadline_ms + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(true) });
   assert.equal(await poolRefundMover(late.host).settle(F), true);
   assert.deepEqual(late.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
-  // used, the tx not final: read again past the deadline (FINAL may lag), let go past the margin on the chain's clock
+  // used, the tx not final: read again past the deadline (FINAL may lag); past the margin on the chain's clock it no
+  // longer holds the end, and stays open, never let go (re-check P3-2: the move landed, a later read may show it)
   const lag = world({ read: readOf(0n, true, MOVE.deadline_ms + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
   assert.equal(await poolRefundMover(lag.host).settle(F), false);
-  const gone = world({ read: readOf(0n, true, MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
-  assert.equal(await poolRefundMover(gone.host).settle(F), true);
-  assert.deepEqual(gone.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
+  const slow = world({ read: readOf(0n, true, MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
+  assert.equal(await poolRefundMover(slow.host).settle(F), true);
+  assert.deepEqual(slow.records, [], "open, not let go");
   // nothing heard, or already settled: nothing to read
   assert.equal(await poolRefundMover(world({ read: readOf(0n, true), move: MOVE, tx: tx(true) }).host).settle(F), true);
   assert.equal(await poolRefundMover(world({ read: readOf(0n, true), move: { ...MOVE, txs: [{ ...heard(HASH), final: true }] }, tx: tx(true) }).host).settle(F), true);
@@ -209,10 +210,60 @@ test("review P2-b: reads that never agree (null) hold a heard tx only until the 
   assert.equal(await poolRefundMover({ ...inside.host, now: () => MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS }).settle(F), false, "inside the margin: read again");
   const past = world({ read: null, move: { ...MOVE, txs: [heard(HASH)] }, tx });
   assert.equal(await poolRefundMover({ ...past.host, now: () => MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS + 1 }).settle(F), true);
-  assert.deepEqual(past.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
+  assert.deepEqual(past.records, [], "it no longer holds the end, and stays open (re-check P3-2)");
   // a move with deadline_ms 0 and reads that never agree: let go at once on any real clock
   const zero = world({ read: null, move: { ...MOVE, deadline_ms: 0, txs: [heard(HASH, "n", 0)] }, tx });
   assert.equal(await poolRefundMover({ ...zero.host, now: () => NOW }).settle(F), true);
+});
+
+test("re-check P3-1: a heard tx with no finite deadline never holds the end: reads that never agree let it go at once, open", async () => {
+  for (const deadline_ms of [Number.NaN, undefined, Infinity, "1"] as unknown as number[]) {
+    const w = world({ read: null, move: { ...MOVE, txs: [{ hash: HASH, nonce: "n", deadline_ms }] }, tx: async () => true });
+    assert.equal(await poolRefundMover({ ...w.host, now: () => NOW }).settle(F), true, String(deadline_ms));
+    assert.deepEqual(w.records, [], String(deadline_ms));
+    const unused = world({ read: readOf(0n, false), move: { ...MOVE, txs: [{ hash: HASH, nonce: "n", deadline_ms }] }, tx: async () => true });
+    assert.equal(await poolRefundMover(unused.host).settle(F), true, `${String(deadline_ms)}, unused`);
+    assert.deepEqual(unused.records, [], `${String(deadline_ms)}, unused: open, not let go`);
+  }
+});
+
+test("re-check P3-2: an ended op whose refund tx is still open is read again at each landing, and shown once final", async () => {
+  const { poolFollows } = await import("../src/pool-deposit-follow.ts");
+  const rows = new Map<string, unknown>();
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) rows.set(k, v);
+      return rows.get(k);
+    },
+  };
+  const follow = { chain: "solana", s: "777", i: 0, u: SOL_U, refund_id: ID, address: "DEPOSIT", deadline_ms: NOW, origin: BASE_USDC, min_out: "20000000" };
+  rows.set("op-1", { kind: "pool_deposit", stage: "in_pool", final: true, txs: [], created_ms: 1, follow: { ...follow, move: { ...MOVE, txs: [heard(HASH)] } } });
+  rows.set("op-2", { kind: "pool_deposit", stage: "in_pool", final: true, txs: [], created_ms: 1, follow });
+  let final = false;
+  const followed: string[] = [];
+  const host = poolFollows({
+    store: async () => store,
+    deps: (f, o) => {
+      followed.push(f.address);
+      const refund = poolRefundMover({ ...world({ read: readOf(0n, true) }).host, tx: async () => final, move: o.move as never, record: o.record as never });
+      return { refund, past: async () => true } as never;
+    },
+    decimals: () => 9,
+    locks: () => null,
+    now: () => 5,
+  });
+  await host.settle();
+  await host.idle();
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [], "not final yet: open");
+  assert.equal(followed.length, 1, "only the op with an open tx is read; an ended op with none is not");
+  final = true;
+  await host.settle();
+  await host.idle();
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [{ chain: "near", hash: HASH }], "a later landing shows it");
+  assert.equal((rows.get("op-1") as { final?: true }).final, true);
 });
 
 test("review P3 1: a new move never loses an earlier move's heard tx: each is kept and settled on its own nonce", async () => {
