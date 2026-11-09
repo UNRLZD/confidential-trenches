@@ -1,16 +1,18 @@
-import type { SignpageClientSnapshot, SignpageResults } from "@blindfill/kit";
+import type { PoolChain, SignpageClientSnapshot, SignpageResults } from "@blindfill/kit";
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useReturnHop } from "../../shell/ReturnHop.tsx";
 import type { ReturnHopView } from "../../shell/ReturnHop.tsx";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
-import { assetOf, statusOf } from "./model.ts";
-import type { Asset, DepositStatus, DryQuote, QuoteRefusal } from "./model.ts";
+import { assetOf, poolStatusFor, statusOf } from "./model.ts";
+import type { Asset, DepositStatus, DryQuote, PoolDepositStatus, QuoteRefusal } from "./model.ts";
 
 // What the deposit sheet reads and does, all through the kit's deposit calls (kit-deposit-assets-dry, kit-deposit-calls):
 // `deposit.assets` (the assets 1Click takes, each with its minimum and the beta cap) when the sheet opens, `deposit.dry`
 // (the quote lines for an amount, no address) as the amount is typed, `deposit.quote` (the quote SIGN_HOST fetches and
 // checks before any address exists, W:667), and the deposit's stage and facts from `state.ops` under that request's id;
+// for a pool (card deposit-to-pool-pools) `pool.address`: with no asset, whether the page answers the chain at all; with
+// the asset and amount, the quote it checks to the pool's one-time address, then the pool_deposit op under that id;
 // the hops (withdraw.open with the held id, backup.open) go through the shell's return hop. The screen tests pass
 // fixtures through DepositSourceProvider, so the same sheet draws every state with no signing page.
 
@@ -31,6 +33,13 @@ export interface DepositSource {
   quote(asset: Asset, amount: string): Promise<{ id: string | null; reply: Reply<SignpageResults["deposit.quote"]> }>;
   /** The deposit's status by the quote request's id; null before the kit reports one. */
   status(id: string): DepositStatus | null;
+  /**
+   * kit `pool.address` for a pool's chain: with no asset, the chain's one-time address alone (nothing sent: whether the
+   * page answers the chain); with the asset and amount, the checked quote to it. Returns the request id with the answer.
+   */
+  poolAddress(chain: PoolChain, quote?: { asset: Asset; amount: string }): Promise<{ id: string | null; reply: Reply<SignpageResults["pool.address"]> }>;
+  /** A pool deposit's status by its pool.address request's id, only when the op names `chain`; null before one. */
+  poolStatus(id: string, chain: PoolChain): PoolDepositStatus | null;
   hop: ReturnHopView["hop"];
   locked: string | null;
   /**
@@ -92,6 +101,16 @@ export function useDepositSource(): DepositSource {
     },
     [client],
   );
+  const poolAddress = useCallback<DepositSource["poolAddress"]>(
+    async (chain, q) => {
+      if (!client) return { id: null, reply: { ok: false, code: "down" } };
+      const h = client.request("pool.address", q ? { chain, origin_asset: q.asset.id, amount: q.amount } : { chain });
+      const o = await h.outcome;
+      return { id: h.id, reply: o.ok ? { ok: true, value: o.result } : { ok: false, code: refusal(o.error.code) } };
+    },
+    [client],
+  );
+  const poolStatus = useCallback<DepositSource["poolStatus"]>((id, chain) => poolStatusFor(snapshot.state?.ops, id, chain), [snapshot]);
   const status = useCallback<DepositSource["status"]>(
     (id) => {
       const op = snapshot.state?.ops.find((o) => o.id === id);
@@ -111,6 +130,8 @@ export function useDepositSource(): DepositSource {
     dryQuote,
     quote,
     status,
+    poolAddress,
+    poolStatus,
     hop,
     locked,
     start: null,
