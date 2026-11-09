@@ -1,0 +1,161 @@
+{
+ "read": "GET https://ct-api.unrealized.trade/v1/market/token?chain=base for 0x8b7dde054be9d180c1be7fae0874697374a49832 (the top of that recording's Trending list), Origin APP_HOST, 2026-11-09T18:38:33Z, HTTP 200, X-Helper-Commit a5ffb026; the row kept as a field list and its values",
+ "fields": [
+  "chain",
+  "token",
+  "symbol",
+  "name",
+  "icon",
+  "venue",
+  "label",
+  "created_s",
+  "price_usd",
+  "mc_usd",
+  "vol_24h_usd",
+  "chg_5m_bps",
+  "chg_1h_bps",
+  "chg_24h_bps",
+  "liq_usd",
+  "holders",
+  "top10_bps",
+  "src",
+  "as_of_ms",
+  "creator",
+  "creator_sold_bps",
+  "dev_bps",
+  "snipers_bps",
+  "mint_auth",
+  "freeze_auth",
+  "vol_5m_usd",
+  "buys_5m",
+  "sells_5m",
+  "net_5m_usd",
+  "risk_src",
+  "launchpad",
+  "curve_bps",
+  "vol_1h_usd",
+  "chg_4h_bps",
+  "buys_24h",
+  "sells_24h",
+  "buys_1h",
+  "sells_1h"
+ ],
+ "row": [
+  "base",
+  "0x8b7dde054be9d180c1be7fae0874697374a49832",
+  "PROS",
+  "Wrapped PROS",
+  false,
+  null,
+  null,
+  1778678239,
+  "0.524126663499",
+  "2005000.0941",
+  "1733559.49358",
+  21,
+  -126,
+  502,
+  "849429.9535",
+  4210,
+  8882,
+  "geckoterminal",
+  1794249366576,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  "7246.85303294",
+  11,
+  17,
+  null,
+  null,
+  null,
+  null,
+  "149417.554241",
+  null,
+  5386,
+  5371,
+  412,
+  412
+ ],
+ "rest": {
+  "decimals": 18,
+  "pool": "0x8a8e4170c09074b109352190d47e54d7c1f61e4e",
+  "risk": {
+   "mint_auth": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "freeze_auth": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "lp": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "top10_bps": {
+    "v": 8882,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249378000
+   },
+   "dev_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "snipers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "holders": {
+    "v": 4210,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249378000
+   },
+   "liq_usd": {
+    "v": "849429.9535",
+    "src": "geckoterminal",
+    "as_of_ms": 1794249366576
+   },
+   "age_s": {
+    "v": 15571127,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249366576
+   },
+   "tax": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "honeypot": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "insiders_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "bundlers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   },
+   "fresh_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249366576
+   }
+  },
+  "route": "unknown",
+  "filling": false
+ }
+}

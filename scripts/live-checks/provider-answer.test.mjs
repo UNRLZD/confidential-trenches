@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, NOT_YET, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, LIMIT_CODES, NOT_YET, PAGE_THROTTLE_CODES, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -100,6 +100,143 @@ test("the request is one JSON-RPC 2.0 POST of the method and its params", async 
   let seen;
   await rpcAnswer("https://p.example/rpc", "eth_getBlockByNumber", ["latest", false], { fetchFn: async (url, init) => ((seen = [url, init.method, JSON.parse(init.body)]), new Response(ok({}), { status: 200 })) });
   assert.deepEqual(seen, ["https://p.example/rpc", "POST", { jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false] }]);
+});
+
+// card wallet-restore-reads-ux: a read asked from a page's origin (wallet-restore-reads-ux.mjs reads the restore's
+// providers as SIGN_HOST's page does)
+test("a read with its own headers sends them and the redirect rule, and gets the answer's status and CORS answer back; a read without is as before", async () => {
+  let seen;
+  const a = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], {
+    headers: { origin: "https://page.example" },
+    redirect: "error",
+    fetchFn: async (url, init) => ((seen = init), new Response(ok({ value: 7 }), { status: 200, headers: { "access-control-allow-origin": "*" } })),
+  });
+  assert.deepEqual([seen.headers, seen.redirect], [{ "content-type": "application/json", origin: "https://page.example" }, "error"]);
+  assert.deepEqual(a, { result: { value: 7 }, status: 200, acao: "*" });
+  // a refusal read again once: the last answer's status and CORS answer
+  let n = 0;
+  const r = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { headers: { origin: "https://page.example" }, fetchFn: async () => (n++, new Response("Forbidden", { status: 403 })) });
+  assert.deepEqual([r.status, r.acao, typeof r.noAnswer, n], [403, null, "string", 2]);
+  // no answer at all: no status
+  const t = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { headers: { origin: "https://page.example" }, fetchFn: async () => { throw new DOMException("timed out", "TimeoutError"); } });
+  assert.deepEqual(t, { noAnswer: "p.example: no answer (TimeoutError)" });
+  // a read without headers: the same answer as before this card, no status beside it
+  const plain = await rpcAnswer("https://p.example/rpc", "getBalance", ["u"], { fetchFn: async (url, init) => ((seen = init), new Response(ok(1), { status: 200, headers: { "access-control-allow-origin": "*" } })) });
+  assert.deepEqual([plain, seen.headers, "redirect" in seen], [{ result: 1 }, { "content-type": "application/json" }, false]);
+});
+
+test("pageRefuses: an answer the page's origin may not read is the page's real answer, never a no-answer", () => {
+  const O = "https://page.example";
+  const u = "https://p.example/rpc";
+  // api.mainnet-beta.solana.com's answer to a request with an Origin header: a non-JSON 403 with no CORS answer
+  assert.match(pageRefuses(u, { noAnswer: "p.example HTTP 403: not JSON (Forbidden)", status: 403, acao: null }, O), /^p\.example HTTP 403: https:\/\/page\.example may not read its answer \(Access-Control-Allow-Origin null\)$/);
+  // a JSON answer without the origin: the page reads nothing either
+  assert.equal(typeof pageRefuses(u, { result: 1, status: 200, acao: "https://other.example" }, O), "string");
+  assert.equal(typeof pageRefuses(u, { result: 1, status: 200, acao: null }, O), "string");
+  // the origin or * admitted: not a refusal, whatever the answer
+  assert.equal(pageRefuses(u, { result: 1, status: 200, acao: "*" }, O), null);
+  assert.equal(pageRefuses(u, { noAnswer: "x", status: 200, acao: O }, O), null);
+  // no HTTP answer (a fetch that failed or timed out), or a 429 (a rate limit, read as one whatever its headers): a no-answer
+  assert.equal(pageRefuses(u, { noAnswer: "p.example: no answer (TimeoutError)" }, O), null);
+  assert.equal(pageRefuses(u, { noAnswer: "p.example HTTP 429: 429 Too Many Requests", status: 429, acao: null }, O), null);
+  // an answer read without the page's headers carries no status (null in a record): refused, never taken as admitted
+  assert.equal(typeof pageRefuses(u, { result: 1, status: null }, O), "string");
+  assert.equal(pageRefuses(u, { noAnswer: "p.example: no answer (TimeoutError)", status: null, acao: null }, O), null);
+  assert.equal(typeof pageRefuses(u, { result: 1 }, O), "string");
+});
+
+// review of 7921e919..9f6473ac (card wallet-restore-reads-ux)
+test("P2-1: a 5xx with no CORS answer is a provider's passing fault, a no-answer, as a 429 is", () => {
+  const O = "https://page.example";
+  for (const status of [500, 502, 503, 504]) assert.equal(pageRefuses("https://p.example/rpc", { noAnswer: `p.example HTTP ${status}: not JSON (Bad gateway)`, status, acao: null }, O), null, String(status));
+  // a 4xx other than 429 with no CORS answer stays the page's refusal
+  for (const status of [401, 403, 404, 405]) assert.equal(typeof pageRefuses("https://p.example/rpc", { noAnswer: "x", status, acao: null }, O), "string", String(status));
+});
+
+test("P3-3: the page's Solana throttle codes are a rate limit whatever their words, as the page reads them: in a page-mode read's 2xx only", () => {
+  for (const code of [-32029, -32429, -429, 15, 429, -32005]) {
+    const a = classify("p", 200, rpcErr(code, "Too many"), { page: true });
+    assert.match(a.noAnswer ?? "", /^p HTTP 200: rate limit /, String(code));
+  }
+  // a revert under one of them is still the contract's
+  assert.deepEqual(classify("p", 200, rpcErr(3, "x"), { page: true }), { error: { code: 3, message: "x" } });
+  // delta review P3-1: outside page mode (the EVM checks), only 429 and -32005 and the words; in page mode, a throttle code
+  // outside a 2xx is the provider's answer (send.ts reads a non-2xx by its status), judged
+  for (const code of [-32029, -32429, -429, 15]) assert.deepEqual(classify("p", 200, rpcErr(code, "Too many")), { error: { code, message: "Too many" } }, String(code));
+  assert.deepEqual(classify("p", 403, rpcErr(15, "Forbidden: origin not allowed"), { page: true }), { error: { code: 15, message: "Forbidden: origin not allowed" } });
+  assert.deepEqual([...LIMIT_CODES].sort(), [-32005, 429].sort());
+});
+
+test("P3-3: the throttle codes are the kit's own (RPC_THROTTLE_CODES in the files the kit's entry loads)", () => {
+  const entry = fileURLToPath(new URL("../../packages/kit/src/index.ts", import.meta.url));
+  const program = ts.createProgram([entry], { noEmit: true, noLib: true, types: [], allowImportingTsExtensions: true, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, target: ts.ScriptTarget.ESNext });
+  const sets = [];
+  for (const f of program.getSourceFiles()) for (const m of f.text.matchAll(/\nconst RPC_THROTTLE_CODES\b[^=]*= new Set\(\[([^\]]*)\]\)/g)) sets.push(m[1].split(",").map((x) => Number(x.trim())));
+  assert.equal(sets.length, 1);
+  assert.deepEqual([...PAGE_THROTTLE_CODES].sort((a, b) => a - b), [...sets[0]].sort((a, b) => a - b));
+});
+
+test("P3-2: a redirect is named as one, never as a provider that said nothing", async () => {
+  const a = await rpcAnswer("https://p.example/rpc", "getBalance", [], {
+    headers: { origin: "https://page.example" },
+    redirect: "error",
+    fetchFn: async () => {
+      throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
+    },
+  });
+  assert.equal(a.noAnswer, "p.example: no answer (it redirects, and a redirect is not followed: unexpected redirect)");
+});
+
+test("P3-1: the CORS preflight is sent as a page's browser sends it, and read", async () => {
+  const O = "https://page.example";
+  let seen;
+  const p = await preflight("https://p.example/rpc", O, {
+    fetchFn: async (url, init) => ((seen = [url, init.method, init.headers, init.redirect, "body" in init]), new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "Content-Type, X-A" } })),
+  });
+  assert.deepEqual(seen, ["https://p.example/rpc", "OPTIONS", { origin: O, "access-control-request-method": "POST", "access-control-request-headers": "content-type" }, "error", false]);
+  assert.deepEqual(p, { status: 204, acao: "*", allowHeaders: "Content-Type, X-A" });
+  assert.equal(preflightRefuses("https://p.example/rpc", p, O), null);
+  assert.equal(preflightRefuses("https://p.example/rpc", { status: 200, acao: O, allowHeaders: "*" }, O), null);
+  // refused: not 2xx (405 with POST admitted), no CORS answer, another origin, content-type not allowed, none read
+  assert.match(preflightRefuses("https://p.example/rpc", { status: 405, acao: "*", allowHeaders: "content-type" }, O), /^p\.example HTTP 405: /);
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: null, allowHeaders: "content-type" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "https://x.example", allowHeaders: "content-type" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "*", allowHeaders: "x-a" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "*", allowHeaders: null }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", undefined, O), "string");
+  // a passing fault (no answer, 429, 5xx) is read again once, then a no-answer, never a refusal
+  for (const f of [async () => new Response("", { status: 503 }), async () => new Response("", { status: 429 }), async () => { throw new DOMException("t", "TimeoutError"); }]) {
+    let n = 0;
+    const q = await preflight("https://p.example/rpc", O, { fetchFn: async () => (n++, f()) });
+    assert.equal(typeof q.noAnswer, "string");
+    assert.equal(n, 2);
+    assert.equal(preflightRefuses("https://p.example/rpc", q, O), null);
+  }
+});
+
+// delta review of 9f6473ac..66b42bea, P2-1: a page-mode read takes any 5xx as a passing fault before its body, as the
+// page does (send.ts: a 429 or 5xx is a retry before the body is read); outside page mode a 5xx's JSON-RPC error is judged
+test("P2-1: a page-mode read's 5xx is a no-answer whatever its body, CORS answer or not", async () => {
+  for (const status of [500, 503])
+    for (const acao of [null, "*"]) {
+      const headers = acao === null ? {} : { "access-control-allow-origin": acao };
+      const a = await rpcAnswer("https://p.example/rpc", "getBalance", [], { headers: { origin: "https://page.example" }, fetchFn: async () => new Response(rpcErr(-32603, "internal error"), { status, headers }) });
+      assert.equal(typeof a.noAnswer, "string", `${status} ${acao}`);
+      assert.match(a.noAnswer, new RegExp(`^p\\.example HTTP ${status}: `));
+      assert.equal(pageRefuses("https://p.example/rpc", a, "https://page.example"), null, `${status} ${acao}`);
+    }
+  // outside page mode: judged, as before (robinhood-rpc.publicnode.com's 403 with a JSON-RPC error inside is an answer)
+  assert.deepEqual(classify("p", 503, rpcErr(-32603, "internal error")), { error: { code: -32603, message: "internal error" } });
+});
+
+// delta review P3-2: a browser never follows a preflight's redirect, so one is the page's refusal
+test("P3-2: a preflight that redirects is a refusal, never a no-answer", async () => {
+  let n = 0;
+  const p = await preflight("https://p.example/rpc", "https://page.example", { fetchFn: async () => (n++, Promise.reject(new TypeError("fetch failed", { cause: new Error("unexpected redirect") }))) });
+  assert.equal(p.noAnswer, undefined);
+  assert.equal(n, 1);
+  assert.match(preflightRefuses("https://p.example/rpc", p, "https://page.example") ?? "", /redirect/);
+  for (const status of [301, 302, 307, 308]) assert.match(preflightRefuses("https://p.example/rpc", { status, acao: "*", allowHeaders: "content-type" }, "https://page.example") ?? "", new RegExp(`HTTP ${status}`));
 });
 
 // The kit's words (its EVM quote's module-private limited, notYet and stateless), read from the

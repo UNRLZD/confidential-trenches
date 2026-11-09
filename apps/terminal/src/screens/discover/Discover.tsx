@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
 import type { MarketSnapshot } from "./fields.ts";
@@ -8,7 +8,8 @@ import { ageLine, WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./discover.css";
 import { Avatar } from "../market/Avatar.tsx";
-import { useDiscoverData } from "./data.ts";
+import { pickData, useDiscoverData } from "./data.ts";
+import { usePick } from "../../shell/chain-pick.ts";
 import { ColSearch, Dock, Ic, PadChip, PauseIcon, Presets, QuickBuyField, T } from "./Toolbar.tsx";
 import { narrowed, padEntries, pendingNew, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
 import type { View } from "./view.ts";
@@ -360,8 +361,10 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
   );
 }
 
-/** The Discover route: the screen on the helper's lists (data.ts). */
+/** The Discover route: the screen on the helper's lists of every chain (data.ts), on the shell's chain filter. */
 export function DiscoverRoute() {
   const { data, nowMs, retry } = useDiscoverData();
-  return <Discover data={data} nowMs={nowMs} onRetry={retry} />;
+  const pick = usePick();
+  const shown = useMemo(() => pickData(data, pick), [data, pick]);
+  return <Discover data={shown} nowMs={nowMs} onRetry={retry} />;
 }

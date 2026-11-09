@@ -398,6 +398,34 @@ test("review M2: past a company's daily budget nothing more is sent to it that U
   assert.equal(asked.at(-1), qnBase);
 });
 
+test("card helper-live-red: a keyed URL whose callers spent its day is still probed from the day's probe share, so /v1/health names its state, never unread; the probe never passes the plan's day", async () => {
+  // live 17:15Z: Base's QuickNode day spent (the box's day files summed 322,580 credits, KEYED_DAY), so the probe skipped
+  // it after the deploy and rpc-keyed-lists read "quiknode.pro unread" for 180 s; the key answered 0x2105 (18:07Z)
+  const qnBase = LISTS.base[1][1];
+  // 2,000 credits a day: callers stop at 1,980, the probe's 1% keeps one EVM call of 20
+  const env = { BASE_RPC_URL_QUICKNODE: qnBase, RPC_DAY_QUICKNODE: "2000" };
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answer(init, "0x2105"));
+  const c = clock();
+  c.t.v = Math.ceil(c.t.v / 86_400_000) * 86_400_000 + 1_000;
+  const holds = providerHolds(c.now, keyedPaces?.(env) ?? {});
+  const r = createRpc(env, { fetch: fetch as never, holds, now: c.now, sleep: c.sleep, log: () => undefined }) as Rpc;
+  assert.equal(holds.take(qnBase, 99, false), 0, "callers spend 1,980");
+  c.t.v += 2_000; // the pace's bucket full again: what refuses below is the day alone
+  assert.ok(holds.take(qnBase, 1, false) > 3_600_000, "a caller's 1,981st to 2,000th credit is the probe's");
+  assert.ok(holds.take(qnBase, 1, true) > 3_600_000, "and a background read's");
+  assert.ok(holds.dayOut(qnBase, 1));
+  assert.equal(holds.room(qnBase), 0, "the swap reads see no room there");
+  await r.probe?.();
+  assert.equal(asked.filter((u) => u === qnBase).length, 1, "the probe read it from its share");
+  assert.deepEqual(r.keyed?.().base, ["quiknode.test answers"]);
+  // the share spent: the next probe sends nothing past the plan's day and the last state stands
+  c.t.v += 600_001;
+  await r.probe?.();
+  assert.equal(asked.filter((u) => u === qnBase).length, 1, "the probe read past the plan's day");
+  assert.deepEqual(r.keyed?.().base, ["quiknode.test answers"]);
+});
+
 test("review M2: each account's daily budget is its plan's month over 31 days (dRPC's 30-day period over 30), in its own unit, overridable by RPC_DAY_<COMPANY>; a pool sender's read is never refused by it", () => {
   const { KEYED_DAY } = rpcModule as unknown as { KEYED_DAY?: unknown };
   void KEYED_DAY;

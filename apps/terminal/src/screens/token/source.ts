@@ -63,7 +63,7 @@ export async function loadTopToken(fetchFn: typeof fetch = fetch): Promise<Token
   try {
     const top = columnRows(await sharedLists(fetchFn), "trending")[0];
     if (!top) return { status: "empty" };
-    return { status: "ready", ...(await readRow("solana", top.token, fetchFn)) };
+    return { status: "ready", ...(await readRow(top.chain, top.token, fetchFn)) };
   } catch {
     return { status: "error" };
   }
