@@ -15,7 +15,7 @@ import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
 import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
-import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
+import { CHART_TFS, DEFAULT_TF, followFrom, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
@@ -166,9 +166,9 @@ function Links({ v }: { v: TokenView }) {
 const TF_LEGEND: Record<ChartTf, string> = { "1s": "1s", "1m": "1", "5m": "5", "15m": "15", "1H": "1H", "4H": "4H", "1D": "1D" };
 
 /** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
- *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Bars of the
- *  helper's own reads are then followed live (candles.ts followCandles, card app-chart-live) until the page, the token
- *  or the timeframe changes. */
+ *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Every chart the
+ *  helper holds is then followed live (candles.ts followFrom, cards app-chart-live and app-chart-live-stall) until the
+ *  page, the token or the timeframe changes. */
 function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf): { data: CandleData; retry: () => void } {
   const [data, setData] = useState<CandleData>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -181,7 +181,7 @@ function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf
     void loadCandles(ch, id, tf).then((d) => {
       if (!live) return;
       setData(d);
-      if (d.status === "ready" && d.own) stop = followCandles(ch, id, d, (r) => live && setData(r));
+      stop = followFrom(ch, id, tf, d, (r) => live && setData(r));
     });
     return () => {
       live = false;

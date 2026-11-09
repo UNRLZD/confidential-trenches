@@ -12,7 +12,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CANDLES_LIMIT, LIVE_BACKOFF_MAX_MS, LIVE_LIMIT, LIVE_MS, RESYNC_MS, followCandles, foldBars, toCandleData } from "../src/screens/token/candles.ts";
+import { AWAY_MS, CANDLES_LIMIT, LIVE_BACKOFF_MAX_MS, LIVE_LIMIT, LIVE_MS, RESYNC_MS, TIMEOUT_MS, followCandles, followFrom, foldBars, toCandleData } from "../src/screens/token/candles.ts";
 import type { Bar, ChartTf, ReadyCandles } from "../src/screens/token/candles.ts";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "chart-live");
@@ -247,7 +247,7 @@ test("the follow: a page out of sight reads nothing, and its first read back is 
   assert.deepEqual(limits, [String(CANDLES_LIMIT)], "301 s away: a full read");
 });
 
-test("the follow: an answer with none of the helper's own bars (a helper restarted, its book not read yet) waits RESYNC_MS, reads in full, and follows again once its own bars are back", async () => {
+test("the follow: an answer with none of the helper's own bars (a helper restarted, its book not read yet) waits AWAY_MS, reads in full, and follows again once its own bars are back", async () => {
   const c = clock();
   const limits: string[] = [];
   const gecko = { tf: "1m", candles: [row(2, "1.3")], src: "chain,geckoterminal", as_of_ms: 1 };
@@ -260,7 +260,7 @@ test("the follow: an answer with none of the helper's own bars (a helper restart
   followCandles("solana", "Mint1", start, (r) => got.push(r), { fetchFn, now: c.now, later: c.later, hidden: () => false });
   const waits = [];
   for (let i = 0; i < 4; i++) waits.push(await c.tick());
-  assert.deepEqual(waits, [LIVE_MS, LIVE_MS, RESYNC_MS, LIVE_MS], "no own bars: the next read a minute later");
+  assert.deepEqual(waits, [LIVE_MS, LIVE_MS, AWAY_MS, LIVE_MS], "no own bars: the next read AWAY_MS later");
   assert.deepEqual(limits, ["2", "2", String(CANDLES_LIMIT), "2"], "the read after the gap is a full one");
   assert.equal(got.at(-1)!.bars.at(-1)!.close, 1.5, "the bars after the gap are drawn");
   assert.equal(got.at(-1)!.bars.length, 3);
@@ -276,4 +276,72 @@ test("the follow: a throw is a failed read, never an error out of the loop", asy
   followCandles("solana", "Mint1", start, () => assert.fail("no bars"), { fetchFn, now: c.now, later: c.later, hidden: () => false });
   assert.equal(await c.tick(), LIVE_MS);
   assert.equal(await c.tick(), 2 * LIVE_MS);
+});
+
+// Card app-chart-live-stall: the follow's start. A first answer with none of the helper's own bars (a token the helper
+// opened on this very read; read live 9 Nov 14:46Z and 14:56Z: HYPE, SPCX and a third listed Solana token answered
+// limit 500 with GeckoTerminal's bars and no own_from_s) or with no bars at all (a 200: the helper holds the token, no
+// trade yet) was drawn once and never read again, so its chart stood still once trades landed. Every chart the helper
+// holds is followed: one starting without own bars reads in full every AWAY_MS (the away rule) until they come.
+const gecko15 = (candles: unknown[]) => ({ tf: "1m", candles, src: "chain,geckoterminal", as_of_ms: 1 });
+const followed = async (first: Parameters<typeof followFrom>[3], answers: Response[]) => {
+  const c = clock();
+  const limits: string[] = [];
+  const fetchFn = (async (u: string) => {
+    limits.push(new URL(u).searchParams.get("limit")!);
+    return answers.shift() ?? answer(200, own([row(3, "1.7")]));
+  }) as typeof fetch;
+  const got: ReadyCandles[] = [];
+  followFrom("solana", "Mint1", "1m", first, (r) => got.push(r), { fetchFn, now: c.now, later: c.later, hidden: () => false });
+  const waits: (number | null)[] = [];
+  for (let i = 0; i < 3; i++) waits.push(await c.tick());
+  return { waits, limits, got };
+};
+
+test("the start: a first answer without the helper's own bars is followed: a full read AWAY_MS later, then live once its own bars come", async () => {
+  const { waits, limits, got } = await followed({ ...start, own: false }, [answer(200, own([row(2, "1.3"), row(3, "1.4")])), answer(200, own([row(3, "1.5")]))]);
+  assert.deepEqual(waits, [AWAY_MS, LIVE_MS, LIVE_MS], "away first, live once own bars are back");
+  assert.deepEqual(limits, [String(CANDLES_LIMIT), String(LIVE_LIMIT), String(LIVE_LIMIT)]);
+  assert.equal(got.at(-1)!.bars.at(-1)!.close, 1.7, "the last bar moves with the helper's own bars");
+});
+
+test("the start: a first answer with no bars the helper holds (200) is followed: its first bars are drawn when they come", async () => {
+  const { waits, limits, got } = await followed({ status: "empty", gecko: false, held: true }, [answer(200, own([row(3, "1.4")]))]);
+  assert.deepEqual(waits, [AWAY_MS, LIVE_MS, LIVE_MS]);
+  assert.equal(limits[0], String(CANDLES_LIMIT));
+  assert.equal(got[0]!.status, "ready");
+  assert.equal(got[0]!.tf, "1m");
+  assert.deepEqual(got.at(-1)!.bars.map((b) => b.close), [1.7]);
+});
+
+test("the start: a token the helper draws no candles for (404), a failed or a loading read is not followed", async () => {
+  for (const d of [{ status: "empty", gecko: false, held: false }, { status: "error" }, { status: "loading" }] as const) {
+    const { waits, limits } = await followed(d, []);
+    assert.deepEqual(waits, [null, null, null], d.status);
+    assert.deepEqual(limits, []);
+  }
+});
+
+test("the start: a first answer of the helper's own bars is followed live from the first second, as before", async () => {
+  const { waits, limits } = await followed(start, []);
+  assert.deepEqual(waits, [LIVE_MS, LIVE_MS, LIVE_MS]);
+  assert.deepEqual(limits, Array(3).fill(String(LIVE_LIMIT)));
+});
+
+// The away read keeps the helper's book of the token open: the helper drops a book no read touched for its IDLE_MS (60 s,
+// apps/helper/src/data/solana/trades.ts and apps/helper/src/data/evm/swaps.ts), and a Solana book opened again costs
+// a mint read, a stream subscription, a signatures read and up to COLD_SIGS (30) transaction reads (trades.ts first,
+// walk). An away read every 60 s, sent after the last one answered, came just past it, so each read reopened a quiet
+// token's book and its stream missed the trades between. The next away read is sent AWAY_MS after an answer that took
+// at most TIMEOUT_MS; with SPARE_MS for both reads' transit and the helper's 1 s tick, two reads land within IDLE_MS.
+const SPARE_MS = 5_000;
+test("the away read lands within the helper's IDLE_MS on both chains' books, a read's timeout included", () => {
+  const HELPER = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../helper/src/data");
+  for (const f of ["solana/trades.ts", "evm/swaps.ts"]) {
+    const m = /^export const IDLE_MS = ([\d_]+);/m.exec(readFileSync(path.join(HELPER, f), "utf8"));
+    assert.ok(m, `${f} names IDLE_MS`);
+    const idle = Number(m[1]!.replaceAll("_", ""));
+    assert.ok(AWAY_MS + TIMEOUT_MS + SPARE_MS <= idle, `${f}: AWAY_MS ${AWAY_MS} + TIMEOUT_MS ${TIMEOUT_MS} + ${SPARE_MS} spare within IDLE_MS ${idle}`);
+  }
+  assert.ok(AWAY_MS <= RESYNC_MS, "away reads no less often than the live chart's full read");
 });

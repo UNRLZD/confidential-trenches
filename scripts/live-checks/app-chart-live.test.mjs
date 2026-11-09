@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { APP_HOST, classify, EXIT, judge, LOADS, pickOf, probeSaid } from "./app-chart-live.mjs";
+import { APP_HOST, classify, EXIT, judge, LOADS, pickOf, probeSaid, settled } from "./app-chart-live.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
@@ -149,4 +149,22 @@ test("planted on the good answer: the token page's failed footer read of a relea
   assert.match(plant([tagged], { conn: "wait", block: "", ms: 5000 }, "phone").join("\n"), /a footer read, and the footer shows wait/);
   assert.match(plant([cors(`${near}/`)], on).join("\n"), /is a release RPC, not shown Unverified: code not drawn/);
   assert.match(plant([tagged, "Uncaught boom"], on).join("\n"), /Uncaught boom/);
+});
+
+// Card app-chart-live-stall: app live run 42628866668 attempt 1 (13:5xZ, APP_HOST at aed95465) failed its desktop load
+// "no last bar drawn (none); no live read (limit 2)" with the chart ready: the page sets data-chart="ready" as it renders
+// and writes the drawn last bar (data-last) in the effect after, once the plot has a size, so a read between the two saw
+// a ready chart with no bar, took that as the watch's first bar and watched nothing (attempt 2 of the same run passed).
+// The watch starts from the first read that is settled: a chart in any state but loading, and a ready one only with its
+// last bar drawn; a ready chart that never draws one within READY_MS is still "no last bar drawn".
+test("the watch's start: a ready chart counts only once its last bar is drawn (run 42628866668 attempt 1, desktop)", () => {
+  const route = "token";
+  const reads = [{ route, chart: "loading", last: null }, { route, chart: "ready", last: null }, { route, chart: "ready", last: "1794231900000:9.084324427609801e-7" }];
+  const before = (m) => Boolean(m?.chart && m.chart !== "loading");
+  assert.equal(reads.find(before).last, null, "the old start: a ready chart before its bar is drawn");
+  assert.equal(reads.find(settled).last, "1794231900000:9.084324427609801e-7");
+  for (const chart of ["empty", "error"]) assert.equal(settled({ route, chart, last: null }), true, `${chart}: no bar to wait for`);
+  assert.equal(settled({ route, chart: "loading", last: null }), false);
+  assert.equal(settled(null), false);
+  assert.equal(settled({ route, chart: null, last: null }), false);
 });
