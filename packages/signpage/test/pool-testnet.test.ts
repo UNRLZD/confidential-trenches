@@ -335,6 +335,13 @@ test("the pool fee, busy (card withdraw-fee-busy-waits): 429 rate_limited or 503
   await assert.rejects(r.out, /HTTP 400/);
   assert.equal(r.asks(), 1);
   assert.deepEqual(r.slept, []);
+  // the kit's other 503 codes are no busy answer (review of 407ba3bc, P3): each refuses at once
+  for (const code of ["relayer_low", "token_halted", "index_behind"]) {
+    r = await run([{ status: 503, body: { error: { code } }, retryAfter: "1" }, good]);
+    await assert.rejects(r.out, /HTTP 503/, code);
+    assert.equal(r.asks(), 1, code);
+    assert.deepEqual(r.slept, [], code);
+  }
   // a Retry-After over the cap waits only the cap
   r = await run([{ ...busy, retryAfter: "3600" }, good]);
   assert.deepEqual(await r.out, answer);

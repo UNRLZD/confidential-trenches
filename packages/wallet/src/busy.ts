@@ -81,7 +81,9 @@ async function isBusy(res: Response): Promise<boolean> {
   } catch {
     return false;
   } finally {
-    await reader.cancel().catch(() => undefined);
+    // never awaited: a tee branch's cancel settles only once the other branch is cancelled or the source ends, so an
+    // awaited one held an over-long chunked body until the ask's timeout (review of 407ba3bc, P2)
+    void reader.cancel().catch(() => undefined);
   }
   const bytes = new Uint8Array(total);
   let at = 0;

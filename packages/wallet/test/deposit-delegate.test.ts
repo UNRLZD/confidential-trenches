@@ -503,11 +503,37 @@ test("send, busy (card withdraw-fee-busy-waits): 429 rate_limited or 503 upstrea
   const calls409: Call[] = [];
   assert.deepEqual(await sendDepositDelegate(OUT, seq([{ status: 409, body: { error: { code: "prepay_open" } }, retryAfter: "1" }, ok], calls409), undefined, async (ms) => void slept.push(ms)), { ok: false, code: "prepay_open" });
   assert.equal(calls.length + calls409.length, 2);
+  // the kit's other 503 codes are no busy answer (review of 407ba3bc, P3): relayer_low and token_halted are the bind's
+  // own (its RETRY pause), index_behind no bind code; each one ask, no wait
+  for (const [code, want] of [["relayer_low", { ok: false, code: "relayer_low" }], ["token_halted", { ok: false, code: "token_halted" }], ["index_behind", null]] as const) {
+    const c: Call[] = [];
+    const out = sendDepositDelegate(OUT, seq([{ status: 503, body: { error: { code } }, retryAfter: "1" }, ok], c), undefined, async (ms) => void slept.push(ms));
+    if (want === null) await assert.rejects(out, /relayer: HTTP 503/, code);
+    else assert.deepEqual(await out, want, code);
+    assert.equal(c.length, 1, code);
+  }
   assert.deepEqual(slept, []);
   // a Retry-After over the cap waits only the cap
   slept = [];
   assert.deepEqual(await sendDepositDelegate(OUT, seq([{ ...busy, retryAfter: "3600" }, ok], []), undefined, async (ms) => void slept.push(ms)), { ok: true, tx_hash: HASH });
   assert.deepEqual(slept, [BUSY_WAIT_MAX_MS]);
+});
+
+test("send, busy: a 503 whose chunked body runs past 1 KB, endless, is refused as over the size at once, never held to the timeout (review of 407ba3bc, P2)", async (t) => {
+  const server = createServer((_req, res) => {
+    res.writeHead(503, { "content-type": "text/html", "retry-after": "1" }); // chunked: no Content-Length
+    const tick = setInterval(() => res.write("<p>".padEnd(512, "x")), 5);
+    res.on("close", () => clearInterval(tick));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  t.after(() => (server.closeAllConnections(), server.close()));
+  const port = (server.address() as AddressInfo).port;
+  const local = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/bind`, init)) as typeof fetch;
+  const slept: number[] = [];
+  const t0 = performance.now();
+  await assert.rejects(sendDepositDelegate(OUT, local, AbortSignal.timeout(3_000), async (ms) => void slept.push(ms)), /relayer: HTTP 503, an answer over 1024 B/);
+  assert.ok(performance.now() - t0 < 1_000, `${(performance.now() - t0).toFixed(0)} ms`);
+  assert.deepEqual(slept, []);
 });
 
 // The carry answers once the prepay and the delegate are read at final: a testnet deposit took 19.4 s from the signed

@@ -135,6 +135,10 @@ test("the fee, busy: a 400, a 404 and a 429 or 503 not the helper's busy answer 
     { status: 429, body: { error: { code: "in_flight" } }, retryAfter: "1" },
     { status: 503, body: { error: { code: "upstream" }, more: 1 }, retryAfter: "1" },
     { status: 503, body: RATE_LIMITED, retryAfter: "1" },
+    // the kit's other 503 codes are no busy answer here (review of 407ba3bc, P3): only upstream
+    { status: 503, body: { error: { code: "relayer_low" } }, retryAfter: "1" },
+    { status: 503, body: { error: { code: "token_halted" } }, retryAfter: "1" },
+    { status: 503, body: { error: { code: "index_behind" } }, retryAfter: "1" },
   ] as const) {
     const sent: string[] = [];
     const slept: number[] = [];
@@ -161,6 +165,24 @@ test("the fee, busy: the caller's signal ends a wait at once", async () => {
   await assert.rejects(askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "10" }], sent), { signal: stop.signal })), /stopped/);
   assert.equal(sent.length, 1);
   assert.ok(Date.now() - t0 < 2_000);
+});
+
+test("the fee, busy: a 503 whose chunked body runs past 1 KB, endless, is refused as over the size at once, never held to the timeout (review of 407ba3bc, P2)", async (t) => {
+  const { createServer } = await import("node:http");
+  const server = createServer((_req, res) => {
+    res.writeHead(503, { "content-type": "text/html", "retry-after": "1" }); // chunked: no Content-Length
+    const tick = setInterval(() => res.write("<p>".padEnd(512, "x")), 5);
+    res.on("close", () => clearInterval(tick));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  t.after(() => (server.closeAllConnections(), server.close()));
+  const port = (server.address() as { port: number }).port;
+  const local = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/withdraw/fee`, init)) as typeof fetch;
+  const slept: number[] = [];
+  const t0 = performance.now();
+  await assert.rejects(askWithdrawFee(feeArgs(local, { sleep: waits(slept), signal: AbortSignal.timeout(3_000) })), (e: WithdrawRelayRefused) => e.code === "answer" && /an answer over 1024 B/.test(e.message));
+  assert.ok(performance.now() - t0 < 1_000, `${(performance.now() - t0).toFixed(0)} ms`);
+  assert.deepEqual(slept, []);
 });
 
 // ---------- the send's answers ----------

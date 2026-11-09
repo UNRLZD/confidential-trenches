@@ -33,6 +33,7 @@ import {
   txCarriesFinal,
 } from "../src/deposit/bind.ts";
 import { depositDelegate, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
+import { BUSY_ASKS, BUSY_WAIT_FIRST_MS } from "../src/busy.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../src/notes/store.ts";
@@ -356,6 +357,32 @@ for (const reply of ["tx", "lost"] as const) {
     assert.ok(t.sent[1]!.mbh > t.sent[0]!.mbh);
   });
 }
+
+// card withdraw-fee-busy-waits (review of 407ba3bc, P3): the send waits out a busy relayer on the bind's own sleep.
+test("busy (card withdraw-fee-busy-waits): 429 rate_limited, then a tx_hash: the same bytes again after the bind's own sleep, the hash written, the note lands", async () => {
+  const t = await setup(["rate_limited", "tx"]);
+  const n0 = t.chain.a.nonce;
+  const waits: number[] = [];
+  const note = landed(await bindDeposit(SEED, t.args, { ...t.deps, sleep: async (ms: number) => (waits.push(ms), await t.deps.sleep()) }));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes); // one signed call, sent again unchanged
+  assert.equal(t.sent[0]!.nonce, n0 + 1n);
+  assert.deepEqual((note.calls ?? []).flatMap((c) => c.tx_hashes), [t.sent[1]!.hash]);
+  assert.deepEqual(waits.slice(0, 1), [BUSY_WAIT_FIRST_MS], "the busy wait went through the bind's sleep");
+});
+
+test("busy (card withdraw-fee-busy-waits): 503 upstream on all BUSY_ASKS asks is no answer: the bind settles from the pages and signs again only past the window, at the same nonce", async () => {
+  const t = await setup(["upstream", "upstream", "upstream", "upstream", "tx"]);
+  t.chain.tick = () => t.chain.blocks(6n);
+  const n0 = t.chain.a.nonce;
+  const waits: number[] = [];
+  landed(await bindDeposit(SEED, t.args, { ...t.deps, sleep: async (ms: number) => (waits.push(ms), await t.deps.sleep()) }));
+  assert.deepEqual(waits.slice(0, BUSY_ASKS - 1), [1_000, 2_000, 4_000], "the busy waits went through the bind's sleep");
+  assert.equal(t.sent.length, BUSY_ASKS + 1);
+  for (let k = 1; k < BUSY_ASKS; k++) assert.equal(t.sent[k]!.bytes, t.sent[0]!.bytes, `ask ${k + 1}: the same bytes`);
+  assert.equal(t.sent[BUSY_ASKS]!.nonce, n0 + 1n); // nothing ran: the same nonce
+  assert.ok(t.sent[BUSY_ASKS]!.low > t.sent[0]!.mbh + LAPSE_MARGIN, `re-signed at ${t.sent[BUSY_ASKS]!.low}, window ${t.sent[0]!.mbh}`);
+});
 
 test("refused: U's nonce moved past the call, P not held and the USDC back in U: a new call on the same P, past the dead nonce", async () => {
   let calls = 0;

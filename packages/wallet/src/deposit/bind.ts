@@ -616,7 +616,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       stopped();
       let a: BindAnswer | null;
       try {
-        a = await sendDepositDelegate(c, fetchFn, signal);
+        a = await sendDepositDelegate(c, fetchFn, signal, sleep); // a busy relayer waited out on the bind's own clock (../busy.ts)
       } catch {
         stopped();
         a = null; // no answer, a timeout included: unsure, never failed. The relayer may hold it, so the pages and U's nonce settle it
