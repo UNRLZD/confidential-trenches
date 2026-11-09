@@ -18,6 +18,10 @@
 //     alone (42207995804) read 31;
 //   - the check job runs a serial group's checks in one step (scripts/ci/live-serial.mjs, GROUP the matrix's) and a single
 //     check in the other, each `if` on matrix.group so no check runs twice or not at all (card helper-live-jup-serial);
+//   - a single check runs through scripts/ci/live-rerun.mjs, and both runners (it and live-serial.mjs) run an INCONCLUSIVE
+//     check (exit 3) again after a pause, up to a bound, and never anything else (card live-inconclusive-rerun): RERUN_CASES,
+//     played on each runner with stand-in checks. A provider's 429 read once undid a good deploy; a FAIL or an ERROR read
+//     twice would let a real red through;
 //   - the helper's plan puts every check that reads the helper's Jupiter budget (BUDGET_READS: a Jupiter proxy path, a
 //     build, a Solana token page) in a serial group, one matrix entry, or lists it exempt with the reason: two such checks
 //     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1);
@@ -28,6 +32,8 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOSTS, ROOT, keysOf, listOf, planFor } from "./live-plan.mjs";
+import { RERUN, rerun } from "./live-rerun.mjs";
+import { serial } from "./live-serial.mjs";
 
 const SHA_FULL = "0123456789012345678901234567890123456789";
 const uncommented = (text) => text.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => !/^\s*#/.test(l));
@@ -111,9 +117,9 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   const jobText = (name) => new RegExp(`^  ${name}:\\n((?:   .*\\n|\\s*\\n|  #.*\\n)*)`, "m").exec(text)?.[0] ?? "";
   want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
-  want(/node "scripts\/live-checks\/\$KEY\.mjs"/.test(jobText("check")), "the check job does not run the check its matrix names");
+  want(/node scripts\/ci\/live-rerun\.mjs "\$KEY" \$ARGS/.test(jobText("check")), "the check job does not run the check its matrix names through scripts/ci/live-rerun.mjs (node scripts/ci/live-rerun.mjs \"$KEY\" $ARGS): an INCONCLUSIVE check read once undoes a good deploy");
   // card helper-live-jup-serial: a serial group is one step, a single check the other, and each runs on its own `if`
-  want(/- name: [^\n]*\n {8}if: matrix\.group == ''\n {8}env:\n(?: {10}.*\n)*? {10}KEY: \$\{\{ matrix\.key \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node "scripts\/live-checks\/\$KEY\.mjs"/.test(jobText("check")), "the check job's single-check step does not run `if: matrix.group == ''`");
+  want(/- name: [^\n]*\n {8}if: matrix\.group == ''\n {8}env:\n(?: {10}.*\n)*? {10}KEY: \$\{\{ matrix\.key \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node scripts\/ci\/live-rerun\.mjs "\$KEY"/.test(jobText("check")), "the check job's single-check step does not run `if: matrix.group == ''`, the check through scripts/ci/live-rerun.mjs");
   want(/- name: [^\n]*\n {8}if: matrix\.group != ''\n {8}env:\n {10}GROUP: \$\{\{ matrix\.group \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node scripts\/ci\/live-serial\.mjs \$GROUP/.test(jobText("check")), "the check job does not run a serial group's checks with scripts/ci/live-serial.mjs on `if: matrix.group != ''`");
   want(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.test(jobText("check")) && (([, g, o]) => Number(g) > Number(o))(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.exec(jobText("check"))), "a serial group's job has no longer limit than a single check's (timeout-minutes: ${{ matrix.group != '' && <longer> || <shorter> }})");
   want(/KEY: \$\{\{ matrix\.key \}\}/.test(jobText("check")), "the check job's key is not the matrix's");
@@ -129,6 +135,73 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   for (const [n, l] of uncommented(text)) {
     for (const m of l.matchAll(/scripts\/live-checks\/([\w.-]+?)\.mjs/g)) if (!exists(m[1])) p.push(`${file}:${n}: runs ${m[1]}, which is no file in scripts/live-checks`);
     if (/playwright\s+install\b.*\bchromium\b/.test(l)) p.push(`${file}:${n}: installs Playwright's own Chromium; a browser starts only as the installed Chrome (scripts/browsers.mjs)`);
+  }
+  return p;
+}
+
+/** The two providers a stand-in INCONCLUSIVE check names, as provider-answer.mjs words a no-answer. */
+const QUIET = ["rpc-a.example.org HTTP 429: 429 Too Many Requests", "rpc-b.example.org: no answer (UND_ERR_CONNECT_TIMEOUT)"];
+const QUIET_HOSTS = ["rpc-a.example.org", "rpc-b.example.org"];
+
+/** What each runner must do with a check's exit codes in turn (card live-inconclusive-rerun): `codes` the stand-in check's
+ *  exits, run by run (the last repeats); `pass` the verdict; `runs` how many times it ran (RERUN.runs: the bound);
+ *  `code` the single runner's exit; `named` that the last line names the providers that did not answer. */
+export const RERUN_CASES = Object.freeze([
+  { name: "exit 0 passes on its one run", codes: [0], pass: true, runs: 1, code: 0 },
+  { name: "exit 3 then exit 0 passes on the rerun", codes: [3, 0], pass: true, runs: 2, code: 0 },
+  { name: "exit 3 throughout is red at the bound and names the providers", codes: [3], pass: false, runs: "bound", code: 3, named: true },
+  { name: "exit 3 then exit 1 is red and not run again", codes: [3, 1], pass: false, runs: 2, code: 1 },
+  { name: "exit 1 (FAIL) is never run again", codes: [1], pass: false, runs: 1, code: 1 },
+  { name: "exit 2 (ERROR) is never run again", codes: [2], pass: false, runs: 1, code: 2 },
+]);
+
+const IDLE = Object.freeze({ idle: true, probes: 1, waitedMs: 0, why: "idle" });
+
+/** Plays RERUN_CASES on the single-check runner and on the serial group's. `impl` stands in for them in the tests:
+ *  { single(key, opts) -> { code }, group(keys, opts) -> { ok } }, opts carrying run, sleep, say, random and policy. */
+export async function rerunProblems(impl = { single: (k, o) => rerun(k, [], o), group: (keys, o) => serial(keys, { ...o, idle: async () => IDLE }) }, policy = RERUN) {
+  const p = [];
+  const where = "scripts/ci/live-rerun.mjs";
+  if (!Number.isInteger(policy.runs) || policy.runs < 2 || policy.runs > 5) p.push(`${where}: RERUN.runs is ${policy.runs}, want 2 to 5: no rerun at all, or no bound a job's time holds`);
+  if (!(policy.baseMs >= 10_000) || !(policy.capMs >= policy.baseMs) || !(policy.capMs <= 300_000)) p.push(`${where}: RERUN's pause (base ${policy.baseMs} ms, cap ${policy.capMs} ms) is not 10 s or more, capped at 5 min or less`);
+  const bound = Math.min(Math.max(policy.runs, 1), 8);
+  for (const kind of ["single", "group"]) {
+    for (const c of RERUN_CASES) {
+      const runs = [];
+      const pauses = [];
+      const lines = [];
+      const opts = {
+        run: async () => {
+          const code = c.codes[Math.min(runs.length, c.codes.length - 1)];
+          runs.push(code);
+          if (runs.length > 8) return 0;
+          return code === 3 ? { code, output: QUIET.map((q) => `--- base ${q}`).join("\n") } : code;
+        },
+        sleep: async (ms) => void pauses.push(ms),
+        say: (l) => lines.push(l),
+        random: () => 0,
+        policy,
+      };
+      const at = `${where} (${kind === "single" ? "a single check" : "a serial group's member, live-serial.mjs"}): ${c.name}`;
+      let r;
+      try {
+        r = await impl[kind](kind === "single" ? "k" : ["k"], opts);
+      } catch (e) {
+        p.push(`${at}: threw ${e?.message ?? e}`);
+        continue;
+      }
+      const want = c.runs === "bound" ? bound : c.runs;
+      const passed = kind === "single" ? r?.code === 0 : r?.ok === true;
+      if (passed !== c.pass) p.push(`${at}: ${passed ? "passed" : "was red"}, want ${c.pass ? "a pass" : "red"}`);
+      if (runs.length !== want) p.push(`${at}: ran ${runs.length} times, want ${want}`);
+      if (kind === "single" && r?.code !== c.code) p.push(`${at}: exit ${r?.code}, want ${c.code}`);
+      if (pauses.length !== Math.max(0, Math.min(runs.length, want) - 1)) p.push(`${at}: paused ${pauses.length} times between ${runs.length} runs`);
+      if (pauses.some((ms) => !(ms >= policy.baseMs / 2))) p.push(`${at}: a pause of ${Math.min(...pauses)} ms, under half the base (${policy.baseMs / 2} ms): a provider's window has not moved on`);
+      if (c.named) {
+        const last = lines.filter((l) => /INCONCLUSIVE/.test(l)).at(-1) ?? "";
+        if (!QUIET_HOSTS.every((h) => last.includes(h))) p.push(`${at}: its last INCONCLUSIVE line does not name the providers that did not answer (${QUIET_HOSTS.join(", ")}): "${last}"`);
+      }
+    }
   }
   return p;
 }
@@ -222,6 +295,7 @@ export async function problems(root = ROOT) {
   if (existsSync(live)) out.push(...liveProblems(readFileSync(live, "utf8"), Object.keys(HOSTS), (k) => existsSync(path.join(root, "scripts/live-checks", `${k}.mjs`))));
   else out.push(".github/workflows/live.yml: missing");
   for (const h of Object.keys(HOSTS)) out.push(...(await planProblems(h, root)));
+  out.push(...(await rerunProblems()));
   return out;
 }
 

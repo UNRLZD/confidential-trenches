@@ -57,7 +57,7 @@ test("planted: a run that names a check that does not exist, an artifact step th
   assert.ok(has(liveProblems(LIVE.replace("pnpm --filter signpage run test:e2e", "node scripts/live-checks/no-such-check.mjs")), /no-such-check, which is no file/));
   assert.ok(has(liveProblems(LIVE.replace("        if: always()\n        with:\n          name: live-", "        with:\n          name: live-")), /artifact step does not run `if: always\(\)`/));
   assert.ok(has(liveProblems(LIVE.replace("    if: always() && needs.plan.result != 'skipped'", "    if: needs.plan.result != 'skipped'")), /live job does not run `if: always\(\)`/));
-  assert.ok(has(liveProblems(LIVE.replace('node "scripts/live-checks/$KEY.mjs" $ARGS', "node scripts/live-checks/app-shell.mjs")), /does not run the check its matrix names/));
+  assert.ok(has(liveProblems(LIVE.replace('node scripts/ci/live-rerun.mjs "$KEY" $ARGS', "node scripts/live-checks/app-shell.mjs")), /does not run the check its matrix names/));
   assert.ok(has(liveProblems(LIVE.replace("  browser-e2e:", "  other-e2e:")), /no browser-e2e job/));
 });
 
@@ -72,6 +72,77 @@ test("planted (card jupiter-build-budget-503): a summary grep that drops a verdi
 
 test("planted: a step that installs Playwright's own Chromium is refused", () => {
   assert.ok(has(liveProblems(LIVE.replace("--with-deps $ENGINES", "--with-deps chromium firefox")), /installs Playwright's own Chromium/));
+});
+
+// card live-inconclusive-rerun: the gate's own module, read at test time so a base without it fails these tests alone
+const gate = () => import("./live-workflow.mjs");
+
+test("live-inconclusive-rerun: both runners hold every rerun case, and live.yml runs a single check through live-rerun.mjs", async () => {
+  const { rerunProblems, RERUN_CASES } = await gate();
+  assert.deepEqual(await rerunProblems(), []);
+  assert.ok(LIVE.includes('node scripts/ci/live-rerun.mjs "$KEY" $ARGS 2>&1 | tee "$out/$ID.log"'), "the single-check step");
+  assert.deepEqual(RERUN_CASES.map((c) => c.codes.join(",")), ["0", "3,0", "3", "3,1", "1", "2"]);
+});
+
+test("planted (live-inconclusive-rerun): a single-check step that runs the check itself, read once, is refused", () => {
+  const direct = LIVE.replace('node scripts/ci/live-rerun.mjs "$KEY" $ARGS', 'node "scripts/live-checks/$KEY.mjs" $ARGS');
+  assert.notEqual(direct, LIVE);
+  assert.ok(has(liveProblems(direct), /does not run the check its matrix names through scripts\/ci\/live-rerun\.mjs/));
+  assert.ok(has(liveProblems(direct), /single-check step does not run/));
+});
+
+// stand-in runners that each break one rule, on the single-check path; the group path is planted in live-serial.test.mjs
+const STANDIN = (single) => ({ single, group: async (keys, o) => ({ ok: (await single(keys[0], o)).code === 0 }) });
+const loop = (decide) => async (key, o) => {
+  let code;
+  for (let n = 1; ; n++) {
+    const r = await o.run(key, []);
+    code = typeof r === "number" ? r : r.code;
+    const next = decide(code, n);
+    if (next === "stop") return { code };
+    if (next === "pass") return { code: 0 };
+    await o.sleep(next);
+  }
+};
+
+test("planted (live-inconclusive-rerun): exit 3 then exit 0 must pass: a runner that never reruns is refused", async () => {
+  const { rerunProblems } = await gate();
+  const p = await rerunProblems(STANDIN(loop(() => "stop")));
+  assert.ok(has(p, /a single check\): exit 3 then exit 0 passes on the rerun: was red, want a pass/), p.join("\n"));
+  assert.ok(has(p, /exit 3 throughout is red at the bound and names the providers: ran 1 times, want 3/));
+});
+
+test("planted (live-inconclusive-rerun): exit 3 throughout must stay red and name the providers", async () => {
+  const { rerunProblems } = await gate();
+  // passes once the bound is spent
+  const lenient = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 ? "stop" : n >= 3 ? "pass" : 30_000))));
+  assert.ok(has(lenient, /exit 3 throughout is red at the bound and names the providers: passed, want red/), lenient.join("\n"));
+  // red, but names no provider
+  const mute = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(mute, /does not name the providers that did not answer \(rpc-a\.example\.org, rpc-b\.example\.org\)/), mute.join("\n"));
+  // no bound
+  const endless = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n > 8 ? "stop" : 30_000))));
+  assert.ok(has(endless, /exit 3 throughout is red at the bound and names the providers: ran 9 times, want 3/), endless.join("\n"));
+  // no pause, or a short one
+  const eager = await rerunProblems(STANDIN(loop((c, n) => (c !== 3 || n >= 3 ? "stop" : 1000))));
+  assert.ok(has(eager, /a pause of 1000 ms, under half the base/), eager.join("\n"));
+});
+
+test("planted (live-inconclusive-rerun): exit 1 and exit 2 must never run again", async () => {
+  const { rerunProblems } = await gate();
+  const p = await rerunProblems(STANDIN(loop((c, n) => (c === 0 || n >= 3 ? "stop" : 30_000))));
+  assert.ok(has(p, /exit 1 \(FAIL\) is never run again: ran 3 times, want 1/), p.join("\n"));
+  assert.ok(has(p, /exit 2 \(ERROR\) is never run again: ran 3 times, want 1/), p.join("\n"));
+  assert.ok(has(p, /exit 3 then exit 1 is red and not run again: ran 3 times, want 2/), p.join("\n"));
+});
+
+test("planted (live-inconclusive-rerun): a bound or a pause out of reason is refused", async () => {
+  const { rerunProblems } = await gate();
+  const { RERUN } = await import("./live-rerun.mjs");
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, runs: 1 }), /RERUN\.runs is 1, want 2 to 5/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, runs: 50 }), /RERUN\.runs is 50, want 2 to 5/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, baseMs: 1000 }), /is not 10 s or more/));
+  assert.ok(has(await rerunProblems(undefined, { ...RERUN, capMs: 3_600_000 }), /capped at 5 min or less/));
 });
 
 // a list file that prints `checks` with --live-runs, as the real ones do

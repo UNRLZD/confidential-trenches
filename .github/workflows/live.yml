@@ -13,9 +13,14 @@
 # or error. The helper's commit is held to what the helper reports (X-Helper-Commit). APP_HOST and SIGN_HOST report none:
 # signpage-release holds their files to the commit's own build, and fails when a host serves another commit's.
 #
+# A check that ends INCONCLUSIVE (exit 3: too few of its providers answered, a public RPC's 429) runs again after a
+# pause, three runs at most (card live-inconclusive-rerun; scripts/ci/live-rerun.mjs: capped exponential backoff with equal
+# jitter). Still INCONCLUSIVE, the job is red and its last line names the providers that did not answer; a FAIL (1) or an
+# ERROR (2) is never run again.
+#
 # A serial group (card helper-live-jup-serial; SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) is ONE job: its checks
 # spend one shared budget, the helper's Jupiter window, so they run one after another (scripts/ci/live-serial.mjs), each
-# once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and none is retried. Run in parallel they
+# once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and only an INCONCLUSIVE one runs again. Run in parallel they
 # spent it between them and a page fell back to chain reads (run 42332950254 attempt 1), a red that was no fault of the code.
 #
 # The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
@@ -187,7 +192,8 @@ jobs:
             ~/.cache/ms-playwright
             ~/.cache/playwright-debs
           key: ${{ steps.engines-key.outputs.key }}
-      # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default
+      # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default.
+      # live-rerun runs the check, and again on INCONCLUSIVE (exit 3) alone, then exits with the check's own last code.
       - name: ${{ matrix.name }}
         if: matrix.group == ''
         env:
@@ -200,8 +206,9 @@ jobs:
           export TMPDIR="$out"
           set -o pipefail
           # shellcheck disable=SC2086
-          node "scripts/live-checks/$KEY.mjs" $ARGS 2>&1 | tee "$out/$ID.log"
-      # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, none retried
+          node scripts/ci/live-rerun.mjs "$KEY" $ARGS 2>&1 | tee "$out/$ID.log"
+      # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, an INCONCLUSIVE one
+      # run again as a single check is (live-rerun.mjs), a FAIL or ERROR never
       - name: ${{ matrix.name }} (in turn)
         if: matrix.group != ''
         env:
