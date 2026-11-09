@@ -404,6 +404,8 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
     // a send time on a stage where nothing was sent is not sent
     [rec("expired", { since_ms: 7 }), want("expired")],
     [rec("in_pool", { txs: [{ chain: "solana", hash: "5sig", extra: 1 }] }), want("in_pool", { txs: [{ chain: "solana", hash: "5sig" }] })],
+    // card pool-deposit-op-txs: the follow's txs, its deposits' on the pool's chain and a refund move's on NEAR
+    [rec("in_pool", { since_ms: 7, refunded: true, txs: [{ chain: "near", hash: "9move" }, { chain: "solana", hash: "5sig" }] }), want("in_pool", { since_ms: 7, refunded: true, txs: [{ chain: "near", hash: "9move" }, { chain: "solana", hash: "5sig" }] })],
   ] as const) {
     const op = opOf(id, r);
     assert.deepEqual(op, w, JSON.stringify(r));

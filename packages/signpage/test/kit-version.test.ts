@@ -75,6 +75,8 @@ const POOL_OPS = [
   pdep("p-refunded", "refunded", { since_ms: 1 }),
   pdep("p-move", "refund_move", { refunded: true, since_ms: 1 }),
   pdep("p-move-in", "in_pool", { refunded: true, since_ms: 1 }, "robinhood"),
+  // card pool-deposit-op-txs: a pool deposit with its txs (a deposit's and a refund move's), left out below 1.7 as any
+  pdep("p-txs", "in_pool", { refunded: true, since_ms: 1, txs: [{ chain: "solana", hash: "5sig" }, { chain: "near", hash: "9move" }] }),
   pdep("p-failed", "failed", { since_ms: 1 }),
   pdep("p-short", "short", { since_ms: 1 }),
   pdep("p-expired", "expired"),
