@@ -39,14 +39,16 @@
 // --local judges this tree's committed build (packages/signpage/index.html and public/app.js) in SIGN_HOST's place, the
 // providers still asked live; --with asks <url> in the second provider's place (a recorded bad answer). PASS exit 0,
 // FAIL exit 1, error exit 2, INCONCLUSIVE exit 3: every read goes through provider-answer.mjs (rpcAnswer, with SIGN_HOST's
-// Origin header), a provider that refuses SIGN_HOST's origin fails (pageRefuses), and one that admits it but answers
-// nothing usable (a timeout, a 429, an empty or non-JSON body) is its no-answer: the pair is then not judged.
+// Origin header), each provider's CORS preflight is sent as the page's browser sends it (OPTIONS, POST and content-type
+// asked; preflight), a provider that refuses SIGN_HOST's origin or its preflight fails (pageRefuses, preflightRefuses),
+// and one that admits it but answers nothing usable (a timeout, a 429 or 5xx, a throttle code, an empty or non-JSON body,
+// a redirect) is its no-answer: the pair is then not judged.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EXIT, pageRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { EXIT, pageRefuses, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "wallet-restore-reads-ux";
 export const SIGN = "https://confidential.unrealized.trade";
@@ -236,7 +238,7 @@ export async function read(fetchFn = fetch, origin = SIGN, local = false, second
   const out = { origin, bundle: await readBundle(fetchFn, local), clusters: {} };
   for (const [name, c] of Object.entries(CLUSTERS)) {
     const providers = [];
-    for (const url of second === null ? c.providers : [c.providers[0], second]) providers.push({ url, held: await balanceOf(fetchFn, url, origin, c.held), empty: await balanceOf(fetchFn, url, origin, EMPTY) });
+    for (const url of second === null ? c.providers : [c.providers[0], second]) providers.push({ url, preflight: await preflight(url, origin, { fetchFn }), held: await balanceOf(fetchFn, url, origin, c.held), empty: await balanceOf(fetchFn, url, origin, EMPTY) });
     out.clusters[name] = { held: c.held, empty: EMPTY, providers };
   }
   return out;
@@ -271,6 +273,21 @@ export function judge(a) {
     got.providers.forEach((p, k) => {
       if (String(p.url).startsWith(HELPER)) bad(`${name}: the restore's U_X reads name our helper relay (${p.url})`);
       if (p.url !== c.providers[k]) bad(`${name}: provider ${k} is ${String(p.url)}, not ${c.providers[k]}`);
+      // the preflight the page's browser sends before its POST (review P3-1): refused, the page reads nothing there
+      let pre;
+      try {
+        pre = preflightRefuses(String(p.url), p.preflight, SIGN);
+      } catch {
+        pre = `${String(p.url)} is not a provider URL`;
+      }
+      if (pre !== null) {
+        bad(`${name} ${p.url} preflight: ${pre}`);
+        all = false;
+      } else if (p.preflight?.noAnswer !== undefined) {
+        lines.push(`NO ANSWER ${name} ${p.url} preflight: ${p.preflight.noAnswer}`);
+        quiet = true;
+        all = false;
+      }
       for (const what of ["held", "empty"]) {
         const x = p[what];
         let refused;

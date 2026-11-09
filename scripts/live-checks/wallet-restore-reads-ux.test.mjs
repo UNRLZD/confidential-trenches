@@ -56,6 +56,10 @@ test("the recorded bad runs fail: our helper relay among the restore's providers
   assert.deepEqual(l.lines, Object.values(BUNDLE_WHY).map((w) => `BAD ${w}`));
 });
 
+test("planted: no preflight read is a FAIL", () => {
+  assert.equal(spoil((a) => delete a.clusters.mainnet.providers[1].preflight).verdict, "FAIL");
+});
+
 test("planted: two providers giving two balances, one provider's word, a non-zero empty account, another origin or provider, and each bundle fact gone each fail", () => {
   assert.equal(spoil((a) => (a.clusters.mainnet.providers[1].held.value += 1)).ok, false, "disagree");
   assert.equal(spoil((a) => a.clusters.mainnet.providers.pop()).ok, false, "one provider");
@@ -142,7 +146,9 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {
   for (const k of ["bad_dead_copy", "bad_reader_not_handed", "bad_one_provider", "bad_dead_held_binding", "bad_filter_one_amount", "bad_filter_both_nonzero"]) {
-    const v = judge(A[k]);
+    assert.equal(judge(A[k]).ok, false, k);
+    // recorded before the preflight was read (review of 9f6473ac, P3-1): judged here on its bundle beside good's reads
+    const v = judge({ ...A[k], clusters: A.good.clusters });
     assert.equal(v.ok, false, k);
     assert.ok(v.lines.length > 0 && v.lines.every((l) => Object.values(BUNDLE_WHY).some((w) => l === `BAD ${w}`) || l.includes("index.html pins")), `${k}: ${v.lines.join("\n")}`);
   }
@@ -165,10 +171,12 @@ test("planted providers: a refusal of the page fails, an admitted provider's tim
   const rpc = (value) => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value } });
   const truth = (body) => (JSON.parse(body).params[0] === EMPTY ? 0 : held);
   const honest = (body) => new Response(rpc(truth(body)), { status: 200, headers: { "access-control-allow-origin": "*" } });
-  const run = async (second) => {
+  const pre = async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type" } });
+  const run = async (second, secondPre = pre) => {
     const sent = [];
     const a = await read(async (url, init) => {
       sent.push(init.headers.origin);
+      if (init.method === "OPTIONS") return url === P ? pre() : secondPre();
       return url === P ? honest(init.body) : second(init.body);
     }, SIGN, true);
     assert.ok(sent.length >= 4 && sent.every((o) => o === SIGN), "every read is asked from SIGN_HOST's origin");
@@ -181,6 +189,11 @@ test("planted providers: a refusal of the page fails, an admitted provider's tim
   assert.ok(refused.lines.some((l) => l.includes("HTTP 403") && l.includes("may not read its answer")), refused.lines.join("\n"));
   // an admitted provider timing out, or rate-limiting: INCONCLUSIVE, exit 3, the pair not judged
   for (const [why, f] of [
+    // review of 9f6473ac: P2-1, a gateway's passing 5xx with no CORS answer; P3-3, the page's throttle codes whatever
+    // their words; P3-2, a redirect, named as one
+    ...[502, 503, 504].map((status) => [`${status} with no CORS answer`, async () => new Response("<html>Bad gateway</html>", { status })]),
+    ...[-32029, -32429, -429, 15].map((code) => [`throttle code ${code}`, async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message: "Too many" } }), { status: 200, headers: { "access-control-allow-origin": "*" } })]),
+    ["redirect", async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); }],
     ["timeout", async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }],
     ["429", async () => new Response("Too Many Requests", { status: 429 })],
     ["empty, admitted", async () => new Response("", { status: 200, headers: { "access-control-allow-origin": SIGN } })],
@@ -189,6 +202,21 @@ test("planted providers: a refusal of the page fails, an admitted provider's tim
     assert.deepEqual([v.verdict, EXIT[v.verdict]], ["INCONCLUSIVE", 3], `${why}: ${v.lines.join("\n")}`);
     assert.ok(v.lines.every((l) => l.startsWith("NO ANSWER ")), why);
   }
+  const redirected = await run(async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); });
+  assert.ok(redirected.lines.some((l) => l.includes("it redirects")), redirected.lines.join("\n"));
+  // review of 9f6473ac, P3-1: the preflight refused while the POST is admitted (405, as a provider that takes no OPTIONS
+  // answers), or without SIGN_HOST's origin, or without content-type: FAIL; a preflight's passing fault: INCONCLUSIVE
+  for (const [why, f] of [
+    ["OPTIONS 405, the POST admitted", async () => new Response("Method Not Allowed", { status: 405, headers: { "access-control-allow-origin": "*" } })],
+    ["no CORS answer", async () => new Response(null, { status: 204 })],
+    ["another origin", async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "https://x.example", "access-control-allow-headers": "content-type" } })],
+    ["content-type not allowed", async () => new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization" } })],
+  ]) {
+    const v = await run(honest, f);
+    assert.equal(v.verdict, "FAIL", why);
+    assert.ok(v.lines.some((l) => l.includes("preflight")), `${why}: ${v.lines.join("\n")}`);
+  }
+  assert.equal((await run(honest, async () => new Response("", { status: 503 }))).verdict, "INCONCLUSIVE", "a preflight's 503");
   // liars
   const liars = {
     "another balance": async (body) => new Response(rpc(truth(body) + 1), { status: 200, headers: { "access-control-allow-origin": "*" } }),

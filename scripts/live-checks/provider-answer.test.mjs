@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { classify, NOT_YET, pageRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, LIMIT_CODES, NOT_YET, pageRefuses, preflight, preflightRefuses, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
@@ -143,6 +143,70 @@ test("pageRefuses: an answer the page's origin may not read is the page's real a
   assert.equal(typeof pageRefuses(u, { result: 1, status: null }, O), "string");
   assert.equal(pageRefuses(u, { noAnswer: "p.example: no answer (TimeoutError)", status: null, acao: null }, O), null);
   assert.equal(typeof pageRefuses(u, { result: 1 }, O), "string");
+});
+
+// review of 7921e919..9f6473ac (card wallet-restore-reads-ux)
+test("P2-1: a 5xx with no CORS answer is a provider's passing fault, a no-answer, as a 429 is", () => {
+  const O = "https://page.example";
+  for (const status of [500, 502, 503, 504]) assert.equal(pageRefuses("https://p.example/rpc", { noAnswer: `p.example HTTP ${status}: not JSON (Bad gateway)`, status, acao: null }, O), null, String(status));
+  // a 4xx other than 429 with no CORS answer stays the page's refusal
+  for (const status of [401, 403, 404, 405]) assert.equal(typeof pageRefuses("https://p.example/rpc", { noAnswer: "x", status, acao: null }, O), "string", String(status));
+});
+
+test("P3-3: the page's Solana throttle codes are a rate limit whatever their words, as the page reads them", () => {
+  for (const code of [-32029, -32429, -429, 15, 429, -32005]) {
+    const a = classify("p", 200, rpcErr(code, "Too many"));
+    assert.match(a.noAnswer ?? "", /^p HTTP 200: rate limit /, String(code));
+  }
+  // a revert under one of them is still the contract's
+  assert.deepEqual(classify("p", 200, rpcErr(3, "x")), { error: { code: 3, message: "x" } });
+});
+
+test("P3-3: the throttle codes are the kit's own (RPC_THROTTLE_CODES in the files the kit's entry loads)", () => {
+  const entry = fileURLToPath(new URL("../../packages/kit/src/index.ts", import.meta.url));
+  const program = ts.createProgram([entry], { noEmit: true, noLib: true, types: [], allowImportingTsExtensions: true, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, target: ts.ScriptTarget.ESNext });
+  const sets = [];
+  for (const f of program.getSourceFiles()) for (const m of f.text.matchAll(/\nconst RPC_THROTTLE_CODES\b[^=]*= new Set\(\[([^\]]*)\]\)/g)) sets.push(m[1].split(",").map((x) => Number(x.trim())));
+  assert.equal(sets.length, 1);
+  for (const c of sets[0]) assert.ok(LIMIT_CODES.has(c), String(c));
+});
+
+test("P3-2: a redirect is named as one, never as a provider that said nothing", async () => {
+  const a = await rpcAnswer("https://p.example/rpc", "getBalance", [], {
+    headers: { origin: "https://page.example" },
+    redirect: "error",
+    fetchFn: async () => {
+      throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
+    },
+  });
+  assert.equal(a.noAnswer, "p.example: no answer (it redirects, and a redirect is not followed: unexpected redirect)");
+});
+
+test("P3-1: the CORS preflight is sent as a page's browser sends it, and read", async () => {
+  const O = "https://page.example";
+  let seen;
+  const p = await preflight("https://p.example/rpc", O, {
+    fetchFn: async (url, init) => ((seen = [url, init.method, init.headers, init.redirect, "body" in init]), new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "Content-Type, X-A" } })),
+  });
+  assert.deepEqual(seen, ["https://p.example/rpc", "OPTIONS", { origin: O, "access-control-request-method": "POST", "access-control-request-headers": "content-type" }, "error", false]);
+  assert.deepEqual(p, { status: 204, acao: "*", allowHeaders: "Content-Type, X-A" });
+  assert.equal(preflightRefuses("https://p.example/rpc", p, O), null);
+  assert.equal(preflightRefuses("https://p.example/rpc", { status: 200, acao: O, allowHeaders: "*" }, O), null);
+  // refused: not 2xx (405 with POST admitted), no CORS answer, another origin, content-type not allowed, none read
+  assert.match(preflightRefuses("https://p.example/rpc", { status: 405, acao: "*", allowHeaders: "content-type" }, O), /^p\.example HTTP 405: /);
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: null, allowHeaders: "content-type" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "https://x.example", allowHeaders: "content-type" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "*", allowHeaders: "x-a" }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", { status: 204, acao: "*", allowHeaders: null }, O), "string");
+  assert.equal(typeof preflightRefuses("https://p.example/rpc", undefined, O), "string");
+  // a passing fault (no answer, 429, 5xx) is read again once, then a no-answer, never a refusal
+  for (const f of [async () => new Response("", { status: 503 }), async () => new Response("", { status: 429 }), async () => { throw new DOMException("t", "TimeoutError"); }]) {
+    let n = 0;
+    const q = await preflight("https://p.example/rpc", O, { fetchFn: async () => (n++, f()) });
+    assert.equal(typeof q.noAnswer, "string");
+    assert.equal(n, 2);
+    assert.equal(preflightRefuses("https://p.example/rpc", q, O), null);
+  }
 });
 
 // The kit's words (its EVM quote's module-private limited, notYet and stateless), read from the

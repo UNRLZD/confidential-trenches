@@ -1,6 +1,6 @@
 {
  "key": "wallet-restore-reads-ux",
- "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build; bad_filter_one_amount and bad_filter_both_nonzero (9 Nov 10:22Z): delta review 2 P2-A plants A5 and A6 built with packages/signpage/scripts/build-app.mjs on this card's build (each sha384 equal to the review's own plant build), judged by this check's own bundleFacts, the providers' reads those of good; good and bad_refuses_page re-recorded 2026-11-09T13:26Z (the Mac, --local and --local --with https://api.mainnet-beta.solana.com) on the merge of main f3e2317e with every read through provider-answer.mjs: mainnet-beta answers SIGN_HOST's Origin 403 with a JSON-RPC error {code 403, Access forbidden} and Access-Control-Allow-Origin *",
+ "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build; bad_filter_one_amount and bad_filter_both_nonzero (9 Nov 10:22Z): delta review 2 P2-A plants A5 and A6 built with packages/signpage/scripts/build-app.mjs on this card's build (each sha384 equal to the review's own plant build), judged by this check's own bundleFacts, the providers' reads those of good; good and bad_refuses_page re-recorded 2026-11-09T13:26Z (the Mac, --local and --local --with https://api.mainnet-beta.solana.com) on the merge of main f3e2317e with every read through provider-answer.mjs: mainnet-beta answers SIGN_HOST's Origin 403 with a JSON-RPC error {code 403, Access forbidden} and Access-Control-Allow-Origin *; good, bad_helper, bad_refuses_page and bad_live_before re-recorded 2026-11-09T14:44Z (the Mac; --local, --local --with https://ct-api.unrealized.trade/v1/rpc/solana, --local --with https://api.mainnet-beta.solana.com, and the live SIGN_HOST, which does not serve this card yet) with each provider's CORS preflight read (review of 9f6473ac P3-1); the six bundle plants keep their recorded reads and are judged by the test with good's provider reads beside their bundle",
  "good": {
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
@@ -20,6 +20,11 @@
     "providers": [
      {
       "url": "https://solana-rpc.publicnode.com",
+      "preflight": {
+       "status": 204,
+       "acao": "*",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "*",
@@ -33,6 +38,11 @@
      },
      {
       "url": "https://solana.api.pocket.network",
+      "preflight": {
+       "status": 204,
+       "acao": "https://confidential.unrealized.trade",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "https://confidential.unrealized.trade",
@@ -52,8 +62,8 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
-   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "pin": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
+   "sha384": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,
@@ -67,6 +77,11 @@
     "providers": [
      {
       "url": "https://solana-rpc.publicnode.com",
+      "preflight": {
+       "status": 204,
+       "acao": "*",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "*",
@@ -80,6 +95,11 @@
      },
      {
       "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+      "preflight": {
+       "status": 204,
+       "acao": "https://confidential.unrealized.trade",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "https://confidential.unrealized.trade",
@@ -114,6 +134,11 @@
     "providers": [
      {
       "url": "https://solana-rpc.publicnode.com",
+      "preflight": {
+       "status": 204,
+       "acao": "*",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "*",
@@ -127,6 +152,11 @@
      },
      {
       "url": "https://api.mainnet-beta.solana.com",
+      "preflight": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "allowHeaders": "authorization, content-type"
+      },
       "held": {
        "status": 403,
        "acao": "*",
@@ -154,8 +184,8 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "https://confidential.unrealized.trade",
-   "pin": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
-   "sha384": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
+   "pin": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "ux_read": false,
    "ux_carry": false,
    "id_held": false,
@@ -169,6 +199,11 @@
     "providers": [
      {
       "url": "https://solana-rpc.publicnode.com",
+      "preflight": {
+       "status": 204,
+       "acao": "*",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "*",
@@ -182,6 +217,11 @@
      },
      {
       "url": "https://solana.api.pocket.network",
+      "preflight": {
+       "status": 204,
+       "acao": "https://confidential.unrealized.trade",
+       "allowHeaders": "content-type"
+      },
       "held": {
        "status": 200,
        "acao": "https://confidential.unrealized.trade",
