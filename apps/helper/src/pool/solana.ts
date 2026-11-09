@@ -70,7 +70,6 @@ import {
   SOLANA_COMPUTE_BUDGET_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_JITO_TIP_MIN,
-  SOLANA_KEYLESS_PATH_INTERVAL_MS,
   SOLANA_MAX_TX_BYTES,
   SOLANA_POOL_SEND_MARGIN_MS,
   solanaPoolStepPrograms,
@@ -100,7 +99,7 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { base58decode } from "../bind/send.ts";
-import { jitoSender, type JitoSender } from "./jito.ts";
+import { JITO_TICK_SLACK_MS, jitoSender, type JitoSender } from "./jito.ts";
 import { oncePerNullifier } from "./once.ts";
 import { heldPerClient, throttleOf } from "../limits/limits.ts";
 import { epochStartOf, POOL_EPOCH_MS, POOL_FEE_STEP, type PoolFeeAnswer } from "./fee.ts";
@@ -595,7 +594,9 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
           through = [
             {
               name: "jito",
-              minIntervalMs: SOLANA_KEYLESS_PATH_INTERVAL_MS,
+              // the region's own pace (./jito.ts JITO_REGION_INTERVAL_MS) plus JITO_TICK_SLACK_MS, so the kit's tick, in
+              // whole Date.now() ms, never lands inside the gate's performance.now() interval and is refused unsent
+              minIntervalMs: jito.intervalMs + JITO_TICK_SLACK_MS,
               paceKey: region,
               send: async (b64) => {
                 const r = await jito.rebroadcast(region, b64, sig);
