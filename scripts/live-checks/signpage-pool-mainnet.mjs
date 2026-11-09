@@ -43,6 +43,7 @@ import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { headersOf } from "./signpage-postmessage.mjs";
 import { named } from "./record-names.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-mainnet";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -70,7 +71,8 @@ export const ASKS = [
 const READY_MS = 10_000;
 const ANSWER_MS = 10_000;
 const SETTLE_MS = 1_500;
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -108,7 +110,7 @@ export function judge(rec) {
 /** packages/signpage built as its deploy builds it (deploy.mjs build(): index.html and public/ copied). */
 function build() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-pool-mainnet-sign-"));
-  copyFileSync(path.join(REPO, "packages/signpage/index.html"), path.join(out, "index.html"));
+  copyFileSync(path.join(signBuilt(), "index.html"), path.join(out, "index.html"));
   cpSync(path.join(REPO, "packages/signpage/public"), out, { recursive: true });
   return out;
 }
@@ -173,7 +175,7 @@ async function probe(browser, { signUrl, dir }) {
 
 export async function collect({ browser, signUrl = SIGN_URL, dir = null, source }) {
   const at = new Date().toISOString();
-  const treeBundle = sha384(readFileSync(TREE_BUNDLE));
+  const treeBundle = sha384(readFileSync(treeBundlePath()));
   let index;
   let csp;
   let bytes;

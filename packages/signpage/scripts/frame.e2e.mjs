@@ -7,10 +7,10 @@
 // and packages/signpage. exit 0 all as expected, 1 otherwise.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../scripts/browsers.mjs";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const REPO = dirname(dirname(PKG));
 const GOOD = JSON.parse(readFileSync(join(REPO, "scripts/live-checks/signpage-skeleton.answers.json"), "utf8")).good;
 const PAGE = readFileSync(join(PKG, "index.html"), "utf8");

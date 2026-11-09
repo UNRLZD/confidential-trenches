@@ -47,6 +47,7 @@ import { fileURLToPath } from "node:url";
 import { readSolanaRent, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaPoolAccount, solanaPoolFee, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-pins";
 export const SIGN_HOST = "https://confidential.unrealized.trade";
@@ -60,8 +61,9 @@ const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const SYSTEM = "11111111111111111111111111111111";
 const LOOKUP_TABLE_PROGRAM = "AddressLookupTab1e1111111111111111111111111";
 const U64_MAX = "18446744073709551615";
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
 const DEPLOY_RECORD = path.join(REPO, "contracts/pool-solana/deployments/mainnet.json");
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const B58Q = "[`\"']([1-9A-HJ-NP-Za-km-z]{32,44})[`\"']";
 /** SOL_POOLS.mainnet's literal in the minified bundle: its program read from a frozen object's `.program`, its fee payer
  *  a quoted base58 key. */
@@ -203,7 +205,7 @@ async function accountRead(url, address) {
 
 export async function collect({ harness = false, bundle = null } = {}) {
   const at = new Date().toISOString();
-  const tree = readFileSync(TREE_BUNDLE);
+  const tree = readFileSync(treeBundlePath());
   const treeBundle = sha384(tree);
   const r = JSON.parse(readFileSync(DEPLOY_RECORD, "utf8"));
   const deploy = r.cluster === "mainnet" && typeof r.program_id === "string" ? { program: r.program_id, pool: solanaPoolAccount(r.program_id), table: r.table, tableAddresses: r.table_addresses } : null;
