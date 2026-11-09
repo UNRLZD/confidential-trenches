@@ -795,11 +795,26 @@ export function solanaPoolBuyInstructions(cfg: SolanaPoolConfig, release: Solana
   ];
 }
 
+export type SolanaPoolBuyErrorCode = "venue_not_in_table"; // our lookup table is not made for the buy's venue (none of its program's accounts)
+export class SolanaPoolBuyError extends Error {
+  readonly code: SolanaPoolBuyErrorCode;
+  constructor(code: SolanaPoolBuyErrorCode, message: string) {
+    super(`${code}: ${message}`);
+    this.code = code;
+    this.name = "SolanaPoolBuyError";
+  }
+}
+
 /** The unsigned v0 transaction the fee payer and W sign: one tag 3 release-and-buy, naming the next state page (flag
- *  bit 1) whenever the transaction still fits 1,232 bytes with it. Refuses over 1,232 bytes. */
+ *  bit 1) whenever the transaction still fits 1,232 bytes with it. Refuses over 1,232 bytes, and refuses a venue whose
+ *  program our lookup table does not hold (SolanaPoolBuyError venue_not_in_table: the table is made per venue, as
+ *  solanaPoolBuyTableAccounts names it, and the mainnet one holds pump's curve alone), so a venue not open on this
+ *  table is told apart from a failure. */
 export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions = {}): SolanaPoolBuyBuilt {
   if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
   if (!solanaTableIsActive(chain.table.table)) throw new Error("our lookup table is deactivated");
+  const venueProgram = venue.kind === "pump-curve" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM;
+  if (!chain.table.table.addresses.includes(venueProgram)) throw new SolanaPoolBuyError("venue_not_in_table", `our lookup table holds no account of the ${venue.kind} program`);
   const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
   const compile = (nextPage: boolean) => {
     const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, chain.rent, tipAccount, nextPage);

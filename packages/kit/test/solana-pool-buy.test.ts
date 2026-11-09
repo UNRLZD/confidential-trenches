@@ -16,6 +16,7 @@ import {
   SOLANA_POOL_VOLUME_ACCOUNT_SIZE,
   SOLANA_PUMP_AMM_PROGRAM,
   SOLANA_PUMP_PROGRAM,
+  SolanaPoolBuyError,
   buildSolanaPoolBuy,
   checkSolanaPoolBuy,
   readSolanaPoolBuyVenue,
@@ -341,6 +342,20 @@ test("size table: tag 3 with the compressed proof, pump and PumpSwap, with and w
     "pump none": 1010, "pump tip": 1043, "pump cashback none": 1010, "pump cashback tip": 1043,
     "pumpswap none": 1167, "pumpswap tip": 1200, "pumpswap cashback none": 1201, "pumpswap cashback tip": 1201,
   });
+});
+
+// review P3-4 of a34c1626: the mainnet table holds pump's curve venue alone (card pool-sol-deploy-mainnet), so a PumpSwap
+// buy on it named PumpSwap's accounts as static keys and threw a plain Error past 1,232 bytes, which the page answered
+// "failed". The venue whose program our table does not hold is refused with its own code, before any bytes are built.
+test("a buy on a venue our lookup table is not made for (PumpSwap on the curve-only table, the curve on a PumpSwap-only one) is refused venue_not_in_table", async () => {
+  const curve = await setup("pump");
+  const swap = await setup("pumpswap");
+  for (const [name, venue, req, chain] of [["PumpSwap on the curve table", swap.venue, swap.req, { ...swap.chain, table: curve.chain.table }], ["the curve on the PumpSwap table", curve.venue, curve.req, { ...curve.chain, table: swap.chain.table }]] as const) {
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, venue, req, chain, { pick: () => 0 }), (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table" && /^venue_not_in_table: our lookup table holds no account of the (pumpswap|pump-curve) program$/.test(e.message), name);
+  }
+  // each venue on its own table still builds
+  assert.ok(buildSolanaPoolBuy(cfg, release, swap.venue, swap.req, swap.chain, { pick: () => 0 }).size > 0);
+  assert.ok(buildSolanaPoolBuy(cfg, release, curve.venue, curve.req, curve.chain, { pick: () => 0 }).size > 0);
 });
 
 test("M369 (L2): a mainnet pool buy tips at least Jito's minimum; devnet may tip nothing; the check refuses the same", async () => {
