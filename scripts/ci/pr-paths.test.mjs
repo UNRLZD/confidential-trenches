@@ -311,7 +311,7 @@ test("the decide step writes the all-run plan on every path but a complete plan 
 const STEP_PLANTED = {
   "the bootstrap exits with no output (PR #549)": [`elif [ ! -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ]; then echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"`, `elif [ ! -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ]; then echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"; exit 0`, "main has no rule yet"],
   "the rule's plan taken unchecked": [`elif ! valid "$plan"; then echo "the rule wrote no complete plan, so every job runs"\n`, "", "a rule that writes garbage"],
-  "a failed rule fails the step": [`elif ! GITHUB_OUTPUT="$plan" node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then echo "the rule failed, so every job runs"`, `elif ! GITHUB_OUTPUT="$plan" node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then exit 1`, "a rule that fails"],
+  "a failed rule fails the step": [`decide "$EVENT" "$BASE" "$HEAD"; then echo "the rule failed, so every job runs"`, `decide "$EVENT" "$BASE" "$HEAD"; then exit 1`, "a rule that fails"],
   "an all-run plan with a job left out": ["test_scripts=true test_vault=true", "test_scripts=true", "main has no rule yet"],
 };
 for (const [name, [from, to, want]] of Object.entries(STEP_PLANTED)) {

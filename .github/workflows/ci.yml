@@ -358,7 +358,8 @@ jobs:
             : > "$plan"
             if ! { git archive "$BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"; }; then echo "main's scripts/ could not be read, so every job runs"
             elif [ ! -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ]; then echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"
-            elif ! GITHUB_OUTPUT="$plan" node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then echo "the rule failed, so every job runs"
+            elif ! GITHUB_OUTPUT="$plan" \
+              node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then echo "the rule failed, so every job runs"
             elif ! valid "$plan"; then echo "the rule wrote no complete plan, so every job runs"
             else cp "$plan" "$plan.all"; fi
           else echo "a $EVENT run runs every job"; fi
