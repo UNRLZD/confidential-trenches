@@ -6,7 +6,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { AGE_S, QUOTE_ONLY_RH, check, pinned, replayer } from "./evm-buy-hookdata-fee.mjs";
+import { AGE_S, QUOTE_ONLY_RH, check, pinned, post, replayer } from "./evm-buy-hookdata-fee.mjs";
+import { JUDGED_403, NO_ANSWERS } from "./provider-answer.plants.mjs";
+
+// a no-answer is read again at once here, not after provider-answer.mjs's pause
+process.env.PROVIDER_RETRY_MS = "0";
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-hookdata-fee.answers.json", import.meta.url), "utf8"));
 
@@ -65,7 +69,7 @@ test("a chain with no block AGE_S old (the oldest is newer) fails the check", as
   const block = (n) => ({ number: hex(n), timestamp: hex(10_000 - 2 * (99 - n)), hash: `0x${n.toString(16).padStart(64, "0")}` });
   const transport = async (url, method, params) => (method === "eth_getBlockByNumber" ? { result: block(params[0] === "latest" ? 99 : Number(BigInt(params[0]))) } : { result: `0x${"0".repeat(64)}` });
   const r = await check(transport, [{ chain: "young", providers: u, reads: [{ to: `0x${"1".repeat(40)}`, data: "0x12345678" }] }]);
-  assert.deepEqual(r, { ok: false, lines: [`young: no block ${AGE_S} s old on one.example`] });
+  assert.deepEqual(r, { verdict: "FAIL", ok: false, lines: [`young: no block ${AGE_S} s old on one.example`] });
 });
 
 test("a provider holding another block at the number found fails the check", async () => {
@@ -83,3 +87,51 @@ test("a provider holding another block at the number found fails the check", asy
 
 const hex = (n) => `0x${BigInt(n).toString(16)}`;
 const host = (u) => new URL(u).host;
+
+// card live-checks-provider-no-answer: one fee read on robinhood.drpc.org answered, through post() and the shared rule,
+// with each planted answer; every other read replayed from the good run
+async function plantedRun(status, body, wrongElsewhere = false) {
+  const replay = replayer(A.good);
+  const k = A.good.findIndex((e) => e.method === "eth_call" && e.url === "https://robinhood.drpc.org");
+  const target = A.good[k];
+  const w = A.good.findIndex((e) => e.method === "eth_call" && e.url === "https://mainnet.base.org");
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => new Response(body, { status });
+  try {
+    return await check(async (url, method, params) => {
+      const same = JSON.stringify([url, method, params]);
+      if (same === JSON.stringify([target.url, target.method, target.params])) return post(url, method, params);
+      if (wrongElsewhere && same === JSON.stringify([A.good[w].url, A.good[w].method, A.good[w].params])) return { result: "0x" };
+      return replay(url, method, params);
+    });
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+const STATE = /state|not found|unknown block/i;
+
+test("planted: an empty body, a 429, each rate-limit wording or a 403 rate limit on a fee read makes that chain INCONCLUSIVE (exit 3), named; the others still pass", async () => {
+  for (const [name, status, body] of NO_ANSWERS.filter(([n]) => !STATE.test(n) || /rate limit/.test(n))) {
+    const r = await plantedRun(status, body);
+    assert.equal(r.verdict, "INCONCLUSIVE", `${name}: ${r.lines.join("\n")}`);
+    assert.ok(r.lines.some((l) => l.startsWith(`INCONCLUSIVE robinhood: robinhood.drpc.org: eth_call: no answer: robinhood.drpc.org HTTP ${status}: `)), `${name}: ${r.lines.join("\n")}`);
+    assert.equal(r.lines.filter((l) => !l.startsWith("INCONCLUSIVE")).length, 3, `${name}: the other three chains judged`);
+  }
+});
+
+test("planted: a state the fee provider does not hold (drpc's code 27, header not found, historical state, on a 403 too) is this check's subject: FAIL", async () => {
+  const state = NO_ANSWERS.filter(([n]) => STATE.test(n) && !/rate limit/.test(n));
+  assert.equal(state.length, 6);
+  for (const [name, status, body] of state) {
+    const r = await plantedRun(status, body);
+    assert.equal(r.verdict, "FAIL", `${name}: ${r.lines.join("\n")}`);
+    assert.ok(r.lines.some((l) => /^robinhood: robinhood\.drpc\.org: eth_call: RPC error /.test(l)), `${name}: ${r.lines.join("\n")}`);
+  }
+});
+
+test("planted: a wrong answer beside a no-answer still FAILs; a 403 that carries a real JSON-RPC error is judged", async () => {
+  for (const [name, status, body] of NO_ANSWERS) assert.equal((await plantedRun(status, body, true)).verdict, "FAIL", name);
+  const r = await plantedRun(...JUDGED_403);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^robinhood: robinhood\.drpc\.org: eth_call: RPC error -32601: /.test(l)), r.lines.join("\n"));
+});

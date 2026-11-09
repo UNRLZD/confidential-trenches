@@ -12,6 +12,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { collect, EXIT, judge } from "./evm-quote-read-gas-starve.mjs";
+import { JUDGED_403, NO_ANSWERS } from "./provider-answer.plants.mjs";
+
+// a no-answer is read again at once here, not after provider-answer.mjs's pause
+process.env.PROVIDER_RETRY_MS = "0";
 
 const A = JSON.parse(readFileSync(new URL("./evm-quote-read-gas-starve.answers.json", import.meta.url), "utf8"));
 
@@ -76,6 +80,7 @@ test("planted: one provider on a chain, a chain missing, a read answered 0 where
 async function run(down) {
   const byHost = new Map(A.good.chains.flatMap((c) => c.reads.map((r) => [r.provider, [{ hash: r.block }, r.six, r.sixtyFour, r.heavy, r.floor]])));
   const seen = new Map();
+  const planted = new Map();
   const real = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const host = new URL(url).host;
@@ -83,9 +88,13 @@ async function run(down) {
     seen.set(host, n + 1);
     if (down[host] !== undefined) {
       const x = down[host](n);
-      if (x !== undefined) return x;
+      if (x !== undefined) {
+        planted.set(host, (planted.get(host) ?? 0) + 1);
+        return x;
+      }
     }
-    const k = n - (down[host] === undefined ? 0 : (down[host].skipped ?? 0));
+    // `skipped` planted answers take no recorded answer's place, counted once they were answered
+    const k = n - Math.min(down[host]?.skipped ?? 0, planted.get(host) ?? 0);
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: byHost.get(host)[k] }), { status: 200 });
   };
   try {
@@ -114,12 +123,12 @@ test("planted (live run 42552050303): an empty body, an HTML 429 page, two provi
   // an HTML 429 page
   const h = await run({ "rpc.mainnet.chain.robinhood.com": always(html429) });
   assert.equal(h.verdict, "PASS", h.lines.join("\n"));
-  assert.ok(h.lines.some((l) => l.startsWith("--- robinhood rpc.mainnet.chain.robinhood.com: no answer: rpc.mainnet.chain.robinhood.com HTTP 429: not JSON")), h.lines.join("\n"));
+  assert.ok(h.lines.some((l) => l.startsWith("--- robinhood rpc.mainnet.chain.robinhood.com: no answer: rpc.mainnet.chain.robinhood.com HTTP 429: 429 Too Many Requests")), h.lines.join("\n"));
   // a JSON-RPC rate limit with HTTP 200, as some providers answer, after the block read: a no-answer, not a wrong answer
   const limited = (n) => (n === 0 ? undefined : new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limit exceeded" } }), { status: 200 }));
   const l = await run({ "base-rpc.publicnode.com": limited });
   assert.equal(l.verdict, "PASS", l.lines.join("\n"));
-  assert.ok(l.lines.some((x) => x.startsWith("--- base base-rpc.publicnode.com: no answer: base-rpc.publicnode.com HTTP 200: error")), l.lines.join("\n"));
+  assert.ok(l.lines.some((x) => x.startsWith("--- base base-rpc.publicnode.com: no answer: base-rpc.publicnode.com HTTP 200: rate limit")), l.lines.join("\n"));
   // two providers of one chain down: Base has four, so two answer and the chain is judged on them; each down one named
   const two = await run({ "base.api.pocket.network": always(empty), "mainnet.base.org": always(html429) });
   assert.equal(two.verdict, "PASS", two.lines.join("\n"));
@@ -141,4 +150,32 @@ test("planted (live run 42552050303): an empty body, an HTML 429 page, two provi
   const refused = (n) => (n === 1 ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "state override not supported" } }), { status: 200 }) : undefined);
   const r = await run({ "robinhood-rpc.publicnode.com": refused });
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+});
+
+// card live-checks-provider-no-answer (review of evm-quote-gas-used, P3-1 and P3-2): every kind of no-answer in the
+// shared plants (an empty body, a 429, an HTTP-200 rate limit in each of the kit's wordings, drpc's code 27 state miss,
+// a lagging backend's "header not found", a 403 with a state miss inside), on the block read and on a call, is named
+// and left out; beside a wrong answer the run still FAILs; a 403 that carries a real JSON-RPC error is judged
+test("planted: each shared no-answer kind, on the block read and on a call; beside a wrong answer; a judged 403", async () => {
+  // the host's kth answer planted; `skipped`: planted answers that take no recorded answer's place
+  const at = (k, res, skipped = 0) => Object.assign((n) => (n === k ? res() : undefined), { skipped });
+  for (const [name, status, body] of NO_ANSWERS) {
+    const res = () => new Response(body, { status });
+    // the block read (answer 0) and its read again (1): the host is a no-answer, the chain judged on the other three
+    const b = await run({ "mainnet.base.org": always(res) });
+    assert.equal(b.verdict, "PASS", `${name}: ${b.lines.join("\n")}`);
+    assert.ok(b.lines.some((l) => l.startsWith(`--- base mainnet.base.org: no answer: mainnet.base.org HTTP ${status}: `)), `${name}: ${b.lines.join("\n")}`);
+    // the second call (answer 2), read again once and then answered: no line, a pass
+    const c = await run({ "robinhood.drpc.org": at(2, res, 1) });
+    assert.equal(c.verdict, "PASS", `${name}: ${c.lines.join("\n")}`);
+    assert.ok(!c.lines.some((l) => l.includes("robinhood.drpc.org: no answer")), `${name}: ${c.lines.join("\n")}`);
+    assert.equal(c.seen.get("robinhood.drpc.org"), 6, `${name}: read again once`);
+    // beside a wrong answer on another provider of the chain: FAIL
+    const wrong = at(1, () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: A.bad.chains[0].reads[0].six }), { status: 200 }));
+    const w = await run({ "mainnet.base.org": always(res), "base-rpc.publicnode.com": wrong });
+    assert.equal(w.verdict, "FAIL", `${name}: ${w.lines.join("\n")}`);
+  }
+  // a 403 that carries a real JSON-RPC error, on a call: judged, a FAIL
+  const j = await run({ "robinhood-rpc.publicnode.com": at(1, () => new Response(JUDGED_403[1], { status: JUDGED_403[0] })) });
+  assert.equal(j.verdict, "FAIL", j.lines.join("\n"));
 });
