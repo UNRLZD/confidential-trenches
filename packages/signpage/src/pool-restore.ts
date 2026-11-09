@@ -43,7 +43,7 @@
 //   one walk's match or one window of a lane's deposit ids, and zeroed when that use ends; no read and no wait holds
 //   the lock (review P2-2: held for the whole run, it made a queued seed write, and every pool.buy, sell, deposit and
 //   follow behind it, wait for step 5). The floor's write runs under the same lock and check, so a sign out in another
-//   tab is never written over; this tab's sign out aborts the run, between and around every id.
+//   tab is never written over; this tab's sign out aborts the run, checked before every id.
 // - One run at a time on the page: a request while one runs is answered "started" and follows that run. Across tabs,
 //   runs take RESTORE_LOCK in turn, so two tabs' writes never race on one note.
 // - A run's op records stay "started" or "reading" only while it lives: each follower holds RESTORE_LOCK/<op id> for
@@ -130,7 +130,7 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
  * Step 5 on every pool walked, in order, on one pass and one IdReader: each reason it is not done, named, pushed to `why`
  * as found (never none while a pool scope's U_X is unread: POOL_CHAIN_UNREAD), so a throw keeps the reasons before it. The first id unread on both providers stops every read
  * after it (each throws at once, so its lane ends with restoreDepositIds's error); a sign out stops them the same way,
- * checked before and after each id. `seed` opens the seed for each window of a lane's ids only.
+ * checked before each id (the id in flight then ends its lane, and the run's end checks it again). `seed` opens the seed for each window of a lane's ids only.
  */
 async function readDepositIds(seed: SeedUse, walked: readonly { label: string; scope: bigint; notes: readonly RestoredNote[] }[], ids: IdReads, signal: AbortSignal, why: string[]): Promise<void> {
   const rpcs = ids.rpcs();
@@ -141,10 +141,7 @@ async function readDepositIds(seed: SeedUse, walked: readonly { label: string; s
     signal.throwIfAborted();
     if (stop !== undefined) throw stop;
     try {
-      const x = await reader(u);
-      // a sign out during the read: its answer is not taken
-      signal.throwIfAborted();
-      return x;
+      return await reader(u);
     } catch (e) {
       stop ??= e;
       throw e;

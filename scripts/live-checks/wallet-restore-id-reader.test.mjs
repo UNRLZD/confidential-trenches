@@ -1,7 +1,9 @@
 // node --test scripts/live-checks/wallet-restore-id-reader.test.mjs: the live check's verdict on its recorded answers, with
 // no network. Each record is a real run of the check (the 8-9 Nov 2026 clock of the recording machine), both providers
-// asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded by card
-// wallet-restore-id-reader-wired, whose MARK gained the IdReader's rules:
+// asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded (9 Nov
+// 00:52Z) by card wallet-restore-id-reader-wired's fold of its review, whose MARK gained the stall's named reasons and
+// whose reads gained intents.near's mt_tokens_for_owner and the final block header (step 5 reads both), so every record
+// holds them:
 // - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
 // - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
 //   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
@@ -13,6 +15,9 @@
 //       const h = new Headers(res.headers); for (const k of [...h.keys()]) if (k.startsWith("access-control-")) h.delete(k);
 //       return new Response(res.status === 204 ? null : await res.arrayBuffer(), { status: res.status, headers: h }); };
 //     probe(SIGN_ORIGIN, localFetch, strip)   // written as JSON as --record writes it
+// - bad_catch_done: this card's build with step 5's catch swallowing its throw (`.catch(() => {})`, the review's
+//   mutant B3: a step 5 that throws would end the run done), built and run with --local --root <that folder>: FAIL on
+//   the markers alone, ids_catch at 0;
 // - and the good record with another script's integrity, each marker gone, a provider out of the CSP, and each provider's
 //   preflight or reads unknown, wrong, failed or with no CORS for the page: each FAIL.
 import assert from "node:assert/strict";
@@ -40,6 +45,10 @@ const IDS = "the ids read are the registered one and a fresh one";
 const PRE = (i) => `provider ${i} answers the page's preflight for its origin`;
 const REG = (i) => `provider ${i} reads the registered id registered for the page's origin`;
 const UNU = (i) => `provider ${i} reads the unused id unused for the page's origin`;
+const BLK = (i) => `provider ${i} reads its final block's header for the page's origin`;
+const INT = (i, who) => `provider ${i} reads intents.near's token list of the ${who} id for the page's origin`;
+// a provider's lines in the order judge says them
+const ALL = (i) => [PRE(i), BLK(i), INT(i, "registered"), REG(i), INT(i, "unused"), UNU(i)];
 
 /** Each provider's answers as the recorded good run read them, with no network; the Origin sent is the page's. */
 const fakeRpc = (state = {}) => async (u, init) => {
@@ -50,10 +59,12 @@ const fakeRpc = (state = {}) => async (u, init) => {
   const cors = { "access-control-allow-origin": "*" };
   if (init.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...cors, "access-control-allow-methods": "POST", "access-control-allow-headers": "content-type" } });
   const { method, params } = JSON.parse(init.body);
-  assert.equal(method, "query");
   const json = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: "x", result }), { status: 200, headers: cors });
+  if (method === "block") return (assert.deepEqual(params, { finality: "final" }), json({ header: { height: 223700000, hash: "7GimM2vwF2MuALZhZsRYibhPjTqBNjV8gP7pnR5rtQb5" } }));
+  assert.equal(method, "query");
   const unknown = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT" } } }), { status: 200, headers: cors });
   if (params.request_type === "view_account") return params.account_id === REGISTERED ? json({ amount: "374836026634223774816433" }) : unknown();
+  if (params.account_id === "intents.near") return (assert.equal(params.method_name, "mt_tokens_for_owner"), json({ result: [...Buffer.from("[]")] }));
   assert.equal(params.account_id, USDC);
   assert.equal(params.method_name, "storage_balance_of");
   state.args = [...(state.args ?? []), JSON.parse(Buffer.from(params.args_base64, "base64").toString()).account_id];
@@ -76,7 +87,7 @@ test("the recorded good answer (the card's build and both providers' real reads)
 test("main's build before the IdReader was wired (the walk's reach, none of the IdReader's rules) fails, on the markers alone", () => {
   assert.equal(answers.bad_main_bundle.url, "local build of main-610143c2");
   assert.deepEqual(BAD(answers.bad_main_bundle), [MARKS]);
-  assert.equal(ID_MARKERS.length, 9);
+  assert.equal(ID_MARKERS.length, 13);
   for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], m.startsWith("reach_") ? 1 : 0, m);
 });
 
@@ -85,8 +96,14 @@ test("the live SIGN_HOST before the card's release fails, on the markers alone",
   assert.deepEqual(BAD(answers.bad_live_before), [MARKS]);
 });
 
+test("this card's build with step 5's catch swallowing its throw (the review's mutant B3) fails, on ids_catch alone", () => {
+  assert.equal(answers.bad_catch_done.url, "local build of catch-mutant");
+  assert.deepEqual(BAD(answers.bad_catch_done), [MARKS]);
+  for (const m of MARKERS) assert.equal(answers.bad_catch_done.app.markers[m], m === "ids_catch" ? 0 : 1, m);
+});
+
 test("a provider answering with no CORS (dRPC, every access-control header gone) fails, on its preflight and reads alone", () => {
-  assert.deepEqual(BAD(answers.bad_no_cors), [PRE(1), REG(1), UNU(1)]);
+  assert.deepEqual(BAD(answers.bad_no_cors), ALL(1));
   assert.equal(judgeBundle(answers.bad_no_cors).pass, true);
 });
 
@@ -150,9 +167,15 @@ test("each provider's preflight or reads not what the page needs fails, on that 
     assert.deepEqual(BAD(swap((p) => void (p.registered.account.read = "UNKNOWN_ACCOUNT"))), [REG(i)], `${k} registered reads no account`);
     assert.deepEqual(BAD(swap((p) => void (p.unused.storage.read = "registered"))), [UNU(i)], `${k} unused reads registered`);
     assert.deepEqual(BAD(swap((p) => void (p.unused.account.read = "account"))), [UNU(i)], `${k} unused reads an account`);
+    // the block and intents.near's list: each wrong, failed or with no CORS fails on its own line
+    for (const [why, v] of [["no CORS", { ...good.block, acao: undefined }], ["a 429", { http: 429, error: "error" }], ["no answer", { error: "TimeoutError" }], ["not a header", { ...good.block, read: "other" }]])
+      assert.deepEqual(BAD(swap((p) => void (p.block = v))), [BLK(i)], `${k} block ${why}`);
+    for (const who of ["registered", "unused"])
+      for (const [why, v] of [["no CORS", { ...good[who].intents, acao: undefined }], ["a 429", { http: 429, error: "error" }], ["not a list", { ...good[who].intents, read: "other" }]])
+        assert.deepEqual(BAD(swap((p) => void (p[who].intents = v))), [INT(i, who)], `${k} ${who} intents ${why}`);
     const none = structuredClone(answers.good);
     delete none.rpc[k];
-    assert.deepEqual(BAD(none), [PRE(i), REG(i), UNU(i)], `${k} not read`);
+    assert.deepEqual(BAD(none), ALL(i), `${k} not read`);
   });
 });
 
@@ -167,6 +190,7 @@ test("the committed build in this tree passes as the recorded good answer did (b
   assert.notEqual(rec.ids.unused, REGISTERED);
   assert.equal((await probe(SIGN_ORIGIN, localFetch, fakeRpc(), undefined, "cd".repeat(32))).ids.unused, "cd".repeat(32));
   assert.equal(state.args.length, 2 * PAIR.length, "storage_balance_of asked of each provider for each id");
+  for (const k of PLACES) assert.deepEqual([rec.rpc[k].block.read, rec.rpc[k].registered.intents.read, rec.rpc[k].unused.intents.read], ["header", "list", "list"], k);
   assert.deepEqual(new Set(state.args), new Set([REGISTERED, rec.ids.unused]));
   // two runs read two fresh ids
   assert.notEqual((await probe(SIGN_ORIGIN, localFetch, fakeRpc())).ids.unused, rec.ids.unused);
@@ -189,18 +213,13 @@ test("reach_misses and reach_floor match a miss counted only past the floor, nev
   assert.equal(n("let o=a??0,s=[]", "reach_floor"), 0);
 });
 
-// the page's wiring (src/pool-restore.ts readDepositIds): the error kept is the one thrown again, the result tested is the
-// one whose lanes are read
-test("ids_stop and ids_stall match the first unread id stopping every read after it and a lane unread ending the run, never another", () => {
+// the page's wiring (src/pool-restore.ts readDepositIds): the error kept is the one thrown again
+test("ids_stop matches the first unread id stopping every read after it, never another", () => {
   const n = (text, k) => [...text.matchAll(MARK[k])].length;
   assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 1);
   assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw p;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 0);
   assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw e}", "ids_stop"), 0);
   assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=x,e}", "ids_stop"), 0);
-  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||t.lanes.some(e=>e.unread.length>0))return!1", "ids_stall"), 1);
-  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||u.lanes.some(e=>e.unread.length>0))return!1", "ids_stall"), 0);
-  assert.equal(n("if(n.read?.(r.scope,t),!t.complete||t.lanes.some(e=>f.unread.length>0))return!1", "ids_stall"), 0);
-  assert.equal(n("if(n.read?.(r.scope,t),!t.complete)return!1", "ids_stall"), 0);
 });
 
 test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks it is the answer", async () => {
@@ -223,8 +242,8 @@ test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s 
       return new Response("{}", { status: 429, headers: ra === null ? {} : { "retry-after": ra } });
     };
     const rec = await probe(SIGN_ORIGIN, localFetch, always, wait);
-    assert.deepEqual(BAD(rec), PLACES.flatMap((_, i) => [REG(i), UNU(i)]), String(ra));
-    assert.equal(asks, 4 * 4 * PAIR.length, `${ra}: four asks of each of the four reads on each provider`);
+    assert.deepEqual(BAD(rec), PLACES.flatMap((_, i) => [BLK(i), INT(i, "registered"), REG(i), INT(i, "unused"), UNU(i)]), String(ra));
+    assert.equal(asks, 4 * 7 * PAIR.length, `${ra}: four asks of each of the seven reads on each provider`);
     assert.deepEqual(new Set(waits), new Set([ms]), `${ra}: each wait ${ms} ms`);
   }
 });

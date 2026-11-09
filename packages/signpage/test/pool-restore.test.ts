@@ -444,19 +444,21 @@ test("planted (review P1): a pool scope whose ids all read unused still ends sta
 
 test("planted (review P2-2): the seed lock is held only for each use of the seed: a seed write and a pool.buy asked during step 5 are granted before it ends", async () => {
   let reading = false;
+  let last = 0;
   const n = nearOf();
-  const slow = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p) => ((reading = true), await new Promise((x) => setTimeout(x, 1)), r.query(p)) });
+  const slow = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p) => ((reading = true), await new Promise((x) => setTimeout(x, 1)), (last = performance.now()), r.query(p)) });
   const ids = { ...n.ids, rpcs: () => n.ids.rpcs().map(slow) as unknown as readonly [NearRpc, NearRpc] };
   const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids });
-  let ended = -1;
-  const run = w.r.auto().then((x) => ((ended = performance.now()), x));
+  const run = w.r.auto();
   await until("step 5 reading", () => reading);
   // nameDeposit's exclusive request, then a pool.buy's shared one, both asked while step 5 reads
   const writer = navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, async () => performance.now());
   const reader = navigator.locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => performance.now());
   const [wAt, rAt] = await Promise.all([writer, reader]);
-  assert.equal(await run, "stalled");
-  assert.ok(wAt < ended && rAt < ended, `the seed write at ${wAt.toFixed(0)} and the buy at ${rAt.toFixed(0)} were granted before step 5 ended at ${ended.toFixed(0)}`);
+  const stage = await run;
+  // granted while step 5 still read: before its last view
+  assert.ok(wAt < last && rAt < last, `the seed write at ${wAt.toFixed(0)} ms and the buy at ${rAt.toFixed(0)} ms, step 5's last view at ${last.toFixed(0)} ms`);
+  assert.equal(stage, "stalled");
   assert.ok(w.seeds.length > 1 && w.seeds.every((s) => s.every((b) => b === 0)), "the seed opened per window and zeroed after each");
 });
 
