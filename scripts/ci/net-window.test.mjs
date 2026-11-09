@@ -108,6 +108,7 @@ export const CHANGED = [
   "scripts/live-checks/wallet-refund-move.mjs",
   "scripts/live-checks/kit-renewal-read-bounded.mjs",
   "scripts/live-checks/market-data-evm.mjs",
+  "scripts/live-checks/market-data-evm-token.mjs",
   "scripts/live-checks/market-data-solana-lists.mjs",
   "scripts/live-checks/market-data-solana-token.mjs",
   "scripts/live-checks/money-gate-testnet.mjs",
