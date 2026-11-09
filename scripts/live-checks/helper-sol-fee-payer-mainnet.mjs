@@ -15,9 +15,20 @@
 // not judged and the run is INCONCLUSIVE (exit 3), a FAIL where any answer is wrong. A run keeps each RPC's last raw
 // answer and the judge reads it by provider-answer.mjs's classify, so a replay judges exactly what the run read.
 // Listed after the owner's SOL send to the fee payer (9 Nov 10:36Z: PASS, 10000000 lamports on both RPCs).
+// Card sol-pools-mainnet-pin: the helper is also held to SIGN_HOST's pin. It fetches SIGN_HOST's /app.js and reads the
+// mainnet Solana pool pin with signpage-pool-pins.mjs's mainnetPin (SOL_POOLS.mainnet's own literal, matched once, its
+// program resolved to the frozen {program, table}); the helper's fee_payer must be that pin's fee payer and its program
+// the pin's program, since the device's bind refuses any other answer and a helper on another key refuses every mainnet
+// release. signpage-pool-pins (After: sign) reads the same pin and the same helper answer after every sign deploy, so the
+// helper check and the sign check now hold each other: a helper redeploy on another key fails here, a sign deploy with
+// another pin fails there. Until this card's sign deploy, SIGN_HOST serves a bundle with no mainnet pin, so this check
+// FAILs live on that line alone; it passes once SIGN_HOST serves this card's bundle.
 // After: helper
-//   node scripts/live-checks/helper-sol-fee-payer-mainnet.mjs [--base <url>] [--record <file>] [--rpcs <a>,<b>]   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
-//   (--rpcs replaces RPCS for a local recording only)
+//   node scripts/live-checks/helper-sol-fee-payer-mainnet.mjs [--base <url>] [--record <file>] [--rpcs <a>,<b>] [--sign-bundle <file>]
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
+//   (--rpcs replaces RPCS for a local recording only; --sign-bundle <file> stands a built bundle, such as this
+//   checkout's packages/signpage/public/app.js after signBuilt(), for SIGN_HOST's /app.js, for recording a good run
+//   before the sign deploy: it replaces the bundle only, every other read stays live)
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -25,6 +36,7 @@ import { fileURLToPath } from "node:url";
 import { solanaPoolAccount, solanaPoolFee, solanaRentOf } from "../../packages/kit/src/index.ts";
 import { solanaFeePayerLowMark } from "../../apps/helper/src/pool/solana.ts";
 import { classify, EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { mainnetPin, SIGN_HOST } from "./signpage-pool-pins.mjs";
 
 export { EXIT };
 
@@ -86,8 +98,24 @@ export function answerOf(r) {
   return classify(host, r?.status, r?.body);
 }
 
-/** One run, every answer kept as read: the fee answer, the rent on both RPCs, then the named fee payer's balance on both. */
-export async function read(base = BASE, fetchFn = fetch, record = loadRecord(), rpcs = RPCS) {
+export const SIGN_APP = `${SIGN_HOST}/app.js`;
+
+/** SIGN_HOST's mainnet pin: { url, status, pin } with pin mainnetPin's answer on the served /app.js, or on `file` (a built
+ *  bundle standing for it, named by `as`). */
+export async function readSign(fetchFn = fetch, file = null, as = null) {
+  if (file !== null) return { url: as ?? "a built bundle standing for SIGN_HOST's /app.js", status: 200, pin: mainnetPin(readFileSync(file, "utf8")) };
+  try {
+    const r = await fetchFn(SIGN_APP, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+    const text = await r.text();
+    return { url: SIGN_APP, status: r.status, pin: r.status === 200 ? mainnetPin(text) : { error: `HTTP ${r.status}` } };
+  } catch (e) {
+    return { url: SIGN_APP, status: 0, pin: { error: String(e?.cause?.code ?? e?.name ?? e?.message ?? e).slice(0, 300) } };
+  }
+}
+
+/** One run, every answer kept as read: the fee answer, the rent on both RPCs, then the named fee payer's balance on both,
+ *  and SIGN_HOST's pin (`sign`, readSign's). */
+export async function read(base = BASE, fetchFn = fetch, record = loadRecord(), rpcs = RPCS, sign = () => readSign(fetchFn)) {
   const url = `${base.replace(/\/$/, "")}/v1/pool/fee?cluster=mainnet&pool=${record.pool}`;
   const r = await fetchFn(url, { redirect: "manual", headers: { origin: APP }, signal: AbortSignal.timeout(15_000) });
   const headers = Object.fromEntries(["x-helper-commit", "access-control-allow-origin"].map((h) => [h, r.headers.get(h)]));
@@ -95,7 +123,7 @@ export async function read(base = BASE, fetchFn = fetch, record = loadRecord(), 
   const rent = await Promise.all(rpcs.map((u) => rpc(u, "getAccountInfo", [RENT_SYSVAR, { encoding: "base64", commitment: "confirmed" }], fetchFn)));
   const payer = json(fee.body)?.fee_payer;
   const balance = typeof payer === "string" && B58.test(payer) ? await Promise.all(rpcs.map((u) => rpc(u, "getBalance", [payer, { commitment: "confirmed" }], fetchFn))) : [];
-  return { base, record, rpcs: [...rpcs], readAt: new Date().toISOString(), fee, rent, balance };
+  return { base, record, rpcs: [...rpcs], readAt: new Date().toISOString(), fee, rent, balance, sign: await sign() };
 }
 
 /** The rent one getAccountInfo answer (answerOf's) holds, or null. */
@@ -164,6 +192,12 @@ export function judge(run, record = run.record) {
   const payer = b?.fee_payer;
   const payerOk = typeof payer === "string" && B58.test(payer) && payer !== record?.pool && payer !== record?.program;
   say(payerOk, `the fee payer ${show(payer)}`);
+  // SIGN_HOST's pin: the device binds this fee payer and program, and refuses a helper answer of any other
+  const s = run.sign ?? {};
+  const pin = s.status === 200 && typeof s.pin?.feePayer === "string" && typeof s.pin?.program === "string" ? s.pin : null;
+  say(pin !== null, `SIGN_HOST's pin (${show(s.url)}): ${pin ? `program ${pin.program}, fee payer ${pin.feePayer}` : run.sign === undefined ? "not read" : (s.pin?.error ?? `HTTP ${s.status}`)}`);
+  say(pin !== null && payer === pin.feePayer, `the helper's fee payer ${show(payer)} is SIGN_HOST's pin's${pin && payer !== pin.feePayer ? `: the pin is ${pin.feePayer}` : ""}`);
+  say(pin !== null && b?.program === pin.program, `the helper's program ${show(b?.program)} is SIGN_HOST's pin's${pin && b?.program !== pin.program ? `: the pin is ${pin.program}` : ""}`);
   if (!payerOk) return done();
   const bal = run.balance ?? [];
   say(sameUrls(bal), `its balance read on both RPCs (${bal.length})`);
@@ -192,7 +226,9 @@ if (import.meta.main) {
   try {
     const record = loadRecord();
     const rpcs = opt("--rpcs") ? opt("--rpcs").split(",") : RPCS;
-    const run = await read(opt("--base") ?? BASE, fetch, record, rpcs);
+    const bundle = opt("--sign-bundle");
+    const sign = bundle === undefined ? undefined : () => readSign(fetch, path.resolve(bundle), `${((r) => (r.startsWith("..") ? path.basename(bundle) : r))(path.relative(path.join(HERE, "../.."), path.resolve(bundle)))} (--sign-bundle) standing for ${SIGN_APP}`);
+    const run = await read(opt("--base") ?? BASE, fetch, record, rpcs, sign);
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const r = judge(run, record);
     for (const l of r.lines) console.log(l);
