@@ -6,7 +6,11 @@
 // each new object got a fresh burst and a busy hold died with its object (review P3-5).
 // A reader built on the default fetch goes through pacedFetch (the real clock); one given its own fetch (tests) is not
 // paced there, and the IdReader then takes the slot itself (asked), on the clock it is given.
-import { NEAR_NETWORKS } from "./deposit/account.ts";
+// A request on pacedFetch waits for its slot under its caller's own signal only, and its deadline (RPC_TIMEOUT_MS)
+// starts when the slot comes; a wait its caller ends gives the slot back (delta review 2, P1: with the deadline
+// started before the queue, the fourth request queued on FastNEAR's 2.56 s gap timed out unsent, its slot lost and its
+// retry queued behind it again, so four chains at once stalled for good).
+import { NEAR_NETWORKS, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "./deposit/account.ts";
 
 /**
  * Each provider's pace: `perSec` requests a second, `burst` at once. FastNEAR's is its sustained rate, read 9 Nov
@@ -44,6 +48,10 @@ export function paceSlot(p: Pace, now: number): number {
   p.tat += p.every;
   return Math.max(0, at - now);
 }
+/** A slot taken and not used (its wait ended by its caller) given back, so the requests after it lose no time. */
+export function paceGiveBack(p: Pace, now: number): void {
+  p.tat = Math.max(now, p.tat - p.every);
+}
 /** A busy answer holds the provider's every request for `ms`, its burst spent. */
 export function paceHold(p: Pace, now: number, ms: number): void {
   p.tat = Math.max(p.tat, now + ms + (p.burst - 1) * p.every);
@@ -56,27 +64,33 @@ export function resetPaces(): void {
 const PACED = new WeakSet<object>();
 /** Whether `fetchFn` is a pacedFetch (a reader built on it is paced at its transport). */
 export const isPacedFetch = (fetchFn: unknown): boolean => typeof fetchFn === "function" && PACED.has(fetchFn);
-/** fetch to `url`, each request after `url`'s slot on the real clock; the request's own signal aborts the wait. */
-export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(...a)): typeof fetch {
+/**
+ * fetch to `url`, each request after `url`'s slot on the real clock, then bounded by `timeoutMs` from that slot on. The
+ * request's signal is its caller's own (no deadline in it: a reader on a pacedFetch leaves the deadline to it,
+ * requestSignal); it ends the wait, and the slot is given back.
+ */
+export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(...a), timeoutMs: number = RPC_TIMEOUT_MS): typeof fetch {
   const p = paceOf(url);
   const f = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
+    const signal = init?.signal ?? undefined;
+    signal?.throwIfAborted();
     const w = paceSlot(p, performance.now());
     if (w > 0) {
-      const signal = init?.signal ?? undefined;
       await new Promise<void>((res, rej) => {
-        if (signal?.aborted) return rej(signal.reason);
         const t = setTimeout(() => {
           signal?.removeEventListener("abort", stop);
           res();
         }, w);
         const stop = (): void => {
           clearTimeout(t);
+          paceGiveBack(p, performance.now());
           rej(signal!.reason);
         };
         signal?.addEventListener("abort", stop, { once: true });
       });
     }
-    return fetchFn(input, init);
+    const deadline = AbortSignal.timeout(timeoutMs);
+    return fetchFn(input, { ...init, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
   };
   PACED.add(f);
   return f as typeof fetch;
@@ -90,3 +104,16 @@ export function pacedRpc<T extends object>(rpc: T, fetchFn: unknown): T {
 }
 /** Whether `rpc` is paced at its transport (pacedRpc on a pacedFetch). */
 export const isPacedRpc = (rpc: object): boolean => PACED_RPCS.has(rpc);
+/** A reader's deadline on `fetchFn`: none on a pacedFetch (it bounds each request from its slot on), else `timeoutMs`. */
+export const deadlineOf = (fetchFn: unknown, timeoutMs: number): number | null => (isPacedFetch(fetchFn) ? null : timeoutMs);
+/** One request's signal on `fetchFn`: the caller's `signal`, bounded by `timeoutMs` unless the fetch bounds it itself. */
+export function requestSignal(fetchFn: unknown, timeoutMs: number, signal?: AbortSignal): AbortSignal | undefined {
+  const ms = deadlineOf(fetchFn, timeoutMs);
+  if (ms === null) return signal;
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
+}
+/** The kit's nearRpc for `url` on its one pace (the withdraw form's pair). */
+export function pacedNearRpc(url: string): NearRpc {
+  const f = pacedFetch(url);
+  return pacedRpc(nearRpc(url, f, null), f);
+}

@@ -97,7 +97,9 @@ export function nearPairRule(network?: NearNetwork): string {
  * near-testnet.drpc.org, read 2026-11-06 05:47Z), and the vault's page reads ask for the same page again after a wait
  * (the kit's vaultViewBusy); to every other reader it is a JSON-RPC error like any other.
  */
-export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
+// `timeoutMs` null: the fetch bounds each request itself (the wallet's pacedFetch, whose deadline starts when the
+// request's pace slot comes, so a wait in the pace queue never spends it: card wallet-id-reader-paced, delta review 2 P1)
+export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs: number | null = RPC_TIMEOUT_MS): NearRpc {
   return {
     name: url,
     async query(params, signal) {
@@ -105,7 +107,7 @@ export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = 
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: NEAR_RPC_METHOD, params }),
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+        signal: timeoutMs === null ? (signal ?? null) : signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       });
       if (res.status !== 200 && res.status !== 408) throw rpcHttpError(res);
       return await res.json();

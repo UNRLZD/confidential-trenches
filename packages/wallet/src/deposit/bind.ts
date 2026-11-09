@@ -55,7 +55,7 @@ import { HELPER_RPC_METHODS, type VaultDepositRow, vaultSync, type VaultSyncCurs
 import { base58, base64 } from "@scure/base";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import { pacedFetch, pacedRpc } from "../pace.ts";
+import { deadlineOf, pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, heightSpreadOver } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
 
@@ -91,7 +91,7 @@ export interface BindRpc extends NearRpc {
 }
 /** A provider by URL, for both `query` (nearRpc) and `tx`. A status other than 200 or no answer in time throws. */
 export function bindRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), timeoutMs = RPC_TIMEOUT_MS): BindRpc {
-  const q = nearRpc(url, fetchFn, timeoutMs);
+  const q = nearRpc(url, fetchFn, deadlineOf(fetchFn, timeoutMs));
   return pacedRpc({
     name: q.name,
     query: q.query,
@@ -100,7 +100,7 @@ export function bindRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), ti
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: TX_METHOD, params }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestSignal(fetchFn, timeoutMs),
       });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       return await res.json();

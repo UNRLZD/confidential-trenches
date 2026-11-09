@@ -23,7 +23,9 @@
 // Re-recorded again (9 Nov 04:51Z) by that card's fold of its review (P2-3), whose MARK gained id_keep and id_signout
 // and whose busy_wait and pair_wrong bind more, each record as above from the fold's commit 648d10c2 (its mutants built
 // in a worktree of that commit with its own install, whose fresh build matched the committed one); bad_pair_guard
-// counts id_keep 0 as well, since the keep is bound with readId in one pattern.
+// counts id_keep 0 as well, since the keep is bound with readId in one pattern. Re-recorded again (9 Nov 05:47Z) by
+// its delta review 2 fold (P1: pacedFetch's deadline from the slot on, busy_wait binding it), the same way, from the fold's
+// tree; the live SIGN_HOST now carries the wired IdReader's markers, so bad_live_before fails on the card's four alone.
 // - bad_busy_guard and bad_pair_guard (card wallet-id-reader-paced): this card's build with one guard planted in the
 //   IdReader's source, built and run with --local --root <that folder>: busy_guard asks the busy wait only when more
 //   than one try is allowed (`if (b !== null && o.tries > 1)` in asked: the page's default tries would still wait, so
@@ -345,7 +347,14 @@ const PLANTS = [
   ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst\\}", "every:1e3/", "every:0*")],
   ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\);[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return 0}`)],
   ["busy_wait", "the busy hold holds nothing", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§),(?<c>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\+\k<c>\+\(\k<a>\.burst-1\)\*\k<a>\.every\)\}`, (_, g) => `function ${g.f}(${g.a},${g.b},${g.c}){}`)],
-  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`=async\(§,§\)=>\{let (?<w>§)=§\(§,performance\.now\(\)\);if\(\k<w>>0\)`, ">0)", ">0&&!1)")],
+  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`;let (?<w>§)=§\(§,performance\.now\(\)\);\k<w>>0&&await new Promise`, ">0&&", ">0&&!1&&")],
+  // delta review 2, P1: the deadline from the slot on, the slot given back
+  ["busy_wait", "an ended wait keeps its slot (none given back)", () => plant(String.raw`clearTimeout\(§\),(?<g>§\(§,performance\.now\(\)\),)§\(§\.reason\)`, (s, g) => s.replace(g.g, ""))],
+  ["busy_wait", "the slot given back takes no time back", () => swap(String.raw`\{(?<p>§)\.tat=Math\.max\(§,\k<p>\.tat-\k<p>\.every\)\}`, "-", "-0*")],
+  ["busy_wait", "pacedFetch sends the caller's signal with no deadline of its own", () => swap(String.raw`return §\(§,\{\.\.\.§,signal:§\?AbortSignal\.any\(\[§,§\]\):§\}\)`, "signal:", "signal:void 0??")],
+  ["busy_wait", "a reader on a pacedFetch keeps its own deadline (it runs in the queue)", () => swap(String.raw`=\(§,§\)=>§\(§\)\?null:§;function`, "?null:", "?(null,1e4):")],
+  ["busy_wait", "relayRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=(?<nr>§)\((?<u>§),(?<fx>§),§\(\k<fx>,(?<tm>§)\)\);return §\(\{name:§\.name,query:\(`, (s, g) => s.replace(/,[\w$]+\([\w$]+,[\w$]+\)\);return/, `,${g.tm});return`))],
+  ["busy_wait", "RPC_TIMEOUT_MS 10 s -> 1e9 ms", () => { const to = /function [\w$]+\([\w$]+,[\w$]+=\(\.\.\.[\w$]+\)=>fetch\(\.\.\.[\w$]+\),[\w$]+=([\w$]+)\)\{/.exec(APP)[1]; return swap(String.raw`(?<![\w$.])${to.replace(/[$]/g, "\\$&")}=1e4[,;]`, "1e4", "1e9"); }],
   ["busy_wait", "pacedRpc marks every rpc paced (none takes a slot)", () => swap(String.raw`\{return §\(§\)&&§\.add\(§\),§\}`, "return ", "return 1||")],
   ["busy_wait", "the default sleep resolves at once", () => swap(String.raw`\(\)=>\{§\?\.removeEventListener\(` + "`abort`" + String.raw`,§\),§\(\)\},§\),§=\(\)=>\{clearTimeout\(§\),§\(§\.reason\)\};§\?\.addEventListener\(` + "`abort`" + String.raw`,§,\{once:!0\}\)\}\),§=class extends Error\{retryAfterMs`, "()},", "()},0&&")],
   ["busy_wait", "busyMax by default 60 s -> 6e9 ms (69 days: never met)", () => swap("busyMaxMs\\?\\?6e4", "6e4", "6e9")],
@@ -379,7 +388,7 @@ const PLANTS = [
 ];
 
 test("busy waited out, the pair's disagreement, the keep and the sign-out drop: each planted bundle fails on its marker", () => {
-  assert.ok(PLANTS.length >= 30, `${PLANTS.length} plants`);
+  assert.ok(PLANTS.length >= 40, `${PLANTS.length} plants`);
   for (const [key, why, make] of PLANTS) {
     const text = make();
     assert.notEqual(text, APP, why);

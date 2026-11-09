@@ -95,7 +95,7 @@
 import { DEPOSIT_REFUNDED_STAGES, type DepositFacts, type DepositStage, HELPER_FETCH_INIT, HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
-import { pacedFetch, pacedRpc } from "../pace.ts";
+import { pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
@@ -231,7 +231,7 @@ export function followRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), 
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: BLOCK_METHOD, params }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestSignal(fetchFn, timeoutMs),
       });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       return await res.json();

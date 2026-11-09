@@ -46,7 +46,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { readTokenStorageMin } from "../arming/accounts.ts";
 import { depositId } from "../derive/keys.ts";
-import { pacedFetch, pacedRpc } from "../pace.ts";
+import { pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import type { WalletStore } from "../store/index.ts";
 import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, statusFacts } from "./follow.ts";
@@ -122,7 +122,7 @@ export function moveOutRpc(url: string, fetchFn: typeof fetch = pacedFetch(url),
   return pacedRpc({
     ...followRpc(url, fetchFn, timeoutMs),
     async call(method, params) {
-      const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: requestSignal(fetchFn, timeoutMs) });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     },
@@ -154,7 +154,7 @@ export function archivalRpc(url: string, fetchFn: typeof fetch = pacedFetch(url)
       let after: number | null = null;
       let why: string;
       try {
-        const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: AbortSignal.timeout(timeoutMs) });
+        const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: requestSignal(fetchFn, timeoutMs) });
         if (res.status === 200) {
           const body: unknown = await res.json();
           if (!(isObj(body) && isObj(body.error) && body.error.code === -429)) return body;
