@@ -2,7 +2,8 @@
 // Live check of card app-launchpad-chain-badges: every token on Discover, as served at APP_HOST, shows where it was
 // launched and on which chain as logo badges at its avatar's corners, never as a raw id. Headless Chromium opens
 // /discover at 390 x 844 (phone, dpr 2, touch; each tab in turn) and 1440 x 900 (desktop, every column), keeps the
-// lists answer the page itself read from HELPER_HOST, and for every drawn row reads:
+// lists answers the page itself read from HELPER_HOST (Solana's, Base's and Robinhood's, card app-chains-evm; each
+// chain's rows from its own snapshot), and for every drawn row reads:
 //   - its served `launchpad` id has a row in the terminal's table (apps/terminal/src/screens/market/pads.ts), so a pad
 //     the lists start serving shows here as a fault, not as a token with no badge;
 //   - with an id, the launchpad badge draws that pad: data-pad is the id, the hover title is the pad's proper name, its
@@ -12,7 +13,7 @@
 //   - each badge lies inside its row's box and is not cut by the column (no clipping at either width).
 // A screenshot of every width is kept.
 // After: app
-//   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--shots <dir>] [--record <file>]
+//   node scripts/live-checks/app-launchpad-badges.mjs [--url <page>] [--build <dir>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge(). A row is recorded by its `addr`
 // (the token id): an id under a "token" key reads to gitleaks as a secret.
@@ -131,7 +132,13 @@ export const READ = ({ scope, column }) => {
   return out;
 };
 
-export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null } = {}) {
+export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), prepare = null, build = null } = {}) {
+  if (build && !prepare) {
+    // --build: that terminal build at APP_HOST's name inside the stand-in shell, the helper live
+    const { harnessRoute } = await import("./app-in-shell.mjs");
+    const harness = await harnessRoute(path.resolve(build), "signed");
+    prepare = (ctx) => ctx.route("**/*", (r) => (new URL(r.request().url()).origin === HELPER_HOST ? r.continue() : harness(r)));
+  }
   mkdirSync(shots, { recursive: true });
   const browser = await launchBrowser("chromium");
   const rec = { url, at: new Date().toISOString(), browser: browser.version(), loads: [] };
@@ -141,7 +148,12 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       if (prepare) await prepare(ctx);
       const page = await ctx.newPage();
       let lists = null;
-      page.on("response", (r) => r.url() === LISTS_URL && !lists && (lists = r));
+      // every chain's lists the page read (card app-chains-evm: Discover draws Solana's, Base's and Robinhood's)
+      const answers = [];
+      page.on("response", (r) => {
+        if (r.url() === LISTS_URL && !lists) lists = r;
+        if (r.url().startsWith(`${HELPER_HOST}/v1/market/lists?`)) answers.push(r);
+      });
       await page.goto(url, { waitUntil: "load" });
       const stateOf = (f) => f.evaluate(() => document.querySelector('main[data-route="discover"] .dsc')?.dataset.discover ?? null).catch(() => null);
       let app = null;
@@ -175,9 +187,13 @@ export async function collect({ url = `${APP_HOST}/discover`, shots = path.join(
       // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
       const shot = `${w.name}-discover.png`;
       await page.screenshot({ path: path.join(shots, shot) });
-      const body = lists ? await lists.json().catch(() => null) : null;
       const served = new Map();
-      for (const rs of Object.values(body?.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string") served.set(r.token, { launchpad: r.launchpad ?? null, chain: r.chain });
+      for (const a of answers) {
+        const body = a.status() === 200 ? await a.json().catch(() => null) : null;
+        // a chain's rows from its own snapshot only, as Discover draws them
+        if (body?.chain !== new URL(a.url()).searchParams.get("chain")) continue;
+        for (const rs of Object.values(body?.lists ?? {})) for (const r of Array.isArray(rs) ? rs : []) if (r && typeof r.token === "string" && r.chain === body.chain) served.set(r.token, { launchpad: r.launchpad ?? null, chain: r.chain });
+      }
       for (const r of rows) r.served = served.get(r.addr) ?? null;
       rec.loads.push({ width: w.name, path: new URL(target.url()).pathname, state, lists: lists ? { url: lists.url(), status: lists.status() } : null, rows, shot });
       await ctx.close();
@@ -193,7 +209,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const a = process.argv.slice(2);
   const opt = (k, d) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
   try {
-    const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined) });
+    const rec = await collect({ url: opt("--url", `${APP_HOST}/discover`), shots: opt("--shots", undefined), build: opt("--build", null) });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
