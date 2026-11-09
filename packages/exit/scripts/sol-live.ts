@@ -6,9 +6,11 @@
 //   node packages/exit/scripts/sol-live.ts [--record <file>] [--replay <answers.json> [--bad <json>]]
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes every RPC answer read to <file>; --replay answers every call from a recorded file instead of the
-// network (getMultipleAccounts from every account it holds, any other call by its exact params), and --bad plants one
+// network (getMultipleAccounts from every account it holds, any other call by its params but a getProgramAccounts'
+// minContextSlot, at the slot asked when past the recorded one), and --bad plants one
 // lie in it (flip: a mark's other bytes on one RPC; hide: a mark the lister leaves out; drop: a listed mark one RPC
-// lacks; fake: an address the lister makes up; refuse: a lister that refuses getProgramAccounts), for the live
+// lacks; fake: an address the lister makes up; refuse: a lister that refuses getProgramAccounts; rollback: the lister
+// hides a mark and its own host serves its state page one entry short), for the live
 // check's test.
 import { readFileSync, writeFileSync } from "node:fs";
 import { EXIT_SOL_CLUSTERS, type ExitSolCluster } from "../src/sol-rpc.ts";
@@ -22,11 +24,12 @@ const CLUSTERS: ExitSolCluster[] = ["devnet", "mainnet"];
 const REPLAY_GAP = 4;
 
 type Answer = { url: string; method: string; params: any[]; status: number; json: any };
-type Bad = { kind: "flip" | "hide" | "drop" | "fake" | "refuse"; url: string; address: string | null };
+type Bad = { kind: "flip" | "hide" | "drop" | "fake" | "refuse" | "rollback"; url: string; address: string | null };
 
 /**
  * A fetch answering from `answers`: getMultipleAccounts from every account the host's answers hold (null for one they
- * never gave), at its highest recorded slot or the minContextSlot asked; any other call by its exact params. `bad`
+ * never gave), at its highest recorded slot or the minContextSlot asked; any other call by its params, a
+ * getProgramAccounts' minContextSlot left out (a planted lie changes the slots the reads reach), at the slot asked. `bad`
  * plants one lie.
  */
 function replay(answers: Answer[], bad?: Bad): typeof fetch {
@@ -53,21 +56,29 @@ function replay(answers: Answer[], bad?: Bad): typeof fetch {
           d[0] ^= 1;
           acc.data[0] = d.toString("base64");
         }
+        // rollback: the lister's own host serves its state page one entry short (with the lister hiding `address`)
+        if (acc && bad?.kind === "rollback" && bad.url === href) {
+          const d = Buffer.from(acc.data[0], "base64");
+          if (d.length > 16 + 72 && d.subarray(0, 8).toString() === "bfpage01" && d[8] === 0) acc.data[0] = d.subarray(0, d.length - 72).toString("base64");
+        }
         return acc;
       });
       return reply({ result: { context: { slot: Math.max(slots.get(href) ?? 0, params[1]?.minContextSlot ?? 0) }, value } });
     }
-    const a = answers.find((x) => x.url === href && x.method === method && JSON.stringify(x.params) === JSON.stringify(params));
+    const bare = (m: string, p: any[]): string => JSON.stringify(m === "getProgramAccounts" ? [p[0], { ...p[1], minContextSlot: undefined }] : p);
+    const a = [...answers].reverse().find((x) => x.url === href && x.method === method && bare(x.method, x.params) === bare(method, params));
     if (!a) return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -1, message: `no recorded answer for ${method} on ${href}` } }), { status: 200 });
+    const min: number | undefined = params[1]?.minContextSlot;
+    const at = (r: any): any => (r?.context && min !== undefined ? { ...r, context: { ...r.context, slot: Math.max(r.context.slot, min) } } : r);
     if (method === "getProgramAccounts" && bad?.url === href) {
       if (bad.kind === "refuse") return reply({ error: { code: -32602, message: "Indexed requests require a personal token" } });
-      const r = structuredClone(a.json.result);
+      const r = at(structuredClone(a.json.result));
       const size = params[1].filters[0].dataSize;
-      if (bad.kind === "hide") r.value = r.value.filter((x: { pubkey: string }) => x.pubkey !== bad.address);
+      if (bad.kind === "hide" || bad.kind === "rollback") r.value = r.value.filter((x: { pubkey: string }) => x.pubkey !== bad.address);
       if (bad.kind === "fake" && size === 17 && r.value.length > 0) r.value.push({ pubkey: bad.address, account: r.value[0].account });
       return reply({ result: r });
     }
-    return reply({ result: a.json.result });
+    return reply({ result: at(a.json.result) });
   }) as typeof fetch;
 }
 
@@ -102,7 +113,7 @@ async function check(fetchFn: typeof fetch, gap?: number): Promise<{ ok: boolean
         say(reads.length > 0 && reads.every((c) => c.method === "getMultipleAccounts"), `${cluster}: ${u} read every mark and page by address only (${reads.length} getMultipleAccounts)`);
       }
       say(calls.every((c) => hosts.has(c.href)), `${cluster}: no request left the cluster's lister and two RPCs`);
-      say(true, `${cluster}: every listed mark on both RPCs with the same bytes, and the pages count every deposit and release (pool ${r.pool}; the test words hold ${r.notes.length} notes)`);
+      say(true, `${cluster}: every listed mark on both RPCs with the same bytes, each RPC's own pages count every deposit and release, and the counters run with no hole (pool ${r.pool}; the test words hold ${r.notes.length} notes)`);
     } catch (e) {
       say(false, `${cluster}: ${e instanceof Error ? e.message : String(e)}`);
     }

@@ -1,5 +1,5 @@
 {
- "note": "Recorded 2026-11-09T18:52:33.621Z (card exit-pool-notes): the live check run on devnet (lister api.devnet.solana.com; RPCs api.devnet.solana.com and solana-devnet.api.onfinality.io/public) and mainnet (lister api.mainnet-beta.solana.com; RPCs api.mainnet-beta.solana.com and solana-rpc.publicnode.com), PASS. Each bad answer is one lie planted in the good one: a listed mark whose bytes differ on one RPC (flip), a mark the lister leaves out (hide), a listed mark one RPC lacks (drop), or an address the lister makes up (fake).",
+ "note": "Recorded 2026-11-09T19:42:25.205Z (card exit-pool-notes): the live check run on devnet (lister api.devnet.solana.com; RPCs api.devnet.solana.com and solana-devnet.api.onfinality.io/public) and mainnet (lister api.mainnet-beta.solana.com; RPCs api.mainnet-beta.solana.com and solana-rpc.publicnode.com), PASS. Each bad answer is one lie planted in the good one by the tool's --bad: a listed mark whose bytes differ on one RPC (flip), a mark the lister leaves out (hide), a listed mark one RPC lacks (drop), an address the lister makes up (fake), a lister that refuses to list (refuse), or the lister leaving out the newest release while its own host serves its state page one leaf short (rollback).",
  "good": [
   {
    "url": "https://api.devnet.solana.com/",
@@ -32,7 +32,7 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 520477925,
+      "slot": 520490453,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": [
@@ -110,7 +110,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477925
+     "minContextSlot": 520490453
     }
    ],
    "status": 200,
@@ -119,7 +119,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.0",
-      "slot": 520477925
+      "slot": 520490453
      },
      "value": [
       {
@@ -184,7 +184,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477925
+     "minContextSlot": 520490453
     }
    ],
    "status": 200,
@@ -193,7 +193,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.1",
-      "slot": 520477925
+      "slot": 520490455
      },
      "value": [
       {
@@ -258,6 +258,7 @@
       "offset": 0,
       "length": 0
      },
+     "minContextSlot": 520490455,
      "filters": [
       {
        "dataSize": 17
@@ -276,7 +277,7 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 520477927,
+      "slot": 520490455,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": [
@@ -458,7 +459,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477927
+     "minContextSlot": 520490455
     }
    ],
    "status": 200,
@@ -467,7 +468,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.0",
-      "slot": 520477927
+      "slot": 520490456
      },
      "value": [
       {
@@ -604,7 +605,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477927
+     "minContextSlot": 520490455
     }
    ],
    "status": 429,
@@ -627,7 +628,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477927
+     "minContextSlot": 520490456
     }
    ],
    "status": 200,
@@ -636,7 +637,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.0",
-      "slot": 520477927
+      "slot": 520490457
      },
      "value": [
       {
@@ -674,7 +675,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477927
+     "minContextSlot": 520490455
     }
    ],
    "status": 200,
@@ -683,7 +684,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.1",
-      "slot": 520477933
+      "slot": 520490461
      },
      "value": [
       {
@@ -811,7 +812,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477933
+     "minContextSlot": 520490461
     }
    ],
    "status": 429,
@@ -834,7 +835,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477933
+     "minContextSlot": 520490461
     }
    ],
    "status": 200,
@@ -843,7 +844,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.1",
-      "slot": 520477940
+      "slot": 520490468
      },
      "value": [
       {
@@ -879,7 +880,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477940
+     "minContextSlot": 520490468
     }
    ],
    "status": 200,
@@ -888,7 +889,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.0",
-      "slot": 520477941
+      "slot": 520490469
      },
      "value": [
       {
@@ -941,7 +942,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477940
+     "minContextSlot": 520490468
     }
    ],
    "status": 429,
@@ -971,7 +972,7 @@
     {
      "commitment": "finalized",
      "encoding": "base64",
-     "minContextSlot": 520477940
+     "minContextSlot": 520490468
     }
    ],
    "status": 200,
@@ -980,7 +981,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.1",
-      "slot": 520477947
+      "slot": 520490476
      },
      "value": [
       {
@@ -1029,6 +1030,7 @@
       "offset": 0,
       "length": 0
      },
+     "minContextSlot": 520490476,
      "filters": [
       {
        "dataSize": 13
@@ -1047,7 +1049,7 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 520477948,
+      "slot": 520490477,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": [
@@ -1114,180 +1116,6 @@
   },
   {
    "url": "https://api.devnet.solana.com/",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "31rsJXM9rMCP1YLvL5AovcXCBAZPcqRGaqvKGSFSdqyz",
-     "3gkUdmBw6euLytYR4M2ovMKDbc4TNLyDbvH7dDcDoKfu",
-     "7UQ1VqFgj8nBEENox2EP7xTvMxwPRH98uvVPKe98dUcW",
-     "8Q6KzXkaVY3bHg4UMmy7gMd4uzt8eqwSGGESkrNTQs9b"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477948
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.0",
-      "slot": 520477949
-     },
-     "value": [
-      {
-       "data": [
-        "gJaYAAAAAAADAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "gJaYAAAAAAACAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAAAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "8yE1AAAAAAABAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      }
-     ]
-    },
-    "id": "15"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "31rsJXM9rMCP1YLvL5AovcXCBAZPcqRGaqvKGSFSdqyz",
-     "3gkUdmBw6euLytYR4M2ovMKDbc4TNLyDbvH7dDcDoKfu",
-     "7UQ1VqFgj8nBEENox2EP7xTvMxwPRH98uvVPKe98dUcW",
-     "8Q6KzXkaVY3bHg4UMmy7gMd4uzt8eqwSGGESkrNTQs9b"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477948
-    }
-   ],
-   "status": 429,
-   "json": {
-    "jsonrpc": "2.0",
-    "error": {
-     "code": -32029,
-     "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
-    },
-    "id": "16"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "31rsJXM9rMCP1YLvL5AovcXCBAZPcqRGaqvKGSFSdqyz",
-     "3gkUdmBw6euLytYR4M2ovMKDbc4TNLyDbvH7dDcDoKfu",
-     "7UQ1VqFgj8nBEENox2EP7xTvMxwPRH98uvVPKe98dUcW",
-     "8Q6KzXkaVY3bHg4UMmy7gMd4uzt8eqwSGGESkrNTQs9b"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477948
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.1",
-      "slot": 520477955
-     },
-     "value": [
-      {
-       "data": [
-        "gJaYAAAAAAADAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "gJaYAAAAAAACAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAAAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      },
-      {
-       "data": [
-        "8yE1AAAAAAABAAAAAQ==",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 716280,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 13
-      }
-     ]
-    },
-    "id": "17"
-   }
-  },
-  {
-   "url": "https://api.devnet.solana.com/",
    "method": "getProgramAccounts",
    "params": [
     "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
@@ -1299,6 +1127,7 @@
       "offset": 0,
       "length": 0
      },
+     "minContextSlot": 520490476,
      "filters": [
       {
        "dataSize": 17
@@ -1317,7 +1146,7 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 520477955,
+      "slot": 520490477,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": [
@@ -1477,430 +1306,7 @@
       }
      ]
     },
-    "id": "18"
-   }
-  },
-  {
-   "url": "https://api.devnet.solana.com/",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "2VMiTk5BW6C8Aa4gSLtQQCsyX8EYeuNFwgRLTxkiQ9zi",
-     "2Xu1kBRUmWRwtwMMu35AcegJXubh6etNzE1zARinZw4g",
-     "3A6WS5VTneqMdVE3TbLgC9Rt58F9e377KRx8JWg3vdDA",
-     "3W4R7wdUfjWv1SkdwN18q9ZANUWEjmjpgZSmS2TEC9Cz",
-     "3mqRe3iKTU3SPRvCWetp3bpENY4hNZ7NuJxs2PU79wz7",
-     "6kzwX9zgvgwniapMhh37HNX8pStqKPs9uVE7JTpe5ixe",
-     "9G1kNpB3gu726wuH8z8UXR3Rc4nwPk9KjMFMUs4dKbrK",
-     "AVK1sjbMAGRamksNgMGpsbPE4WzPE5QMZWk4a7rRdDKR",
-     "EZ1MV8C4HPVkHViAfh9gHCZECbnZfWepMfTgse53nUzU",
-     "GJ8bbpqpxVR1VkaU5KE6dAyAvki5m3n7AtGcHMQZnbqu"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477955
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.0",
-      "slot": 520477955
-     },
-     "value": [
-      {
-       "data": [
-        "gJaYAAAAAAADAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAACAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "A4oXAAAAAAAHAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAGAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "8yE1AAAAAAAFAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAEAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAABAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gIAoAAAAAAALAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAJAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "UHc+AAAAAAAIAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      }
-     ]
-    },
-    "id": "19"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "2VMiTk5BW6C8Aa4gSLtQQCsyX8EYeuNFwgRLTxkiQ9zi",
-     "2Xu1kBRUmWRwtwMMu35AcegJXubh6etNzE1zARinZw4g",
-     "3A6WS5VTneqMdVE3TbLgC9Rt58F9e377KRx8JWg3vdDA",
-     "3W4R7wdUfjWv1SkdwN18q9ZANUWEjmjpgZSmS2TEC9Cz",
-     "3mqRe3iKTU3SPRvCWetp3bpENY4hNZ7NuJxs2PU79wz7",
-     "6kzwX9zgvgwniapMhh37HNX8pStqKPs9uVE7JTpe5ixe",
-     "9G1kNpB3gu726wuH8z8UXR3Rc4nwPk9KjMFMUs4dKbrK",
-     "AVK1sjbMAGRamksNgMGpsbPE4WzPE5QMZWk4a7rRdDKR",
-     "EZ1MV8C4HPVkHViAfh9gHCZECbnZfWepMfTgse53nUzU",
-     "GJ8bbpqpxVR1VkaU5KE6dAyAvki5m3n7AtGcHMQZnbqu"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477955
-    }
-   ],
-   "status": 429,
-   "json": {
-    "jsonrpc": "2.0",
-    "error": {
-     "code": -32029,
-     "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
-    },
-    "id": "20"
-   }
-  },
-  {
-   "url": "https://api.devnet.solana.com/",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "GxNV9jbtcK4RCsqgVRYHqirxTXb9RvHf3vygycaaKKNg"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477955
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.0",
-      "slot": 520477955
-     },
-     "value": [
-      {
-       "data": [
-        "8yE1AAAAAAAKAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      }
-     ]
-    },
-    "id": "21"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "2VMiTk5BW6C8Aa4gSLtQQCsyX8EYeuNFwgRLTxkiQ9zi",
-     "2Xu1kBRUmWRwtwMMu35AcegJXubh6etNzE1zARinZw4g",
-     "3A6WS5VTneqMdVE3TbLgC9Rt58F9e377KRx8JWg3vdDA",
-     "3W4R7wdUfjWv1SkdwN18q9ZANUWEjmjpgZSmS2TEC9Cz",
-     "3mqRe3iKTU3SPRvCWetp3bpENY4hNZ7NuJxs2PU79wz7",
-     "6kzwX9zgvgwniapMhh37HNX8pStqKPs9uVE7JTpe5ixe",
-     "9G1kNpB3gu726wuH8z8UXR3Rc4nwPk9KjMFMUs4dKbrK",
-     "AVK1sjbMAGRamksNgMGpsbPE4WzPE5QMZWk4a7rRdDKR",
-     "EZ1MV8C4HPVkHViAfh9gHCZECbnZfWepMfTgse53nUzU",
-     "GJ8bbpqpxVR1VkaU5KE6dAyAvki5m3n7AtGcHMQZnbqu"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477955
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.1",
-      "slot": 520477961
-     },
-     "value": [
-      {
-       "data": [
-        "gJaYAAAAAAADAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAACAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "A4oXAAAAAAAHAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAGAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "8yE1AAAAAAAFAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAEAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAABAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gIAoAAAAAAALAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "gJaYAAAAAAAJAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      },
-      {
-       "data": [
-        "UHc+AAAAAAAIAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      }
-     ]
-    },
-    "id": "22"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "GxNV9jbtcK4RCsqgVRYHqirxTXb9RvHf3vygycaaKKNg"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477961
-    }
-   ],
-   "status": 429,
-   "json": {
-    "jsonrpc": "2.0",
-    "error": {
-     "code": -32029,
-     "message": "Too Many Requests, Please apply an OnFinality API key or contact us to receive a higher rate limit"
-    },
-    "id": "23"
-   }
-  },
-  {
-   "url": "https://solana-devnet.api.onfinality.io/public",
-   "method": "getMultipleAccounts",
-   "params": [
-    [
-     "GxNV9jbtcK4RCsqgVRYHqirxTXb9RvHf3vygycaaKKNg"
-    ],
-    {
-     "commitment": "finalized",
-     "encoding": "base64",
-     "minContextSlot": 520477961
-    }
-   ],
-   "status": 200,
-   "json": {
-    "jsonrpc": "2.0",
-    "result": {
-     "context": {
-      "apiVersion": "4.4.1",
-      "slot": 520477967
-     },
-     "value": [
-      {
-       "data": [
-        "8yE1AAAAAAAKAAAAAAAAAAE=",
-        "base64"
-       ],
-       "executable": false,
-       "lamports": 736600,
-       "owner": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
-       "rentEpoch": 18446744073709552000,
-       "space": 17
-      }
-     ]
-    },
-    "id": "24"
+    "id": "15"
    }
   },
   {
@@ -1934,12 +1340,12 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 467424740,
+      "slot": 467438652,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": []
     },
-    "id": "25"
+    "id": "16"
    }
   },
   {
@@ -1973,12 +1379,12 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 467424740,
+      "slot": 467438653,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": []
     },
-    "id": "26"
+    "id": "17"
    }
   },
   {
@@ -2006,7 +1412,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.0",
-      "slot": 467424741
+      "slot": 467438652
      },
      "value": [
       null,
@@ -2019,7 +1425,7 @@
       null
      ]
     },
-    "id": "27"
+    "id": "18"
    }
   },
   {
@@ -2047,7 +1453,7 @@
     "result": {
      "context": {
       "apiVersion": "4.4.1",
-      "slot": 467424742
+      "slot": 467438655
      },
      "value": [
       null,
@@ -2060,7 +1466,7 @@
       null
      ]
     },
-    "id": "28"
+    "id": "19"
    }
   },
   {
@@ -2076,6 +1482,7 @@
       "offset": 0,
       "length": 0
      },
+     "minContextSlot": 467438655,
      "filters": [
       {
        "dataSize": 13
@@ -2094,12 +1501,12 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 467424743,
+      "slot": 467438656,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": []
     },
-    "id": "29"
+    "id": "20"
    }
   },
   {
@@ -2115,6 +1522,7 @@
       "offset": 0,
       "length": 0
      },
+     "minContextSlot": 467438655,
      "filters": [
       {
        "dataSize": 17
@@ -2133,12 +1541,12 @@
     "jsonrpc": "2.0",
     "result": {
      "context": {
-      "slot": 467424744,
+      "slot": 467438657,
       "apiVersion": "4.3.0-beta.2"
      },
      "value": []
     },
-    "id": "30"
+    "id": "21"
    }
   }
  ],
@@ -2155,7 +1563,7 @@
    "kind": "hide",
    "url": "https://api.devnet.solana.com/",
    "address": "2VMiTk5BW6C8Aa4gSLtQQCsyX8EYeuNFwgRLTxkiQ9zi",
-   "fails": "^FAIL devnet: .*for 10 deposits and 4 releases: the lister listed marks the pages do not count$"
+   "fails": "^FAIL devnet: restore: the lister listed 10 deposits and 4 releases \\(10 label and 14 state leaves\\), but rpc 0.s pages hold 15 state and 11 label leaves and rpc 1.s hold 15 state and 11 label leaves$"
   },
   {
    "name": "a devnet RPC lacks a listed mark",
@@ -2177,6 +1585,13 @@
    "url": "https://api.mainnet-beta.solana.com/",
    "address": null,
    "fails": "^FAIL mainnet: .*Indexed requests require a personal token"
+  },
+  {
+   "name": "the devnet lister and its own host roll the pool back past the newest release",
+   "kind": "rollback",
+   "url": "https://api.devnet.solana.com/",
+   "address": "31rsJXM9rMCP1YLvL5AovcXCBAZPcqRGaqvKGSFSdqyz",
+   "fails": "^FAIL devnet: restore: the lister listed 11 deposits and 3 releases \\(11 label and 14 state leaves\\), but rpc 0.s pages hold 14 state and 11 label leaves and rpc 1.s hold 15 state and 11 label leaves$"
   }
  ]
 }

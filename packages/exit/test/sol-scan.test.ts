@@ -61,16 +61,16 @@ test("the recorded devnet read: the lister only lists, both RPCs read every list
 test("a lister's lies stop the scan: a hidden mark, a made-up address, a moved spent mark, an empty list", async () => {
   const drop = (key: string): Edit => (m, _p, a) => (m === "getProgramAccounts" ? { ...(a as Gpa), value: (a as Gpa).value.filter((x) => x.pubkey !== key) } : a);
   // a hidden deposit or release: the pages on both RPCs count one more
-  await assert.rejects(scan({ lister: drop(listed(17)[0]!) }), /for 10 deposits and 4 releases: the lister listed marks the pages do not count/);
-  await assert.rejects(scan({ lister: drop(listed(13)[0]!) }), /for 11 deposits and 3 releases: the lister listed marks the pages do not count/);
+  await assert.rejects(scan({ lister: drop(listed(17)[0]!) }), /the lister listed 10 deposits and 4 releases \(10 label and 14 state leaves\), but rpc 0's pages hold 15 state and 11 label leaves and rpc 1's hold 15 state and 11 label leaves$/);
+  await assert.rejects(scan({ lister: drop(listed(13)[0]!) }), /the lister listed 11 deposits and 3 releases \(11 label and 14 state leaves\), but rpc 0's pages hold 15 state and 11 label leaves and rpc 1's hold 15 state and 11 label leaves$/);
   // a made-up address in a bucket, and a spent mark listed at another address in place of its own: neither RPC holds it
   const fake = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
   const add = (size: number, f: (v: { pubkey: string }[]) => { pubkey: string }[]): Edit => (m, p, a) => (m === "getProgramAccounts" && gpaSize(p) === size ? { ...(a as Gpa), value: f((a as Gpa).value) } : a);
   await assert.rejects(scan({ lister: add(17, (v) => [...v, { pubkey: fake }]) }), new RegExp(`rpc 0: listed mark ${fake} is not on it`));
   await assert.rejects(scan({ lister: add(13, (v) => v.map((x, i) => (i === 0 ? { pubkey: fake } : x))) }), /listed mark \S+ is not on it/);
   // a lister that answers every bucket empty while the pages count 11 deposits and 4 releases
-  await assert.rejects(scan({ lister: add(13, () => []) }), /for 11 deposits and 0 releases: the lister listed/);
-  await assert.rejects(scan({ lister: (m, _p, a) => (m === "getProgramAccounts" ? { ...(a as Gpa), value: [] } : a) }), /the pages hold 15 state and 11 label leaves for 0 deposits and 0 releases: the lister listed/);
+  await assert.rejects(scan({ lister: add(13, () => []) }), /the lister listed 11 deposits and 0 releases \(11 label and 11 state leaves\), but rpc 0's pages hold 15 state and 11 label leaves and rpc 1's hold 15 state and 11 label leaves$/);
+  await assert.rejects(scan({ lister: (m, _p, a) => (m === "getProgramAccounts" ? { ...(a as Gpa), value: [] } : a) }), /the lister listed 0 deposits and 0 releases \(0 label and 0 state leaves\), but rpc 0's pages hold 15 state and 11 label leaves and rpc 1's hold 15 state and 11 label leaves$/);
 });
 
 test("an RPC's lies stop the scan: a mark's other bytes on one, a short page on both", async () => {
@@ -97,17 +97,44 @@ test("an RPC's lies stop the scan: a mark's other bytes on one, a short page on 
     }
     return a;
   };
-  await assert.rejects(scan({ rpc0: cut, rpc1: cut }), /the pages hold 14 state and 11 label leaves for 11 deposits and 4 releases/);
+  await assert.rejects(scan({ rpc0: cut, rpc1: cut }), /the lister listed 11 deposits and 4 releases \(11 label and 15 state leaves\), but rpc 0's pages hold 14 state and 11 label leaves and rpc 1's hold 14 state and 11 label leaves$/);
 });
 
-test("refused before any read: an unknown cluster, RPCs not the release's, a lister of the second RPC's operator", () => {
+test("the lister's host and one RPC rolling the pool back by one release or deposit stop the scan: the other RPC's pages count it", async () => {
+  const markBytes = (key: string): Uint8Array => {
+    for (const [k, a] of F.rpcs[1].answers) {
+      const [m, p] = JSON.parse(k) as [string, unknown[]];
+      if (m !== "getMultipleAccounts") continue;
+      const i = (p[0] as string[]).indexOf(key);
+      const v = (a as Gma).value[i];
+      if (i >= 0 && v) return base64.decode(v.data[0]);
+    }
+    throw new Error(`no bytes for ${key}`);
+  };
+  const spent = listed(13).map((k) => ({ k, n: new DataView(markBytes(k).buffer).getUint32(8, true) })).sort((x, y) => x.n - y.n);
+  const pre = listed(17).map((k) => ({ k, n: Number(new DataView(markBytes(k).buffer).getBigUint64(8, true)) })).sort((x, y) => x.n - y.n);
+  // rpc 0, the lister's own host on devnet, serves its pages one entry short in `trees`; the lister leaves out `key`
+  const cut = (trees: number[]): Edit => (m, _p, a) => {
+    if (m !== "getMultipleAccounts") return a;
+    for (const acc of (a as Gma).value) {
+      if (!acc) continue;
+      const d = base64.decode(acc.data[0]);
+      if (d.length > 16 && new TextDecoder().decode(d.subarray(0, 8)) === "bfpage01" && trees.includes(d[8]!)) acc.data[0] = base64.encode(d.subarray(0, d.length - 72));
+    }
+    return a;
+  };
+  const hide = (key: string): Edit => (m, _p, a) => (m === "getProgramAccounts" ? { ...(a as Gpa), value: (a as Gpa).value.filter((x) => x.pubkey !== key) } : a);
+  for (const [name, key, trees] of [["the newest release", spent.at(-1)!.k, [0]], ["the newest deposit", pre.at(-1)!.k, [0, 1]], ["release number 0", spent[0]!.k, [0]], ["deposit nonce 4", pre[3]!.k, [0, 1]]] as const)
+    await assert.rejects(scan({ lister: hide(key), rpc0: cut([...trees]) }), /restore: the lister listed .*but rpc 0's pages hold .* and rpc 1's hold 15 state and 11 label leaves|the listed (releases' numbers|deposits' nonces) are not/, name);
+});
+
+test("refused before any read: an unknown cluster, RPCs not the release's, a lister not on https; any https lister is taken", () => {
   assert.throws(() => exitSolReads("testnet"), ExitSolRefused);
   const r = reads();
   assert.throws(() => exitSolReads("devnet", { rpcs: [r.rpcs[1], r.rpcs[0]] }), /the two RPCs on devnet are/);
   assert.throws(() => exitSolReads("mainnet", { rpcs: r.rpcs }), /the two RPCs on mainnet are/);
   const main = exitSolReads("mainnet");
-  assert.throws(() => exitSolReads("mainnet", { rpcs: main.rpcs, lister: exitSolRpc("https://solana-rpc.publicnode.com/?x=1") }), /the lister is not publicnode.com's/);
   assert.throws(() => exitSolReads("mainnet", { rpcs: main.rpcs, lister: Object.assign(async () => null, { url: "http://example.org/" }) }), /an https RPC URL/);
-  // any other operator's lister is taken (for the listing only)
-  assert.equal(exitSolReads("mainnet", { rpcs: main.rpcs, lister: exitSolRpc("https://mainnet.example-rpc.org/") }).lister.url, "https://mainnet.example-rpc.org/");
+  // any https lister is taken, the second RPC's operator's included: each RPC's own pages judge what it lists
+  for (const url of ["https://mainnet.example-rpc.org/", "https://solana-rpc.publicnode.com/?x=1"]) assert.equal(exitSolReads("mainnet", { rpcs: main.rpcs, lister: exitSolRpc(url) }).lister.url, url);
 });
