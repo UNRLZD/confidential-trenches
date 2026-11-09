@@ -27,11 +27,12 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "words-nov8-final";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const HOSTS = {
-  sign: { url: "https://confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage"), localJs: (ref) => path.join("public", new URL(ref, "http://x/").pathname) },
+  sign: { url: "https://confidential.unrealized.trade/", get local() { return signBuilt(); }, localJs: (ref) => path.join("public", new URL(ref, "http://x/").pathname) },
   app: { url: "https://ct-app.unrealized.trade/", local: path.join(ROOT, "apps/terminal/dist"), localJs: (ref) => new URL(ref, "http://x/").pathname },
 };
 

@@ -4,9 +4,8 @@
 // its own read and judge on this checkout's build, so a change that breaks one of their facts, or only reshapes the
 // code one reads, fails here, before a deploy, and not on the live host after it (host=sign run 42348279478: release-73
 // served a correct reader whose minified shape signpage-withdraw-own-spend's old regex did not know).
-//   SIGN_HOST's build is packages/signpage's index.html and public/, the files its deploy copies and serves
-//   (packages/signpage/scripts/deploy.mjs build()), which packages/signpage/scripts/build-app.test.mjs holds equal to a
-//   fresh build-app.mjs build. APP_HOST's is apps/terminal/dist, from `pnpm --filter terminal build` run first (the
+//   SIGN_HOST's build is packages/signpage's index.html and public/, built from this checkout's sources first
+//   (scripts/signpage-built.mjs, the build-app.mjs build the deploy makes; card signpage-generated-merge-free). APP_HOST's is apps/terminal/dist, from `pnpm --filter terminal build` run first (the
 //   deploy's own vite build).
 // Two ways a check runs:
 //   IN_PROCESS: the check's exported read with a fetch that answers from the build folders as the host would (a path
@@ -21,6 +20,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const SIGN = "https://confidential.unrealized.trade";
@@ -97,6 +97,7 @@ export const OUT = {
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",
+  "signpage-generated-merge-free": "what the host serves against a fresh build of this checkout, which on the build itself is the same bytes by construction (its replay judges the deploy's own build)",
   "signpage-release-at-deploy": "the newest committed release list against what the host serves (the sign deploy refuses a build that list does not name)",
   "wallet-deposit-follow": "the helper's deposit status answer",
   "pool-ready-no-flicker": "the devnet run record",
@@ -173,6 +174,7 @@ export function buildFetch({ sign, app }) {
 
 /** Runs the checks on the build folders: [{ key, host, ok, lines }], one per run. */
 export async function run({ sign = SIGN_DIR, app = APP_DIR, inProcess = IN_PROCESS, childRuns = CHILD_RUNS, root = ROOT } = {}) {
+  if (sign === SIGN_DIR) signBuilt(); // this checkout's build, made from its sources
   const f = buildFetch({ sign, app });
   const out = [];
   for (const c of inProcess) {

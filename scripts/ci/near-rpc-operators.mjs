@@ -237,7 +237,7 @@ export const SKIP = {
 // Built files whose pairs the scan judges in the sources they are built from: minifying drops comments, so the allow
 // marker a source line carries is gone from the bundle. Every host in them must still be in the map.
 export const BUNDLES = {
-  "packages/signpage/public/app.js": "the signing page's bundle, made by packages/signpage/scripts/build-app.mjs from sources this scan reads (build-app --check holds it equal to them); minifying drops the allow marker",
+  "packages/signpage/public/app.js": "the signing page's bundle, made by packages/signpage/scripts/build-app.mjs from sources this scan reads (build output, ignored and never committed, card signpage-generated-merge-free, so the scan meets it only if it is ever tracked); minifying drops the allow marker",
 };
 export const fileProblems = (text, f) => {
   const p = lineProblems(text, f);

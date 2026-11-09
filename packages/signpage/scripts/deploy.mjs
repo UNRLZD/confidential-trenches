@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Builds the signing page and deploys it to SIGN_HOST's Cloudflare Pages project, only after the gate passes it.
 //   node packages/signpage/scripts/deploy.mjs [--dry-run | --build]     exit 0 ok, 1 refused or failed, 2 usage
-// The build is the package's tracked index.html and public/ (git ls-files: what the commit holds, never a file an
-// ignore rule hides, such as public/.env.local) copied into a fresh temp folder, so nothing else in the package is
-// served, plus the prover's setup files at assets/zk/<sha256>.<ext> and their licences (scripts/build-app.mjs
+// The build is the package's tracked public/ files (git ls-files: what the commit holds, never a file an ignore rule
+// hides, such as public/.env.local or a local build) copied into a fresh temp folder, so nothing else in the package is
+// served, then index.html, app.js, prover-worker.js and prover-thread.js built there from HEAD's sources by
+// scripts/build-app.mjs --out (never committed, card signpage-generated-merge-free; the release list below pins their
+// bytes), plus the prover's setup files at assets/zk/<sha256>.<ext> and their licences (scripts/build-app.mjs
 // copyServed, card signpage-prover-host). The gate then reads the build's own _headers and runs the card's live check
 // (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
 // rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
@@ -128,16 +130,29 @@ export function untrackedSources(pkg = PKG) {
   return r.stdout.split("\0").filter(Boolean);
 }
 
+const BUILD_APP = join(dirname(fileURLToPath(import.meta.url)), "build-app.mjs");
+
 /** Copies the package's served sources (servedSources: index.html at the root, public/'s files at their paths under it)
- *  and the prover's setup files and licences (SERVED) into a fresh temp folder and returns its path. */
+ *  into a fresh temp folder, builds the page's four output files there from the package's sources when it has them
+ *  (src/main.ts: the real package; a test's copy of the served files is served as it is), and copies the prover's setup
+ *  files and licences (SERVED); returns the folder's path. A failed build removes the folder and throws. */
 export function build(pkg = PKG) {
   const out = mkdtempSync(join(tmpdir(), "ct-signpage-"));
-  for (const f of servedSources(pkg)) {
-    const to = join(out, f === "index.html" ? f : f.slice("public/".length));
-    mkdirSync(dirname(to), { recursive: true });
-    copyFileSync(join(pkg, f), to);
+  try {
+    for (const f of servedSources(pkg)) {
+      const to = join(out, f === "index.html" ? f : f.slice("public/".length));
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(join(pkg, f), to);
+    }
+    if (existsSync(join(pkg, "src", "main.ts"))) {
+      const r = spawnSync(process.execPath, [BUILD_APP, "--out", out, "--pkg", pkg], { encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`build-app.mjs --out failed (exit ${r.status ?? r.signal}): ${`${r.stderr ?? ""}${r.error ?? ""}`.trim()}`);
+    }
+    copyServed(out);
+  } catch (e) {
+    rmSync(out, { recursive: true, force: true });
+    throw e;
   }
-  copyServed(out);
   return out;
 }
 

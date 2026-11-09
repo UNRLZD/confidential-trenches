@@ -9,14 +9,15 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
+import { bundle, SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
+import { SIGN_BUILD_CONFIG, SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
 import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const ZK = "a".repeat(64);
 const SIGN_HEADERS = `# a comment
 /*
@@ -477,11 +478,19 @@ test("--print --host builds and lists only the host asked; a bad argument is a u
   for (const args of [["--print", "--host", "helper"], ["--check"], ["v1"], ["--print", "x"]]) assert.equal(gen(args).status, 2, args.join(" "));
 });
 
-test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate compares a list's tree on, and each of them", () => {
+test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate compares a list's tree on, and each of them", async () => {
   const repo = dirname(dirname(PKG));
-  const reads = ["packages/signpage/index.html", "packages/signpage/public", ...SERVED.map((e) => relative(repo, e.from).split(sep).join("/"))];
+  // card signpage-generated-merge-free: the bundle is built at the deploy, so what it reads is every module it carries
+  // (outside node_modules, which the lockfile pins: SIGN_BUILD_CONFIG), the tracked public/ files, and SERVED
+  const { modules } = await bundle();
+  const rel = (abs) => relative(repo, abs.split("?")[0]).split(sep).join("/");
+  const own = modules.filter((id) => !id.startsWith("\0") && !/[\\/]node_modules[\\/]/.test(id)).map(rel);
+  assert.ok(own.some((p) => p.startsWith("packages/wallet/src/")) && own.some((p) => p.startsWith("packages/kit/src/")), own.join("\n"));
+  const reads = [...own, "packages/signpage/public/_headers", "packages/kit/src/prover/build.mjs", ...SERVED.map((e) => rel(e.from)), ...SIGN_BUILD_CONFIG];
   for (const p of reads) assert.ok(SIGN_BUILD_INPUTS.some((i) => p === i || p.startsWith(`${i}/`)), `${p} is read by the build, not in SIGN_BUILD_INPUTS`);
   for (const i of SIGN_BUILD_INPUTS) assert.ok(reads.some((p) => p === i || p.startsWith(`${i}/`)), `${i} is in SIGN_BUILD_INPUTS, read by no build step`);
+  // no build output is an input: a list's tree is compared on sources only
+  for (const o of SIGN_BUILD_OUTPUTS) assert.ok(!SIGN_BUILD_INPUTS.includes(o), o);
   // deploy.mjs build() copies exactly index.html, public/ and SERVED: its built folder holds nothing else
   const built = buildSign();
   try {

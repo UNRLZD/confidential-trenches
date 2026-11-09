@@ -10,12 +10,13 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { BRANCH, LIVE_CHECKS, PROJECT, WRANGLER, build, checkDir, checkHeadersFile, checkPins, deploy, liveRuns, servedSources } from "./deploy.mjs";
 import { makeList } from "./release-list.mjs";
+import { bundle } from "./build-app.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const REAL = readFileSync(join(PKG, "public", "_headers"), "utf8");
 const ENV = { CLOUDFLARE_API_TOKEN: "t", CLOUDFLARE_ACCOUNT_ID: "a" };
 
@@ -219,6 +220,49 @@ test("with the gate passed and no token, nothing is uploaded", async () => {
   assert.equal(uploads().length, 0);
 });
 
+// card signpage-generated-merge-free: the deploy builds index.html and app.js at HEAD from the sources, never from a
+// committed or local copy, and the newest release list still pins their bytes: a list that names another bundle (here
+// the same page with one unrelated copy change, its integrity re-pinned as build-app.mjs writes it) refuses the deploy
+test("the build's four output files are built at the deploy from the sources: a local build in the package is never copied", async () => {
+  const served = servedSources(PKG);
+  assert.deepEqual(served.filter((f) => ["index.html", "public/app.js", "public/prover-worker.js", "public/prover-thread.js"].includes(f)), []);
+  const fresh = await bundle();
+  const dir = build();
+  try {
+    assert.ok(readFileSync(join(dir, "app.js")).equals(fresh.js));
+    assert.equal(readFileSync(join(dir, "index.html"), "utf8"), fresh.html);
+    assert.ok(readFileSync(join(dir, "prover-worker.js")).equals(fresh.worker));
+    assert.ok(readFileSync(join(dir, "prover-thread.js")).equals(fresh.thread));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planted: a deploy whose fresh build of the sources the newest release list does not name is refused, nothing uploaded", async () => {
+  const other = mkdtempSync(join(tmpdir(), "ct-signpage-test-"));
+  const js = `${readFileSync(join(PKG, "public", "app.js"), "utf8")}\n/* another build */\n`;
+  cpSync(join(PKG, "public"), join(other, "public"), { recursive: true });
+  writeFileSync(join(other, "public", "app.js"), js);
+  const sri = `sha384-${createHash("sha384").update(js).digest("base64")}`;
+  writeFileSync(join(other, "index.html"), readFileSync(join(PKG, "index.html"), "utf8").replace(/integrity="[^"]+"/, `integrity="${sri}"`));
+  const stale = releasedAs(other);
+  try {
+    for (const [argv, env, code] of [[["--dry-run"], {}, 1], [[], ENV, 1]]) {
+      const rec = recorder();
+      const r = await deploy(argv, env, rec.run, undefined, signHost(rec).net, stale);
+      assert.equal(r.code, code, `${argv}: ${(r.err ?? []).join("\n")}`);
+      assert.ok(r.err.some((l) => l.includes("is not this SIGN_HOST build") && l.includes("/app.js")), `${argv}: ${r.err.join("\n")}`);
+      assert.equal(rec.uploads().length, 0, `${argv}`);
+    }
+    // and the list of this tree's own fresh build lets the same deploy through
+    const rec = recorder();
+    assert.equal((await deploy(["--dry-run"], {}, rec.run, undefined, {}, RELEASED_TREE())).code, 0);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+    rmSync(stale.dir, { recursive: true, force: true });
+  }
+});
+
 test("the upload is wrangler pages deploy at its pinned version, to the sign project on main, from an empty folder, named by HEAD", async () => {
   const rec = recorder();
   const { uploads, run } = rec;
@@ -246,7 +290,7 @@ test("an uncommitted tree or no HEAD is refused before the token: the upload is 
   assert.match(r2.err.join("\n"), /REFUSED no HEAD commit/);
   assert.equal(headless.uploads().length, 0);
   // --dry-run still builds and gates a work in progress, and exits 1 with what a deploy would refuse
-  const dry = recorder({ status: " M packages/signpage/index.html" });
+  const dry = recorder({ status: " M packages/signpage/src/main.ts" });
   const d = await deploy(["--dry-run"], {}, dry.run, undefined, {}, RELEASED_TREE());
   assert.equal(d.code, 1, (d.out ?? []).join("\n"));
   rmSync(/gate ok on (\S+?);/.exec(d.out[0])[1], { recursive: true, force: true });
