@@ -20,7 +20,7 @@
 import type { SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { ANSWER_ROOM, pickOps } from "./state.ts";
-import { decimal } from "./vault-balance.ts";
+import { poolUnits } from "./rules/pool.ts";
 
 export type Position = SignpageState["positions"][number];
 
@@ -56,7 +56,7 @@ export async function positionsPass(r: PositionsReads): Promise<Position[]> {
   const out: Position[] = [];
   for (const [mint, p] of by) {
     const decimals = await r.decimals(mint);
-    out.push({ chain: "solana", token: mint, amount: decimal(p.amount, decimals), cost: "0", wallets: p.wallets, decimals });
+    out.push({ chain: "solana", token: mint, amount: poolUnits(p.amount, decimals), cost: "0", wallets: p.wallets, decimals });
   }
   return out;
 }
