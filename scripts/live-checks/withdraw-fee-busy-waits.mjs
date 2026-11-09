@@ -45,8 +45,11 @@ const FEE_FIELDS = ["relayer_account", "fee_recipient", "relay_fee", "gp", "px",
 const BUSY = { 429: "rate_limited", 503: "upstream" };
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PIN = /src="\/app\.js" integrity="(sha384-[A-Za-z0-9+/=]+)"/;
-/** The /app.js sha384 this checkout's signing page pins: the commit's own build. */
-export const COMMIT_PIN = PIN.exec(readFileSync(path.join(ROOT, "packages/signpage/index.html"), "utf8"))?.[1];
+/** The /app.js sha384 an index.html pins, or undefined. */
+export const pinOf = (index) => PIN.exec(index)?.[1];
+/** The /app.js sha384 this checkout's signing page pins: the commit's own build. scripts/ci/bundle-checks.mjs passes the
+ *  pin of the build it serves instead (its planted copies re-pin their own app.js). */
+export const COMMIT_PIN = pinOf(readFileSync(path.join(ROOT, "packages/signpage/index.html"), "utf8"));
 
 export const asks = (pool = DEVNET_POOL) => [
   { route: "withdraw-fee", path: `/v1/withdraw/fee?token=${MAINNET_USDC}` },
@@ -132,7 +135,7 @@ export async function readSign(sign = SIGN, fetchFn = fetch, want = COMMIT_PIN) 
   };
   const index = (await get("/")).toString("utf8");
   const js = await get("/app.js");
-  return { part: "sign", sign, want, pin: PIN.exec(index)?.[1] ?? null, sha384: `sha384-${createHash("sha384").update(js).digest("base64")}` };
+  return { part: "sign", sign, want, pin: pinOf(index) ?? null, sha384: `sha384-${createHash("sha384").update(js).digest("base64")}` };
 }
 
 /** The sign part's verdict: the served index pins this commit's /app.js, and the served /app.js is that file. */
