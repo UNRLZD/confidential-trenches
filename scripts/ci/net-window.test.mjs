@@ -156,6 +156,7 @@ export const CHANGED = [
   "scripts/live-checks/signpage-pool-flow.mjs",
   "scripts/live-checks/signpage-pool-kinds.mjs",
   "scripts/live-checks/signpage-pool-mainnet.mjs",
+  "scripts/live-checks/sol-pool-venue-tables.mjs",
   "scripts/live-checks/sol-pools-mainnet-pin.mjs",
   "scripts/live-checks/signpage-pool-notes.mjs",
   "scripts/live-checks/signpage-pool-price.mjs",

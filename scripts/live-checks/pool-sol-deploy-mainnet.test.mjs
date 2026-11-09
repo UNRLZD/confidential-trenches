@@ -98,7 +98,11 @@ test("mainnet needs mainnet's genesis on its two operators", async () => {
 test("the owner's paste's own recording on mainnet passes, once its record exists", { skip: existsSync(RECORD) ? false : "no mainnet record yet: the paste writes it and its recording" }, async () => {
   assert.ok(existsSync(GOOD), "the paste recorded its live check's answers");
   const g = JSON.parse(readFileSync(GOOD, "utf8"));
-  assert.deepEqual(g.deployment, JSON.parse(readFileSync(RECORD, "utf8")));
+  // the record as the paste wrote it; its `tables` map came later (venue-table.mjs, card sol-pool-venue-tables), and its
+  // curve entry is the paste's own table and list
+  const { tables, ...pasted } = JSON.parse(readFileSync(RECORD, "utf8"));
+  assert.deepEqual(g.deployment, pasted);
+  if (tables !== undefined) assert.deepEqual({ table: tables["pump-curve"]?.table, addresses: tables["pump-curve"]?.addresses }, { table: g.deployment.table, addresses: g.deployment.table_addresses });
   assert.deepEqual(g.rpcs, MAINNET_RPCS);
   const r = await checkMainnet({ deployment: g.deployment, fetchFn: replay(g.answers), rpcs: g.rpcs, sleep: async () => {} });
   assert.equal(r.ok, true, r.lines.join("\n"));

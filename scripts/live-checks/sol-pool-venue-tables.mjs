@@ -9,20 +9,24 @@
 //     slot u64 max), authority none (frozen), and holds exactly, in order, (a) the record's `addresses` and (b) the kit's
 //     own list for the record's program_id and pool (solanaPoolVenueTableList over the venue's global account, which
 //     readSolanaPoolTableVenue reads at finalized on the same two RPCs and which must agree there).
+// Every read goes through provider-answer.mjs's rpcAnswer: a provider's no-answer (a 429, an empty or cut body, a rate
+// limit) is never judged as a wrong answer; a row with one is INCONCLUSIVE, named on its own line.
 // The bytes are decoded by the kit's solanaDecodeLookupTable (its type, size and authority-tag checks) beside the one
 // read it does not return, the authority at byte 21: a script outside Blindfill may not import the deploy script's own
 // tableProblems (check:imports, kit-public-entry-only).
 //   node scripts/live-checks/sol-pool-venue-tables.mjs [--dir <deployments folder>] [--record <file>]
-//     PASS exit 0 (every deployed row passes), FAIL exit 1, error exit 2. The last line names the counts:
+//     PASS exit 0 (every deployed row passes), FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (a row a provider did not
+//     answer, and no row failing). The last line names the counts:
 //     `live-check sol-pool-venue-tables: PASS (1 deployed, 3 not deployed yet)`.
 // --record writes every RPC answer read, with the records they were read for, to <file>.
-// Runs: after a deploy that writes a table (the owner's paste, a devnet run); no host deploy changes it. Reads only.
+// Runs: once, a contract deploy's read-back (each venue's frozen lookup table, made by venue-table.mjs on the owner's paste or a devnet run); no host deploy changes it
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as kit from "../../packages/kit/src/index.ts";
-import { account, ALT_PROGRAM, b58encode, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, recorder, rpc, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
+import { ALT_PROGRAM, b58encode, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "sol-pool-venue-tables";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +44,36 @@ const TABLE_MAX = 256;
 export function readRecord(cluster, dir = DEPLOYMENTS) {
   const file = path.join(dir, `${cluster}.json`);
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+}
+
+/** A provider that gave no answer (rpcAnswer's noAnswer): the row is not judged on it. */
+class NoAnswer extends Error {}
+/** One read through the shared module: its result; a no-answer throws NoAnswer, a JSON-RPC error throws (judged). */
+async function read(fetchFn, url, method, params) {
+  const a = await rpcAnswer(url, method, params, { fetchFn });
+  if (a.noAnswer !== undefined) throw new NoAnswer(a.noAnswer);
+  if (a.error !== undefined) throw new Error(`${new URL(url).host}: ${method} answered ${JSON.stringify(a.error).slice(0, 120)}`);
+  return a.result;
+}
+async function account(fetchFn, url, addr) {
+  const v = (await read(fetchFn, url, "getAccountInfo", [addr, { encoding: "base64", commitment: "finalized" }]))?.value;
+  return v ? { owner: v.owner, data: new Uint8Array(Buffer.from(v.data[0], "base64")) } : null;
+}
+/** A fetch that keeps every answer it reads ({ url, method, params, status, json }), for --record. */
+function recorder(fetchFn = fetch) {
+  const answers = [];
+  const wrapped = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    const r = await fetchFn(url, init);
+    const text = await r.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {}
+    answers.push({ url, method, params, status: r.status, json });
+    return new Response(text, { status: r.status });
+  };
+  return { answers, fetchFn: wrapped };
 }
 
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
@@ -72,12 +106,12 @@ function entryProblems(rec, cluster, entry) {
   return out;
 }
 
-/** One deployed row: the venue's table read on the cluster's two RPCs and judged. Returns { ok, lines }. */
-async function checkRow({ cluster, venue, rec, fetchFn, sleep }) {
+/** One deployed row: the venue's table read on the cluster's two RPCs and judged. Returns { ok, quiet, lines }. */
+async function checkRow({ cluster, venue, rec, fetchFn }) {
   const { rpcs, genesis } = CLUSTERS[cluster];
   const at = `${cluster} ${venue}`;
   const lines = [];
-  let ok = true;
+  let ok = true, quiet = false;
   const say = (pass, text) => {
     lines.push(`${pass ? "ok  " : "FAIL"} ${at}: ${text}`);
     ok &&= pass;
@@ -90,11 +124,11 @@ async function checkRow({ cluster, venue, rec, fetchFn, sleep }) {
   say(op.length === 0, `the RPCs ${rpcs.join(" and ")} are two operators of ${cluster}${op.length ? `: ${op.join("; ")}` : ""}`);
   if (op.length) return { ok, lines };
   try {
-    const call = rpcs.map((url) => Object.assign((method, params) => rpc(fetchFn, url, method, params, sleep), { url }));
+    const call = rpcs.map((url) => Object.assign((method, params) => read(fetchFn, url, method, params), { url }));
     const gs = await Promise.all(call.map((c) => c("getGenesisHash", [])));
     gs.forEach((g, i) => say(g === genesis, `genesis ${String(g).slice(0, 12)} is ${cluster}'s on ${rpcs[i]}`));
     if (gs.some((g) => g !== genesis)) return { ok, lines };
-    const reads = await Promise.all(rpcs.map((url) => account(fetchFn, url, entry.table, sleep)));
+    const reads = await Promise.all(rpcs.map((url) => account(fetchFn, url, entry.table)));
     const same = reads.every((r) => r && reads[0] && r.owner === reads[0].owner && Buffer.from(r.data).equals(Buffer.from(reads[0].data)));
     say(same, `the table ${entry.table} reads the same bytes at finalized on ${rpcs.join(" and ")}: ${same}`);
     say(reads[0]?.owner === ALT_PROGRAM, `the table is the lookup table program's: ${reads[0] ? reads[0].owner : "missing"}`);
@@ -109,18 +143,24 @@ async function checkRow({ cluster, venue, rec, fetchFn, sleep }) {
     against("the record's list", entry.addresses);
     against("the kit's list for this program and pool", own);
   } catch (e) {
-    say(false, `not read: ${String(e.message).split("\n")[0].slice(0, 200)}`);
+    // the kit's reader wraps a provider's throw in its own words: a no-answer is found by its class on the chain
+    let n = e;
+    while (n && !(n instanceof NoAnswer)) n = n.cause;
+    if (n instanceof NoAnswer || /\bno answer\b|HTTP 429/.test(String(e?.message))) {
+      quiet = true;
+      lines.push(`quiet ${at}: a provider gave no answer, not judged: ${String((n ?? e).message).split("\n")[0].slice(0, 200)}`);
+    } else say(false, `not read: ${String(e.message).split("\n")[0].slice(0, 200)}`);
   }
-  return { ok, lines };
+  return { ok, quiet, lines };
 }
 
 /**
  * The check on `records` ({ mainnet, devnet }, each a parsed deploy record or null). Rows run in order, cluster then
  * venue. Returns { ok, lines, deployed, failed, notDeployed, summary }: `summary` is the verdict line.
  */
-export async function checkTables({ records, fetchFn = fetch, sleep }) {
+export async function checkTables({ records, fetchFn = fetch }) {
   const lines = [];
-  let deployed = 0, failed = 0, notDeployed = 0;
+  let deployed = 0, failed = 0, notDeployed = 0, unanswered = 0;
   for (const cluster of Object.keys(CLUSTERS)) {
     for (const venue of VENUES) {
       const rec = records[cluster];
@@ -130,14 +170,20 @@ export async function checkTables({ records, fetchFn = fetch, sleep }) {
         continue;
       }
       deployed++;
-      const r = await checkRow({ cluster, venue, rec, fetchFn, sleep });
+      const r = await checkRow({ cluster, venue, rec, fetchFn });
       lines.push(...r.lines);
       if (!r.ok) failed++;
+      else if (r.quiet) unanswered++;
     }
   }
-  const ok = failed === 0;
-  const summary = ok ? `PASS (${deployed} deployed, ${notDeployed} not deployed yet)` : `FAIL (${failed} of ${deployed} deployed failing, ${notDeployed} not deployed yet)`;
-  return { ok, lines, deployed, failed, notDeployed, summary };
+  const verdict = verdictOf(failed > 0, unanswered > 0);
+  const ok = verdict === "PASS";
+  const summary = {
+    PASS: `PASS (${deployed} deployed, ${notDeployed} not deployed yet)`,
+    FAIL: `FAIL (${failed} of ${deployed} deployed failing, ${notDeployed} not deployed yet)`,
+    INCONCLUSIVE: `INCONCLUSIVE (${unanswered} of ${deployed} deployed not answered by both providers, ${notDeployed} not deployed yet)`,
+  }[verdict];
+  return { ok, verdict, lines, deployed, failed, unanswered, notDeployed, summary };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -151,9 +197,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ records, answers: rec.answers }) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.summary}`);
-    process.exit(r.ok ? 0 : 1);
+    process.exit(EXIT[r.verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${String(e.message).split("\n")[0]}`);
-    process.exit(2);
+    process.exit(EXIT.ERROR);
   }
 }

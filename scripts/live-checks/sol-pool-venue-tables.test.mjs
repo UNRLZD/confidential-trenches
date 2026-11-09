@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { b58decode } from "./pool-sol-deploy.mjs";
+import { RETRY } from "./provider-answer.mjs";
 import { checkTables, CLUSTERS, readRecord, VENUES } from "./sol-pool-venue-tables.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./sol-pool-venue-tables.answers.json", import.meta.url), "utf8"));
@@ -24,9 +25,10 @@ function replay(answers) {
     if (i < 0) throw new Error(`no recorded answer for ${method} ${JSON.stringify(params).slice(0, 80)} on ${url}`);
     used.add(i);
     const a = answers[i];
-    return { ok: a.status === 200, status: a.status, json: async () => a.json };
+    return new Response(a.json === null ? "" : JSON.stringify(a.json), { status: a.status });
   };
 }
+RETRY.ms = 0;
 const run = (answers = A.answers, records = REC) => checkTables({ records, fetchFn: replay(answers), sleep: async () => {} });
 const failLines = (r) => r.lines.filter((l) => l.startsWith("FAIL")).join("\n");
 
@@ -119,4 +121,19 @@ test("a missing record file is the named state; the committed mainnet record, if
   assert.equal(readRecord("devnet", "/nonexistent-folder"), null);
   const mainnet = readRecord("mainnet");
   for (const v of Object.keys(mainnet?.tables ?? {})) assert.ok(VENUES.includes(v), `${v} is not a venue the kit builds`);
+});
+
+test("a provider's no-answer (a 429, an empty body) is INCONCLUSIVE on its own line, never a FAIL and never a PASS", async () => {
+  for (const [status, json] of [[429, { jsonrpc: "2.0", id: 1, error: { code: 429, message: "Too many requests" } }], [200, null]]) {
+    // every answer of the second RPC on the table read is the no-answer, the retry included
+    const answers = structuredClone(A.answers);
+    for (const a of answers) if (a.url === SECOND && a.method === "getAccountInfo" && a.params[0] === TABLE) Object.assign(a, { status, json });
+    answers.push(...answers.filter((a) => a.url === SECOND && a.method === "getAccountInfo" && a.params[0] === TABLE).map((a) => structuredClone(a)));
+    const r = await run(answers);
+    assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+    assert.equal(r.ok, false);
+    assert.equal(failLines(r), "");
+    assert.match(r.lines.join("\n"), /^quiet mainnet pump-curve: a provider gave no answer, not judged/m);
+    assert.match(r.summary, /^INCONCLUSIVE \(1 of 1 deployed not answered by both providers, 3 not deployed yet\)$/);
+  }
 });
