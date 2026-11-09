@@ -22,6 +22,8 @@ const TESTNET_ONLY = [
   "robinhood-sepolia-rpc.publicnode.com",
   "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
   "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
+  "0x6c830ac1b22d96baf692af4dd17d822ba61c32ec", // the Base Sepolia pool's fee recipient (wallet EVM_POOLS, card evm-pool-pins)
+  "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", // the Robinhood testnet pool's fee recipient
 ];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {

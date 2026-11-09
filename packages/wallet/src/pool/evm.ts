@@ -80,6 +80,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
+import { POOL_TESTNET } from "./network.ts";
 import { TAKE_SLACK_MS, type Pool, type PoolTrees } from "./pool.ts";
 
 /** One JSON-RPC call on one EVM provider (the kit's JSON-RPC client shape, solanaJsonRpc, which speaks any JSON-RPC). */
@@ -344,8 +345,25 @@ export const EVM_TRANSFER_RPCS: Readonly<Record<EvmTestnet, readonly string[]>> 
 /** A network's pool, pinned on the device: the pool, the relayer's fee recipient every proof binds, and the pool's
  * deploy block (the sync's first block). */
 export type EvmPoolPin = { readonly network: EvmNetwork; readonly pool: string; readonly feeRecipient: string; readonly fromBlock: bigint };
-/** The pinned pools by network: pool-evm-deploy writes each one. */
-export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Object.freeze({});
+/** The pinned pools by network (card evm-pool-pins). Testnets only, in the testnet build only (./network.ts, as
+ *  SOL_POOLS keeps devnet out of SIGN_HOST's build): each pool is its chain's newest pool record, card
+ *  pool-evm-buy-pays-revert's (scripts/live-checks/pool-evm-buy-pays-revert.<chain>.json; pool-evm-deploy.md's 3 Nov
+ *  pools are older builds no helper serves), and the kit's venue pool; its deploy block is the block of that record's
+ *  PrivacyPoolSimple deploy tx, and its fee recipient the helper's withdraw sender on that chain, which GET
+ *  /v1/pool/fee names for the pool. Read 2026-11-09 21:5xZ: each receipt's block and contract the same on both of
+ *  pool-evm-deploy.mjs CHAINS' RPCs, the code the build's; live check evm-pool-pins reads all three after every deploy.
+ *  No mainnet pin until buy, sell and withdraw are proven on testnet: a pin turns on deposits into the pool
+ *  (test/evm-pool-pins.test.ts refuses one). */
+export const EVM_POOLS: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = Object.freeze(
+  POOL_TESTNET
+    ? {
+        // deploy tx 0x47fa9d64f391118425e42cec266d7bee4d8c0117dda24e5e33219b0cc366424d
+        "base-sepolia": Object.freeze({ network: "base-sepolia", pool: "0xeb967dfc1b4ffb22942f833c76866ea85fc42266", feeRecipient: "0x6c830ac1b22d96baf692af4dd17d822ba61c32ec", fromBlock: 55_524_040n }),
+        // deploy tx 0x83ab94117dc9659a95f08966be9f49e02dc313afb54e8fccf1fbd25fca82567b
+        "robinhood-testnet": Object.freeze({ network: "robinhood-testnet", pool: "0xed9fac860e6bc5e932455232eedca8b71c44da4d", feeRecipient: "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", fromBlock: 149_841_188n }),
+      }
+    : {},
+);
 
 /** A block as the sync reads it. */
 export type EvmBlock = { number: bigint; hash: string; timestamp: bigint; baseFeePerGas: bigint | null };
