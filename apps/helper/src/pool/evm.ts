@@ -911,10 +911,11 @@ export function evmPoolSender(
   // a buy's keys (card helper-evm-sender-2, review a2ff5521 H1): the same W, client and token caps as a sale (one
   // caller's unpaid gas, either route), and the withdraw sender's own budget ("buys"), as the sell sender has "all"
   const buyKeys = (w: string, client: string | undefined, token: string) => ["buys", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])];
-  // every upstream answer writes one log line (card helper-pool-fee-one-read-fails): `said`, the failed read's words, the
-  // log's alone (they name hosts), else the answer's own detail
+  // every upstream answer a provider's read or answer made writes one log line (card helper-pool-fee-one-read-fails):
+  // `said`, the failed read's words, the log's alone (they name hosts), else the answer's own detail; null for a lane's
+  // hold, which the lane logs once at its bound
   const no = (status: number, code: PoolEvmCode, detail?: string, said?: unknown): PoolEvmAnswer => {
-    if (status === 503 && code === "upstream") upstreamSaid("", said ?? detail ?? "");
+    if (status === 503 && code === "upstream" && said !== null) upstreamSaid("", said ?? detail ?? "");
     return { status, body: { error: { code, ...(detail ? { detail } : {}) } } };
   };
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
@@ -1404,7 +1405,8 @@ export function evmPoolSender(
     const nextTend = lane.heldTendAt + EVM_LANE_RETRY_S * 1000;
     const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;
     const wait = sent > 0 ? EVM_LANE_SENT_RETRY_S : Math.max(1, Math.ceil((Math.min(nextTend, mined) - now()) / 1000));
-    return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`), retryAfterS: wait };
+    // (null: the lane's hold is its own, logged once at its bound, never once per held answer)
+    return { ...no(503, "upstream", `the sender's nonce ${low[0]} is unmined past its watch`, null), retryAfterS: wait };
   }
   /** One tend of the lane, run now (on the lane's queue), to how many sends it made; a tend that fails logs once until
    *  one runs through. */
