@@ -222,6 +222,15 @@ function seen(answer: unknown, at: number): "exists" | "absent" | "unread" {
   return "unread";
 }
 
+/**
+ * Whether `account` exists at block `at` on both RPCs (view_account): exists or absent when both say so, else unread
+ * (card exit-withdraw: A's DeleteAccount pays a missing beneficiary nothing, its NEAR is burnt, so the close reads it).
+ */
+export async function exitAccountAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], account: string, at: number, sleep: (ms: number) => Promise<void> = realSleep): Promise<"exists" | "absent" | "unread"> {
+  const reads = await Promise.all(rpcs.map((r) => ask(r, { request_type: "view_account", account_id: account, block_id: at }, sleep).then((x) => seen(x, at), () => "unread" as const)));
+  return reads[0] === reads[1] ? reads[0]! : "unread";
+}
+
 /** The typed account checked for `network` on its release pair; a pair that is not the network's throws ExitRpcRefused. `sleep` is for tests only. */
 export async function exitRecipient(typed: unknown, network: NearNetwork, rpcs: readonly [VaultSyncRpc, VaultSyncRpc], sleep: (ms: number) => Promise<void> = realSleep): Promise<ExitRecipientCheck> {
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
