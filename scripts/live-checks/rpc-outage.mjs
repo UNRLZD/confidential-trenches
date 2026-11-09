@@ -31,6 +31,7 @@
 // read is counted by the cap.
 // Not a check of its own; scripts/live-checks/app-shell.test.mjs holds it.
 // Runs: once, no check of its own: the shared judgment of a down RPC (app-shell.test.mjs holds it)
+import { readFileSync } from "node:fs";
 import { BLOCK_EVERY_MS } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
@@ -68,15 +69,18 @@ export function rpcRows(network = "mainnet") {
 //     status) or without Access-Control-Allow-Origin, as a CDN's error page does, also gets "Access to fetch at '<url>'
 //     ... blocked by CORS policy: Response to preflight request doesn't pass access control check: ...", which Chrome
 //     locates at the page and names the failed address in its text. Chrome prints no status there, so "It does not have
-//     HTTP ok status" reads the same for a 403 or 404 preflight as for a 503: a 4xx the line alone cannot tell is held
-//     by the Verify checks' own 200 checks on the reads they record (app-verify-mount, verify-pools). Any other CORS
+//     HTTP ok status" reads the same for a 403 or 404 preflight as for a 503: Chrome's console, and the POST's own
+//     failure text (net::ERR_FAILED for every status), cannot tell a 4xx preflight from a 5xx one, so the Verify checks
+//     take a failed read as down only beside the preflight's own status, recorded through CDP (watchPreflights); a 4xx
+//     preflight is the RPC refusing the app's origin, no outage. Any other CORS
 //     refusal (a header, a method, a credentials rule) stays an error. Read 8 Nov in Chrome against a local server answering 503 and 429 each with and
 //     without the header: both forms, in that order, for each.
 const TAG = "(?: \\[footer read\\])?";
 const FAILED_LOAD = new RegExp(`^Failed to load resource: (?:net::ERR_(?!BLOCKED_)[A-Z0-9_]+|the server responded with a status of (?:5\\d\\d|429)(?: \\([^()]*\\))?) \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
 const FAILED_PREFLIGHT = new RegExp(`^Access to fetch at '(https?:\\/\\/[^'\\s]+)' from origin '[^'\\s]+' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: (?:It does not have HTTP ok status|No 'Access-Control-Allow-Origin' header is present on the requested resource)\\. \\((https?:\\/\\/[^\\s()]+)\\)${TAG}$`);
 // Chrome locates that line at the document that made the read, never at a script: the location's origin is the origin the
-// line says the read came from, and its path is a page's (no file extension), so an app's own console.error that prints
+// line says the read came from, and its path is a page's (not /assets/ and not a script file; a route may hold a dot,
+// /token/near/wrap.near), so an app's own console.error that prints
 // Chrome's words from /assets/index-*.js is no preflight line
 const preflightOf = (line) => {
   const m = FAILED_PREFLIGHT.exec(line);
@@ -89,7 +93,7 @@ const preflightOf = (line) => {
   } catch {
     return null;
   }
-  return at !== null && at === originOf(from ?? "") && !/\.[A-Za-z0-9]+$/.test(path) ? m[1] : null;
+  return at !== null && at === originOf(from ?? "") && !/^\/assets\//.test(path) && !/\.(?:m?js|cjs|wasm)$/.test(path) ? m[1] : null;
 };
 const FOOTER_TAGGED = / \[footer read\]$/;
 
@@ -110,25 +114,113 @@ export const releaseOrigins = () => new Set(Object.keys(VERIFY_RELEASES).flatMap
  *  4xx other than 429 is no outage. */
 export const downStatus = (status) => status === 429 || (status >= 500 && status < 600);
 
-/** One recorded read of an RPC that the RPC failed: it answered 5xx or 429, or it answered nothing and Playwright's
- *  requestfailed event says why (`failure`, the browser's error text). A read the page aborted itself (net::ERR_ABORTED)
- *  or a request that ended with no answer and no failure is no outage. */
-export const readDown = (x) => (x.status === null || x.status === undefined || x.status === 0 ? typeof x.failure === "string" && x.failure !== "" && !/ERR_ABORTED/.test(x.failure) : downStatus(x.status));
+const ABORTED = /ERR_ABORTED/;
+const BLOCKED = /ERR_BLOCKED_BY_/;
+const is4xx = (s) => s >= 400 && s < 500 && s !== 429;
 
-/** Which of the origins the console and the DOM show down (`shown`) this open's own recorded reads (`reads`: its POSTs
- *  to the RPCs) bear out: `some`, those with a read the RPC failed; `all`, those of them with no read answered 200. An
- *  origin the open never read, or read only with 200s, is neither: the failed load was another open's, or none of the
+/** A preflight the page saw (watchPreflights): `status` as the browser received it, or none with a `failure` (`cors` set
+ *  when the failure is a CORS refusal, not the network's). Unreachable: no answer and the network's own failure. */
+const unreachable = (p) => (p.status === null || p.status === undefined || p.status === 0) && typeof p.failure === "string" && p.failure !== "" && !p.cors && !ABORTED.test(p.failure) && !BLOCKED.test(p.failure);
+
+/** An RPC's preflights say it is down: one answered 5xx or 429 or was unreachable, and none answered a 4xx (a 403 or 404
+ *  is the RPC refusing the app's origin, which is no outage: Chrome prints the same lines and the POST's failure text
+ *  is the same net::ERR_FAILED for every status, so only the preflight's own status tells them apart). */
+export const preflightDown = (pre) => (pre ?? []).length > 0 && !pre.some((p) => is4xx(p.status)) && pre.some((p) => downStatus(p.status) || unreachable(p));
+
+/** One recorded read of an RPC that the RPC failed (`pre`: the preflights recorded for its origin):
+ *  - a failure text other than net::ERR_ABORTED (the page's own abort) wins over the status: a read answered 200 whose
+ *    body then failed (a reset, an HTTP/2 error) is a failed read; one the browser blocked (ERR_BLOCKED_BY_*) is not
+ *    the RPC's, as FAILED_LOAD does not take it;
+ *  - a read with no answer is down only beside a preflight that answered 5xx or 429 or was unreachable;
+ *  - otherwise it answered 5xx or 429. A 4xx other than 429 is no outage. */
+export function readDown(x, pre = []) {
+  const f = typeof x.failure === "string" ? x.failure : "";
+  if (BLOCKED.test(f)) return false;
+  const answered = !(x.status === null || x.status === undefined || x.status === 0);
+  if (f !== "" && !ABORTED.test(f)) return answered ? !is4xx(x.status) : preflightDown(pre);
+  return answered && downStatus(x.status);
+}
+
+/** A read that answered 200 and ended whole: a failure text other than the page's own abort means its body failed. */
+export const readAnswered = (x) => x.status === 200 && !(typeof x.failure === "string" && x.failure !== "" && !ABORTED.test(x.failure) && !BLOCKED.test(x.failure));
+
+/** The Verify reads one open makes of one RPC, counted from the code (read.ts and pools.ts): the NEAR RPC's one final
+ *  height read and VERIFY_READS; a Solana pool RPC's one getMultipleAccounts; an EVM pool RPC's one eth_blockNumber and
+ *  EVM_READS. More than that of an RPC in one open, from any frame, is a read storm: the 429s it draws are our own. */
+const SRC = new URL("../../apps/terminal/src/screens/verify/", import.meta.url);
+const listLen = (file, name) => {
+  const m = new RegExp(`export const ${name} = \\[([^\\]]*)\\]`).exec(readFileSync(new URL(file, SRC), "utf8"));
+  if (!m) throw new Error(`${file}: no ${name} list to count the reads of`);
+  return m[1].split(",").filter((x) => x.trim() !== "").length;
+};
+export const READS_PER_OPEN = { near: 1 + listLen("read.ts", "VERIFY_READS"), solana: 1, evm: 1 + listLen("pools.ts", "EVM_READS") };
+
+/** The most reads one open makes of this origin (READS_PER_OPEN), from the release row it feeds. */
+export function readCap(origin, network = "mainnet") {
+  const rows = rpcRows(network).get(origin) ?? [];
+  return rows.includes("code") ? READS_PER_OPEN.near : rows.includes("solana") ? READS_PER_OPEN.solana : READS_PER_OPEN.evm;
+}
+
+/** The first read of a Verify open, which picks the block and feeds no check: the NEAR final-height probe, an EVM head. */
+export const isHeightRead = (x) => x.rpcMethod === "eth_blockNumber" || /"finality":"final"/.test(x.rpcParams ?? "");
+
+/** Which of the origins the console and the DOM show down (`shown`) this open's own recorded reads bear out:
+ *  - `reads`: the open's reads of the RPCs that feed a check (not the height read); `some`: origins with one that the RPC
+ *    failed (readDown, beside the origin's `pre` preflights); `all`: those with none answered 200;
+ *  - `volume`: every read of the open from any frame, the height read included; an origin with more than `cap(origin)`
+ *    of them is a storm and neither (the 429s are our own);
+ *  - `isDown(x)`: a read of an origin in `some` that readDown takes as failed.
+ *  An origin the open never read, or read only with 200s, is neither: the failed load was another open's, or none of the
  *  page's. */
-export function confirmDown(shown, reads) {
+export function confirmDown(shown, reads, { pre = [], volume = reads, cap = () => Infinity } = {}) {
   const some = new Set();
   const all = new Set();
+  const preOf = (o) => pre.filter((p) => originOf(p.url) === o);
   for (const o of shown) {
+    if ((volume ?? []).filter((x) => originOf(x.url) === o).length > cap(o)) continue;
     const q = (reads ?? []).filter((x) => originOf(x.url) === o);
-    if (!q.some(readDown)) continue;
+    if (!q.some((x) => readDown(x, preOf(o)))) continue;
     some.add(o);
-    if (q.every((x) => x.status !== 200)) all.add(o);
+    if (q.every((x) => !readAnswered(x))) all.add(o);
   }
-  return { some, all };
+  return { some, all, isDown: (x) => some.has(originOf(x.url)) && readDown(x, preOf(originOf(x.url))) };
+}
+
+/** Records every preflight the page's frames send into `sink`, as the browser saw it, through CDP (Playwright shows
+ *  none): { url, status, failure, cors }. Attach before the page loads; a frame in another process gets its own session
+ *  as it commits. Needs Chromium. */
+export function watchPreflights(ctx, page, sink) {
+  const attach = async (target) => {
+    const c = await ctx.newCDPSession(target);
+    const mine = new Map();
+    c.on("Network.requestWillBeSent", (e) => {
+      if (e.request.method !== "OPTIONS") return;
+      const p = { url: e.request.url, status: null, failure: null, cors: false };
+      mine.set(e.requestId, p);
+      sink.push(p);
+    });
+    c.on("Network.responseReceived", (e) => {
+      const p = mine.get(e.requestId);
+      if (p) p.status = e.response.status;
+    });
+    c.on("Network.loadingFailed", (e) => {
+      const p = mine.get(e.requestId);
+      if (p) {
+        p.failure = e.errorText;
+        p.cors = !!e.corsErrorStatus;
+      }
+    });
+    await c.send("Network.enable");
+  };
+  const done = new WeakSet();
+  const once = (target) => {
+    if (done.has(target)) return;
+    attach(target).then(() => done.add(target), () => {});
+  };
+  once(page);
+  page.on("framenavigated", (f) => {
+    if (f !== page.mainFrame()) once(f);
+  });
 }
 
 /** The pairs of RPCs the release names for a network: the NEAR pair and each pool's pair, as their origins. */

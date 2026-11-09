@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { CHAINS, judge, pinsProblems, recordPins } from "./verify-pools.mjs";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 import { consoleLine } from "./console-errors.mjs";
+import { READS_PER_OPEN } from "./rpc-outage.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./verify-pools.answers.json", import.meta.url), "utf8"));
 const bad = (r) => judge(r).lines.filter((l) => l.startsWith("BAD"));
@@ -92,11 +93,13 @@ test("planted on the good answer: an amber pool row and its RPC's failed reads p
   const first = new URL(rpcs[0]).origin;
   const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
   const dom = (solana) => ({ verify: { state: "read", code: "ok", funds: "ok", pools: { solana, base: "ok", robinhood: "ok" } }, footer: null });
-  const run = ({ errors = [load(first, 503)], d = dom("warn"), checks, status = 503, failure, only = false, origin = first, row = "warn" } = {}) =>
+  const run = ({ errors = [load(first, 503)], d = dom("warn"), checks, status = 503, failure, only = false, origin = first, row = "warn", pre } = {}) =>
     bad(mutate((r) => {
       const x = r.runs[0];
       x.errors = errors;
       x.dom = d;
+      // a read that got no answer was preflighted: the preflight's own status, as the browser saw it
+      x.preflights = pre ?? (status === null ? [{ url: `${first}/`, status: 503, failure: null, cors: false }] : []);
       const s = x.pools.rows.solana;
       s.status = row;
       for (const k of Object.keys(s.checks)) s.checks[k] = checks?.[k] ?? { status: "warn", word: "Unverified" };
@@ -134,4 +137,62 @@ test("planted on the good answer: an amber pool row and its RPC's failed reads p
   assert.match(run({ errors: [load(first, 503), "Uncaught boom"] }).join("\n"), /phone \/verify: console Uncaught boom$/);
   const words = `Access to fetch at '${first}/' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`;
   assert.match(run({ errors: [consoleLine(words, "https://ct-app.unrealized.trade/assets/index-abc.js")] }).join("\n"), /console Access to fetch/);
+});
+
+test("planted on the good answer: a failed read is down only beside a 5xx, 429 or unreachable preflight; the head read is no evidence; a read storm is ours (card app-shell-rpc-outage-judge)", () => {
+  const solana = VERIFY_RELEASES.mainnet.pools.solana.rpcs;
+  const base = VERIFY_RELEASES.mainnet.pools.base.rpcs;
+  const rows = (c) => ({ state: "read", code: "ok", funds: "ok", pools: { solana: "ok", base: "ok", robinhood: "ok", [c]: "warn" } });
+  const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
+  // `which`: the chain's reads that get the status: "all", "head" (its first, eth_blockNumber) or "rest"; `amber`: its checks drawn Unverified
+  const run = ({ chain = "base", urls = base, status = 503, failure, pre, which = "all", amber, extra = 0, n = 0 } = {}) => {
+    const origin = new URL(urls[0]).origin;
+    return bad(mutate((r) => {
+      const x = r.runs[0];
+      x.errors = [status === 200 ? consoleLine(`Failed to load resource: ${failure} ()`.replace(" ()", ""), `${origin}/`) : load(origin, status ?? 503)];
+      x.dom = { verify: rows(chain), footer: null };
+      x.preflights = pre ?? (status === null ? [{ url: `${origin}/`, status: 503, failure: null, cors: false }] : []);
+      const s = x.pools.rows[chain];
+      s.status = "warn";
+      for (const k of Object.keys(s.checks)) s.checks[k] = { status: (amber ?? Object.keys(s.checks)).includes(k) ? "warn" : "ok", word: (amber ?? Object.keys(s.checks)).includes(k) ? "Unverified" : null };
+      const reads = x.requests.filter((q) => q.method === "POST" && q.url.startsWith(origin));
+      // the recorder keeps the JSON-RPC method of each read: an EVM pool's first is its head
+      reads.forEach((q, i) => (q.rpcMethod = chain === "base" ? (i === 0 ? "eth_blockNumber" : "eth_getCode") : "getMultipleAccounts"));
+      reads.forEach((q, i) => {
+        if (which === "all" || (which === "head") === (i === 0)) {
+          q.status = status;
+          if (failure) q.failure = failure;
+        }
+      });
+      x.otherReads = Array.from({ length: extra }, () => ({ url: `${origin}/`, method: "POST", status: 429, phase: "open" }));
+      x.requests.push(...Array.from({ length: n }, () => ({ url: `${origin}/`, method: "POST", status: 429, phase: "open", rpcMethod: "eth_getCode" })));
+    }));
+  };
+  const noAnswer = { status: null, failure: "net::ERR_FAILED" };
+  const pf = (url, status, extra = {}) => [{ url: `${new URL(url).origin}/`, status, failure: null, cors: false, ...extra }];
+  // the preflight's own status: 5xx, 429 or unreachable is an outage; a 403 or 404 (Pocket refusing the app's origin) is not, nor is none recorded
+  assert.deepEqual(run({ chain: "solana", urls: solana, ...noAnswer }), []);
+  assert.deepEqual(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], 429) }), []);
+  assert.deepEqual(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], null, { failure: "net::ERR_CONNECTION_REFUSED" }) }), []);
+  for (const s of [403, 404]) assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], s) }).join("\n"), /solana: row warn/, `a ${s} preflight`);
+  assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: [] }).join("\n"), /solana: row warn/, "no preflight recorded");
+  assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], null, { failure: "net::ERR_FAILED", cors: true }) }).join("\n"), /solana: row warn/, "a CORS refusal");
+  // a failure text wins over the status; a blocked read is not the RPC's
+  assert.deepEqual(run({ chain: "solana", urls: solana, status: 200, failure: "net::ERR_CONNECTION_RESET" }), [], "answered 200, then reset");
+  assert.match(run({ chain: "solana", urls: solana, status: null, failure: "net::ERR_BLOCKED_BY_CLIENT" }).join("\n"), /solana: row warn/);
+  // the head read feeds no check: (a) only it failing, with a check drawn Unverified, is not the RPC's outage; (b) it answering 200 and every check's read failing is
+  assert.match(run({ which: "head", amber: ["poolCode"] }).join("\n"), /base: row warn/, "(a) base.org head 503, the six reads 200");
+  assert.deepEqual(run({ which: "rest" }), [], "(b) head 200, the six reads 503");
+  // a storm: more reads of the RPC in one open than the page makes (7 for an EVM pool, 1 for Solana), from any frame
+  assert.deepEqual(run({ which: "rest", n: 0 }), []);
+  assert.match(run({ which: "rest", n: 1 }).join("\n"), /base: row warn/, "an eighth read from the terminal's frame");
+  assert.match(run({ which: "rest", extra: 1 }).join("\n"), /base: row warn/, "a read from another frame");
+  assert.match(run({ chain: "solana", urls: solana, extra: 1 }).join("\n"), /solana: row warn/);
+});
+
+test("a pool RPC's reads in one open are what the recorded good run made: Solana's one account read, an EVM pool's head and six reads (card app-shell-rpc-outage-judge)", () => {
+  const x = A.good.runs[0];
+  const n = (u) => x.requests.filter((q) => q.method === "POST" && q.phase === "open" && q.url.startsWith(new URL(u).origin)).length;
+  for (const u of VERIFY_RELEASES.mainnet.pools.solana.rpcs) assert.equal(n(u), READS_PER_OPEN.solana, u);
+  for (const c of ["base", "robinhood"]) for (const u of VERIFY_RELEASES.mainnet.pools[c].rpcs) assert.equal(n(u), READS_PER_OPEN.evm, u);
 });

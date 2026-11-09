@@ -427,7 +427,12 @@ test("planted: a preflight line is Chrome's own only when it is located at the p
   const kept = (line) => outages([line], rows).kept.length;
   assert.equal(kept(consoleLine(words, `${app}/verify`)), 0, "located at the page");
   assert.equal(kept(consoleLine(words, `${app}/token/solana/So11111111111111111111111111111111111111112`)), 0, "a token page");
+  assert.equal(kept(consoleLine(words, `${app}/token/near/wrap.near`)), 0, "a page route holding a dot (a NEAR token)");
+  assert.equal(kept(consoleLine(words, `${app}/token/near/usdt.tether-token.near`)), 0);
   assert.equal(kept(consoleLine(words, `${app}/assets/index-abc.js`)), 1, "located at the app's script");
+  assert.equal(kept(consoleLine(words, `${app}/assets/x`)), 1, "anything under /assets/");
+  assert.equal(kept(consoleLine(words, `${app}/prover.wasm`)), 1, "a wasm file");
+  assert.equal(kept(consoleLine(words, `${app}/chunk.cjs`)), 1, "a cjs file");
   assert.equal(kept(consoleLine(words, `${app}/assets/worker.mjs`)), 1, "located at a module");
   assert.equal(kept(consoleLine(words, "https://evil.example/verify")), 1, "located at another site");
   assert.equal(kept(words), 1, "no location at all");

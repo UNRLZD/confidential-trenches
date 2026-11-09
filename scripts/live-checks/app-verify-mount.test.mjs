@@ -27,6 +27,7 @@ import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 import { consoleLine } from "./console-errors.mjs";
 import * as check from "./app-verify-mount.mjs";
+import { READS_PER_OPEN } from "./rpc-outage.mjs";
 import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, recorded, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -358,12 +359,16 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
   const verifyDom = (code, funds) => ({ state: "read", code, funds, pools: {} });
   // `status`: every read of `origin` (a number, or null with `failure`); `only`: just the first read of it gets `status`
-  const down = (rec, { errors, dom, rows = "warn", status = 503, failure, only = false, origin = near } = {}) => {
+  // `which`: all the origin's reads, only the height read (the first, which feeds no check), or all but it
+  const down = (rec, { errors, dom, rows = "warn", status = 503, failure, only = false, origin = near, which = "all", pre } = {}) => {
     const d = desktop(rec);
     d.errors = [...d.errors, ...errors];
     d.dom = { verify: dom, footer: { conn: "on", block: "223500000", ms: 5000 } };
     for (const p of [d.panel, d.footer?.panel].filter(Boolean)) Object.assign(p, { code: rows, funds: rows, checks: Object.fromEntries(Object.keys(p.checks).map((c) => [c, rows])) });
-    const reads = d.requests.filter((x) => x.method === "POST" && x.url.startsWith(origin));
+    // a read that got no answer was preflighted: the preflight's own status, as the browser saw it
+    d.preflights = pre ?? (status === null ? [{ url: `${origin}/`, status: 503, failure: null, cors: false }] : []);
+    const isH = (x) => /"finality":"final"/.test(x.rpcParams ?? "");
+    const reads = d.requests.filter((x) => x.method === "POST" && x.url.startsWith(origin) && x.phase !== "between" && (which === "all" || (which === "height") === isH(x)));
     for (const x of only ? reads.slice(0, 1) : reads) {
       x.status = status;
       if (failure) x.failure = failure;
@@ -376,10 +381,33 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   const ok = run(good);
   assert.deepEqual(bad(ok), [], ok.lines.join("\n"));
   assert.deepEqual(bad(run({ ...good, status: 429, errors: [load(near, 429)] })), []);
-  // no answer: passes with the browser's failure text, fails with none, fails when the page aborted the read itself
-  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_FAILED" })), []);
-  assert.ok(bad(run({ ...good, status: null })).length > 0, "no answer and no failure text");
-  assert.ok(bad(run({ ...good, status: null, failure: "net::ERR_ABORTED" })).length > 0, "a read the page aborted");
+  // no answer: down only beside a preflight that answered 5xx or 429 or was unreachable; a 4xx preflight is the RPC refusing the origin
+  const noAnswer = { status: null, failure: "net::ERR_FAILED" };
+  const pf = (status, extra = {}) => [{ url: `${near}/`, status, failure: null, cors: false, ...extra }];
+  assert.deepEqual(bad(run({ ...good, ...noAnswer })), [], "preflight 503");
+  assert.deepEqual(bad(run({ ...good, ...noAnswer, pre: pf(429) })), [], "preflight 429");
+  assert.deepEqual(bad(run({ ...good, ...noAnswer, pre: pf(null, { failure: "net::ERR_CONNECTION_REFUSED" }) })), [], "preflight unreachable");
+  for (const status of [403, 404, 401]) assert.ok(bad(run({ ...good, ...noAnswer, pre: pf(status) })).length > 0, `a ${status} preflight is no outage`);
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: [...pf(503), ...pf(403)] })).length > 0, "one 4xx preflight among them");
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: pf(null, { failure: "net::ERR_FAILED", cors: true }) })).length > 0, "a CORS refusal of the preflight");
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: [] })).length > 0, "no preflight recorded");
+  assert.ok(bad(run({ ...good, status: null })).length > 0 && bad(run({ ...good, status: null, failure: "net::ERR_ABORTED" })).length > 0, "no failure text, or a read the page aborted");
+  // a failure text wins over the status: a read answered 200 whose body failed is a failed read; a blocked one is not the RPC's
+  assert.deepEqual(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET" })), [], "every read 200 then reset");
+  assert.ok(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET", only: true })).length > 0, "only the first read reset, the rest 200");
+  assert.ok(bad(run({ ...good, status: null, failure: "net::ERR_BLOCKED_BY_CLIENT" })).length > 0, "blocked by the browser");
+  // the height read feeds no check: it failing alone is no outage the panel shows (a), and the checks' reads failing after a
+  // height read that answered is (b)
+  assert.ok(bad(run({ ...good, which: "height" })).some((l) => /panel read, code warn/.test(l)), "(a) only the height read failed, every check amber");
+  assert.deepEqual(bad(run({ ...good, which: "rest" })), [], "(b) the height read answered 200, every check's read failed");
+  // a read storm (more reads of the RPC in one open than the page makes, from any frame) is our own 429, never the RPC's outage
+  const storm = (rec, n, phase = "open") => (desktop(rec).otherReads = Array.from({ length: n }, () => ({ url: `${near}/`, method: "POST", status: 429, phase })));
+  const stormed = (n) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)] });
+    storm(rec, n);
+  });
+  assert.deepEqual(bad(stormed(0)), [], "no other frame's reads");
+  assert.ok(bad(stormed(1)).length > 0, "one read too many from another frame (the cap is the page's own 8)");
   // (a) the panel and every check amber with every read of the RPC answering 200, one failed load of it in the console
   assert.ok(bad(run({ ...good, status: 200 })).some((l) => /panel read, code warn/.test(l)), "(a) a decode bug beside an unrelated failed load");
   // (b) one read of eight failed and the rest answered 200: the amber on every check is not that read's
@@ -413,4 +441,11 @@ test("planted on the mainnet answer: the footer's read cap counts the time of th
   const at = (ms) => bad(mut("goodMainnet", (rec) => Object.assign(desktop(rec), { errors: [...desktop(rec).errors, tagged, tagged], dom: { verify: { state: "read", code: "ok", funds: "ok", pools: {} }, footer: { conn: "on", block: "223500000", ms } } })));
   assert.match(at(2000).join("\n"), /2 of them in 2000 ms is more than the footer makes \(1\)/, "the clock read before the second read");
   assert.deepEqual(at(3000), [], "the clock read as the run ends: reads at 0 and 3 s");
+});
+
+test("the most reads one open makes of an RPC is counted from the code and is what the recorded good run made (card app-shell-rpc-outage-judge)", () => {
+  assert.deepEqual(READS_PER_OPEN, { near: 8, solana: 1, evm: 7 });
+  const reads = (run, u, phase) => run.requests.filter((x) => x.method === "POST" && x.phase === phase && x.url.startsWith(new URL(u).origin) && !/ct=footer/.test(x.url)).length;
+  const d = desktop(ANSWERS.goodMainnet);
+  for (const u of VERIFY_RELEASES.mainnet.rpcs) assert.equal(reads(d, u, "open"), READS_PER_OPEN.near, u);
 });
