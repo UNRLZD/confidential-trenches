@@ -2,10 +2,12 @@
 // bound, and nothing else does (scripts/ci/live-rerun.mjs, card live-inconclusive-rerun). The cases every runner must hold
 // are the gate's (scripts/ci/live-workflow.mjs RERUN_CASES); these hold the pause, the names and the process run.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { EXIT, RETRY, classify, rpcAnswer } from "../live-checks/provider-answer.mjs";
 import { INCONCLUSIVE, RERUN, noAnswerHosts, pauseMs, rerun, runCheck } from "./live-rerun.mjs";
 
@@ -72,6 +74,59 @@ test("the process run: a check that is INCONCLUSIVE once and then passes ends 0;
     const f = await rerun("fail", [], { run: (k, a) => runCheck(k, a, root), sleep: async () => assert.fail("a FAIL is never run again"), say: () => {} });
     assert.deepEqual(f, { code: 1, runs: 1, stopped: false });
     assert.equal((await runCheck("missing", [], root)).code, 1, "a check file that is not there is node's own exit 1, never run again");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// review of 9eaf059a, P3-1: a provider named by its address or host:port is named too, as provider-answer.mjs words it
+test("a provider at an IPv4 address, an IPv6 one or a bare host:port is named", () => {
+  const out = [
+    `--- solana ${classify("127.0.0.1:8899", 429, "").noAnswer}`,
+    `--- base ${classify("[::1]:8545", 200, "").noAnswer}`,
+    "--- near localhost:3030: no answer (ECONNREFUSED)",
+    "live-check k: INCONCLUSIVE (0 of 3 answered)",
+  ].join("\n");
+  assert.deepEqual(noAnswerHosts(out), ["127.0.0.1:8899", "[::1]:8545", "localhost:3030"]);
+  assert.deepEqual(noAnswerHosts("run 2 of 3: no answer (x)\nlive-rerun k: run 1 of 3 INCONCLUSIVE (no answer from: a.example.org)"), [], "the runner's own words and a bare word name no provider");
+});
+
+const RUNNER = fileURLToPath(new URL("./live-rerun.mjs", import.meta.url));
+
+// review of 9eaf059a, P2-2: a dispatch of a commit older than the runner. The runner comes from the workflow's own ref
+// (.live-runner) and runs the check of the folder it is started in, the deployed commit's.
+test("an old commit's check runs under the workflow's runner: the check is the working folder's, the runner found", () => {
+  const old = mkdtempSync(path.join(tmpdir(), "live-rerun-old-"));
+  try {
+    mkdirSync(path.join(old, "scripts/live-checks"), { recursive: true });
+    writeFileSync(path.join(old, "scripts/live-checks/old-check.mjs"), 'console.log("live-check old-check: PASS", process.argv.slice(2).join(" "));\n');
+    const log = path.join(old, "run.log");
+    const r = spawnSync(process.execPath, [RUNNER, "--log", log, "old-check", "--host", "app"], { cwd: old, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(log, "utf8"), /live-check old-check: PASS --host app/);
+    const fail = spawnSync(process.execPath, [RUNNER, "--log", log, "no-such"], { cwd: old, encoding: "utf8" });
+    assert.equal(fail.status, 2);
+    assert.match(fail.stderr + readFileSync(log, "utf8"), /no such check: no-such in /);
+  } finally {
+    rmSync(old, { recursive: true, force: true });
+  }
+});
+
+// review of 9eaf059a, P2-1 and P3-1: the runner writes the job's log itself from one combined pipe, so no pipefail or
+// tee stands between the check's exit and the job's, and a check's stdout and stderr keep their order
+test("the runner writes the log itself, the check's stdout and stderr in order, and exits with the check's code", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "live-rerun-log-"));
+  try {
+    mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+    const lines = Array.from({ length: 40 }, (_, i) => `${i % 2 ? "process.stderr" : "process.stdout"}.write("line ${i}\\n");`).join("\n");
+    writeFileSync(path.join(root, "scripts/live-checks/both.mjs"), `${lines}\nprocess.exitCode = 1;\n`);
+    const log = path.join(root, "run.log");
+    const r = spawnSync(process.execPath, [RUNNER, "--log", log, "both"], { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 1, "a FAIL is the job's exit, with no pipe after it");
+    const got = readFileSync(log, "utf8").split("\n").filter((l) => /^line \d+$/.test(l));
+    assert.deepEqual(got, Array.from({ length: 40 }, (_, i) => `line ${i}`));
+    assert.match(readFileSync(log, "utf8"), /live-rerun both: exit 1 FAIL, never run again/);
+    assert.match(r.stdout, /line 39/, "the job's console shows it too");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -1,7 +1,7 @@
 // node --test scripts/ci/live-serial.test.mjs: a serial group's checks run one after another, each once the helper's budget is
 // idle, every one whatever an earlier one ended with, none twice (scripts/ci/live-serial.mjs, card helper-live-jup-serial).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -104,4 +104,25 @@ test("a budget that is not idle before a rerun stops the group there: the member
   });
   assert.deepEqual(r, { ok: false, failed: ["a"], notRun: ["b"] });
   assert.ok(out.includes("BAD the helper's Jupiter budget was not idle in 179000 ms (36 probes) before a run 2: busy"), out.join("\n"));
+});
+
+// review of 9eaf059a, P2-2: the serial runner comes from the workflow's own ref and runs the checks of the folder it is
+// started in (the deployed commit's), writing the job's log itself
+test("an old commit's serial group runs under the workflow's runner: its checks are the root's, the log the runner's", async () => {
+  const { main } = await import("./live-serial.mjs");
+  const old = mkdtempSync(path.join(tmpdir(), "live-serial-old-"));
+  try {
+    mkdirSync(path.join(old, "scripts/live-checks"), { recursive: true });
+    writeFileSync(path.join(old, "scripts/live-checks/old-a.mjs"), 'console.log("live-check old-a: PASS");\n');
+    writeFileSync(path.join(old, "scripts/live-checks/old-b.mjs"), 'console.error("live-check old-b: FAIL"); process.exit(1);\n');
+    const log = path.join(old, "group.log");
+    assert.equal(await main(["--log", log, "old-a"], { root: old, idle: async () => IDLE }), 0);
+    assert.match(readFileSync(log, "utf8"), /live-check old-a: PASS[\s\S]*live-serial: PASS 1 checks/);
+    assert.equal(await main(["--log", log, "old-a", "old-b"], { root: old, idle: async () => IDLE }), 1);
+    assert.match(readFileSync(log, "utf8"), /live-check old-b: FAIL[\s\S]*live-serial: FAIL old-b/);
+    assert.equal(await main(["--log", log, "old-c"], { root: old, idle: async () => IDLE }), 2);
+    assert.match(readFileSync(log, "utf8"), /no such check: old-c in /);
+  } finally {
+    rmSync(old, { recursive: true, force: true });
+  }
 });

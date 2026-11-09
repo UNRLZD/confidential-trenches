@@ -11,14 +11,22 @@
 //   - exit 0 passes; exit 1 (FAIL), exit 2 (ERROR) and any other code end the job at once, never run again: a wrong
 //     answer is the deploy's, and a check that maps its own INCONCLUSIVE to 2 (hosts-main-on-top, solana-mint-supply-moves:
 //     waits measured in hours) keeps that.
-// The check's output is printed as it comes, so the job's log and summary hold every run's verdict line.
-//   node scripts/ci/live-rerun.mjs <key> [args...]      the check's own exit code, after the reruns
+// Some checks end INCONCLUSIVE for something other than a silent provider: app-discover-rows-hold (no refresh reordered
+// a list in its window), deposit-sheet-oneclick-budget (its rerun spends 1Click's budget again), the browser checks that
+// saw no event to judge. A rerun is sound for them too: it can turn exit 3 into a PASS or a FAIL that it read, never a
+// FAIL into a pass.
+// The runner is the workflow's own (live.yml checks it out at github.workflow_sha into .live-runner) and the check is the
+// deployed commit's: the check is scripts/live-checks/<key>.mjs under the folder the runner is started in, never under
+// the runner's own, so a dispatch of a commit older than the runner still runs its checks (review of 9eaf059a, P2-2).
+// The runner writes the job's log itself (--log): the check's stdout and stderr through one pipe, in the order written,
+// and its own lines, each also printed as it comes. Its exit is the check's last code, with no pipe or tee after it that
+// could change it (review of 9eaf059a, P2-1).
+//   node <runner>/scripts/ci/live-rerun.mjs --log <file> <key> [args...]      the check's own exit code, after the reruns
 import { spawn } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, openSync, realpathSync, writeSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const KEY = /^[a-z][a-z0-9-]*$/;
 
 /** The exit code that is run again (provider-answer.mjs EXIT.INCONCLUSIVE). */
@@ -34,8 +42,11 @@ export function pauseMs(n, policy = RERUN, random = Math.random) {
 }
 
 // A provider's no-answer as provider-answer.mjs names it: `<host> HTTP <status>: <why>` (classify) or
-// `<host>: no answer (<why>)` (a fetch that failed); live-rerun.test.mjs holds the two in step.
-const NO_ANSWER = /\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9](?::\d+)?)(?: HTTP \d{3}: |: no answer \()/gi;
+// `<host>: no answer (<why>)` (a fetch that failed); live-rerun.test.mjs holds the two in step. The host is URL.host's:
+// a name with a dot, an IPv4 or [IPv6] address, each with an optional port, or any name with a port (localhost:8899).
+const LABEL = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
+const HOST = `(?:(?:${LABEL}\\.)+[a-z][a-z0-9-]*[a-z0-9]|\\d{1,3}(?:\\.\\d{1,3}){3}|\\[[0-9a-f:.]+\\])(?::\\d{1,5})?|${LABEL}:\\d{1,5}`;
+const NO_ANSWER = new RegExp(`(?<![\\w.:\\[\\]-])(${HOST})(?: HTTP \\d{3}: |: no answer \\()`, "gi");
 
 /** The hosts named as not answering in a check's output, sorted, each once. */
 export function noAnswerHosts(output) {
@@ -73,24 +84,51 @@ export async function rerun(key, args, { run, sleep = (ms) => new Promise((r) =>
   }
 }
 
-/** One run of scripts/live-checks/<key>.mjs with `args`, its output printed as it comes and kept: { code, output }. */
-export function runCheck(key, args = [], root = ROOT) {
+/** Where output goes: printed as it comes, and appended to the log file when there is one. Returns { write, say, close }. */
+export function sink(logFile) {
+  const fd = logFile ? openSync(logFile, "a") : null;
+  const write = (b) => {
+    process.stdout.write(b);
+    if (fd !== null) writeSync(fd, b);
+  };
+  return { write, say: (line) => write(`${line}\n`), close: () => fd !== null && closeSync(fd) };
+}
+
+/** `--log <file>` first, then the rest: { log, rest }. */
+export function logArg(argv) {
+  return argv[0] === "--log" && argv.length >= 2 ? { log: argv[1], rest: argv.slice(2) } : { log: null, rest: argv };
+}
+
+/** Whether `key` names a check under `root`'s scripts/live-checks. */
+export const isCheck = (key, root) => KEY.test(key) && existsSync(path.join(root, "scripts/live-checks", `${key}.mjs`));
+
+/**
+ * One run of `root`'s scripts/live-checks/<key>.mjs with `args`: its stdout and stderr through one pipe (`sh -c 'exec
+ * node … 2>&1'`, the arguments passed as the shell's positional ones, never parsed), each chunk to `write` as it comes.
+ * Resolves { code, output }.
+ */
+export function runCheck(key, args = [], root = process.cwd(), write = (b) => process.stdout.write(b)) {
   return new Promise((resolve) => {
     const chunks = [];
-    const child = spawn(process.execPath, [path.join("scripts/live-checks", `${key}.mjs`), ...args], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-    child.stdout.on("data", (b) => (process.stdout.write(b), chunks.push(b)));
-    child.stderr.on("data", (b) => (process.stderr.write(b), chunks.push(b)));
+    const child = spawn("/bin/sh", ["-c", 'exec "$0" "$@" 2>&1', process.execPath, path.join("scripts/live-checks", `${key}.mjs`), ...args], { cwd: root, stdio: ["ignore", "pipe", "inherit"] });
+    child.stdout.on("data", (b) => (write(b), chunks.push(b)));
     child.on("error", (e) => resolve({ code: 2, output: `${Buffer.concat(chunks)}${e.message}` }));
     child.on("close", (code) => resolve({ code: code ?? 2, output: Buffer.concat(chunks).toString("utf8") }));
   });
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [key, ...args] = process.argv.slice(2);
-  if (!key || !KEY.test(key) || !existsSync(path.join(ROOT, "scripts/live-checks", `${key}.mjs`))) {
-    console.error(`live-rerun: ERROR: ${key ? `no such check: ${key}` : "no check named"}`);
+  const { log, rest } = logArg(process.argv.slice(2));
+  const [key, ...args] = rest;
+  const root = process.cwd();
+  const out = sink(log);
+  if (!key || !isCheck(key, root)) {
+    const line = `live-rerun: ERROR: ${key ? `no such check: ${key} in ${root}/scripts/live-checks` : "no check named"}`;
+    out.say(line);
+    out.close();
     process.exit(2);
   }
-  const r = await rerun(key, args, { run: (k, a) => runCheck(k, a) });
-  process.exit(r.code);
+  const r = await rerun(key, args, { run: (k, a) => runCheck(k, a, root, out.write), say: out.say });
+  out.close();
+  process.exitCode = r.code;
 }

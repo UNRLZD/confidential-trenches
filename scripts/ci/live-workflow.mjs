@@ -22,6 +22,13 @@
 //     check (exit 3) again after a pause, up to a bound, and never anything else (card live-inconclusive-rerun): RERUN_CASES,
 //     played on each runner with stand-in checks. A provider's 429 read once undid a good deploy; a FAIL or an ERROR read
 //     twice would let a real red through;
+//   - the two runner steps are held whole (SINGLE_STEP, SERIAL_STEP): the runner line is the step's only command and
+//     writes the log itself, so no `|| true`, `; exit 0`, tee without pipefail or line before it turns a red job green; no
+//     other line of the check job runs a check; no continue-on-error anywhere; the live job fails on a check job that
+//     did not succeed (review of 9eaf059a, P2-1);
+//   - the runners come from the workflow's own commit (RUNNER_CHECKOUT: github.workflow_sha into .live-runner, a sparse
+//     checkout of RUNNER_FILES, the runners and every file they import), the checks from the deployed one, so a dispatch
+//     of a commit older than the runners still runs (review of 9eaf059a, P2-2);
 //   - the helper's plan puts every check that reads the helper's Jupiter budget (BUDGET_READS: a Jupiter proxy path, a
 //     build, a Solana token page) in a serial group, one matrix entry, or lists it exempt with the reason: two such checks
 //     in separate jobs spend one shared window between them and a page reads chain (run 42332950254 attempt 1);
@@ -91,6 +98,59 @@ export const LIVE_GROUP = "live-${{ inputs.host || github.ref }}";
 /** The cancel-in-progress values that never cancel a dispatched run. */
 export const LIVE_CANCEL = Object.freeze(["false", "${{ github.event_name == 'pull_request' }}"]);
 
+/** The runners live.yml takes from its own commit, and every file they import (relative .mjs imports, followed). */
+export const RUNNERS = Object.freeze(["scripts/ci/live-rerun.mjs", "scripts/ci/live-serial.mjs"]);
+export function runnerFiles(root = ROOT) {
+  const seen = new Set();
+  const walk = (f) => {
+    if (seen.has(f) || !existsSync(path.join(root, f))) return;
+    seen.add(f);
+    for (const m of readFileSync(path.join(root, f), "utf8").matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+\.mjs)["']/g)) walk(path.posix.join(path.posix.dirname(f), m[1]));
+  };
+  for (const r of RUNNERS) walk(r);
+  return [...seen].sort();
+}
+export const RUNNER_FILES = Object.freeze(runnerFiles());
+
+/** The check job's checkout of the runners: this workflow's own commit, never the deployed one. */
+export const runnerCheckout = (files = RUNNER_FILES) => `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ github.workflow_sha }}
+          path: .live-runner
+          persist-credentials: false
+          sparse-checkout: |
+${files.map((f) => `            ${f}\n`).join("")}          sparse-checkout-cone-mode: false
+`;
+const RUN_HEAD = `        run: |
+          out="$RUNNER_TEMP/live"
+          mkdir -p "$out"
+          export TMPDIR="$out"
+          # shellcheck disable=SC2086
+`;
+export const RUN_LINE = 'node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS';
+export const SERIAL_LINE = 'node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP';
+/** The single-check step, whole: the runner line is its only command. */
+export const SINGLE_STEP = `      - name: \${{ matrix.name }}
+        if: matrix.group == ''
+        env:
+          KEY: \${{ matrix.key }}
+          ARGS: \${{ matrix.args }}
+          ID: \${{ matrix.id }}
+${RUN_HEAD}          ${RUN_LINE}
+`;
+/** The serial group's step, whole. */
+export const SERIAL_STEP = `      - name: \${{ matrix.name }} (in turn)
+        if: matrix.group != ''
+        env:
+          GROUP: \${{ matrix.group }}
+          ID: \${{ matrix.id }}
+${RUN_HEAD}          ${SERIAL_LINE}
+`;
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** How many times `step` stands whole in `text`, the next line a new step or job (a line indented deeper, or a blank
+ *  one, would carry the run block on). */
+const wholeCount = (text, step) => [...text.matchAll(new RegExp(`${escapeRe(step)}(?= {0,6}[^ \\n]|$)`, "g"))].length;
+
 /** The problems with live.yml's own shape. */
 export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => existsSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`))) {
   const file = ".github/workflows/live.yml";
@@ -117,10 +177,18 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   const jobText = (name) => new RegExp(`^  ${name}:\\n((?:   .*\\n|\\s*\\n|  #.*\\n)*)`, "m").exec(text)?.[0] ?? "";
   want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
-  want(/node scripts\/ci\/live-rerun\.mjs "\$KEY" \$ARGS/.test(jobText("check")), "the check job does not run the check its matrix names through scripts/ci/live-rerun.mjs (node scripts/ci/live-rerun.mjs \"$KEY\" $ARGS): an INCONCLUSIVE check read once undoes a good deploy");
-  // card helper-live-jup-serial: a serial group is one step, a single check the other, and each runs on its own `if`
-  want(/- name: [^\n]*\n {8}if: matrix\.group == ''\n {8}env:\n(?: {10}.*\n)*? {10}KEY: \$\{\{ matrix\.key \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node scripts\/ci\/live-rerun\.mjs "\$KEY"/.test(jobText("check")), "the check job's single-check step does not run `if: matrix.group == ''`, the check through scripts/ci/live-rerun.mjs");
-  want(/- name: [^\n]*\n {8}if: matrix\.group != ''\n {8}env:\n {10}GROUP: \$\{\{ matrix\.group \}\}\n(?: {10}.*\n)*? {8}run: \|\n(?: {10}.*\n)*? {10}node scripts\/ci\/live-serial\.mjs \$GROUP/.test(jobText("check")), "the check job does not run a serial group's checks with scripts/ci/live-serial.mjs on `if: matrix.group != ''`");
+  // card helper-live-jup-serial: a serial group is one step, a single check the other, and each runs on its own `if`;
+  // card live-inconclusive-rerun (review P2-1, P2-2): each held whole, through the workflow's own runner
+  const check = jobText("check");
+  want(wholeCount(check, SINGLE_STEP) === 1, `the check job's single-check step is not the one the gate holds: it must run the check its matrix names through the workflow's runner, \`${RUN_LINE}\`, as its only command, on \`if: matrix.group == ''\`, with no ||, ;, exit, pipe or line around it that turns a red job green (SINGLE_STEP in scripts/ci/live-workflow.mjs)`);
+  want(wholeCount(check, SERIAL_STEP) === 1, `the check job's serial step is not the one the gate holds: it must run a serial group's checks through the workflow's runner, \`${SERIAL_LINE}\`, as its only command, on \`if: matrix.group != ''\` (SERIAL_STEP in scripts/ci/live-workflow.mjs)`);
+  want(wholeCount(check, runnerCheckout()) === 1, `the check job's runner checkout is not the one the gate holds: actions/checkout at \${{ github.workflow_sha }} into .live-runner, sparse (cone mode off) on exactly ${RUNNER_FILES.join(", ")}, so the runners are this workflow's and a dispatch of an older commit still finds them`);
+  for (const [n, l] of uncommented(check)) {
+    if (/\bnode\b.*(?:scripts\/live-checks\/|live-rerun\.mjs|live-serial\.mjs)/.test(l) && ![RUN_LINE, SERIAL_LINE].includes(l.trim())) p.push(`${file}: the check job runs a live check outside the two runner steps (its line ${n}: ${l.trim()})`);
+  }
+  for (const [n, l] of uncommented(text)) if (/^\s*-?\s*continue-on-error:/.test(l)) p.push(`${file}:${n}: continue-on-error: a job or step that may fail and still read as success (the live job reads needs.check.result)`);
+  const verdict = jobText("live");
+  want(/^ {10}CHECKS: \$\{\{ needs\.check\.result \}\}$/m.test(verdict) && verdict.includes('if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi'), "the live job does not fail when a check job did not succeed (CHECKS: ${{ needs.check.result }}, and exit 1 unless it is success)");
   want(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.test(jobText("check")) && (([, g, o]) => Number(g) > Number(o))(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.exec(jobText("check"))), "a serial group's job has no longer limit than a single check's (timeout-minutes: ${{ matrix.group != '' && <longer> || <shorter> }})");
   want(/KEY: \$\{\{ matrix\.key \}\}/.test(jobText("check")), "the check job's key is not the matrix's");
   const grep = /grep -E '([^']+)' "\$log"/.exec(jobText("check"))?.[1];

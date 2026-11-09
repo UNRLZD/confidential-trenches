@@ -10,19 +10,18 @@
 //     something other than this run is spending the budget, and a check started now would read that.
 // Each member's output is printed as it comes, under a `=== <key>` line, so the job's log and summary hold each check's own
 // verdict line. The group ends with one line: `live-serial: PASS <n> checks` or `live-serial: FAIL <keys>`.
-//   node scripts/ci/live-serial.mjs <key> <key> ...      exit 0 when every member passed, else 1
-import { existsSync, realpathSync } from "node:fs";
-import path from "node:path";
+// As live-rerun.mjs: the runner is the workflow's own (.live-runner), the checks are those under the folder it is started
+// in (the deployed commit's), and it writes the job's log itself (--log), its exit with no pipe after it.
+//   node <runner>/scripts/ci/live-serial.mjs --log <file> <key> <key> ...      exit 0 when every member passed, 1 when
+//   one did not, 2 on an error
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { waitIdle } from "./jup-idle.mjs";
-import { RERUN, rerun, runCheck as runOnce } from "./live-rerun.mjs";
+import { RERUN, isCheck, logArg, rerun, runCheck as runOnce, sink } from "./live-rerun.mjs";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const KEY = /^[a-z][a-z0-9-]*$/;
-
-/** One run of a check, as the job runs a single one (`node scripts/live-checks/<key>.mjs`): { code, output }. */
-export function runCheck(key, root = ROOT) {
-  return runOnce(key, [], root);
+/** One run of a check under `root`, as the job runs a single one: { code, output }. */
+export function runCheck(key, root = process.cwd(), write) {
+  return runOnce(key, [], root, write);
 }
 
 /**
@@ -60,18 +59,27 @@ export async function serial(keys, { idle, run, say = console.log, sleep, random
   return { ok: failed.length === 0, failed, notRun };
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const keys = process.argv.slice(2);
-  const bad = keys.filter((k) => !KEY.test(k) || !existsSync(path.join(ROOT, "scripts/live-checks", `${k}.mjs`)));
-  if (keys.length === 0 || bad.length > 0) {
-    console.error(`live-serial: ERROR: ${keys.length === 0 ? "no check named" : `no such check: ${bad.join(", ")}`}`);
-    process.exit(2);
-  }
+/** The command line: `--log <file>` and the keys, the checks under `root`. Resolves the exit code. `idle` stands in for
+ *  the helper's budget read in the tests. */
+export async function main(argv, { root = process.cwd(), idle } = {}) {
+  const { log, rest: keys } = logArg(argv);
+  const out = sink(log);
   try {
-    const r = await serial(keys, { idle: () => waitIdle({ log: (l) => console.log(l) }), run: (k) => runCheck(k) });
-    process.exit(r.ok ? 0 : 1);
+    const bad = keys.filter((k) => !isCheck(k, root));
+    if (keys.length === 0 || bad.length > 0) {
+      out.say(`live-serial: ERROR: ${keys.length === 0 ? "no check named" : `no such check: ${bad.join(", ")} in ${root}/scripts/live-checks`}`);
+      return 2;
+    }
+    const r = await serial(keys, { idle: idle ?? (() => waitIdle({ log: out.say })), run: (k) => runCheck(k, root, out.write), say: out.say });
+    return r.ok ? 0 : 1;
   } catch (e) {
-    console.error(`live-serial: ERROR: ${e.message}`);
-    process.exit(2);
+    out.say(`live-serial: ERROR: ${e.message}`);
+    return 2;
+  } finally {
+    out.close();
   }
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = await main(process.argv.slice(2));
 }
