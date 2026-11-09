@@ -82,7 +82,7 @@ test("the token page holds one trade state and both widths draw it: a buy starte
   // the box is its state (useTrade, one quote and one follow of the kit per state) and its view (TradeView)
   const box = src("screens/trade/TradeBox.tsx");
   assert.match(box, /export function useTrade\(at: TradeAt \| null/);
-  assert.match(box, /export function TradeView\(\{ t, symbol, footer, toast = true, decimals = null \}/);
+  assert.match(box, /export function TradeView\(\{ t, symbol, footer, toast = true \}/);
   assert.match(box, /const t = useTrade\(\{ chain, token, slippageBps \}, initialAmount\);\s*return <TradeView t=\{t\}/);
   // the view subscribes to nothing: every kit call and timer is the state's, so two views never quote or follow twice
   const view = box.slice(box.indexOf("export function TradeView("));

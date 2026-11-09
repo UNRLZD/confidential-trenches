@@ -28,7 +28,9 @@ function price(costCents: bigint, amount: string): string {
 
 const tone = (c: bigint | null) => (c === null ? undefined : String(c >= 0n));
 
-export function PositionPanel({ row, s, now, onShare, decimals = null }: { row: Row; s: Sell; now: number; onShare?: () => void; decimals?: number | null }) {
+export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now: number; onShare?: () => void }) {
+  // the row's decimals, the signing page's, never the helper's (card app-sell-mount re-check 2)
+  const decimals = row.decimals;
   const running = busy(s.phase);
   const noRoute = row.mark === "noRoute";
   const total = row.pnl === null ? null : row.pnl + row.realized;

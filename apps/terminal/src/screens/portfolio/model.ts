@@ -160,6 +160,9 @@ export interface Row {
   symbol: string;
   name: string;
   units: string;
+  /** The token's own decimals as the signing page's state names them (positions[].decimals, kit 1.8; card
+   *  signpage-state-holdings); null from a page that names none. Never the helper's: a sell is sized from it. */
+  decimals: number | null;
   cost: bigint;
   /** Null: no price (S10.4). */
   value: bigint | null;
@@ -221,6 +224,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     symbol: m?.symbol ?? p.token.slice(0, 6),
     name: m?.name ?? "",
     units: p.amount,
+    decimals: p.decimals ?? null,
     cost,
     value,
     pnl,

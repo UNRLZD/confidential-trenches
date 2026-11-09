@@ -5,6 +5,7 @@ import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
 import { baseUnits, sellLocked } from "./model.ts";
+import type { Tapped } from "./model.ts";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
@@ -60,9 +61,9 @@ export interface Sell {
   sell(amount: string | null, bps: number, decimals?: number | null): void;
 }
 
-/** The units of the row each sell was tapped on, by its request id, kept for the page: a box mounted again reads them
- *  (sellLocked's P3-1 exit). A page's sells are few and the ids small; a reload starts it empty. */
-const TAPPED = new Map<string, string>();
+/** The holding each sell was tapped on (chain, token, units), by its request id, kept for the page: a box mounted again
+ *  reads them (sellLocked). A refused sell leaves it; a reload starts it empty. */
+const TAPPED = new Map<string, Tapped>();
 let refusedHere = 0;
 
 /** `units` is the row's units now (null with no row): the sell's lock reads it (model.ts sellLocked). */
@@ -91,7 +92,12 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     return () => clearInterval(t);
   }, [phase.k]);
 
-  const locked = sellLocked(phase, src.snapshot, units, TAPPED);
+  // a tapped sell the record has shown once is the record's from then on (sellLocked)
+  for (const o of src.snapshot.state?.ops ?? []) {
+    const t = TAPPED.get(o.id);
+    if (t && !t.seen) TAPPED.set(o.id, { ...t, seen: true });
+  }
+  const locked = sellLocked(phase, src.snapshot, { chain, token, units }, TAPPED);
   const ready = moneyOn && kit.request !== null && !locked;
   return {
     phase,
@@ -116,12 +122,14 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
         return;
       }
       const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount: base!, slippage_bps: slippageBps });
-      if (units !== null) TAPPED.set(h.id, units);
+      TAPPED.set(h.id, { chain, token, units });
       const next = tap(ref.current, h.id, src.now());
       ref.current = next;
       setPhase(next);
       setBps(b);
       void h.outcome.then((o) => {
+        // a refusal sold nothing: its holding is not held for it (a client timeout says nothing yet, so it stays)
+        if (!o.ok && o.error.code !== "client_timeout") TAPPED.delete(h.id);
         const at = src.now();
         setPhase((p) => outcome(p, h.id, o, at));
       });

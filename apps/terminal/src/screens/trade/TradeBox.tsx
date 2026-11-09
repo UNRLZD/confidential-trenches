@@ -270,13 +270,12 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 }
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
-/** `decimals` is the token's own (the token read's): the sell side floors a percent at its base unit. */
-export function TradeView({ t, symbol, footer, toast = true, decimals = null }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean; decimals?: number | null }) {
+export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
   const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
-  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} decimals={decimals} />;
+  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   const pending = shown === null && last !== null;

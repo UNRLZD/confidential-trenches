@@ -20,7 +20,7 @@ import { SolanaRpcTransportError, solanaSameProvider, solanaPacedRpc, type Solan
 import type { Stage } from "../../kit/src/signpage/messages.ts";
 import { RELEASE_HELPER } from "../../wallet/src/withdraw/relay.ts";
 import { readFileSync } from "node:fs";
-import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, tradeKind } from "../src/trade.ts";
+import { SOLANA_PROVIDER_A, TRADE_HELPER, TRADE_PICK_LOCK, tradeLock, buyLegs, refusalCode, releaseTradeDeps, sellSplit, settleTradeOps, tradeKind } from "../src/trade.ts";
 
 // the skeleton check's pinned policy (an .mjs with no types: imported by a plain string)
 const SKELETON: string = "../../../scripts/live-checks/signpage-skeleton.mjs";
@@ -904,4 +904,52 @@ test("card pool-answer-unknown (review): the watch is no new provider to the kit
   assert.equal(solanaSameProvider(seen[0]!, seen[1]!), true, "one provider given twice is one to the kit");
   await page(store({ [armKey("sol", L, 0)]: rec(0, 1_000n) }), { final: "filled", onDeps: (d) => (seen = d.providers) }, [one, other]).ask(buy("10"));
   assert.equal(solanaSameProvider(seen[0]!, seen[1]!), false);
+});
+
+test("a sell whose end write is lost keeps its wallet's mark, and the next load's settle writes its end from the mark's tx (card app-sell-mount re-check 2, P2-1)", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  let opsPuts = 0;
+  // the op's pending, signed and sent writes land; every write from the fill on fails, each try again included
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) }, { failPut: (_n, st) => st === "ops" && ++opsPuts > 3 });
+  const held = { [W[0]!.address]: 3_000n };
+  const p = page(s, { final: "filled" }, [provider(held), provider(held)]);
+  const a = await p.ask(sell("3000"));
+  await p.idle();
+  assert.equal((s.m.ops!.get(a.id) as { stage: string }).stage, "sent", "the fill's write was lost");
+  assert.equal(mark(s, 0)?.op, a.id, "the wallet's mark stays while the op's end is not written");
+  p.die(); // the page reloads
+  opsPuts = -1_000_000; // the store writes again
+  await settleTradeOps(s, navigator.locks, [sigStatus("ok"), sigStatus("ok")]);
+  assert.equal((s.m.ops!.get(a.id) as { stage: string }).stage, "filled", "the reloaded page settled the sell from its tx");
+  assert.equal(mark(s, 0), undefined, "and its mark went once the end landed");
+  // a tx still unknown on a provider keeps the op open and the mark on
+  const t = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) }, { failPut: (_n, st) => st === "ops" && ++opsPuts > 3 });
+  opsPuts = 0;
+  const q = page(t, { final: "filled" }, [provider(held), provider(held)]);
+  const b = await q.ask(sell("3000"));
+  await q.idle();
+  q.die();
+  opsPuts = -1_000_000;
+  await settleTradeOps(t, navigator.locks, [sigStatus(null), sigStatus("ok")]);
+  assert.equal((t.m.ops!.get(b.id) as { stage: string }).stage, "sent");
+  assert.equal(mark(t, 0)?.op, b.id);
+});
+
+test("the next load's settle refuses an open trade op that sent nothing, and leaves one whose page still runs it (P2-1)", async () => {
+  const s = store();
+  const op = (stage: string) => ({ kind: "sell", sha: "x", stage, txs: [], created_ms: 1 });
+  s.m.ops!.set("dead-pending", op("pending"));
+  s.m.ops!.set("dead-signed", op("signed"));
+  s.m.ops!.set("live", op("pending"));
+  s.m.ops!.set("ended", op("filled"));
+  let free!: () => void;
+  const held = new Promise<void>((r) => (free = r));
+  const taken = new Promise<void>((r) => void navigator.locks.request(tradeLock("live"), () => (r(), held)));
+  await taken;
+  await settleTradeOps(s, navigator.locks, [noRpc, noRpc]);
+  free();
+  assert.deepEqual(s.m.ops!.get("dead-pending"), { ...op("pending"), stage: "refused", code: "failed" });
+  assert.deepEqual(s.m.ops!.get("dead-signed"), { ...op("signed"), stage: "refused", code: "failed" });
+  assert.deepEqual(s.m.ops!.get("live"), op("pending"), "a page still running it");
+  assert.deepEqual(s.m.ops!.get("ended"), op("filled"));
 });

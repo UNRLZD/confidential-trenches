@@ -18,7 +18,7 @@ const src = (p: string) => readFileSync(new URL(`../src/${p}`, import.meta.url),
 const MINT = "So1aNaMint1111111111111111111111111111111pump";
 const EVM = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01";
 const row = (chain: Row["chain"], token: string, units: string): Row => ({
-  key: `${chain}:${token}`, chain, token, symbol: "SYM", name: "Sym", units, cost: 100n, value: null, pnl: null, pnlBps: null,
+  key: `${chain}:${token}`, chain, token, symbol: "SYM", name: "Sym", units, decimals: null, cost: 100n, value: null, pnl: null, pnlBps: null,
   bought: 0n, sold: 0n, realized: 0n, mark: null, exit: null, wallets: 1, addresses: [], openedAt: null, selling: null,
 });
 
@@ -89,15 +89,15 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
   assert.match(sellBtn, /onClick=\{\(\) => t\.setSide\("sell"\)\}/, "Sell does not move the box to the sell side");
   // mounted: TradeBox imports SellBox and draws it for the sell side, with the box's footer
   assert.match(box, /^import \{ SellBox \} from "\.\.\/positions\/SellBox\.tsx";$/m, "SellBox is imported by no screen");
-  assert.match(box, /if \(t\.onSell\) return <SellBox row=\{\{ \.\.\.t\.held!, symbol \}\} s=\{t\.sell\} slippageBps=\{slippageBps\} onBuy=\{\(\) => t\.setSide\("buy"\)\} footer=\{footer\} decimals=\{decimals\} \/>;/);
+  assert.match(box, /if \(t\.onSell\) return <SellBox row=\{\{ \.\.\.t\.held!, symbol \}\} s=\{t\.sell\} slippageBps=\{slippageBps\} onBuy=\{\(\) => t\.setSide\("buy"\)\} footer=\{footer\} \/>;/);
   // the position is Portfolio's Row for this chain and token, signed in only; the sell is useSell's, one per trade state
   assert.match(box, /const heldNow = useHeld\(signedOut \? null : snapshot, chain, token\);/);
   assert.match(box, /const sell = useSell\(chain, heldNow\?\.token \?\? token, slippageBps, heldNow\?\.units \?\? null\);/);
   // while the sell's lock holds (useSell), the box keeps the row it was tapped on, display only; no position, no box
   assert.doesNotMatch(box, /markEnd|endMark/, "the lock still keys on the state object's identity (re-check P2)");
   assert.match(box, /const held = heldNow \?\? \(busy\(sell\.phase\) \|\| sell\.locked \? lastHeld\.current : null\);/);
-  // the token page passes the token's own decimals to the sell side (review P1)
-  assert.match(src("screens/token/TokenPage.tsx"), /<TradeView t=\{t\} symbol=\{row\.symbol\} toast=\{toast\} decimals=\{r\.data\.decimals\}/);
+  // the sell side reads the row's decimals, the signing page's, never the token read's (re-check 2 P2-2, sell-lock.test.ts)
+  assert.match(src("screens/token/TokenPage.tsx"), /<TradeView t=\{t\} symbol=\{row\.symbol\} toast=\{toast\} footer=/);
   // the side never moves while a buy or a sell runs
   assert.match(box, /if \(!busy\(phaseRef\.current\) && !busy\(sell\.phase\)\) setSide\(x\);/);
   // the box asks the kit only through the buy's two sites: the sell's request is useSell's

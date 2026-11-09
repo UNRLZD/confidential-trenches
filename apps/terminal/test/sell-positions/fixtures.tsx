@@ -8,7 +8,8 @@
 // at the string's scale plus 4, card app-sell-mount re-check P3; its chain has a pool, so it asks pool.sell), nodec-vault
 // (no decimals and no pool: the vault's sell takes whole base units, so the app refuses it and sends nothing, re-check 2
 // P3-3), open (a box mounted while the device's record holds a sell at sent: every sell button locked, re-check 2 P2).
-// Every position passes the token's 6 decimals to SellBox and PositionPanel, as the token page does, but the two nodec.
+// Every position names the token's 6 decimals in the signing page's state (positions[].decimals, kit 1.8), the one
+// source a sell is sized from, but the two nodec (a page of an earlier release).
 // The stub answers as the signing page does: the vault's `buy` side sell takes whole base units only (trade.ts UNITS),
 // pool.sell a fraction no longer than the token's 6 (rules/pool.ts checkPoolRequest); any other is refused not_allowed at
 // 300 ms (pool-kinds.ts). The trade states (app-trade-box-states), on up's
@@ -73,7 +74,7 @@ const STATE: SignpageState = {
   code_saved: true,
   vault_balance: "73.18",
   wallets: [],
-  positions: [{ chain: "solana", token: MINT, amount: P.amount, cost: P.cost, wallets: ["W1", "W2"] }],
+  positions: [{ chain: "solana", token: MINT, amount: P.amount, cost: P.cost, wallets: ["W1", "W2"], ...(P.decimals === null ? {} : { decimals: P.decimals }) }],
   orders: [],
   held: [],
   // open: the device's record holds a sell at sent that this mount did not start (a remount while it runs)
@@ -187,8 +188,8 @@ function Panels() {
   if (!row) return null;
   return (
     <div className="sp-fx">
-      <SellBox row={row} s={s} onBuy={() => {}} decimals={P.decimals} />
-      <PositionPanel row={row} s={s} now={NOW} onShare={() => void window.__shares++} decimals={P.decimals} />
+      <SellBox row={row} s={s} onBuy={() => {}} />
+      <PositionPanel row={row} s={s} now={NOW} onShare={() => void window.__shares++} />
     </div>
   );
 }

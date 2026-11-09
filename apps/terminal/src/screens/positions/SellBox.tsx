@@ -44,8 +44,10 @@ const Coins = () => (
 );
 
 /** `footer` draws inside the panel under the Route & fees line, as the buy side's does (the token page's safety grid). */
-/** `decimals` is the token's own (the token read's), so a percent floors at its base unit (positions/model.ts sellAmount). */
-export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer, decimals = null }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode; decimals?: number | null }) {
+/** A percent is a share of the row's own units at the row's decimals, the signing page's (positions/model.ts sellAmount),
+ *  never the helper's token read: a sell's amount is never sized on a server's word (card app-sell-mount re-check 2). */
+export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode }) {
+  const decimals = row.decimals;
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview } | null>(null);

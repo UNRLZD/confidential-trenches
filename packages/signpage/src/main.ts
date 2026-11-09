@@ -92,6 +92,7 @@ import { PAGE_NETWORK, withdrawFormDeps, withdrawSettle } from "./withdraw/hando
 import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
+import { settleTradeOps } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { poolRestore } from "./pool-restore.ts";
@@ -767,6 +768,10 @@ async function landed(l: Landing): Promise<void> {
   void settleHeld().catch(() => {});
   // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
   void restore?.settle().catch(() => {});
+  // a buy or sell a closed or reloaded page left open is settled from its wallets' marks, or refused when it sent
+  // nothing (src/trade.ts settleTradeOps): the app's Sell never waits on an op no page will end
+  // (its own paced pair: a few status reads once per sign-in)
+  if (!framed && globalThis.navigator?.locks) void open().then((s) => settleTradeOps(s, navigator.locks, releaseTradeDeps().providers)).catch(() => {});
   if (l.screen === "backup") return void showBackup(l.seed);
   show("signed-in", shown(l.seed));
 }

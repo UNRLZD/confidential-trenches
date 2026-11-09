@@ -103,26 +103,47 @@ export function pctLabel(bps: number): string {
 const OPEN: ReadonlySet<string> = new Set(["signed", "sent"]);
 const LANDED: ReadonlySet<string> = new Set(["filled", "part_filled"]);
 const SELL_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed", "refused"]);
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+
+/** The holding a sell was tapped on: its chain, token and units at the tap. */
+export interface Tapped {
+  chain: string;
+  token: string;
+  units: string | null;
+  /** state.ops has shown this sell's op (from then on, its stage there speaks for it). */
+  seen?: boolean;
+}
 
 /**
- * Every sell button is locked (card app-sell-mount, re-checks of 0ea1ef58 and 68b288e7):
- * - while the device's record (state.ops) holds a sell that is open, from any mount: a box mounted again while a sell
- *   runs finds it there, never READY (P2);
- * - while a sell tapped on this page has landed but the row still shows the units it was tapped on: the holdings read
- *   lags the op's end (P3-2);
+ * Every sell button is locked (card app-sell-mount, re-checks of 0ea1ef58, 68b288e7 and c01c07a4):
+ * - while the device's record (state.ops) holds a sell that is open (signed, sent), from any mount or tab: a box
+ *   mounted again finds it there, never READY (P2). No row move lets go of it: the signing page settles every open
+ *   sell itself (trade.ts settleTradeOps, pool-sell.ts settleSellOps), so the op is what ends the lock;
+ * - while a sell tapped on this page for this holding (`here`) is not in state.ops yet (pending, which the record never
+ *   shows) and the row is unmoved (P3-3a);
+ * - while a sell tapped on this page for this holding has landed (filled, part filled) but the row still shows the
+ *   units it was tapped on: the holdings read lags the op's end (P3-2 in this page);
  * - after this mount's sell may have sold (filled, part filled, not landed), until its op shows an end and while the
- *   snapshot is stale; an end that sold nothing (refused, not landed) lets go, as a refusal keeps its Retry.
- * A sell lets go of all three once the row's units move off the units it was tapped on (`tapped`, the request id's
- * units at the tap, kept for the page): a lost end write (signpage trade.ts) never locks for good (P3-1). `units` is the
- * row's units now, null with no row (a 100% sell's row is gone).
+ *   snapshot is stale, unless the row moved off the tapped units; an end that sold nothing (refused, not landed) lets go.
+ * `tapped` holds the request id's holding at the tap, kept for the page; a row is compared with one only when it is the
+ * same holding (chain and token). `here.units` is null with no row (a 100% sell's row is gone).
  */
-export function sellLocked(phase: Phase, snap: Pick<SignpageClientSnapshot, "state" | "stale">, units: string | null, tapped: ReadonlyMap<string, string>): boolean {
+export function sellLocked(phase: Phase, snap: Pick<SignpageClientSnapshot, "state" | "stale">, here: { chain: string; token: string; units: string | null }, tapped: ReadonlyMap<string, Tapped>): boolean {
   const ops = snap.state?.ops ?? [];
-  const moved = (id: string) => tapped.has(id) && tapped.get(id) !== units;
+  const mine = (id: string) => {
+    const t = tapped.get(id);
+    return t !== undefined && t.chain === here.chain && t.token === here.token ? t : undefined;
+  };
+  const moved = (id: string) => {
+    const t = mine(id);
+    return t !== undefined && t.units !== here.units;
+  };
   for (const o of ops) {
-    if (o.kind !== "sell" || moved(o.id)) continue;
-    if (OPEN.has(o.stage) || (LANDED.has(o.stage) && tapped.has(o.id))) return true;
+    if (o.kind !== "sell") continue;
+    if (OPEN.has(o.stage)) return true;
+    if (LANDED.has(o.stage) && mine(o.id) && !moved(o.id)) return true;
   }
+  for (const [id, t] of tapped) if (!t.seen && mine(id) && !moved(id) && !ops.some((o) => o.id === id)) return true;
   const sold = phase.k === "filled" || (phase.k === "ended" && phase.stage !== "refused");
   if (!sold || moved(phase.id)) return false;
   if (snap.stale) return true;
@@ -132,11 +153,11 @@ export function sellLocked(phase: Phase, snap: Pick<SignpageClientSnapshot, "sta
 
 /** A token amount (decimal string) as whole base units at the token's `decimals`, as the vault's sell takes it
  *  (packages/signpage/src/trade.ts UNITS: /^[1-9]\d{0,19}$/); null with no decimals read (not a whole 0-36), a fraction
- *  longer than the token's, zero, or past 20 digits (card app-sell-mount re-check P3-3). */
+ *  longer than the token's, zero, or past 2^64 - 1, the most a token account holds (trade.ts U64_MAX; card app-sell-mount
+ *  re-check P3-3 and its re-check). */
 export function baseUnits(amount: string, decimals: number | null): string | null {
   const u = toUnits(amount);
   if (!u || decimals === null || !Number.isInteger(decimals) || decimals < 0 || decimals > 36 || u.scale > decimals) return null;
   const n = u.n * 10n ** BigInt(decimals - u.scale);
-  const s = n.toString();
-  return n === 0n || s.length > 20 ? null : s;
+  return n === 0n || n > U64_MAX ? null : n.toString();
 }

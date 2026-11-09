@@ -57,7 +57,7 @@ const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 // Exact amounts for the fixture's 1234567.891234 units at $0.00017739 (value 21899 cents, cost $100): 50% is
-// 617283.945617 (617283945617 base units, rounded down from .5); 25% is 308641.972808; Initials is ceil(1e8 / 21899)
+// 617283.945617 (617283945617 base units, exact: 1234567891234 is even); 25% is 308641.972808 (rounded down from .5); Initials is ceil(1e8 / 21899)
 // = 4567 bps, 563827.155926.
 const HALF = vault("617283945617");
 const QUARTER = vault("308641972808");

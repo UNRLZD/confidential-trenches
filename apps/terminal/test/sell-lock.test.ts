@@ -12,60 +12,70 @@ import type { Phase } from "../src/screens/trade/model.ts";
 
 const src = (p: string) => readFileSync(new URL(`../src/${p}`, import.meta.url), "utf8");
 type Snap = Parameters<typeof sellLocked>[1];
+type Tapped = Parameters<typeof sellLocked>[3] extends ReadonlyMap<string, infer T> ? T : never;
 const op = (id: string, stage: string, kind = "sell") => ({ id, kind, stage, txs: [] });
 const at = (ops: unknown[], stale = false) => ({ state: { ops }, stale }) as unknown as Snap;
 const READY: Phase = { k: "ready" };
-const none = new Map<string, string>();
+const none = new Map<string, Tapped>();
+const MINT = "So1aNaMint1111111111111111111111111111111pump";
+const here = (units: string | null, token = MINT) => ({ chain: "solana", token, units });
+const tap = (units: string | null, token = MINT, seen = false): Tapped => ({ chain: "solana", token, units, ...(seen ? { seen } : {}) });
 
-test("P2: a remount finds an open sell on the device's record and locks every sell button", () => {
-  // a fresh mount (READY, nothing tapped here) while the device's sell is signed or sent: locked
-  for (const stage of ["signed", "sent"]) assert.equal(sellLocked(READY, at([op("s1", stage)]), "1000", none), true, stage);
-  // the same while the snapshot is a reconnect's clone
-  assert.equal(sellLocked(READY, structuredClone(at([op("s1", "sent")])), "1000", none), true);
+test("P2: a remount finds an open sell on the device's record and locks every sell button; no row move lets go of it", () => {
+  for (const stage of ["signed", "sent"]) assert.equal(sellLocked(READY, at([op("s1", stage)]), here("1000"), none), true, stage);
+  assert.equal(sellLocked(READY, structuredClone(at([op("s1", "sent")])), here("1000"), none), true);
+  // the device settles every open sell (trade.ts settleTradeOps): a moved row, this holding's or another's, never ends it
+  const tapped = new Map([["s1", tap("1000")]]);
+  for (const u of ["750", "1000.5", null]) assert.equal(sellLocked(READY, at([op("s1", "sent")]), here(u), tapped), true, String(u));
   // an open buy, or a sell at its end, locks nothing on a fresh mount
-  assert.equal(sellLocked(READY, at([op("b1", "sent", "buy")]), "1000", none), false);
-  for (const stage of ["filled", "part_filled", "refused", "not_landed"]) assert.equal(sellLocked(READY, at([op("s1", stage)]), "1000", none), false, stage);
-  assert.equal(sellLocked(READY, { state: null, stale: false } as Snap, "1000", none), false);
+  assert.equal(sellLocked(READY, at([op("b1", "sent", "buy")]), here("1000"), none), false);
+  for (const stage of ["filled", "part_filled", "refused", "not_landed"]) assert.equal(sellLocked(READY, at([op("s1", stage)]), here("1000"), none), false, stage);
+  assert.equal(sellLocked(READY, { state: null, stale: false } as Snap, here("1000"), none), false);
+});
+
+test("P3-3a: a sell tapped on this page that the record does not show yet (pending) locks its holding while the row is unmoved", () => {
+  const tapped = new Map([["s1", tap("1000")]]);
+  assert.equal(sellLocked(READY, at([]), here("1000"), tapped), true, "a remount before signed");
+  assert.equal(sellLocked(READY, at([]), here("750"), tapped), false, "the row moved");
+  assert.equal(sellLocked(READY, at([]), here("1000", "OtherMint111111111111111111111111111111pump"), tapped), false, "another holding");
+  // once the record has shown it, its stage there speaks for it (an op aged out of the list locks nothing)
+  assert.equal(sellLocked(READY, at([]), here("1000"), new Map([["s1", tap("1000", MINT, true)]])), false);
 });
 
 test("P2: after this mount's sell may have sold, locked until its op ends; never while stale; a refusal keeps Retry", () => {
-  const tapped = new Map([["s1", "1000"], ["s4", "1000"]]);
+  const tapped = new Map([["s1", tap("1000")]]);
   const filled: Phase = { k: "filled", id: "s1", at: 0, ms: 900 };
   const part: Phase = { k: "ended", id: "s1", at: 0, stage: "part_filled" };
   const notLanded: Phase = { k: "ended", id: "s1", at: 0, stage: "not_landed" };
   for (const p of [filled, part, notLanded]) {
-    assert.equal(sellLocked(p, at([op("s1", "sent")]), "1000", tapped), true, `${p.k}: sent`);
-    assert.equal(sellLocked(p, at([]), "1000", tapped), true, `${p.k}: no op yet`);
-    assert.equal(sellLocked(p, at([op("other", "refused")]), "1000", tapped), true, `${p.k}: another id`);
-    // the state that shows it refused or not landed: nothing left the row, the box takes taps again
-    for (const end of ["refused", "not_landed"]) assert.equal(sellLocked(p, at([op("s1", end)]), "1000", tapped), false, `${p.k}: ${end}`);
-    assert.equal(sellLocked(p, at([op("s1", "refused")], true), "1000", tapped), true, `${p.k}: stale`);
+    assert.equal(sellLocked(p, at([op("s1", "sent")]), here("1000"), tapped), true, `${p.k}: sent`);
+    assert.equal(sellLocked(p, at([]), here("1000"), tapped), true, `${p.k}: no op yet`);
+    assert.equal(sellLocked(p, at([op("other", "refused")]), here("1000"), tapped), true, `${p.k}: another id`);
+    for (const end of ["refused", "not_landed"]) assert.equal(sellLocked(p, at([op("s1", end)]), here("1000"), tapped), false, `${p.k}: ${end}`);
+    assert.equal(sellLocked(p, at([op("s1", "refused")], true), here("1000"), tapped), true, `${p.k}: stale`);
   }
   const refused: Phase = { k: "ended", id: "s4", at: 0, stage: "refused", code: "not_allowed" };
-  assert.equal(sellLocked(refused, at([op("s4", "refused")], true), "1000", tapped), false);
+  assert.equal(sellLocked(refused, at([op("s4", "refused")], true), here("1000"), new Map()), false);
 });
 
-test("P3-1: a sell whose end write was lost lets go once the row's units move off the units it was tapped on", () => {
-  const tapped = new Map([["s1", "1000"]]);
+test("P3-1: rows compare only within one holding: another token's units never end or start a lock here", () => {
+  const OTHER = "OtherMint111111111111111111111111111111pump";
+  const tapped = new Map([["s1", tap("1000", OTHER)]]);
+  // a sell tapped on OTHER, landed: this holding's row (whatever its units) is not OTHER's, so it is not held here
+  assert.equal(sellLocked(READY, at([op("s1", "filled")]), here("1000"), tapped), false);
+  // this mount's sell (of OTHER) filled: this row's units say nothing of it, so it waits on the op
   const filled: Phase = { k: "filled", id: "s1", at: 0, ms: 900 };
-  // trade.ts swallows the end write: the op stays sent. The row moved (750 left, or the position gone): unlocked
-  assert.equal(sellLocked(filled, at([op("s1", "sent")]), "750", tapped), false);
-  assert.equal(sellLocked(filled, at([op("s1", "sent")]), null, tapped), false);
-  // the same after a remount (READY): the units it was tapped on are the page's, not the mount's
-  assert.equal(sellLocked(READY, at([op("s1", "sent")]), "750", tapped), false);
-  // not moved: still open, still locked
-  assert.equal(sellLocked(READY, at([op("s1", "sent")]), "1000", tapped), true);
+  assert.equal(sellLocked(filled, at([]), here("750"), tapped), true);
 });
 
 test("P3-2: a landed end does not let go while the row still shows the units the sell was tapped on", () => {
-  const tapped = new Map([["s1", "1000"]]);
+  const tapped = new Map([["s1", tap("1000")]]);
   const filled: Phase = { k: "filled", id: "s1", at: 0, ms: 900 };
   for (const end of ["filled", "part_filled"]) {
-    assert.equal(sellLocked(filled, at([op("s1", end)]), "1000", tapped), true, `${end}: old units`);
-    // after a remount too
-    assert.equal(sellLocked(READY, at([op("s1", end)]), "1000", tapped), true, `${end}: old units, remounted`);
-    assert.equal(sellLocked(filled, at([op("s1", end)]), "750", tapped), false, `${end}: new units`);
-    assert.equal(sellLocked(READY, at([op("s1", end)]), "750", tapped), false, `${end}: new units, remounted`);
+    assert.equal(sellLocked(filled, at([op("s1", end)]), here("1000"), tapped), true, `${end}: old units`);
+    assert.equal(sellLocked(READY, at([op("s1", end)]), here("1000"), tapped), true, `${end}: old units, remounted`);
+    assert.equal(sellLocked(filled, at([op("s1", end)]), here("750"), tapped), false, `${end}: new units`);
+    assert.equal(sellLocked(READY, at([op("s1", end)]), here(null), tapped), false, `${end}: the row gone`);
   }
 });
 
@@ -81,17 +91,32 @@ test("P3-3: the vault's sell is whole base units at the token's decimals; none r
   assert.equal(baseUnits("1.5", null), null, "no decimals read");
   for (const d of [-1, 1.5, 37]) assert.equal(baseUnits("1.5", d), null, String(d));
   for (const a of ["0", "0.000000", "x", "-1", ""]) assert.equal(baseUnits(a, 6), null, a);
-  assert.equal(baseUnits("99999999999999999999", 6), null, "past 20 digits");
+  // the most a token account holds is 2^64 - 1 base units (trade.ts U64_MAX)
+  assert.equal(baseUnits("18446744073709.551615", 6), "18446744073709551615");
+  assert.equal(baseUnits("18446744073709.551616", 6), null, "past 2^64 - 1");
 });
 
 test("the lock and the vault amount are useSell's: every sell button reads them; TradeBox forks neither", () => {
   const sell = src("screens/positions/source.tsx");
-  assert.match(sell, /const locked = sellLocked\(phase, src\.snapshot, units, TAPPED\);/);
+  assert.match(sell, /const locked = sellLocked\(phase, src\.snapshot, \{ chain, token, units \}, TAPPED\);/);
   assert.match(sell, /const ready = moneyOn && kit\.request !== null && !locked;/);
-  assert.match(sell, /TAPPED\.set\(h\.id, units\)/, "the units a sell was tapped on are not kept past the mount");
+  assert.match(sell, /TAPPED\.set\(h\.id, \{ chain, token, units \}\)/, "the holding a sell was tapped on is not kept past the mount");
+  assert.match(sell, /if \(!o\.ok && o\.error\.code !== "client_timeout"\) TAPPED\.delete\(h\.id\);/, "a refused sell still holds its holding");
   assert.match(sell, /const base = baseUnits\(amount, decimals\);/);
   assert.doesNotMatch(sell, /side: "sell", amount, slippage_bps/, "the vault sell still sends the decimal amount");
   const box = src("screens/trade/TradeBox.tsx");
   assert.match(box, /const sell = useSell\(chain, heldNow\?\.token \?\? token, slippageBps, heldNow\?\.units \?\? null\);/);
   assert.doesNotMatch(box, /staleAfterSell|sellLive/);
+});
+
+test("P2-2: a sell is sized from the signing page's decimals (the row's), never the helper's token read", () => {
+  const page = src("screens/token/TokenPage.tsx");
+  assert.doesNotMatch(page, /<TradeView[^>]*decimals=/, "the token page hands the helper's decimals to the sell");
+  const box = src("screens/trade/TradeBox.tsx");
+  assert.doesNotMatch(box, /<SellBox[^>]*decimals=/);
+  for (const f of ["screens/positions/SellBox.tsx", "screens/positions/PositionPanel.tsx"]) {
+    assert.match(src(f), /const decimals = row\.decimals;/, `${f} does not read the row's decimals`);
+    assert.doesNotMatch(src(f), /decimals = null \}/, `${f} still takes decimals from its caller`);
+  }
+  assert.match(src("screens/portfolio/model.ts"), /decimals: p\.decimals \?\? null,/, "the row's decimals are not the position's");
 });
