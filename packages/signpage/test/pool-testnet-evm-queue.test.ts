@@ -8,7 +8,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
-import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
+import { WALLET_SEED_LOCK, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -21,6 +21,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
 const { EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_POOLS, SOL_SEND_MARGIN_MS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 type EvmPoolPin = import("../../wallet/src/pool/evm.ts").EvmPoolPin;
 type EvmPoolEvent = import("../../wallet/src/pool/evm.ts").EvmPoolEvent;
 type EvmRpc = import("../../wallet/src/pool/evm.ts").EvmRpc;
@@ -119,8 +120,9 @@ test("with the chain's EVM pin, a state read opens its proof queue once a note i
   await t.stateRead();
   for (let i = 0; i < 50 && proves() === 0; i++) await new Promise((r) => setTimeout(r, 10));
   await t.stateRead(); // its pass waits for the one before
-  const { ready, value } = await t.readyWith(async () => "notes");
+  const { ready, value, open } = await t.readyWith(async () => "notes");
   assert.equal(value, "notes");
+  assert.deepEqual([...open], [`evm:base-sepolia:${PIN.pool.toLowerCase()}`], "only the Base queue is open: Solana's entry reads no ready");
   assert.equal(proves(), 1);
   assert.equal(ready?.length, 1);
   assert.equal(ready![0]!.poolId, `evm:base-sepolia:${PIN.pool.toLowerCase()}`);
@@ -139,7 +141,8 @@ test("with the chain's EVM pin, a state read opens its proof queue once a note i
 test("without the chain's EVM pin, a landed note of that pool opens no queue and reads nothing", async () => {
   const { w, ns } = await wallet();
   const prover = signalsProver();
-  const t = testnetPool(page(w), { prover: { vault: prover, stop: () => {} }, evmRpcs: unread, evmQueuePool: () => assert.fail("no EVM queue without a pin") });
+  // no pin on either chain, whatever the wallet's EVM_POOLS holds
+  const t = testnetPool(page(w), { prover: { vault: prover, stop: () => {} }, evmPin: () => undefined, evmRpcs: unread, evmQueuePool: () => assert.fail("no EVM queue without a pin") });
   await landed(ns);
   await t.stateRead();
   assert.equal((await t.readyWith(async () => null)).ready, undefined);
@@ -186,4 +189,145 @@ test("a state read settles the EVM pool's RESERVED notes on the chain's sync: he
   // no release, the final block's time at the deadline: held
   const at = await run({ fin: { number: 30n, timestamp: 1_800_000_210n }, events: [deposit] });
   assert.equal((await at.ns.get(at.id))!.state, "RESERVED");
+});
+
+// ---- review P2-1, P2-2, P2-3, P3-3: one settle per chain at a time, stopped at sign out, beside the Solana part ----
+
+const DEADLINE_MS = 1_800_000_210_000n;
+/** Deposit 0 landed and its proof taken: RESERVED with DEADLINE_MS. */
+async function reserved(ns: NoteStore): Promise<string> {
+  const n = await landed(ns);
+  const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: DEADLINE_MS, context: "5" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: held.attempt! });
+  return n.id;
+}
+const DEPOSIT = ev(10n, { kind: "deposit", state: noteCommitment(RUNG, L0, P(D0)), label: L0, value: RUNG, precommitment: P(D0) });
+/** A round past the deadline with no release: the note it settles is freed. */
+const FREEING = { fin: { number: 30n, timestamp: 1_800_000_300n, hash: "", baseFeePerGas: null }, anchor: { number: 40n, hash: "", timestamp: 0n, baseFeePerGas: null }, events: [DEPOSIT] };
+/** A sync whose rounds wait until `go()` (or their signal's abort): `started` counts the rounds begun. */
+function slowSync() {
+  let started = 0;
+  const waiting: (() => void)[] = [];
+  const events = (signal?: AbortSignal) => {
+    started++;
+    return new Promise<typeof FREEING>((resolve, reject) => {
+      waiting.push(() => resolve(FREEING));
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  };
+  return { sync: { events }, started: () => started, go: () => waiting.splice(0).forEach((f) => f()) };
+}
+const until = async (f: () => boolean) => {
+  for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(f(), "reached");
+};
+
+test("state reads during one slow settle round join it: one round per chain, however many reads, with or without a Solana pin", async () => {
+  for (const pin of [null, undefined]) await joins(pin);
+});
+async function joins(pin: null | undefined): Promise<void> {
+  const { w, ns } = await wallet();
+  const id = await reserved(ns);
+  const slow = slowSync();
+  const t = testnetPool(page(w), { pin, prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => slow.sync, evmQueuePool: () => fakeEvmPool() });
+  const reads = [t.stateRead()];
+  await until(() => slow.started() === 1);
+  for (let i = 0; i < 5; i++) reads.push(t.stateRead());
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(slow.started(), 1, "the reads join the round in flight");
+  slow.go();
+  await Promise.all(reads);
+  assert.equal(slow.started(), 1);
+  assert.ok(["UNSPENT", "HELD"].includes((await ns.get(id))!.state), "the one round freed it");
+  // the round done, the next read starts the next one only if a note is still RESERVED: none is
+  await t.stateRead();
+  assert.equal(slow.started(), 1);
+}
+
+test("sign out stops a settle round in flight: the state read returns without waiting for it, and nothing is written after", async () => {
+  const { w, ns } = await wallet();
+  const id = await reserved(ns);
+  const slow = slowSync();
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => slow.sync, evmQueuePool: () => fakeEvmPool() });
+  const read = t.stateRead();
+  await until(() => slow.started() === 1);
+  t.signingOut();
+  // the round never answers (go() is not called): the read ends on the stop alone
+  const ended = await Promise.race([read.then(() => "ended"), new Promise((r) => setTimeout(() => r("waiting"), 500))]);
+  assert.equal(ended, "ended");
+  // the round answers late: its pass is stopped, so nothing is written
+  slow.go();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal((await ns.get(id))!.state, "RESERVED");
+  assert.equal((await ns.list()).length, 1);
+  // a pass waiting for the seed lock the sign out holds stops too, without waiting for the lock
+  let release!: () => void;
+  let held!: () => void;
+  const signout = new Promise<void>((r) => (held = r));
+  void navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => (held(), new Promise<void>((r) => (release = r))));
+  await signout;
+  const waiting = t.stateRead();
+  await new Promise((r) => setTimeout(r, 30));
+  t.signingOut();
+  assert.equal(await Promise.race([waiting.then(() => "ended"), new Promise((r) => setTimeout(() => r("waiting"), 500))]), "ended");
+  release();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(slow.started(), 1, "the stopped pass never read a round");
+  // the next pass (signed in again) runs on a fresh stop
+  const again = t.stateRead();
+  await until(() => slow.started() === 2);
+  slow.go();
+  await again;
+  assert.ok(["UNSPENT", "HELD"].includes((await ns.get(id))!.state));
+});
+
+/** A fake devnet Solana pool (the page's pinned program's scope) whose tree holds one landed note at leaf 0. */
+function fakeSolPool(ns: NoteStore) {
+  const scope = solanaPoolOf(SOL_POOLS.devnet!.program).scope;
+  const ref: NoteRef = { kind: "deposit", s: scope, i: 0 };
+  const label = vaultLabelOf(keccak_256, scope, 1n);
+  const commitment = noteCommitment(10_000_000n, label, P(ref));
+  const pool: Pool<{ w: string }> = {
+    id: "test:devnet",
+    chain: "sol",
+    scope,
+    ladder: SOL_LADDER,
+    epochMs: SOL_EPOCH_MS,
+    lifeMs: SOL_LIFE_MS,
+    sendMarginMs: SOL_SEND_MARGIN_MS,
+    now: async () => NOW,
+    trees: async () => {
+      const s = new VaultTree([commitment]), l = new VaultTree([label]);
+      return { stateTree: s, labelTree: l, stateRoot: s.root!, labelRoot: l.root! };
+    },
+    bind: async (b) => {
+      const bytes = new TextEncoder().encode(`${b.wallet.address}|${b.chunk}|${b.deadlineMs}`);
+      return { context: BigInt("0x" + Buffer.from(keccak_256(bytes)).toString("hex")) % VAULT_FIELD_P, feeCap: 1_000n, request: { w: b.wallet.address } };
+    },
+  };
+  const land = () => ns.add({ ref, scope, precommitment: P(ref), state: "UNSPENT", leaf: { value: 10_000_000n, label, commitment, leafIndex: 0n } });
+  return { pool, land };
+}
+
+test("the EVM part of a state read runs beside the Solana part: a Solana proof is made while an EVM settle round hangs, and readyWith's open names only the open queues", async () => {
+  const { w, ns } = await wallet();
+  await reserved(ns);
+  const sol = fakeSolPool(ns);
+  await sol.land();
+  const slow = slowSync();
+  const prover = signalsProver();
+  const t = testnetPool(page(w), { pool: sol.pool, prover: { vault: prover, stop: () => {} }, hardwareConcurrency: 4, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => slow.sync, evmQueuePool: () => fakeEvmPool() });
+  void t.stateRead();
+  await until(() => slow.started() === 1);
+  // the EVM round hangs; the Solana queue opens and proves its note all the same
+  await until(() => prover.log.some((x) => x.startsWith("prove")));
+  for (let i = 0; i < 100 && (await t.readyWith(async () => null)).ready?.length !== 1; i++) await new Promise((r) => setTimeout(r, 10));
+  const r = await t.readyWith(async () => null);
+  assert.equal(r.ready?.length, 1);
+  assert.equal(r.ready![0]!.poolId, "test:devnet");
+  // only the Solana queue is open (the EVM chain's note is RESERVED, so its queue never opened): Base reads no ready
+  assert.deepEqual([...r.open], ["test:devnet"]);
+  assert.equal(slow.started(), 1);
+  t.signingOut();
+  await t.signedOut();
 });

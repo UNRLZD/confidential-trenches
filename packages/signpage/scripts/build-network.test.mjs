@@ -20,6 +20,8 @@ const TESTNET_ONLY = [
   "base-testnet.api.pocket.network", // Base Sepolia's second pool provider (card notes-per-pool-evm-base-hang)
   "rpc.testnet.chain.robinhood.com",
   "robinhood-sepolia-rpc.publicnode.com",
+  "sepolia.base.org", // Base Sepolia's fee provider (src/pool-testnet.ts TESTNET_EVM_FEE_RPCS)
+  "robinhood-testnet.drpc.org", // Robinhood testnet's fee provider (the same)
   "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
   "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
 ];

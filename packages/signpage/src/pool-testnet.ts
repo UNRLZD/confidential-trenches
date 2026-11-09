@@ -293,8 +293,9 @@ export type TestnetOver = {
   table?: string | null;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
-  /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool. */
-  pin?: SolanaPoolPin;
+  /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool; null, none (a build
+   *  with no Solana pin, as SIGN_HOST's until the pool deploys). */
+  pin?: SolanaPoolPin | null;
   /** The withdraw run's clock and wait (the page's own otherwise): a test's read-back bound passes on its clock, so no
    *  run outlives its test (fold 5: each held node ~120 s on the wall clock). */
   now?: () => bigint;
@@ -415,11 +416,15 @@ export type TestnetPool = {
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
-   * `read` waits for nothing of the queue's. */
-  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T }>;
+   * `open`: the ids of the pools whose queue is open, so a chain with no open queue reads no ready (src/pools.ts
+   * withPools). `read` waits for nothing of the queue's. */
+  readyWith<T>(read: () => Promise<T>): Promise<{ ready: readonly ReadyProof[] | undefined; value: T; open: ReadonlySet<string> }>;
   /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
    * before it began), so the page's state is read again on this. */
   watch(fn: () => void): void;
+  /** Before the store signs out (src/main.ts signOut): every EVM settle pass stopped, so none holds the seed's shared
+   *  lock the sign out waits for, and none writes after it. */
+  signingOut(): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
@@ -429,8 +434,11 @@ export type TestnetPool = {
 };
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
+/** An open proof queue, its note store and the id of the pool it proves for. */
+type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string };
+
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
-  const pin = over.pin ?? PAGE_SOL_PIN;
+  const pin = over.pin === null ? undefined : (over.pin ?? PAGE_SOL_PIN);
   const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs();
   const prover = over.prover ?? proverHost();
   const solanaDepositKind = over.depositKinds?.solana ?? poolDepositKind;
@@ -450,15 +458,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return out;
   };
   // the proof queue: opened at the first landing, closed at sign out
-  let open: Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }> | null = null;
-  const openQueue = async (): Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }> => {
+  let open: Promise<OpenQueue> | null = null;
+  const openQueue = async (): Promise<OpenQueue> => {
     const notes = await openNoteStore(await page.store());
     let seed64: Uint8Array | null = null;
     try {
       seed64 = await page.seed64();
       const pool = over.pool ?? solanaPool({ pin: pin!, rpcs: rpcs(), relayFee: (e, s) => poolRelayFee(solanaPoolOf(pin!.program).pool, e, s, over.fetch) });
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id };
     } catch (e) {
       notes.close();
       throw e;
@@ -549,8 +557,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // or at a state read that finds its notes landed, on the page's one prover, the page's note store and a copy of the
   // seed; the pool is the wallet's evmPool over the chain's pool list (its seats the deposit's pair), the page's hold
   // and sources, the kit's fee pair, the helper's GET /v1/pool/fee and the kit's epoch fee rule. Closed at sign out.
-  const evmQueues = new Map<"base" | "robinhood", Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }>>();
-  const openEvmQueue = async (chain: "base" | "robinhood"): Promise<{ queue: ProofQueue<unknown>; notes: NoteStore }> => {
+  const evmQueues = new Map<"base" | "robinhood", Promise<OpenQueue>>();
+  const openEvmQueue = async (chain: "base" | "robinhood"): Promise<OpenQueue> => {
     const e = evmPool(chain);
     if (e === null) throw new Error(`no ${chain} pool on this page's network`);
     const notes = await openNoteStore(await page.store());
@@ -569,7 +577,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           epochFee: evmEpochFee,
         });
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes };
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id };
     } catch (err) {
       notes.close();
       throw err;
@@ -655,38 +663,54 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // an EVM pool's RESERVED notes settled (../../wallet/src/pool/evm-settle.ts evmSettleReserved: spent with its change
   // once both RPCs show the release final, freed once both RPCs' final block time is past the deadline with none, else
-  // held), on the chain's sync, under the seed's shared lock as the Solana pass; a freed note is proved again by the
-  // open queue's next pass. No Web Locks: no pass.
+  // held), on the chain's sync, under the seed's shared lock as the Solana pass; a freed note or a change written is
+  // proved by the queue's next pass. One pass per chain at a time: a state read during one joins it. A sign out stops
+  // it (signingOut): its lock wait and its round end at once, and it writes nothing after. No Web Locks: no pass.
+  let evmStop = new AbortController();
   const settleEvmReserved = async (chain: "base" | "robinhood"): Promise<void> => {
     const e = evmPool(chain);
     if (e === null || !locks) return;
-    await locks.request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
+    const signal = evmStop.signal;
+    await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
       const notes = await openNoteStore(await page.store());
       let seed64: Uint8Array | null = null;
       try {
         seed64 = await page.seed64();
-        const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: (s) => e.sync.events(s) });
-        if (pass.freed.length > 0 && evmQueues.has(chain)) void evmProofs(chain);
+        const pass = await evmSettleReserved({ seed64, notes, scope: e.scope, round: (s) => e.sync.events(s), signal });
+        if (pass.freed.length > 0 || pass.spent.length > 0) void evmProofs(chain);
       } finally {
         seed64?.fill(0);
         notes.close();
       }
     });
   };
-  // a state read's EVM part, per pinned chain: its INCOMING notes, its RESERVED ones, then its queue's pass (one at a
-  // time per chain) while the queue is open or the chain's notes are landed
+  const evmReserving = new Map<"base" | "robinhood", Promise<void>>();
+  const reserveEvm = (chain: "base" | "robinhood"): Promise<void> => {
+    let p = evmReserving.get(chain);
+    if (p === undefined) {
+      const run: Promise<void> = settleEvmReserved(chain).finally(() => {
+        if (evmReserving.get(chain) === run) evmReserving.delete(chain);
+      });
+      evmReserving.set(chain, (p = run));
+    }
+    return p;
+  };
+  // a state read's EVM part: its INCOMING notes, then per pinned chain, each beside the other, its queue's pass (one at
+  // a time per chain) while the queue is open or the chain's notes are landed, and its RESERVED notes' settle
   const evmPassing = new Map<"base" | "robinhood", Promise<unknown>>();
   const evmRead = async (): Promise<void> => {
     await settleEvmOpen().catch(() => {});
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
     if (chains.length === 0) return;
     const all = await readNotes(await page.store());
-    for (const chain of chains) {
-      const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
-      if (mine.some((n) => n.state === "RESERVED")) await settleEvmReserved(chain).catch(() => {});
-      if (!evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
-        evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
-    }
+    await Promise.all(
+      chains.map(async (chain) => {
+        const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
+        if (!evmPassing.has(chain) && (evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD")))
+          evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain).catch(() => {});
+      }),
+    );
   };
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const table = over.table === undefined ? PAGE_TABLE : over.table;
@@ -926,14 +950,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes.close();
     }
   };
+  // the EVM pools' open deposits, their RESERVED notes and their queues' passes run on every state read beside the
+  // Solana pool's part (none pinned: only theirs): neither waits on the other, and one that fails or hangs never stops
+  // the other
   const stateRead = (): Promise<void> => {
-    // the EVM pools' open deposits, their RESERVED notes and their queues' passes run on every state read, beside the
-    // Solana pool's (none pinned: only theirs)
-    if (scope === null) return evmRead().catch(() => {});
+    const evm = evmRead().catch(() => {});
+    if (scope === null) return evm;
+    return Promise.all([evm, solanaRead()]).then(() => {});
+  };
+  const solanaRead = (): Promise<void> => {
     if (reading) return reading;
     const p = (async () => {
       try {
-        await evmRead().catch(() => {});
         if (settling) return await settling;
         const mine = (await readNotes(await page.store())).filter((n) => n.scope === scope);
         if (mine.some((n) => n.state === "INCOMING")) await settleSolana();
@@ -1156,11 +1184,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     // the same order, so no swap of any queue falls between its list and the notes
     readyWith: async <T,>(read: () => Promise<T>) => {
       const qs: ProofQueue<unknown>[] = [];
+      const ids = new Set<string>();
       for (const p of [open, ...evmQueues.values()]) {
-        const q = p ? (await p.catch(() => null))?.queue : undefined;
-        if (q) qs.push(q);
+        const q = p ? await p.catch(() => null) : null;
+        if (q) {
+          qs.push(q.queue);
+          ids.add(q.poolId);
+        }
       }
-      if (qs.length === 0) return { ready: undefined, value: await read() };
+      if (qs.length === 0) return { ready: undefined, value: await read(), open: ids };
       const ready: ReadyProof[] = [];
       const turn = async (i: number): Promise<T> => {
         if (i === qs.length) return read();
@@ -1169,9 +1201,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return r.value;
       };
       const value = await turn(0);
-      return { ready, value };
+      return { ready, value, open: ids };
     },
     watch: (fn) => void watchers.add(fn),
+    signingOut: () => {
+      evmStop.abort();
+      evmStop = new AbortController();
+    },
     signedOut,
     withdrawDeps,
     withdraw,
