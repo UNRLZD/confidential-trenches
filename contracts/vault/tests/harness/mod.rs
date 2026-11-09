@@ -901,6 +901,12 @@ impl Harness {
         Ok(serde_json::from_str(&text)?)
     }
 
+    /// A transaction the harness did not send (a node CLI's, or signed bytes a test sent with `send_tx`), read by its
+    /// hash and signer as `outcome` reads one: every receipt at `FINAL`, its gas recorded.
+    pub async fn tx_outcome(&self, signer: &AccountId, tx_hash: &str) -> R<Outcome> {
+        self.outcome_of(signer, tx_hash.to_string(), None).await
+    }
+
     /// Reads the transaction at `FINAL` (every receipt, refunds included), names every receipt's actions and records
     /// each function-call receipt's gas.
     async fn outcome(&self, signer: &AccountId, result: ExecutionFinalResult) -> R<Outcome> {

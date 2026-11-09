@@ -13,12 +13,39 @@ const ours = (c: EvmRpcCall) => {
   const [tx, , over] = c.params as [Record<string, unknown>, unknown, Record<string, { code?: unknown }> | undefined];
   return c.method === "eth_call" && String(tx?.to).toLowerCase() === MULTICALL3 && Object.entries(over ?? {}).some(([a, o]) => a.toLowerCase() === MULTICALL3 && o.code === EVM_READ_GAS_CODE);
 };
+// EVM_READ_GAS_CODE's result layout, read from its own bytes (card evm-quote-gas-used): each element 224 bytes apart
+// (PUSH1 0xe0 MUL), written as success, the gas used (m[0x60]) at +0x20, the offset 0x60 at +0x40, the length at +0x60
+// and the return data at +0x80; a code that writes another layout fails here, not as a silent misread
+const STRIDE = "60e002";
+const WRITE = "85526060518560200152606085604001528085606001526000856080013e";
+if (!EVM_READ_GAS_CODE.includes(STRIDE) || !EVM_READ_GAS_CODE.includes(WRITE)) throw new Error("EVM_READ_GAS_CODE writes no (success, gasUsed, bytes) result of 224 bytes");
+const W = (v: bigint) => v.toString(16).padStart(64, "0");
+/** One result as EVM_READ_GAS_CODE writes it: its success word (0, 1 or 2), the gas the read used, its return data
+ *  (hex, whole words or not), padded to whole words. */
+export const codeResult = (success: bigint, used: bigint, data: string): string => W(success) + W(used) + W(0x60n) + W(BigInt(data.length / 2)) + data.padEnd(Math.ceil(data.length / 64) * 64, "0");
+/** aggregate3's answer as EVM_READ_GAS_CODE gives it: the results, their offsets and the marker after them. */
+export function codeAnswer(results: readonly string[]): string {
+  let at = 32 * results.length;
+  const offs = results.map((b) => {
+    const o = W(BigInt(at));
+    at += b.length / 2;
+    return o;
+  });
+  return "0x" + W(0x20n) + W(BigInt(results.length)) + offs.join("") + results.join("") + READ_MARKER;
+}
 /** `answers` to `sent` as EVM_READ_GAS_CODE answers them: each recorded aggregate3 result (Multicall3's own, which
- *  predates the code) with the code's marker after it, so the device reads it as the code's answer; every read the
- *  recording holds ran with the call's whole gas, and every recorded case's outcome is the one recorded. */
+ *  predates the code: success, returnData) written as the code writes it, a gas used of 0 beside it and the marker
+ *  after the last, so the device reads it as the code's answer; every read the recording holds ran with the call's whole
+ *  gas, and every recorded case's outcome is the one recorded. */
 export function withMarker<T>(sent: readonly EvmRpcCall[], answers: T): T {
   (answers as { result?: unknown }[]).forEach((a, i) => {
-    if (sent[i] !== undefined && ours(sent[i]!) && typeof a?.result === "string") a.result = a.result + READ_MARKER;
+    if (sent[i] === undefined || !ours(sent[i]!) || typeof a?.result !== "string") return;
+    const h = a.result.slice(2);
+    const at = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+    a.result = codeAnswer(Array.from({ length: at(32) }, (_, k) => {
+      const e = 64 + at(64 + 32 * k);
+      return codeResult(BigInt(at(e)), 0n, h.slice(2 * (e + 96), 2 * (e + 96 + at(e + 64))));
+    }));
   });
   return answers;
 }

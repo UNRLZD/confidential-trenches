@@ -2,6 +2,7 @@
 // (src/deposit/moveout.ts). A fake chain answers both RPCs of the testnet release pair; the signed bytes are decoded
 // and checked against nearcore's borsh by hand.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -10,7 +11,7 @@ import { VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { IDBFactory } from "fake-indexeddb";
 import { NEAR_NETWORKS } from "../src/deposit/account.ts";
 import type { DepositOp, FollowRecord } from "../src/deposit/follow.ts";
-import { checkMoveCalls, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
+import { buildMoveOut, buildRegisterOut, buildWithdrawOut, checkMoveCalls, checkRegisterCalls, checkWithdrawCalls, readWithdrawOut, GAS_PRICE_MARGIN, MOVE_GAS, moveCalls, withdrawCalls, type MoveOutRecord, MoveOutRefused, type MoveOutRpc, moveOutHeld, SETTLE_BLOCKS, signedBlockHash, TX_VALIDITY_BLOCKS } from "../src/deposit/moveout.ts";
 import * as d from "../src/derive/index.ts";
 import { depositId } from "../src/derive/keys.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
@@ -34,6 +35,8 @@ class Chain {
   near = NEAR / 10n; // 0.1 N
   usage = 182n;
   usdc = 2_500_000n;
+  /** what U holds inside intents.near (mt_balance_of on nep141:<token>); null: the view fails */
+  held: bigint | null = 3_000_000n;
   registered = new Set<string>();
   keys = 1;
   /** U's one key is another key (not U's own) */
@@ -49,7 +52,7 @@ class Chain {
   /** U's key nonce at a height (default: the current one at every height) */
   nonceAt: (h: number) => bigint = () => this.nonce;
   /** what the second RPC answers differently, at the same height */
-  skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string }> = {};
+  skewB: Partial<{ nonce: bigint; usdc: bigint; registered: boolean; gas: bigint; hash: string; near: bigint; code: string; held: bigint }> = {};
   /** the second RPC's own tx states (default: the same as the first's) */
   txsB: Map<string, "ok" | "failed"> | null = null;
   /** txs both of the pair no longer keep (they answer them as unknown); the archival RPC keeps every one */
@@ -88,6 +91,11 @@ class Chain {
         const args = JSON.parse(Buffer.from(p.args_base64 as string, "base64").toString());
         if (p.method_name === "ft_balance_of") return view((sk.usdc ?? this.usdc).toString(), h);
         if (p.method_name === "storage_balance_of") return view((sk.registered ?? this.registered.has(args.account_id)) ? { total: STORAGE_MIN.toString(), available: "0" } : null, h);
+        if (p.method_name === "mt_balance_of" && p.account_id === "intents.near" && args.account_id === U && args.token_id === `nep141:${TOKEN}`) {
+          const v = sk.held ?? this.held;
+          if (v === null) throw new Error("no view");
+          return view(v.toString(), h);
+        }
         if (p.method_name === "storage_balance_bounds") return view({ min: STORAGE_MIN.toString(), max: STORAGE_MIN.toString() }, h);
         throw new Error(`unexpected ${String(p.method_name)}`);
       },
@@ -328,6 +336,242 @@ test("the payload rule reads an amount only as plain digits and the registration
     () => checkMoveCalls(U, TO, TOKEN, [{ ...ok[0]!, args: { account_id: TO, registration_only: true, extra: 1 } }, ok[1]!], 2_500_000n, STORAGE_MIN),
     /the registration is storage_deposit/,
   );
+});
+
+test("the ft_withdraw rule (card exit-ids-out) refuses a memo, a msg, another token or receiver, the vault, more than held less the keep, and a second call", () => {
+  const ok = withdrawCalls(TO, 2_999_999n, TOKEN);
+  checkWithdrawCalls(U, TO, TOKEN, ok, 3_000_000n);
+  checkWithdrawCalls(U, TO, TOKEN, withdrawCalls(TO, 3_000_000n, TOKEN), 3_000_000n, 0n); // A: all
+  const c = ok[0]!;
+  const bad = [
+    () => checkWithdrawCalls(U, TO, TOKEN, withdrawCalls(TO, 3_000_000n, TOKEN), 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, memo: "x" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, msg: "{}" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, token: "other.testnet" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, args: { ...c.args, receiver_id: "bob.testnet" } }], 3_000_000n),
+    () => checkWithdrawCalls(U, NET.vault, TOKEN, withdrawCalls(NET.vault, 1n, TOKEN), 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [c, c], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, TOKEN, [{ ...c, deposit: 0n }], 3_000_000n),
+    () => checkWithdrawCalls(U, TO, "other.testnet", withdrawCalls(TO, 1n, "other.testnet"), 3_000_000n),
+  ];
+  for (const f of bad) assert.throws(f, MoveOutRefused);
+});
+
+test("readWithdrawOut (card exit-ids-out): what U holds inside intents.near at readMoveOut's block on both RPCs, equal, else unread", async () => {
+  const chain = new Chain();
+  chain.b.height = 1003;
+  const r = await readWithdrawOut(U, TO, TOKEN, chain.rpcs());
+  assert.ok(r !== null);
+  assert.equal(r.held, 3_000_000n);
+  assert.equal(r.height, 1000, "the lower final height, as readMoveOut reads");
+  assert.equal(r.nonce, 7n);
+  assert.ok(!("usdc" in r), "the token's balance is not the amount moved");
+  chain.skewB = { held: 3_000_001n };
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "two RPCs that differ");
+  chain.skewB = {};
+  chain.held = null;
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "a failed view is unread, never a zero");
+  chain.held = 3_000_000n;
+  chain.skewB = { usdc: 1n };
+  assert.equal(await readWithdrawOut(U, TO, TOKEN, chain.rpcs()), null, "readMoveOut's own reads must agree too");
+});
+
+test("review 2 of exit-ids-out: a typed account or token that is not a string is refused by every builder; each builder checks its read, signs with its own key copy and zeroes that copy", () => {
+  const k = depositId(SEED, 1n, 0);
+  const k2 = depositId(SEED, 1n, 1);
+  const BH = "11111111111111111111111111111111";
+  const keyOf = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const base = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, held: 3_000_000n, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  const builders = {
+    move: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildMoveOut({ read: { ...base, registered: false, ...read } as never, key, kind: "id", to: to as string, token: token as string, storageMin: STORAGE_MIN }),
+    register: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildRegisterOut({ read: { ...base, registered: false, ...read } as never, key, to: to as string, token: token as string, storageMin: STORAGE_MIN }),
+    withdraw: (to: unknown, token: unknown, read: Record<string, unknown>, key = keyOf()) => buildWithdrawOut({ read: { ...base, registered: true, ...read } as never, key, kind: "id", to: to as string, token: token as string }),
+  };
+  for (const [name, b] of Object.entries(builders)) {
+    // M1: a String or an object whose toJSON names the vault or intents.near, as both `to` and the read's `to`
+    for (const name2 of [NET.vault, "intents.near"]) {
+      for (const to of [new String(name2), { toJSON: () => name2 }]) {
+        assert.throws(() => b(to, TOKEN, { to }), MoveOutRefused, `${name}: to ${String(to)}`);
+      }
+      const tok = new String(TOKEN);
+      assert.throws(() => b(TO, tok, { token: tok }), MoveOutRefused, `${name}: a String token`);
+    }
+    // M2: a read of another account, typed account or token
+    for (const [f, v] of [["u", k2.id], ["to", "bob.testnet"], ["token", NEAR_NETWORKS.mainnet.usdc]] as const) assert.throws(() => b(TO, TOKEN, { [f]: v }), MoveOutRefused, `${name}: read.${f}`);
+    // L3: the read's nonce, block hash and registration
+    for (const bad of [{ nonce: -1n }, { nonce: 7 }, { blockHash: "1111" }, { blockHash: 32 }, { blockHash: "0OIl" }, { registered: "no" }]) assert.throws(() => b(TO, TOKEN, bad), MoveOutRefused, `${name}: ${JSON.stringify(bad, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))}`);
+    // M2: the key's fields read once: a getter that answers another key on its second read does not sign with it
+    const flipped = Object.defineProperties({ ...keyOf() }, {
+      publicKey: { get: ((n = 0) => () => (n++ === 0 ? k.publicKey : k2.publicKey))(), enumerable: true },
+      secretKey: { get: ((n = 0, own = k.secretKey.slice()) => () => (n++ === 0 ? own : k2.secretKey.slice()))(), enumerable: true },
+    });
+    const m = b(TO, TOKEN, {}, flipped as never);
+    const signed = base64.decode(m.signed);
+    const txBytes = signed.slice(0, signed.length - 65);
+    assert.ok(ed25519.verify(signed.slice(signed.length - 64), sha256(txBytes), k.publicKey), `${name}: signed by the key it checked`);
+    // M2 (review 3 M1): the builder's own copy of the key is zeroed whole, on a build and on a refusal. The arrays
+    // whose length is read while they hold the secret during the call are recorded by identity (the builder reads its
+    // copy's length), and after the call each one but the caller's own must read all zero. A copy whose length is never
+    // read that way is out of this spy's sight: the source pin below holds every expression that touches the secret.
+    for (const refuse of [false, "read", "key"] as const) {
+      const lengthOf = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), "length")!;
+      const seen = new Set<Uint8Array>();
+      Object.defineProperty(Object.getPrototypeOf(Uint8Array.prototype), "length", {
+        ...lengthOf,
+        get(this: Uint8Array) {
+          const n = lengthOf.get!.call(this) as number;
+          if (n === 32 && this instanceof Uint8Array && k.secretKey.every((x, i) => this[i] === x)) seen.add(this);
+          return n;
+        },
+      });
+      const own = refuse === "key" ? { ...keyOf(), id: k2.id } : keyOf();
+      try {
+        if (refuse === "read") assert.throws(() => b(TO, TOKEN, { u: k2.id }, own), MoveOutRefused);
+        else if (refuse === "key") assert.throws(() => b(TO, TOKEN, { u: k2.id }, own), MoveOutRefused);
+        else b(TO, TOKEN, {}, own);
+      } finally {
+        Object.defineProperty(Object.getPrototypeOf(Uint8Array.prototype), "length", lengthOf);
+      }
+      assert.ok(own.secretKey.some((x) => x !== 0), "the caller's key is the caller's to zero");
+      seen.delete(own.secretKey);
+      assert.ok(seen.size >= 1, `${name}: the builder's copy was seen`);
+      for (const c of seen) assert.ok(c.every((x) => x === 0), `${name}${refuse ? ` (refused: ${refuse})` : ""}: a copy of the secret is left live`);
+    }
+    // review 3 L1: a nonce whose + 1 is past a u64, a storage minimum past a u128, are refused, never wrapped
+    assert.throws(() => b(TO, TOKEN, { nonce: (1n << 64n) - 1n }), MoveOutRefused, `${name}: nonce 2^64 - 1`);
+    b(TO, TOKEN, { nonce: (1n << 64n) - 2n });
+  }
+});
+
+test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by the move and the registration; checkWithdrawCalls and checkRegisterCalls refuse a String vault or intents.near", () => {
+  const k = depositId(SEED, 1n, 0);
+  const BH = "11111111111111111111111111111111";
+  const key = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const read = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, registered: false, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  for (const min of [1n << 128n, (1n << 128n) + 1n]) {
+    assert.throws(() => buildMoveOut({ read, key: key(), kind: "id", to: TO, token: TOKEN, storageMin: min }), MoveOutRefused);
+    assert.throws(() => buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: min }), MoveOutRefused);
+  }
+  buildRegisterOut({ read, key: key(), to: TO, token: TOKEN, storageMin: (1n << 128n) - 1n });
+  // the largest storage minimum a u128 holds is built, and signed as itself (review 4, L2)
+  const top = buildMoveOut({ read, key: key(), kind: "id", to: TO, token: TOKEN, storageMin: (1n << 128n) - 1n });
+  assert.equal(top.calls[0]!.method, "storage_deposit");
+  assert.equal(top.calls[0]!.deposit, (1n << 128n) - 1n);
+  const bytes = base64.decode(top.signed);
+  const tx = bytes.slice(0, bytes.length - 65);
+  // the storage_deposit action's deposit, the u128 just before the ft_transfer action's tag (2) and method name
+  const name = new TextEncoder().encode("ft_transfer");
+  let at = -1;
+  for (let i = tx.length - name.length; i >= 0 && at < 0; i--) if (name.every((b, j) => tx[i + j] === b)) at = i;
+  const end = at - 4 - 1; // the method name's u32 length and the FunctionCall tag
+  const dep = tx.slice(end - 16, end);
+  assert.equal(dep.length, 16);
+  assert.ok(dep.every((b) => b === 0xff), "the signed deposit is 2^128 - 1, not a wrapped value");
+  for (const name of [NET.vault, "intents.near"]) {
+    for (const to of [new String(name), { toJSON: () => name }] as unknown as string[]) {
+      assert.throws(() => checkWithdrawCalls(U, to, TOKEN, withdrawCalls(to, 1n, TOKEN), 2n), MoveOutRefused, `withdraw ${name}`);
+      assert.throws(() => checkRegisterCalls(U, to, TOKEN, [{ method: "storage_deposit", args: { account_id: to, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: STORAGE_MIN }], STORAGE_MIN), MoveOutRefused, `register ${name}`);
+    }
+    const tok = new String(TOKEN) as unknown as string;
+    assert.throws(() => checkWithdrawCalls(U, TO, tok, withdrawCalls(TO, 1n, tok), 2n), MoveOutRefused);
+    assert.throws(() => checkRegisterCalls(U, TO, tok, [{ method: "storage_deposit", args: { account_id: TO, registration_only: true }, gas: MOVE_GAS.storage_deposit, deposit: STORAGE_MIN }], STORAGE_MIN), MoveOutRefused);
+  }
+});
+
+/**
+ * Every expression in moveout.ts that touches a secret key, as text (review 4, L1): no in-process spy sees a copy kept
+ * in a module array, a 64-byte secret-and-public copy or a DataView over a copied buffer, so each line that names
+ * secretKey or sk is pinned here. A new copy site fails this test until it is reviewed and the pin is changed with it.
+ */
+const SECRET_LINES = [
+  "function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {",
+  "const signature = ed25519.sign(digest, secretKey);",
+  "secretKey: Uint8Array;",
+  "const id = k.id, pk = k.publicKey, sk = k.secretKey;",
+  'if (!(sk instanceof Uint8Array) || !(pk instanceof Uint8Array)) throw new MoveOutRefused("the key is not a pair of 32-byte arrays");',
+  "const key = { id, publicKey: new Uint8Array(pk), secretKey: new Uint8Array(sk) };",
+  "if (key.secretKey.length !== 32 || key.publicKey.length !== 32 || typeof id !== \"string\" || !IMPLICIT.test(id) || hex(key.publicKey) !== id || hex(ed25519.getPublicKey(key.secretKey)) !== id) {",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "return signMoveTx(k.publicKey, k.secretKey, nonce, read.blockHash, move);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "k.secretKey.fill(0);",
+];
+test("moveout.ts touches a secret key only in the pinned expressions (review 4, L1)", () => {
+  const src = readFileSync(new URL("../src/deposit/moveout.ts", import.meta.url), "utf8");
+  const code = src.split("\n").map((l) => l.trim()).filter((l) => !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("/*"));
+  const touched = code.filter((l) => /\b(secretKey|sk)\b/.test(l));
+  assert.deepEqual(touched.slice().sort(), SECRET_LINES.slice().sort());
+});
+
+test("the exit's typed-account rule refuses exactly what checkMoveCalls refuses, over every moving account, token and typed account (card exit-ids-out)", () => {
+  const k = depositId(SEED, 1n, 0);
+  const tos = [NET.vault, "intents.near", TOKEN, U, "bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, "other.testnet"];
+  const verdict = (f: () => unknown) => { try { f(); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : `other: ${String(e)}`; } };
+  let oks = 0;
+  for (const u of [U, "bob.testnet"]) {
+    for (const token of [TOKEN, NEAR_NETWORKS.mainnet.usdc, "other.testnet"]) {
+      for (const to of tos) {
+        const held = verdict(() => checkMoveCalls(u, to, token, moveCalls(to, 1n, false, 0n), 2n, 0n));
+        const withdraw = verdict(() => checkWithdrawCalls(u, to, token, withdrawCalls(to, 1n, token), 2n));
+        assert.equal(withdraw, held, `withdraw: ${u} ${token} ${to}`);
+        if (u === U) {
+          const register = verdict(() => buildRegisterOut({ read: { nonce: 1n, blockHash: "11111111111111111111111111111111", registered: false, u, to, token }, key: { ...k, secretKey: k.secretKey.slice() }, to, token, storageMin: STORAGE_MIN }));
+          assert.equal(register, held, `register: ${token} ${to}`);
+        }
+        if (held === "ok") oks++;
+      }
+    }
+  }
+  assert.ok(oks >= 4, "some cases pass, so the loop tests the refusals and not a broken setup");
+});
+
+test("each exit builder signs what it checked: a getter that answers the check one value and the signer another changes nothing (card exit-ids-out, review M1)", () => {
+  const k = depositId(SEED, 1n, 0);
+  const BH = "11111111111111111111111111111111";
+  const flip = <T,>(first: T, later: T) => { let n = 0; return () => (n++ === 0 ? first : later); };
+  const signedText = (m: { signed: string }) => new TextDecoder().decode(base64.decode(m.signed));
+  const keyOf = () => ({ ...k, secretKey: k.secretKey.slice() });
+  const getterArgs = <A extends object>(base: A, field: keyof A & string, later: unknown) => Object.defineProperty({ ...base }, field, { get: flip((base as Record<string, unknown>)[field], later), enumerable: true });
+  const read = { height: 1000, blockHash: BH, nonce: 7n, free: NEAR, usdc: 2_500_000n, registered: false, gasPrice: 100_000_000n, u: U, to: TO, token: TOKEN };
+  const move = { read, key: keyOf(), kind: "id" as const, to: TO, token: TOKEN, storageMin: STORAGE_MIN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["storageMin", 9n], ["kind", "arm"]] as const) {
+    const m = buildMoveOut(getterArgs({ ...move, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildMoveOut ${field}`);
+    assert.equal(m.amount, 2_499_999n);
+    assert.equal(m.receiver, TOKEN);
+  }
+  const reg = { read: { nonce: 7n, blockHash: BH, registered: false, u: U, to: TO, token: TOKEN }, key: keyOf(), to: TO, token: TOKEN, storageMin: STORAGE_MIN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["storageMin", 9n]] as const) {
+    const m = buildRegisterOut(getterArgs({ ...reg, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildRegisterOut ${field}`);
+    assert.equal(m.receiver, TOKEN);
+    assert.equal(m.calls[0]!.deposit, STORAGE_MIN);
+  }
+  const wd = { read: { ...read, held: 3_000_000n, registered: true }, key: keyOf(), kind: "id" as const, to: TO, token: TOKEN };
+  for (const [field, later] of [["to", "evil.testnet"], ["token", "evil.testnet"], ["kind", "arm"]] as const) {
+    const m = buildWithdrawOut(getterArgs({ ...wd, key: keyOf() }, field, later));
+    assert.ok(!signedText(m).includes("evil"), `buildWithdrawOut ${field}`);
+    assert.equal(m.amount, 2_999_999n);
+  }
+  // the key's id and the read's fields, flipped after the first read
+  const k2 = depositId(SEED, 1n, 1);
+  const keyFlip = Object.defineProperty({ ...keyOf() }, "id", { get: flip(k.id, k2.id), enumerable: true });
+  assert.equal(new TextDecoder().decode(base64.decode(buildMoveOut({ ...move, key: keyFlip }).signed)).includes(k.id), true);
+  const readFlip = Object.defineProperty({ ...read }, "blockHash", { get: flip(BH, "evil"), enumerable: true });
+  buildMoveOut({ ...move, key: keyOf(), read: readFlip }); // read once: the second answer is never asked for
+  // a read of another account, typed account or token is refused
+  for (const [f, v] of [["u", k2.id], ["to", "bob.testnet"], ["token", NEAR_NETWORKS.mainnet.usdc]] as const) assert.throws(() => buildMoveOut({ ...move, key: keyOf(), read: { ...read, [f]: v } }), MoveOutRefused, f);
+  // an unknown kind, and storageMin 0 for an unregistered typed account, are refused
+  assert.throws(() => buildMoveOut({ ...move, key: keyOf(), kind: "all" as "id" }), MoveOutRefused);
+  assert.throws(() => buildMoveOut({ ...move, key: keyOf(), storageMin: 0n }), MoveOutRefused);
+  assert.throws(() => buildWithdrawOut({ ...wd, key: keyOf(), kind: "W" as "id" }), MoveOutRefused);
 });
 
 test("bytes both RPCs refuse for U's NEAR answer gas and are kept: once U holds the cost the same bytes land, none signed anew", async () => {

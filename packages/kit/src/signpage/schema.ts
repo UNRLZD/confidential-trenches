@@ -8,7 +8,7 @@ import { base58 } from "@scure/base";
 import { CHAINS, type Chain } from "../orders/record.ts";
 import {
   DEPOSIT_HELD_STAGES, DEPOSIT_HOLDS, DEPOSIT_REFUNDED_STAGES, DEPOSIT_STAGES, POOL_ASSET_DECIMALS, POOL_ASSETS, POOL_CHAINS,
-  SIGNPAGE_KINDS,
+  POOL_DEPOSIT_REFUNDED_STAGES, POOL_DEPOSIT_STAGES, SIGNPAGE_KINDS,
 } from "./messages.ts";
 import type { PoolAsset, SignpageKind } from "./messages.ts";
 import { deepFreeze } from "../freeze.ts";
@@ -165,6 +165,16 @@ const depositFactsFit = (v: unknown): boolean => {
   return true;
 };
 const depositOp: SignpageSchema = (v) => op(lit("deposit"), DEPOSIT, DEPOSIT_FACTS)(v) && depositFactsFit(v);
+/** A pool deposit's op (messages.ts PoolDepositStage, PoolDepositFacts; card pool-deposit-stages): its pool's chain, one
+ * of its stages, and each fact only on the stages it belongs to, as the deposit op's. */
+const poolDepositFactsFit = (v: unknown): boolean => {
+  const d = v as { stage: (typeof POOL_DEPOSIT_STAGES)[number]; refunded?: unknown; since_ms?: unknown };
+  if (d.refunded !== undefined && !POOL_DEPOSIT_REFUNDED_STAGES.includes(d.stage)) return false;
+  if (d.since_ms !== undefined && (d.stage === "quote_checked" || d.stage === "expired")) return false;
+  return true;
+};
+const poolDepositOp: SignpageSchema = (v) =>
+  obj({ id: str, kind: lit("pool_deposit"), chain: poolChain, stage: oneOf(POOL_DEPOSIT_STAGES), txs }, { refunded: bool, since_ms: uint })(v) && poolDepositFactsFit(v);
 const depositConfirm: SignpageSchema = (v) => obj({ stage: oneOf(DEPOSIT) }, DEPOSIT_FACTS)(v) && depositFactsFit(v);
 
 /** The asset each chain's pool holds: the Solana pool wrapped SOL, the EVM pools native ETH, the NEAR vault USDC. */
@@ -229,6 +239,7 @@ const stateOp = by("kind", {
   hop: op(lit("hop"), HOP),
   return: op(lit("return"), RETURN),
   restore: op(lit("restore"), RESTORE),
+  pool_deposit: poolDepositOp,
 });
 
 const state = obj(
