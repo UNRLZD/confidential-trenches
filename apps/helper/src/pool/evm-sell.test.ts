@@ -1395,6 +1395,18 @@ test("a withdraw repeat whose first send the lane's replacement took the nonce o
   assert.equal(sends(r.x).length, 3, "the withdraw sent again");
 });
 
+test("a withdraw whose replacement was sent but whose first send landed (status 1 on both) keeps its nullifier: the repeat gets the first hash, nothing sent again", async () => {
+  const fee = withdrawFee();
+  const deadlineMs = NOW + 300_000; // withdrawData's
+  const data = withdrawData(fee, 0x86n, NOW + 500_000);
+  const r = await stuck((s) => s.carry({ pool: POOL, data: withdrawData(fee, 0x86n), epoch: NOW }), deadlineMs, { base: 2n * BASE });
+  assert.equal(r.replaced, 2, "the lane's replacement at 7");
+  r.opts.receipt = (h: string) => (h === r.hash ? receiptOf("0x1") : null); // both providers (b reads a's answers)
+  const again = await r.s.carry({ pool: POOL, data, epoch: NOW });
+  assert.equal((again.body as { hash: string }).hash, r.hash, JSON.stringify(again.body));
+  assert.equal(sends(r.x).length, 2, "landed: never sent again");
+});
+
 test("a stuck replacement whose maxFeePerGas still covers 2 x base + tip but whose tip is under the providers' is raised again; at their tip it is left", async () => {
   const deadlineMs = Number(SELL.deadline) * 1000;
   const r = await stuck((s) => s.sell(body()), deadlineMs, { base: 2n * BASE });

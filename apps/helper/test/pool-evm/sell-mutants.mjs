@@ -160,7 +160,9 @@ export const MUTANTS = [
   [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
   // card helper-judge-two-agree: reverted only on both providers' receipts in one block, never on one provider's
   [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (status.includes("0x0")) return "reverted";', T, "a sale that reverted or was dropped"],
-  [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a sale that reverted or was dropped"],
+  // a landed send is never read dropped, whatever the lane's replacement did (card helper-judge-two-agree: with the revert
+  // on both providers, the success line matters only for a send the lane replaced)
+  [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "whose first send landed"],
   [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "", T, "a sale that reverted or was dropped"],
   // the drop margin: a clock up to 60 s ahead of the chain's never frees (W, nonce) while the first sale can land
   [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "    if (Math.floor(now()) <= deadlineMs) return \"waiting\";", T, "a dropped sale with our clock 59 s ahead"],
