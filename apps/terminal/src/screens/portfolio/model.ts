@@ -160,6 +160,9 @@ export interface Row {
   symbol: string;
   name: string;
   units: string;
+  /** The token's own decimals as the signing page's state names them (positions[].decimals, kit 1.8; card
+   *  signpage-state-holdings); null from a page that names none. Never the helper's: a sell is sized from it. */
+  decimals: number | null;
   cost: bigint;
   /** Null: no price (S10.4). */
   value: bigint | null;
@@ -221,6 +224,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     symbol: m?.symbol ?? p.token.slice(0, 6),
     name: m?.name ?? "",
     units: p.amount,
+    decimals: p.decimals ?? null,
     cost,
     value,
     pnl,
@@ -289,6 +293,16 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
   if (!s) return { view: offline ? "S10.2" : "S10.1", offline, rows: [], totals: null, pools: { view: offline ? "offline" : "loading", rows: [] } };
   const rows = sortRows(s.positions.map((p) => rowOf(p, d, s.ops, now)));
   return { view: rows.length ? "S10.3" : "S10.2", offline, rows, totals: totals(s, rows, d.closed, now), pools: pools(s, offline) };
+}
+
+/** The open position the trade box's Sell side sells (card app-sell-mount): the row of `rows` on `chain` whose token is
+ *  `token`, holding more than nothing; null otherwise. Never another chain's row of the same address. An EVM address
+ *  matches in any case (its checksum is case alone); a Solana mint (case-sensitive base58) and a NEAR account id (lower
+ *  case by rule, apps/helper/src/withdraw/checks.ts) match exactly. */
+export function heldOf(rows: readonly Row[], chain: Chain, token: string): Row | null {
+  if (!token) return null;
+  const same = chain === "solana" || chain === "near" ? (t: string) => t === token : (t: string) => t.toLowerCase() === token.toLowerCase();
+  return rows.find((r) => r.chain === chain && same(r.token) && /^[0-9.]+$/.test(r.units) && /[1-9]/.test(r.units)) ?? null;
 }
 
 /** The one balance the app draws: Portfolio's Cash (totals(); design-lock-r5 S10.3 shows Cash in the header), for the

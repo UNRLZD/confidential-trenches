@@ -1,8 +1,8 @@
 import type { Chain, PoolChain, SignpageClientSnapshot } from "@blindfill/kit";
 import { createContext, useContext } from "react";
 import { useSignpage } from "../../shell/signpage-frame.tsx";
-import { balanceOf, NO_DATA } from "./model.ts";
-import type { PortfolioData } from "./model.ts";
+import { balanceOf, heldOf, NO_DATA, portfolio } from "./model.ts";
+import type { PortfolioData, Row } from "./model.ts";
 
 // What Portfolio and Activity read and do. The kit gives the signing page's state (cash, wallets, open positions and
 // every operation's stage and txs). It has no call yet for the rest of PortfolioData (model.ts: the market reads, the
@@ -48,4 +48,12 @@ export function usePortfolioSource(act: (a: PortfolioAction) => void): Portfolio
 export function useBalance(snapshot: SignpageClientSnapshot): bigint | null {
   const fixture = useContext(Fixture);
   return balanceOf(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now());
+}
+
+/** The open position on `chain` of `token` in `snapshot` (heldOf), from the same rows Portfolio draws, so the trade box's
+ *  Sell side sells the number Portfolio shows; null with no snapshot (signed out) or no such position. */
+export function useHeld(snapshot: SignpageClientSnapshot | null, chain: Chain, token: string): Row | null {
+  const fixture = useContext(Fixture);
+  if (!snapshot) return null;
+  return heldOf(portfolio(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now()).rows, chain, token);
 }
