@@ -290,15 +290,17 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
   /**
    * One storage_deposit (registration_only) of `account` on `token`, read until its outcome is known or `untilMs`.
    * The token watch's hold is the relayer queue's guard, read right before the signing, so no await between the check
-   * and the send lets a hold start unseen; `held` true: nothing was signed.
+   * and the send lets a hold start unseen; `held` true: nothing was signed. `live`, read in the same guard, is whether
+   * the caller's claim is still the current one: a claim another poll replaced meanwhile (its done() read the account
+   * registered) signs nothing (delta review 5, P3-1).
    */
-  const sendRegistration = async (token: string, account: string, untilMs: number, onTx: (tx: TxRef) => void): Promise<{ o: TxOutcome; tx: TxRef | undefined; held?: true }> => {
+  const sendRegistration = async (token: string, account: string, untilMs: number, onTx: (tx: TxRef) => void, live?: () => boolean): Promise<{ o: TxOutcome; tx: TxRef | undefined; held?: true }> => {
     const sentTx: TxRef[] = [];
     let o: TxOutcome;
     try {
       const a = await relayer.send(
         { kind: "call", receiver: token, method: "storage_deposit", args: JSON.stringify({ account_id: account, registration_only: true }), gas: REGISTER_GAS, deposit: REGISTRATION_YOCTO },
-        async () => ((await holds()) ? "in_flight" : null),
+        async () => ((await holds()) || (live !== undefined && !live()) ? "in_flight" : null),
         (tx) => {
           sentTx.push(tx);
           onTx(tx);
@@ -473,7 +475,7 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
       // the claim's identity: every later write is on this claim only
       const claim = randomUUID();
       store.putSigner({ ...rec, own: { id: claim, receiver: signer, state: "pending", tx: null } });
-      const { o, tx, held } = await sendRegistration(usdc, signer, untilMs, (t) => void cas(signer, "own", claim, (g, r) => ({ ...r, own: { ...g, tx: t } })));
+      const { o, tx, held } = await sendRegistration(usdc, signer, untilMs, (t) => void cas(signer, "own", claim, (g, r) => ({ ...r, own: { ...g, tx: t } })), () => idOf(store.signer(signer).own) === claim);
       if (held === true) {
         freeOwn(signer, claim); // nothing signed: free, no backoff
         return no("in_flight");
@@ -507,16 +509,19 @@ export function createIntentsCarry(deps: IntentsDeps): IntentsCarry {
     if (ownDone.has(signer)) return null;
     // read registered once, on both providers: done for good, a restart included (review PROBE-4)
     if (store.signer(signer).own?.read === true) {
+      store.paid(signer); // an owed record a done() left when its removal failed (delta review 5, P3-2)
       ownDone.add(signer);
       return null;
     }
     /** Registered on both: its record kept as read (never cleared, so no later claim pays again), owed no more. */
     const done = () => {
-      ownDone.add(signer);
       // a record of its own identity: a claim still out leaves it alone (its writes are on its own identity)
       const r = store.signer(signer);
       store.putSigner({ ...r, own: { id: randomUUID(), receiver: signer, state: "landed", tx: r.own?.tx ?? null, read: true } });
+      // done in memory only once its owed record is gone: a removal that throws is tried again by the next pass, which
+      // reads the read record (delta review 5, P3-2)
       store.paid(signer);
+      ownDone.add(signer);
       return null;
     };
     const owed = store.owed(signer);

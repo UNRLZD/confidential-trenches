@@ -2466,3 +2466,89 @@ test("R4-N8: an intent that spent no reservation and whose send throws before it
   s.store.close();
   assert.deepEqual([after.sent, after.taking, after.registration], [before.sent, [], before.registration]);
 });
+
+// ---- delta review 5 ----
+
+test("R5-1 (P3-1): U's claim replaced by another poll's done() while it waits in the relayer queue's guard signs nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const base = relayer((a) => {
+    if (a.method === "storage_deposit") chain.storage.set(`${a.receiver}/${JSON.parse(a.args).account_id}`, "registered");
+    return "ran";
+  });
+  const g = gateP();
+  let heldCalls = 0;
+  const carry = createIntentsCarry({
+    vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: base,
+    held: async () => {
+      if (++heldCalls === 2) await g.p; // A's queue guard, after its claim is written
+      return false;
+    },
+    now: () => NOW, resolveEveryMs: 1,
+  });
+  const u = hex();
+  await seeSigner(store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const a = carry.registerSeen(u);
+  await until(() => heldCalls === 2);
+  assert.equal(store.signer(u).own?.state, "pending", "A's claim written");
+  chain.storage.set(`${USDC}/${u}`, "registered"); // registered by someone else meanwhile
+  assert.equal(await carry.registerSeen(u), "registered", "B reads U registered: done");
+  assert.equal(store.signer(u).own?.read, true);
+  g.open();
+  assert.equal(await a, "registered");
+  const own = store.signer(u).own;
+  store.close();
+  assert.equal(regsOf({ r: base }), 0, "no storage_deposit signed for a U already read registered");
+  assert.deepEqual([own?.read, own?.tx], [true, null], "the read record stands, with no transaction of ours");
+});
+
+test("R5-2 (P3-2): a done() whose owed-record removal throws once leaves no owed record: the next sweep removes it, and a restart finds none", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const paid = s.store.paid;
+  let failOnce = true;
+  s.store.paid = (x: string) => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error("EIO");
+    }
+    paid(x);
+  };
+  await s.carry.registerSeen(u);
+  assert.equal(s.store.signer(u).own?.read, true, "U read registered: its read record written");
+  s.clock.ms = NOW + 10 * SWEEP_MS;
+  await s.carry.sweep();
+  assert.equal(s.store.owed(u), null, "the next sweep removed it");
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "registered"]]) } });
+  t.clock.ms = NOW + 100 * SWEEP_MS;
+  await t.carry.sweep();
+  const owing = t.store.owing().length;
+  const sends = regsOf(s) + regsOf(t);
+  t.store.close();
+  assert.deepEqual([owing, sends], [0, 1], "nothing owed after a restart; the one registration only");
+});
+
+test("R5-2 (P3-2): an owed record beside a read record (left by an earlier release) is removed at the first read, a restart included", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const paid = s.store.paid;
+  s.store.paid = () => {
+    throw new Error("EIO");
+  };
+  await s.carry.registerSeen(u);
+  s.store.paid = paid;
+  assert.notEqual(s.store.owed(u), null, "left owed beside the read record");
+  s.store.close();
+  const t = setup({ dir: s.dir, chain: { storage: new Map([[`${USDC}/${u}`, "registered"]]) } });
+  assert.equal(await t.carry.registerSeen(u), "registered");
+  const owed = t.store.owed(u);
+  t.store.close();
+  assert.equal(owed, null);
+});
