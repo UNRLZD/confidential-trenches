@@ -26,6 +26,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
+import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-restore-id-reader.answers.json"), "utf8"));
@@ -179,13 +180,31 @@ test("each provider's preflight or reads not what the page needs fails, on that 
   });
 });
 
-test("the committed build in this tree passes as the recorded good answer did (both providers' answers replayed, a fresh random id)", async () => {
+// card held-move-replay-any-build: the tree's build is read with the check's own reader (readBundle over localFetch) and
+// judged with the live rule; of the recorded good answer only the providers' reads (and the ids they read) are kept, so
+// any build of this tree that keeps the rule passes with no re-record, and one that drops a rule fails
+const treeRecord = async (fetchFn = localFetch) => ({ ...answers.good, url: "local build", ...(await readBundle(fetchFn)) });
+
+test("the committed build in this tree passes the live rule, with the recorded providers' reads", async () => {
+  const rec = await treeRecord();
+  assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
+});
+
+test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
+  const copy = await treeRecord(plantedFetch(localFetch, (js) => copyChange(js, Object.values(MARK))));
+  assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
+  assert.notEqual(copy.app.sha384, (await treeRecord()).app.sha384, "another bundle than the tree's");
+  for (const m of MARKERS) {
+    const rec = await treeRecord(plantedFetch(localFetch, (js) => dropRule(js, MARK[m])));
+    assert.equal(rec.app.markers[m], 0, m);
+    assert.deepEqual(BAD(rec), [MARKS], m);
+  }
+});
+
+test("the committed build in this tree passes with both providers' answers replayed and a fresh random id", async () => {
   const state = {};
   const rec = await probe(SIGN_ORIGIN, localFetch, fakeRpc(state));
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
-  assert.equal(rec.connect_src, answers.good.connect_src, "the CSP as recorded");
-  assert.equal(rec.app.sha384, answers.good.app.sha384, "the bundle as recorded");
-  assert.deepEqual(rec.app.markers, answers.good.app.markers);
   assert.match(rec.ids.unused, /^[0-9a-f]{64}$/);
   assert.notEqual(rec.ids.unused, REGISTERED);
   assert.equal((await probe(SIGN_ORIGIN, localFetch, fakeRpc(), undefined, "cd".repeat(32))).ids.unused, "cd".repeat(32));
