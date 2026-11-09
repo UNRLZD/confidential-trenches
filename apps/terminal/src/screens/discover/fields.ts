@@ -9,7 +9,7 @@
 // a field no source has is null (or absent) and draws "—". A trade count has two sides: one Jupiter leaves out reads 0
 // when the other is there, and both unknown is null (the helper's `sides`, apps/helper/src/data/solana/lists.ts).
 
-/** A chain id as 06b's stream names it; this card draws Solana only. */
+/** A chain id as 06b's stream names it. */
 export type MarketChain = "solana" | "base" | "robinhood" | "near";
 
 /** 06b §6.1 `Row` (v1.15 to v1.22 additions included). Every optional field may also be null. */
@@ -62,9 +62,11 @@ export interface MarketRow {
   sells_1h?: number | null;
 }
 
-/** 06b §6.1 `snapshot`: `trending` equals `trending_1h`; `graduating` highest `curve_bps` first. */
+/** 06b §6.1 `snapshot`: `trending` equals `trending_1h`; `graduating` highest `curve_bps` first. `chain` is "all" for
+ *  the browser's merge of every chain's served lists (09-design-brief S1 Chain filter: "`All` merges the four chains'
+ *  served lists in the browser"; data.ts readAllLists), each row still naming its own chain. */
 export interface MarketSnapshot {
-  chain: MarketChain;
+  chain: MarketChain | "all";
   lists: {
     new: MarketRow[];
     trending: MarketRow[];

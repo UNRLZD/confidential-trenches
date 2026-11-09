@@ -1,13 +1,12 @@
 // The top bar's search model (card app-header-search-chain): find a token by its symbol, its name or its address in the
-// lists already read (Discover's read, ../screens/discover/data.ts readLists; the rail's store, ../screens/token/rail.ts),
-// on this device with no read per key. A pasted address the lists do not hold goes to the token read
+// lists already read (every chain's lists, Discover's read: ../screens/discover/data.ts sharedAllLists, card
+// app-chains-evm), on this device with no read per key. A pasted address the lists do not hold goes to the token read
 // (../screens/token/source.ts loadToken) for each chain with data whose address form it fits. The chain filter is All
 // plus the chains the lists hold. Display only: nothing here feeds a signature.
 import { TOKEN_CHAINS } from "../routes/routes.ts";
-import { REFRESH_MS } from "../screens/discover/data.ts";
+import { REFRESH_MS, sharedAllLists } from "../screens/discover/data.ts";
 import type { MarketChain, MarketRow, MarketSnapshot } from "../screens/discover/fields.ts";
 import { columnRows } from "../screens/discover/model.ts";
-import { RAIL, sharedLists } from "../screens/token/rail.ts";
 
 /** The filter: every chain, or one. */
 export type ChainPick = "all" | MarketChain;
@@ -116,10 +115,14 @@ export const idleRows = (s: MarketSnapshot, pick: ChainPick): MarketRow[] =>
 
 type RailView = { data: { status: string; snapshot?: MarketSnapshot }; nowMs: number };
 
+/** The rail's store as never ready: the rail reads Solana's lists alone (rail.ts), so the search keeps to its own read of
+ *  every chain's. */
+const NO_RAIL = (): RailView => ({ data: { status: "loading" }, nowMs: 0 });
+
 export interface ListsDeps {
-  /** The rail's store as drawn now (rail.ts RAIL.get). */
+  /** The rail's store as drawn now (rail.ts RAIL.get); none by default, since the rail reads Solana's lists alone. */
   rail?: () => RailView;
-  /** One lists read, shared while in flight (rail.ts sharedLists). */
+  /** One read of every chain's lists, shared while in flight (data.ts sharedAllLists). */
   read?: () => Promise<MarketSnapshot>;
   now?: () => number;
 }
@@ -130,8 +133,8 @@ export interface ListsDeps {
  * flight. It reads only when asked (the search opening), never on a timer: no second poll.
  */
 export function listsSource(deps: ListsDeps = {}) {
-  const rail = deps.rail ?? (RAIL.get as () => RailView);
-  const read = deps.read ?? (() => sharedLists());
+  const rail = deps.rail ?? NO_RAIL;
+  const read = deps.read ?? (() => sharedAllLists());
   const now = deps.now ?? Date.now;
   let own: { s: MarketSnapshot; at: number } | null = null;
   const fresh = (at: number) => now() - at < REFRESH_MS;
@@ -159,5 +162,5 @@ export function listsSource(deps: ListsDeps = {}) {
 
 export type ListsSource = ReturnType<typeof listsSource>;
 
-/** The app's one source. */
+/** The app's one source: every chain's lists (card app-chains-evm), read when the search opens. */
 export const SEARCH_LISTS = listsSource();

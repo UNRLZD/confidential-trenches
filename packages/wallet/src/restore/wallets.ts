@@ -83,7 +83,9 @@ export type HistoryReader = (chain: HistoryChain, address: string) => Promise<bo
  * - Throws when it cannot tell (after its retries): step 5 counts the id as failed, never as unused.
  */
 export type IdState = "money" | "used" | "unused";
-export type IdReader = (id: string) => Promise<IdState>;
+/** `i`: the id's deposit index (restoreDepositIds always gives it), for a reader that reads more than the id itself (a
+ *  pool deposit's U_X on its own chain). */
+export type IdReader = (id: string, i?: number) => Promise<IdState>;
 
 /** A fresh wallet the restore found: its arm (l, j), the note whose withdrawal made it, its path and address. */
 export type RestoredWallet = { c: Chain; l: bigint; j: number; note: string; path: string; address: string; history: HistoryChain[]; returnNote: string | null };
@@ -250,7 +252,7 @@ export async function restoreDepositIds(
       const id = win.get(i)!;
       let state: unknown;
       try {
-        state = await holds(id);
+        state = await holds(id, i);
         if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");
       } catch (e) {
         // the pair disagrees at one block: one of them is wrong, so nothing either says is taken and the restore stops

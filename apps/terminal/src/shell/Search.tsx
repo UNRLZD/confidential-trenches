@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode, Ref, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
@@ -10,6 +10,7 @@ import { rowView } from "../screens/discover/model.ts";
 import { chainOf } from "../screens/market/pads.ts";
 import { loadToken } from "../screens/token/source.ts";
 import type { TokenData } from "../screens/token/source.ts";
+import { setPick, usePick } from "./chain-pick.ts";
 import { allRows, chainsWithData, idleRows, plan, SEARCH_LISTS } from "./search.ts";
 import type { ChainPick } from "./search.ts";
 import { WORDS } from "./search-words.ts";
@@ -50,16 +51,6 @@ const CHEV_DOWN = <path d="M3 4.5l3 3 3-3" />;
 const BACK = <path d="M7.5 2.5L4 6l3.5 3.5" />;
 
 // ------------------------------------------------------------------------------------------------ the shared state
-/** The chain filter, one for the whole shell (the desktop chip and the phone sheet). */
-let pickNow: ChainPick = "all";
-const pickSubs = new Set<() => void>();
-const setPick = (p: ChainPick) => {
-  pickNow = p;
-  for (const f of pickSubs) f();
-};
-const subPick = (f: () => void) => (pickSubs.add(f), () => void pickSubs.delete(f));
-const usePick = () => useSyncExternalStore(subPick, () => pickNow, () => pickNow);
-
 type Lists = { status: "loading" | "ready" | "error"; snapshot: MarketSnapshot | null; retry: () => void };
 
 /** The lists while `active` (the search open): the ones held at once, then fresh ones (search.ts SEARCH_LISTS). */

@@ -139,7 +139,8 @@ export type ProviderHolds = {
   heldFor(url: string): number;
   heldMs(url: string): number;
   hold(url: string, seconds: number): void;
-  take(url: string, calls: number, background: boolean, sender?: boolean): number;
+  /** `probe`: a keyed URL's identity read (rpc.ts probe), the one draw on PROBE_DAY_SHARE of its day. */
+  take(url: string, calls: number, background: boolean, sender?: boolean, probe?: boolean): number;
   /** True when `url`'s daily budget (Pace day) cannot fit `calls` more today: out for the rest of the UTC day, which is
    *  no wait (review M3 of 424dce1e: a walk counts it down, so every provider failing is 503, never a 429). */
   dayOut(url: string, calls: number): boolean;
@@ -254,6 +255,13 @@ export const KEYED_COST: Readonly<Record<KeyedProvider, Readonly<Record<"evm" | 
 };
 /** The environment name of a company's daily budget (KEYED_DAY), a non-secret whole number of its units. */
 export const keyedDayEnv = (p: KeyedProvider): string => `RPC_DAY_${p.toUpperCase()}`;
+/** The share of a daily budget (Pace day) only the keyed URLs' identity reads (rpc.ts probe) draw: every other draw but a
+ *  pool sender's stops short of it, so a URL whose day the reads spent is still read for /v1/health and never past its
+ *  plan's day (card helper-live-red: live 17:15Z, Base's QuickNode day spent, its probe skipped after the deploy and the
+ *  health named it "unread" until 00:00Z while its key answered). [design: 1%: one identity read per URL each
+ *  KEYED_PROBE_MS is 144 a day, 2,880 credits of QuickNode's 322,580 EVM day (0.9%), 4,320 of its Solana's at 30; a URL
+ *  that does not answer is read each minute and spends the share sooner, its last state then standing.] */
+export const PROBE_DAY_SHARE = 0.01;
 /** A UTC day, the daily budget's window. */
 const DAY_MS = 86_400_000;
 /** How often a helper re-reads the other helpers' day files, and at most how often it writes its own (day-spend.ts):
@@ -347,7 +355,14 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       pending.unref?.();
     }
   };
-  const dayOut = (k: string, p: Pace, calls: number, t: number): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > p.day;
+  // the units a draw may reach: the plan's day for a probe, else the day less the probes' share (PROBE_DAY_SHARE), in
+  // whole calls (a day too small for one keeps none)
+  const dayCap = (p: Pace, probe: boolean): number => {
+    if (p.day === undefined) return Infinity;
+    const cost = p.cost ?? 1;
+    return probe ? p.day : p.day - Math.floor((p.day * PROBE_DAY_SHARE) / cost) * cost;
+  };
+  const dayOut = (k: string, p: Pace, calls: number, t: number, probe = false): boolean => p.day !== undefined && usedToday(k, t) + Math.max(calls, 1) * (p.cost ?? 1) > dayCap(p, probe);
   // a company's URLs share one bucket and one caller wait (Pace group, card rpc-keyed-lists)
   const fill = (url: string, p: Pace) => {
     const t = now();
@@ -359,7 +374,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
     return b;
   };
   return {
-    take(url, calls, background, sender = false) {
+    take(url, calls, background, sender = false, probe = false) {
       const p = pace[url];
       if (p === undefined) return 0;
       const b = fill(url, p);
@@ -368,7 +383,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       // the day's budget (review M2): a draw it cannot fit waits for the next UTC day, so every path asks another
       // provider; a pool sender's few reads are never refused by it (pool/evm.ts pacedEvmRpc waits out what take names)
       const need = Math.max(calls, 1) * (p.cost ?? 1);
-      if (!sender && dayOut(k, p, calls, t)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
+      if (!sender && dayOut(k, p, calls, t, probe)) return Math.max(1, Math.ceil((Math.floor(t / DAY_MS) + 1) * DAY_MS - t));
       const spend = () => {
         if (p.day === undefined) return;
         const day = Math.floor(t / DAY_MS);
@@ -404,7 +419,7 @@ export function providerHolds(now: () => number = () => performance.timeOrigin +
       const p = pace[url];
       if (p === undefined) return 1;
       // a day's budget with no call's room left: none (the swap reads rank it last)
-      if (p.day !== undefined && p.day - usedToday(p.group ?? url, now()) < (p.cost ?? 1)) return 0;
+      if (p.day !== undefined && dayCap(p, false) - usedToday(p.group ?? url, now()) < (p.cost ?? 1)) return 0;
       return fill(url, p).tokens / p.burst;
     },
     paceOf(url) {

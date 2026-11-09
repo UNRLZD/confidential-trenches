@@ -27,8 +27,10 @@ const M = [
   ["M4b reads compared on the first RPC only", "  if (!x || !y || x.blockHash !== y.blockHash || x.nonce !== y.nonce || x.free !== y.free || x.usdc !== y.usdc || x.registered !== y.registered || x.gasPrice !== y.gasPrice) return null;", "  if (!x) return null;"],
   ["M5 a typed account on resume signs anew to it", "  const had = op.follow.out;", "  const had = to === null ? op.follow.out : undefined;"],
   ["M5b another receiver, the payload rule's receiver test dropped", "args: { receiver_id: to, amount: amount.toString() }", 'args: { receiver_id: "bob.testnet", amount: amount.toString() }', " || last.args.receiver_id !== to", ""],
-  ["M6 amount = U's whole USDC", "const calls = moveCalls(typed, read.usdc - 1n,", "const calls = moveCalls(typed, read.usdc,"],
-  ["M6b whole USDC, the payload bound loosened too", "const calls = moveCalls(typed, read.usdc - 1n,", "const calls = moveCalls(typed, read.usdc,", "amount > usdc - 1n", "amount > usdc"],
+  // the unit a move out leaves is ID_KEEP (card wallet-restore-reads-ux: the restore's pool scopes read an id at it as moved out)
+  ["M6 amount = U's whole USDC", "const calls = moveCalls(typed, read.usdc - ID_KEEP,", "const calls = moveCalls(typed, read.usdc,"],
+  ["M6b whole USDC, the payload bound loosened too", "const calls = moveCalls(typed, read.usdc - ID_KEEP,", "const calls = moveCalls(typed, read.usdc,", "amount > usdc - ID_KEEP", "amount > usdc"],
+  ["M6c the kept unit 0 (whole USDC in the calls, the payload bound and the record at once)", "export const ID_KEEP = 1n;", "export const ID_KEEP = 0n;"],
   ["M7 U's key not zeroed", "          k.secretKey.fill(0);\n", ""],
   ["M8 no seed lock", "    const tx = await seedLock(async () => {", `    const tx = await ${SELF}(async () => {`],
   // the move built as the rule would seal it, the rule never called (card signers-own-bytes: the rule's call returns the sealed move)

@@ -1067,6 +1067,12 @@ test("a request id seen before never runs twice: answered from its ops record, w
   // (the sell's own sends: the first run's rent back may still be sending its own)
   const sellSends = () => w.c.calls.filter((c) => c.method === "sendTransaction" && base58.encode(base64.decode(c.params[0] as string).subarray(1, 65)) === sig).length;
   const sendsBefore = sellSends();
+  // a reload's ask comes after the first run let go of its request's lock: the record reads filled a few turns before
+  // that, and an ask in between is the same id while it runs, id_reused (the next test's case; under load this test
+  // asked there, CI run 42663378358, and failed 1 in 5 on a loaded Mac at main 681147d0)
+  const held = async () => ((await locks.query()).held ?? []).some((l) => l.name === tradeLock("t1"));
+  await until(async () => !(await held()));
+  assert.equal(await held(), false, "the first run let go of its request's lock");
   const again = poolSellKind(kindHost(w), locks)(ASK, ctxOf("t1", "aa")) as KindAnswer;
   await again.after;
   assert.deepEqual(again.answer(), { result: { stage: "filled", txs: [{ chain: "solana", hash: sig }] } });
