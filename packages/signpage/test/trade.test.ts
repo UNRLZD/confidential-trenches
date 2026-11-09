@@ -84,7 +84,8 @@ function tabLocks() {
   const locks = {
     request: (name: string, opts: LockOptions, fn: (l: Lock | null) => Promise<unknown>) =>
       navigator.locks.request(name, opts, (l) => Promise.race([fn(l), dead.then(() => undefined)])),
-  } as unknown as Pick<LockManager, "request">;
+    query: () => navigator.locks.query(),
+  } as unknown as Pick<LockManager, "request" | "query">;
   return { locks, die };
 }
 
@@ -853,6 +854,8 @@ test("card pool-answer-unknown: a provider read the kit makes before any leg is 
       assert.deepEqual((out.answer as { error: unknown }).error, { code: "down" }, at);
       assert.deepEqual(out.stages, ["refused"], at);
       assert.equal(q.opened(), 0, `${at}: the seed is never opened, so no leg is signed`);
+      // the mark goes in the trade's end, after its op write (unmark, in the finally): wait for that end
+      await q.idle();
       assert.equal(mark(s, 0), undefined, `${at}: the wallet's mark goes`);
     }
   }
@@ -984,9 +987,12 @@ test("a sell with one leg failed and one unknown never stays sent: each leg's en
 
 test("the page settles an owed trade at each state read, on the store bounded as a pick's is (re-check of 91fb908e, P3)", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-  assert.match(main, /if \(s\.signed_in\) void settleTradesIfDue\(\);/, "the state read runs the due settle");
-  assert.match(main, /tradeSettleDue\(st, navigator\.locks\)/, "due is read from the store");
-  assert.match(main, /settleTradeOps\(timedStore\(s, TRADE_STORE_MS\), navigator\.locks, releaseTradeDeps\(\)\.providers\)/, "the settle's store is timed");
+  assert.match(main, /if \(s\.signed_in\) void settleTrades\(true\);/, "the state read runs the due settle");
+  // one pass at a time, the due read included (re-check of efd3845d, P3-b): the guard is set before the read, and both
+  // the read and the pass go through the timed store
+  assert.match(main, /return \(tradeSettling \?\?= open\(\)\s*\.then\(async \(s\) => \{\s*const st = timedStore\(s, TRADE_STORE_MS\);/, "the guard is set before the due read; the store is timed");
+  assert.match(main, /if \(!ifDue \|\| \(await tradeSettleDue\(st, navigator\.locks\)\)\) await settleTradeOps\(st, navigator\.locks, releaseTradeDeps\(\)\.providers\);/, "due and the pass read the timed store");
+  assert.doesNotMatch(main, /tradeSettleDue\((?!st,)/, "no due read on another store");
   assert.equal(main.match(/settleTradeOps\(/g)?.length, 1, "one settle call, through settleTrades");
   assert.doesNotMatch(main, /set(Interval|Timeout)\([^)]*settleTrades/, "no timer runs it");
 });
@@ -1062,4 +1068,24 @@ test("due is exactly what a pass acts on: a dead tab's open op with no tx is due
   assert.equal((s.m.ops!.get("dead-pending") as { stage: string }).stage, "refused");
   s.m.ops!.set("old-sent", { kind: "sell", sha: "x", stage: "sent", txs: [{ chain: "solana", hash: "h" }], created_ms: 1 });
   assert.equal(await tradeSettleDue(s, navigator.locks), false, "no pass changes it, so none is due");
+});
+
+test("the due probe reads held locks and never takes a trade's lock (re-check of efd3845d, P3-a)", async () => {
+  const pos = { state: "IN_POSITION" as const, token: MINT };
+  const s = store({ [armKey("sol", L, 0)]: rec(0, 1_000n, pos) });
+  const held = { [W[0]!.address]: 3_000n };
+  const p = page(s, { legState: () => "unknown" }, [provider(held), provider(held)]);
+  const a = await p.ask(sell("3000"));
+  await p.idle();
+  p.die();
+  const asked: string[] = [];
+  const spy = { request: (n: string, o: LockOptions, f: (l: Lock | null) => Promise<unknown>) => (asked.push(n), navigator.locks.request(n, o, f)), query: () => navigator.locks.query() } as unknown as LockManager;
+  assert.equal(await tradeSettleDue(s, spy), true, "a dead tab's mark is due");
+  assert.deepEqual(asked, [], "no lock is requested by the probe");
+  // a running trade's lock, held by another tab, reads as live
+  let free!: () => void;
+  void navigator.locks.request(tradeLock(a.id), { mode: "exclusive" }, () => new Promise<void>((r) => (free = r)));
+  await tick();
+  assert.equal(await tradeSettleDue(s, spy), false, "a held trade lock is live");
+  free();
 });

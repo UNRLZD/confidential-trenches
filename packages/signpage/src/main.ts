@@ -259,7 +259,7 @@ else {
         if (s.signed_in) void testnet?.stateRead();
         // a trade no tab is running that the store shows open or marked (any tab's: a leg unknown, a lost write, a
         // closed tab) is settled at each state read until none is left (src/trade.ts tradeSettleDue), no reload needed
-        if (s.signed_in) void settleTradesIfDue();
+        if (s.signed_in) void settleTrades(true);
         const r = s.signed_in && hasSolana ? rent.get() : null;
         // the ready list and the notes in one turn of the queue (card pool-ready-no-flicker): a remake's swap never
         // falls between them, so a note that stays ready never reads as ready "0". A failed notes read is kept and
@@ -756,22 +756,19 @@ function notesMoved(e: WalletEvent): void {
 }
 
 // The trade ops a closed page or an unknown leg left open, settled from their wallets' marks (src/trade.ts
-// settleTradeOps): one pass at a time, on the store bounded as a pick's is (timedStore), on its own paced pair.
+// settleTradeOps): one pass at a time, on the store bounded as a pick's is (timedStore), on its own paced pair. At a state
+// read (`ifDue`) the pass runs only when the store shows one due (tradeSettleDue); that read is inside the same one-pass
+// guard and on the same timed store, so a slow store never piles reads up (re-check of efd3845d, P3-b).
 let tradeSettling: Promise<void> | null = null;
-function settleTrades(): Promise<void> {
+function settleTrades(ifDue = false): Promise<void> {
   if (framed || !globalThis.navigator?.locks) return Promise.resolve();
   return (tradeSettling ??= open()
-    .then((s) => settleTradeOps(timedStore(s, TRADE_STORE_MS), navigator.locks, releaseTradeDeps().providers))
+    .then(async (s) => {
+      const st = timedStore(s, TRADE_STORE_MS);
+      if (!ifDue || (await tradeSettleDue(st, navigator.locks))) await settleTradeOps(st, navigator.locks, releaseTradeDeps().providers);
+    })
     .catch(() => {})
     .finally(() => (tradeSettling = null)));
-}
-
-function settleTradesIfDue(): Promise<void> {
-  if (framed || !globalThis.navigator?.locks || tradeSettling) return Promise.resolve();
-  return open()
-    .then((st) => tradeSettleDue(st, navigator.locks))
-    .then((due) => (due ? settleTrades() : undefined))
-    .catch(() => {});
 }
 
 // Where a sign-in landed (words.ts): the backup screen for a no-PRF seed this sign-in made, else signed in on the seed

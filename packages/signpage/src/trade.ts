@@ -450,22 +450,25 @@ type LegEnd = "filled" | "failed" | "not_landed";
 
 /**
  * Whether a settle pass is due (re-check of 54cf7a29): the store holds a buy or sell no tab is running that is not
- * settled, whose trade lock is free (probed ifAvailable): a wallet's mark, or an op still open (pending, signed, sent)
+ * settled, whose trade lock no tab holds (locks.query): a wallet's mark, or an op still open (pending, signed, sent)
  * with no mark and no tx, which a pass refuses. Exactly what a pass acts on, so a record no pass changes (an open op
  * with txs and no mark, written before card app-sell-mount) never makes one due at every read.
  * Read from the store every tab shares, so a trade one tab left (closed, a leg unknown, a lost write, a failed mark
  * read) is due in every other; a running trade holds its lock and is its own to end. src/main.ts runs settleTradeOps at
  * a state read when it is due.
  */
-export async function tradeSettleDue(store: TradeStore, locks: Locks): Promise<boolean> {
+export async function tradeSettleDue(store: TradeStore, locks: Pick<LockManager, "query">): Promise<boolean> {
   const ops = new Set((await armRecords(store, "sol")).flatMap((r) => (r.rec.inflight ? [r.rec.inflight.op] : [])));
   for (const k of await store.keys("ops")) {
     if (ops.has(k)) continue;
     const rec = (await store.get("ops", k)) as { kind?: unknown; stage?: unknown; txs?: unknown } | undefined;
     if (rec && (rec.kind === "buy" || rec.kind === "sell") && ["pending", "signed", "sent"].includes(String(rec.stage)) && !(Array.isArray(rec.txs) && rec.txs.length > 0)) ops.add(k);
   }
-  for (const op of ops) if (await locks.request(tradeLock(op), { mode: "exclusive", ifAvailable: true }, async (l) => l !== null)) return true;
-  return false;
+  if (ops.size === 0) return false;
+  // the held names, as pool-sell.ts settleDeadSellOps reads them: a probe that took a dead op's lock, outside
+  // TRADE_PICK_LOCK, could make a pick's own settleDeadMarks read that op as live (re-check of efd3845d, P3-a)
+  const held = new Set(((await locks.query()).held ?? []).map((l) => l.name));
+  return [...ops].some((op) => !held.has(tradeLock(op)));
 }
 
 /** One ops write, tried three times (50 and 200 ms apart) before it rejects: the op's end is what the app's sell lock
