@@ -3,7 +3,9 @@
 // asked live with Origin SIGN_ORIGIN, a preflight first and then the page's reads; none is edited. Re-recorded (9 Nov
 // 01:51Z) by card wallet-restore-id-reader-wired's fold of its delta review (P3-3), whose MARK gained ids_end,
 // ids_ux_push and seed_per_use_lock, so every record counts them (the fold before it, 00:52Z, added the stall's named
-// reasons, intents.near's mt_tokens_for_owner and the final block header):
+// reasons, intents.near's mt_tokens_for_owner and the final block header). Re-recorded again (9 Nov 03:48Z) by card
+// wallet-id-reader-paced, whose MARK gained busy_wait and pair_wrong, each record as below from that card's tree (the
+// mutants built in a worktree of its commit with its own install, whose fresh build matched the committed one):
 // - good: that card's build (index.html, public/app.js and public/_headers at its branch, --local): PASS;
 // - bad_main_bundle: main's build before it (610143c2's index.html, public/app.js and public/_headers, run with
 //   --local --root <that folder>): FAIL on the markers alone, the walk's reach in it and none of the IdReader's rules;
@@ -18,6 +20,20 @@
 // - bad_catch_done: this card's build with step 5's catch swallowing its throw (`.catch(() => {})`, the review's
 //   mutant B3: a step 5 that throws would end the run done), built and run with --local --root <that folder>: FAIL on
 //   the markers alone, ids_catch and ids_end at 0;
+// Re-recorded again (9 Nov 04:51Z) by that card's fold of its review (P2-3), whose MARK gained id_keep and id_signout
+// and whose busy_wait and pair_wrong bind more, each record as above from the fold's commit 648d10c2 (its mutants built
+// in a worktree of that commit with its own install, whose fresh build matched the committed one); bad_pair_guard
+// counts id_keep 0 as well, since the keep is bound with readId in one pattern. Re-recorded again (9 Nov 05:47Z) by
+// its delta review 2 fold (P1: pacedFetch's deadline from the slot on, busy_wait binding it), the same way, from the fold's
+// tree; the live SIGN_HOST now carries the wired IdReader's markers, so bad_live_before fails on the card's four alone.
+// Re-recorded again (9 Nov 06:23Z) by its delta review 3 fold (P2-1: only the queue's last slot given back; P2-2:
+// busy_wait binds the five requestSignal sites and pacedNearRpc), the same way.
+// - bad_busy_guard and bad_pair_guard (card wallet-id-reader-paced): this card's build with one guard planted in the
+//   IdReader's source, built and run with --local --root <that folder>: busy_guard asks the busy wait only when more
+//   than one try is allowed (`if (b !== null && o.tries > 1)` in asked: the page's default tries would still wait, so
+//   the guard is one a test passes), pair_guard concludes a disagreement only when an indexer is given (`if (ok.length
+//   === 2 && ok[0]!.x !== ok[1]!.x && opts.indexer !== undefined)` in readId: the page gives none, so one provider's
+//   word would read the lane on); each FAIL on the markers alone, its own marker at 0;
 // - and the good record with another script's integrity, each marker gone, a provider out of the CSP, and each provider's
 //   preflight or reads unknown, wrong, failed or with no CORS for the page: each FAIL.
 import assert from "node:assert/strict";
@@ -25,7 +41,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
+import { countOf, judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -88,7 +104,7 @@ test("the recorded good answer (the card's build and both providers' real reads)
 test("main's build before the IdReader was wired (the walk's reach, none of the IdReader's rules) fails, on the markers alone", () => {
   assert.equal(answers.bad_main_bundle.url, "local build of main-610143c2");
   assert.deepEqual(BAD(answers.bad_main_bundle), [MARKS]);
-  assert.equal(ID_MARKERS.length, 16);
+  assert.equal(ID_MARKERS.length, 20);
   for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], m.startsWith("reach_") ? 1 : 0, m);
 });
 
@@ -101,6 +117,16 @@ test("this card's build with step 5's catch swallowing its throw (the review's m
   assert.equal(answers.bad_catch_done.url, "local build of catch-mutant");
   assert.deepEqual(BAD(answers.bad_catch_done), [MARKS]);
   for (const m of MARKERS) assert.equal(answers.bad_catch_done.app.markers[m], m === "ids_catch" || m === "ids_end" ? 0 : 1, m);
+});
+
+test("this card's build with a guard planted on the busy wait, or on the pair's disagreement, fails, on that marker alone", () => {
+  for (const [key, marker] of [["bad_busy_guard", "busy_wait"], ["bad_pair_guard", "pair_wrong"]]) {
+    assert.equal(answers[key].url, `local build of ${key.slice(4).replace("_", "-")}`, key);
+    assert.deepEqual(BAD(answers[key]), [MARKS], key);
+    // the pair's guard sits in readId, which the IdReader's keep is bound with (id_keep shares its pattern)
+    const zero = key === "bad_pair_guard" ? [marker, "id_keep"] : [marker];
+    for (const m of MARKERS) assert.equal(answers[key].app.markers[m], zero.includes(m) ? 0 : 1, `${key} ${m}`);
+  }
 });
 
 test("a provider answering with no CORS (dRPC, every access-control header gone) fails, on its preflight and reads alone", () => {
@@ -184,6 +210,13 @@ test("each provider's preflight or reads not what the page needs fails, on that 
 // judged with the live rule; of the recorded good answer only the providers' reads (and the ids they read) are kept, so
 // any build of this tree that keeps the rule passes with no re-record, and one that drops a rule fails
 const treeRecord = async (fetchFn = localFetch) => ({ ...answers.good, url: "local build", ...(await readBundle(fetchFn)) });
+// card wallet-id-reader-paced: a marker that is a function of the bundle (busy_wait, pair_wrong, id_keep, id_signout)
+// binds a whole run, so its rule is dropped by the one piece of the build that run alone needs: the pace's FastNEAR
+// rate (paceOf), step 5's PairDisagrees rethrow (`${e.message}, to be retried`), step 5's read through keptIdReader
+// (`let{reader:o}=await HV(`) and signedOut's new keep; each zeroes its own marker and no other (measured on the
+// merged build at 124994e7)
+const RULE_OF = { busy_wait: "perSec:.39,burst:8", pair_wrong: ".message}, to be retried`", id_keep: "let{reader:", id_signout: "signedOut:()=>{" };
+const ruleOf = (m) => (typeof MARK[m] === "function" ? RULE_OF[m] : MARK[m]);
 
 test("the committed build in this tree passes the live rule, with the recorded providers' reads", async () => {
   const rec = await treeRecord();
@@ -195,8 +228,9 @@ test("a rebuilt bundle of this tree with an unrelated copy change passes with no
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await treeRecord()).app.sha384, "another bundle than the tree's");
   for (const m of MARKERS) {
-    const rec = await treeRecord(plantedFetch(localFetch, (js) => dropRule(js, MARK[m])));
+    const rec = await treeRecord(plantedFetch(localFetch, (js) => dropRule(js, ruleOf(m))));
     assert.equal(rec.app.markers[m], 0, m);
+    if (m in RULE_OF) for (const o of MARKERS) if (o !== m) assert.equal(rec.app.markers[o], answers.good.app.markers[o], `${m}: ${o} kept`);
     assert.deepEqual(BAD(rec), [MARKS], m);
   }
 });
@@ -301,4 +335,114 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(lock(good[0], good[1], "void 0", good[3]), "seed_per_use_lock"), 0, "the seed not zeroed");
   // the run-long lock: the run's SeedUse hands out one seed held for the run, not a request per use
   assert.equal(n(lock(good[0], good[1], good[2], "f=e=>e(S)"), "seed_per_use_lock"), 0, "a run-long seed");
+});
+
+// card wallet-id-reader-paced (review of 31be751d, P2-3): busy_wait, pair_wrong, id_keep and id_signout on the
+// committed build itself (packages/signpage/public/app.js), each planted bundle that build with one change: a number,
+// a guard, an always-true or never-true compare, a step dropped, a same-shaped dead copy beside a broken real one. The
+// plants find their place by shape, `§` for any name the minifier gave, so they hold from build to build. Each plant
+// counts its marker 0, and the good record with that count fails on the markers alone.
+const APP = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
+const rx = (src) => new RegExp(src.replaceAll("§", String.raw`[\w$]+`), "g");
+// the build with the one place `src` finds (exactly one) rewritten by `to` (its match, its groups)
+const plant = (src, to, text = APP) => {
+  const m = [...text.matchAll(rx(src))];
+  assert.equal(m.length, 1, `${m.length} places of ${src.slice(0, 90)}`);
+  return text.slice(0, m[0].index) + to(m[0][0], m[0].groups ?? {}) + text.slice(m[0].index + m[0][0].length);
+};
+const swap = (src, from, into) => plant(src, (s) => (assert.ok(s.includes(from), `${s.slice(0, 60)} holds ${from}`), s.replace(from, () => into)));
+const planted = (key, text) => {
+  const rec = structuredClone(answers.good);
+  rec.app.markers[key] = countOf(text, MARK[key]);
+  return rec;
+};
+const PACED = ["busy_wait", "pair_wrong", "id_keep", "id_signout"];
+// requestSignal's minified name: `function RS(e,t,n){let r=DL(e,t);return r===null?n:...`
+const RS = /function ([\w$]+)\([\w$]+,[\w$]+,[\w$]+\)\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+\);return \2===null\?/.exec(APP)[1];
+// asked() whole, from its head to its loop's end, and readId() whole: each found by shape
+const ASKED = String.raw`async function (?<n>§)\(§,§,§\)\{let §=§\(§\.name\),§=!§\(§\),§=0,§=0,§=0;for\(;;\)\{[^]*?\.signal\)\}\}\}`;
+const READ = String.raw`async function (?<n>§)\(§\)\{let §=§\(\)===0\?0:1,[^]*?return\[§,!0\]\}\}`;
+
+test("busy_wait, pair_wrong, id_keep and id_signout: this build's bundle holds each once, and the recorded good answer counts each", () => {
+  for (const k of PACED) {
+    assert.equal(countOf(APP, MARK[k]), 1, k);
+    assert.equal(answers.good.app.markers[k], 1, k);
+  }
+});
+
+const PLANTS = [
+  // the pace by value
+  ["busy_wait", "PACE: FastNEAR at 2.5 a second (the rate that earned its 3-minute block)", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "perSec:.39", "perSec:2.5")],
+  ["busy_wait", "PACE: FastNEAR's burst 8 -> 1000", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "burst:8", "burst:1000")],
+  ["busy_wait", "PACE: dRPC at 35 a second", () => swap("drpc:Object\\.freeze\\(\\{perSec:3\\.5,burst:10\\}\\)", "3.5", "35")],
+  ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1,floor:0,holes:\\[\\]\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst,floor:0,holes:\\[\\]\\}", "every:1e3/", "every:0*")],
+  ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{let §=\k<a>\.floor-[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return ${g.b}}`)],
+  ["busy_wait", "the busy hold holds nothing", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§),(?<c>§)\)\{\k<a>\.floor=Math\.max\([^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b},${g.c}){}`)],
+  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`,(?<w>§)=§-§;\k<w>>0&&await new Promise`, ">0&&", ">0&&!1&&")],
+  // delta review 4, P2-1 and P3-1: delta review 3's guard (only the queue's tail given back, by float equality), and a
+  // give-back with no floor, each in every place it could come back
+  ["busy_wait", "an ended wait gives back only the queue's tail (delta review 3's `tat===mine` guard)", () => plant(String.raw`clearTimeout\(§\),(?<g>(?<G>§)\((?<p>§),(?<a>§)\)),§\(§\.reason\)`, (s, g) => s.replace(g.g, `${g.p}.tat===${g.a}&&${g.g}`))],
+  ["busy_wait", "the slot given back comes off tat below the busy hold's floor (a give-back with no floor)", () => plant(String.raw`(?<p>§)\.holes\.pop\(\),\k<p>\.tat=Math\.max\(\k<p>\.tat-\k<p>\.every,\k<p>\.floor\)`, (_, g) => `${g.p}.holes.pop(),${g.p}.tat=${g.p}.tat-${g.p}.every`)],
+  ["busy_wait", "the give-back's tail loop never stops at the busy hold's floor", () => swap(String.raw`>\.001\|\|§\.tat<=§\.floor\)break`, "||", "&&")],
+  ["busy_wait", "the busy hold sets no floor (delta review 3's hold)", () => plant(String.raw`\{(?<h>§)\.floor=Math\.max\(\k<h>\.floor,(?<x>§\+§\+\(\k<h>\.burst-1\)\*\k<h>\.every)\),\k<h>\.tat=Math\.max\(\k<h>\.tat,\k<h>\.floor\)\}`, (_, g) => `{${g.h}.tat=Math.max(${g.h}.tat,${g.x})}`)],
+  ["busy_wait", "a slot given back is taken inside a busy hold", () => swap(String.raw`\|\|(?<k>§)\.holes\[0\]<§\);\)\k<k>\.holes\.shift\(\)`, "||", "&&!1||")],
+  ["busy_wait", "a slot given back is never taken", () => swap(String.raw`if\(§!==void 0\)return §;§\.tat=Math\.max`, "!==void 0", "!==void 0&&!1")],
+  ["busy_wait", "the queue's tail found by float equality (delta review 4: about 1.2% of tails missed)", () => plant(String.raw`Math\.abs\((?<l>§)-\((?<x>§\.tat-§\.burst\*§\.every)\)\)>\.001`, (_, g) => `${g.l}!==${g.x}`)],
+  // delta review 4, P3-2: a given sleep with no clock of its own is refused, never given one per options build
+  ["busy_wait", "a given sleep without its clock is not refused", () => swap(String.raw`if\((?<l>§)!==void 0&&§\.now===void 0\)throw`, "!==void 0&&", "!==void 0&&!1&&")],
+  // delta review 2, P1: the deadline from the slot on, the slot given back
+  ["busy_wait", "an ended wait keeps its slot (none given back)", () => plant(String.raw`clearTimeout\(§\),(?<g>§\(§,§\),)§\(§\.reason\)`, (s, g) => s.replace(g.g, ""))],
+  ["busy_wait", "the slot given back takes no time back", () => swap(String.raw`(?<p>§)\.holes\.pop\(\),\k<p>\.tat=Math\.max\(\k<p>\.tat-\k<p>\.every,\k<p>\.floor\)`, "-", "-0*")],
+  ["busy_wait", "pacedFetch sends the caller's signal with no deadline of its own", () => swap(String.raw`return §\(§,\{\.\.\.§,signal:§\?AbortSignal\.any\(\[§,§\]\):§\}\)`, "signal:", "signal:void 0??")],
+  ["busy_wait", "a reader on a pacedFetch keeps its own deadline (it runs in the queue)", () => swap(String.raw`=\(§,§\)=>§\(§\)\?null:§;function`, "?null:", "?(null,1e4):")],
+  ["busy_wait", "relayRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=(?<nr>§)\((?<u>§),(?<fx>§),§\(\k<fx>,(?<tm>§)\)\);return §\(\{name:§\.name,query:\(`, (s, g) => s.replace(/,[\w$]+\([\w$]+,[\w$]+\)\);return/, `,${g.tm});return`))],
+  // delta review 3, P2-2: each reader's request back to its own 10 s deadline (it runs in the pace queue again)
+  ...[0, 1, 2, 3, 4].map((k) => ["busy_wait", `request ${k + 1} of 5 on requestSignal back to its own 10 s deadline`, () => {
+    const sites = [...APP.matchAll(/signal:([\w$]+)\([\w$]+,[\w$]+(?:,[\w$]+)?\)/g)].filter((m) => m[1] === RS);
+    assert.equal(sites.length, 5, "five requestSignal sites");
+    const m = sites[k];
+    return APP.slice(0, m.index) + "signal:AbortSignal.timeout(1e4)" + APP.slice(m.index + m[0].length);
+  }]),
+  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`return §\(§\(§,§,null\),§\)\}`, (s) => s.replace(",null)", ",1e4)"))],
+  ["busy_wait", "RPC_TIMEOUT_MS 10 s -> 1e9 ms", () => { const to = /function [\w$]+\([\w$]+,[\w$]+=\(\.\.\.[\w$]+\)=>fetch\(\.\.\.[\w$]+\),[\w$]+=([\w$]+)\)\{/.exec(APP)[1]; return swap(String.raw`(?<![\w$.])${to.replace(/[$]/g, "\\$&")}=1e4[,;]`, "1e4", "1e9"); }],
+  ["busy_wait", "pacedRpc marks every rpc paced (none takes a slot)", () => swap(String.raw`\{return §\(§\)&&§\.add\(§\),§\}`, "return ", "return 1||")],
+  ["busy_wait", "the default sleep resolves at once", () => swap(String.raw`\(\)=>\{§\?\.removeEventListener\(` + "`abort`" + String.raw`,§\),§\(\)\},§\),§=\(\)=>\{clearTimeout\(§\),§\(§\.reason\)\};§\?\.addEventListener\(` + "`abort`" + String.raw`,§,\{once:!0\}\)\}\),§=class extends Error\{retryAfterMs`, "()},", "()},0&&")],
+  ["busy_wait", "busyMax by default 60 s -> 6e9 ms (69 days: never met)", () => swap("busyMaxMs\\?\\?6e4", "6e4", "6e9")],
+  ["busy_wait", "tries by default 4 -> 1", () => swap("=§\\.tries\\?\\?4,", "??4", "??1")],
+  ["busy_wait", "the view's JSON busy check dropped", () => plant(String.raw`is halted \(\$\{§\}\)` + "`" + String.raw`\);(?<c>if\(§\(§\.error\)\)throw new §\(` + "`" + String.raw`\$\{§\.name\}: \$\{§\}: busy` + "`" + String.raw`\);)`, (s, g) => s.replace(g.c, ""))],
+  ["busy_wait", "blockHeader's JSON busy check moved into dead code (still two in the build)", () => plant(String.raw`(?<c>if\(§\(§\.error\)\)throw new §\(` + "`" + String.raw`\$\{§\.name\}: \$\{§\}: busy` + "`" + String.raw`\);)let §=§\(§\.error\)&&§\(§\.error\.cause\)\?§\.error\.cause\.name:void 0;if\(` + "`block_id`", (s, g) => s.replace(g.c, "") ).replace("var ", () => `function zzJ(e,n,i){${/if\([\w$]+\([\w$]+\.error\)\)throw new [\w$]+\(`\$\{[\w$]+\.name\}: \$\{[\w$]+\}: busy`\);/.exec(APP)[0]}}var `)],
+  ["busy_wait", "a Retry-After of 0 waits 0 (no 500 ms or pace floor)", () => swap(String.raw`Math\.max\(§\.retryAfterMs\?\?Math\.min\(8e3,500\*2\*\*§\),500,§\.every\)`, ",500,", ",0*")],
+  ["busy_wait", "busy tries not capped", () => swap(String.raw`if\(\+\+§>120\|\|`, ">120||", ",")],
+  ["busy_wait", "the request's own time not counted toward the bound", () => plant(String.raw`throw §\.signal\.reason;(?<c>§\+=§\.now\(\)-§;)`, (s, g) => s.replace(g.c, ""))],
+  ["busy_wait", "another function: real asked() busy-blind, a same-shaped dead copy beside it", () => plant(ASKED, (s, g) => s.replace(/if\(([\w$]+)!==null\)\{/, "if($1!==null&&!1){") + s.replace(`async function ${g.n}(`, "async function zzA("))],
+  ["busy_wait", "the setup's views bypass asked()", () => plant(String.raw`=\((?<a>§),(?<b>§),(?<c>§),(?<d>§)\)=>§\(\k<a>,(?<s>§)=>(?<v>§)\(\k<a>,\k<b>,\k<c>,\k<d>,\k<s>\),§\);return\{token:`, (s, g) => `=(${g.a},${g.b},${g.c},${g.d})=>${g.v}(${g.a},${g.b},${g.c},${g.d});return{token:`)],
+  ["busy_wait", "a third caller of asked() with no busy wait", () => plant(ASKED, (s, g) => `${s}var zzC=(e,t,n)=>${g.n}(e,t,{...n,busyMax:0});`)],
+  // one of the pair is wrong at one block
+  ["pair_wrong", "another function: real readId() takes one provider's word, a same-shaped dead copy beside it", () => plant(READ, (s, g) => s.replace(/if\(([\w$]+)\.length===2&&/, "if(!1&&$1.length===2&&").replace(/if\(([\w$]+)\)throw \1\.reason/, "if(!1)throw $1.reason") + s.replace(`async function ${g.n}(`, "async function zzR("))],
+  ["pair_wrong", "the state taken after the checks: every id read unused", () => plant(String.raw`let (?<f>§)=§\[0\]\.x;if\(\k<f>===` + "`unused`", (s, g) => s.replace(/=[\w$]+\[0\]\.x;/, "=`unused`;"))],
+  ["pair_wrong", "readId reads rpcs[0] for both (one provider's word as the pair's)", () => plant(String.raw`=await Promise\.allSettled\(§\.map\((?<p>§)=>§\(§\[\k<p>\],§\)\)\)`, (s, g) => s.replace(`[${g.p}]`, "[0]"))],
+  ["pair_wrong", "RANK inverted (the weaker named the liar)", () => swap("\\{unused:0,used:1,money:2\\}", "{unused:0,used:1,money:2}", "{unused:2,used:1,money:0}")],
+  ["pair_wrong", "readId ranks by another table than RANK", () => plant(String.raw`=(?<r>§)\[(?<o>§)\[0\]\.x\]>\k<r>\[\k<o>\[1\]\.x\]`, (s, g) => s.replaceAll(`${g.r}[`, "({unused:0,used:1,money:2})["))],
+  ["pair_wrong", "step 5's catch lets a disagreement read on", () => swap(String.raw`\}catch\((?<e>§)\)\{if\(\k<e> instanceof §\)throw new §\(\k<e>\.stronger,`, "if(", "if(!1&&")],
+  // what a Retry keeps
+  ["id_keep", "a kept answer of unused for every id", () => plant(String.raw`let (?<h>§)=(?<k>§)\?\.answers\.get\((?<u>§)\);if\(\k<h>!==void 0\)return \k<h>;`, (s, g) => `let ${g.h}=${g.k}?.answers.get(${g.u});if(${g.k})return\`unused\`;`)],
+  ["id_keep", "every answer kept across passes (lasting on any state)", () => plant(String.raw`,(?<b>§)&&(?<x>§)===` + "`used`" + String.raw`&&(?<k>§)\?\.lasting\.add\((?<u>§)\)`, (s, g) => `,${g.k}?.lasting.add(${g.u})`)],
+  ["id_keep", "the indexer's used made lasting", () => swap("return\\[`used`,!1\\]", "!1", "!0")],
+  ["id_keep", "a new pass drops nothing", () => swap(String.raw`§\.lasting\.has\(§\)\|\|§\.answers\.delete\(§\);`, "||", "||1||")],
+  ["id_keep", "a new pass drops everything (31be751d's rule)", () => plant(String.raw`for\(let (?<x>§) of\[\.\.\.(?<k>§)\.answers\.keys\(\)\]\)\k<k>\.lasting\.has\(\k<x>\)\|\|\k<k>\.answers\.delete\(\k<x>\);`, (s, g) => `${g.k}.answers.clear();`)],
+  ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
+  ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{reader:§\}=await §\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
+  // signing out drops it
+  ["id_signout", "sign out keeps what the restore kept", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),§=§\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort()}`)],
+  ["id_signout", "sign out makes a new keep nobody reads", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),(?<o>§)=(?<f>§)\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort(),zzK=${g.f}()}`)],
+];
+
+test("busy waited out, the pair's disagreement, the keep and the sign-out drop: each planted bundle fails on its marker", () => {
+  assert.ok(PLANTS.length >= 47, `${PLANTS.length} plants`);
+  for (const [key, why, make] of PLANTS) {
+    const text = make();
+    assert.notEqual(text, APP, why);
+    assert.equal(countOf(text, MARK[key]), 0, `${key}: ${why}`);
+    assert.deepEqual(BAD(planted(key, text)), [MARKS], why);
+  }
 });

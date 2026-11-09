@@ -16,7 +16,10 @@
 //     a lane unread or unfinished ends the run stalled by name; since the review of 9583f571 also: a pool scope ends
 //     stalled with its U_X on the pool's chain named unread (never done, until card wallet-restore-reads-ux), a step 5
 //     that throws ends stalled with its error named (the catch's own words: a catch that ends it done has none), a
-//     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored;
+//     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored; since card
+//     wallet-id-reader-paced: a busy provider (HTTP 429 or 5xx, its JSON -429, dRPC's code 30, no answer in time) is
+//     waited out at its pace and asked again within BUSY_WAIT_MAX_MS (busy_wait), and two providers that answer
+//     differently at one block stop the read and step 5, naming the stronger (pair_wrong);
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
@@ -56,7 +59,137 @@ export const REGISTERED = "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79ba
 const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;
 
-/** The card's strings in the bundle, as the minifier writes them. The two patterns bind the minifier's names. */
+// Card wallet-id-reader-paced. Each of its four markers is a function of the bundle's text: exact patterns that capture
+// the names the minifier gave (a class, a function, a variable), then exact patterns that use those very names, so a
+// rule held by other code than the one pattern found counts 0. No pattern has a free gap: every character between the
+// bound names is the build's own, so a guard, a condition, an always-true compare or another number added anywhere in
+// them counts 0. Each pattern is one run of the build's text, so a same-shaped dead copy elsewhere is not the one its
+// callers call (review of 31be751d, P2-3). `§` in a pattern is one minified name.
+const N = String.raw`[\w$]+`;
+const esc = (x) => x.replace(/[$]/g, "\\$&");
+const rx = (src) => new RegExp(src.replaceAll("§", N), "g");
+const all = (text, re) => [...text.matchAll(re)];
+const one = (text, src) => {
+  const m = all(text, rx(src));
+  return m.length === 1 ? m[0].groups : null;
+};
+const B = "`";
+/**
+ * The pace (packages/wallet/src/pace.ts) as one run of the build: PACE by value (FastNEAR 0.39 a second, burst 8;
+ * dRPC 3.5 a second, burst 10), paceOf (one pace per provider URL, an unknown URL unpaced), the slot, the busy hold,
+ * the slot given back (delta review 4: each ended wait's own slot, taken next unless inside a busy hold; the queue's
+ * tail slots off tat, found within a microsecond, never below the floor the busy hold sets), pacedFetch (each request
+ * after its URL's slot on the real clock, its caller's signal ending the wait and giving that very slot back with no
+ * guard, its deadline RPC_TIMEOUT_MS = 10 s from the slot on), pacedRpc, deadlineOf and
+ * requestSignal (a reader on a pacedFetch leaves the deadline to it: delta review 2, P1), and pacedNearRpc (the kit's
+ * nearRpc on a pacedFetch with no deadline of its own).
+ */
+const paceOf = (text) => {
+  const m = one(text, String.raw`(?<PACE>§)=Object\.freeze\(\{fastnear:Object\.freeze\(\{perSec:\.39,burst:8\}\),drpc:Object\.freeze\(\{perSec:3\.5,burst:10\}\)\}\),(?<PACES>§)=new Map;function (?<OF>§)\((?<u>§)\)\{let (?<p>§)=\k<PACES>\.get\(\k<u>\);if\(\k<p>===void 0\)\{let (?<net>§)=Object\.values\((?<NETS>§)\)\.find\((?<n>§)=>\k<n>\.fastnear\.includes\(\k<u>\)\|\|\k<n>\.drpc===\k<u>\),(?<pc>§)=\k<net>===void 0\?null:\k<PACE>\[\k<net>\.fastnear\.includes\(\k<u>\)\?${B}fastnear${B}:${B}drpc${B}\];\k<p>=\k<pc>===null\?\{tat:0,every:0,burst:1,floor:0,holes:\[\]\}:\{tat:0,every:1e3/\k<pc>\.perSec,burst:\k<pc>\.burst,floor:0,holes:\[\]\},\k<PACES>\.set\(\k<u>,\k<p>\)\}return \k<p>\}function (?<TAKE>§)\((?<k>§),(?<kn>§)\)\{let (?<kh>§)=\k<k>\.floor-\(\k<k>\.burst-1\)\*\k<k>\.every;for\(;\k<k>\.holes\.length>0&&\(\k<k>\.holes\[0\]<\k<kn>\|\|\k<k>\.holes\[0\]<\k<kh>\);\)\k<k>\.holes\.shift\(\);let (?<ko>§)=\k<k>\.holes\.shift\(\);if\(\k<ko>!==void 0\)return \k<ko>;\k<k>\.tat=Math\.max\(\k<k>\.tat,\k<kn>\);let (?<at>§)=\k<k>\.tat-\(\k<k>\.burst-1\)\*\k<k>\.every;return \k<k>\.tat\+=\k<k>\.every,Math\.max\(\k<at>,\k<kn>\)\}function (?<SLOT>§)\((?<s>§),(?<t>§)\)\{return \k<TAKE>\(\k<s>,\k<t>\)-\k<t>\}function (?<GIVE>§)\((?<g>§),(?<ga>§)\)\{let (?<gi>§)=\k<g>\.holes\.findIndex\((?<gx>§)=>\k<gx>>\k<ga>\);for\(\k<g>\.holes\.splice\(\k<gi><0\?\k<g>\.holes\.length:\k<gi>,0,\k<ga>\);;\)\{let (?<gl>§)=\k<g>\.holes\.at\(-1\);if\(\k<gl>===void 0\|\|Math\.abs\(\k<gl>-\(\k<g>\.tat-\k<g>\.burst\*\k<g>\.every\)\)>\.001\|\|\k<g>\.tat<=\k<g>\.floor\)break;\k<g>\.holes\.pop\(\),\k<g>\.tat=Math\.max\(\k<g>\.tat-\k<g>\.every,\k<g>\.floor\)\}\}function (?<HOLD>§)\((?<h>§),(?<hn>§),(?<hm>§)\)\{\k<h>\.floor=Math\.max\(\k<h>\.floor,\k<hn>\+\k<hm>\+\(\k<h>\.burst-1\)\*\k<h>\.every\),\k<h>\.tat=Math\.max\(\k<h>\.tat,\k<h>\.floor\)\}var (?<PF>§)=new WeakSet,(?<ISPF>§)=(?<f>§)=>typeof \k<f>==${B}function${B}&&\k<PF>\.has\(\k<f>\);function (?<FETCH>§)\((?<fu>§),(?<ff>§)=\(\.\.\.(?<fa>§)\)=>fetch\(\.\.\.\k<fa>\),(?<fto>§)=(?<TO>§)\)\{let (?<fp>§)=\k<OF>\(\k<fu>\),(?<fr>§)=async\((?<fi>§),(?<fo>§)\)=>\{let (?<fs>§)=\k<fo>\?\.signal\?\?void 0;\k<fs>\?\.throwIfAborted\(\);let (?<fn>§)=performance\.now\(\),(?<fm>§)=\k<TAKE>\(\k<fp>,\k<fn>\),(?<fw>§)=\k<fm>-\k<fn>;\k<fw>>0&&await new Promise\(\((?<fy>§),(?<fx>§)\)=>\{let (?<ft>§)=setTimeout\(\(\)=>\{\k<fs>\?\.removeEventListener\(${B}abort${B},(?<fq>§)\),\k<fy>\(\)\},\k<fw>\),\k<fq>=\(\)=>\{clearTimeout\(\k<ft>\),\k<GIVE>\(\k<fp>,\k<fm>\),\k<fx>\(\k<fs>\.reason\)\};\k<fs>\?\.addEventListener\(${B}abort${B},\k<fq>,\{once:!0\}\)\}\);let (?<fd>§)=AbortSignal\.timeout\(\k<fto>\);return \k<ff>\(\k<fi>,\{\.\.\.\k<fo>,signal:\k<fs>\?AbortSignal\.any\(\[\k<fs>,\k<fd>\]\):\k<fd>\}\)\};return \k<PF>\.add\(\k<fr>\),\k<fr>\}var (?<PR>§)=new WeakSet;function (?<MARKR>§)\((?<rr>§),(?<rf>§)\)\{return \k<ISPF>\(\k<rf>\)&&\k<PR>\.add\(\k<rr>\),\k<rr>\}var (?<ISPR>§)=(?<rq>§)=>\k<PR>\.has\(\k<rq>\),(?<DL>§)=\((?<da>§),(?<db>§)\)=>\k<ISPF>\(\k<da>\)\?null:\k<db>;function (?<RS>§)\((?<sa>§),(?<sb>§),(?<sc>§)\)\{let (?<sm>§)=\k<DL>\(\k<sa>,\k<sb>\);return \k<sm>===null\?\k<sc>:\k<sc>\?AbortSignal\.any\(\[\k<sc>,AbortSignal\.timeout\(\k<sm>\)\]\):AbortSignal\.timeout\(\k<sm>\)\}function (?<PNR>§)\((?<pu>§)\)\{let (?<pf>§)=\k<FETCH>\(\k<pu>\);return \k<MARKR>\((?<NR>§)\(\k<pu>,\k<pf>,null\),\k<pf>\)\}`);
+  return m !== null && all(text, rx(String.raw`(?<![\w$.])${esc(m.TO)}=1e4[,;]`)).length === 1 ? m : null;
+};
+/**
+ * busy_wait: the pace (paceOf above); the default sleep (sleepMs: a real setTimeout of the very ms, its signal ending
+ * it) followed by ProviderBusy, busyOf (a ProviderBusy, HTTP 429 or 5xx, a TimeoutError; nothing else) and busyAnswer
+ * (the JSON -429 or 429, dRPC's code 30 with "timeout"); blockHeader and the one view each throwing ProviderBusy on a
+ * JSON busy answer, at their very place (exactly two such checks in the build); headerRetried, askOpts (tries 4,
+ * backoff 250 ms, busyMax 60 s by default, sleepMs the default sleep, a given sleep refused without its own clock: delta review 4, P3-2) and asked as one run; asked's whole loop: the
+ * pace's slot (taken here unless the rpc is paced at its transport), the request, its time counted toward the bound,
+ * and a busyOf answer waited out by its Retry-After or 500 ms doubling to 8 s, never less than 500 ms or the pace's gap,
+ * at most 120 busy tries and BUSY_WAIT_MAX_MS of request time and waits (past either the read fails by name), the wait
+ * held on the provider's pace, and asked again; and the setup's retried, whose views go through that asked. asked is
+ * called by those two and nothing else. The count is 1 when all hold, else 0.
+ */
+export const BUSY_WAIT = (text) => {
+  const pace = paceOf(text);
+  if (pace === null) return 0;
+  const head = one(text, String.raw`(?<SLEEP>§)=\((?<ms>§),(?<sg>§)\)=>new Promise\(\((?<ok>§),(?<no>§)\)=>\{if\(\k<sg>\?\.aborted\)return \k<no>\(\k<sg>\.reason\);let (?<tm>§)=setTimeout\(\(\)=>\{\k<sg>\?\.removeEventListener\(${B}abort${B},(?<st>§)\),\k<ok>\(\)\},\k<ms>\),\k<st>=\(\)=>\{clearTimeout\(\k<tm>\),\k<no>\(\k<sg>\.reason\)\};\k<sg>\?\.addEventListener\(${B}abort${B},\k<st>,\{once:!0\}\)\}\),(?<Y>§)=class extends Error\{retryAfterMs;constructor\((?<m>§),(?<r>§)\)\{super\(\k<m>\),this\.name=${B}ProviderBusy${B},this\.retryAfterMs=\k<r>\}\};function (?<OF>§)\((?<e>§)\)\{if\(\k<e> instanceof \k<Y>\)return\{retryAfterMs:\k<e>\.retryAfterMs\};if\(!(?<ISO>§)\(\k<e>\)\)return null;let (?<s>§)=\k<e>\.status;return typeof \k<s>==${B}number${B}&&\(\k<s>===429\|\|\k<s>>=500&&\k<s><=599\)\?\{retryAfterMs:typeof \k<e>\.retryAfterMs==${B}number${B}\?\k<e>\.retryAfterMs:void 0\}:\k<e>\.name===${B}TimeoutError${B}\?\{retryAfterMs:void 0\}:null\}var (?<BA>§)=(?<j>§)=>\k<ISO>\(\k<j>\)&&\(\k<j>\.code===-429\|\|\k<j>\.code===429\|\|\k<j>\.code===30&&/timeout/i\.test\(String\(\k<j>\.message\)\)\),`);
+  if (head === null) return 0;
+  const [Y, busyOf, BA, ISO, SLEEP] = [head.Y, head.OF, head.BA, head.ISO, head.SLEEP].map(esc);
+  const [OF, SLOT, HOLD, ISPR] = [pace.OF, pace.SLOT, pace.HOLD, pace.ISPR].map(esc);
+  // the readers on a pacedFetch hand the kit's nearRpc deadlineOf's answer (bindRpc and relayRpc), never their own 10 s
+  if (all(text, rx(String.raw`=(?<nr>§)\((?<u>§),(?<fx>§),${esc(pace.DL)}\(\k<fx>,(?<tm>§)\)\)`)).length !== 2) return 0;
+  // every other request of those readers leaves its deadline to the paced fetch (bindRpc.tx, followRpc.block,
+  // moveOutRpc.call, archivalRpc's post, relayRpc.block), and only pacedNearRpc hands nearRpc no deadline (delta review 3)
+  if (all(text, rx(String.raw`signal:${esc(pace.RS)}\(§,§(?:,§)?\)`)).length !== 5) return 0;
+  if (all(text, rx(String.raw`(?<![\w$.])${esc(pace.NR)}\(§,§,null\)`)).length !== 1) return 0;
+  const json = (v) => String.raw`if\(${BA}\(\k<${v}>\.error\)\)throw new ${Y}\(${B}\$\{\k<rpc>\.name\}: \$\{\k<what>\}: busy${B}\);`;
+  if (all(text, rx(String.raw`if\(${BA}\(§\.error\)\)throw new ${Y}\(${B}\$\{§\.name\}: \$\{§\}: busy${B}\);`)).length !== 2) return 0;
+  const run = one(text, String.raw`async function (?<HR>§)\((?<he>§),(?<ht>§),(?<hw>§),(?<ho>§)=\{\},(?<hs>§)=!1\)\{return (?<ASKED>§)\(\k<he>,async (?<hg>§)=>\{let (?<ha>§)=await (?<BH>§)\(\k<he>,\k<ht>,\k<hw>,\k<hg>\);if\(\k<hs>&&\k<ha>===(?<NB>§)\)throw Error\(${B}\$\{\k<he>\.name\}: \$\{\k<hw>\} \$\{${B}block_id${B}in \k<ht>\?\k<ht>\.block_id:${B}final${B}\} is not served \(UNKNOWN_BLOCK\)${B}\);return \k<ha>\},(?<AOPT>§)\(\k<ho>\)\)\}function \k<AOPT>\((?<e>§)\)\{let (?<tr>§)=\k<e>\.tries\?\?4,(?<bk>§)=\k<e>\.backoffMs\?\?250,(?<bm>§)=\k<e>\.busyMaxMs\?\?6e4;if\(!Number\.isSafeInteger\(\k<tr>\)\|\|\k<tr><1\)throw Error\(${B}tries is a count above 0${B}\);if\(!Number\.isSafeInteger\(\k<bk>\)\|\|\k<bk><0\)throw Error\(${B}backoffMs is a time in ms${B}\);if\(!Number\.isSafeInteger\(\k<bm>\)\|\|\k<bm><0\)throw Error\(${B}busyMaxMs is a time in ms${B}\);let (?<sig>§)=\k<e>\.signal,(?<sl>§)=\k<e>\.sleep;if\(\k<sl>!==void 0&&\k<e>\.now===void 0\)throw Error\(${B}a given sleep needs its own clock \(now\)${B}\);return\{tries:\k<tr>,backoff:\k<bk>,sleep:\k<sl>\?async (?<ms>§)=>\{\k<sig>\?\.throwIfAborted\(\),await \k<sl>\(\k<ms>\),\k<sig>\?\.throwIfAborted\(\)\}:${SLEEP},signal:\k<sig>,now:\k<e>\.now\?\?\(\(\)=>performance\.now\(\)\),busyMax:\k<bm>\}\}async function \k<ASKED>\((?<rpc>§),(?<once>§),(?<ao>§)\)\{let (?<pc>§)=${OF}\(\k<rpc>\.name\),(?<here>§)=!${ISPR}\(\k<rpc>\),(?<fails>§)=0,(?<busy>§)=0,(?<spent>§)=0;for\(;;\)\{\k<ao>\.signal\?\.throwIfAborted\(\);let (?<w>§)=\k<here>\?${SLOT}\(\k<pc>,\k<ao>\.now\(\)\):0;\k<w>>0&&await \k<ao>\.sleep\(\k<w>,\k<ao>\.signal\);let (?<t0>§)=\k<ao>\.now\(\);try\{return await \k<once>\(\k<ao>\.signal\)\}catch\((?<er>§)\)\{if\(\k<ao>\.signal\?\.aborted\)throw \k<ao>\.signal\.reason;\k<spent>\+=\k<ao>\.now\(\)-\k<t0>;let (?<b>§)=${busyOf}\(\k<er>\);if\(\k<b>!==null\)\{let (?<wt>§)=Math\.max\(\k<b>\.retryAfterMs\?\?Math\.min\(8e3,500\*2\*\*\k<busy>\),500,\k<pc>\.every\);if\(\+\+\k<busy>>120\|\|\k<spent>\+\k<wt>>\k<ao>\.busyMax\)throw Error\(${B}\$\{\k<rpc>\.name\}: busy past \$\{\k<ao>\.busyMax\} ms of waits \(\$\{\k<er> instanceof Error\?\k<er>\.message:${B}busy${B}\}\)${B}\.slice\(0,200\)\);\k<spent>\+=\k<wt>,${HOLD}\(\k<pc>,\k<ao>\.now\(\),\k<wt>\),await \k<ao>\.sleep\(\k<wt>,\k<ao>\.signal\);continue\}if\(\+\+\k<fails>>=\k<ao>\.tries\)throw \k<er>;await \k<ao>\.sleep\(\k<ao>\.backoff\*2\*\*\(\k<fails>-1\),\k<ao>\.signal\)\}\}\}`);
+  if (run === null) return 0;
+  const [ASKED, AOPT, BH] = [run.ASKED, run.AOPT, run.BH].map(esc);
+  const setup = one(text, String.raw`function (?<SETUP>§)\((?<n>§),(?<rp>§),(?<o>§)\)\{if\(typeof \k<n>!=${B}string${B}\|\|!Object\.hasOwn\((?<NETS>§),\k<n>\)\)throw Error\(${B}unknown network \$\{String\(\k<n>\)\}${B}\);if\((?<PN>§)\(\k<rp>\)!==\k<n>\)throw Error\((?<PR>§)\(\k<n>\)\);let (?<tk>§)=\k<NETS>\[\k<n>\]\.usdc,(?<io>§)=${AOPT}\(\k<o>\),(?<slp>§)=(?<q>§)=>\k<io>\.sleep\(\k<q>,\k<io>\.signal\),(?<first>§)=\k<o>\.first\?\?(?<RND>§),(?<rt>§)=\((?<a>§),(?<b>§),(?<c>§),(?<d>§)\)=>${ASKED}\(\k<a>,(?<sg>§)=>(?<VIEW>§)\(\k<a>,\k<b>,\k<c>,\k<d>,\k<sg>\),\k<io>\);return\{token:\k<tk>,retried:\k<rt>,first:\k<first>,sleep:\k<slp>,blockOf:`);
+  if (setup === null) return 0;
+  // asked is called by headerRetried and the setup's retried, nothing else (its definition is the third)
+  if (all(text, new RegExp(String.raw`(?<![\w$])${ASKED}\(`, "g")).length !== 3) return 0;
+  // blockHeader's and the view's JSON busy checks, each at its very place in that function
+  const bh = one(text, String.raw`async function ${BH}\((?<rpc>§),(?<p>§),(?<what>§),(?<sig>§)\)\{let (?<i>§)=await \k<rpc>\.block\(\k<p>,\k<sig>\);if\(!${ISO}\(\k<i>\)\)throw Error\(${B}\$\{\k<rpc>\.name\}: \$\{\k<what>\}: not a JSON-RPC answer${B}\);if\(\k<i>\.error!==void 0\)\{${json("i")}`);
+  const view = one(text, String.raw`async function ${esc(setup.VIEW)}\((?<rpc>§),(?<p>§),(?<what>§),(?<at>§),(?<sig>§)\)\{let (?<a>§)=\k<at>===${B}final${B}\?\{\.\.\.\k<p>,finality:${B}final${B}\}:\{\.\.\.\k<p>,block_id:${B}hash${B}in \k<at>\?\k<at>\.hash:\k<at>\.height\},(?<o>§)=await\(\k<sig>\?\k<rpc>\.query\(\k<a>,\k<sig>\):\k<rpc>\.query\(\k<a>\)\);if\(!${ISO}\(\k<o>\)\)throw Error\(${B}\$\{\k<rpc>\.name\}: \$\{\k<what>\}: not a JSON-RPC answer${B}\);if\(JSON\.stringify\(\k<o>\.error\?\?\(${ISO}\(\k<o>\.result\)\?\k<o>\.result\.error:void 0\)\?\?${B}${B}\)\.includes\((?<H>§)\)\)throw Error\(${B}\$\{\k<rpc>\.name\}: \$\{\k<what>\}: the token is halted \(\$\{\k<H>\}\)${B}\);${json("o")}`);
+  return bh !== null && view !== null ? 1 : 0;
+};
+/**
+ * The IdReader (nearIdReader) whole, as one run of the build with keptIdReader after it: the setup's retried, the one
+ * provider's read of an id (storage, then money, then the account), RANK {unused:0,used:1,money:2} by name, the keep (a
+ * new pass keeps only the lasting answers, the ids both providers answered used; an answer kept is returned, a new one
+ * kept, and marked lasting only when both providers answered used), the read closure calling readId, and readId itself:
+ * both providers asked at once, two answers that differ throw PairDisagrees naming the stronger, any failed read throws,
+ * and the indexer may only add used (not lasting). keptIdReader reads on the kept pass, else opens one on make()'s
+ * providers, and passes the keep. Its groups name each function, or it is null.
+ */
+const readerOf = (text, P) =>
+  one(text, String.raw`function (?<OV>§)\((?<net>§),(?<rpcs>§),(?<pass>§),(?<o>§)=\{\}\)\{let\{token:(?<tok>§),retried:(?<ret>§),first:(?<first>§),blockOf:(?<bo>§)\}=(?<SETUP>§)\(\k<net>,\k<rpcs>,\k<o>\),(?<at>§)=(?<AT>§)\(\k<pass>,\k<net>,\k<rpcs>\),(?<one>§)=async\((?<r0>§),(?<u0>§)\)=>\{let (?<sb>§)=\(await \k<ret>\(\k<r0>,(?<call>§)\(\k<tok>,${B}storage_balance_of${B},\{account_id:\k<u0>\}\),${B}storage_balance_of${B},\k<at>\)\)\.v;if\(\k<sb>!==null&&!\((?<iso>§)\(\k<sb>\)&&typeof \k<sb>\.total==${B}string${B}&&(?<dig>§)\.test\(\k<sb>\.total\)\)\)throw Error\(${B}\$\{\k<r0>\.name\}: storage_balance_of: neither null nor a balance${B}\);return \k<sb>!==null&&(?<big>§)\(\(await \k<ret>\(\k<r0>,\k<call>\(\k<tok>,${B}ft_balance_of${B},\{account_id:\k<u0>\}\),${B}ft_balance_of${B},\k<at>\)\)\.v,${B}\$\{\k<r0>\.name\}: ft_balance_of${B}\)>0n\|\|await (?<INT>§)\(\k<ret>,\k<r0>,\k<u0>,\k<at>\)>0n\?${B}money${B}:\k<sb>===null&&\(await \k<ret>\(\k<r0>,\{request_type:${B}view_account${B},account_id:\k<u0>\},${B}view_account${B},\k<at>\)\)\.v===null\?${B}unused${B}:${B}used${B}\},(?<RANK>§)=\{unused:0,used:1,money:2\},(?<k>§)=\k<o>\.keep;return (?<MEET>§)\(\k<pass>,\k<rpcs>,\k<bo>\)\.then\(\(\)=>\{if\(\k<k>!==void 0&&\k<k>\.pass!==\k<pass>\)\{for\(let (?<x>§) of\[\.\.\.\k<k>\.answers\.keys\(\)\]\)\k<k>\.lasting\.has\(\k<x>\)\|\|\k<k>\.answers\.delete\(\k<x>\);\k<k>\.pass=\k<pass>,\k<k>\.rpcs=\k<rpcs>\}return async (?<u>§)=>\{if\(typeof \k<u>!=${B}string${B}\|\|!(?<hex>§)\.test\(\k<u>\)\)throw Error\(${B}an id is a 64-hex implicit account id${B}\);let (?<had>§)=\k<k>\?\.answers\.get\(\k<u>\);if\(\k<had>!==void 0\)return \k<had>;let\[(?<sx>§),(?<both>§)\]=await (?<READ>§)\(\k<u>\);return \k<k>\?\.answers\.set\(\k<u>,\k<sx>\),\k<both>&&\k<sx>===${B}used${B}&&\k<k>\?\.lasting\.add\(\k<u>\),\k<sx>\}\}\);async function \k<READ>\((?<e>§)\)\{let (?<f0>§)=\k<first>\(\)===0\?0:1,(?<ord>§)=\[\k<f0>,1-\k<f0>\],(?<got>§)=await Promise\.allSettled\(\k<ord>\.map\((?<pi>§)=>\k<one>\(\k<rpcs>\[\k<pi>\],\k<e>\)\)\);\k<o>\.signal\?\.throwIfAborted\(\);let (?<ok>§)=\k<got>\.flatMap\(\((?<r1>§),(?<i1>§)\)=>\k<r1>\.status===${B}fulfilled${B}\?\[\{p:\k<ord>\[\k<i1>\],x:\k<r1>\.value\}\]:\[\]\);if\(\k<ok>\.length===2&&\k<ok>\[0\]\.x!==\k<ok>\[1\]\.x\)\{let\[(?<wk>§),(?<sn>§)\]=\k<RANK>\[\k<ok>\[0\]\.x\]>\k<RANK>\[\k<ok>\[1\]\.x\]\?\[\k<ok>\[1\],\k<ok>\[0\]\]:\[\k<ok>\[0\],\k<ok>\[1\]\];throw new ${P}\(\k<rpcs>\[\k<sn>\.p\]\.name,${B}\$\{\k<rpcs>\[\k<sn>\.p\]\.name\} answered \$\{\k<sn>\.x\} where \$\{\k<rpcs>\[\k<wk>\.p\]\.name\} answered \$\{\k<wk>\.x\} at block \$\{\k<at>\.h\}: one of the pair is wrong at one block, so the restore stops${B}\)\}let (?<rej>§)=\k<got>\.find\((?<r2>§)=>\k<r2>\.status===${B}rejected${B}\);if\(\k<rej>\)throw \k<rej>\.reason instanceof Error\?\k<rej>\.reason:Error\(${B}the read failed${B}\);let (?<fs>§)=\k<ok>\[0\]\.x;if\(\k<fs>===${B}unused${B}&&\k<o>\.indexer\)try\{if\(await \k<o>\.indexer\(\k<e>\)===!0\)return\[${B}used${B},!1\]\}catch\{\}return\[\k<fs>,!0\]\}\}async function (?<KR>§)\((?<kn>§),(?<mk>§),(?<kk>§),(?<ko>§)=\{\}\)\{if\(\k<kk>\.rpcs!==void 0&&\k<kk>\.pass!==void 0\)try\{return\{rpcs:\k<kk>\.rpcs,pass:\k<kk>\.pass,reader:await \k<OV>\(\k<kn>,\k<kk>\.rpcs,\k<kk>\.pass,\{\.\.\.\k<ko>,keep:\k<kk>\}\)\}\}catch\((?<ke>§)\)\{if\(!\(\k<ke> instanceof (?<STALE>§)\)\)throw \k<ke>\}let (?<kr>§)=\k<mk>\(\),(?<kp>§)=await (?<OPEN>§)\(\k<kn>,\k<kr>,\k<ko>\);return\{rpcs:\k<kr>,pass:\k<kp>,reader:await \k<OV>\(\k<kn>,\k<kr>,\k<kp>,\{\.\.\.\k<ko>,keep:\k<kk>\}\)\}\}`);
+// PairDisagrees's class, exactly once: its name, or null
+const pairClass = (text) => {
+  const m = one(text, String.raw`(?<P>§)=class extends Error\{stronger;constructor\((?<s>§),(?<m>§)\)\{super\(\k<m>\),this\.name=${B}PairDisagrees${B},this\.stronger=\k<s>\}\}`);
+  return m === null ? null : esc(m.P);
+};
+/**
+ * pair_wrong: PairDisagrees (`P=class extends Error{stronger;constructor(e,t){super(t),this.name=`PairDisagrees`,
+ * this.stronger=e}}`); the IdReader whole (readerOf: readId called by the read closure, RANK by name, both answers
+ * needed); and step 5's catch, whose first statement throws P on at once, naming its lane and index, before an id is
+ * counted unread. The IdReader's setup is the one busy_wait binds. The count is 1 when all hold, else 0.
+ */
+export const PAIR_WRONG = (text) => {
+  const P = pairClass(text);
+  if (P === null) return 0;
+  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\(\1 instanceof ${P}\)throw new ${P}\(\1\.stronger,` + "`" + String.raw`lane \$\{(${N})\}: at index \$\{(${N})\}, \$\{\1\.message\}, to be retried` + "`" + String.raw`\);if\((${N})\.push\(\{i:\3,id:(${N}),error:(${N})\(\1\)\}\),`, "g"));
+  if (stop.length < 1) return 0;
+  const r = readerOf(text, P);
+  return r !== null && all(text, rx(String.raw`function ${esc(r.SETUP)}\(`)).length === 1 ? 1 : 0;
+};
+// idReadKeep and StalePass, one run of the build: idReadKeep's name, or null
+const keepOf = (text) => {
+  const m = one(text, String.raw`(?<IK>§)=\(\)=>\(\{answers:new Map,lasting:new Set\}\),(?<SP>§)=class extends Error\{constructor\((?<m>§)\)\{super\(\k<m>\),this\.name=${B}StalePass${B}\}\}`);
+  return m === null ? null : { IK: esc(m.IK), SP: m.SP };
+};
+/**
+ * id_keep (review P2-2): a Retry reads on from what the restore kept, never past what can change. idReadKeep makes
+ * the answers and the lasting ids; the IdReader keeps only lasting answers across a new pass and marks lasting only an
+ * id both providers answered used (readerOf); keptIdReader opens a new pass only on StalePass (the very class); and the
+ * page's step 5 reads through keptIdReader with the restore's keep. The count is 1 when all hold, else 0.
+ */
+export const ID_KEEP = (text) => {
+  const P = pairClass(text);
+  const k = keepOf(text);
+  if (P === null || k === null) return 0;
+  const r = readerOf(text, P);
+  if (r === null || r.STALE !== k.SP) return 0;
+  return all(text, rx(String.raw`let\{reader:(?<rd>§)\}=await ${esc(r.KR)}\((?<net>§),(?<ids>§)\.rpcs,(?<kp>§),\{\.\.\.\k<ids>\.opts,signal:(?<sig>§)\}\)`)).length === 1 ? 1 : 0;
+};
+/**
+ * id_signout: signing out drops what the restore kept. The restore's keep starts as a new idReadKeep() beside its
+ * abort (`a=null,o=uV()`), and signedOut aborts the run and makes a new one (`signedOut:()=>{a?.abort(),o=uV()}`), the
+ * very two names. The count is 1 when both hold, else 0.
+ */
+export const ID_SIGNOUT = (text) => {
+  const k = keepOf(text);
+  if (k === null) return 0;
+  const init = all(text, rx(String.raw`(?<a>§)=null,(?<o>§)=${k.IK}\(\),`));
+  if (init.length !== 1) return 0;
+  const [a, o] = [init[0].groups.a, init[0].groups.o].map(esc);
+  return all(text, rx(String.raw`signedOut:\(\)=>\{${a}\?\.abort\(\),${o}=${k.IK}\(\)\}`)).length === 1 ? 1 : 0;
+};
+/** The card's strings in the bundle, as the minifier writes them. The four functions bind the minifier's names. */
 export const MARK = Object.freeze({
   reach_error: "reach: not an index of lane",
   // the walk's floor: `let o=a??-1,` (a lane's reach, or -1 when none)
@@ -99,11 +232,18 @@ export const MARK = Object.freeze({
   // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
   // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
   // that request per use (a run-long lock, with the run inside one request, holds none)
+  // card wallet-id-reader-paced: busy waited out (BUSY_WAIT), one of the pair is wrong at one block (PAIR_WRONG)
+  busy_wait: BUSY_WAIT,
+  pair_wrong: PAIR_WRONG,
+  // review of 31be751d (P2-2, P2-3): what a Retry keeps, and signing out drops it (ID_KEEP, ID_SIGNOUT)
+  id_keep: ID_KEEP,
+  id_signout: ID_SIGNOUT,
   seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);
-const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
+/** How many times marker `k` (a string, a pattern, or a function of the bundle's text: BUSY_WAIT, PAIR_WRONG, ID_KEEP, ID_SIGNOUT) is in `text`. */
+export const countOf = (text, k) => (typeof k === "function" ? k(text) : k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 const cors = (v) => v === "*" || v === SIGN_ORIGIN;
 
 /** The bundle's lines of the verdict on a record: { pass, lines } (no network, no headers: a build alone answers them). */
