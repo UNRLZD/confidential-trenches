@@ -18,13 +18,17 @@
 // quote they made the warm p95 1,440 ms, live check evm-quote-warm-round, run 42521476520); and the loop then five
 // reads that each take 1,500,000 gas and return 7 answer [2, then five of 1 7]: each read behind the loop is still given
 // a quarter share, 1.66M (a code that kept nothing for the reads after the one it runs answered all six 2; review of
-// baac0ecb, P3-1). That
+// baac0ecb, P3-1); and each read's gas used beside its answer (card evm-quote-gas-used: the 14M revert's 14M, the 1.5M
+// reads' 1.5M, a return of 7 under 10,000, the loop's more than 30M first in a call of 6), the same on every provider of a
+// chain, as the kit requires of the two it agrees on. That
 // the kit reads a 2 again alone, agrees on it and prices nothing on one answered alone is its test
-// (test/evm-quote-attacks.test.ts GS1-GS11, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
+// (test/evm-quote-attacks.test.ts GS1-GS20, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
 // test/evm-quote-mutants.mjs).
 //   node scripts/live-checks/evm-quote-read-gas-starve.mjs [--record <file> --as good|bad] [--answer <file> --as good|bad]
 // The bad answer is the same run through Multicall3's own code (no override): the loop and the 0xee read answer 0.
-// PASS exit 0, FAIL exit 1, error exit 2.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3: a provider that answers nothing usable (an empty body, not
+// JSON, an HTTP error or a rate limit, read again once) is named and left out; fewer than two of a chain answering is
+// INCONCLUSIVE, never a pass on one provider.
 // After every app deploy (as the kit's other EVM quote checks): a pinned provider can stop applying code overrides or
 // change its gas cap at any time, and the deploy's run reads it again
 // After: app
@@ -78,26 +82,62 @@ function aggregate(tos) {
 // keccak256("blindfill.read.gas.v1"): the word the kit's code writes after its answer, and the kit takes no answer without
 // (unaggregate, review of fe9f5ec3 finding 3); judge reads it inside EVM_READ_GAS_CODE as its PUSH32
 const MARKER = "d5d2d81c98f7eef530d209f98d24b60e8438438a742f7e3b44efbbe020fed2a0";
+// The code's result layout (card evm-quote-gas-used), read from its own bytes as the kit's tests read it: elements 224
+// bytes apart (PUSH1 0xe0 MUL), each written success, gas used (m[0x60]) at +0x20, the offset 0x60 at +0x40, the
+// length at +0x60 and the return data at +0x80, as UniswapInterfaceMulticall answers (success, gasUsed, returnData)
+const LAYOUT = ["60e002", "85526060518560200152606085604001528085606001526000856080013e"];
 /** Each read's success word and its return data's last significant hex digits, or null for an answer that is not one
  *  or does not end in MARKER */
 export function results(r) {
+  const g = gasOf(r);
+  return g === null ? null : g.map(([ok, , d]) => [ok, d]);
+}
+/** Each read's [success word, gas used, return data's last significant hex digits], read by the answer's own offsets
+ *  ((bool, uint256, bytes) results), or null for an answer that is not one or does not end in MARKER */
+export function gasOf(r) {
   if (typeof r !== "string" || !/^0x([0-9a-f]{64})+$/i.test(r) || r.slice(-64).toLowerCase() !== MARKER) return null;
   const h = r.slice(2, -64);
   const at = (o) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
   try {
     return Array.from({ length: at(32) }, (_, i) => {
       const e = 64 + at(64 + 32 * i);
-      return [at(e), h.slice(2 * (e + 96), 2 * (e + 96 + at(e + 64))).replace(/^0+/, "")];
+      if (at(e + 64) !== 0x60) throw new Error("not (success, gasUsed, bytes)");
+      return [at(e), at(e + 32), h.slice(2 * (e + 128), 2 * (e + 128 + at(e + 96))).replace(/^0+/, "")];
     });
   } catch {
     return null;
   }
 }
 
+// An answer that is empty, not JSON, not a JSON-RPC answer, an HTTP error or a rate limit is the provider's no-answer,
+// named with its host and HTTP status (live run 42552050303 died on an empty body: "Unexpected end of JSON input"). A
+// JSON-RPC error that is not a rate limit is an answer, judged: a provider that stops applying the code override answers so
+async function once(url, method, params) {
+  const host = new URL(url).host;
+  let r;
+  try {
+    r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  } catch (e) {
+    return { noAnswer: `${host}: no answer (${e?.cause?.code ?? e?.message ?? e})` };
+  }
+  const text = await r.text().catch(() => "");
+  const no = (why) => ({ noAnswer: `${host} HTTP ${r.status}: ${why}` });
+  if (text.trim() === "") return no("empty body");
+  let j;
+  try {
+    j = JSON.parse(text);
+  } catch {
+    return no(`not JSON (${text.slice(0, 40).replace(/\s+/g, " ")})`);
+  }
+  if (j === null || typeof j !== "object" || !("result" in j || "error" in j)) return no("not a JSON-RPC answer");
+  const limited = j.error !== undefined && ([429, -32005].includes(j.error?.code) || /rate.?limit|too many requests/i.test(String(j.error?.message)));
+  if (!r.ok || limited) return no(j.error !== undefined ? `error ${JSON.stringify(j.error).slice(0, 80)}` : "not a success");
+  return j.result ?? { error: j.error };
+}
+/** One read, read again once on a no-answer */
 async function rpc(url, method, params) {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = await r.json();
-  return j.result ?? { error: j.error ?? `HTTP ${r.status}` };
+  const a = await once(url, method, params);
+  return a?.noAnswer === undefined ? a : once(url, method, params);
 }
 
 /** Each mainnet chain's providers' answers at their latest block; `own`: Multicall3's own code (the bad answer) */
@@ -109,17 +149,26 @@ export async function collect(own = false) {
     if (!["base", "robinhood"].includes(chain)) continue;
     const reads = [];
     for (const url of v.providers ?? []) {
+      const provider = new URL(url).host;
       const block = await rpc(url, "eth_getBlockByNumber", ["latest", false]);
-      if (typeof block?.hash !== "string") throw new Error(`${new URL(url).host} answered no latest block`);
+      if (block?.noAnswer !== undefined) {
+        reads.push({ provider, noAnswer: block.noAnswer });
+        continue;
+      }
+      if (typeof block?.hash !== "string") {
+        reads.push({ provider, noAnswer: `${provider}: no latest block (${cut(block)})` });
+        continue;
+      }
       const at = { blockHash: block.hash };
-      reads.push({
-        provider: new URL(url).host,
-        block: block.hash,
-        six: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(SIX), gas }, at, state]),
-        sixtyFour: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(SIXTY_FOUR), gas }, at, state]),
-        heavy: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(HEAVY_SIX), gas }, at, state]),
-        floor: await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(FLOOR_SIX), gas }, at, state]),
-      });
+      const r = { provider, block: block.hash };
+      for (const [k, calls] of [["six", SIX], ["sixtyFour", SIXTY_FOUR], ["heavy", HEAVY_SIX], ["floor", FLOOR_SIX]]) {
+        r[k] = await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(calls), gas }, at, state]);
+        if (r[k]?.noAnswer !== undefined) {
+          r.noAnswer = r[k].noAnswer;
+          break;
+        }
+      }
+      reads.push(r);
     }
     out.push({ chain, reads });
   }
@@ -131,20 +180,31 @@ const cut = (x) => {
   const s = JSON.stringify(x) ?? String(x);
   return s.length > 140 ? `not the code's: ${s.slice(0, 66)}...${s.slice(-66)}` : `not the code's: ${s}`;
 };
-/** PASS where each mainnet chain has two providers or more, and each answers both planted calls as the kit's code must */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+/** PASS where each mainnet chain has two providers or more that answered, and each answers the planted calls as the kit's
+ *  code must; FAIL on any wrong answer; else INCONCLUSIVE where a chain has fewer than two that answered, each named */
 export function judge(a) {
   const lines = [];
-  let ok = true;
+  let bad = false;
+  let quiet = false;
   const line = (good, s) => {
     lines.push(`${good ? "ok " : "BAD"} ${s}`);
-    if (!good) ok = false;
+    if (!good) bad = true;
   };
   line(a?.code === EVM_READ_GAS_CODE, `the run's code is the kit's EVM_READ_GAS_CODE`);
   line(EVM_READ_GAS_CODE.includes("7f" + MARKER), "the kit's code writes its marker after the answer");
+  line(LAYOUT.every((x) => EVM_READ_GAS_CODE.includes(x)), "the kit's code writes each read's gas used beside its answer");
   const chains = a?.chains ?? [];
   line(["base", "robinhood"].every((c) => chains.some((x) => x.chain === c)), "Base and Robinhood were read");
-  for (const { chain, reads } of chains) {
-    line(reads.length >= 2, `${chain}: ${reads.length} providers`);
+  for (const { chain, reads: pinned } of chains) {
+    line(pinned.length >= 2, `${chain}: ${pinned.length} providers`);
+    // the chain is judged on the providers that answered; a no-answer is named, never a pass
+    const reads = pinned.filter((r) => r.noAnswer === undefined);
+    for (const r of pinned.filter((x) => x.noAnswer !== undefined)) lines.push(`--- ${chain} ${r.provider}: no answer: ${r.noAnswer}`);
+    if (pinned.length >= 2 && reads.length < 2) {
+      quiet = true;
+      lines.push(`INCONCLUSIVE ${chain}: ${reads.length} of ${pinned.length} providers answered (${pinned.filter((x) => x.noAnswer !== undefined).map((x) => x.provider).join(", ")} did not)`);
+    }
     for (const r of reads) {
       const six = results(r.six);
       line(six !== null && JSON.stringify(six) === JSON.stringify(SIX_WANT), `${chain} ${r.provider}: six planted reads answer ${six === null ? cut(r.six) : JSON.stringify(six)}`);
@@ -154,9 +214,19 @@ export function judge(a) {
       line(heavy !== null && JSON.stringify(heavy) === JSON.stringify(HEAVY_SIX_WANT), `${chain} ${r.provider}: six reads, the first a revert after 14M gas, answer ${heavy === null ? cut(r.heavy) : JSON.stringify(heavy)}`);
       const floor = results(r.floor);
       line(floor !== null && JSON.stringify(floor) === JSON.stringify(FLOOR_SIX_WANT), `${chain} ${r.provider}: the loop then five reads of 1.5M gas answer ${floor === null ? cut(r.floor) : JSON.stringify(floor)}`);
+      // the gas used (card evm-quote-gas-used): the 14M revert used 14M, the reads of 1.5M 1.5M, a return of 7 under
+      // 10,000, and the loop all it was given, more than 30M first in a call of 6
+      const used = (x) => gasOf(x)?.map((y) => y[1]) ?? [];
+      const [hv, fl, sx] = [used(r.heavy), used(r.floor), used(r.six)];
+      const near = (u, g) => u >= g && u < g + 10_000;
+      line(near(hv[0], 14_000_000) && hv.slice(1).every((u) => u < 10_000) && fl.slice(1).every((u) => near(u, 1_500_000)) && sx[1] > 30_000_000 && [0, 2, 5].every((k) => sx[k] < 10_000), `${chain} ${r.provider}: each read's gas used ${JSON.stringify({ heavy: hv, floor: fl, six: sx })}`);
     }
+    // every provider of the chain answers each read's gas used alike, which the kit requires of the two it agrees on
+    const all = (r) => ["six", "sixtyFour", "heavy", "floor"].map((k) => gasOf(r[k])?.map((y) => y[1]) ?? null);
+    if (reads.length > 0) line(reads.every((r) => JSON.stringify(all(r)) === JSON.stringify(all(reads[0]))), `${chain}: every provider answers the same gas used for each read`);
   }
-  return { ok, lines };
+  const verdict = bad ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -171,10 +241,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       all[arg("--as") ?? "good"] = a;
       writeFileSync(f, JSON.stringify(all, null, 1) + "\n");
     }
-    const { ok, lines } = judge(a);
+    const { verdict, lines } = judge(a);
     for (const l of lines) console.log(l);
-    console.log(`${KEY}: ${ok ? "PASS" : "FAIL"}`);
-    process.exit(ok ? 0 : 1);
+    console.log(`${KEY}: ${verdict}`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);
