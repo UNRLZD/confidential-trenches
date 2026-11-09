@@ -19,7 +19,7 @@ import { SOL_LADDER } from "../src/pool/solana.ts";
 import { evmRestoreNotes } from "../src/pool/evm-restore.ts";
 import {
   EvmLagError, EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_TRANSFER_RPCS, EVM_LAG_TRIES, EVM_LIFE_MS, EVM_LOG_CEILING_PAGES, EVM_LOG_THROTTLE_TRIES, EVM_POOL_EVENTS, EVM_POOL_READ_BOUND_MS, EVM_POOL_READ_TRIES, EVM_POOL_READ_WAIT_MS, EVM_READ_TRY_MS, EVM_SEND_MARGIN_MS, EVM_SPARE_REST_MS,
-  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
+  EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc,
 } from "../src/pool/evm.ts";
 
@@ -1126,7 +1126,8 @@ test("F6 a read that fails on one RPC stops the other RPC's paging: nothing runs
   const failA = { getLogs: () => { throw new Error("RPC error 429: too many requests"); } };
   // RPC b's pages are slow: the read fails only once its page in flight has settled
   const countB = { cap: 50, getLogs: () => (callsB++, inflight++, 20), logs: (l: Record<string, unknown>[]) => (inflight--, l) };
-  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, failA, countB), pin: PIN, sleep: async () => {} }).trees(after(25)), /429/);
+  // the agreed read's own stop: on a pair passed in (its seats are no source, card evm-pool-leaves-any-source)
+  await assert.rejects(evmTreeSync({ rpcs: evmPair(pair(c, c, failA, countB)), pin: PIN, sleep: async () => {} }).trees(after(25)), /429/);
   assert.equal(inflight, 0, "a page of RPC b was still in flight when trees() rejected");
   const atReject = callsB;
   await new Promise((r) => setTimeout(r, 50));
@@ -1136,7 +1137,7 @@ test("F6 a read that fails on one RPC stops the other RPC's paging: nothing runs
   let open = 0;
   const failLate = { getLogs: () => 5, logs: (): Record<string, unknown>[] => { throw new Error("RPC error 429: too many requests"); } };
   const slowB = { getLogs: () => (open++, 40), logs: (l: Record<string, unknown>[]) => (open--, l) };
-  await assert.rejects(evmTreeSync({ rpcs: pair(c, c, failLate, slowB), pin: PIN, sleep: async () => {} }).trees(after(25)), /429/);
+  await assert.rejects(evmTreeSync({ rpcs: evmPair(pair(c, c, failLate, slowB)), pin: PIN, sleep: async () => {} }).trees(after(25)), /429/);
   assert.equal(open, 0, "RPC b's page was still in flight when trees() rejected");
 });
 
@@ -1830,7 +1831,7 @@ const lyingList = () => {
     rpc(c, capped("https://base.api.pocket.network", 100_000, POCKET_WORDS, count, [])),
   ];
   const twice = () => { const p = lp.filter((x) => x.startsWith("eth_getLogs")); return p.length - new Set(p).size; };
-  return { list, twice };
+  return { list, twice, c };
 };
 
 test("card helper-evm-range-cap-walk (re-check of 6e90f580, HIGH): one pair per read: the pool's trees() and the restore on P-C's list refuse the first provider's lie; evmPair hands back a pair it made as it is and refuses its seat in any other list", async () => {
@@ -1847,6 +1848,14 @@ test("card helper-evm-range-cap-walk (re-check of 6e90f580, HIGH): one pair per 
   const c = lyingList();
   const honest = evmPool({ pin: PIN, rpcs: c.list, feeRpcs: c.list.slice(2), relayFee: async () => { throw new Error("unused"); }, epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => {} });
   assert.equal((await honest.trees(after(399_000))).stateTree.size, 3);
+  // and the events taken are the honest pair's, byte for byte: the liar's value (outside the root) is not (review of
+  // 0b379bf4, P3-4: the size is 3 whichever was taken)
+  const e = lyingList();
+  const taken = (await evmTreeSync({ rpcs: e.list, pin: PIN, sleep: async () => {} }).events()).events;
+  const honestPair = (await evmTreeSync({ rpcs: [rpc(e.c, { url: "https://a.example" }), rpc(e.c, { url: "https://b.example" })], pin: PIN, sleep: async () => {} }).events()).events;
+  assert.deepEqual(taken.map((x) => x.bytes), honestPair.map((x) => x.bytes));
+  assert.equal(taken[0]!.value, honestPair[0]!.value);
+  assert.notEqual(taken[0]!.value, 7n, "the liar's value");
   // the restore's sync gets past the liar too: it reaches the events, where this fixture's one precommitment (rawLogs'
   // 77 on every deposit) stops it
   const d = lyingList();
@@ -2167,7 +2176,7 @@ test("card evm-pool-leaves-any-source: a source missing one leaf, one forged lea
     const c = anyChain();
     await assert.rejects(
       evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, lie)], ...noWait }).events(),
-      (e: Error) => /^the two RPCs differ at log 0 .*no two sources of two providers gave the same logs/.test(e.message) && /source 2 \(https:\/\/helper\.example\): the state tree from the logs \(\d+ leaves\) is not the pool's/.test(e.message),
+      (e: Error) => /^the two RPCs differ at log 0 .*no two sources of two operators gave the same logs/.test(e.message) && /source 0 \(helper\.example https:\/\/helper\.example\): the state tree from the logs \(\d+ leaves\) is not the pool's/.test(e.message),
       name,
     );
   }
@@ -2176,7 +2185,7 @@ test("card evm-pool-leaves-any-source: a source missing one leaf, one forged lea
 test("card evm-pool-leaves-any-source: a lying source is passed over and the next one asked; the pool's own leaves come back", async () => {
   const c = anyChain();
   const asked: string[] = [];
-  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, (l) => l.map((x) => (blockOf(x) === 10 ? word(x, 1, 7n) : x)), "https://liar.example"), rpc(c, { url: "https://tenderly.example", cap: 1_000, log: asked })], ...noWait }).events();
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, (l) => l.map((x) => (blockOf(x) === 10 ? word(x, 1, 7n) : x)), "https://liar.example"), rpc(c, { url: "https://quicknode.example", cap: 10_000, log: asked })], ...noWait }).events();
   assert.deepEqual(r.events.map((e) => e.bytes), await truth(c));
   assert.ok(asked.length > 0, "the next source asked");
 });
@@ -2185,7 +2194,7 @@ test("card evm-pool-leaves-any-source: a release's nullifier, outside the root, 
   const c = anyChain();
   const forged = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
   // publicnode alone and the forger both make the root; no two agree, so nothing is taken
-  await assert.rejects(evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forged)], ...noWait }).events(), /no two sources of two providers gave the same logs/);
+  await assert.rejects(evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forged)], ...noWait }).events(), /no two sources of two operators gave the same logs/);
   // the same forger before an honest source: publicnode and the honest one agree, the forger's nullifier is not taken
   const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c, forged), helperSrc(c, undefined, "https://tenderly.example")], ...noWait }).events();
   assert.deepEqual(r.events.map((e) => e.nullifier), [null, 55n + 1n, null, null]);
@@ -2203,4 +2212,71 @@ test("card evm-pool-leaves-any-source: a held tree resumes from its last block: 
   assert.equal(r.events.length, 4);
   const froms = log.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
   assert.ok(froms.length > 0 && froms.every((f) => f > c.finalized), `froms ${froms}`);
+});
+
+// review of 0b379bf4, P1-1: two URLs, or a relay of one, are one operator's word; the helper counts only in its keyed-only
+// mode (evmSourceOperator "helper"), never through a relay that names no operator
+const forgedRelease = (l: Record<string, unknown>[]) => l.map((x) => (blockOf(x) === 1_100_000 ? word(x, 3, 31337n) : x));
+test("review P1-1: a forger whose second copy comes through a relay (the helper's public fallback) or another URL of its company is refused", async () => {
+  const c = anyChain();
+  const forger = rpc(c, { url: "https://base-rpc.publicnode.com", cap: 50_000, logs: forgedRelease });
+  // the helper's route answering from publicnode: the same bytes, and no operator of its own
+  const relay = Object.assign(async (m: string, p: readonly unknown[]) => forger(m, p), {}) as EvmRpc;
+  await assert.rejects(evmTreeSync({ rpcs: [forger, rpc(c, { url: "https://base.api.pocket.network", cap: 10_000, logs: pocketPruned })], pin: PIN, history: [relay], ...noWait }).events(), /no two sources of two operators/);
+  // another URL of publicnode's: one operator
+  const twin = rpc(c, { url: "https://base.publicnode.com", logs: forgedRelease });
+  await assert.rejects(evmTreeSync({ rpcs: [forger, rpc(c, { url: "https://base.api.pocket.network", cap: 10_000, logs: pocketPruned })], pin: PIN, history: [twin], ...noWait }).events(), /no two sources of two operators/);
+  // the helper's keyed-only route, an operator of its own, honest: it and an honest publicnode agree; the forger's
+  // nullifier is never taken
+  const keyed = Object.assign(rpc(c, { url: "https://ct-api.example/v1/rpc/base?keyed=only", cap: 10_000 }), { operator: "helper" });
+  const r = await evmTreeSync({ rpcs: [rpc(c, { url: "https://base-rpc.publicnode.com", cap: 50_000 }), rpc(c, { url: "https://base.api.pocket.network", cap: 10_000, logs: pocketPruned })], pin: PIN, history: [keyed], ...noWait }).events();
+  assert.deepEqual(r.events.map((e) => e.nullifier), [null, 56n, null, null]);
+});
+
+test("review P2-1: a source of a 1,000-block page over 2M blocks is stopped at EVM_SOURCE_CALLS, and the first two operators that agree end the rest", async () => {
+  const c = anyChain();
+  const slowLog: string[] = [];
+  const slow = rpc(c, { url: "https://tenderly.example", cap: 1_000, log: slowLog });
+  // no pair can agree (pocket pruned, the slow one stopped): refused, the slow one bounded
+  await assert.rejects(evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [slow], ...noWait }).events(), /tenderly\.example.*more than \d+ log calls/);
+  const n1 = slowLog.filter((x) => x.startsWith("eth_getLogs")).length;
+  assert.ok(n1 <= EVM_SOURCE_CALLS, `the slow source made ${n1} log calls`);
+  // the helper and publicnode agree: the slow one is stopped then, short of its bound
+  const slowLog2: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c), rpc(c, { url: "https://tenderly.example", cap: 1_000, log: slowLog2 })], ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  assert.ok(slowLog2.filter((x) => x.startsWith("eth_getLogs")).length <= EVM_SOURCE_CALLS);
+});
+
+test("review P3-1: a source one block behind (its logs a strict prefix, short only past the finalized block) is a lag, then taken", async () => {
+  const c = longChain([...anyChain().events, { block: ANY_HEAD - 2, kind: "wd", leaf: 4444n }], ANY_HEAD);
+  let first = true;
+  const behind = helperSrc(c, (l, p) => (first && p !== undefined && p.to >= ANY_HEAD - 2 ? ((first = false), l.filter((x) => blockOf(x) !== ANY_HEAD - 2)) : l));
+  const waits: number[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [behind], sleep: async (ms) => void waits.push(ms) }).events();
+  assert.equal(r.events.length, 5);
+  assert.deepEqual(waits, [2000]);
+});
+
+test("review P3-2: a held part is kept when the sources merely fail; it is dropped only when a source read every block and did not make the pool's trees", async () => {
+  const c = anyChain();
+  const hold = evmMemoryHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: hold, ...noWait }).events();
+  const h = await hold.read();
+  const log: string[] = [];
+  const broken = { getLogs: () => { throw new Error("RPC error -32000: internal error"); } };
+  const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", log }), rpc(c, { url: "https://pocket.example", ...broken })];
+  await assert.rejects(evmTreeSync({ rpcs: seats, pin: PIN, history: [rpc(c, { url: "https://helper.example", ...broken })], held: hold, ...noWait }).events(), /no two sources of two operators/);
+  assert.equal(await hold.read(), h, "the hold kept");
+  assert.ok(!log.some((x) => x.startsWith("eth_getLogs") && x.includes('"fromBlock":"0x1"')), "never read again from the deploy block");
+});
+
+test("review P3-3: a memory hold only ever rises", async () => {
+  const hold = evmMemoryHold();
+  const at = (to: bigint) => ({ network: "base" as const, pool: POOL, fromBlock: 1n, to, events: [] });
+  await hold.write(at(100n));
+  await hold.write(at(50n));
+  assert.equal((await hold.read())?.to, 100n);
+  await hold.write(at(120n));
+  assert.equal((await hold.read())?.to, 120n);
 });

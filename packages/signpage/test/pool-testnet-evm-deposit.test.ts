@@ -268,4 +268,21 @@ test("card evm-pool-leaves-any-source: one hold per pool on the page; the helper
   const base = pageEvmHistory({ ...PIN, network: "base" });
   assert.equal(base.length, 1);
   assert.equal(pageEvmHistory({ ...PIN, network: "base" })[0], base[0], "one paced route, the same each time");
+  // review of 0b379bf4, P1-1: the route in its keyed-only mode, never the public fallback, one operator "helper"
+  const r = base[0] as unknown as { url: string; operator: string };
+  assert.match(r.url, /\/v1\/rpc\/base\?keyed=only$/);
+  assert.equal(r.operator, "helper");
+  assert.match((pageEvmHistory({ ...PIN, network: "robinhood" })[0] as unknown as { url: string }).url, /\/v1\/rpc\/robinhood\?keyed=only$/);
+});
+
+test("review of 0b379bf4, P3-3: the page's hold never moves back; resetPageEvmHolds forgets every pool's", async () => {
+  const { pageEvmHold, resetPageEvmHolds } = await import("../src/pool-testnet.ts");
+  const at = (to: bigint) => ({ network: PIN.network, pool: PIN.pool, fromBlock: 1n, to, events: [] });
+  const h = pageEvmHold(PIN);
+  await h.write(at(100n));
+  await h.write(at(40n));
+  assert.equal((await h.read())?.to, 100n);
+  resetPageEvmHolds();
+  assert.notEqual(pageEvmHold(PIN), h);
+  assert.equal(await pageEvmHold(PIN).read(), null);
 });

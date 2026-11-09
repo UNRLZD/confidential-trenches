@@ -53,7 +53,7 @@ import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/s
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, evmHelperRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -92,10 +92,12 @@ export const pageEvmHold = (pin: EvmPoolPin): EvmSyncHold => {
   return h;
 };
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
- *  helper's keyed route (POST /v1/rpc/{chain}, its archive providers: a keyless seat keeps a window of logs only), held
- *  to the pool's root at the head like any source and never taken on its word alone; none on a testnet, whose helper
- *  has no route for the chain. */
-export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => (pin.network === "base" || pin.network === "robinhood" ? [evmHelperRpc(TRADE_HELPER, pin.network)] : []);
+ *  helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, its archive providers alone, never its public
+ *  fallback: a keyless seat keeps a window of logs only), one operator, held to the pool's root at the head like any
+ *  source and never taken on its word alone; none on a testnet, whose helper has no route for the chain. */
+export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => (pin.network === "base" || pin.network === "robinhood" ? [evmHelperKeyedRpc(TRADE_HELPER, pin.network)] : []);
+/** Tests only: forget every pool's hold on this page (EVM_HOLDS is the page's, one per pool). */
+export const resetPageEvmHolds = (): void => EVM_HOLDS.clear();
 /** Each EVM chain's mainnet pool list, the pool sync's seats first (card evm-pool-lists-mainnet): the kit's
  *  evmPoolProvidersOf(evmPoolVenues()[chain]), copied, as TESTNET_RPCS copies the testnet pairs, since the venue table
  *  carries every network's providers and SIGN_HOST's build carries no testnet one (scripts/build-network.test.mjs);
