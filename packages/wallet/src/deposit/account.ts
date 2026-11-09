@@ -41,7 +41,7 @@ import { depositId } from "../derive/keys.ts";
 import { NEAR_NETWORKS, NEAR_RPC_METHOD, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc } from "../../../kit/src/near/networks.ts";
 
 // The networks, the pair rule and nearRpc live in the kit (packages/kit/src/near/networks.ts); every caller still imports them here.
-export { NEAR_NETWORKS, NEAR_RPC_METHOD, NEAR_RPC_URLS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS } from "../../../kit/src/near/networks.ts";
+export { NEAR_NETWORKS, NEAR_RPC_METHOD, NEAR_RPC_URLS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, rpcHttpError, type RpcHttpError } from "../../../kit/src/near/networks.ts";
 
 /** The six reads' heights may spread by this many blocks at most (live spread measured by the review: 5-6). */
 export const HEIGHT_SPREAD_MAX = 30;

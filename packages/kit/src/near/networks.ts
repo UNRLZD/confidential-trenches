@@ -49,10 +49,23 @@ export const RPC_TIMEOUT_MS = 10_000;
 /** The one JSON-RPC method nearRpc sends; the wallet's test holds it to the kit's NEAR method list (HELPER_RPC_METHODS). */
 export const NEAR_RPC_METHOD = "query";
 
-/** One NEAR provider: runs a `query` with these params and gives back the JSON-RPC answer object. */
+/** One NEAR provider: runs a `query` with these params and gives back the JSON-RPC answer object; `signal` aborts it. */
 export interface NearRpc {
   name: string;
-  query(params: Record<string, unknown>): Promise<unknown>;
+  query(params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
+}
+
+/** An HTTP answer that is not the provider's JSON-RPC one: its status, and its Retry-After in ms when it sent one. */
+export type RpcHttpError = Error & { status: number; retryAfterMs?: number };
+/** The error a provider's HTTP status throws (message "HTTP <status>"), with its Retry-After (seconds or a date) read. */
+export function rpcHttpError(res: { status: number; headers: { get(name: string): string | null } }, now = Date.now()): RpcHttpError {
+  const e = Object.assign(new Error(`HTTP ${res.status}`), { status: res.status }) as RpcHttpError;
+  const ra = res.headers.get("retry-after")?.trim();
+  if (ra) {
+    const ms = /^[0-9]+$/.test(ra) ? Number(ra) * 1000 : Date.parse(ra) - now;
+    if (Number.isFinite(ms) && ms >= 0) e.retryAfterMs = ms;
+  }
+  return e;
 }
 
 /**
@@ -77,7 +90,8 @@ export function nearPairRule(network?: NearNetwork): string {
 }
 
 /**
- * A provider by URL. A status other than 200 or 408, a body that is not JSON or no answer in time throws. A 408's JSON
+ * A provider by URL. A status other than 200 or 408 throws rpcHttpError (its status and Retry-After kept, so a reader
+ * can tell a provider's "busy" from a wrong answer), as do a body that is not JSON and no answer in time. A 408's JSON
  * body is given back as the answer: dRPC's free plan answers a view it stopped for time that way, HTTP 408 with
  * {"error":{"message":"Request timeout on the free plan, please upgrade to paid plan","code":30}} (near.drpc.org and
  * near-testnet.drpc.org, read 2026-11-06 05:47Z), and the vault's page reads ask for the same page again after a wait
@@ -86,14 +100,14 @@ export function nearPairRule(network?: NearNetwork): string {
 export function nearRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): NearRpc {
   return {
     name: url,
-    async query(params) {
+    async query(params, signal) {
       const res = await fetchFn(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method: NEAR_RPC_METHOD, params }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       });
-      if (res.status !== 200 && res.status !== 408) throw new Error(`HTTP ${res.status}`);
+      if (res.status !== 200 && res.status !== 408) throw rpcHttpError(res);
       return await res.json();
     },
   };
