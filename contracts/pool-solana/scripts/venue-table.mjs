@@ -62,6 +62,18 @@ export const CLUSTERS = Object.freeze({
  *  compute budget's own), the bound the priority is priced on. */
 const CU_PER_IX = 200_000n;
 
+/** A public RPC answers 429 under load past rpc()'s own tries (shared devnet hosts): wait and ask again, up to 8 times. */
+async function patient(f) {
+  for (let i = 0; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (i >= 7 || !/429|-32029|-32429|fetch failed/.test(String(e?.message))) throw e;
+      await sleep(1_000 * 2 ** Math.min(i, 4));
+    }
+  }
+}
+
 /** The cluster's record: its own file, or on devnet one made from the devnet deploy's program and pool. */
 export function recordOf(cluster, dir = DEPLOYMENTS) {
   const file = path.join(dir, `${cluster}.json`);
@@ -111,7 +123,7 @@ export async function plan(cluster, venue, { fetchFn = fetch, dir = DEPLOYMENTS 
   const c = CLUSTERS[cluster];
   if (!c) throw new Error(`--cluster must be mainnet or devnet`);
   if (!kit.SOLANA_POOL_BUY_VENUES.includes(venue)) throw new Error(`--venue must be one of ${kit.SOLANA_POOL_BUY_VENUES.join(", ")}`);
-  const call = c.rpcs.map((url) => Object.assign((method, params) => rpc(fetchFn, url, method, params, sleep), { url }));
+  const call = c.rpcs.map((url) => Object.assign((method, params) => patient(() => rpc(fetchFn, url, method, params, sleep)), { url }));
   const gs = await Promise.all(call.map((f) => f("getGenesisHash", [])));
   gs.forEach((g, i) => { if (g !== c.genesis) throw new Error(`${c.rpcs[i]} answers genesis ${g}, not ${cluster}'s`); });
   const { file, record } = recordOf(cluster, dir);
