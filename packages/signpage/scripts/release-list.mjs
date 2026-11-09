@@ -319,26 +319,50 @@ export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
 
 const git = (...args) => spawnSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).stdout.trim();
 
+/** The newest list's tree against `head` on SIGN_BUILD_INPUTS: { newest, tree, state, changed }, state "same", "differ"
+ *  (changed: the input paths that differ) or "missing" (no tree named, or one this clone does not hold). */
+export function listTreeInputs(dir = RELEASES, head = "HEAD") {
+  const newest = newestRelease(dir);
+  if (!newest) return { newest, state: "missing" };
+  const { tree } = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
+  if (typeof tree !== "string" || spawnSync("git", ["-C", REPO, "cat-file", "-e", `${tree}^{tree}`]).status !== 0) return { newest, tree, state: "missing" };
+  const d = spawnSync("git", ["-C", REPO, "diff", "--name-only", tree, head, "--", ...SIGN_BUILD_INPUTS], { encoding: "utf8" });
+  if (d.status !== 0) throw new Error(`git diff ${tree} ${head} failed: ${(d.stderr ?? "").trim()}`);
+  const changed = d.stdout.split("\n").filter(Boolean);
+  return { newest, tree, state: changed.length ? "differ" : "same", changed };
+}
+
 /**
  * Review P1(a): the newest list held to this checkout's own build whenever its tree has `head`'s SIGN_BUILD_INPUTS (the
- * bundle is built where the list is cut, so CI's clean install rebuilds it and compares): { newest, applies, problems }.
- * A list whose tree is not in this clone throws (CI checks out the whole history for it), never passes unread.
+ * bundle is built where the list is cut, so CI's clean install rebuilds it and compares): { newest, applies, missing,
+ * problems }. A list whose tree is not in this clone gives missing: true, never a pass (CI checks out the whole history).
  */
 export function newestReleaseOnHead(dir = RELEASES, ledger = RELEASED, head = "HEAD") {
-  const newest = newestRelease(dir);
-  if (!newest) return { newest, applies: false, problems: ["no release list"] };
-  const { tree } = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
-  if (typeof tree !== "string" || spawnSync("git", ["-C", REPO, "cat-file", "-e", `${tree}^{tree}`]).status !== 0)
-    throw new Error(`${newest} names tree ${tree}, which this clone does not hold: check out the whole history (fetch-depth: 0)`);
-  const d = spawnSync("git", ["-C", REPO, "diff", "--quiet", tree, head, "--", ...SIGN_BUILD_INPUTS], { encoding: "utf8" });
-  if (d.status !== 0 && d.status !== 1) throw new Error(`git diff ${tree} ${head} failed: ${(d.stderr ?? "").trim()}`);
-  if (d.status === 1) return { newest, applies: false, problems: [] };
+  const t = listTreeInputs(dir, head);
+  if (!t.newest) return { newest: t.newest, applies: false, missing: false, problems: ["no release list"] };
+  if (t.state === "missing") return { newest: t.newest, applies: false, missing: true, problems: [`${t.newest} names tree ${t.tree}, which this clone does not hold: check out the whole history (fetch-depth: 0)`] };
+  if (t.state === "differ") return { newest: t.newest, applies: false, missing: false, problems: [] };
   const built = buildSign();
   try {
-    return { newest, applies: true, problems: unreleasedProblems(built, dir, ledger) };
+    return { newest: t.newest, applies: true, missing: false, problems: unreleasedProblems(built, dir, ledger) };
   } finally {
     rmSync(built, { recursive: true, force: true });
   }
+}
+
+/**
+ * Review P1: what the sign deploy is held to beside unreleasedProblems: the newest list's tree has HEAD's SIGN_BUILD_INPUTS.
+ * Only then did HEAD's passed push run hold that list to a clean build (newestReleaseOnHead); a list whose inputs are not
+ * HEAD's was never compared to one, whatever bytes it names. Empty = fine.
+ */
+export function releaseTreeProblems(dir = RELEASES, head = "HEAD") {
+  const t = listTreeInputs(dir, head);
+  if (!t.newest) return [];
+  const next = `release-${Number(t.newest.slice(8)) + 1}`;
+  const cut = `cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}), push and merge it, then deploy main at that merge`;
+  if (t.state === "missing") return [`${t.newest} names tree ${t.tree}, which this clone does not hold, so its SIGN_HOST build inputs cannot be read against HEAD's: fetch main's whole history, or ${cut}`];
+  if (t.state === "differ") return [`${t.newest} was cut from other SIGN_HOST build inputs than HEAD's (${t.changed.slice(0, 10).join(", ")}${t.changed.length > 10 ? ", ..." : ""}), so no clean build of HEAD was compared to it: ${cut}`];
+  return [];
 }
 const uncommitted = () => git("status", "--porcelain", "--", ".", ":!packages/signpage/releases");
 

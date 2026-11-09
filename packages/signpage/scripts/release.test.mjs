@@ -13,7 +13,7 @@ import { bundle, SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
 import { SIGN_BUILD_CONFIG, SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, releaseTreeProblems, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
@@ -521,8 +521,11 @@ test("APP_HOST's part of a list is built by the terminal deploy's own build(), s
 // review P1(a): the bundle is built on the release machine, so CI rebuilds it on its own clean install and holds the
 // newest list to it whenever that list's tree has HEAD's SIGN_BUILD_INPUTS (a release merge, or a release branch): a list
 // cut from a machine whose bytes are not the sources' build (a tsconfig above the repo, an edited node_modules) fails here
-test("the newest release list is this runner's clean build whenever its tree has HEAD's SIGN_BUILD_INPUTS", () => {
+test("the newest release list is this runner's clean build whenever its tree has HEAD's SIGN_BUILD_INPUTS", (t) => {
   const r = newestReleaseOnHead();
+  // heavy.sh's remote box holds no history (scripts/heavy-remote.sh), so the list's tree is not there: CI's test-packages
+  // job (fetch-depth: 0) holds this test; anywhere else a missing tree fails it
+  if (r.missing && process.env.HEAVY_JOB) return t.skip(`${r.problems[0]}: held by CI's test-packages job, which checks out the whole history`);
   assert.deepEqual(r.problems, [], r.problems.join("\n"));
   if (!r.applies) assert.ok(r.newest, "a newest list to compare");
 });
@@ -555,4 +558,31 @@ test("planted: a newest list naming HEAD's tree passes as this build, and fails 
   // a list whose tree's inputs are not HEAD's (here: the empty tree) is not held to this build
   const other = plant((l) => ({ ...l, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
   assert.equal(other.applies, false);
+  // a list naming a tree this clone does not hold is missing, never a pass (review P3-1: the box has no history)
+  const gone = plant((l) => ({ ...l, tree: "1".repeat(40) }));
+  assert.equal(gone.missing, true);
+  assert.match(gone.problems.join("\n"), /does not hold: check out the whole history \(fetch-depth: 0\)/);
+});
+
+// review P1: the deploy is held to the newest list's tree too. Bytes equal to the list are not enough: a list cut from
+// other inputs (a tainted release machine, then a lockfile bump on main) was never compared to a clean build of HEAD
+test("planted: a newest list whose tree has other SIGN_HOST build inputs than HEAD is refused for the deploy, whatever bytes it names", () => {
+  const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+  const tag = `release-${n + 1}`;
+  const head = spawnSync("git", ["-C", PKG, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).stdout.trim();
+  const list = JSON.parse(listText(tag));
+  const at = (tree) => {
+    const dir = releasesCopy();
+    writeFileSync(join(dir, `${tag}.json`), `${JSON.stringify({ ...structuredClone(list), tree }, null, 1)}\n`);
+    try {
+      return releaseTreeProblems(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  assert.deepEqual(at(head), []);
+  const differ = at("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+  assert.match(differ.join("\n"), new RegExp(`${tag} was cut from other SIGN_HOST build inputs than HEAD's \\(LICENSE, package\\.json, .*, \\.\\.\\.\\), so no clean build of HEAD was compared to it: cut release-${n + 2}`));
+  assert.match(at("1".repeat(40)).join("\n"), /which this clone does not hold/);
+  assert.match(at(undefined).join("\n"), /names tree undefined, which this clone does not hold/);
 });
