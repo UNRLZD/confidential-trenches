@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_DATA, NO_FILTER, pct, portfolio, restored, shortAddress, sortRows, stats, units, usd, walletRows } from "../src/screens/portfolio/model.ts";
+import { activity, amount, balanceOf, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_DATA, NO_FILTER, pct, portfolio, restored, shortAddress, sortRows, stats, units, usd, walletRows } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData, TokenMarket } from "../src/screens/portfolio/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
@@ -370,6 +370,98 @@ test("cash: the vault and the ready wallets in dollars; a SOL or ETH pool never 
   const same = portfolio(snap({ ...base, vault_balance: "50", wallets: [], pools: [{ chain: "near", asset: "USDC", balance: "50", ready: "50" }] }), data(), NOW).totals!;
   assert.equal(same.cash, 10000n);
   assert.equal(same.total, 10000n);
+});
+
+// one balance (card portfolio-one-balance): Cash is the vault plus every pool at the signing page's own price, one total
+// with each chain's part; a deposit in flight is counted on the side the kit's totals hold it, once.
+const PX = (usd: number, ageS = 5) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - ageS, read_ms: NOW - 1000 });
+const FOUR: SignpageState = {
+  ...STATE,
+  positions: [],
+  pools: [
+    { chain: "solana", asset: "SOL", balance: "12.5", ready: "10", tap_max: "1", price: PX(150) },
+    { chain: "base", asset: "ETH", balance: "0.25", price: PX(3000) },
+    { chain: "robinhood", asset: "ETH", balance: "0.1", price: PX(3000) },
+  ],
+};
+
+test("one balance: Cash is the vault plus each pool at the page's price and the ready wallets, with each chain's part", () => {
+  const t = portfolio(snap(FOUR), data(), NOW).totals!;
+  // vault 73.18; 12.5 SOL at $150 = $1,875.00 and the READY Solana wallet's $10.00; 0.25 ETH at $3,000; 0.1 ETH at $3,000
+  assert.equal(t.cash, 7318n + 187500n + 1000n + 75000n + 30000n);
+  assert.deepEqual(t.parts, [
+    { chain: "near", cents: 7318n, moving: false },
+    { chain: "solana", cents: 188500n, moving: false },
+    { chain: "base", cents: 75000n, moving: false },
+    { chain: "robinhood", cents: 30000n, moving: false },
+  ]);
+  assert.equal(t.total, t.cash + t.onWay + t.inPos);
+  // what a chain with no pool spends (the vault path): the cash before this card, the pools left out
+  assert.equal(t.offPool, 7318n + 1000n);
+  // the header, the deposit and withdraw screens draw the same one number
+  assert.equal(balanceOf(snap(FOUR), data(), NOW), t.cash);
+});
+
+test("one balance: the vault alone, then the vault and one pool", () => {
+  const vault = portfolio(snap({ ...STATE, positions: [], wallets: [] }), data(), NOW).totals!;
+  assert.equal(vault.cash, 7318n);
+  assert.deepEqual(vault.parts, [{ chain: "near", cents: 7318n, moving: false }]);
+  const one = portfolio(snap({ ...STATE, positions: [], wallets: [], pools: [{ chain: "solana", asset: "SOL", balance: "2", price: PX(150) }, { chain: "base", asset: "ETH", balance: "0" }] }), data(), NOW).totals!;
+  assert.equal(one.cash, 7318n + 30000n);
+  // an empty pool is left out of the parts, priced or not
+  assert.deepEqual(one.parts.map((p) => p.chain), ["near", "solana"]);
+});
+
+test("one balance: a pool with no fresh price has no dollar part and stays out of Cash; none is made up", () => {
+  // Solana's feed bound is 60 s: a read 120 s old is past it on this device's clock
+  const s = { ...FOUR, wallets: [], pools: [{ chain: "solana" as const, asset: "SOL" as const, balance: "12.5", price: PX(150, 120) }, { chain: "base" as const, asset: "ETH" as const, balance: "0.25" }] };
+  const t = portfolio(snap(s), data(), NOW).totals!;
+  assert.equal(t.cash, 7318n);
+  assert.deepEqual(t.parts, [
+    { chain: "near", cents: 7318n, moving: false },
+    { chain: "solana", cents: null, moving: false },
+    { chain: "base", cents: null, moving: false },
+  ]);
+});
+
+const POOL_STAGES = ["quote_checked", "waiting", "in_transit", "in_pool", "refunded", "refund_move", "failed", "short", "expired"] as const;
+const POOL_MOVING = new Set(["waiting", "in_transit", "refunded", "refund_move", "failed", "short"]);
+const VAULT_STAGES = ["quote_checked", "waiting", "in_transit", "into_vault", "done", "refunded", "held", "halted", "failed", "short", "expired", "refund_move"] as const;
+const VAULT_MOVING = new Set(["waiting", "in_transit", "into_vault", "refunded", "refund_move", "failed", "short"]);
+
+for (const stage of POOL_STAGES) {
+  test(`one balance, in flight: a pool deposit at ${stage} is counted once, on the side the kit's totals hold it`, () => {
+    const op = { id: "pd1", kind: "pool_deposit", chain: "base", stage, txs: [] } as Operation;
+    const t = portfolio(snap({ ...FOUR, wallets: [], ops: [op] }), data(), NOW).totals!;
+    // the vault and the pools as the kit reports them, never more or less at any stage: the op adds no amount
+    assert.equal(t.cash, 7318n + 187500n + 75000n + 30000n);
+    const base = t.parts.find((p) => p.chain === "base")!;
+    assert.equal(base.cents, 75000n);
+    assert.equal(base.moving, POOL_MOVING.has(stage));
+    // only the pool's own chain is marked
+    assert.ok(t.parts.filter((p) => p.chain !== "base").every((p) => !p.moving));
+  });
+}
+
+for (const stage of VAULT_STAGES) {
+  test(`one balance, in flight: a vault deposit at ${stage} is counted once, on the side the kit's totals hold it`, () => {
+    // a done deposit carries the USDC it credited; vault_balance already holds that note, so it never adds again
+    const op = { id: "d1", kind: "deposit", stage, txs: [], ...(stage === "done" ? { amount_usd: "50" } : {}) } as Operation;
+    const t = portfolio(snap({ ...FOUR, wallets: [], ops: [op] }), data(), NOW).totals!;
+    assert.equal(t.cash, 7318n + 187500n + 75000n + 30000n);
+    const near = t.parts.find((p) => p.chain === "near")!;
+    assert.equal(near.cents, 7318n);
+    assert.equal(near.moving, VAULT_MOVING.has(stage));
+  });
+}
+
+test("one balance, in flight: a chain with nothing yet and a deposit moving is listed, at $0, marked", () => {
+  const op = { id: "pd2", kind: "pool_deposit", chain: "robinhood", stage: "in_transit", txs: [] } as Operation;
+  const t = portfolio(snap({ ...STATE, positions: [], wallets: [], ops: [op] }), data(), NOW).totals!;
+  assert.deepEqual(t.parts, [
+    { chain: "near", cents: 7318n, moving: false },
+    { chain: "robinhood", cents: 0n, moving: true },
+  ]);
 });
 
 test("words: every word has a source; the drafts left are the overflow button's accessible name and card app-export-every-wallet's two (words-pending)", () => {

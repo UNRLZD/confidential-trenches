@@ -67,6 +67,15 @@
 .pvt .pvv { font-size: 14px; color: var(--text-1); white-space: nowrap; }
 .pvt .pvp { font-size: 11px; color: var(--text-3); }
 .pvtstrip { display: block; margin-top: 4px; }
+/* Cash's parts per chain (card portfolio-one-balance): shown on hover or focus, and by a tap (.open) on the phone */
+.pvt.pvcash { position: relative; cursor: pointer; outline: none; }
+.pvt.pvcash:focus-visible { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.pvparts { display: none; position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; min-width: 232px; padding: 6px; background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+.pvcash:hover .pvparts, .pvcash:focus-visible .pvparts, .pvcash.open .pvparts { display: block; }
+.pvpr { height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border-radius: 8px; font: 13px var(--font-ui); color: var(--text-1); white-space: nowrap; }
+.pvpr + .pvpr { box-shadow: inset 0 1px 0 var(--border-row); }
+.pvpr .num { font-size: 13px; }
+.pvpl { width: 16px; height: 16px; flex: none; border-radius: 50%; background: var(--bg-page); object-fit: contain; box-sizing: border-box; }
 .cal .hd, .wr .hd { display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font-ui); }
 .cal .hd .s, .wr .hd .ct { font: 500 12px var(--font-num); color: var(--text-3); }
 .cal .hd .s.gain { color: var(--acc); } .cal .hd .s.loss { color: var(--sell); }
