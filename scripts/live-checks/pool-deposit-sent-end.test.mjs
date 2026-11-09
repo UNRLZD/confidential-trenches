@@ -91,7 +91,7 @@ const PLANTED = [
   ["no backoff (review 4)", [["d&&(u=Math.min(u*2,IP))", "d&&(u=u)"]], "loops"],
   ["filled without the whole ask sent (S9)", [["return e.signal?.aborted?null:t.whole&&o.length>0", "return e.signal?.aborted?null:o.length>0"]], "loops"],
   ["the hand-off keeps settled sends (S12)", [["let t=new Set(d().map(e=>e.hash))", "let t=new Set(l.map(e=>e.hash))"]], "solLeft"],
-  ["EVM: the round read before U's nonce (E1)", [["let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`));nF(e);let c=await e.round(),", "let c=await e.round();nF(e);let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),"]], "evmEnd"],
+  ["EVM: the round read before U's nonce (E1)", [["let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`));nF(e);let c=await e.round(e.signal),", "let c=await e.round(e.signal);nF(e);let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),"]], "evmEnd"],
   ["EVM: the first send's nonce (E8)", [["(i?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(i?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
   ["EVM: a Deposited not final read as an end (E4)", [["l.block>c.finalBlock?null:", ""]], "evmEnd"],
   ["EVM: a Deposited at another value read as landed (E5)", [["l.value===t.value?`landed`:`dead`}", "`landed`}"]], "evmEnd"],

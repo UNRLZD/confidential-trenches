@@ -45,6 +45,7 @@ export const IN_PROCESS = [
   viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
   viaRead("kit-frame-version", () => import("../live-checks/kit-frame-version.mjs")),
+  viaRead("kit-portfolio-reads", () => import("../live-checks/kit-portfolio-reads.mjs")),
   viaRead("kit-oneclick-pins-frozen", () => import("../live-checks/kit-oneclick-pins-frozen.mjs")),
   viaRead("pool-answer-unknown", () => import("../live-checks/pool-answer-unknown.mjs")),
   viaRead("oneclick-fee-path-own-key", () => import("../live-checks/oneclick-fee-path-own-key.mjs")),

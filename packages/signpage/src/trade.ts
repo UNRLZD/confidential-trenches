@@ -256,7 +256,9 @@ export function tradeKind(host: TradeHost): TradeKind {
     async function trade(locks: Locks): Promise<void> {
       const ms = host.storeMs ?? TRADE_STORE_MS;
       const store = timedStore(await within(host.store(), ms, "the store's open"), ms);
-      const op: { kind: "buy" | "sell"; sha: string; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number } = { kind: side, sha: ctx.sha, stage: "pending", txs: [], created_ms: now() };
+      // its chain, token and, on a buy, its USDC spend as its USD size, from the request, so state.ops names them (kit
+      // messages.ts OpDetail, card kit-portfolio-reads); a sell's amount is in base units here, so it names no units
+      const op: { kind: "buy" | "sell"; sha: string; stage: string; txs: TxRef[]; code?: ErrorCode; created_ms: number; chain: "solana"; token: string; amount_usd?: string } = { kind: side, sha: ctx.sha, stage: "pending", txs: [], created_ms: now(), chain: "solana", token, ...(side === "buy" ? { amount_usd: amount } : {}) };
       // each write in order, tried again before it counts as lost (card app-sell-mount re-check 2, P2-1): a lost write
       // keeps the wallets' marks (legsRun), so the next load or pick settles the op from them, never leaving it open
       let writes: Promise<void> = Promise.resolve();
