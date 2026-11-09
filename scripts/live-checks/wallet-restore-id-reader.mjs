@@ -29,9 +29,9 @@
 //       with CORS for the page's origin, as step 5 reads each.
 // Until card wallet-restore-id-reader-wired the IdReader's code was not in the served bundle (at f11b13ac nothing in
 // packages/signpage/src imported restore/id-reader.ts, and main 610143c2's public/app.js holds none of the id_ and ids_
-// markers below); its rules joined MARK once src/pool-restore.ts imported it. What this check cannot read: whether a
-// restore on SIGN_HOST reads any id today, as the mainnet build pins no pool yet (src/pool-restore.ts pagePools), so its
-// step 5 runs on the first pool pinned there.
+// markers below); its rules joined MARK once src/pool-restore.ts imported it. What this check cannot read: which ids a
+// restore on SIGN_HOST reads; since card sol-pools-mainnet-pin the mainnet build pins the Solana pool
+// (src/pool-restore.ts pagePools), so its step 5 runs on that pool's deposit ids.
 // After: sign
 //   node scripts/live-checks/wallet-restore-id-reader.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/wallet-restore-id-reader.mjs --local [--root <signpage dir>] [--record <file>]

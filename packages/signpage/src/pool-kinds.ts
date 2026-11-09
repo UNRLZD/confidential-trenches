@@ -1,7 +1,7 @@
 // The pool kinds on SIGN_HOST (card signpage-pool-kinds): pool.deposit, pool.buy, pool.sell and pool.withdraw, each
 // checked by src/rules/pool.ts before anything else happens, and answered only for a chain whose pool this page's
-// network pins (the wallet's SOL_POOLS and EVM_POOLS, both empty until the pools deploy: every kind is refused
-// not_allowed until then, and no read is made for a refused one).
+// network pins (the wallet's SOL_POOLS and EVM_POOLS: on mainnet the Solana pool since card sol-pools-mainnet-pin, no
+// EVM pool yet; a kind on a chain with no pin is refused not_allowed, and no read is made for a refused one).
 // - A sell's amount is in the token's decimals: the device reads the mint (Solana) or decimals() (EVM) on two
 //   providers here and the rule parses both answers (tokenDecimalsOf); the app never names a number of decimals. A
 //   read that fails on either provider is "down" (card pool-read-down), never not_allowed.

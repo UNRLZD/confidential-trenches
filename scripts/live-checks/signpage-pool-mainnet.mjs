@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Live check of card signpage-pool-mainnet: SIGN_HOST's mainnet build runs the same pool flow and proof queue as the
 // testnet build (packages/signpage/src/pool-testnet.ts, which main.ts now builds on every build), and only the pin
-// tables and the RPCs differ. Mainnet pins no pool yet, so the deployed page must refuse every pool kind and read
-// nothing for it. It reads what SIGN_HOST serves:
+// tables and the RPCs differ. Since card sol-pools-mainnet-pin the mainnet build pins the Solana pool
+// (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet, its lookup table MAINNET_TABLE), so the deployed page must take
+// every Solana pool kind to that flow, reading only its own pair. It reads what SIGN_HOST serves:
 //   1. SIGN_HOST's /app.js is the one its index.html pins, and it has the sha384 of this checkout's signing page bundle
 //      (packages/signpage/public/app.js), so the deployed page is this release's;
 //   2. that bundle carries the flow and the queue (QUEUE below: the deposit and sell locks, the proof queue's own
@@ -10,15 +11,21 @@
 //      TESTNET_ONLY);
 //   3. SIGN_HOST's served connect-src names the mainnet pair the queue reads (provider A and the helper's keyed route,
 //      packages/signpage/src/trade.ts);
-//   4. in a fresh browser, SIGN_HOST opened top-level frames APP_HOST, which Playwright answers with a probe page; on
-//      the shell's ready the probe asks pool.sell (a mainnet USDC sell), pool.deposit, pool.buy and pool.withdraw on
-//      Solana. Each is refused not_allowed, and the page sends no request to the pair, the other Solana RPC its CSP
-//      allows (api.mainnet-beta.solana.com) or the helper's pool routes. A pinned pool
-//      reads the sold token's mint on the pair before anything else (src/pool-kinds.ts), seed or not, so a refusal with
-//      no read is the missing pin's.
-// Not read here, and why: a real mainnet note's deposit, proof, buy, sell and withdraw on the deployed page wait for
-// SOL_POOLS.mainnet (card pool-sol-deploy-mainnet) and the funded run of card pool-sol-mainnet-run; until then the
-// pinned mainnet build is proven by packages/signpage/test/main-mainnet-pools.test.ts (a planted pin, test only).
+//   4. in a fresh browser, signed out, SIGN_HOST opened top-level frames APP_HOST, which Playwright answers with a probe
+//      page; on the shell's ready the probe asks pool.sell (a mainnet USDC sell), pool.deposit, pool.buy and
+//      pool.withdraw on Solana:
+//      - pool.sell, pool.deposit and pool.buy reach the pinned pool's flow: each is answered, and never not_allowed
+//        (the answer a missing pin gives, src/pool-kinds.ts deps.pinned; a buy with no lookup table is refused too);
+//      - the sell reads its token's mint (getAccountInfo of USDC_MINT) on both of the page's pair before anything else
+//        (src/pool-kinds.ts readTokenDecimals), seed or not: the pin is what lets it through;
+//      - pool.withdraw is refused not_allowed: it opens the page's own withdraw screen, which needs a stored seed
+//        (src/main.ts openPoolWithdraw, src/pages/open.ts takes: withdraw.open only on a signed-in page), and this
+//        browser has none; the three above show the pin is not why;
+//      - no pool read goes to the other Solana RPC SIGN_HOST's CSP allows (api.mainnet-beta.solana.com, the trade
+//        path's): pool reads stay on the page's pair.
+// Not read here, and why: a real mainnet note's deposit, proof, buy, sell and withdraw on the deployed page need the
+// owner's funded run (card pool-sol-mainnet-run); the signed-in pinned flow is proven by
+// packages/signpage/test/main-mainnet-pools.test.ts on fakes.
 // After: sign
 //   node scripts/live-checks/signpage-pool-mainnet.mjs [--record <file>]
 //   node scripts/live-checks/signpage-pool-mainnet.mjs --local [<dir>] [--record <file>]
@@ -50,9 +57,9 @@ export const QUEUE = ["ct-pool/deposit", "ct-pool/sell", "the proof queue is clo
 /** The other Solana RPC SIGN_HOST's connect-src allows (the trade path's): a pool read sent there is one too. */
 const SOLANA_OTHER = "https://api.mainnet-beta.solana.com";
 /** Requests a pinned pool's kinds make: the pair (the helper's route reads the sell Ws' holdings too), any other Solana
- *  RPC the page may reach, and the helper's pool routes. */
+ *  RPC the page may reach, and the helper's pool routes. Each is recorded with its body, so the mint read is seen. */
 const POOL_READ = (u) => u.startsWith(PAGE_PAIR[0]) || u.startsWith(PAGE_PAIR[1]) || u.startsWith(SOLANA_OTHER) || u.startsWith(`${HELPER_HOST}/v1/pool/`);
-/** Mainnet USDC: the sold token, an address of the chain, so a pinned pool would read its mint. */
+/** Mainnet USDC: the sold token, an address of the chain, so the pinned pool reads its mint. */
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 export const ASKS = [
   { type: "pool.sell", chain: "solana", token: USDC_MINT, amount: "1", slippage_bps: 100 },
@@ -86,10 +93,14 @@ export function judge(rec) {
   for (const ask of ASKS) {
     const a = (p.answers ?? {})[ask.type];
     const code = a?.ok === false ? a.error?.code : a?.ok === true ? "ok" : "none";
-    say(code === "not_allowed", `${ask.type} on Solana with no mainnet pin: ${code}, want not_allowed`);
+    if (ask.type === "pool.withdraw") say(code === "not_allowed", `pool.withdraw on Solana, signed out: ${code}, want not_allowed (its screen needs a stored seed, src/pages/open.ts takes)`);
+    else say(code !== "not_allowed" && code !== "none", `${ask.type} on Solana reaches the pinned pool's flow: ${code}, want any answer but not_allowed`);
   }
   const reads = Array.isArray(p.poolReads) ? p.poolReads : null;
-  say(reads !== null && reads.length === 0, `no request to the pair, ${new URL(SOLANA_OTHER).host} or the helper's pool routes for them: ${reads === null ? "not recorded" : reads.length ? reads.join(", ") : "none"}`);
+  const mint = (base) => (reads ?? []).some((r) => typeof r?.url === "string" && r.url.startsWith(base) && typeof r.body === "string" && r.body.includes('"getAccountInfo"') && r.body.includes(USDC_MINT));
+  say(reads !== null && PAGE_PAIR.every(mint), `the sell read its mint on both of the page's pair: ${reads === null ? "not recorded" : PAGE_PAIR.map((u) => `${new URL(u).host}${new URL(u).pathname === "/" ? "" : new URL(u).pathname} ${mint(u) ? "yes" : "no"}`).join(", ")}`);
+  const other = (reads ?? []).filter((r) => typeof r?.url === "string" && r.url.startsWith(SOLANA_OTHER));
+  say(reads !== null && other.length === 0, `no pool read to ${new URL(SOLANA_OTHER).host}: ${reads === null ? "not recorded" : other.length ? `${other.length} read(s)` : "none"}`);
   return { ok: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -140,7 +151,7 @@ async function probe(browser, { signUrl, dir }) {
     for (const o of new Set([...PAGE_PAIR.map((u) => new URL(u).origin), SOLANA_OTHER, HELPER_HOST])) await ctx.route((u) => u.origin === o, (r) => r.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
   }
   const all = [];
-  ctx.on("request", (req) => all.push(req.url()));
+  ctx.on("request", (req) => all.push({ url: req.url(), body: (req.postData() ?? "").slice(0, 600) }));
   const page = await ctx.newPage();
   await page.goto(signUrl, { waitUntil: "load" });
   const app = () => page.frames().find((f) => f.url().startsWith(`${APP_HOST}/`));
@@ -157,7 +168,7 @@ async function probe(browser, { signUrl, dir }) {
     const m = out.log.find((x) => x.fromParent && x.data?.id === id)?.data;
     if (m) answers[type] = { ok: m.ok, ...(m.ok ? { result: m.result } : { error: m.error }) };
   }
-  return { ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), answers, poolReads: all.filter(POOL_READ) };
+  return { ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), answers, poolReads: all.filter((r) => POOL_READ(r.url)) };
 }
 
 export async function collect({ browser, signUrl = SIGN_URL, dir = null, source }) {

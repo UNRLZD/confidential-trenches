@@ -108,7 +108,7 @@ export const OUT = {
   "signpage-pool-flow": "devnet RPC reads",
   "signpage-pool-notes": "devnet RPC reads of the run",
   "signpage-pool-withdraw-form": "devnet RPC reads of the run",
-  "signpage-pool-pins": "devnet RPC reads",
+  "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
   "pool-deposits": "devnet RPC reads of the run",
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",

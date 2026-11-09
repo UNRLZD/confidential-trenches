@@ -9,9 +9,10 @@
 //   3. the new frame's state holds a restore op of the page's own (the run with no tap) that ends done;
 //   4. the probe asks restore: answered {stage: "started"}, then progress for its id: reading, and done at the end;
 //      never stalled.
-// The page's network pins no pool on mainnet yet (SOL_POOLS.mainnet and EVM_POOLS are empty), so each run there reads
-// no pool and ends done at once; a pin that lands makes the same run read it, and a pool it cannot read ends stalled,
-// which this check fails. The devnet and Base Sepolia notes themselves are the card's run record
+// Since card sol-pools-mainnet-pin the page's network pins the Solana pool on mainnet (SOL_POOLS.mainnet; EVM_POOLS is
+// empty), so each run there reads that pool for the vector's seed, which holds no note there, then step 5's deposit ids
+// and each id's U_X on Solana (card wallet-restore-reads-ux), and ends done; a pool it cannot read ends stalled, which
+// this check fails. The devnet and Base Sepolia notes themselves are the card's run record
 // (pool-restore-wired.run.json), read on two RPCs.
 // After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
