@@ -40,6 +40,12 @@ export const PATHS = [
   "apps/helper/test/withdraw-send/",
   // settle.rs's kit_settle_mock: the kit's settle CLI (it imports the kit's src/ and contracts/vault/scripts/near-tx.mjs)
   "packages/kit/test/vault-settle-cli.mjs",
+  // exit_out.rs: the exit tool's CLI, the tool's own src/ and the wallet's moves it reaches through the kit's ./core
+  "packages/exit/test/out-cli.ts",
+  "packages/exit/src/",
+  "packages/exit/package.json",
+  "packages/wallet/src/",
+  "packages/wallet/package.json",
   "scripts/live-checks/vault-",
   "scripts/ci/near-rpc-operators.mjs",
   // the shared read that waits out a rate limit, which vault-skeleton.mjs and vault-testnet-t01.mjs read through
@@ -83,7 +89,7 @@ export function matches(file, paths = PATHS) {
 // parallel with it; CI run #406's shard 1 took 16m47s with the long run before that card (about 560 s on the box).
 export const SHARDS = [
   ["s10", "s01", "withdraw_spend", "withdraw_context", "vkey", "s14", "s13", "p02"],
-  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16"],
+  ["s04", "relayer_send", "groth16", "events", "poseidon", "s17", "prepay", "s16", "exit_out"],
   ["payouts", "s20", "s02", "withdraw_vectors", "s15", "s12"],
   ["lib", "deposit_msg", "ragequit", "settle", "real_token", "smoke", "tree_prop", "relayer_withdraw", "s19"],
 ];
