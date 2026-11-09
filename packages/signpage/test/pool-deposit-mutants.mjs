@@ -61,7 +61,7 @@ export const MUTANTS = [
   // delta review 2 of release-86: the stop read before the wait for an RPC behind, not after it
   [SOL, [["    await pause(ms);\n    stopped(h);\n", "    stopped(h);\n    await pause(ms);\n"]], "pool-deposit-sent-end review 2 M1"],
   // E1: the follower's round read before U's finalized nonce
-  [EVM, [['  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n  stopped(h);\n  const round = await h.round();\n', '  const round = await h.round();\n  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n']], "review 8 E1:"],
+  [EVM, [['  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n  stopped(h);\n  const round = await h.round(h.signal);\n', '  const round = await h.round(h.signal);\n  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n']], "review 8 E1:"],
   // E4: a take read from a Deposited not final yet; E5: a Deposited at another value read as landed
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.value !== n.value ? "dead" : d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],

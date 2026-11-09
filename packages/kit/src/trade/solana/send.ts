@@ -408,11 +408,18 @@ const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "Tim
 /** ": RPC error <code>: <message>" when `text` is a JSON-RPC error object, else "". */
 function rpcErrorWords(text: string): string {
   try {
-    const e = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown } } | null)?.error;
-    return e && typeof e === "object" && (typeof e.code === "number" || typeof e.message === "string") ? `: RPC error ${String(e.code)}: ${String(e.message).slice(0, 120)}` : "";
+    const e = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown; data?: unknown } } | null)?.error;
+    return e && typeof e === "object" && (typeof e.code === "number" || typeof e.message === "string") ? `: ${rpcErrorText(e)}` : "";
   } catch {
     return "";
   }
+}
+/** A JSON-RPC error's words: its code, its message and, when it is text, its data, where a provider may name its cap
+ *  (base.gateway.tenderly.co: message "invalid params", data "Block range too large: maximum 1000 blocks without an
+ *  access key. ...", read 2026-11-09 19:43Z; review of 39a4c67a, P3-4). Each part bounded. */
+function rpcErrorText(e: { code?: unknown; message?: unknown; data?: unknown } | null): string {
+  const data = typeof e?.data === "string" && e.data !== "" ? `: ${e.data.slice(0, 200)}` : "";
+  return `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}${data}`;
 }
 /** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
 function retryAfterMs(h: string | null, now: number): number | null {
@@ -468,8 +475,8 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         const o = j as Record<string, unknown>;
         if (!(o.id === id || (typeof o.id === "number" && String(o.id) === id))) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
         if (o.error !== undefined) {
-          const e = o.error as { code?: unknown; message?: unknown } | null;
-          const msg = `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}`;
+          const e = o.error as { code?: unknown; message?: unknown; data?: unknown } | null;
+          const msg = rpcErrorText(e);
           if (typeof e?.code === "number" && RPC_THROTTLE_CODES.has(e.code)) throw new Fault("rpc_throttled", msg, new Error(msg));
           throw new Error(msg);
         }

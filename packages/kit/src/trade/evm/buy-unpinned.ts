@@ -119,6 +119,26 @@ export type EvmPoolVenueList = Readonly<Partial<Record<EvmPoolChain, EvmPoolVenu
 export function evmPoolProvidersOf(venue: EvmPoolVenue): readonly string[] | undefined {
   return Object.hasOwn(venue, "poolProviders") ? venue.poolProviders : Object.hasOwn(venue, "providers") ? venue.providers : undefined;
 }
+/** The deep public sources an EVM pool's old logs are read from past its pool list (card evm-pool-sync-holds): the
+ *  signing page reads each after the helper's keyed-only route, each held to the pool's root like any source and never
+ *  taken on its word alone; the helper's start refuses a keyed URL of any of their operators (apps/helper/src/
+ *  env-check.ts); scripts/live-checks/evm-pool-sync-holds.mjs reads each one's floor after every helper deploy. Apart
+ *  from the venues, so their URL order, and SIGN_HOST's connect-src pinned on it, stays; each origin is in that
+ *  connect-src (scripts/live-checks/signpage-skeleton.mjs). Base, each under the pool's deploy block 54,325,671:
+ *  - bloXroute keeps logs from block 52,500,000 ("4444: pruned history unavailable: requested 52400000, earliest
+ *    available 52500000", read 2026-11-09 13:03Z, 14:14Z and 18:37Z);
+ *  - Tenderly's gateway (2026-11-09 18:35Z): eth_chainId 0x2105; USDC's logs at block 40,000,000 alone (149, the first
+ *    USDC's at that block) and at the deploy block (1); 1,001 blocks a call keyless ("Block range too large: maximum
+ *    1000 blocks without an access key", a range of from to from + 1,000 answered).
+ *  Not taken: rpc.sentio.xyz/base (the same answers at 18:35Z, but past 1,000 blocks a call HTTP 429 "public
+ *  eth_getLogs is limited to 1000 blocks", 18:36Z: the page's client reads any 429 as "HTTP 429", which the pool's
+ *  pager takes as a throttle and retries, never a cap, so it never pages); (14:17Z-14:21Z) base.drpc.org (the helper's keyed operator), base.llamarpc.com (HTTP 525),
+ *  1rpc.io/base ("earliest available 52000000", eth_getLogs "discontinued"), base.blockpi.network and rpc.ankr.com/base
+ *  (a key required). Robinhood's has none: its bloXroute answers HTTP 403 to eth_getLogs. */
+export const EVM_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  base: /* @__PURE__ */ Object.freeze(["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]),
+  robinhood: /* @__PURE__ */ Object.freeze([] as string[]),
+});
 let venues: Readonly<Record<EvmPoolChain, EvmPoolVenue>> | undefined;
 export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
   (venues ??= bare({
