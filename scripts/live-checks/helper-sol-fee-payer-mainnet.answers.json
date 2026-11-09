@@ -1,0 +1,124 @@
+{
+ "note": "good: apps/helper at this card's branch (8ccc7d84) run on the Mac with node src/server.ts on the deploy/.env apps/helper/deploy/sol-fee-payer-key.sh wrote on a temp server (its stub docker running this machine's node from apps/helper; a fresh key made by the script, never funded, thrown away), its POOL_SOLANA_RPCS_MAINNET and the check's --rpcs two local RPCs that answer the Rent sysvar exactly as api.mainnet-beta.solana.com answered it at 2026-11-09T04:28:23.676Z (5,080 a byte, factor 1) and getBalance 3,000,000 lamports for any address (a funded fee payer stands in for the owner's send, not yet made), read 2026-11-09T04:29:09.695Z: PASS. bad_not_found: the deployed helper ct-api.unrealized.trade (X-Helper-Commit ca80421e4f8e3c504aa1d716e9cb0e54266508b8) with the Rent sysvar on the real pair, 2026-11-09T04:28:23.676Z: 404 not_found, no mainnet pool carried: FAIL. bad_unfunded: the same branch and key step as good with the real pair everywhere (the script read the real rent and wrote fee 1300000; the helper read it again), the new fee payer read on both real RPCs at 0 lamports, 2026-11-09T04:29:24.616Z: FAIL on its balance only.",
+ "good": {
+  "base": "http://127.0.0.1:18441",
+  "record": {
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
+  },
+  "rpcs": [
+   "http://127.0.0.1:51336",
+   "http://127.0.0.1:51337"
+  ],
+  "readAt": "2026-11-09T04:29:09.695Z",
+  "fee": {
+   "status": 200,
+   "headers": {
+    "x-helper-commit": "8ccc7d84692265241f6c3b50251ce84232c32d02",
+    "access-control-allow-origin": "https://ct-app.unrealized.trade"
+   },
+   "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"8Rj4ZJubKsa3dB9b63Y4eopdFbuchWPWsjohC8YAnEzL\",\"epoch_ms\":60000,\"epoch_start_ms\":1794198540000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+  },
+  "rent": [
+   {
+    "url": "http://127.0.0.1:51336",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709552000,\"space\":17}}}"
+   },
+   {
+    "url": "http://127.0.0.1:51337",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709552000,\"space\":17}}}"
+   }
+  ],
+  "balance": [
+   {
+    "url": "http://127.0.0.1:51336",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":3000000}}"
+   },
+   {
+    "url": "http://127.0.0.1:51337",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":3000000}}"
+   }
+  ]
+ },
+ "bad_not_found": {
+  "base": "https://ct-api.unrealized.trade",
+  "record": {
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
+  },
+  "rpcs": [
+   "https://api.mainnet-beta.solana.com",
+   "https://solana-rpc.publicnode.com"
+  ],
+  "readAt": "2026-11-09T04:28:23.676Z",
+  "fee": {
+   "status": 404,
+   "headers": {
+    "x-helper-commit": "ca80421e4f8e3c504aa1d716e9cb0e54266508b8",
+    "access-control-allow-origin": "https://ct-app.unrealized.trade"
+   },
+   "body": "{\"error\":{\"code\":\"not_found\"}}"
+  },
+  "rent": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":467183371},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709551615,\"space\":17}},\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.1\",\"slot\":467183369},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709551615,\"space\":17}},\"id\":1}\n"
+   }
+  ],
+  "balance": []
+ },
+ "bad_unfunded": {
+  "base": "http://127.0.0.1:18669",
+  "record": {
+   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
+  },
+  "rpcs": [
+   "https://api.mainnet-beta.solana.com",
+   "https://solana-rpc.publicnode.com"
+  ],
+  "readAt": "2026-11-09T04:29:24.616Z",
+  "fee": {
+   "status": 200,
+   "headers": {
+    "x-helper-commit": "8ccc7d84692265241f6c3b50251ce84232c32d02",
+    "access-control-allow-origin": "https://ct-app.unrealized.trade"
+   },
+   "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"631fQArTgRXskKGAjUCxrwd75rFBEygZo2x3EP1AdrDd\",\"epoch_ms\":60000,\"epoch_start_ms\":1794198540000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+  },
+  "rent": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":467183650},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709551615,\"space\":17}},\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.1\",\"slot\":467183648},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709551615,\"space\":17}},\"id\":1}\n"
+   }
+  ],
+  "balance": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.0\",\"slot\":467183651},\"value\":0},\"id\":1}\n"
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"context\":{\"apiVersion\":\"4.4.1\",\"slot\":467183650},\"value\":0},\"id\":1}\n"
+   }
+  ]
+ }
+}

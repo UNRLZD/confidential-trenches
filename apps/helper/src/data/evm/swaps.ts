@@ -2166,6 +2166,13 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     /** The lists' tokens, looked for ahead of a first open (card helper-robinhood-search-ahead); settles when the search
      *  it joined is done. The lists call it as each new answer loads (server.ts evmSwapsFromEnv). */
     ahead,
+    /** The token's main pool (a pool's address or a v4 pool id) and decimals as an earlier read found and checked them on
+     *  chain, with no read; undefined when none is kept (card market-data-evm-token: the token page's `pool`, `decimals`). */
+    kept(token: string): { pool: string; decimals: number } | undefined {
+      const t = evmAddress(token);
+      const k = t === null ? undefined : pools.get(t);
+      return k?.found != null && now() - k.at < POOL_KEEP_MS ? { pool: k.found.pool.id, decimals: k.found.decimals } : undefined;
+    },
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
     async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);

@@ -5,8 +5,8 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
-   "sha384": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
+   "pin": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
+   "sha384": "sha384-MEBTv4iMq2SOO1WTqVJ6BL2yqvyr8+hDQuo1PdDQJCzCyHRBDaFuFRCkZWSZgq06",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,

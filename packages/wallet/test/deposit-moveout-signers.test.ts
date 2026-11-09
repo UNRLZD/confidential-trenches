@@ -51,14 +51,28 @@ test("moveout.ts exports exactly these, and no signer", () => {
     "MoveOutRefused",
     "SETTLE_BLOCKS",
     "TX_VALIDITY_BLOCKS",
+    "WITHDRAW_GAS",
     "archivalRpc",
+    // card exit-ids-out: each builds its own calls, checks and seals them, then signs; none signs calls it is handed
+    "buildMoveOut",
+    "buildRegisterOut",
+    "buildSettleOut",
+    "buildWithdrawOut",
     "checkMoveCalls",
+    "checkRegisterCalls",
+    "checkSettleCalls",
+    "checkWithdrawCalls",
     "heldOpOf",
     "moveCalls",
     "moveOutHeld",
     "moveOutRpc",
     "readMoveOut",
+    "readMoveOutFor",
+    "readSettle",
+    "readWithdrawOut",
+    "settleNeed",
     "signedBlockHash",
+    "withdrawCalls",
   ]);
 });
 
@@ -111,6 +125,125 @@ test("the signer signs only a move a check sealed (review 3): an unchecked list,
   assert.throws(() => m.checkMoveCalls(U, TO, TOKEN, m.moveCalls(TO, 50n, false, 0n), 10n, 0n), m.MoveOutRefused);
   // a seal of the real module is not one of the copy's, and the copy's are not the module's: one set per module
   refused(moveout.checkMoveCalls(U, TO, TOKEN, moveout.moveCalls(TO, 5n, false, 0n), 10n, 0n), "another module's seal");
+});
+
+test("card exit-ids-out: the registration and ft_withdraw checks seal their own deep copy as checkMoveCalls does; the withdraw's receiver is intents.near, never one a caller names", async () => {
+  const m = await probe();
+  const min = 1_250_000_000_000_000_000_000n;
+  const reg = [{ method: "storage_deposit" as const, args: { account_id: TO, registration_only: true }, gas: m.MOVE_GAS.storage_deposit, deposit: min }];
+  const sealedReg = m.checkRegisterCalls(U, TO, TOKEN, reg, min);
+  assert.equal(sealedReg.receiver, TOKEN);
+  const wd = m.withdrawCalls(TO, 5n, TOKEN);
+  const sealedWd = m.checkWithdrawCalls(U, TO, TOKEN, wd, 10n);
+  assert.equal(sealedWd.receiver, "intents.near");
+  for (const [sealed, given] of [[sealedReg, reg], [sealedWd, wd]] as const) {
+    const tx = m.signMoveTx(PK, SK, 1n, BH, sealed);
+    const signed = base64.decode(tx.signed);
+    const bytes = signed.subarray(0, signed.length - 65);
+    assert.ok(ed25519.verify(signed.subarray(signed.length - 64), sha256(bytes), PK));
+    assert.ok(Object.isFrozen(sealed) && Object.isFrozen(sealed.calls) && Object.isFrozen(sealed.calls[0]!.args));
+    // the list handed in, changed after the check, reaches nothing sealed
+    (given[0]!.args as Record<string, unknown>).account_id = "b".repeat(64);
+    (given[0]!.args as Record<string, unknown>).receiver_id = "b".repeat(64);
+    assert.ok(!JSON.stringify(sealed.calls.map((c) => c.args)).includes("b".repeat(64)));
+    assert.throws(() => m.signMoveTx(PK, SK, 1n, BH, { ...sealed }), /not one a check of this module passed/);
+  }
+  // an account id that is not a string, or a call with another field, is refused before any seal
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, args: { token: new String(TOKEN), receiver_id: TO, amount: "5" } }], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, extra: 1 } as never], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, args: { token: TOKEN, receiver_id: TO, amount: 5 } } as never], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkRegisterCalls(U, TO, TOKEN, [{ ...reg[0]!, extra: 1 } as never], min), m.MoveOutRefused);
+});
+
+test("card exit-ids-out: settle is one call on a release's vault, the kit's gas and attachment, signed by A at A's nonce + 1; anything else is refused before a seal", async () => {
+  const VAULT = NEAR_NETWORKS.testnet.vault;
+  const NH = 12345678901234567890n;
+  const key = { id: U, publicKey: PK, secretKey: SK.slice() };
+  const read = { height: 100, blockHash: BH, nonce: 41n, free: 10n ** 24n, gasPrice: 100_000_000n, a: U };
+  for (const status of ["refund_pending", "paid"] as const) {
+    const m = moveout.buildSettleOut({ read, key: { ...key, secretKey: SK.slice() }, vault: VAULT, nullifierHash: NH, status });
+    assert.equal(m.receiver, VAULT);
+    assert.equal(m.nonce, 42n);
+    assert.deepEqual(m.calls.map((c) => [c.method, c.args, c.gas, c.deposit]), [["settle", { nullifier_hash: NH.toString() }, 150_000_000_000_000n, status === "refund_pending" ? 148n * 10n ** 19n : 0n]]);
+    const signed = base64.decode(m.signed);
+    const bytes = signed.subarray(0, signed.length - 65);
+    assert.ok(ed25519.verify(signed.subarray(signed.length - 64), sha256(bytes), PK));
+    assert.ok(Buffer.from(bytes).includes(Buffer.from(VAULT)) && !Buffer.from(bytes).includes(Buffer.from("ft_transfer")));
+  }
+  const call = (o: Record<string, unknown> = {}) => [{ method: "settle" as const, args: { nullifier_hash: NH.toString() }, gas: 150_000_000_000_000n, deposit: 148n * 10n ** 19n, ...o }];
+  moveout.checkSettleCalls(U, VAULT, call(), "refund_pending");
+  const bad: [string, () => unknown][] = [
+    ["another vault", () => moveout.checkSettleCalls(U, "evil.testnet", call(), "refund_pending")],
+    ["the token as vault", () => moveout.checkSettleCalls(U, NEAR_NETWORKS.testnet.usdc, call(), "refund_pending")],
+    ["a named signer", () => moveout.checkSettleCalls("bob.testnet", VAULT, call(), "refund_pending")],
+    ["a paid spend's attachment on refund_pending", () => moveout.checkSettleCalls(U, VAULT, call({ deposit: 0n }), "refund_pending")],
+    ["an attachment on paid", () => moveout.checkSettleCalls(U, VAULT, call(), "paid")],
+    ["more gas", () => moveout.checkSettleCalls(U, VAULT, call({ gas: 300_000_000_000_000n }), "refund_pending")],
+    ["another method", () => moveout.checkSettleCalls(U, VAULT, call({ method: "withdraw" }), "refund_pending")],
+    ["an extra arg", () => moveout.checkSettleCalls(U, VAULT, call({ args: { nullifier_hash: NH.toString(), x: 1 } }), "refund_pending")],
+    ["a number arg", () => moveout.checkSettleCalls(U, VAULT, call({ args: { nullifier_hash: 5 } }), "refund_pending")],
+    ["a non-canonical arg", () => moveout.checkSettleCalls(U, VAULT, call({ args: { nullifier_hash: "05" } }), "refund_pending")],
+    ["0", () => moveout.checkSettleCalls(U, VAULT, call({ args: { nullifier_hash: "0" } }), "refund_pending")],
+    ["p", () => moveout.checkSettleCalls(U, VAULT, call({ args: { nullifier_hash: "21888242871839275222246405745257275088548364400416034343698204186575808495617" } }), "refund_pending")],
+    ["two calls", () => moveout.checkSettleCalls(U, VAULT, [...call(), ...call()], "refund_pending")],
+    ["settled status", () => moveout.checkSettleCalls(U, VAULT, call(), "settled" as "paid")],
+    ["a read of another account", () => moveout.buildSettleOut({ read: { ...read, a: "b".repeat(64) }, key: { ...key, secretKey: SK.slice() }, vault: VAULT, nullifierHash: NH, status: "paid" })],
+    ["a nonce past a u64", () => moveout.buildSettleOut({ read: { ...read, nonce: 2n ** 64n - 1n }, key: { ...key, secretKey: SK.slice() }, vault: VAULT, nullifierHash: NH, status: "paid" })],
+    ["another key", () => moveout.buildSettleOut({ read, key: { ...key, secretKey: new Uint8Array(32).fill(1) }, vault: VAULT, nullifierHash: NH, status: "paid" })],
+  ];
+  for (const [why, f] of bad) assert.throws(f, moveout.MoveOutRefused, why);
+  // the caller's key is the caller's; the builder's copy is zeroed (the secret-line pin holds every copy site)
+  const own = SK.slice();
+  moveout.buildSettleOut({ read, key: { ...key, secretKey: own }, vault: VAULT, nullifierHash: NH, status: "paid" });
+  assert.deepEqual(own, SK);
+});
+
+test("card exit-ids-out: readSettle reads A at the lower final height on both RPCs, equal, else null", async () => {
+  const mk = (final: number, over: Partial<{ nonce: number; amount: string; hash: string; price: string; keys: unknown[] }> = {}): moveout.MoveOutRpc => ({
+    name: "x",
+    block: async (p: unknown) => ({ result: { header: { height: (p as { finality?: string }).finality ? final : (p as { block_id: number }).block_id, hash: over.hash ?? BH } } }),
+    query: async (p: unknown) => {
+      const q = p as { request_type: string; block_id: number };
+      if (q.request_type === "view_access_key_list") return { result: { block_height: q.block_id, keys: over.keys ?? [{ public_key: `ed25519:${base58.encode(PK)}`, access_key: { nonce: over.nonce ?? 41, permission: "FullAccess" } }] } };
+      return { result: { block_height: q.block_id, amount: over.amount ?? "2000000000000000000000000", storage_usage: 182, code_hash: "11111111111111111111111111111111" } };
+    },
+    tx: async () => ({}),
+    call: async () => ({ result: { gas_price: over.price ?? "100000000" } }),
+  }) as unknown as moveout.MoveOutRpc;
+  const r = await moveout.readSettle(U, [mk(1000), mk(1002)]);
+  assert.ok(r !== null);
+  assert.equal(r.height, 1000);
+  assert.equal(r.nonce, 41n);
+  assert.equal(r.free, 2_000_000_000_000_000_000_000_000n - 182n * 10n ** 19n);
+  assert.ok(moveout.settleNeed(r, "refund_pending") > 148n * 10n ** 19n);
+  assert.equal(await moveout.readSettle(U, [mk(1000), mk(1000, { nonce: 42 })]), null, "nonces differ");
+  assert.equal(await moveout.readSettle(U, [mk(1000), mk(1000, { amount: "1" })]), null, "NEAR differs");
+  assert.equal(await moveout.readSettle(U, [mk(1000), mk(1000, { price: "200000000" })]), null, "gas price differs");
+  assert.equal(await moveout.readSettle(U, [mk(1000), mk(1000, { keys: [] })]), null, "A's key list is not exactly its key");
+  assert.equal(await moveout.readSettle(U, [mk(1000), mk(5000)]), null, "heights spread too far");
+  assert.equal(await moveout.readSettle("bob.testnet", [mk(1000), mk(1000)]), null, "a named A");
+});
+
+test("review 5 P3: readSettle is null when the two RPCs name different block hashes at one height; settleNeed is the attachment plus the prepaid gas at GAS_PRICE_MARGIN", async () => {
+  const mk = (hash: string): moveout.MoveOutRpc => ({
+    name: "x",
+    block: async (p: unknown) => ({ result: { header: { height: (p as { finality?: string }).finality ? 1000 : (p as { block_id: number }).block_id, hash } } }),
+    query: async (p: unknown) => {
+      const q = p as { request_type: string; block_id: number };
+      return q.request_type === "view_access_key_list"
+        ? { result: { block_height: q.block_id, keys: [{ public_key: `ed25519:${base58.encode(PK)}`, access_key: { nonce: 41, permission: "FullAccess" } }] } }
+        : { result: { block_height: q.block_id, amount: "2000000000000000000000000", storage_usage: 182, code_hash: "11111111111111111111111111111111" } };
+    },
+    tx: async () => ({}),
+    call: async () => ({ result: { gas_price: "100000000" } }),
+  }) as unknown as moveout.MoveOutRpc;
+  const h1 = base58.encode(new Uint8Array(32).fill(7));
+  const h2 = base58.encode(new Uint8Array(32).fill(8));
+  assert.notEqual(await moveout.readSettle(U, [mk(h1), mk(h1)]), null, "equal hashes read");
+  assert.equal(await moveout.readSettle(U, [mk(h2), mk(h1)]), null, "two hashes at one height");
+  const p = 100_000_000n;
+  assert.equal(moveout.settleNeed({ gasPrice: p }, "paid"), (150n + 5n) * 10n ** 12n * p * moveout.GAS_PRICE_MARGIN);
+  assert.equal(moveout.settleNeed({ gasPrice: p }, "refund_pending"), 148n * 10n ** 19n + (150n + 5n) * 10n ** 12n * p * moveout.GAS_PRICE_MARGIN);
 });
 
 // ---- the source pins the run-time rule rests on

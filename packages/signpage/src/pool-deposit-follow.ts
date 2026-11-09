@@ -17,14 +17,17 @@
 //   read again next round; only the signal (a sign out) ends a follow early. A quote with nothing seen sent by its
 //   deadline shows expired and is read on (a late send is refunded by 1Click and carried); a stale status never shows
 //   it live again.
-// - REFUNDED: refunded is shown; the money is under U_{s,i} inside intents.near, and the refund carry (`refund`,
-//   poolRefundMover below: moved with the same signer back to X's coin, to U_X, and carried on by the rounds above) is
-//   asked once per round while the status reads REFUNDED. With no `refund` given the stage stays refunded and the follow does not end (followed on at
-//   every landing), so no refund is left as if done.
+// - REFUNDED shows nothing the chain has not read (the vault's rule, ../../wallet/src/deposit/follow.ts; card
+//   pool-deposit-stages review P2): while the status reads REFUNDED the refund carry (`refund`, poolRefundMover below)
+//   reads what U_{s,i} holds inside intents.near at one block on NEAR's two RPCs, once per round. refunded is shown only
+//   once that read finds money there ("held", or "moved": moved with the same signer back to X's coin, to U_X, and
+//   carried on by the rounds above, refund_move). A REFUNDED with nothing read there moves no stage: an unsent quote
+//   still shows expired past its deadline, and a delivery that lands normally never reads as refunded. With no `refund`
+//   given nothing is read, so nothing is shown for it, and the follow does not end (followed on at every landing).
 // - Pace: FAST_MS while a status shows a send in flight or a deposit ran; else SLOW_MS doubling to SLOW_MAX_MS.
 // Nothing here logs. Every read names one public account (U_X) or the quote's deposit address; no request carries a
 // key, the words, or which note is whose.
-import type { PoolChain } from "../../kit/src/signpage/messages.ts";
+import type { PoolChain, PoolDepositStage } from "../../kit/src/signpage/messages.ts";
 import { ladderSplit, type Ladder } from "../../wallet/src/pool/ladder.ts";
 import { type MoveRead, type OneClickStatus, readDepositStatus, type StatusRead } from "../../wallet/src/deposit/follow.ts";
 import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
@@ -58,8 +61,8 @@ export interface PoolFollowRecord {
   move?: MoveRecord;
 }
 
-/** The pool follow's stages, as kit messages.ts PoolDepositStage names them. */
-export type PoolFollowStage = "quote_checked" | "waiting" | "in_transit" | "in_pool" | "refunded" | "refund_move" | "failed" | "short" | "expired";
+/** The pool follow's stages: kit messages.ts PoolDepositStage, the stages the app reads on the op (card pool-deposit-stages). */
+export type PoolFollowStage = PoolDepositStage;
 
 /** Each 1Click status's stage before the device's own reads (as the vault's STATUS_STAGE). */
 export const POOL_STATUS_STAGE: Readonly<Record<OneClickStatus, PoolFollowStage>> = Object.freeze({
@@ -79,6 +82,11 @@ const RANK: Partial<Record<PoolFollowStage, number>> = { quote_checked: 0, expir
 /** A deposit run's end as the page's pool.deposit kind tells it (pool-deposit.ts poolDepositKind: the answer, then its
  *  end as progress), or its refusal code. */
 export type PoolDepositEnd = "filled" | "part_filled" | "not_landed" | "sent" | "not_allowed" | "not_funded" | "failed" | "down";
+
+/** The refund carry's answer (poolRefundMover): "moved" and "held" read money under U_{s,i} inside intents.near on both
+ *  of NEAR's RPCs (moved on, or not moved this round); "none" read nothing there; "wait" read nothing that counts (the
+ *  reads did not agree, or a recorded move is still in its window). */
+export type RefundRead = "moved" | "held" | "none" | "wait";
 
 /** One U_X: its chain, the pool's scope and index it was named at, its address on X and U_{s,i}'s 64-hex id. */
 export type PoolUx = Pick<PoolFollowRecord, "chain" | "s" | "i" | "u" | "refund_id">;
@@ -106,7 +114,7 @@ export interface PoolFollowDeps extends PoolUxReads {
   /** The quote's deadline past on both RPCs' clocks. */
   past(f: PoolFollowRecord): Promise<boolean>;
   /** The refund carry: what U_{s,i} holds inside intents.near moved back to X's coin, to U_X; none, and a refund waits. */
-  refund?(f: PoolFollowRecord, signal: AbortSignal): Promise<"moved" | "none" | "wait">;
+  refund?(f: PoolFollowRecord, signal: AbortSignal): Promise<RefundRead>;
   /** The op's stage written (and posted to the app in state.ops). */
   stage(s: PoolFollowStage): Promise<void>;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
@@ -169,21 +177,26 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         if (await deps.past(f)) return shown;
       } else {
         const st = await deps.status(f, deps.signal);
+        let refund: RefundRead | null = null;
         if (st !== null && "status" in st) {
-          // a refund being moved stays shown as moved while 1Click still reads REFUNDED
-          if (!(shown === "refund_move" && st.status === "REFUNDED")) await show(POOL_STATUS_STAGE[st.status]);
+          // REFUNDED shows nothing the chain has not read: refunded only once the carry's read finds the money under
+          // U_{s,i} on both of NEAR's RPCs (a refund being moved stays shown as moved: RANK)
+          if (st.status !== "REFUNDED") await show(POOL_STATUS_STAGE[st.status]);
           if (st.status === "KNOWN_DEPOSIT_TX" || st.status === "PROCESSING" || st.status === "SUCCESS") fast = true;
           if (st.status === "REFUNDED" && deps.refund) {
-            const r = await deps.refund(f, deps.signal);
-            if (r === "moved") {
+            refund = await deps.refund(f, deps.signal);
+            if (refund === "held" || refund === "moved") await show("refunded");
+            if (refund === "moved") {
               await show("refund_move");
               fast = true;
             }
           }
         }
         // nothing seen sent by the deadline on both RPCs' clocks: expired, and read on (a late send to the address is
-        // refunded by 1Click, and that refund is carried as any other)
-        if (shown === "quote_checked" && (st === null || ("status" in st && st.status === "PENDING_DEPOSIT")) && (await deps.past(f))) await show("expired");
+        // refunded by 1Click, and that refund is carried as any other). A REFUNDED whose read found nothing under U_{s,i}
+        // is no send seen; one whose read did not count ("wait") is read again first
+        const unseen = st === null || ("status" in st && (st.status === "PENDING_DEPOSIT" || (st.status === "REFUNDED" && (refund === null || refund === "none"))));
+        if (shown === "quote_checked" && unseen && (await deps.past(f))) await show("expired");
       }
     } catch {
       if (deps.signal.aborted) return shown;
@@ -197,8 +210,40 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
 // ---------------------------------------------------------------------------------------------- on SIGN_HOST's page
 
 /** The op a pool quote's follow keeps in the wallet store's "ops" under its request's id (src/state.ts op contract):
- *  nothing secret. `final` once in_pool is read on past the quote's deadline. */
-export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true };
+ *  nothing secret. `final` once in_pool is read on past the quote's deadline. `since_ms` is the device's clock when a
+ *  stage first said the money was sent (any stage but quote_checked and expired), `refunded` true from the refunded
+ *  stage on (card pool-deposit-stages): the facts src/state.ts opOf sends the app on the stages they belong to (kit
+ *  messages.ts PoolDepositFacts). */
+export type PoolDepositOp = { kind: "pool_deposit"; stage: PoolFollowStage; txs: { chain: PoolChain; hash: string }[]; created_ms: number; follow: PoolFollowRecord; final?: true; since_ms?: number; refunded?: true; untimed?: true };
+
+/** A stage that says the money was sent: any but quote_checked and expired. */
+const SENT = (s: PoolFollowStage): boolean => s !== "quote_checked" && s !== "expired";
+
+/**
+ * The op with `s` written: its stage, and the facts the step to it sets, each kept after (review P3 1):
+ * - since_ms only on the step out of quote_checked or expired to a stage that says the money was sent, so the time is
+ *   when the device first saw the send. A record of release-94 to 107 already past that step has none and gets none (a
+ *   reload's time is not the send's), nor one marked `untimed` (a legacy refunded op read again from quote_checked);
+ * - refunded at refunded or refund_move (each shown only once the chain read the money under U_{s,i}), and on the step
+ *   on from refund_move, so a legacy refund_move record (which has no refunded) keeps it into the pool.
+ */
+export function withStage(op: PoolDepositOp, s: PoolFollowStage, now: number): PoolDepositOp {
+  const next: PoolDepositOp = { ...op, stage: s };
+  if (op.since_ms === undefined && op.untimed !== true && !SENT(op.stage) && SENT(s)) next.since_ms = now;
+  if (s === "refunded" || s === "refund_move" || op.stage === "refund_move") next.refunded = true;
+  return next;
+}
+
+/**
+ * A record to follow on from (review P2): a refunded record with no refunded fact was written by release-94 to 107 on
+ * the helper's REFUNDED alone, so it is read again from quote_checked (marked untimed: its send's time is unknown), and
+ * shows refunded again only once the chain reads the money under U_{s,i}. Every other record as it is. The one rule,
+ * refundedOnWord, also holds what src/state.ts opOf sends the app (the framed page runs no follow).
+ */
+export const refundedOnWord = (r: { stage?: unknown; refunded?: unknown }): boolean => r.stage === "refunded" && r.refunded !== true;
+export function resumeOf(op: PoolDepositOp): PoolDepositOp {
+  return refundedOnWord(op) ? { ...op, stage: "quote_checked", untimed: true } : op;
+}
 
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
 export const POOL_FOLLOW_LOCK = "ct-wallet/pool-follow/";
@@ -239,8 +284,10 @@ export function poolFollows(h: PoolFollowHost) {
     const signal = abort.signal;
     const body = async () => {
       const ops = await h.store();
-      const now = await ops.get("ops", id);
-      if (!isPoolOp(now) || poolFollowEnded(now)) return;
+      const read = await ops.get("ops", id);
+      if (!isPoolOp(read) || poolFollowEnded(read)) return;
+      const now = resumeOf(read);
+      if (now !== read) await ops.update("ops", id, (v) => (isPoolOp(v) ? resumeOf(v) : undefined));
       // the refund carry's move, kept in the op's follow record (written before its send)
       const d = h.deps(f, {
         move: async () => {
@@ -251,11 +298,11 @@ export function poolFollows(h: PoolFollowHost) {
       });
       if (d === null) return;
       const stage = async (s: PoolFollowStage) => {
-        await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: s } : undefined));
+        await ops.update("ops", id, (v) => (isPoolOp(v) ? withStage(v, s, (h.now ?? Date.now)()) : undefined));
       };
       const end = await followPoolQuote(f, { ...d, stage, signal }, now.stage);
       // the follow returns past its deadline only at in_pool; a signal's return leaves the op to the next landing
-      if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...v, stage: "in_pool", final: true } : undefined));
+      if (end === "in_pool" && !signal.aborted) await ops.update("ops", id, (v) => (isPoolOp(v) ? { ...withStage(v, "in_pool", (h.now ?? Date.now)()), final: true } : undefined));
     };
     const lm = locks();
     // one follower per op across tabs; two ops of one U_X may run at once, since each deposit from U_X is the page's
@@ -369,8 +416,10 @@ export function depositToEnd(
  * - The move is recorded in the op (`record`) before it is sent. While a recorded move's nonce reads unused at a block
  *   inside its deadline, nothing new is signed ("wait"); its nonce read used, the money is on its way to U_X ("moved",
  *   the rounds carry it); past its deadline unused, a new move may go, the earlier deadline handed to the rule.
- * - Nothing held: "none". A read that does not agree, a quote that fails a check (one under the pool's floor among
- *   them: it waits under U_{s,i}), or a relayer that refuses: "wait", read again next round.
+ * - Nothing held: "none". A read that does not agree: "wait", read again next round. Money read under U_{s,i} on both
+ *   RPCs that is not moved this round (no price read, a quote that fails a check, one under the pool's floor among them:
+ *   it waits under U_{s,i}, a relayer that refuses, a seed that is not U_{s,i}'s): "held", read again next round; the
+ *   follow shows refunded on "held" and "moved" alone (review P2).
  */
 export interface PoolRefundHost {
   /** NEAR mainnet's two RPCs (FastNEAR and dRPC) and intents.near. */
@@ -390,7 +439,7 @@ export interface PoolRefundHost {
   now?: () => number;
 }
 
-export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal: AbortSignal) => Promise<"moved" | "none" | "wait"> {
+export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal: AbortSignal) => Promise<RefundRead> {
   const now = h.now ?? Date.now;
   return async (f, signal) => {
     const m = await h.move();
@@ -406,9 +455,11 @@ export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal
       }
     }
     if (r.held === 0n) return "none";
+    // money under U_{s,i} on both RPCs from here: "held" unless it moves
     const priced = h.priced(f);
-    if (priced === null) return "wait";
-    const floor = await h.floor(f);
+    if (priced === null) return "held";
+    const floor = await h.floor(f).catch(() => null);
+    if (floor === null) return "held";
     const signer = { role: "U" as const, id: f.refund_id, publicKey: hex.decode(f.refund_id) };
     const decimalsOut = h.decimals(f.chain);
     const res = await runRefundMove<RefundQuote, IdIntent>(
@@ -443,8 +494,8 @@ export function poolRefundMover(h: PoolRefundHost): (f: PoolFollowRecord, signal
         signal,
         ...(h.fetch ? { fetchFn: h.fetch } : {}),
       },
-    );
-    return res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "wait";
+    ).catch(() => null);
+    return res !== null && res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "held";
   };
 }
 

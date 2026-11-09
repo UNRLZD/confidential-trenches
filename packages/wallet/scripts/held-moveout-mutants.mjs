@@ -34,7 +34,7 @@ const M = [
   // the move built as the rule would seal it, the rule never called (card signers-own-bytes: the rule's call returns the sealed move)
   ["M9 the payload rule not called", "    const move = checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);\n", "    const move = { signer: U, receiver: token, calls } as SealedMove;\n"],
   ["M10 a NEAR refusal not answered gas", '        if (lack !== null) return { kind: "gas", need: lack, u: U };', ""],
-  ["M11 the token allowed as the typed account", "to === u || to === token", "to === u"],
+  ["M11 the token allowed as the typed account", "throw new MoveOutRefused(strings);\n  if (!IMPLICIT.test(u) || to === u || to === token)", "throw new MoveOutRefused(strings);\n  if (!IMPLICIT.test(u) || to === u)"],
   // this fold
   ["N1 taken with no look SETTLE_BLOCKS back", "    const past = await keyNonceAt(U, r.height - SETTLE_BLOCKS, rpcs).catch(() => null);\n    if (past !== null && past >= BigInt(had.nonce)) {", "    {"],
   ["N2 a settled record never settled", "  if (r.nonce >= BigInt(had.nonce) && r.height > SETTLE_BLOCKS) {", "  if (false) {"],
@@ -42,7 +42,7 @@ const M = [
   ["N4 no lock of U", "  const signed = await uLock(async (): Promise<Signed> => {", `  const signed = await ${SELF}(async (): Promise<Signed> => {`],
   ["N5 another op's live record of U ignored", '      if (st === "live") return { follow: r, owner: k };\n', ""],
   ["N6 no code hash read (M2)", "      if (resultAt(code, at)?.code_hash !== VAULT_TOKEN_CODE_HASH) return null; // the token's code is the pin (W:928)\n", ""],
-  ["N7 the vault and intents.near allowed (L1)", "  if (to === net.vault || to === INTENTS) throw", "  if (false) throw"],
+  ["N7 the vault and intents.near allowed (L1)", "  if (to === net.vault || to === INTENTS) throw new MoveOutRefused(\"the typed account is the vault or intents.near: nothing sent there is the user's\");\n  const last = calls.at(-1);", "  if (false) throw new MoveOutRefused(\"the typed account is the vault or intents.near: nothing sent there is the user's\");\n  const last = calls.at(-1);"],
   ["N8 a gone record not kept as history", "\n      return { ...o, follow: { ...rest, out_past: [...(o.follow.out_past ?? []), r] } };", "\n      return { ...o, follow: { ...rest, out_past: o.follow.out_past } };"],
   // (N9, a split read counted as absent, is gone: after review 3's L1 only follow() reads readBoth, and there split,
   // absent and unknown are one case, read again)
@@ -135,7 +135,7 @@ const M = [
   ["H5 (review 4) no cap on the wait", "await sleep(Math.min(ARCHIVAL_WAIT_MAX_MS, Math.max(after ?? 0, 1_000 * 2 ** (ask - 1))));", "await sleep(Math.max(after ?? 0, 1_000 * 2 ** (ask - 1)));"],
   ["H9 (review 4) no connection not asked again", '        if ((e as Error).name === "TimeoutError" || (e as Error).message.startsWith("HTTP ")) throw e;', "        throw e;"],
   ["H10 (review 4) a Retry-After date unread", "  const t = Date.parse(h);\n  return Number.isFinite(t) ? Math.max(0, t - now) : null;", "  return null;"],
-  ["H11 (review 4) the archival block read not asked again", 'tx: (params) => post("tx", params), block: (params) => post("block", params) };', 'tx: (params) => post("tx", params) };'],
+  ["H11 (review 4) the archival block read not asked again", 'tx: (params) => post("tx", params), block: (params) => post("block", params) }, fetchFn);', 'tx: (params) => post("tx", params) }, fetchFn);'],
   ["P1h (review 4) NONE counted running", 'new Set(["INCLUDED", "EXECUTED_OPTIMISTIC", "INCLUDED_FINAL", "EXECUTED"])', 'new Set(["NONE", "INCLUDED", "EXECUTED_OPTIMISTIC", "INCLUDED_FINAL", "EXECUTED"])'],
   ["P1i (review 4) running without the hash check only", "PENDING.has(res.final_execution_status) && isObj(res.transaction) && res.transaction.hash === hash && res.transaction.signer_id === u", "PENDING.has(res.final_execution_status) && isObj(res.transaction) && res.transaction.signer_id === u"],
   ["P5 (review 4) an archival host's running read counted as its word", '  if (st === "pending") return "unknown";\n', '  if (st === "pending") return "ok";\n'],

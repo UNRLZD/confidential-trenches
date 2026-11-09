@@ -90,7 +90,8 @@ const M = [
   ["review R1: the pass block's header hash not checked at the open", IDR, [["if (y === NO_BLOCK || y.hash !== x.hash) throw", "if (y === NO_BLOCK) throw"]], ID, "step 7's clock"],
   ["delta review 6 P2: the providers' times of the pass block not agreed", IDR, [["if (t0!.ms !== t1!.ms) throw", "if (false) throw"]], ID, "step 7's clock"],
   ["delta review 6 P1: the bound block read by height however old", AFT, [["const h = Math.max(bound, now.heights[k] - d);", "const h = bound;"]], ID, "step 7's clock"],
-  ["delta review 7 P2: a header read not retried", IDR, [["      if (k + 1 >= tries) throw e;\n      await sleep(backoff * 2 ** k);\n    }\n  }\n}", "      throw e;\n    }\n  }\n}"]], ID, "step 7's clock: header reads"],
+  // card wallet-id-reader-paced: headerRetried asks through asked(), the views' one loop; the mutant asks it once
+  ["delta review 7 P2: a header read not retried", IDR, [["  }, askOpts(o));\n}", "  }, { ...askOpts(o), tries: 1, busyMax: 0 });\n}"]], ID, "step 7's clock: header reads"],
   ["delta review 7 P2: the pass's block unserved once taken as a wrong hash", IDR, [["if (served && y === NO_BLOCK) throw", "if (false) throw"]], ID, "step 7's clock: header reads"],
   ["delta review 7 P3: the bound's stand-in older than its own final only", AFT, [["ms + SECOND_SCAN_DELIVERY_MS < Math.min(...now.timesMs)", "ms + SECOND_SCAN_DELIVERY_MS < now.timesMs[k]"]], ID, "step 7's clock: header reads"],
   ["delta review 7 P3: a time-less pass taken", AFT, [["if (ms === null) throw", "if (false) throw"]], ID, "step 7's clock: header reads"],

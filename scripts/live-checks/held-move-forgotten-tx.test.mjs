@@ -26,6 +26,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ARCHIVAL, HOSTS, judge, localFetch, MARK, MARKERS, OLD_TX, probe, SIGN_ORIGIN } from "./held-move-forgotten-tx.mjs";
+import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "held-move-forgotten-tx.answers.json"), "utf8"));
@@ -173,11 +174,26 @@ test("the good record with another script's integrity, one marker gone, one arch
   });
 });
 
-test("the committed build in this tree passes as the recorded good answer did (both archival hosts' answers replayed)", async () => {
-  const rec = await probe(SIGN_ORIGIN, localFetch, archivalOk);
+// card held-move-replay-any-build: the tree's build is read with the check's own reader (probe over localFetch) and
+// judged with the live rule; of the recorded good answer only the archival hosts' reads are kept, so any build of this
+// tree that keeps the rule passes with no re-record, and one that drops a rule fails
+const treeRecord = async (fetchFn = localFetch) => ({ ...(await probe(SIGN_ORIGIN, fetchFn, archivalOk)), archival: answers.good.archival });
+
+test("the committed build in this tree passes the live rule, with the recorded archival hosts' reads", async () => {
+  const rec = await treeRecord();
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
-  assert.equal(rec.connect_src, answers.good.connect_src, "the CSP as recorded");
-  assert.equal(rec.app.sha384, answers.good.app.sha384, "the bundle as recorded");
+  assert.equal(judge(await probe(SIGN_ORIGIN, localFetch, archivalOk)).pass, true, "and with the archival hosts' answers replayed");
+});
+
+test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
+  const copy = await treeRecord(plantedFetch(localFetch, (js) => copyChange(js, Object.values(MARK))));
+  assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
+  assert.notEqual(copy.app.sha384, (await treeRecord()).app.sha384, "another bundle than the tree's");
+  for (const m of MARKERS) {
+    const rec = await treeRecord(plantedFetch(localFetch, (js) => dropRule(js, MARK[m])));
+    assert.equal(rec.app.markers[m], 0, m);
+    assert.deepEqual(BAD(rec), [MARKS], m);
+  }
 });
 
 test("a 429 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks a 429 is the answer", async () => {
@@ -197,4 +213,15 @@ test("a 429 is asked again after its Retry-After (10 s with none, 30 s at most),
     assert.deepEqual(new Set(waits), new Set([ms]), `${ra}: each wait ${ms} ms`);
     assert.equal(waits.length, 3 * 2 * HOSTS.length);
   }
+});
+
+test("card pool-deposit-stages: kit_1_6 counts kit-v1.6 read in full (release-94 to 107) or kit-v1.6's own state branch keeping moved_out (kit-v1.7 on), never a page with neither", () => {
+  const count = (t) => [...t.matchAll(MARK.kit_1_6)].length;
+  assert.equal(count("hl=`1.6`.split(`.`).map(Number)"), 1, "release-107: 1.6 read in full");
+  assert.equal(count("function Ol(e,t){if(e===`current`)return t;if(e===`1.6`)return{...t,ops:Dl(t.ops)};"), 1, "kit-v1.7: kit-v1.6's own state branch, its ops through the pool filter only");
+  // review P3 2: kit-v1.6's branch stripping moved_out as kit-v1.5's does, or a level with no branch, counts none
+  assert.equal(count("if(e===`1.6`)return{...t,ops:Dl(t.ops).map(e=>e.kind===`deposit`?El(e):e)};"), 0, "kit-v1.6 sent with moved_out stripped");
+  assert.equal(count("return i(hl[0],hl[1])?`current`:i(1,6)?`1.6`:i(1,5)?`1.5`:`1.4`}"), 0, "the level's name alone");
+  assert.equal(count("hl=`1.5`.split(`.`).map(Number);return i(hl[0],hl[1])?`current`:`1.4`}"), 0, "kit-v1.6 read at no level of its own");
+  assert.equal(answers.good.app.markers.kit_1_6, 1, "this build: the branch");
 });

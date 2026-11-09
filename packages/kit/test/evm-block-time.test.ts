@@ -86,3 +86,38 @@ test("Robinhood mainnet's pool list: every entry, seat or spare, another operato
   // the quote list stays the quote list: its order is the cold quote's (card rh-cold-quote), untouched by the pool's
   assert.equal(evmPoolVenues().robinhood.providers?.[0], "https://robinhood-rpc.publicnode.com");
 });
+
+// Card evm-pool-lists-mainnet: Base mainnet's pool list. Its seats (the first two, the wallet's evmPair) page the pool's
+// filter over the sync's full page and are two operators; a spare would be another operator again (none today). The widest page each
+// answered and the oldest block it served, read 2026-11-09 05:50-05:55Z (the comment at the list): publicnode 50,000 a
+// page back to block 51,018,473 (403 "Archive requests require a personal token" older); Pocket 10,000 a page 1M back
+// and from the deploy block (0 logs, wrongly, 5M back); Sentio and Tenderly 1,000 a page 20M back.
+// blastapi, the quote list's second, pages 10 blocks: seated, the sync would ask 1,000 times the pages.
+const BASE_DEPLOY = 54_325_671;
+const BASE_READ: Record<string, { widest: number; oldest: number }> = {
+  "base-rpc.publicnode.com": { widest: 50_000, oldest: 51_018_473 },
+  "base.api.pocket.network": { widest: 10_000, oldest: 54_055_001 },
+  "rpc.sentio.xyz": { widest: 1_000, oldest: 35_064_001 },
+  "base.gateway.tenderly.co": { widest: 1_000, oldest: 35_064_001 },
+  "base-mainnet.public.blastapi.io": { widest: 10, oldest: 54_055_158 },
+};
+
+test("Base mainnet's pool list: two seats of two operators, each paging the pool's logs at the sync's full page from its deploy block, every entry another operator's; the quote list unchanged", () => {
+  const base = evmPoolVenues().base;
+  const list = evmPoolProvidersOf(base) ?? assert.fail("base: no pool list");
+  assert.ok(Object.isFrozen(list), "the list is frozen");
+  assert.ok(list.length >= 2, "a pair at least");
+  assert.notEqual(list, base.providers, "its own list, never the quote list");
+  assert.equal(new Set(list.map(evmRpcOperator)).size, list.length, "every provider another operator");
+  for (const u of list) {
+    const h = new URL(u).host;
+    const r = BASE_READ[h] ?? assert.fail(`${h}'s page on the pool's logs was never read`);
+    assert.ok(r.oldest <= BASE_DEPLOY, `${h} serves from block ${r.oldest}, after the pool's deploy block`);
+  }
+  for (const u of list.slice(0, 2)) {
+    const h = new URL(u).host;
+    assert.ok(BASE_READ[h]!.widest >= PAGE, `seat ${h} pages the pool's logs at ${BASE_READ[h]!.widest} blocks, under the sync's ${PAGE}`);
+  }
+  // the quote list stays the quote list, in its eth_call order
+  assert.deepEqual(base.providers, ["https://base-rpc.publicnode.com", "https://base-mainnet.public.blastapi.io", "https://mainnet.base.org", "https://base.api.pocket.network"]);
+});

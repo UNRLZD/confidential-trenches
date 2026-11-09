@@ -3,7 +3,7 @@
 // the real mainnet deploy record (or a planted one) under contracts/vault/deployments, and a stub `docker` on PATH that
 // logs its arguments and runs this machine's node with what follows the image name, as the image's node would.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -43,6 +43,7 @@ printf '%s\\n' "\${a[*]}" >> "${log}"
 while [[ $# -gt 0 && "$1" != ct-helper:* ]]; do shift; done
 [[ "$1" == "ct-helper:${COMMIT}" ]] || exit 125
 shift
+[[ -n "\${STUB_SLEEP:-}" ]] && sleep "\$STUB_SLEEP"
 exec "${process.execPath}" "$@"
 `,
     { mode: 0o755 },
@@ -188,4 +189,31 @@ test("once mainnet-v1.json exists the vault is its account_id (the helper's pin 
   writeFileSync(path.join(s.dir, "contracts/vault/deployments/mainnet-v1.json"), v1);
   assert.equal(s.run().status, 0);
   assert.equal(valueOf(s.envText(), "WITHDRAW_VAULT_MAINNET"), "vault.confidential.unrlzd.near");
+});
+
+// card helper-sol-fee-payer-mainnet, review FIX 2 (P-twice): two runs at once both passed the "already set" check and
+// both renamed, two accounts printed and only the second key kept, so NEAR sent to the first account funded a key
+// nobody holds. The three key steps now share deploy/.env.lock from the check through the rename.
+test("two runs at once: one writes, the other refuses on the lock (exit 9); one key, one account printed, no lock left", async () => {
+  const s = server();
+  const runAsync = (extra) =>
+    new Promise((ok) => {
+      const p = spawn("bash", [path.join(s.deploy, "withdraw-relayer-key.sh")], { env: { ...process.env, PATH: `${path.join(s.dir, "bin")}:${process.env.PATH}`, ...extra } });
+      let stdout = "";
+      let stderr = "";
+      p.stdout.on("data", (c) => (stdout += c));
+      p.stderr.on("data", (c) => (stderr += c));
+      p.on("close", (status) => ok({ status, stdout, stderr }));
+    });
+  const first = runAsync({ STUB_SLEEP: "1.5" });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const [a, b] = await Promise.all([first, runAsync({})]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(b.status, 9, b.stderr);
+  assert.match(b.stderr, /another key step holds deploy\/\.env\.lock/);
+  const env = s.envText();
+  assert.equal(env.split("\n").filter((l) => l.startsWith("WITHDRAW_RELAYER_KEYS_MAINNET=")).length, 1);
+  const printed = [a, b].flatMap((r) => [...(r.stdout + r.stderr).matchAll(/^withdraw-relayer-key: relayer account ([0-9a-f]{64})$/gm)].map((m) => m[1]));
+  assert.deepEqual(printed, [valueOf(env, "WITHDRAW_RELAYER_MAINNET")], "one relayer account printed, the kept key's");
+  assert.deepEqual(readdirSync(s.deploy).sort(), [".env", "withdraw-relayer-key.sh"], "no temporary file, no lock left");
 });

@@ -13,7 +13,10 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { after, test } from "node:test";
+import { after, beforeEach, test } from "node:test";
+import { resetPaces } from "../../wallet/src/pace.ts";
+// each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
+beforeEach(() => resetPaces());
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
@@ -25,6 +28,8 @@ import { APP_ORIGIN, startApi } from "../src/api.ts";
 import * as restoreKind from "../src/pool-restore.ts";
 import { idsUndone, lanesOf, pagePools, POOL_CHAIN_UNREAD, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { MAINNET_POOL_RPCS, pageEvmPoolUrls } from "../src/pool-testnet.ts";
 import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 import { base58, hex } from "@scure/base";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -105,7 +110,7 @@ function replay(url: string, as: ReadonlyMap<string, As>, log: string[]): NearRp
 function nearOf(as: ReadonlyMap<string, As> = new Map()) {
   const log: string[] = [];
   const found = new Map<bigint, DepositIds>();
-  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {} }, read: (scope, r) => void found.set(scope, r) };
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() }, read: (scope, r) => void found.set(scope, r) };
   return { ids, log, found };
 }
 
@@ -418,7 +423,7 @@ test("deposit ids: a pass the providers refuse (their blocks at one height diffe
       return p.block_id === REC.pass.h && url === DRPC ? { ...a, result: { ...a.result, block_hash: "4".repeat(44) } } : a;
     } };
   };
-  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {} } } });
+  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() } } });
   assert.equal(await w.r.auto(), "stalled");
   assert.deepEqual(log, []);
   assert.equal((await listed(w.store)).length, 6);
@@ -873,14 +878,18 @@ test("review P1: two NEAR RPCs that read an id's holding apart stall it, whichev
   }
 });
 
-test("delta review 2 P2-A: one NEAR RPC reading 0 and the other 5 USDC stalls the id, whichever reads 0 (the held reader drops an asset only at 0 on both)", async () => {
+// on main since wallet-id-reader-paced, the IdReader itself refuses two providers that answer money and used for one id
+// at one block (PairDisagrees), so this pair stops step 5 there, before the held reader is asked; the held reader's own
+// filter (an asset left out only at 0 on both) is still held by the live check's plants A5 and A6
+// (scripts/live-checks/wallet-restore-reads-ux.test.mjs)
+test("delta review 2 P2-A: one NEAR RPC reading 0 and the other 5 USDC stalls the id, whichever reads 0 (the pair's disagreement, named)", async () => {
   const id = idOf(SOL_SCOPE, 2);
-  const usdc = NEAR_NETWORKS.mainnet.usdc;
   for (const pair of [[0n, 5_000_000n], [5_000_000n, 0n]] as const) {
     const n = nearPlanted(new Map([[id, pair]]));
     const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
     assert.equal(await w.r.auto(), "stalled", `${String(pair)}: ${JSON.stringify(w.ends)}`);
-    assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 2's id ${id} holds ${pair[0]} and ${pair[1]} of ${usdc} on NEAR's two RPCs: read again`]);
+    assert.equal(w.ends[0]!.why.length, 1, String(pair));
+    assert.match(w.ends[0]!.why[0]!, /^step 5 did not finish: lane 2: at index 2, \S+ answered money where \S+ answered used at block \d+: one of the pair is wrong at one block, so the restore stops, to be retried$/, String(pair));
   }
 });
 
@@ -936,4 +945,80 @@ test("delta review P3-4: an asset that is not a fungible token (nep171, nep245) 
   const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "stalled");
   assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 3's id ${id} holds 1 of ${nft} on NEAR, not a fungible token a move out keeps a unit of; a restore does not carry it yet, and it stays under the 12 words`]);
+});
+
+// ---------- card wallet-id-reader-paced: a Retry reads on, and the run's signal reaches every view and wait ----------
+
+test("a Retry reads on where the last run stopped: no id answered at the kept pass is asked again; a sign out drops what was kept", async () => {
+  const down = idOf(SOL_SCOPE, 43); // lane 3, its sixth id
+  const as = new Map<string, As>([[down, "down"]]);
+  const n = nearOf(as);
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.match(w.ends[0]!.why.join(" | "), /step 5 did not finish: lane 3: /);
+  const answered = new Set(n.log.map((l) => l.split(" ")[1]!).filter((u) => u !== down));
+  assert.ok(answered.size >= 20, `${answered.size} ids answered before the stop`);
+  // the Retry, the provider back: only the ids not answered are asked, and the lanes read whole
+  as.delete(down);
+  n.log.length = 0;
+  assert.equal(await w.r.auto(), "stalled");
+  assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
+  assert.deepEqual(n.log.map((l) => l.split(" ")[1]!).filter((u) => answered.has(u)), [], "an id answered at the kept pass asked again");
+  assert.ok(n.log.some((l) => l.endsWith(down)));
+  // a sign out drops the kept pass and answers: the next run asks every id again
+  w.r.signedOut();
+  n.log.length = 0;
+  assert.equal(await w.r.auto(), "stalled");
+  assert.ok([...answered].every((u) => n.log.some((l) => l.endsWith(u))), "every id asked again after a sign out");
+});
+
+test("the run's signal reaches the reader: a sign out ends a view a provider never answers, and a provider's busy wait, at once", async () => {
+  for (const how of ["hangs", "busy"] as const) {
+    const n = nearOf();
+    // the first id, asked within the pace's burst: its views wait no slot on the real clock
+    const first = idOf(SOL_SCOPE, 0);
+    let reached = false;
+    const gate = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p, signal?: AbortSignal) => {
+      const u = (p.request_type === "view_account" ? p.account_id : argsOf(p).account_id) as string;
+      if (u !== first) return r.query(p);
+      reached = true;
+      // never answered (only the signal ends it), or busy for good with a Retry-After of 50 s, waited on a real clock
+      if (how === "hangs") return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason), { once: true }));
+      throw Object.assign(new Error("HTTP 429"), { status: 429, retryAfterMs: 50_000 });
+    } });
+    const ids = { ...n.ids, opts: { tries: 1 }, rpcs: () => n.ids.rpcs().map(gate) as unknown as readonly [NearRpc, NearRpc] };
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids });
+    const run = w.r.auto();
+    await until("the first id asked", () => reached);
+    const t = performance.now();
+    w.r.signedOut();
+    const stage = await Promise.race([run, new Promise((ok) => setTimeout(() => ok("still running 2 s after the sign out"), 2_000))]);
+    assert.equal(stage, "stalled", how);
+    assert.ok(performance.now() - t < 2_000, how);
+  }
+});
+
+// card evm-pool-lists-mainnet: the page's mainnet pool lists are the kit's (evmPoolProvidersOf), seats first, and the
+// restore and the deposit read them; copied so SIGN_HOST's build carries no testnet provider (build-network.test.mjs)
+test("the page's mainnet EVM pool lists are the kit's pool lists, on both chains, and the mainnet page reads them", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    assert.deepEqual(MAINNET_POOL_RPCS[chain], evmPoolProvidersOf(evmPoolVenues()[chain]), chain);
+    assert.ok(Object.isFrozen(MAINNET_POOL_RPCS[chain]), `${chain}: frozen`);
+    assert.equal(pageEvmPoolUrls(chain), MAINNET_POOL_RPCS[chain], `${chain}: the mainnet page reads it`);
+  }
+});
+
+// review P3-3 of evm-pool-lists-mainnet: with a mainnet pin planted on each chain (EVM_POOLS is empty today, so
+// pagePools() skips EVM on mainnet), the restore's pool reads on MAINNET_POOL_RPCS, end to end through pagePools
+test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL_RPCS, seats first, through pagePools", () => {
+  const pin = (network: "base" | "robinhood", b: string) => ({ network, pool: `0x${b.repeat(20)}`, feeRecipient: `0x${"22".repeat(20)}`, fromBlock: 1n });
+  const pools = pagePools({ base: pin("base", "aa"), robinhood: pin("robinhood", "bb") });
+  const evm = pools.filter((p) => p.chain === "evm");
+  assert.deepEqual(evm.map((p) => p.chain === "evm" && p.pin.network), ["base", "robinhood"]);
+  for (const p of evm) {
+    if (p.chain !== "evm") continue;
+    const chain = p.pin.network as "base" | "robinhood";
+    assert.ok(p.rpcs !== null, `${chain}: read by the page`);
+    assert.deepEqual(p.rpcs().map((r) => r.url), MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href), `${chain}: the kit's pool list`);
+  }
 });

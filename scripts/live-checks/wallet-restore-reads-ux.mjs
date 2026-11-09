@@ -112,11 +112,14 @@ const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${
 // another network is not the one the rule compares with
 const ASSIGNED = (v) => new RegExp(`[^\\w$.]${esc(v)}=(?!=)`);
 const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
-// step 5's head (review P2-2 of 39c5fdd7): the pass, the id reader and the held reader `H` opened on it together, so the
-// held loop's reader is this very binding, never a name looked up across the bundle; `R` the held reader's builder;
-// groups: 1 ids, 2 why (readDepositIds' fifth parameter), 3 the pair, 4 the pass, 5 the network, 6 `H`, 7 `R`
+// step 5's head (review P2-2 of 39c5fdd7; on main's keptIdReader since wallet-id-reader-paced): the id reader on the
+// restore's kept pass (keptIdReader, which hands back the pair and the pass it reads at) and the held reader `H` opened
+// on that very pair and pass, both under the run's signal, so the held loop's reader is this very binding, never a name
+// looked up across the bundle; `R` the held reader's builder; named groups: ids, keep, signal, why (readDepositIds'
+// sixth parameter), pair, pass, net (the network), H, R
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(${N}),${N},(${N}),${N}\\)\\{let (${N})=\\1\\.rpcs\\(\\),(${N})=await ${N}\\((${N}),\\3,\\1\\.opts\\?\\?\\{\\}\\),${N}=await ${N}\\(\\5,\\3,\\4,\\1\\.opts\\?\\?\\{\\}\\),(${N})=await (${N})\\(\\5,\\3,\\4,\\1\\.opts\\?\\?\\{\\}\\),`,
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
+    `(?<H>${N})=await (?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),`,
 );
 // the held reader: each provider's reader (`readOn`) reads the token (ft_balance_of, once U is registered on it) and adds
 // what intents.near holds (`I`), every id read on both providers at once, each asset's two amounts taken one from each
@@ -167,13 +170,13 @@ export function bundleFacts(index, js) {
   const read = once(UX_READ, js) ? UX_READ.exec(js) : null;
   const carry = once(UX_CARRY, js) ? UX_CARRY.exec(js) : null;
   const head = once(STEP5_HEAD, js) ? STEP5_HEAD.exec(js) : null;
-  const loop = read && head ? ID_HELD_LOOP(read[10], head[2]) : null;
+  const loop = read && head ? ID_HELD_LOOP(read[10], head.groups.why) : null;
   const held = loop && once(loop, js) ? loop.exec(js) : null;
   const rule = held ? ID_HELD_RULE(held[6]) : null;
   const ruled = rule && once(rule, js) ? rule.exec(js) : null;
   const nets = once(NEAR_NETS, js) ? NEAR_NETS.exec(js) : null;
   const token = ruled && nets && once(ASSIGNED(ruled[9]), js) && once(ID_HELD_TOKEN(ruled[9], nets[1]), js) ? ID_HELD_TOKEN(ruled[9], nets[1]).exec(js) : null;
-  const both = head && once(ID_HELD_BOTH(head[7]), js) ? ID_HELD_BOTH(head[7]).exec(js) : null;
+  const both = head && once(ID_HELD_BOTH(head.groups.R), js) ? ID_HELD_BOTH(head.groups.R).exec(js) : null;
   const intents = both && once(INTENTS_HELD(both[16]), js) ? INTENTS_HELD(both[16]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;
   const paced = pair ? PACED(pair[3]).exec(js) : null;
@@ -183,7 +186,7 @@ export function bundleFacts(index, js) {
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
-    id_held: !!held && !!head && held[7] === head[6] && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
+    id_held: !!held && !!head && held[7] === head.groups.H && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };

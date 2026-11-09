@@ -95,6 +95,7 @@ export const OUT = {
   "app-release-sri": "response headers (CSP, Integrity-Policy) the host adds",
   "kit-sol-pool-deposit-floor": "the release ledger: it holds the served /app.js to a written release list, so a planted bundle fails it whatever it plants (its replay holds the marks and the pin)",
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
+  "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",

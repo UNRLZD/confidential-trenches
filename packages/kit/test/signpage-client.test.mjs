@@ -1584,7 +1584,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.6");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.7");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();
@@ -1635,4 +1635,65 @@ test("kit-frame-version: a state with one op this kit cannot read keeps the rest
     h.post({ v: 1, type: "state", state: bad });
     before.check(JSON.stringify(bad));
   }
+});
+
+// ------------------------------------------------------------------------------------------------ card pool-deposit-stages
+// A pool deposit's op in state.ops (its id the pool.address request's id): the pool's chain, every stage the signing
+// page's pool follow writes (packages/signpage/src/pool-deposit-follow.ts), and since_ms and refunded only on the stages
+// they belong to, as a deposit's facts. Ready to buy is state.pools' ready, never a stage; a pool deposit is never held.
+const POOL_STAGES = ["quote_checked", "waiting", "in_transit", "in_pool", "refunded", "refund_move", "failed", "short", "expired"];
+const poolOp = (fields) => ({ id: "pa-1", kind: "pool_deposit", chain: "solana", txs: [], ...fields });
+const GOOD_POOL = [
+  { stage: "waiting", since_ms: 1762400000000 },
+  { stage: "in_transit", since_ms: 1762400000000, chain: "base" },
+  { stage: "in_pool", since_ms: 1762400000000, chain: "robinhood" },
+  { stage: "failed", since_ms: 1762400000000 },
+  { stage: "short", since_ms: 1762400000000 },
+  { stage: "refunded", since_ms: 1762400000000 },
+  { stage: "refund_move", refunded: true, since_ms: 1762400000000 },
+  { stage: "in_pool", refunded: true, since_ms: 1762400000000 },
+  { stage: "in_pool", txs: [{ chain: "solana", hash: "5sig" }] },
+];
+const BAD_POOL = [
+  [{ stage: "done" }, "a vault deposit's stage"],
+  [{ stage: "held" }, "held: a pool deposit is never held"],
+  [{ stage: "halted" }, "halted: a pool deposit is never halted"],
+  [{ stage: "ready" }, "ready to buy as a stage (it is state.pools' ready)"],
+  [{ stage: "in_pool", chain: "near" }, "NEAR: the vault's, never a pool's"],
+  [{ stage: "in_pool", chain: undefined }, "no chain"],
+  [{ stage: "quote_checked", since_ms: 1 }, "a send seen on a deposit nothing reached"],
+  [{ stage: "expired", since_ms: 1 }, "a send seen on an address that expired with nothing sent"],
+  [{ stage: "refunded", refunded: true }, "the refunded fact on the refund itself (the stage says it)"],
+  [{ stage: "waiting", refunded: true }, "a refund before the deposit was processed"],
+  [{ stage: "in_transit", refunded: true }, "a refund's leg the pool follow never shows (in_transit ranks under refunded)"],
+  [{ stage: "in_pool", since_ms: -1 }, "a negative time"],
+  [{ stage: "in_pool", refunded: "yes" }, "a refunded flag that is not a boolean"],
+  [{ stage: "in_pool", held_id: U }, "a vault deposit's fact"],
+  [{ stage: "in_pool", amount_usd: "1" }, "a credited amount (the pool's balance is state.pools')"],
+  [{ stage: "in_pool", final: true }, "a field the op does not have"],
+];
+
+test("pool-deposit-stages: the kit names every stage a pool deposit reaches, and the refund's later legs", () => {
+  assert.deepEqual([...MSG.POOL_DEPOSIT_STAGES], POOL_STAGES);
+  assert.deepEqual([...MSG.POOL_DEPOSIT_REFUNDED_STAGES], ["refund_move", "in_pool"]);
+  assert.ok(Object.isFrozen(MSG.POOL_DEPOSIT_STAGES) && Object.isFrozen(MSG.POOL_DEPOSIT_REFUNDED_STAGES));
+});
+
+test("pool-deposit-stages: a pool_deposit op at every stage, with its facts, reaches the app; a fact on the wrong stage, or a stage or field it has not, is dropped", async () => {
+  for (const fields of [...POOL_STAGES.map((stage) => ({ stage })), ...GOOD_POOL]) {
+    const { h, c } = await readyClient();
+    h.post({ v: 1, type: "state", state: { ...STATE, ops: [poolOp(fields)] } });
+    assert.deepEqual(c.snapshot().state.ops, [poolOp(fields)], JSON.stringify(fields));
+  }
+  for (const [fields, why] of BAD_POOL) {
+    const { h, c } = await readyClient();
+    const op = poolOp(fields);
+    if (op.chain === undefined) delete op.chain;
+    h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "7", ops: [op] } });
+    assert.deepEqual(c.snapshot().state, { ...STATE, vault_balance: "7", ops: [] }, `the op dropped: ${why}`);
+  }
+  // a vault deposit op is not a pool one: in_pool on a deposit is dropped, done on a pool deposit too (above)
+  const { h, c } = await readyClient();
+  h.post({ v: 1, type: "state", state: { ...STATE, vault_balance: "7", ops: [depositOp({ stage: "in_pool" })] } });
+  assert.deepEqual(c.snapshot().state, { ...STATE, vault_balance: "7", ops: [] }, "in_pool on a vault deposit is dropped");
 });

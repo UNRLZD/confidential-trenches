@@ -617,3 +617,17 @@ test("the devnet program list: one sender per listed program, keyed by its own p
   assert.deepEqual([...both.values()].map((s) => [s.cluster, s.program]).sort(), [["devnet", OLD], ["mainnet", NEW]]);
   for (const s of both.values()) void s.ready.catch(() => {});
 });
+
+// card helper-sol-fee-payer-mainnet: the fee payer's low mark, the least balance that carries the worst release (its own
+// rent floor, the release's cost fronted, a page opened, the whole priority budget), one definition the key step's
+// print and the live check both read
+test("the fee payer's low mark: its rent floor, the worst release fronted and the whole priority budget, from the rent", async () => {
+  const { solanaFeePayerLowMark } = (await import("./solana.ts")) as { solanaFeePayerLowMark?: (rent: SolanaRent) => bigint };
+  assert.equal(typeof solanaFeePayerLowMark, "function", "solana.ts exports solanaFeePayerLowMark");
+  for (const rent of [{ lamportsPerByte: 5_080n, factor: 1n }, { lamportsPerByte: 3_480n, factor: 2n }, { lamportsPerByte: 2_540n, factor: 1n }] as SolanaRent[]) {
+    const want = solanaRentMin(rent, 0) + solanaPoolReleaseCost(rent) + solanaRentMin(rent, 16) + solanaPoolPriorityBudget(rent, solanaPoolFee(rent));
+    assert.equal(solanaFeePayerLowMark!(rent), want, `at ${rent.lamportsPerByte} a byte, factor ${rent.factor}`);
+    assert.ok(solanaFeePayerLowMark!(rent) > solanaPoolFee(rent) - solanaPoolPageReserve(rent), "it covers more than the fee less the page reserve");
+  }
+  assert.equal(solanaFeePayerLowMark!({ lamportsPerByte: 5_080n, factor: 1n }), 2_681_045n, "2,681,045 lamports at today's mainnet rent (5,080 a byte, factor 1)");
+});

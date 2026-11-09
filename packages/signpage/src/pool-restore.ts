@@ -24,6 +24,10 @@
 //   does. Each id is read by the wallet's IdReader (../../wallet/src/restore/id-reader.ts nearIdReader) on the
 //   release's pair on the network 1Click pays out on (pageIdReads: FastNEAR and dRPC on mainnet), every view at one
 //   block agreed on both (openRestorePass, one pass for the whole run), the stronger answer of the two taken.
+//   - A Retry reads on where the last run stopped (card wallet-id-reader-paced): the page keeps the pass and every id's
+//     answer at it (keptIdReader, IdReadKeep), reused while the pass is fresh, so an id answered once is not asked
+//     again; a stale pass opens a new one with nothing kept, and a sign out drops them all. The run's signal goes to
+//     every view and every wait of the reader, so a sign out stops a provider's busy wait at once.
 //   - The walk's notes are the floor: they are written before any id is read, whatever the ids then show.
 //   - An id unread on both providers (after the IdReader's retries) stops the reads at once: no id is read after it,
 //     and the run ends stalled, never done, so the app's Retry reads again. A pass the providers refuse, a lane stopped
@@ -88,7 +92,7 @@ import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork, type EvmPool
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes } from "../../wallet/src/pool/solana-restore.ts";
-import { nearIdHeldReader, nearIdReader, openRestorePass, type IdHeld, type IdReaderOpts, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { idReadKeep, keptIdReader, nearIdHeldReader, type IdHeld, type IdReaderOpts, type IdReadKeep, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
 import { ID_KEEP } from "../../wallet/src/deposit/moveout.ts";
 import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
@@ -97,7 +101,7 @@ import type { Deferred, KindContext } from "./api.ts";
 import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
 import { pageRpc } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
+import { PAGE_SOL_PIN, pageEvmPoolRpcs, pageSolanaRpcs } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
@@ -171,13 +175,12 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
  * after it (each throws at once, so its lane ends with restoreDepositIds's error); a sign out stops them the same way,
  * checked before each id (the id in flight then ends its lane, and the run's end checks it again). `seed` opens the seed for each window of a lane's ids only.
  */
-async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdReads, signal: AbortSignal, why: string[], noted: (scope: bigint) => Promise<ReadonlySet<number>>): Promise<void> {
-  const rpcs = ids.rpcs();
-  const pass = await openRestorePass(POOL_DEPOSIT_NETWORK, rpcs, ids.opts ?? {});
-  const reader = await nearIdReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
-  // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader: the
-  // pass is fresh only now (nearIdHeldReader refuses one VAULT_SYNC_LAG_MAX blocks old), and step 5 takes minutes
-  const heldOf = await nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
+async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdReads, keep: IdReadKeep, signal: AbortSignal, why: string[], noted: (scope: bigint) => Promise<ReadonlySet<number>>): Promise<void> {
+  const { rpcs, pass, reader } = await keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal });
+  // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
+  // pass it reads at (the kept one while fresh, else the one just opened): nearIdHeldReader refuses a pass
+  // VAULT_SYNC_LAG_MAX blocks old, and step 5 takes minutes
+  const heldOf = await nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, { ...ids.opts, signal });
   let stop: unknown;
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
@@ -350,22 +353,21 @@ const chainOf = (p: RestorePool): PoolChain => (p.chain === "solana" ? "solana" 
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
-/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads. */
-export function pagePools(): RestorePool[] {
+/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads.
+ *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
+export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
   const out: RestorePool[] = [];
   if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaRpcs });
   for (const chain of ["base", "robinhood"] as const) {
-    const pin = EVM_POOLS[EVM_PAGE[chain]];
+    const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
     const net = pin.network;
     // the pool's scope as src/pools.ts names it (evmPoolScopeOf on the pool's lowercased address and chain id)
     const scope = evmPoolScopeOf(pin.pool.toLowerCase(), EVM_CHAIN_IDS[net]);
-    // the testnet lists sit behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them
-    if (POOL_TESTNET && (net === "base-sepolia" || net === "robinhood-testnet"))
-      out.push({ chain: "evm", pin, scope, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)) });
-    // mainnet: the page has no EVM pool list yet (src/pool-testnet.ts testnetPoolDeps answers null), so a pin there is
-    // read by no one until its list lands, and the run says so (stalled), never done
-    else out.push({ chain: "evm", pin, scope, rpcs: null });
+    // the page's pool list (pageEvmPoolRpcs, the deposit's too): the testnet pair on the testnet build, folded at build
+    // time, so SIGN_HOST's bundle carries none of it; on mainnet the kit's pool list (card evm-pool-lists-mainnet). A
+    // chain with no list is read by no one, and the run says so (stalled), never done
+    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain)! });
   }
   return out;
 }
@@ -415,6 +417,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   const locks = (): Pick<LockManager, "request" | "query"> => h.locks ?? navigator.locks;
   let run: Run | null = null;
   let abort: AbortController | null = null;
+  // step 5's pass and answers, kept across this page's runs (a Retry reads on) and dropped at a sign out
+  let keep = idReadKeep();
 
   const read = async (signal: AbortSignal): Promise<RestoreStage> => {
     const pools = (h.pools ?? pagePools)();
@@ -504,7 +508,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           }
         };
         if (ids === null && POOL_TESTNET) for (const w of walked) why.push(`${w.label}: ${POOL_UX_UNREAD_TESTNET}`);
-        if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, signal, why, noted).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
+        if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, keep, signal, why, noted).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
         signal.throwIfAborted();
         return end(why.length > 0 ? "stalled" : "done");
       } finally {
@@ -585,7 +589,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       r.follow(crypto.randomUUID());
       return r.done;
     },
-    signedOut: () => abort?.abort(),
+    signedOut: () => {
+      abort?.abort();
+      keep = idReadKeep();
+    },
     settle: async () => {
       const ops = await h.store();
       const q = await locks().query();
