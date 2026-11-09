@@ -472,13 +472,13 @@ const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "obje
  *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV; devnet's a list, comma apart, solanaPoolPrograms, which
  *  refuses a bad one at start), none when unset. */
 export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET", "solana-marks": "POOL_SOLANA_PROGRAM_MAINNET" };
-/** The note restore's scan (packages/wallet/src/pool/solana-restore.ts solanaMarks, the bucket read; the settle's
- *  solanaSettleSpent reads through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
+/** The note restore's mark list (packages/wallet/src/pool/solana-restore.ts solanaMarksListed, the lister's bucket
+ *  read; the settle's solanaSettleSpent lists through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
  *  past the counter's low byte, of size - 9 bytes whose last is the program's mark tag (SOL_MARK_TAG 1). */
 const SCAN_SIZES: ReadonlySet<unknown> = new Set([13, 17]);
 const SCAN_AT = 9;
 const SCAN_TAG = 1;
-const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "filters"]);
+const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "dataSlice", "filters"]);
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 /** Base58 to bytes (each leading "1" a zero byte), or null for a character off the alphabet. */
 function base58Bytes(s: string): Uint8Array | null {
@@ -497,7 +497,8 @@ const exactKeys = (o: Record<string, unknown>, keys: readonly string[]): boolean
 /**
  * getProgramAccounts only in the note restore's exact shape (review L-2 and its re-review): on the route's own pinned
  * pool program; config { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot? (a positive
- * whole number), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
+ * whole number), dataSlice? (exactly { offset: 0, length: 0 }: the wallet's lister asks for the addresses alone, card
+ * sol-pools-mainnet-pin), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
  * the bytes base58 of exactly size - 9 bytes ending in the mark tag: one bucket of one mark size. An open scan of any
  * program, or a wider one of the pool's (the tag alone, a large size, a compressed encoding, a slice, a sort, a
  * changed-since read), would spend the keyed provider's quota for every caller. Anything else is refused before any call.
@@ -509,6 +510,7 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
   if (Object.keys(c).some((k) => !SCAN_CONFIG.has(k))) return false;
   if (c.commitment !== "finalized" || c.encoding !== "base64" || c.withContext !== true) return false;
   if (Object.hasOwn(c, "minContextSlot") && !(Number.isSafeInteger(c.minContextSlot) && (c.minContextSlot as number) > 0)) return false;
+  if (Object.hasOwn(c, "dataSlice") && !(isPlain(c.dataSlice) && exactKeys(c.dataSlice, ["offset", "length"]) && c.dataSlice.offset === 0 && c.dataSlice.length === 0)) return false;
   const f = c.filters;
   if (!Array.isArray(f) || f.length !== 2) return false;
   const [size, cmp] = f as unknown[];
@@ -522,19 +524,18 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
 
 /**
  * The mark scan's two providers (card sol-pools-mainnet-pin): `a`, the URL set under MARKS_A_ENV, and `b`, the
- * solana-marks route's keyed URLs, in order, whose company (operatorOf) is not a's. The signing page reads the marks of
- * the mainnet pool from both and requires the two to agree (packages/wallet/src/pool/solana-restore.ts solanaMarks).
+ * solana-marks route's keyed URLs, in order, whose company (operatorOf) is not a's. The signing page lists the mainnet
+ * pool's marks on route b alone (packages/signpage/src/pool-testnet.ts pageSolanaLister) and reads each listed address on
+ * its pair, provider A directly, never through this helper (packages/wallet/src/pool/solana-restore.ts
+ * solanaMarksListed).
  *
- * Why a mark read through this helper can only delay, never move money: a mark is the pool's record that a note was
- * deposited (pre-mark) or spent (spent mark). The device uses the marks for two things, and neither reaches what it
- * signs or where money goes. (1) Which of its own notes are live: a spent mark hidden makes the device prove a note the
- * chain has spent, and the pool program refuses that proof (NullifierAlreadySpent) on chain; a spent or pre-mark made up
- * makes the device skip or miss a note, so its money shows late, until an honest read, and stays in the pool, where only
- * a proof made from the user's own seed moves it. (2) The settle of a refused send: a made-up spent mark settles only
- * when its change note is a leaf both of the page's RPCs agree on (one of them not ours, solanaSettleSpent), and a hidden
- * one leaves the note held, then free to prove again, which the chain refuses as above. The recipient, the amount, the
- * fee and the fee payer of every release come from the user's request and the page's pins, and every proof is checked
- * on chain, so a forged mark ends in a refused send or a late balance, never a payment to anyone else.
+ * Why a list from this helper can only stop a restore or a settle, never decide one: a mark is the pool's record that a
+ * note was deposited (pre-mark) or spent (spent mark), and the list only names addresses. A listed mark counts only when
+ * both of the page's RPCs hold that account with the same bytes, so an address made up is no account on provider A and
+ * is refused; and each RPC's own pool count (deposits and releases, numbered with no hole) must equal the listed marks
+ * (solanaMarkCounts), so a mark left out is refused. A refused list stops the restore or leaves the settle held: a spent
+ * note is never shown unspent nor freed. The recipient, the amount, the fee and the fee payer of every release come from
+ * the user's request and the page's pins, and every proof is checked on chain.
  */
 export function marksRoutes(upstreams: Record<RpcChain, Upstream>): { a: () => string | undefined; b: () => string[] } {
   const a = upstreams.solana.keyed.find((k) => k.env === MARKS_A_ENV)?.url;
@@ -736,8 +737,8 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // review L4: the read's whole walk, every path below, ends by `by`
     const by = now() + WALK_MS;
     // card sol-pools-mainnet-pin: the mark scan's two routes, each one company's. A: SOLANA_RPC_URL alone, never a spare
-    // or the public endpoint. B: its keyed names off A's company, in order. The page requires the two to agree; a mark
-    // either one forges can only delay a send, never move money (marksRoutes below)
+    // or the public endpoint. B: its keyed names off A's company, in order. Either only lists: the page reads each listed
+    // mark by address on its pair (marksRoutes below)
     if (c === "solana" && methods.includes("getProgramAccounts")) {
       const a = marksA();
       return a === undefined ? UPSTREAM() : callList(c, [a], forward, methods, client, reserved, by);

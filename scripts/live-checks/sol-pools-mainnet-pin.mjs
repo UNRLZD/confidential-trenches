@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Live check of card sol-pools-mainnet-pin, the helper's half: the mainnet mark scan the signing page reads through two
-// routes of HELPER_HOST, each one company's provider, and the page requires the two to agree
-// (packages/signpage/src/pool-testnet.ts pageSolanaRpcs, packages/wallet/src/pool/solana-restore.ts solanaMarks).
+// Live check of card sol-pools-mainnet-pin, the helper's half: the mainnet mark list, which the signing page asks of the
+// helper's solana-marks route (packages/signpage/src/pool-testnet.ts pageSolanaLister) and then reads mark by mark on its
+// pair, provider A directly (packages/wallet/src/pool/solana-restore.ts solanaMarksListed). Both routes of HELPER_HOST
+// that answer that list, each one company's provider, are read with the wallet lister's exact request (the addresses
+// alone, dataSlice { offset: 0, length: 0 }).
 // No keyless mainnet provider answers that scan (publicnode 403 "Indexed requests require a personal token",
 // api.mainnet-beta 403, read 9 Nov 17:23Z), so both are the helper's (apps/helper/src/rpc/rpc.ts marksRoutes):
 //   A: POST /v1/rpc/solana, getProgramAccounts sent to SOLANA_RPC_URL alone;
@@ -43,7 +45,7 @@ const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 /** Bucket 0 of a mark size: base58 of size - 9 bytes, the counter's bytes past its low byte (0) then the tag 1. */
 export const bucket0 = (size) => "1".repeat(size - 10) + B58[1];
 export const SIZES = [13, 17];
-export const scanParams = (program, size) => [program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: size }, { memcmp: { offset: 9, bytes: bucket0(size) } }] }];
+export const scanParams = (program, size) => [program, { commitment: "finalized", encoding: "base64", withContext: true, dataSlice: { offset: 0, length: 0 }, filters: [{ dataSize: size }, { memcmp: { offset: 9, bytes: bucket0(size) } }] }];
 
 /** The provider's environment name in a Server-Timing header's rpc entry (rpc.ts timingOf), or null. */
 export const providerOf = (timing) => /(?:^|,\s*)rpc;[^,]*desc="([A-Z0-9_]+)"/.exec(timing ?? "")?.[1] ?? null;

@@ -1,8 +1,8 @@
 // node --test src/rpc/marks.test.ts (card sol-pools-mainnet-pin): the mainnet mark scan has two routes on two companies.
 // Route A, POST /v1/rpc/solana, sends getProgramAccounts to SOLANA_RPC_URL alone, never to a spare or the public
 // endpoint. Route B, POST /v1/rpc/solana-marks, answers nothing but that scan (rpc.ts scanAllowed), from the keyed names
-// of RPC_UPSTREAMS["solana-marks"] whose company is not route A's, and has no public fallback. The signing page reads the
-// marks from both and requires them to agree (packages/wallet/src/pool/solana-restore.ts solanaMarks). The env check
+// of RPC_UPSTREAMS["solana-marks"] whose company is not route A's, and has no public fallback. The signing page lists the
+// marks on route B and reads each listed mark on its pair (packages/wallet/src/pool/solana-restore.ts solanaMarksListed). The env check
 // that redeploy.sh runs asks B's provider the exact scan and refuses a B on A's company, or one that does not answer.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -48,6 +48,16 @@ test("route B forwards the exact scan to the first keyed provider not on route A
   assert.equal(a.status, 200);
   assert.deepEqual(sent.map((s) => s.url), [QN]);
   assert.deepEqual(JSON.parse(a.body).result.value, []);
+});
+
+// review of 369a87a8, P1: the signing page's lister on mainnet is route B (pool-testnet.ts pageSolanaLister), and the
+// wallet's lister asks for the addresses alone (solana-restore.ts solanaMarksListed: dataSlice { offset: 0, length: 0 })
+test("route B forwards the wallet lister's exact request, the empty dataSlice included", async () => {
+  const { sent, f } = fakeFetch();
+  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const a = await call(r, "solana-marks", scan(PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }));
+  assert.equal(a.status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [QN]);
 });
 
 test("route B refuses every other method and every wider scan, before any call", async () => {

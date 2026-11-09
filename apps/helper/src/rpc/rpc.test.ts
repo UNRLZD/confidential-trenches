@@ -118,7 +118,7 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
 
 // review L-2 and its re-review: getProgramAccounts only in the note restore's exact shape, on the route's own pinned
 // pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
-// wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
+// wallet's lister sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
 // with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
 const DEV_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const MAIN_PROGRAM = "11111111111111111111111111111111";
@@ -127,18 +127,20 @@ const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withCon
 const PRE: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "11111112" } }] };
 const scan = (program: string, config: unknown = SPENT, id = 5) => ({ jsonrpc: "2.0", id, method: "getProgramAccounts", params: [program, config] });
 const withFilters = (filters: unknown, from: ScanConfig = SPENT): ScanConfig => ({ ...from, filters });
-test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot", async () => {
+test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot, with or without the lister's empty dataSlice", async () => {
   next = { status: 200, type: JSON_T, body: echo };
   const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
   const { minContextSlot: _m, ...noMin } = SPENT;
   for (const [chain, program] of [["solana-devnet", DEV_PROGRAM], ["solana", MAIN_PROGRAM]] as const) {
     seen.length = 0;
     // and a higher bucket: the counter's bytes 05 01 00 past its low byte, then the tag ("8RGtg", @scure/base)
-    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }])]) {
+    // card sol-pools-mainnet-pin (review of 369a87a8, P1): the wallet's lister (solana-restore.ts solanaMarksListed) asks
+    // for the addresses alone, dataSlice { offset: 0, length: 0 }, and the pair reads each listed mark by address
+    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }]), { ...SPENT, dataSlice: { offset: 0, length: 0 } }, { ...PRE, dataSlice: { offset: 0, length: 0 } }]) {
       assert.equal((await call(r, chain, scan(program, config))).status, 200, `${chain} ${JSON.stringify(config)}`);
     }
     assert.equal((await call(r, chain, [scan(program, PRE)])).status, 200, `${chain} in a batch`);
-    assert.equal(seen.length, 5, chain);
+    assert.equal(seen.length, 7, chain);
   }
 });
 // each case differs from SPENT (or PRE) in one thing only, so removing the one rule that refuses it lets it through
@@ -163,7 +165,10 @@ const ONE_OFF: readonly [string, string, unknown][] = [
   ["bytes off the base58 alphabet", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
   ["encoding base64+zstd", DEV_PROGRAM, { ...SPENT, encoding: "base64+zstd" }],
   ["encoding jsonParsed", DEV_PROGRAM, { ...SPENT, encoding: "jsonParsed" }],
-  ["a dataSlice", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }],
+  ["a dataSlice with data", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 13 } }],
+  ["a dataSlice at another offset", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 8, length: 0 } }],
+  ["a dataSlice with another key", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0, x: 1 } }],
+  ["a dataSlice not an object", DEV_PROGRAM, { ...SPENT, dataSlice: 0 }],
   ["sortResults", DEV_PROGRAM, { ...SPENT, sortResults: true }],
   ["changedSinceSlot", DEV_PROGRAM, { ...SPENT, changedSinceSlot: 1 }],
   ["commitment processed", DEV_PROGRAM, { ...SPENT, commitment: "processed" }],

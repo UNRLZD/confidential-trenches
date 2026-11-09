@@ -109,7 +109,7 @@ export function judge(rec) {
     // SigninSheet.tsx): a build that pins a pool scans it (the mainnet Solana pin, card sol-pools-mainnet-pin), and the
     // harness reaches no RPC, so the landing reads it scanning (S19.1) or stalled (S19.5); any other open sheet, or a
     // restore on a new account's way, is a sheet left open
-    const restore = rec.run === "wallet" && l.sheet === 1 && /^S19\.[1-5]$/.test(l.sheetState ?? "");
+    const restore = rec.run === "wallet" && l.sheet === 1 && /^S19\.[1345]$/.test(l.sheetState ?? "");
     say(l.sheet === 0 || restore, restore ? `${at} the sign-in sheet shows the restore (${l.sheetState})` : `${at} the sign-in sheet closed (${l.sheet ?? "-"}${l.sheet ? `, ${l.sheetState ?? "no state"}` : ""})`);
     if (w.width === "1440") say(l.dot === dot, `${at} backup dot ${l.dot} (want ${dot})`);
     // BAR-02: same route and scroll, in the top window and the frame

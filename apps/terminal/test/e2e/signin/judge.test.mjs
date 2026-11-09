@@ -42,7 +42,8 @@ test("the wallet way may land on its restore (S19), never another open sheet; a 
   const withSheet = (rec, sheetState) => ({ ...rec, widths: rec.widths.map((w) => ({ ...w, landing: { ...w.landing, sheet: 1, sheetState } })) });
   const bad = (v) => v.lines.filter((l) => l.startsWith("BAD"));
   assert.equal(judge(withSheet(wallet, "S19.5")).ok, true, bad(judge(withSheet(wallet, "S19.5"))).join("\n"));
-  for (const [rec, state] of [[wallet, "S2.1"], [wallet, null], [prf, "S19.5"]]) {
+  // S19.2 is no state the sheet emits (SigninSheet.tsx emits S19.1, S19.3, S19.4 and S19.5): never a landing
+  for (const [rec, state] of [[wallet, "S2.1"], [wallet, null], [wallet, "S19.2"], [prf, "S19.5"]]) {
     const v = judge(withSheet(rec, state));
     assert.equal(v.ok, false);
     for (const width of ["390", "1440"]) assert.ok(bad(v).some((l) => l.startsWith(`BAD ${rec.run} @${width} the sign-in sheet closed (1`)), `${rec.run} ${state} @${width}: ${bad(v).join("\n")}`);

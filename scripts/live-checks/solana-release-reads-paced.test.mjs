@@ -12,7 +12,7 @@ import { facts, judge } from "./solana-release-reads-paced.mjs";
 
 const ANSWERS = JSON.parse(readFileSync(new URL("./solana-release-reads-paced.answers.json", import.meta.url), "utf8"));
 const NO_RELEASE = "BAD the release's reference reads on a pair outside the trade's pace: a release under load can trip a provider's limit and be refused as down";
-const NO_PAIR = "BAD the page's Solana pair is made unpaced: pool buy, sell, withdraw and settle reads skip the provider's queue";
+const NO_PAIR = "BAD the page's Solana pair or mark lister is made unpaced, or provider A's reads go through another route: pool reads skip the provider's queue, or a mark the helper makes up could count";
 const NO_TIMED = "BAD the kit's reference, rent or tx-end reads skip the provider's queue or count their wait against their timeout: a read behind a full pace is refused as down";
 const NO_PRICE = "BAD the page's price read counts its wait for a turn against its try's bound: behind a full pace it fails as no answer";
 
@@ -51,7 +51,7 @@ test("the facts read from a bundle", () => {
     "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>p_(e,t.length),()=>null)));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
     "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
-    "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=()=>{let e=Cm(hk(KM)),t=Cm(jV(BV));return[yh(e,(n,r)=>(n===`getProgramAccounts`?t:e)(n,r)),Cm(gk(GM))]}";
+    "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=()=>[Cm(hk(KM)),Cm(gk(GM))],LI=()=>Cm(jV(BV)),qV={proving:0};";
   const f = facts("", js);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, release: true, pair: true, timed: true, price: true });
   // each mark changed in place, once (a mark found twice or not at all is a broken test, never a pass)
@@ -70,12 +70,15 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("providers:[Cm(hk(KM)),", "providers:[hk(KM),").release, false);
   assert.equal(planted("Cm(gk(GM))],reference", "gk(GM)],reference").release, false);
   assert.equal(planted("KM=`https://solana-rpc.publicnode.com`", "KM=`https://api.mainnet-beta.solana.com`").release, false);
-  // either provider of the page's pair unpaced, the marks route unpaced, or the scan not sent to it: FAIL
-  assert.equal(planted("let e=Cm(hk(KM)),", "let e=hk(KM),").pair, false);
-  assert.equal(planted("Cm(gk(GM))]}", "gk(GM)]}").pair, false);
-  assert.equal(planted("t=Cm(jV(BV));", "t=jV(BV);").pair, false);
-  assert.equal(planted("(n===`getProgramAccounts`?t:e)", "(e)").pair, false);
+  // either provider of the page's pair unpaced, the lister unpaced or not the marks route: FAIL
+  assert.equal(planted("hI=()=>[Cm(hk(KM)),", "hI=()=>[hk(KM),").pair, false);
+  assert.equal(planted("Cm(gk(GM))],LI", "gk(GM)],LI").pair, false);
+  assert.equal(planted("LI=()=>Cm(jV(BV))", "LI=()=>jV(BV)").pair, false);
+  assert.equal(planted("LI=()=>Cm(jV(BV))", "LI=()=>Cm(jV(GM))").pair, false);
   assert.equal(planted("BV=`${GM}/v1/rpc/solana-marks`", "BV=`${GM}/v1/rpc/solana`").pair, false);
+  // review of 369a87a8 P1: provider A's place wrapped onto the marks route (369a87a8's own pair), so its reads of a
+  // listed mark by address go through the helper: FAIL
+  assert.equal(planted("hI=()=>[Cm(hk(KM)),Cm(gk(GM))]", "hI=()=>{let e=Cm(hk(KM)),t=Cm(jV(BV));return[yh(e,(n,r)=>(n===`getProgramAccounts`?t:e)(n,r)),Cm(gk(GM))]}").pair, false);
   // the timed read pacing the provider under it, so its wait counts against its timeout: FAIL
   assert.equal(planted("return a?Cm(r,a):r}", "return a?Cm(e,a):r}").timed, false);
   // the provider called after a turn (a microtask), not inside it, so a paced provider would queue twice: FAIL

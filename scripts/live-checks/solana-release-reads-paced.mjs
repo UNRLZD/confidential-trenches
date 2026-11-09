@@ -5,8 +5,9 @@
 //     each under the kit's paced wrapper (send.ts solanaPacedRpc), and the reference reads on the pair the kit hands
 //     it (flow.ts gives its paced providers), never on a pair of its own;
 //   - pair: the page's Solana pair (pool-testnet.ts pageSolanaRpcs, which every pool buy, sell, withdraw, settle and
-//     restore read takes) is the same two providers, each under the paced wrapper, provider A's place sending the mark
-//     scan (getProgramAccounts) to the helper's solana-marks route, paced too (card sol-pools-mainnet-pin);
+//     restore read takes) is the same two providers, each under the paced wrapper alone, so provider A's reads go to
+//     provider A and nowhere else; and the page's mark lister (pageSolanaLister) is the helper's solana-marks route,
+//     paced too (card sol-pools-mainnet-pin): it only names the marks, which the pair reads by address;
 //   - timed: the kit's timed reads (send.ts solanaTimedRpc) call the provider inside its turn and time that call, then
 //     pace the timed call under the limit the provider's queue already holds, so a wait for a turn never counts
 //     against the read's timeout; and the reference's reads (pool.ts readSolanaReference), the rent read (pool-buy.ts
@@ -54,14 +55,15 @@ export function facts(index, js) {
   const release =
     !!(p && a && h) &&
     new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
-  // card sol-pools-mainnet-pin: provider A's place sends the mark scan to the helper's solana-marks route, itself paced
+  // card sol-pools-mainnet-pin: the pair is provider A and the helper's route, each paced and nothing else (provider A
+  // never wrapped onto another route: a mark the helper makes up would count, review of 369a87a8 P1); the lister is the
+  // helper's solana-marks route, paced
   const marks = h ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q}`, "g"))].map((x) => esc(x[1])) : [];
   const m = marks.length ? `(?:${marks.join("|")})` : undefined;
   const pair =
     !!(p && a && h && m) &&
-    new RegExp(
-      `=\\(\\)=>\\{let (${N})=${esc(p)}\\(${N}\\(${a}\\)\\),(${N})=${esc(p)}\\(${N}\\(${m}\\)\\);return\\[${N}\\(\\1,\\((${N}),(${N})\\)=>\\(\\3===${Q}getProgramAccounts${Q}\\?\\2:\\1\\)\\(\\3,\\4\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\]\\}`,
-    ).test(js);
+    // MAINNET_MARKS_ROUTE, pageSolanaRpcs and pageSolanaLister, as pool-testnet.ts declares them in turn
+    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\)[,;]`).test(js);
   const timed =
     !!t &&
     // the reference's reads, a failed one read as no answer (pool.ts readSolanaReference)
@@ -85,7 +87,7 @@ export function judge(a) {
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.release !== true) bad("the release's reference reads on a pair outside the trade's pace: a release under load can trip a provider's limit and be refused as down");
-  if (a?.pair !== true) bad("the page's Solana pair is made unpaced: pool buy, sell, withdraw and settle reads skip the provider's queue");
+  if (a?.pair !== true) bad("the page's Solana pair or mark lister is made unpaced, or provider A's reads go through another route: pool reads skip the provider's queue, or a mark the helper makes up could count");
   if (a?.timed !== true) bad("the kit's reference, rent or tx-end reads skip the provider's queue or count their wait against their timeout: a read behind a full pace is refused as down");
   if (a?.price !== true) bad("the page's price read counts its wait for a turn against its try's bound: behind a full pace it fails as no answer");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };

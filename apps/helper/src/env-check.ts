@@ -81,7 +81,7 @@ export async function checkMarksRoute(env: Record<string, string | undefined>, d
   for (const url of [aUrl, bUrl]) {
     const name = nameOf(url);
     for (const size of [13, 17]) {
-      const body = { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: size }, { memcmp: { offset: 9, bytes: bucket0(size) } }] }] };
+      const body = { jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [program, { commitment: "finalized", encoding: "base64", withContext: true, dataSlice: { offset: 0, length: 0 }, filters: [{ dataSize: size }, { memcmp: { offset: 9, bytes: bucket0(size) } }] }] };
       let status: number;
       let j: ScanAnswer;
       try {

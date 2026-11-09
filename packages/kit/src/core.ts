@@ -57,7 +57,7 @@ export { readTokenStorageMin } from "../../wallet/src/arming/accounts.ts";
 // the wallet's bound on two providers' final heights, which the exit tool's reads hold too
 export { HEIGHT_SPREAD_MAX } from "../../wallet/src/deposit/account.ts";
 // card exit-pool-notes: the Solana pool's restore from the 12 words, the wallet's own walk on two RPCs (its marks listed
-// by one RPC and read by both when a lister is given, solanaMarksListed), with the pool's address and scope and the
+// by one RPC, the lister or else the first of the two, and read by both, solanaMarksListed), with the pool's address and scope and the
 // wallet's refusal of one provider twice
 export { solanaRestoreNotes, type SolanaRestoredNote, type SolanaRestoredSpend } from "../../wallet/src/pool/solana-restore.ts";
 export { solanaPoolOf, checkSolanaRpcs } from "../../wallet/src/pool/solana.ts";

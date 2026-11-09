@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
-import { pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -166,11 +166,11 @@ test("card solana-release-reads-paced: the page's Solana pair waits its turn beh
   }
 });
 
-// card sol-pools-mainnet-pin: no keyless mainnet provider answers the mark scan (publicnode 403 "Indexed requests
-// require a personal token", api.mainnet-beta 403, read 9 Nov 17:23Z), so on the mainnet build the pair's first sends
-// that one read, getProgramAccounts, to the helper's second route (/v1/rpc/solana-marks, another company's provider than
-// /v1/rpc/solana's), and every other read to provider A. solanaMarks reads both of the pair and requires them to agree.
-test("the mainnet build's Solana pair: the mark scan goes to the helper's two routes, solana-marks and solana, every other read to provider A and the helper's solana route", async () => {
+// card sol-pools-mainnet-pin: no keyless mainnet provider answers the mark list (publicnode 403 "Indexed requests
+// require a personal token", api.mainnet-beta 403, read 9 Nov 17:23Z), so on the mainnet build the page's lister is the
+// helper's marks route (/v1/rpc/solana-marks). The pair reads each listed mark by address, and provider A's reads go to
+// provider A alone, never through the helper: a mark the helper makes up is no account there (review of 369a87a8, P1).
+test("the mainnet build's Solana reads: the lister is the helper's marks route; the pair's reads go to provider A directly and to the helper's solana route", async () => {
   const real = globalThis.fetch;
   const sent: [string, string][] = [];
   globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
@@ -180,18 +180,23 @@ test("the mainnet build's Solana pair: the mark scan goes to the helper's two ro
   }) as typeof fetch;
   try {
     const [a, b] = pageSolanaRpcs();
+    const lister = pageSolanaLister();
+    assert.ok(lister !== undefined, "the mainnet build names a lister");
     const scanParams = ["EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
+    const byAddress = [["11111111111111111111111111111111"], { commitment: "finalized", encoding: "base64" }];
+    await lister("getProgramAccounts", scanParams);
     for (const r of [a, b]) {
       await r("getProgramAccounts", scanParams);
-      await r("getAccountInfo", ["11111111111111111111111111111111", { encoding: "base64" }]);
+      await r("getMultipleAccounts", byAddress);
     }
   } finally {
     globalThis.fetch = real;
   }
   assert.deepEqual(sent, [
     [`${TRADE_HELPER}/v1/rpc/solana-marks`, "getProgramAccounts"],
-    [SOLANA_PROVIDER_A, "getAccountInfo"],
+    [SOLANA_PROVIDER_A, "getProgramAccounts"],
+    [SOLANA_PROVIDER_A, "getMultipleAccounts"],
     [`${TRADE_HELPER}/v1/rpc/solana`, "getProgramAccounts"],
-    [`${TRADE_HELPER}/v1/rpc/solana`, "getAccountInfo"],
+    [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
   ]);
 });

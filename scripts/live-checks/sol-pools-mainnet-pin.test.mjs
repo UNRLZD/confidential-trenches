@@ -16,7 +16,7 @@ const bad = (r) => r.lines.filter((l) => l.startsWith("BAD"));
 test("the check's names and shape are the helper's: route A's one name, route B's list, the scan's bucket 0 bytes", () => {
   assert.equal(A_NAME, MARKS_A_ENV);
   assert.deepEqual(B_NAMES, [...RPC_UPSTREAMS["solana-marks"].keyed]);
-  // the two requests the wallet's solanaMarks sends for bucket 0 (apps/helper/src/rpc/rpc.test.ts SPENT and PRE)
+  // bucket 0's bytes in the two requests the wallet's lister sends (solanaMarksListed; apps/helper/src/rpc/rpc.test.ts SPENT and PRE)
   assert.equal(bucket0(13), "1112");
   assert.equal(bucket0(17), "11111112");
   assert.equal(providerOf('rpc-wait;dur=0, rpc;dur=69;desc="SOLANA_RPC_URL"'), "SOLANA_RPC_URL");

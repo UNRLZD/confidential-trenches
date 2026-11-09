@@ -187,6 +187,19 @@ test("restore: answered started at once; every pinned pool read; the notes writt
   assert.deepEqual(await listed(w.store), want);
 });
 
+// review of 369a87a8, P1: the Solana walk lists its marks on the pool's lister (the helper's marks route on mainnet) and
+// reads each on the pair; a pool with no lister walks on its pair's first RPC, as the wallet's default
+test("restore: a Solana pool's lister reaches the walk; a pool with none passes none", async () => {
+  const lister = (async () => null) as never;
+  const got: unknown[] = [];
+  const walk = (async (a: { lister?: unknown }) => (got.push("lister" in a ? a.lister : "none"), { notes: [], spends: [] })) as never;
+  const listed = await world({ pools: () => [{ ...POOLS[0]!, lister: () => lister } as RestorePool], solana: walk });
+  await listed.r.auto();
+  const bare = await world({ pools: () => [POOLS[0]!], solana: walk });
+  await bare.r.auto();
+  assert.deepEqual(got, [lister, "none"]);
+});
+
 test("restore: progress says reading at least every beat while a pool reads; the kit's 10 s holds", async () => {
   assert.ok(RESTORE_BEAT_MS <= 10_000);
   let release: () => void = () => {};
@@ -269,9 +282,9 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
 
 test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
-  const { pageSolanaRpcs } = await import("../src/pool-testnet.ts");
+  const { pageSolanaLister, pageSolanaRpcs } = await import("../src/pool-testnet.ts");
   const pin = SOL_POOLS.mainnet!;
-  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaRpcs }]);
+  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaRpcs, lister: pageSolanaLister }]);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so

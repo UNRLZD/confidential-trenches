@@ -14,7 +14,7 @@
 //   - on both routes, a getProgramAccounts scan with a dataSize filter alone (not the note restore's shape: no memcmp)
 //     is refused 400 method_not_allowed (review L-2: the helper forwards a scan only on its own pinned pool program with
 //     a dataSize and a memcmp filter, so no caller spends the keyed provider's quota on an open scan);
-//   - devnet: the note restore's exact scan (restoreScan, packages/wallet/src/pool/solana-restore.ts solanaMarks: the
+//   - devnet: the note restore's exact scan (restoreScan, packages/wallet/src/pool/solana-restore.ts solanaMarksListed: the
 //     spent marks' bucket 0 of the devnet pool program) is forwarded: 200 with { context, value: [...] } for its own id
 //     (the box's POOL_SOLANA_PROGRAM_DEVNET is the devnet pool program, else the helper refuses it 400);
 //   - devnet pace: PACE_READS getSlot reads one after another each answer 200 with a slot, none 429, and their median is
@@ -51,9 +51,9 @@ export const poolReads = (pin) => [
 /** Today's: the reads a live run makes. */
 export const POOL_READS = poolReads(devnetPin());
 export const ROUTES = ["solana-devnet", "solana"];
-/** The restore's request for the devnet pool's spent marks, bucket 0, as solanaMarks sends it (no minContextSlot on a
- *  first read). */
-export const restoreScan = (pin) => [pin.program, { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
+/** The restore's request for the devnet pool's spent marks, bucket 0, as the wallet's lister sends it (no minContextSlot
+ *  on a first read; the addresses alone). */
+export const restoreScan = (pin) => [pin.program, { commitment: "finalized", encoding: "base64", withContext: true, dataSlice: { offset: 0, length: 0 }, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
 
 const json = (t) => {
   try {
