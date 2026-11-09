@@ -44,3 +44,7 @@ export const SIGN_BUILD_OUTPUTS = Object.freeze([
   "packages/signpage/public/prover-worker.js",
   "packages/signpage/public/prover-thread.js",
 ]);
+
+/** The files packages/signpage/public/ holds in git: its sources, served as they are. Any other file there is build output
+ *  (review P3-2: public/app.min.js), refused by scripts/ci/no-tracked-build-output.mjs. */
+export const SIGN_PUBLIC_SOURCES = Object.freeze(["packages/signpage/public/_headers"]);

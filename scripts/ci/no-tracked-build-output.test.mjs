@@ -99,3 +99,22 @@ test("planted: a .gitignore that does not ignore a build output is refused, so a
     rmSync(r.dir, { recursive: true, force: true });
   }
 });
+
+// review P3-2: another name for a build (public/app.min.js) or a dist/ folder is build output too
+test("planted: a tracked file in packages/signpage/public/ that is not one of its sources, or any tracked dist/, is refused", () => {
+  const r = plantedRepo();
+  try {
+    r.write("packages/signpage/public/app.min.js", "var a=1;\n");
+    r.write("packages/signpage/dist/app.js", "var a=1;\n");
+    r.write("apps/terminal/dist/index.html", "<!doctype html>\n");
+    r.git("add", "-f", "--", "packages/signpage/public/app.min.js", "packages/signpage/dist/app.js", "apps/terminal/dist/index.html");
+    r.git("commit", "-q", "-m", "Card bad: other build names committed");
+    assert.deepEqual(buildOutputProblems(r.dir), [
+      "packages/signpage/public/app.min.js is tracked in packages/signpage/public/, which holds only its sources (packages/signpage/public/_headers): build output is never committed; git rm --cached -- packages/signpage/public/app.min.js",
+      "apps/terminal/dist/index.html is tracked in a dist/ folder: build output is never committed; git rm --cached -- apps/terminal/dist/index.html",
+      "packages/signpage/dist/app.js is tracked in a dist/ folder: build output is never committed; git rm --cached -- packages/signpage/dist/app.js",
+    ]);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
