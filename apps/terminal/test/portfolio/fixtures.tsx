@@ -70,6 +70,12 @@ interface Fx {
   data?: Partial<PortfolioData>;
   ui?: Partial<Ui>;
 }
+const PX = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 });
+const FOUR: NonNullable<SignpageState["pools"]> = [
+  { chain: "solana", asset: "SOL", balance: "2.5", ready: "2", tap_max: "0.5", price: PX(150) },
+  { chain: "base", asset: "ETH", balance: "0.25", ready: "0.25", tap_max: "0.05", price: PX(3000) },
+  { chain: "robinhood", asset: "ETH", balance: "0.1", ready: "0.1", tap_max: "0.05", price: PX(3000) },
+];
 const mark = (token: string, m: PositionExtra["mark"]): Partial<PortfolioData> => ({ extra: (c, t) => (t === token ? { ...EXTRA.get(`${c}:${t}`), mark: m } : EXTRA.get(`${c}:${t}`) ?? null) });
 const act = (ui: Partial<Ui["act"]> = {}): Partial<Ui> => ({ pane: "activity", act: { filter: NO_FILTER, open: null, ...ui } });
 
@@ -102,6 +108,17 @@ export const FIXTURES: Record<string, Fx> = {
   pools: { state: { pools: [{ chain: "solana", asset: "SOL", balance: "1250000.5", ready: "999999.99" }, { chain: "base", asset: "ETH", balance: "0.25", ready: "0.2" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] } },
   "pools-noready": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "12.5" }, { chain: "base", asset: "ETH", balance: "0.001" }] } },
   "pools-empty": { state: { pools: [] } },
+  // one balance (card portfolio-one-balance): the vault alone, the vault and one pool, the vault and all three pools, and
+  // a pool deposit in flight on Robinhood; each pool at the page's own price, read 5 s before NOW
+  "cash-vault": { state: { pools: [] } },
+  "cash-one": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "2.5", ready: "2", tap_max: "0.5", price: PX(150) }] } },
+  "cash-four": { state: { pools: FOUR } },
+  "cash-moving": {
+    state: {
+      pools: [FOUR[0]!, FOUR[1]!, { chain: "robinhood", asset: "ETH", balance: "0", price: PX(3000) }],
+      ops: [...STATE.ops, { id: "pd-live", kind: "pool_deposit", chain: "robinhood", stage: "in_transit", txs: [], since_ms: NOW - 40_000 }],
+    },
+  },
 };
 
 declare global {
