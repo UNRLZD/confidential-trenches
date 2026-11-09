@@ -11,7 +11,7 @@ import { deflateSync } from "node:zlib";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { cloneProblems, gateArgs, REPO } from "./source-gate.mjs";
+import { cloneProblems, gateArgs, MODULES, REPO } from "./source-gate.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WT = path.resolve(HERE, "../../..");
@@ -255,6 +255,19 @@ test("L1 (B, C, D, H; review 5): a node_modules folder pnpm does not make, a dot
   unlinkSync(path.join(h, "packages/wallet/node_modules/fake-indexeddb"));
   cpSync(path.join(h, "node_modules/.pnpm/fake-indexeddb@1/node_modules/fake-indexeddb"), path.join(h, "packages/wallet/node_modules/fake-indexeddb"), { recursive: true });
   refuses(h, o.head, /fake-indexeddb from packages\/wallet\/package\.json resolves to .*outside node_modules\/\.pnpm of the clone/);
+});
+
+test("L1 (B): the node_modules folders the gate lets stand are the ones pnpm makes for this repo's workspace, every glob of pnpm-workspace.yaml", () => {
+  const text = readFileSync(path.join(WT, "pnpm-workspace.yaml"), "utf8");
+  const globs = [...text.split("packages:\n")[1].matchAll(/^\s+-\s+["']?([^"'\n]+)["']?\s*$/gm)].map((m) => m[1]);
+  assert.ok(globs.length > 0, "pnpm-workspace.yaml lists its packages");
+  assert.ok(MODULES.test("node_modules"), "the root's node_modules");
+  for (const g of globs) {
+    assert.match(g, /^[a-z]+\/\*$/, `${g}: the gate reads one folder level per workspace glob`);
+    const dir = g.slice(0, -2);
+    assert.ok(MODULES.test(`${dir}/a/node_modules`), `${dir}/<package>/node_modules (pnpm makes it for ${g}) stands beside the commit's files`);
+    assert.ok(!MODULES.test(`${dir}/a/src/node_modules`), `${dir}/<package>/src/node_modules is no folder pnpm makes`);
+  }
 });
 
 test("L1 (E, review 5): a replace ref that swaps the commit's tree is not honoured: the files are read against the commit's own tree", () => {
