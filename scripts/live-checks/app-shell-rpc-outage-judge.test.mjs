@@ -35,7 +35,7 @@ test("recorded bad answer: both NEAR RPCs fail the footer's reads, the footer sh
   const r = judge(A.bad);
   assert.equal(r.ok, false);
   assert.equal(bad(A.bad).length, 1, r.lines.join("\n"));
-  assert.match(bad(A.bad)[0], /^BAD desktop \/verify: a release RPC failed to load and the page does not show it: Failed to load resource: .* \[footer read\] \[https:\/\/\S+ is a release RPC, a footer read, and both RPCs of the pair failed it\]/);
+  assert.match(bad(A.bad)[0], /^BAD desktop \/verify: a release RPC failed to load and the page does not show it: Failed to load resource: .* \[footer read\] \[https:\/\/\S+ is a release RPC, and every RPC of its pair failed a load\]/);
   assert.equal(A.bad.loads[1].footer.conn, "off");
 });
 

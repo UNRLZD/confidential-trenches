@@ -42,6 +42,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleError, pageError } from "./console-errors.mjs";
+import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-chart-live";
@@ -119,6 +120,7 @@ export function judge(rec) {
       const helperBars = new Set([...(a.helper ?? []).filter((h) => h.status === 200).map((h) => keyOf(h.last)), ...(l.answered ?? [])]);
       const w = `${LOADS[i]?.name ?? l.width}`;
       const bad = [];
+      let outage = "";
       if (p?.token && l.opened !== `${APP_HOST}/token/${p.chain}/${p.token}`) bad.push(`opened ${l.opened}`);
       if (l.chart !== "ready") bad.push(`the chart is ${l.chart ?? "not there"}`);
       const first = norm(l.first);
@@ -129,9 +131,13 @@ export function judge(rec) {
       if (!(l.origin > 0) || l.originEnd !== l.origin) bad.push(`the frame was loaded again (time origin ${l.origin} -> ${l.originEnd})`);
       if (!(l.liveReads > 0)) bad.push("no live read (limit 2)");
       if (!(l.fullReads >= 1 && l.fullReads <= fullMax(l.watchedMs ?? WATCH_MAX_MS))) bad.push(`${l.fullReads} full reads (limit 500) in ${l.watchedMs} ms`);
-      if ((l.errors ?? []).length) bad.push(`errors: ${l.errors.join(" | ")}`);
+      // a footer read of a release NEAR RPC that failed, the footer showing the pair answered, is no error; any other failed load
+      // of a release RPC needs a Verify panel to show it, and the token page draws none (rpc-outage.mjs, card app-shell-rpc-outage-judge)
+      const { kept, down } = outages(l.errors ?? [], null, "mainnet", l.footer);
+      if (kept.length) bad.push(`errors: ${kept.join(" | ")}`);
+      outage += downNote(down);
       if (!l.shot) bad.push("no screenshot");
-      say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error`}`);
+      say(bad.length === 0, `${tag} ${w}: ${bad.length ? bad.join("; ") : `the last bar moved ${l.first} -> ${l.final} after ${l.changedMs} ms, a bar the helper answered; ${l.liveReads} live reads, ${l.fullReads} full, one load, no error${outage}`}`);
     }
   }
   const bad = lines.some((x) => x.startsWith("BAD"));
@@ -302,11 +308,12 @@ async function watchLoad(browser, w, i, pick, harness, shots, n) {
     }
   }
   const originEnd = app ? await app.evaluate(() => performance.timeOrigin).catch(() => null) : null;
+  const footer = app ? await footerEvidence(app).catch(() => null) : null;
   // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
   const shot = `${n}-${i}-${w.name}.png`;
   await page.screenshot({ path: path.join(shots, shot) });
   await ctx.close();
-  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, shot };
+  return { width: w.name, opened, chart: m?.chart ?? null, first, final, changedMs, watchedMs: Date.now() - readyAt, readyAt, origin, originEnd, liveReads, fullReads, answered, errors, footer, shot };
 }
 
 /** One pick watched at both widths, with the helper's newest bars read each second and its tape every two. */

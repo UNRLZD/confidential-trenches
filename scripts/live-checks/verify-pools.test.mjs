@@ -86,3 +86,39 @@ test("planted on the good answer: a down pool RPC's preflight error is let throu
   assert.match(plant([cors]), /not shown Unverified: solana not drawn\]$/);
   assert.match(plant([cors, "Uncaught boom"], dom("warn")), /^BAD phone \/verify: console Uncaught boom$/);
 });
+
+test("planted on the good answer: an amber pool row and its RPC's non-200 reads pass only beside a shown outage of that chain's RPC, in the same load (card app-shell-rpc-outage-judge)", () => {
+  const rpcs = VERIFY_RELEASES.mainnet.pools.solana.rpcs;
+  const first = new URL(rpcs[0]).origin;
+  const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
+  const dom = (solana) => ({ verify: { state: "read", code: "ok", funds: "ok", pools: { solana, base: "ok", robinhood: "ok" } }, footer: null });
+  const run = ({ errors = [load(first, 503)], d = dom("warn"), checks, status = 503, origin = first, row = "warn" } = {}) =>
+    bad(mutate((r) => {
+      const x = r.runs[0];
+      x.errors = errors;
+      x.dom = d;
+      const s = x.pools.rows.solana;
+      s.status = row;
+      for (const k of Object.keys(s.checks)) s.checks[k] = checks?.[k] ?? { status: "warn", word: "Unverified" };
+      for (const q of x.requests) if (q.method === "POST" && q.url.startsWith(origin)) q.status = status;
+    }));
+  // the shown outage: the row amber, every check Unverified, the first RPC answering 503: nothing fails
+  assert.deepEqual(run(), []);
+  // 429 and no answer read as down as well; a check that still read ok beside an Unverified one passes
+  assert.deepEqual(run({ status: 429, errors: [load(first, 429)] }), []);
+  assert.deepEqual(run({ status: null }), []);
+  const mixed = A.good.runs[0].pools.rows.solana.checks;
+  assert.deepEqual(run({ checks: { [Object.keys(mixed)[0]]: { status: "ok", word: null } } }), []);
+  // the same amber row with no failed load, or with the page's DOM showing the row ok, is an unexplained warn
+  assert.match(run({ errors: [] }).join("\n"), /phone \/verify solana: row warn/);
+  assert.match(run({ d: dom("ok") }).join("\n"), /console Failed to load resource/);
+  // an amber row where every check is ok, RPCs disagree or a check is red is no outage
+  assert.match(run({ checks: Object.fromEntries(Object.keys(mixed).map((k) => [k, { status: "ok", word: null }])) }).join("\n"), /phone \/verify solana: row warn/);
+  assert.match(run({ checks: Object.fromEntries(Object.keys(mixed).map((k) => [k, { status: "warn", word: "RPCs disagree" }])) }).join("\n"), /phone \/verify solana: row warn/);
+  assert.match(run({ row: "danger", d: dom("danger") }).join("\n"), /phone \/verify solana: row danger/);
+  // a 4xx other than 429 on the down RPC's reads, or a non-200 read of the RPC not shown down, fails
+  assert.match(run({ status: 403 }).join("\n"), /phone \/verify solana: this page read .* not all 200/);
+  assert.match(run({ origin: new URL(rpcs[1]).origin, status: 500 }).join("\n"), /phone \/verify solana: this page read .* not all 200/);
+  // a page error beside the outage still fails
+  assert.match(run({ errors: [load(first, 503), "Uncaught boom"] }).join("\n"), /phone \/verify: console Uncaught boom$/);
+});

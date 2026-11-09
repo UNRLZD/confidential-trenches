@@ -32,7 +32,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { APP_HOST, harnessRoute, recorded, watch, WIDTHS } from "./app-verify-mount.mjs";
-import { downNote, footerEvidence, outages, verifyEvidence } from "./rpc-outage.mjs";
+import { downNote, downStatus, footerEvidence, outages, verifyEvidence } from "./rpc-outage.mjs";
 
 const KEY = "verify-pools";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -105,9 +105,16 @@ export const EXPLORERS = {
   base: (a) => [`https://basescan.org/address/${a}`, `https://base.blockscout.com/address/${a}`],
   robinhood: (a) => [`https://robinhoodchain.blockscout.com/address/${a}`, `https://hoodscan.co/address/${a}`],
 };
+const originOf = (u) => {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+};
 const addressOf = (c, pin) => (c === "solana" ? pin.program : pin.address);
 
-function judgeRow(say, n, c, row, release, reqs) {
+function judgeRow(say, n, c, row, release, reqs, shown = new Set()) {
   const named = release[c] ?? null;
   if (!row) return say(false, `${n} ${c}: no pool row`);
   const checks = row.checks ?? {};
@@ -118,13 +125,21 @@ function judgeRow(say, n, c, row, release, reqs) {
     say(row.status === "warn" && unv && row.rpcs.length === 0, `${n} ${c}: no pool named: row ${row.status}, ${want.map((k) => `${k} ${checks[k]?.status ?? "none"}`).join(", ")}, RPCs ${row.rpcs.join(" ") || "none"}`);
     return;
   }
-  const allOk = want.every((k) => checks[k]?.status === "ok" && !checks[k]?.word) && Object.keys(checks).length === want.length;
-  say(row.status === "ok" && allOk, `${n} ${c}: row ${row.status}; ${want.map((k) => `${k} ${checks[k]?.status ?? "none"}${checks[k]?.word ? ` (${checks[k].word})` : ""}`).join(", ")}`);
+  // a pool RPC down that the page shows (rpc-outage.mjs: its failed load let through by this chain's row amber in the same
+  // load) draws the row amber with its checks ok or Unverified, at least one Unverified; any other warn, "RPCs disagree"
+  // or danger fails as before (card app-shell-rpc-outage-judge)
+  const isDown = named.rpcs.some((u) => shown.has(originOf(u)));
+  const keys = Object.keys(checks).length === want.length && want.every((k) => k in checks);
+  const allOk = want.every((k) => checks[k]?.status === "ok" && !checks[k]?.word) && keys;
+  const unverified = (k) => checks[k]?.status === "warn" && checks[k]?.word === "Unverified";
+  const downOk = isDown && keys && row.status === "warn" && want.every((k) => unverified(k) || (checks[k]?.status === "ok" && !checks[k]?.word)) && want.some(unverified);
+  say(isDown ? downOk : row.status === "ok" && allOk, `${n} ${c}: row ${row.status}; ${want.map((k) => `${k} ${checks[k]?.status ?? "none"}${checks[k]?.word ? ` (${checks[k].word})` : ""}`).join(", ")}`);
   const pair = named.rpcs.map(host);
   say(row.rpcs.length === 2 && row.rpcs.every((r, i) => r === pair[i]), `${n} ${c}: the row names ${row.rpcs.join(" and ") || "no RPC"}, want ${pair.join(" and ")}`);
   const asked = named.rpcs.map((u) => {
     const q = poolPosts.filter((x) => host(x.url) === host(u));
-    return { u, n: q.length, ok: q.length > 0 && q.every((x) => x.status === 200) };
+    // a read of an RPC the page shows down answers 5xx, 429 or nothing; a 4xx is no outage and fails
+    return { u, n: q.length, ok: q.length > 0 && q.every((x) => x.status === 200 || (shown.has(originOf(u)) && downStatus(x.status))) };
   });
   say(asked.every((a) => a.ok), `${n} ${c}: this page read ${asked.map((a) => `${host(a.u)} ${a.n} time(s)${a.ok ? ", all 200" : ", not all 200"}`).join(" and ")}`);
   const links = EXPLORERS[c](addressOf(c, named.pin));
@@ -145,11 +160,13 @@ export function judge(rec) {
       say(false, `${n}: the pool rows ${r.pools ? `stayed ${r.pools.state}` : "were not drawn"} (${r.frame ?? "no frame"})`);
       continue;
     }
-    for (const c of CHAINS) judgeRow(say, n, c, r.pools.rows[c], release ?? {}, r.requests);
+    // what the page shows of a down RPC, from this run's console errors and the DOM (rpc-outage.mjs)
+    const { kept, down, verifyDown } = outages(r.errors ?? [], r.dom?.verify, rec.network, r.dom?.footer);
+    const shown = new Set(verifyDown);
+    for (const c of CHAINS) judgeRow(say, n, c, r.pools.rows[c], release ?? {}, r.requests, shown);
     const viaHelper = (r.requests ?? []).filter((x) => x.phase === "open" && x.url.startsWith(`${HELPER}/v1/rpc/`));
     say(viaHelper.length === 0, `${n}: no pool read through the helper${viaHelper.length ? `: ${viaHelper.map((x) => new URL(x.url).pathname).join(", ")}` : ""}`);
     // a down RPC the page shows is no error (rpc-outage.mjs, card app-shell-rpc-outage-judge): the same judgment as app-shell's
-    const { kept, down } = outages(r.errors ?? [], r.dom?.verify, rec.network, r.dom?.footer);
     const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept.map((e) => `console ${e}`)];
     say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error${downNote(down)}`}`);
   }

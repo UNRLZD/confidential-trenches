@@ -338,7 +338,7 @@ test("planted on the mainnet answer: a down NEAR RPC's preflight error is let th
   const cors = (url) => consoleLine(`Access to fetch at '${url}' from origin '${APP_HOST}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, `${APP_HOST}/verify`);
   const line = (r) => r.lines.find((l) => l.includes("desktop /verify: ") && /no console error|console /.test(l));
   const plant = (errors, dom) => line(mut("goodMainnet", (rec) => Object.assign(desktop(rec), { errors: [...desktop(rec).errors, ...errors], dom })));
-  const amber = { verify: { state: "read", code: "warn", funds: "warn", pools: {} }, footer: { conn: "on", block: "223500000" } };
+  const amber = { verify: { state: "read", code: "warn", funds: "warn", pools: {} }, footer: { conn: "on", block: "223500000", ms: 5000 } };
   // a Verify read: shown amber passes the line, shown ok or not drawn fails it
   assert.equal(plant([cors(`${near}/`)], amber), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
   assert.match(plant([cors(`${near}/`)], { ...amber, verify: { ...amber.verify, code: "ok" } }), /^BAD desktop \/verify: console Access to fetch .*\[.* is a release RPC, not shown Unverified: code ok, funds warn\]$/);
@@ -347,7 +347,45 @@ test("planted on the mainnet answer: a down NEAR RPC's preflight error is let th
   const tagged = cors(footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
   assert.ok(tagged.endsWith(" [footer read]"));
   assert.equal(plant([tagged], { ...amber, verify: { state: "read", code: "ok", funds: "ok", pools: {} } }), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
-  assert.match(plant([tagged], { ...amber, footer: { conn: "off", block: "223500000" } }), /a footer read, and the footer shows off, block 223500000, not the pair answered\]$/);
+  assert.match(plant([tagged], { ...amber, footer: { conn: "off", block: "223500000", ms: 5000 } }), /a footer read, and the footer shows off, block 223500000, not the pair answered\]$/);
   // any other error beside it still fails
   assert.match(plant([cors(`${near}/`), "Uncaught boom"], amber), /^BAD desktop \/verify: console Uncaught boom$/);
+});
+
+test("planted on the mainnet answer: amber rows and the down RPC's non-200 reads pass only beside a shown outage of that origin, in the same load (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const other = new URL(VERIFY_RELEASES.mainnet.rpcs[1]).origin;
+  const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
+  const amberChecks = { keys: "warn", code: "warn", asset: "warn", registration: "warn", tokenCode: "warn", balance: "warn" };
+  const verifyDom = (code, funds) => ({ state: "read", code, funds, pools: {} });
+  const down = (rec, { errors, dom, rows = "warn", status = 503, origin = near } = {}) => {
+    const d = desktop(rec);
+    d.errors = [...d.errors, ...errors];
+    d.dom = { verify: dom, footer: { conn: "on", block: "223500000", ms: 5000 } };
+    for (const p of [d.panel, d.footer?.panel].filter(Boolean)) Object.assign(p, { code: rows, funds: rows, checks: Object.fromEntries(Object.keys(p.checks).map((c) => [c, rows])) });
+    for (const x of d.requests) if (x.method === "POST" && x.url.startsWith(origin)) x.status = status;
+    return rec;
+  };
+  const desk = (r) => r.lines.filter((l) => l.includes("desktop /verify"));
+  const run = (o) => mut("goodMainnet", (rec) => down(rec, o));
+  const good = { errors: [load(near, 503)], dom: verifyDom("warn", "warn") };
+  // the shown outage: every desktop line passes
+  const ok = run(good);
+  assert.deepEqual(bad(ok), [], ok.lines.join("\n"));
+  // 429 and no answer at all read as down as well
+  assert.deepEqual(bad(run({ ...good, status: 429, errors: [load(near, 429)] })), []);
+  assert.deepEqual(bad(run({ ...good, status: null })), []);
+  // the same amber rows with no failed load of that origin, or with the page's DOM showing them ok, are unexplained warns
+  assert.ok(bad(run({ ...good, errors: [] })).some((l) => /panel read, code warn/.test(l)), "amber rows with no failed load");
+  assert.ok(bad(run({ ...good, dom: verifyDom("ok", "ok") })).some((l) => /console Failed to load resource/.test(l)), "failed load of an RPC the DOM shows ok");
+  // one amber row of two, or a check that is ok among the amber ones, fails
+  assert.ok(bad(run({ ...good, dom: verifyDom("warn", "ok") })).length > 0);
+  assert.ok(bad(run({ ...good, rows: "ok", dom: verifyDom("warn", "warn") })).some((l) => /panel read, code ok/.test(l)), "outage shown by the DOM but the panel record says ok");
+  // a 4xx other than 429 on the down RPC's reads is no outage
+  assert.ok(bad(run({ ...good, status: 404 })).some((l) => /not all 200/.test(l)), "404 beside the outage");
+  // the other RPC of the pair answering 500 while only the first is shown down fails
+  assert.ok(bad(run({ ...good, origin: other, status: 500 })).some((l) => /not all 200/.test(l)), "a read of the RPC that is not shown down");
+  // a failed load of the origin plus a page error beside it still fails
+  assert.ok(bad(run({ ...good, errors: [...good.errors, "Uncaught boom"] })).some((l) => l.endsWith("console Uncaught boom")));
+  assert.ok(desk(ok).length > 0);
 });

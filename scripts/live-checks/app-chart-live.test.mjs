@@ -15,7 +15,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { classify, EXIT, judge, LOADS, pickOf, probeSaid } from "./app-chart-live.mjs";
+import { APP_HOST, classify, EXIT, judge, LOADS, pickOf, probeSaid } from "./app-chart-live.mjs";
+import { consoleLine } from "./console-errors.mjs";
+import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
+import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-chart-live.answers.json"), "utf8"));
@@ -125,4 +128,25 @@ test("the pick: the token whose own bars changed most; with none, a token whose 
   assert.equal(t.token, "c");
   assert.equal(t.changes, 0);
   assert.equal(pickOf([a, b, c], none, new Map([[a, [5, 5]], [b, [null, null]]])), null);
+});
+
+test("planted on the good answer: the token page's failed footer read of a release NEAR RPC passes only beside a desktop footer showing the pair answered, any other failed load of a release RPC fails (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const cors = (url) => consoleLine(`Access to fetch at '${url}' from origin '${APP_HOST}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, `${APP_HOST}/`);
+  const tagged = cors(footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  assert.ok(tagged.endsWith(" [footer read]"));
+  const on = { conn: "on", block: "223500000", ms: 5000 };
+  const plant = (errors, footer, width = "desktop") => {
+    return bad(mut((rec, a) => {
+      const x = a.loads.find((l) => l.width === width);
+      x.errors.push(...errors);
+      x.footer = footer;
+    }));
+  };
+  assert.deepEqual(plant([tagged], on), []);
+  assert.match(plant([tagged], { ...on, conn: "off" }).join("\n"), /a footer read, and the footer shows off/);
+  assert.match(plant([tagged], null).join("\n"), /a footer read, and /);
+  assert.match(plant([tagged], { conn: "wait", block: "", ms: 5000 }, "phone").join("\n"), /a footer read, and the footer shows wait/);
+  assert.match(plant([cors(`${near}/`)], on).join("\n"), /is a release RPC, not shown Unverified: code not drawn/);
+  assert.match(plant([tagged, "Uncaught boom"], on).join("\n"), /Uncaught boom/);
 });

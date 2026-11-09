@@ -1904,7 +1904,7 @@
   "url": "https://ct-app.unrealized.trade",
   "network": "mainnet",
   "source": "bar10, the build inside the stand-in shell, answers at once, footer RPC answering 503",
-  "at": "2026-11-08T23:37:02.800Z",
+  "at": "2026-11-09T00:13:34.730Z",
   "browser": "157.0.8103.38",
   "headers": {
    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
@@ -2012,7 +2012,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2107
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2034,7 +2035,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2049
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2056,7 +2058,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2064
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2078,7 +2081,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2044
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2100,7 +2104,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2052
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2131,7 +2136,8 @@
     },
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2068
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2153,7 +2159,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2046
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2175,7 +2182,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2040
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2199,7 +2207,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500038"
+     "block": "223500039",
+     "ms": 2106
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2223,7 +2232,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500042"
+     "block": "223500042",
+     "ms": 2047
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2247,7 +2257,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500046"
+     "block": "223500046",
+     "ms": 2058
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2271,7 +2282,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500049"
+     "block": "223500050",
+     "ms": 2042
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2295,7 +2307,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500053"
+     "block": "223500053",
+     "ms": 2049
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2328,7 +2341,8 @@
     },
     "footer": {
      "conn": "on",
-     "block": "223500057"
+     "block": "223500057",
+     "ms": 2067
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2352,7 +2366,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500060"
+     "block": "223500061",
+     "ms": 2049
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2376,7 +2391,8 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500064"
+     "block": "223500064",
+     "ms": 2043
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2424,7 +2440,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 3808
     }
    },
    {
@@ -2472,17 +2489,18 @@
     "verify": null,
     "footer": {
      "conn": "on",
-     "block": "223500073"
+     "block": "223500073",
+     "ms": 4206
     }
    }
   ],
-  "shots": "<shots>"
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/f3/b-footer"
  },
  "outageFooterPair": {
   "url": "https://ct-app.unrealized.trade",
   "network": "mainnet",
   "source": "bar10, the build inside the stand-in shell, answers at once, footer-pair RPC answering 503",
-  "at": "2026-11-08T23:38:35.077Z",
+  "at": "2026-11-09T00:15:08.694Z",
   "browser": "157.0.8103.38",
   "headers": {
    "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://ct-api.unrealized.trade; font-src 'self'; connect-src 'self' https://ct-api.unrealized.trade wss://ct-api.unrealized.trade https://confidential.unrealized.trade https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://solana-rpc.publicnode.com https://solana.api.pocket.network https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org; manifest-src 'self'; worker-src 'none'; frame-src 'none'; frame-ancestors https://confidential.unrealized.trade; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'; upgrade-insecure-requests",
@@ -2590,7 +2608,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2100
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2612,7 +2631,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2049
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2634,7 +2654,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2071
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2656,7 +2677,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2047
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2678,7 +2700,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2045
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2709,7 +2732,8 @@
     },
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2077
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2731,7 +2755,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2063
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2753,7 +2778,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 2042
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2778,7 +2804,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2101
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2803,7 +2830,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2051
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2828,7 +2856,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2041
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2853,7 +2882,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2041
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2878,7 +2908,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2047
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2912,7 +2943,8 @@
     },
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2059
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2937,7 +2969,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2044
     },
     "cls": 0,
     "shiftCount": 0,
@@ -2962,7 +2995,8 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 2042
     },
     "cls": 0,
     "shiftCount": 0,
@@ -3010,7 +3044,8 @@
     "verify": null,
     "footer": {
      "conn": "wait",
-     "block": ""
+     "block": "",
+     "ms": 3837
     }
    },
    {
@@ -3060,10 +3095,11 @@
     "verify": null,
     "footer": {
      "conn": "off",
-     "block": ""
+     "block": "",
+     "ms": 4198
     }
    }
   ],
-  "shots": "<shots>"
+  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/f3/b-pair"
  }
 }

@@ -252,7 +252,7 @@ test("recorded outage-footer-pair answer: both NEAR RPCs fail the footer's reads
   const r = judge(ANSWERS.outageFooterPair);
   assert.equal(r.ok, false);
   const b = r.lines.filter((l) => l.startsWith("BAD"));
-  for (const [id, p] of ROUTES) assert.ok(b.some((l) => l.startsWith(`BAD desktop ${p} (${id}): console error: Failed to load resource: `) && l.includes("[footer read] [") && l.includes("is a release RPC, a footer read, and both RPCs of the pair failed it]")), `${p}: ${b.join("\n")}`);
+  for (const [id, p] of ROUTES) assert.ok(b.some((l) => l.startsWith(`BAD desktop ${p} (${id}): console error: Failed to load resource: `) && l.includes("[footer read] [") && l.includes("is a release RPC, and every RPC of its pair failed a load]")), `${p}: ${b.join("\n")}`);
   assert.ok(b.every((l) => l.startsWith("BAD desktop")), b.join("\n"));
   assert.equal(ANSWERS.outageFooterPair.loads.find((l) => l.width === "desktop").footer.conn, "off");
 });
@@ -297,7 +297,7 @@ test("planted on the outage-footer answer: both NEAR RPCs failing a footer read 
   rec.loads.find((l) => l.width === "desktop" && l.path === "/terms").consoleErrors.push(`${failed(other)} [footer read]`);
   const b = judge(rec).lines.filter((l) => l.startsWith("BAD"));
   assert.equal(b.length, 1, b.join("\n"));
-  assert.ok(b[0].startsWith("BAD desktop /terms (terms): ") && b[0].includes("both RPCs of the pair failed it"), b[0]);
+  assert.ok(b[0].startsWith("BAD desktop /terms (terms): ") && b[0].includes("every RPC of its pair failed a load"), b[0]);
   // a footer read tagged on a pool's RPC is no footer read of the release: it is judged as a Verify read, by its row
   const p = structuredClone(ANSWERS.outageFooter);
   p.loads.find((l) => l.width === "desktop" && l.path === "/terms").consoleErrors.push(`${failed(SOLANA)} [footer read]`);
@@ -368,7 +368,7 @@ test("a down RPC's preflight: Chrome's CORS line names the failed address in its
   const noHeader = cors(`${BASE}/`, "No 'Access-Control-Allow-Origin' header is present on the requested resource.");
   assert.ok(!status.includes("?s=503"), "no query in the line");
   for (const line of [status, noHeader]) {
-    assert.deepEqual(outages([line], down), { kept: [], down: [BASE], refused: [] }, line);
+    assert.deepEqual(outages([line], down), { kept: [], down: [BASE], refused: [], verifyDown: [BASE] }, line);
     // shown ok: refused; an origin the release does not name: kept as any other error
     assert.equal(outages([line], okRows).refused.length, 1, line);
     assert.equal(outages([line.replace(BASE, "https://rpc.example.org")], down).kept.length, 1, line);
@@ -377,4 +377,44 @@ test("a down RPC's preflight: Chrome's CORS line names the failed address in its
   for (const why of ["Request header field x-api-key is not allowed by Access-Control-Allow-Headers in preflight response.", "Method POST is not allowed by Access-Control-Allow-Methods in preflight response."]) {
     assert.equal(outages([cors(`${BASE}/`, why)], down).kept.length, 1, why);
   }
+});
+
+test("planted: a pair is down when every one of its RPCs failed a load, tagged or not, whichever way each failed: none of its failures is let through (card app-shell-rpc-outage-judge)", () => {
+  const { rpcs, pools } = VERIFY_RELEASES.mainnet;
+  const load = (u, tag = "") => `${consoleLine("Failed to load resource: the server responded with a status of 503 ()", tag ? footerUrl(u) : `${new URL(u).origin}/`)}`;
+  const on = { conn: "on", block: "223500000", ms: 5000 };
+  const rows = (code, funds, solana = "ok") => ({ state: "read", code, funds, pools: { solana, base: "ok", robinhood: "ok" } });
+  const refused = (r, n) => r.kept.length === n && r.refused.every((x) => x.includes("and every RPC of its pair failed a load"));
+  // (a) both NEAR RPCs fail Verify reads, Code and Funds warn: the app says it got no answer; neither is let through
+  const a = outages([load(rpcs[0]), load(rpcs[1])], rows("warn", "warn"), "mainnet", on);
+  assert.ok(refused(a, 2) && a.down.length === 0, JSON.stringify(a));
+  assert.deepEqual(outages([load(rpcs[0])], rows("warn", "warn"), "mainnet", on).kept, [], "one of them alone is let through");
+  // (b) FastNEAR fails a footer read and dRPC a Verify read, the footer on and the rows warn: the pair is down all the same
+  const b = outages([load(rpcs[0], "footer"), load(rpcs[1])], rows("warn", "warn"), "mainnet", on);
+  assert.ok(refused(b, 2) && b.down.length === 0, JSON.stringify(b));
+  assert.equal(outages([load(rpcs[0], "footer")], rows("ok", "ok"), "mainnet", on).kept.length, 0, "the footer read alone is let through");
+  // (c) both Solana pool RPCs fail with the solana row warn: refused; one alone is let through
+  const c = outages([load(pools.solana.rpcs[0]), load(pools.solana.rpcs[1])], rows("ok", "ok", "warn"), "mainnet", on);
+  assert.ok(refused(c, 2) && c.down.length === 0, JSON.stringify(c));
+  assert.equal(outages([load(pools.solana.rpcs[1])], rows("ok", "ok", "warn"), "mainnet", on).kept.length, 0);
+  // a failed preflight line counts toward the pair as well as a failed load
+  const cors = (u) => consoleLine(`Access to fetch at '${new URL(u).origin}/' from origin 'https://ct-app.unrealized.trade' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, "https://ct-app.unrealized.trade/verify");
+  assert.ok(refused(outages([cors(rpcs[0]), load(rpcs[1])], rows("warn", "warn"), "mainnet", on), 2));
+  // pools of different chains are not one pair: one RPC each of two pairs down is two outages, each shown by its own row
+  const two = outages([load(pools.solana.rpcs[0]), load(pools.base.rpcs[0])], { ...rows("ok", "ok", "warn"), pools: { solana: "warn", base: "warn", robinhood: "ok" } }, "mainnet", on);
+  assert.deepEqual(two.kept, []);
+});
+
+test("planted: a footer makes one read in each BLOCK_EVERY_MS of the load, plus one; more failed footer reads of an origin than that are no outage the footer shows (card app-shell-rpc-outage-judge)", () => {
+  const rpc = VERIFY_RELEASES.mainnet.rpcs[0];
+  const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(rpc));
+  const at = (ms) => ({ conn: "on", block: "223500000", ms });
+  const n = (k, ms) => outages(Array(k).fill(tagged), null, "mainnet", at(ms)).kept.length;
+  assert.equal(n(2, 5000), 0, "5 s of load: reads at 0 and 3 s");
+  assert.equal(n(3, 5000), 3, "a third read within 5 s is a storm");
+  assert.equal(n(1, 0), 0);
+  assert.equal(n(2, 0), 2, "no time has passed: one read");
+  assert.equal(n(7, 18000), 0, "18 s: seven reads");
+  assert.equal(n(8, 18000), 8);
+  assert.equal(outages([tagged], null, "mainnet", { conn: "on", block: "223500000" }).kept.length, 1, "no clock in the record: no read is allowed");
 });
