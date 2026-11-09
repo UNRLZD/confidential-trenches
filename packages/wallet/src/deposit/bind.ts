@@ -138,9 +138,11 @@ export interface BindDeps {
    * Told before every wait of the bind (a code it reads again after: a halt among them, "halted", "token_halted"; the
    * pages, "pages"; a lapse, "lapse"; the relayer's answers). A throw from it ends the bind there, the seed zeroed, with
    * what it wrote kept: a later bind of the note picks up from the store (the call written) and the pages, so a caller
-   * that opens the seed only for each step (card wallet-deposit-follow) throws here and calls again.
+   * that opens the seed only for each step (card wallet-deposit-follow) throws here and calls again. `ms`: given only
+   * for a busy relayer (rate_limited, upstream), its Retry-After's wait (../busy.ts busyWaitMs), which a caller that
+   * ends the phase waits out before it binds again (card withdraw-fee-busy-waits).
    */
-  onWait?: (code: string) => Promise<void> | void;
+  onWait?: (code: string, ms?: number) => Promise<void> | void;
 }
 
 export type BindOutcome =
@@ -557,12 +559,12 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     // the code the last sign waited on (an RPC behind, USDC not back, U not created): the next pause names it
     let waitOn: string | null = null;
     // `ms`: a busy relayer's own wait (its Retry-After, ../busy.ts busyWaitMs), else pollMs
-    const pause = async (code: string, ms = pollMs) => {
+    const pause = async (code: string, ms?: number) => {
       code = waitOn ?? code;
       waitOn = null;
       stopped();
-      await deps.onWait?.(code);
-      await sleep(ms);
+      await (ms === undefined ? deps.onWait?.(code) : deps.onWait?.(code, ms));
+      await sleep(ms ?? pollMs);
       stopped();
     };
     const strike = (): BindOutcome => {
@@ -791,7 +793,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           const landed = await prepaid();
           if (landed !== null) return (resend.delete(own.noteId), landed);
         }
-        await pause(answer.code, "waitMs" in answer ? answer.waitMs : pollMs);
+        await pause(answer.code, "waitMs" in answer ? answer.waitMs : undefined);
         step = await sendAgain(out);
       } else return { kind: "refused", code: answer.code };
     }

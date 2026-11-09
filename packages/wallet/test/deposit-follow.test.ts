@@ -1081,6 +1081,34 @@ test("C5: with bind.ts, the seed is never open (nor the seed lock held) across a
   assert.equal(during.filter(Boolean).length, 0, `${during.filter(Boolean).length} of ${during.length} sleeps ran with the seed open or its lock held`);
 });
 
+// card withdraw-fee-busy-waits: a busy relayer's Retry-After paces the follow's next round; any other code keeps the pace
+async function bindAsks(first: Response) {
+  const t = await setup(["SUCCESS"], { bind: bindDeposit });
+  t.chain.credit(CREDIT);
+  const stopIt = new AbortController();
+  const at: number[] = []; // the follow's clock (the sum of its sleeps) at each bind ask
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    if (url.startsWith(DEPOSIT_STATUS_URL)) return t.oc.fetchFn(url, init);
+    at.push(t.sleeps.reduce((a, b) => a + b, 0));
+    if (at.length === 1) return first;
+    stopIt.abort(new Error("stop"));
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  await assert.rejects(followDeposit(t.args, { ...t.deps, fetchFn, signal: AbortSignal.any([stopIt.signal, t.deps.signal!]) }), /stop/);
+  assert.equal(at.length, 2, "the same call asked again");
+  return at[1]! - at[0]!;
+}
+
+test("busy: a bind that meets 429 rate_limited with Retry-After 2 asks again no sooner than 2 s on the follow's clock", async () => {
+  const gap = await bindAsks(Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "retry-after": "2" } }));
+  assert.equal(gap, 2_000);
+});
+
+test("busy: a bind that meets a code that is not busy (503 relayer_low, Retry-After 2) keeps the 1 s in-flight pace", async () => {
+  const gap = await bindAsks(Response.json({ error: { code: "relayer_low" } }, { status: 503, headers: { "retry-after": "2" } }));
+  assert.equal(gap, 1_000);
+});
+
 test("C6: once U exists and the bind waits on another read (an RPC behind), the status is not read again", async () => {
   const t = await setup(["SUCCESS"]);
   t.chain.credit(CREDIT);
