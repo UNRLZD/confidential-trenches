@@ -44,10 +44,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "wallet-restore-id-reader";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
-const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
 /** The release pair (the kit's NEAR_NETWORKS.mainnet: one FastNEAR URL and the dRPC URL), asked in this order. */
 export const PAIR = Object.freeze(["https://rpc.mainnet.fastnear.com", "https://near.drpc.org"]); // near-rpc-operators: two operators (the release pair)
 /** The record's key for provider i (a place, not the host: a record naming both in one object would read as a pair). */
@@ -304,7 +304,8 @@ export const localFetchOf = (dir) => async (url) => {
   const csp = /^\/\*\n {2}Content-Security-Policy: (.*)$/m.exec(readFileSync(path.join(dir, "public/_headers"), "utf8"))?.[1] ?? "";
   return new Response(readFileSync(file), { status: 200, headers: p === "/" ? { "content-security-policy": csp } : {} });
 };
-export const localFetch = localFetchOf(SIGNPAGE);
+// the tree's build, made from its sources at the first read (card signpage-generated-merge-free)
+export const localFetch = (url, init) => localFetchOf(signBuilt())(url, init);
 
 /** The page as a browser reads it from `origin`: the CSP's connect-src, the script tag and /app.js's markers (never the bytes). */
 export async function readBundle(fetchFn = fetch, origin = SIGN_ORIGIN) {
@@ -415,7 +416,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined);
   try {
     const local = args.includes("--local");
-    const rec = await probe(local ? SIGN_ORIGIN : (opt("--url") ?? SIGN_ORIGIN), local ? localFetchOf(opt("--root") ? path.resolve(opt("--root")) : SIGNPAGE) : fetch);
+    const rec = await probe(local ? SIGN_ORIGIN : (opt("--url") ?? SIGN_ORIGIN), local ? localFetchOf(opt("--root") ? path.resolve(opt("--root")) : signBuilt()) : fetch);
     if (local) rec.url = opt("--root") ? `local build of ${path.basename(path.resolve(opt("--root")))}` : "local build";
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
     const r = judge(rec);
