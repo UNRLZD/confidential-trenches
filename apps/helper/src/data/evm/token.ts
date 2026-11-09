@@ -129,7 +129,7 @@ export function createEvmToken(
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rows = bounded<Row>(CACHE_MAX);
-  let seen: number | undefined;
+  let seen: string | undefined;
   const infos = bounded<{ info: Info | "none"; at: number }>(CACHE_MAX);
   const running = new Map<string, Promise<Read>>();
 
@@ -138,10 +138,12 @@ export function createEvmToken(
   async function rowOf(token: string): Promise<Row | null | undefined> {
     const a = await deps.lists.get();
     if (a.status !== 200 || a.asOfMs === undefined) return undefined;
-    if (seen !== a.asOfMs) {
+    // keyed on the answer itself: a tick rebuilds it with a maker newly read and the same as_of_ms (its oldest list
+    // read), and the row's launchpad tag is then the new one
+    if (seen !== a.body) {
       const snap = JSON.parse(a.body) as { lists: Record<string, Row[]> };
       for (const list of Object.values(snap.lists)) for (const r of list) rows.set(r.token as string, r);
-      seen = a.asOfMs;
+      seen = a.body;
     }
     const row = rows.get(token);
     return row !== undefined && row.chain === chain && (await deps.lists.listed(token)) ? row : null;

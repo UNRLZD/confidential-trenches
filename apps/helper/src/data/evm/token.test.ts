@@ -189,6 +189,17 @@ test("the pool and decimals the swap reads found and checked on chain win over G
   assert.equal(p.decimals, 6);
 });
 
+test("a lists answer rebuilt with the same as_of_ms (a maker settled in a tick with no list read): the page takes its new tag", async () => {
+  const snap = structuredClone(FX.base.lists);
+  for (const r of Object.values(snap.lists).flat()) if (r.token === CASES[0].addr) r.launchpad = null;
+  let body = JSON.stringify(snap);
+  const lists = { get: async () => ({ status: 200, body, asOfMs: snap.as_of_ms }), listed: async () => true };
+  const tok = createEvmToken("base", { lists, gecko: geckoBudget(() => NOW), fetch: fake("base"), now: () => NOW });
+  assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.launchpad, null);
+  body = FX.base.lists_body; // the same as_of_ms, the maker now read
+  assert.equal(JSON.parse((await tok.page(CASES[0].addr)).body).row.launchpad, "doppler");
+});
+
 test("toInfo: only an answer naming this token; numbers in range or null", () => {
   const good = FX.base.info[CASES[0].addr];
   assert.notEqual(toInfo(CASES[0].addr, good, NOW), null);
