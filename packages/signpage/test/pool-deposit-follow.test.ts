@@ -649,7 +649,7 @@ test("review P2-a: a candidate whose read throws or answers null on either RPC i
   const U = b58.encode(new Uint8Array(32).fill(5)), PROGRAM = b58.encode(new Uint8Array(32).fill(7)), OTHER = b58.encode(new Uint8Array(32).fill(8));
   const data = b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...new Uint8Array(40)));
   const tx = (s: string, payer = U) => ({ slot: 9, meta: { err: null }, transaction: { signatures: [s], message: { accountKeys: [payer, PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data }] } } });
-  const listed = [{ signature: sig(1), err: null }];
+  const listed = [{ signature: sig(11), err: null }];
   const f = { ...F, u: U };
   const throwing = (async (method: string) => {
     if (method === "getSignaturesForAddress") return listed;
@@ -658,14 +658,14 @@ test("review P2-a: a candidate whose read throws or answers null on either RPC i
   for (const [what, other] of [
     ["not indexed yet (null)", solRpc(listed, {}).f],
     ["a 429", throwing],
-    ["another payer (the RPCs disagree)", solRpc(listed, { [sig(1)]: tx(sig(1), OTHER) }).f],
+    ["another payer (the RPCs disagree)", solRpc(listed, { [sig(11)]: tx(sig(11), OTHER) }).f],
   ] as const) {
-    const first = solRpc(listed, { [sig(1)]: tx(sig(1)) }).f;
+    const first = solRpc(listed, { [sig(11)]: tx(sig(11)) }).f;
     await assert.rejects(solanaPoolFollowDeps({ rpcs: [first, other], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), what);
     await assert.rejects(solanaPoolFollowDeps({ rpcs: [other, first], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), `${what}, the other way`);
   }
   // both answered and both agree it is no deposit: rejected, and not read again
-  const no = solRpc(listed, { [sig(1)]: tx(sig(1), OTHER) });
+  const no = solRpc(listed, { [sig(11)]: tx(sig(11), OTHER) });
   const d = solanaPoolFollowDeps({ rpcs: [no.f, no.f], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
   assert.deepEqual(await d.landed!(f, []), []);
   no.asked.length = 0;

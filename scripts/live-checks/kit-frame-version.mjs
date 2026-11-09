@@ -123,13 +123,15 @@ function helloPath(js) {
   };
 }
 
-/** The pool deposit op's tx reads, as minified (card pool-deposit-op-txs): U_X's listing, the tx kept only when every
- *  RPC reads it, the NEAR move tx read FINAL on both, and the op adding a move tx only once final. */
+/** The pool deposit op's tx reads, as minified (card pool-deposit-op-txs): U_X's listing; each tx kept only once both
+ *  RPCs answered it (a read that fails or answers null throws, two that disagree throw; review P2-a); the NEAR move tx
+ *  read FINAL on both, its one execute_intents carrying this move's own intent alone (its signer and nonce; review P1);
+ *  and the op adding a move tx only once final, never one let go. */
 const OP_TXS = {
   landed: /`getSignaturesForAddress`,\[[\w$]+\.u,\{commitment:`finalized`,limit:1e3\}\]/,
-  every: /`getTransaction`,\[[\w$]+,\{commitment:`finalized`,encoding:`json`,maxSupportedTransactionVersion:0\}\]\)\.catch\(\(\)=>null\)\)\)\)\.every\(/,
-  nearFinal: /sender_account_id:([\w$]+),wait_until:`FINAL`\}\)[^]{0,300}?final_execution_status!==`FINAL`[^]{0,200}?`SuccessValue`[^]{0,200}?\.signer_id===\1&&[\w$]+\.receiver_id===`intents\.near`\}catch\{return!1\}\},\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[[\w$]+\([\w$]+\[0\]\),[\w$]+\([\w$]+\[1\]\)\]\);return \2&&\3\}/,
-  moveShown: /([\w$]+)\.tx_final===!0&&typeof \1\.tx==`string`\?[\w$]+\([\w$]+,\[\{chain:`near`,hash:\1\.tx\}\]\):[\w$]+\}/,
+  every: /`getTransaction`,\[[\w$]+,\{commitment:`finalized`,encoding:`json`,maxSupportedTransactionVersion:0\}\]\)\);if\(([\w$]+)\.some\(([\w$]+)=>typeof \2!=`object`\|\|!\2\)\)throw Error\(`[^`]*`\);let\[([\w$]+),([\w$]+)\]=\1\.map\(([\w$]+)=>[\w$]+\(\5,[\w$]+,[\w$]+\.u,[\w$]+\.program\)\);if\(\3!==\4\)throw Error\(/,
+  nearFinal: /function ([\w$]+)\([\w$]+,([\w$]+)\)\{[^]{0,200}?method_name:([\w$]+)[^]{0,60}?if\(\3!==`execute_intents`[^]{0,300}?\.signed\.length!==1\)return!1;[^]{0,200}?let ([\w$]+)=JSON\.parse\([\w$]+\.payload\);return typeof \4==`object`&&!!\4&&\4\.signer_id===\2\.signer&&\4\.nonce===\2\.nonce\}async function [\w$]+\([\w$]+,[\w$]+,([\w$]+)\)\{[^]{0,200}?sender_account_id:([\w$]+),wait_until:`FINAL`\}\)[^]{0,300}?final_execution_status!==`FINAL`[^]{0,200}?`SuccessValue`[^]{0,200}?\.signer_id!==\6\|\|[\w$]+\.receiver_id!==`intents\.near`\?!1:Array\.isArray\(([\w$]+)\.actions\)&&\7\.actions\.length===1&&\1\(\7\.actions\[0\],\5\)\}catch\{return!1\}\},\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[[\w$]+\([\w$]+\[0\]\),[\w$]+\([\w$]+\[1\]\)\]\);return \8&&\9\}/,
+  moveShown: /\.filter\(([\w$]+)=>\1\.final===!0&&\1\.dropped!==!0&&typeof \1\.hash==`string`\)\.map\(([\w$]+)=>\(\{chain:`near`,hash:\2\.hash\}\)\);return ([\w$]+)\.length===0\?[\w$]+:[\w$]+\([\w$]+,\3\)\}/,
 };
 const opTxsOf = (js) => Object.fromEntries(Object.entries(OP_TXS).map(([k, re]) => [k, re.exec(js)?.[0] ?? null]));
 
@@ -185,7 +187,7 @@ export function judge(a) {
   // card pool-deposit-op-txs: a tx shown on the pool_deposit op is one the device read on both RPCs
   const o = a?.opTxs;
   if (typeof o?.landed !== "string" || typeof o?.every !== "string") bad("the pool deposit op's txs are not read on both of the pool chain's RPCs: a tx one RPC alone names may be shown, or a landed deposit shows none");
-  if (typeof o?.nearFinal !== "string") bad("a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near");
+  if (typeof o?.nearFinal !== "string") bad("a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near, carrying that move's own intent alone");
   if (typeof o?.moveShown !== "string") bad("the pool deposit op shows a refund move's tx before it is read final");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }

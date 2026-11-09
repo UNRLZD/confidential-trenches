@@ -16,7 +16,9 @@
 // every planted one from its own build, badLive from SIGN_HOST as served at 11:09Z on 9 Nov 2026 (kit 1.6, no op tx
 // reads), kept bad (release-61) as recorded then (both now also name the three op tx lines), and added badOpTxsOneRpc,
 // badNearOneRpc and badMoveHeardShown: a pool deposit tx kept on some RPC's read, a NEAR move tx final on one RPC's
-// word, a move tx shown as heard: each FAIL.
+// word, a move tx shown as heard: each FAIL. Its review FIX re-recorded good and every planted one from its build, and
+// added badOpTxsNoAnswer (a read that fails or answers null on one RPC taken as an answer; review P2-a) and
+// badNearOtherNonce (a relayer tx shown that carries another nonce's intent; review P1): each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
@@ -35,7 +37,7 @@ const POOL_LINE = "BAD the state sent to kit-v1.6 and kit-v1.5 does not leave th
 const RESULT16_LINE = "BAD kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out";
 const OPTX_LINES = [
   "BAD the pool deposit op's txs are not read on both of the pool chain's RPCs: a tx one RPC alone names may be shown, or a landed deposit shows none",
-  "BAD a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near",
+  "BAD a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near, carrying that move's own intent alone",
   "BAD the pool deposit op shows a refund move's tx before it is read final",
 ];
 const POSTS = (n) => `BAD the bundle holds ${n} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`;
@@ -107,13 +109,17 @@ test("card pool-deposit-op-txs: recorded bad answers badOpTxsOneRpc, badNearOneR
   assert.equal(typeof ANSWERS.good.opTxs.landed, "string");
   assert.deepEqual(Object.keys(ANSWERS.good.opTxs), ["landed", "every", "nearFinal", "moveShown"]);
   for (const k of ["landed", "every", "nearFinal", "moveShown"]) assert.equal(typeof ANSWERS.good.opTxs[k], "string", k);
-  assert.equal(ANSWERS.badOpTxsOneRpc.opTxs.every, null);
-  assert.deepEqual(judge(ANSWERS.badOpTxsOneRpc).lines, [OPTX_LINES[0]]);
-  assert.equal(ANSWERS.badNearOneRpc.opTxs.nearFinal, null);
-  assert.deepEqual(judge(ANSWERS.badNearOneRpc).lines, [OPTX_LINES[1]]);
-  assert.equal(ANSWERS.badMoveHeardShown.opTxs.moveShown, null);
-  assert.deepEqual(judge(ANSWERS.badMoveHeardShown).lines, [OPTX_LINES[2]]);
-  for (const k of ["badOpTxsOneRpc", "badNearOneRpc", "badMoveHeardShown"]) {
+  for (const [k, read, line] of [
+    ["badOpTxsOneRpc", "every", 0],
+    ["badOpTxsNoAnswer", "every", 0],
+    ["badNearOneRpc", "nearFinal", 1],
+    ["badNearOtherNonce", "nearFinal", 1],
+    ["badMoveHeardShown", "moveShown", 2],
+  ]) {
+    assert.equal(ANSWERS[k].opTxs[read], null, k);
+    assert.deepEqual(judge(ANSWERS[k]).lines, [OPTX_LINES[line]], k);
+  }
+  for (const k of ["badOpTxsOneRpc", "badOpTxsNoAnswer", "badNearOneRpc", "badNearOtherNonce", "badMoveHeardShown"]) {
     assert.notEqual(ANSWERS[k].sha384, ANSWERS.good.sha384, k);
     assert.deepEqual(ANSWERS[k].hello, ANSWERS.good.hello, k);
   }

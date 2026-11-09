@@ -661,6 +661,10 @@ const lamports = (v: unknown): bigint => {
 /** A Solana signature: base58 of 64 bytes. */
 const SOL_SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
+/** U_X's signatures both RPCs answered as finalized txs that are no deposit into the pool (review P3 2), by pool, U_X
+ *  and signature: never read again on this page (a finalized tx never changes). */
+const NOT_DEPOSIT = new Set<string>();
+
 /** A top-level instruction's data (base58 in the json encoding) that starts with the pool's deposit tag (review P3 3). */
 const isDepositData = (d: unknown): boolean => {
   if (typeof d !== "string") return false;
@@ -700,8 +704,6 @@ function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): b
  */
 export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> {
   const both = <T,>(f: (r: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0]), f(o.rpcs[1])]);
-  // U_X's signatures both RPCs answered as finalized txs that are no deposit (review P3 2): never read again
-  const notDeposit = new Set<string>();
   return {
     status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
     balances: (f) => both(async (r) => lamports(await r("getBalance", [f.u, { commitment: "finalized" }]))),
@@ -731,7 +733,8 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
       for (const l of lists) if (Array.isArray(l)) for (const x of l) if (x !== null && typeof x === "object" && (x as { err?: unknown }).err === null) add((x as { signature?: unknown }).signature);
       const out: TxRef[] = [];
       for (const sig of cands) {
-        if (notDeposit.has(`${f.u}/${sig}`)) continue;
+        const key = `${o.program}/${f.u}/${sig}`;
+        if (NOT_DEPOSIT.has(key)) continue;
         // review P2-a: a read that fails or answers null (not indexed yet) on either RPC is no answer, and two answers
         // that disagree are none either: landed throws, read again. A tx is rejected only once both answered no deposit
         const reads = await both((r) => r("getTransaction", [sig, { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 }]));
@@ -739,7 +742,7 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
         const [a, b] = reads.map((t) => isPoolDepositTx(t, sig, f.u, o.program));
         if (a !== b) throw new Error("the RPCs disagree on a tx");
         if (a) out.push({ chain: "solana", hash: sig });
-        else notDeposit.add(`${f.u}/${sig}`);
+        else NOT_DEPOSIT.add(key);
       }
       return out;
     },
