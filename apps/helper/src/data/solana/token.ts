@@ -23,7 +23,7 @@
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
 import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
 
@@ -45,13 +45,9 @@ export const LAUNCH_WAIT_MS = 300;
 export const HOLDERS_FRESH_MS = 60_000;
 /** 06b: the OHLCV history is cached 60 s and shared; a token's top pool is kept 10 minutes. */
 export const CANDLES_FRESH_MS = 60_000;
-/**
- * The longest a caller's cold GeckoTerminal read waits for the budget's next free call (card helper-crowd-429). [design:
- * 4 s: a cold chart is two calls (its top pool, then its bars), so 8 s of waits and GeckoTerminal's answers stay inside
- * the app's 10 s request (apps/terminal/src/screens/token/candles.ts TIMEOUT_MS), which then reads a 429 again after its
- * Retry-After (THROTTLE_RETRIES 2); the live checks wait on the answer with no timeout of their own.]
- */
-export const GT_PAGE_WAIT_MS = 4_000;
+/** The longest a caller's cold GeckoTerminal read waits for the budget's next free call: ../gecko.ts GT_PAGE_WAIT_MS,
+ *  the one bound every cold read of the budget waits under (card evm-holders-never-starve). */
+export { GT_PAGE_WAIT_MS };
 /** The longest a caller's cold chart read waits in all, its top pool's call and its bars' (card helper-crowd-429): a
  *  chart whose top pool is held waits up to this for its one call, inside the app's 10 s request with GeckoTerminal's
  *  answer. [design: two GT_PAGE_WAIT_MS; live run 41935321432: PUMP's 1h, its pool held, answered 429 with the next
@@ -911,11 +907,8 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     // by `untilMs` (GT_PAGE_WAIT_MS a call, GT_CHART_WAIT_MS a chart), instead of a 429 (market-data-solana-token at
     // 22:12Z and 23:39Z: PUMP 1h answered 429 "geckoterminal budget"); a stale, refresh or ahead read never waits (the
     // bars held are served meanwhile)
-    for (let round = 0; !gt.take(lane, false, false, what); round++) {
-      const at = gt.retryAt("pages");
-      if (lane !== "pages" || round >= 8 || at > untilMs) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
-      await sleep(Math.max(at - now(), 0) + 5);
-    }
+    const at = await takeOrWait(gt, lane, what, untilMs, now, sleep);
+    if (at !== null) throw new Throttled(secondsUntil(at, now()), lane === "pages" ? "geckoterminal budget" : `geckoterminal ${lane}`);
     const r = await doFetch(`${GT_BASE}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (r.status === 429) {
       throw new Throttled(secondsUntil(throttledUntil(gt, r.headers.get("retry-after"), now()), now()), "geckoterminal 429");

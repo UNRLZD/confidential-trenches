@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import { ROW_FIELDS } from "../../../../terminal/src/screens/discover/fields.ts";
 import { start } from "../../server.ts";
-import { GT_SERVE_MS, geckoBudget, type GeckoBudget } from "../gecko.ts";
+import { GT_PAGE_WAIT_MS, GT_SERVE_MS, geckoBudget, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
 import { GT_BASE } from "./lists.ts";
 import { createEvmToken, INFO_FRESH_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
@@ -277,4 +277,33 @@ test("a held info's re-read keeps refreshLane's lanes: refused, the held count s
   assert.ok((old.retryAfterS ?? 0) >= 1);
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, null, "the page: no old count");
   assert.equal(calls, 1);
+});
+
+// The window full, 5 of 5, as at 14:29Z with the live run's Solana pages: a cold holders read waits for the budget's next
+// free call under GT_PAGE_WAIT_MS (../gecko.ts takeOrWait, the Solana path's cold-read wait) instead of answering 429.
+test("the window full (5 of 5): a cold base holders read waits for the next free call and answers 200, within GT_PAGE_WAIT_MS", async () => {
+  let t = NOW;
+  calls = 0;
+  const gecko = geckoBudget(() => t);
+  gecko.seed(Array.from({ length: 5 }, () => NOW - WINDOW_MS + 2_000)); // all five leave the window 2 s from now
+  const slept: number[] = [];
+  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)) });
+  const h = await tok.holders(CASES[0].addr);
+  assert.equal(h.status, 200, h.body);
+  assert.equal(JSON.parse(h.body).total, CASES[0].holders);
+  assert.equal(calls, 1);
+  const waited = slept.reduce((a, b) => a + b, 0);
+  assert.ok(waited >= 2_000 && waited <= GT_PAGE_WAIT_MS, `waited ${waited} ms`);
+});
+
+test("the window full with its next free call past GT_PAGE_WAIT_MS: a cold holders read answers 429 with that wait, without waiting", async () => {
+  let t = NOW;
+  const gecko = geckoBudget(() => t);
+  gecko.seed(Array.from({ length: 5 }, () => NOW - 1_000)); // the next free call 74 s away
+  const slept: number[] = [];
+  const tok = createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)) });
+  const h = await tok.holders(CASES[0].addr);
+  assert.equal(h.status, 429, h.body);
+  assert.ok((h.retryAfterS ?? 0) >= 70, `retry-after ${h.retryAfterS}`);
+  assert.deepEqual(slept, []);
 });

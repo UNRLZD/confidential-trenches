@@ -14,6 +14,8 @@
 //     GT_SERVE_MS) is a page read, a held one's re-read "stale" or "refresh", which leave a cold read its calls (card
 //     evm-holders-never-starve: a first read sent to "stale" or "refresh" was refused behind the helper's own lists and
 //     ahead reads, live 14:46Z). A held count is served while under GT_SERVE_MS, the market routes' freshness bound.
+//     A first read waits for the budget's next free call up to GT_PAGE_WAIT_MS (../gecko.ts takeOrWait, the bound the
+//     Solana path's cold reads wait under) instead of a 429; a held one's re-read never waits, the held count serves.
 //     The page waits for a first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read
 //     held for the next.
 //   - pool and decimals on chain: the token's main pool and decimals the swap reads already found and checked on two
@@ -29,7 +31,7 @@
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { GT_SERVE_MS, refreshLane, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
+import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
@@ -128,9 +130,10 @@ function bounded<V>(max: number) {
  *  swap reads' pool and decimals for a token, when held (swaps.ts kept). */
 export function createEvmToken(
   chain: EvmChain,
-  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number },
+  deps: { lists: { get(): Promise<ListsAnswer>; listed(token: string): Promise<boolean> }; gecko: GeckoBudget; kept?: (token: string) => { pool: string; decimals: number } | undefined; fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown> },
 ) {
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
   const rows = bounded<Row>(CACHE_MAX);
   let seen: string | undefined;
@@ -154,7 +157,7 @@ export function createEvmToken(
   }
 
   async function readInfo(token: string, lane: "pages" | "stale" | "refresh"): Promise<Read> {
-    if (!deps.gecko.take(lane, false, false, `${chain} info`)) return "refused";
+    if ((await takeOrWait(deps.gecko, lane, `${chain} info`, now() + GT_PAGE_WAIT_MS, now, sleep)) !== null) return "refused";
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
