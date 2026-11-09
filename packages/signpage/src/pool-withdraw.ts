@@ -556,6 +556,11 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     const w = freshWallet(seed, "sol", leaf.label, j);
     w.secretKey.fill(0);
     const refundPrecommitment = noteSecrets(seed, { kind: "refund", l: leaf.label, j }).precommitment;
+    const spent = noteSecrets(seed, n!.ref);
+    const next = noteSecrets(seed, { kind: "change", l: leaf.label, j });
+    // shut before the bind asks the helper's fee: a busy helper is waited out (../../wallet/src/busy.ts) with no seed open
+    seed.fill(0);
+    seed = null;
     // tipCap 0: the tag 2 pays no tip, so W's floor is rent(0) and the backstop alone
     const binding = await P.bind({ chunk: p.chunk, wallet: { address: w.address, publicKey: w.publicKey }, refundPrecommitment, epochStartMs, deadlineMs, tipCap: 0n });
     checkBinding(P as Pool, binding, p.chunk);
@@ -565,10 +570,6 @@ async function onePart(h: PoolWithdrawHost, ask: PoolAsk, notes: NoteStore, p: W
     // the epoch root when the note is in it, else the newest (it landed this epoch)
     let trees = await P.trees(epochStartMs);
     if (leaf.leafIndex >= BigInt(trees.stateTree.size)) trees = await P.trees(nowMs + 1n, undefined, { newest: true });
-    const spent = noteSecrets(seed, n!.ref);
-    const next = noteSecrets(seed, { kind: "change", l: leaf.label, j });
-    seed.fill(0);
-    seed = null;
     const made = await poolProveWithdraw(h.prover, {
       stateTree: trees.stateTree,
       labelTree: trees.labelTree,

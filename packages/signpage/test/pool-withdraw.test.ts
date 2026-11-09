@@ -136,6 +136,29 @@ test("a withdraw sends exactly the typed amount to To from one note: the release
   assert.ok(wd.releases[0]!.subarray(1, 65).every((b) => b === 0));
 });
 
+test("the seed is shut before the pool fee is asked (card withdraw-fee-busy-waits): a busy helper's wait never runs with it open", async () => {
+  const wd = await world([30_000_000n]);
+  const handed: Uint8Array[] = [];
+  const seed64 = wd.host.seed64.bind(wd.host);
+  wd.host.seed64 = async () => {
+    const s = await seed64();
+    handed.push(s);
+    return s;
+  };
+  const bind = wd.host.pool.bind.bind(wd.host.pool);
+  const atBind: { read: number; open: number }[] = [];
+  wd.host.pool.bind = async (b) => {
+    atBind.push({ read: handed.length, open: handed.filter((s) => s.some((x) => x !== 0)).length });
+    return await bind(b);
+  };
+  const a = await runPoolWithdraw(wd.host, ASK, TO, 2_000_000n + MIN, COST);
+  // one bind, after the seed was read for W, with every copy of it zeroed
+  assert.equal(atBind.length, 1);
+  assert.ok(atBind[0]!.read > 0);
+  assert.equal(atBind[0]!.open, 0);
+  assert.equal(a.stage, "sent");
+});
+
 test("a withdraw over two notes: two releases and two onward sends, each note its own W, the parts summing to the amount", async () => {
   const wd = await world([10_000_000n, 30_000_000n]);
   const amount = 33_000_000n;
