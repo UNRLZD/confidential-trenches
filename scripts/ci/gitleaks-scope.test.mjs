@@ -251,3 +251,10 @@ test("the bundle scan copies exactly SIGN_BUILD_OUTPUTS into a folder of its own
   assert.match(step, /cp -- "\$f" "\$scan\/\$f"/);
   assert.ok(step.indexOf('cd "$scan"') < step.indexOf('"$RUNNER_TEMP/gitleaks" dir packages/signpage'), 'the scan runs in its own folder');
 });
+
+// review of 31f81cbd (P2): a source line may carry gitleaks:allow, which the tree scan honours by design. The bundler puts
+// that line's secret and its mark on one minified line of app.js, so the bundle scan ignores every gitleaks:allow
+// (--ignore-gitleaks-allow): the reviewer's replay, a secret with the mark on its built line, must fail it
+test("a secret whose built line carries gitleaks:allow still fails the bundle scan", () => {
+  fails(built(`var a="${secret()}",b="gitleaks:allow";\n`));
+});

@@ -98,9 +98,11 @@ jobs:
       # The scan reads a folder of its own holding only the four built files (scripts/ci/sign-build-inputs.mjs
       # SIGN_BUILD_OUTPUTS) at their repository paths, with main's rules and main's ignore file: gitleaks dir also reads the
       # scanned folder's own .gitleaksignore, so scanning packages/signpage in place would let a pull request that adds
-      # packages/signpage/.gitleaksignore silence it (delta review 2). The sha256 check holds against a file swapped in
-      # $RUNNER_TEMP by a later step only: on a pull request this workflow and fetch.sh are the pull request's own (only
-      # the verify and money gates run from main), so it is no guard against a pull request that edits them.
+      # packages/signpage/.gitleaksignore silence it (delta review 2). It ignores every gitleaks:allow mark: the tree scan
+      # honours one on a source line by design, and the bundler puts that line's secret and its mark on one minified line.
+      # The sha256 check catches a gitleaks binary that a later step swapped in $RUNNER_TEMP, and nothing more: a step can
+      # also put its own sha256sum first on PATH ($GITHUB_PATH), and on a pull request this workflow and fetch.sh are the
+      # pull request's own (only the verify and money gates run from main).
       - name: scan the signing page's built bundle with main's rules
         env:
           GITLEAKS_SHA256: ${{ steps.gitleaks-bin.outputs.sha256 }}
@@ -119,7 +121,7 @@ jobs:
           done
           cd "$scan"
           "$RUNNER_TEMP/gitleaks" dir packages/signpage --config "$rules/.gitleaks.toml" \
-            --gitleaks-ignore-path "$rules/.gitleaksignore" --redact --no-banner
+            --gitleaks-ignore-path "$rules/.gitleaksignore" --ignore-gitleaks-allow --redact --no-banner
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
