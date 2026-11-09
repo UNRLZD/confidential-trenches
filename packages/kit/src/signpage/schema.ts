@@ -230,6 +230,15 @@ const depositWalletList = arr(depositWalletFits);
 const depositWallets: SignpageSchema = (v) =>
   depositWalletList(v) && new Set((v as { chain: string; address: string }[]).map((w) => `${w.chain}\n${w.address}`)).size === (v as unknown[]).length;
 
+/** A position (card signpage-state-holdings): exact, its optional decimals the token's own (a u8, as an SPL mint's and an
+ * ERC-20's are), and its amount with no more fraction digits than those decimals when named. */
+const positionEntry = obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) }, { decimals: (v) => uint(v) && (v as number) <= 255 });
+const positionFits: SignpageSchema = (v) => {
+  if (!positionEntry(v)) return false;
+  const p = v as { amount: string; decimals?: number };
+  return p.decimals === undefined || unitsAt(p.amount, p.decimals) !== null;
+};
+
 /** One op of state.ops, told apart by its kind. */
 const stateOp = by("kind", {
   deposit: depositOp,
@@ -250,7 +259,7 @@ const state = obj(
     code_saved: bool,
     vault_balance: dec,
     wallets: arr(obj({ chain, address: str, role: oneOf(["fresh", "hop"]), size: dec, state: walletState })),
-    positions: arr(obj({ chain, token: str, amount: dec, cost: dec, wallets: arr(str) })),
+    positions: arr(positionFits),
     orders: arr(
       obj(
         { order_id: str, chain, wallet: str, token: str, group_id: str, trigger, state: orderState },

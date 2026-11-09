@@ -1,0 +1,44 @@
+{
+ "good": {
+  "key": "signpage-state-holdings",
+  "url": "local build",
+  "at": "2026-11-09T12:24:26.007Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 812949,
+   "sha384": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "marks": {
+    "sum": 1,
+    "fill": 1
+   }
+  }
+ },
+ "bad_live_before": {
+  "key": "signpage-state-holdings",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-09T12:24:26.421Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 810182,
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "marks": {
+    "sum": 0,
+    "fill": 0
+   }
+  }
+ }
+}
