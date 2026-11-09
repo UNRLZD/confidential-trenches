@@ -487,7 +487,8 @@ function chain(pools: ModelPool[], who: 0 | 1, headNo = 5_000_000, overrides?: O
         // the share the code keeps for each read after the one it runs, as its bytes say (PUSH1 k SHR PUSH1 0xa0 MSTORE:
         // S >> k), so a change of it in the kit's code shows here (review of baac0ecb, P2-1)
         const keep = /60(0[0-9a-f])1c60a052/.exec(quoteMod.EVM_READ_GAS_CODE);
-        const keepShift = keep === null ? 0 : parseInt(keep[1]!, 16);
+        if (keep === null) throw new Error("the model reads no reserve in EVM_READ_GAS_CODE (PUSH1 k SHR PUSH1 0xa0 MSTORE)");
+        const keepShift = parseInt(keep[1]!, 16);
         return { jsonrpc: "2.0", id, result: encodeAggregate(ds.map((d, i) => {
           const need = readGasOf(d, overridden);
           if (bounded || even) {
@@ -7583,7 +7584,7 @@ const spamAt = (token: string): ModelPool => ({ key: keyOf(token, NATIVE, 500, 1
 const stdQuote = (pools: ModelPool[], token: string, rpcs?: [EvmRpc, EvmRpc]) =>
   verdict(evmPoolBuyQuoteWith({ chain: "base", token, amountIn: AMOUNT, slippageBps: 100, route: seededRoute(token) }, rpcs ?? [chain(pools, 0), chain(pools, 1)], NOW));
 
-test("GS1 a standard pool built to burn gas, quoted before the token's better standard pool in one call, starves none of its reads: the seeded route is held to the better one; its cost is one more round in the cold quote, the reads it starved read again", async () => {
+test("GS1 a standard pool built to burn gas, quoted before the token's better standard pool in one call, starves none of its reads: the seeded route is held to the better one, and the burner's reads are read again alone", async () => {
   const token = "0x00000000000000000000000000000000000a5a51";
   // the better pool's quote takes 1M gas (a v4 quote crossing ticks): more than the 1/64 of a 50M call the burner
   // leaves the reads after it in Multicall3's aggregate3, inside the 1.66M (S/4) the code keeps for each read after it
@@ -7731,6 +7732,24 @@ test("GS8 a provider that drops the per-read gas code's override is refused by n
   );
 });
 
+// each aggregate3 call's reads, as `rpc` answers them: each read's to, calldata and success word (GS11, GS17)
+type Answered = { to: string; data: string; word: number };
+const answeredOf = (rpc: EvmRpc, into: Answered[][]): EvmRpc => async (calls) => {
+  const out = (await rpc(calls)) as { result?: string }[];
+  calls.forEach((c, i) => {
+    const p = c.params[0] as { to?: string; data?: string };
+    const r = out[i]?.result;
+    if (c.method !== "eth_call" || p.to?.toLowerCase() !== MC3 || typeof r !== "string") return;
+    const h = p.data!.slice(10);
+    const w = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
+    const ds = decodeAggregate(p.data!);
+    const a = r.slice(2);
+    const at = (o: number) => Number(BigInt("0x" + a.slice(2 * o, 2 * o + 64)));
+    into.push(ds.map((d, k) => ({ to: "0x" + h.slice(2 * (64 + w(64 + 32 * k)) + 24, 2 * (64 + w(64 + 32 * k)) + 64), data: "0x" + d, word: at(64 + at(64 + 32 * k)) })));
+  });
+  return out;
+};
+
 // each aggregate3 call's success words, as `rpc` answers them (GS16)
 const wordsOf = (rpc: EvmRpc, into: number[][]): EvmRpc => async (calls) => {
   const out = (await rpc(calls)) as { result?: string }[];
@@ -7777,27 +7796,15 @@ test("GS11 reads that ran out of gas in a call of 64 are read again in calls of 
   quoteMod.evmReadsPerCall(64);
   try {
     const n: number[] = [];
-    // the reads of the calls of 2 to 6 (the second pass), each to and calldata
-    const again: { to: string; data: string }[] = [];
-    const rereads = (rpc: EvmRpc): EvmRpc => async (calls) => {
-      for (const c of calls) {
-        const p = c.params[0] as { to?: string; data?: string };
-        if (c.method !== "eth_call" || p.to?.toLowerCase() !== MC3) continue;
-        const h = p.data!.slice(10);
-        const w = (o: number) => Number(BigInt("0x" + h.slice(2 * o, 2 * o + 64)));
-        const k = w(32);
-        if (k < 2 || k > 6) continue;
-        const ds = decodeAggregate(p.data!);
-        for (let i = 0; i < k; i++) again.push({ to: "0x" + h.slice(2 * (64 + w(64 + 32 * i)) + 24, 2 * (64 + w(64 + 32 * i)) + 64), data: "0x" + ds[i]! });
-      }
-      return rpc(calls);
-    };
-    assert.deepEqual(await stdQuote(pools, token, [rereads(readsPerAsk(chain(pools, 0), n)), chain(pools, 1)]), below);
+    const calls: Answered[][] = [];
+    assert.deepEqual(await stdQuote(pools, token, [answeredOf(readsPerAsk(chain(pools, 0), n), calls), chain(pools, 1)]), below);
     assert.ok(n.some((x) => x > 6), `calls of ${n.join(",")} reads: a call of more than 6`);
     assert.ok(n.some((x) => x > 1 && x <= 6) && !n.includes(1), `calls of ${n.join(",")} reads: read again 6 a call, none alone`);
-    // each read read again 6 a call is kept at 6 for the next quote, never alone (review of baac0ecb, P3-2)
-    const kept = again.map((r) => quoteMod.evmReadSizeKept(r.to, r.data));
-    assert.ok(kept.includes(6) && kept.every((k) => k === undefined || k === 6), `kept at ${kept.join(",")}`);
+    // each read answered 2 in a call of more than 6 was read again 6 a call and is kept at exactly 6 for the next quote,
+    // never alone (review of baac0ecb, P3-2; delta review of 344596b1, P3)
+    const twos = calls.filter((c) => c.length > 6).flat().filter((r) => r.word === 2);
+    const kept = twos.map((r) => quoteMod.evmReadSizeKept(r.to, r.data));
+    assert.ok(twos.length > 0 && kept.every((k) => k === 6), `kept at ${kept.join(",")}`);
   } finally {
     quoteMod.evmReadsPerCall();
   }
@@ -7863,4 +7870,36 @@ test("GS14 a hidden listed two-hop within the slippage of a route through an unl
   assert.deepEqual(await buy(hooked, spammed(price, twoHop), spammed(price, twoHop)), { accepted: false, code: "out_of_gas" });
   // control: the two-hop's twice answered, it fills, and the listed route within the slippage holds the hooked one
   assert.deepEqual(await buy(hooked, spammed(price, () => false), spammed(price, () => false)), below);
+});
+
+
+// Delta review of 344596b1, P2-2: base-partial-v4's eight QuoterV2 quoteExactInput reads each revert after 8-9M gas and
+// answer [000222] in a call of 6 (the first three left the last three too little). A read answered 2 behind an earlier
+// 2 of its call was not kept unless it answered 2 alone too, so the honest reads read 0 alone were sent again in a call
+// of 6 and read again alone on warm quotes 1 to 4 (live p95 981 ms against baac0ecb's 874). An earlier read now makes a
+// read behind only where it still answers 2 at its final answer (a burner's), so honest reverts are kept as baac0ecb kept them.
+test("GS17 honest reads that revert after 8.5M or 9M gas, starved in a call of 6 by the reverts before them, are each kept at the size they were read at, and the warm quotes settle with no read answered 2", async () => {
+  for (const [token, gas] of [["0x00000000000000000000000000000000000a5a68", 8_500_000], ["0x00000000000000000000000000000000000a5a69", 9_000_000]] as const) {
+    // the token's four standard hookless pools, each quote through them reverting after `gas`, as a pool that runs out does
+    const rev = (fee: number, ts: number): ModelPool => ({ key: keyOf(token, NATIVE, fee, ts, NATIVE), give: (() => null) as unknown as (a: bigint) => bigint, readGas: gas });
+    const pools = [rev(10000, 200), rev(3000, 60), rev(100, 1), rev(500, 10)];
+    const quotes: Answered[][][] = [];
+    for (let q = 0; q < 5; q++) {
+      const calls: Answered[][] = [];
+      await stdQuote(pools, token, [answeredOf(chain(pools, 0), calls), chain(pools, 1)]);
+      quotes.push(calls);
+    }
+    const words = (calls: Answered[][]) => calls.map((c) => c.map((r) => r.word));
+    const cold = quotes[0]!;
+    // control: three or more of a call of 6 answer 2 behind the reverts before them, and each reads 0 alone
+    const starved = cold.filter((c) => c.length === 6).flatMap((c) => c.filter((r) => r.word === 2));
+    assert.ok(starved.length >= 3, `${gas}: cold ${JSON.stringify(words(cold))}`);
+    // each is kept alone, the size it was read at, not dropped (before: the ones behind the first 2 were not kept)
+    const kept = starved.map((r) => quoteMod.evmReadSizeKept(r.to, r.data));
+    assert.deepEqual(kept, starved.map(() => 1), `${gas}: kept at ${kept.join(",")}`);
+    // the warm quotes settle: one of the first three answers no read 2, and every quote after sends the same calls
+    const settled = quotes.findIndex((c, q) => q > 0 && !c.flat().some((r) => r.word === 2));
+    assert.ok(settled >= 1 && settled <= 3, `${gas}: ${quotes.map((c) => JSON.stringify(words(c))).join(" | ")}`);
+    for (const c of quotes.slice(settled + 1)) assert.deepEqual(words(c), words(quotes[settled]!), `${gas}: settled at warm ${settled}`);
+  }
 });

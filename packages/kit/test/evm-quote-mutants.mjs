@@ -385,6 +385,8 @@ export const MUTANTS = [
   [QUOTE, "    readSizes.set(key, n);\n", "    readSizes.set(key, 1);\n", R, "GS11 "],
   [QUOTE, "    if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;\n", "", R, "GS16 "],
   [QUOTE, "    if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;\n", "    if (behind.has(i)) continue;\n", R, "GS16 "],
+  // delta review of 344596b1, P2-2: an earlier read makes a read behind only where it still answers 2 at its final answer
+  [QUOTE, "first2.has(j) && (all[j] as { gas?: true }).gas === true", "first2.has(j)", R, "GS17 "],
   [QUOTE, "5760021c60a0526020", "5760011c60a0526020", R, "GS16 "],
   // the per-read gas code as merged at 206d625f, an even share for each read: a hookless warm quote's heavy reverts read
   // again alone (warm p95 1,440 ms, live check evm-quote-warm-round)

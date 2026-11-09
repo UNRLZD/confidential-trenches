@@ -452,12 +452,14 @@ const READ_AGAIN_PER_CALL = 6;
 // A plain read (no override) that answered 2 in a call and was answered at fewer a call, kept with that many, at most
 // READ_SIZES_KEPT of them, oldest out first: the next quote sends it in calls of that many at once, so a warm quote does
 // not pay the re-read's round trips again (review of fe9f5ec3, finding 2: rh-cold-quote's warm median went from 1.34 s to
-// 2.17 s). A read whose 2 came behind an earlier read of its call that also answered 2 is not kept, unless it answers 2
-// alone too (review of baac0ecb, P2-2): a pool built to burn gas leaves the reads after it in its call S/4 each, and kept
-// alone they made every warm quote send them alone (16 to 33 eth_calls); the burner's reads are kept alone, so the next
-// quote's call holds the others without them.
-// The cost left is one more round in the cold quote for each such call. It sends a read in fewer a call, where its first
-// answer can be another (a read kept at 6 may be the last of its call, at 1.66M), never its final one
+// 2.17 s). A read whose 2 came behind an earlier read of its call that answered 2 and still answers 2 at its final answer
+// (a pool built to burn gas) is not kept, unless it answers 2 alone too (review of baac0ecb, P2-2): the burner leaves the
+// reads after it in its call S/4 each, and kept alone they made every warm quote send them alone (16 to 33 eth_calls);
+// the burner's reads are kept alone, so the next quote's call holds the others without them. Honest reads that starve
+// each other (base-partial-v4's QuoterV2 reverts after 8-9M gas, [000222] in a call of 6) are all kept, so the warm
+// quotes settle by the second (delta review of 344596b1, P2-2).
+// Keeping a read sends it in fewer a call, where its first answer can be another (a read kept at 6 may be the last of
+// its call, at 1.66M), never its final one
 const readSizes = new Map<string, number>();
 const READ_SIZES_KEPT = 4_096;
 const sizeKey = (r: Read) => lower(r.to) + r.data;
@@ -679,9 +681,8 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
   // One answered 2 alone keeps `gas` and prices nothing; each pass sends fewer reads a call, so it ends
   const size = new Map(parts.flatMap((part) => part.map((i): [number, number] => [i, part.length])));
   const sent = new Map(size);
-  // the reads answered 2 behind an earlier read of their call answered 2: kept at a smaller size (readSizes) only where
-  // they still answer 2 alone (a burner's own reads)
-  const behind = new Set(parts.flatMap((part) => part.filter((i, k) => (all[i] as { gas?: true }).gas === true && part.slice(0, k).some((j) => (all[j] as { gas?: true }).gas === true))));
+  // the reads answered 2 first (before the passes below), for `behind`
+  const first2 = new Set(reads.flatMap((_, i) => ((all[i] as { gas?: true }).gas === true ? [i] : [])));
   // each pass is this read's own: a pass reads its reads again in calls of `per`, never again itself
   for (const per of again === undefined ? [READ_AGAIN_PER_CALL, 1] : []) {
     const more = reads.flatMap((_, i) => ((size.get(i) ?? 1) > per && (per === 1 || (size.get(i) ?? 1) > READ_AGAIN_PER_CALL) && (all[i] as { gas?: true }).gas === true ? [i] : []));
@@ -692,6 +693,13 @@ async function readBoth(rpcs: readonly EvmRpc[], hash: string, reads: readonly R
       size.set(i, per);
     });
   }
+  // the reads answered 2 behind an earlier read of their call that answered 2 first and still answers 2 at its final
+  // answer (a burner's): kept at a smaller size (readSizes) only where they still answer 2 alone (a burner's own reads).
+  // Left open (delta review of 344596b1, P2-1; no worse than baac0ecb): a read that burns about 30M and then returns
+  // answers 1, so the honest reads it starved are kept alone for good. The root fix is card evm-quote-gas-used: the read
+  // code returns each read's gas used, as UniswapInterfaceMulticall returns gasUsed, so the read that used the gas is
+  // the one kept apart
+  const behind = new Set(parts.flatMap((part) => part.filter((i, k) => first2.has(i) && part.slice(0, k).some((j) => first2.has(j) && (all[j] as { gas?: true }).gas === true))));
   // a plain read read again keeps the size it was last read at; one kept and not read again keeps its size, newest
   for (const i of again === undefined ? plain : []) {
     if (behind.has(i) && (all[i] as { gas?: true }).gas !== true) continue;
