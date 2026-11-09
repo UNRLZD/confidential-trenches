@@ -31,7 +31,7 @@ import { base58, base64 } from "@scure/base";
 import { depositId } from "../derive/keys.ts";
 import { type DepositAccount, NEAR_NETWORKS, type NearNetwork, type NearRpc, readDepositAccount } from "./account.ts";
 import { readCapped } from "./capped.ts";
-import { askWhileBusy, type BusyOpts } from "../busy.ts";
+import { busyWaitMs } from "../busy.ts";
 
 /** W: the delegate's window in blocks over the lower of the two RPC heights (V:670-672). */
 export const DEPOSIT_WINDOW = 120;
@@ -216,34 +216,34 @@ export async function depositDelegate(
 }
 
 /** The relayer's answer, checked: a tx hash, or one of the deposit codes. Anything else throws. */
-export type BindAnswer = { ok: true; tx_hash: string } | { ok: false; code: HelperBindCode };
+export type BindAnswer =
+  | { ok: true; tx_hash: string }
+  | { ok: false; code: HelperBindCode }
+  /** The helper busy (429 rate_limited, 503 upstream): nothing carried; waitMs is its Retry-After as ../busy.ts reads it. */
+  | { ok: false; code: BindBusyCode; waitMs: number };
+/** The helper's busy codes on POST /v1/bind, each at its own status (HELPER_CODE_STATUS): the bind waits them out of its
+ *  phase and sends the same bytes again (bind.ts RETRY; card withdraw-fee-busy-waits). */
+const BIND_BUSY_CODES = ["rate_limited", "upstream"] as const;
+export type BindBusyCode = (typeof BIND_BUSY_CODES)[number];
 
 /**
  * Hands the signed call to the release's relayer only: POST RELEASE_BIND_URL with {signed_delegate} and nothing else.
  * The answer is hostile input: only a tx hash of 32 bytes in base58 on 200, or a code from HELPER_BIND_DEPOSIT_CODES
  * with its own HTTP status, is taken;
  * the deposit itself is confirmed from the vault's deposits pages, never from this answer (W:418). It waits
- * SEND_TIMEOUT_MS each ask, or until `signal` (the bind's stop) aborts. A busy helper (429 rate_limited, 503 upstream) is
- * waited out for its Retry-After, capped, and the same bytes go again, BUSY_ASKS asks at most (../busy.ts, card
- * withdraw-fee-busy-waits): one signed call, so at most one runs; the last busy answer is no bind answer (the bind
- * settles it from the pages, as before).
+ * SEND_TIMEOUT_MS, or until `signal` (the bind's stop) aborts. One ask, never a wait: a busy helper (429 rate_limited,
+ * 503 upstream at its status) comes back as its code with the wait its Retry-After names (busyWaitMs), and the bind waits
+ * it out of its phase, the seed shut, before the same bytes go again (bind.ts RETRY; card withdraw-fee-busy-waits).
  */
-export async function sendDepositDelegate(
-  signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal, sleep?: BusyOpts["sleep"],
-): Promise<BindAnswer> {
-  const bytes = JSON.stringify({ signed_delegate: signed.signed_delegate });
-  const res = await askWhileBusy(
-    () =>
-      fetchFn(RELEASE_BIND_URL, {
-        ...HELPER_FETCH_INIT,
-        redirect: "error",
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: bytes,
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
-      }),
-    { signal, sleep },
-  );
+export async function sendDepositDelegate(signed: Pick<SignedDepositDelegate, "signed_delegate">, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<BindAnswer> {
+  const res = await fetchFn(RELEASE_BIND_URL, {
+    ...HELPER_FETCH_INIT,
+    redirect: "error",
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ signed_delegate: signed.signed_delegate }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SEND_TIMEOUT_MS)]) : AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readCapped(res, BIND_ANSWER_MAX_BYTES)));
@@ -268,5 +268,7 @@ export async function sendDepositDelegate(
     const status = Object.hasOwn(HELPER_CODE_STATUS, code) ? HELPER_CODE_STATUS[code as keyof typeof HELPER_CODE_STATUS] : 400;
     if (res.status === status) return { ok: false, code: code as HelperBindCode };
   }
+  if (txHash === undefined && typeof code === "string" && (BIND_BUSY_CODES as readonly string[]).includes(code) && res.status === HELPER_CODE_STATUS[code as BindBusyCode])
+    return { ok: false, code: code as BindBusyCode, waitMs: busyWaitMs(res.headers.get("retry-after"), Date.now(), 1) };
   throw new Error(`relayer: HTTP ${res.status}, not a bind answer`);
 }

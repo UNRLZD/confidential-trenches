@@ -483,8 +483,10 @@ const isUs = (ref: NoteRef, s: bigint, i: number) =>
 // it is stale (a ran call's debit before its refund, audit V-01) or hostile, and the chain decides: the call lapses
 // and is signed again at its nonce once U holds the amount.
 const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used", "amount_above_balance"]);
-// Codes that say wait and send the same bytes again while their window is ahead.
-const RETRY = new Set(["token_halted", "relayer_low"]);
+// Codes that say wait and send the same bytes again while their window is ahead. rate_limited and upstream: the helper
+// busy (delegate.ts BIND_BUSY_CODES), waited out for its Retry-After, out of the phase as every pause (onWait first;
+// card withdraw-fee-busy-waits).
+const RETRY = new Set(["token_halted", "relayer_low", "rate_limited", "upstream"]);
 // Codes on which the device's own reads may continue (one RPC behind or down, a halt, USDC not back yet).
 const WAIT_READ = new Set(["rpc", "disagree", "height", "halted", "balance", "not_created"]);
 
@@ -554,12 +556,13 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     const stopped = () => signal?.throwIfAborted();
     // the code the last sign waited on (an RPC behind, USDC not back, U not created): the next pause names it
     let waitOn: string | null = null;
-    const pause = async (code: string) => {
+    // `ms`: a busy relayer's own wait (its Retry-After, ../busy.ts busyWaitMs), else pollMs
+    const pause = async (code: string, ms = pollMs) => {
       code = waitOn ?? code;
       waitOn = null;
       stopped();
       await deps.onWait?.(code);
-      await sleep(pollMs);
+      await sleep(ms);
       stopped();
     };
     const strike = (): BindOutcome => {
@@ -616,7 +619,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
       stopped();
       let a: BindAnswer | null;
       try {
-        a = await sendDepositDelegate(c, fetchFn, signal, sleep); // a busy relayer waited out on the bind's own clock (../busy.ts)
+        a = await sendDepositDelegate(c, fetchFn, signal);
       } catch {
         stopped();
         a = null; // no answer, a timeout included: unsure, never failed. The relayer may hold it, so the pages and U's nonce settle it
@@ -788,7 +791,7 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           const landed = await prepaid();
           if (landed !== null) return (resend.delete(own.noteId), landed);
         }
-        await pause(answer.code);
+        await pause(answer.code, "waitMs" in answer ? answer.waitMs : pollMs);
         step = await sendAgain(out);
       } else return { kind: "refused", code: answer.code };
     }

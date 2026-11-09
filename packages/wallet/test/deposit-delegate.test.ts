@@ -41,7 +41,7 @@ import {
   sendDepositDelegate,
 } from "../src/deposit/delegate.ts";
 import { depositId } from "../src/derive/keys.ts";
-import { BUSY_ASKS, BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
+import { BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
 import { type ReadKind, replayDepositReads } from "./replay-deposit-reads.ts";
 import { withSendClock } from "./send-clock.ts";
 
@@ -469,54 +469,24 @@ test("send: the relayer's codes come back only with their own status", async () 
     await assert.rejects(sendDepositDelegate(OUT, answer(status, { error: { code } })), /relayer/, `${status} ${code}`);
 });
 
-test("send, busy (card withdraw-fee-busy-waits): 429 rate_limited or 503 upstream waits its Retry-After, capped, and sends the same bytes again, BUSY_ASKS asks at most; any other answer at once", async () => {
-  const seq = (answers: { status: number; body: unknown; retryAfter?: string }[], calls: Call[]) =>
-    (async (url: string | URL | Request, init?: RequestInit) => {
-      const a = answers[Math.min(calls.length, answers.length - 1)]!;
-      calls.push({ url: String(url), init: init! });
-      return new Response(JSON.stringify(a.body), { status: a.status, headers: a.retryAfter === undefined ? {} : { "retry-after": a.retryAfter } });
-    }) as typeof fetch;
-  const busy = { status: 429, body: { error: { code: "rate_limited" } }, retryAfter: "1" };
-  const ok = { status: 200, body: { tx_hash: HASH } };
-  // a 429 with Retry-After 1, then a 200: the tx hash, the same bytes both times
-  let calls: Call[] = [];
-  let slept: number[] = [];
-  assert.deepEqual(await sendDepositDelegate(OUT, seq([busy, ok], calls), undefined, async (ms) => void slept.push(ms)), { ok: true, tx_hash: HASH });
-  assert.deepEqual(slept, [1_000]);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1]!.init.body, calls[0]!.init.body);
-  // a 503 upstream naming no wait: BUSY_WAIT_FIRST_MS
-  calls = [];
-  slept = [];
-  assert.deepEqual(await sendDepositDelegate(OUT, seq([{ status: 503, body: { error: { code: "upstream" } } }, ok], calls), undefined, async (ms) => void slept.push(ms)), { ok: true, tx_hash: HASH });
-  assert.deepEqual(slept, [BUSY_WAIT_FIRST_MS]);
-  // never clears: no bind answer after BUSY_ASKS asks, the waits within the bound
-  calls = [];
-  slept = [];
-  await assert.rejects(sendDepositDelegate(OUT, seq([{ ...busy, retryAfter: "75" }], calls), undefined, async (ms) => void slept.push(ms)), /relayer: HTTP 429/);
-  assert.equal(calls.length, BUSY_ASKS);
-  assert.ok(slept.length === BUSY_ASKS - 1 && slept.every((ms) => ms <= BUSY_WAIT_MAX_MS));
-  // a 400 and a frozen code answer at once
-  calls = [];
-  slept = [];
-  assert.deepEqual(await sendDepositDelegate(OUT, seq([{ status: 400, body: { error: { code: "bad_shape" } }, retryAfter: "1" }, ok], calls), undefined, async (ms) => void slept.push(ms)), { ok: false, code: "bad_shape" });
-  const calls409: Call[] = [];
-  assert.deepEqual(await sendDepositDelegate(OUT, seq([{ status: 409, body: { error: { code: "prepay_open" } }, retryAfter: "1" }, ok], calls409), undefined, async (ms) => void slept.push(ms)), { ok: false, code: "prepay_open" });
-  assert.equal(calls.length + calls409.length, 2);
-  // the kit's other 503 codes are no busy answer (review of 407ba3bc, P3): relayer_low and token_halted are the bind's
-  // own (its RETRY pause), index_behind no bind code; each one ask, no wait
-  for (const [code, want] of [["relayer_low", { ok: false, code: "relayer_low" }], ["token_halted", { ok: false, code: "token_halted" }], ["index_behind", null]] as const) {
-    const c: Call[] = [];
-    const out = sendDepositDelegate(OUT, seq([{ status: 503, body: { error: { code } }, retryAfter: "1" }, ok], c), undefined, async (ms) => void slept.push(ms));
-    if (want === null) await assert.rejects(out, /relayer: HTTP 503/, code);
-    else assert.deepEqual(await out, want, code);
-    assert.equal(c.length, 1, code);
-  }
-  assert.deepEqual(slept, []);
-  // a Retry-After over the cap waits only the cap
-  slept = [];
-  assert.deepEqual(await sendDepositDelegate(OUT, seq([{ ...busy, retryAfter: "3600" }, ok], []), undefined, async (ms) => void slept.push(ms)), { ok: true, tx_hash: HASH });
-  assert.deepEqual(slept, [BUSY_WAIT_MAX_MS]);
+test("send, busy (card withdraw-fee-busy-waits): one ask, never a wait: 429 rate_limited and 503 upstream come back as their code with the Retry-After's wait (capped, BUSY_WAIT_FIRST_MS when none); the kit's other codes as before", async () => {
+  const one = async (status: number, body: unknown, retryAfter?: string) => {
+    const calls: Call[] = [];
+    const a = await sendDepositDelegate(OUT, answer(status, body, calls, retryAfter === undefined ? {} : { "retry-after": retryAfter }));
+    assert.equal(calls.length, 1, `${status} ${JSON.stringify(body)}: one ask`);
+    return a;
+  };
+  assert.deepEqual(await one(429, { error: { code: "rate_limited" } }, "1"), { ok: false, code: "rate_limited", waitMs: 1_000 });
+  assert.deepEqual(await one(503, { error: { code: "upstream" } }), { ok: false, code: "upstream", waitMs: BUSY_WAIT_FIRST_MS });
+  assert.deepEqual(await one(429, { error: { code: "rate_limited" } }, "3600"), { ok: false, code: "rate_limited", waitMs: BUSY_WAIT_MAX_MS });
+  // a busy code at another status is no answer
+  await assert.rejects(sendDepositDelegate(OUT, answer(503, { error: { code: "rate_limited" } })), /relayer: HTTP 503/);
+  await assert.rejects(sendDepositDelegate(OUT, answer(429, { error: { code: "upstream" } })), /relayer: HTTP 429/);
+  // the kit's other codes, as before: one ask
+  assert.deepEqual(await one(400, { error: { code: "bad_shape" } }, "1"), { ok: false, code: "bad_shape" });
+  assert.deepEqual(await one(503, { error: { code: "relayer_low" } }, "1"), { ok: false, code: "relayer_low" });
+  assert.deepEqual(await one(503, { error: { code: "token_halted" } }, "1"), { ok: false, code: "token_halted" });
+  await assert.rejects(sendDepositDelegate(OUT, answer(503, { error: { code: "index_behind" } })), /relayer: HTTP 503/);
 });
 
 test("send, busy: a 503 whose chunked body runs past 1 KB, endless, is refused as over the size at once, never held to the timeout (review of 407ba3bc, P2)", async (t) => {
@@ -529,11 +499,9 @@ test("send, busy: a 503 whose chunked body runs past 1 KB, endless, is refused a
   t.after(() => (server.closeAllConnections(), server.close()));
   const port = (server.address() as AddressInfo).port;
   const local = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/bind`, init)) as typeof fetch;
-  const slept: number[] = [];
   const t0 = performance.now();
-  await assert.rejects(sendDepositDelegate(OUT, local, AbortSignal.timeout(3_000), async (ms) => void slept.push(ms)), /relayer: HTTP 503, an answer over 1024 B/);
+  await assert.rejects(sendDepositDelegate(OUT, local, AbortSignal.timeout(3_000)), /relayer: HTTP 503, an answer over 1024 B/);
   assert.ok(performance.now() - t0 < 1_000, `${(performance.now() - t0).toFixed(0)} ms`);
-  assert.deepEqual(slept, []);
 });
 
 // The carry answers once the prepay and the delegate are read at final: a testnet deposit took 19.4 s from the signed
