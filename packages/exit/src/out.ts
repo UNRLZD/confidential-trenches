@@ -151,7 +151,7 @@ async function finalAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], token: strin
  * far. A halt on both RPCs reads as halted for that id; a halt on one only is a split, and stops the read. Each RPC is
  * asked one query at a time, and a busy answer is asked again after the kit's waits. `sleep` is for tests only.
  */
-export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc] }, sleep: (ms: number) => Promise<void> = realSleep): Promise<{ height: number; holdings: ExitHolding[] }> {
+export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc]; at?: number }, sleep: (ms: number) => Promise<void> = realSleep): Promise<{ height: number; holdings: ExitHolding[] }> {
   const { network, rpcs } = a;
   const ids = [...a.ids];
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
@@ -159,7 +159,9 @@ export async function exitHoldings(a: { network: NearNetwork; ids: readonly stri
   for (const id of ids) if (typeof id !== "string" || !HEX64.test(id)) throw new ExitRpcRefused(`${JSON.stringify(id)} is not a 64-hex implicit account`);
   const token = EXIT_TOKENS[network];
   const intents = EXIT_INTENTS[network];
-  const at = await finalAt(rpcs, token, sleep);
+  // `at`, when given, is a block the caller read its other facts at (exit-withdraw: A's close reads every fact at one block)
+  if (a.at !== undefined && (!Number.isSafeInteger(a.at) || a.at <= 0)) throw new ExitRpcRefused("at is a block height");
+  const at = a.at ?? (await finalAt(rpcs, token, sleep));
   const side = async (r: VaultSyncRpc) => {
     const out: { bal: unknown; mt: unknown }[] = [];
     for (const id of ids) {
@@ -206,6 +208,10 @@ const IMPLICIT_ANY = /^([0-9a-f]{64}|0x[0-9a-f]{40})$/;
 /** A typed account exitRecipient checked; exitBuildMove takes only these. */
 export type ExitRecipient = { readonly account: string; readonly network: NearNetwork };
 const CHECKED = new WeakSet<object>();
+/** Whether `to` is a typed account exitRecipient checked for `network` (exit-withdraw takes only these too). */
+export function exitRecipientFor(to: unknown, network: NearNetwork): to is ExitRecipient {
+  return isObj(to) && CHECKED.has(to) && to.network === network;
+}
 export type ExitRecipientCheck = { ok: true; recipient: ExitRecipient } | { ok: false; code: "not-account" | "vault" | "intents" | "token" | "no-account" | "unread" };
 
 function seen(answer: unknown, at: number): "exists" | "absent" | "unread" {
