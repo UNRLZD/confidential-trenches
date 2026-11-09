@@ -290,7 +290,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.7";
+export const SIGNPAGE_KIT_VERSION = "1.8";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -498,7 +498,13 @@ export interface SignpageState {
    */
   readonly pools?: readonly { readonly chain: Chain; readonly asset: PoolAsset; readonly balance: string; readonly ready?: string; readonly tap_max?: string; readonly price?: PoolStatePrice }[];
   readonly wallets: readonly { readonly chain: Chain; readonly address: string; readonly role: "fresh" | "hop"; readonly size: string; readonly state: WalletState }[];
-  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[] }[];
+  /**
+   * The tokens the device's buys hold. `decimals` (card signpage-state-holdings, additive) is the token's own decimals,
+   * as its mint or contract names them (a u8), so an app sizes a partial sell in base units; `amount` then has no more
+   * fraction digits than that. Absent from a page of an earlier release: an app then reads the amount at its string's
+   * own scale.
+   */
+  readonly positions: readonly { readonly chain: Chain; readonly token: string; readonly amount: string; readonly cost: string; readonly wallets: readonly string[]; readonly decimals?: number }[];
   readonly orders: readonly {
     readonly order_id: string;
     readonly chain: Chain;

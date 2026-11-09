@@ -641,7 +641,7 @@ function uxOf(planted: Map<string, UxAs>, over: { deposit?: (f: { s: string; i: 
     if (as === "off") return { value: p.held.value + (k === 1 ? 1 : 0) };
     return { value: as === "held" ? p.held.value : p.empty.value };
   };
-  const d = solanaPoolFollowDeps({ rpcs: [rpc(0), rpc(1)], program: "Prog111", deposit: async () => "down" });
+  const d = solanaPoolFollowDeps({ rpcs: [rpc(0), rpc(1)], program: "Prog111", deposit: async () => ({ end: "down", txs: [] }) });
   const reads: PoolUxReads = {
     balances: d.balances,
     costs: async () => over.costs ?? COSTS,
@@ -651,7 +651,8 @@ function uxOf(planted: Map<string, UxAs>, over: { deposit?: (f: { s: string; i: 
       const end = over.deposit ? await over.deposit(f, amount) : "filled";
       // a filled deposit empties U_X but its rent, read on both providers as the empty account's 0 here
       if (end === "filled" && !over.deposit) planted.set(f.u, "empty");
-      return end;
+      // the follow's deposit's answer (card pool-deposit-op-txs): its end, with the txs it named
+      return { end, txs: [] };
     },
   };
   return { reads, asked, deposits };
@@ -945,6 +946,21 @@ test("delta review P3-4: an asset that is not a fungible token (nep171, nep245) 
   const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "stalled");
   assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 3's id ${id} holds 1 of ${nft} on NEAR, not a fungible token a move out keeps a unit of; a restore does not carry it yet, and it stays under the 12 words`]);
+});
+
+// card evm-pool-leaves-any-source: the page's restore keeps the page's hold for the pool (the deposit's sync's too) and
+// reads the page's history sources, so a restore after a deposit reads only past the held blocks
+test("card evm-pool-leaves-any-source: the restore passes the page's hold and history for each EVM pool", async () => {
+  const { pageEvmHold, pageEvmHistory } = await import("../src/pool-testnet.ts");
+  const args: { held?: unknown; history?: unknown; pin: { network: string } }[] = [];
+  const w = await world({ evm: (async (x: { held?: unknown; history?: unknown; pin: { network: string } }) => (args.push(x), { notes: [], spends: [], elsewhere: [], wallets: [], block: 1n })) as never });
+  const a = api(w.r.kind);
+  const id = a.ask();
+  await until("done", () => a.posted.some((m) => m.id === id && m.stage === "done"));
+  const pin = POOLS[1]!.chain === "evm" ? POOLS[1]!.pin : assert.fail("the EVM pool");
+  assert.equal(args.length, 1);
+  assert.equal(args[0]!.held, pageEvmHold(pin));
+  assert.deepEqual(args[0]!.history, pageEvmHistory(pin));
 });
 
 // ---------- card wallet-id-reader-paced: a Retry reads on, and the run's signal reaches every view and wait ----------

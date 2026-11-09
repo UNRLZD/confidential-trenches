@@ -11,7 +11,7 @@ import { after, before, mock, test } from "node:test";
 import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import { HELPER_BIND_ANSWER_MS } from "@blindfill/kit";
 import { PARTS, releaseOf } from "./health.ts";
-import { createRpc } from "./rpc/rpc.ts";
+import { createRpc, RPC_UPSTREAMS } from "./rpc/rpc.ts";
 import { createProxy } from "./proxy/proxy.ts";
 import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
 import { randomBytes } from "node:crypto";
@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
@@ -226,6 +226,7 @@ test("the server writes no line while it answers (no request log)", async () => 
 });
 
 const JSON_H = { "content-type": "application/json", origin: APP };
+const RPC_FALLBACK_BASE = RPC_UPSTREAMS.base.fallback;
 const rpcBody = (method: string) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: [] });
 
 test("POST /v1/rpc/{chain}: an unlisted method is refused 400 method_not_allowed, with the commit and CORS", async () => {
@@ -280,6 +281,36 @@ test("/v1/rpc forwards an allowlisted call to the configured provider and passes
   }
 });
 
+test("card evm-pool-leaves-any-source: POST /v1/rpc/{chain}?keyed=only reads the keyed URLs alone (none set: 503 upstream, nothing fetched); without it the public fallback as before; any other keyed value 400 before any call", async () => {
+  const KEYED = "https://keyed.test/v2/projectsegment0123456789";
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit) => (asked.push(url), new Response(JSON.stringify({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } }));
+  const bare = own(start(COMMIT, 0, undefined, createRpc({}, { fetch: fetch as never })));
+  const keyed = own(start(COMMIT, 0, undefined, createRpc({ BASE_RPC_URL: KEYED }, { fetch: fetch as never, pinned: { base: ["https://p1.test"] } })));
+  await Promise.all([bare, keyed].map((s) => new Promise<void>((ok) => (s.listening ? ok() : s.on("listening", () => ok())))));
+  const to = (s: ReturnType<typeof createServer>) => (s.address() as AddressInfo).port;
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] });
+  for (const q of ["?keyed=bogus", "?keyed=", "?keyed=ONLY", "?keyed=only&keyed=only", "?keyed"]) {
+    const r = await call("POST", `/v1/rpc/base${q}`, JSON_H, body, to(keyed));
+    assert.equal(r.status, 400, q);
+    assert.deepEqual(JSON.parse(r.body), { error: { code: "method_not_allowed" } }, q);
+    assert.equal(r.headers["access-control-allow-origin"], APP, q);
+  }
+  assert.deepEqual(asked, [], "a refused flag reaches no provider");
+  const none = await call("POST", "/v1/rpc/base?keyed=only", JSON_H, body, to(bare));
+  assert.equal(none.status, 503, none.body);
+  assert.deepEqual(JSON.parse(none.body), { error: { code: "upstream" } });
+  assert.equal(none.headers["access-control-allow-origin"], APP);
+  assert.deepEqual(asked, [], "no keyed URL: nothing fetched");
+  const plain = await call("POST", "/v1/rpc/base", JSON_H, body, to(bare));
+  assert.equal(plain.status, 200, plain.body);
+  assert.deepEqual(asked, [RPC_FALLBACK_BASE], "without the flag the public fallback answers, as before");
+  asked.length = 0;
+  const only = await call("POST", "/v1/rpc/base?keyed=only", JSON_H, body, to(keyed));
+  assert.equal(only.status, 200, only.body);
+  assert.deepEqual(asked, [KEYED]);
+});
+
 test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another token, two tokens or none 404 not_found; reads refused 503 upstream; POST 405", async (t) => {
   const ANSWER = { relayer_account: "relayer.confidential.unrlzd.near", fee_recipient: "relayer.confidential.unrlzd.near", relay_fee: "207609", gp: "100000000", px: "4.135781763845", g_w: "92505000000000", valid_until_block: 222699586 };
   let failing = false;
@@ -310,6 +341,9 @@ test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another t
     const u = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
     assert.equal(u.status, 503);
     assert.deepEqual(JSON.parse(u.body), { error: { code: "upstream" } });
+    // card withdraw-fee-busy-waits: the 503 names its wait, so the device waits it and asks again
+    assert.equal(u.headers["retry-after"], String(UPSTREAM_RETRY_AFTER_S));
+    assert.match(String(u.headers["access-control-expose-headers"]), /Retry-After/);
     const p = await call("POST", "/v1/withdraw/fee?token=carried.near", JSON_H, "{}", to);
     assert.equal(p.status, 405);
     assert.equal(p.headers["allow"], "GET, HEAD, OPTIONS");
@@ -460,6 +494,32 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
     const ok = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: decodable }), (helper.address() as AddressInfo).port);
     assert.deepEqual([ok.status, JSON.parse(ok.body)], [200, { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" }]);
     assert.deepEqual(seen, [{ signed_delegate: decodable }]);
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("card withdraw-fee-busy-waits: POST /v1/bind's 503 upstream names Retry-After UPSTREAM_RETRY_AFTER_S, its 200 and its other codes none", async (t) => {
+  const answers = [
+    { status: 503, body: { error: { code: "upstream" } } },
+    { status: 503, body: { error: { code: "relayer_low" } } },
+    { status: 409, body: { error: { code: "prepay_open" } } },
+    { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } },
+  ];
+  let n = 0;
+  const bind: BindSender = { carry: async () => answers[n++]! as Awaited<ReturnType<BindSender["carry"]>>, warm: () => undefined, stop: () => undefined };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  try {
+    const to = (helper.address() as AddressInfo).port;
+    const got: [number, string | undefined][] = [];
+    for (let i = 0; i < answers.length; i++) {
+      const r = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to);
+      got.push([r.status, r.headers["retry-after"] as string | undefined]);
+    }
+    assert.deepEqual(got, [[503, String(UPSTREAM_RETRY_AFTER_S)], [503, undefined], [409, undefined], [200, undefined]]);
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
@@ -670,7 +730,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
       await listening(a);
       assert.equal((await call("GET", "/v1/health", {}, undefined, hp)).status, 200);
       const f = await call("GET", `/v1/pool/fee?pool=${pool}`, {}, undefined, hp);
-      assert.deepEqual([f.status, JSON.parse(f.body).error.code], [503, "upstream"]);
+      assert.deepEqual([f.status, JSON.parse(f.body).error.code, f.headers["retry-after"]], [503, "upstream", String(UPSTREAM_RETRY_AFTER_S)]);
       const s = await call("POST", "/v1/pool/solana/send", { "content-type": "application/json" }, JSON.stringify({ pool, tx: "AA==" }), hp);
       assert.deepEqual([s.status, JSON.parse(s.body).error.code], [503, "upstream"], "the pool's send is down with it");
       // the RPCs back: the next ask reads, the configured fee is the kit's, and the pool answers

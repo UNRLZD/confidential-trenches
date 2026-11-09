@@ -105,7 +105,17 @@ export const STOP_MS = HELPER_BIND_ANSWER_MS + 5_000;
  * device re-proves after, never a late send. A bind waits only within its own HELPER_BIND_ANSWER_MS (the BIND route).
  */
 export const SENDERS_WAIT_MS = 60_000;
-const SENDERS_LATE = { status: 503, body: JSON.stringify({ error: { code: "upstream" } }) };
+/**
+ * The wait a relay route's 503 upstream names (card withdraw-fee-busy-waits): a read that failed or disagreed, or the
+ * senders not held yet, is read again on the next blocks, so the device (wallet busy.ts) waits this and asks again,
+ * bounded, rather than stopping. Its 429s name their own wait (limits.ts throttled). [design: two NEAR blocks]
+ */
+export const UPSTREAM_RETRY_AFTER_S = 2;
+const UPSTREAM_WAIT = { "Retry-After": String(UPSTREAM_RETRY_AFTER_S) } as const;
+const SENDERS_LATE = { status: 503, headers: UPSTREAM_WAIT, body: JSON.stringify({ error: { code: "upstream" } }) };
+/** UPSTREAM_WAIT on a route's own 503 upstream answer, none on any other. */
+const upstreamWait = (a: { status: number; body: unknown }): Headers | undefined =>
+  a.status === 503 && (a.body as { error?: { code?: unknown } } | null)?.error?.code === "upstream" ? { ...UPSTREAM_WAIT } : undefined;
 /** Whether `held` settles fulfilled within `ms` (SENDERS_WAIT_MS). */
 function heldWithin(held: Promise<unknown>, ms = SENDERS_WAIT_MS): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -297,7 +307,7 @@ export function handler(
         void heldWithin(senders)
           .then((held) => (held ? fee.quote(tokens[0]!) : Promise.reject(new FeeReadRefused("the senders are not this helper's yet"))))
           .then((a) => send(200, a, cors(req)))
-          .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? (throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, cors(req))) : send(500, { error: "internal" }, cors(req))));
+          .catch((e) => (res.headersSent ? res.destroy() : e instanceof FeeReadRefused ? (throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, { ...cors(req), ...UPSTREAM_WAIT })) : send(500, { error: "internal" }, cors(req))));
         return;
       }
       if (path === POOL_FEE) {
@@ -319,7 +329,7 @@ export function handler(
           .then((): unknown => pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
           .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
           // a provider's throttle is a wait (429), any other failed read 503
-          .catch((e) => (res.headersSent ? res.destroy() : throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, cors(req))));
+          .catch((e) => (res.headersSent ? res.destroy() : throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, { ...cors(req), ...UPSTREAM_WAIT })));
         return;
       }
       if (path === POOL_SOLANA_SEND) {
@@ -413,7 +423,7 @@ export function handler(
             const t0 = now();
             if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
             const a = await bindAnswerWithin(bind.carry(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
-            return { status: a.status, body: JSON.stringify(a.body) };
+            return { status: a.status, headers: upstreamWait(a), body: JSON.stringify(a.body) };
           })
           .then(reply)
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
@@ -436,7 +446,7 @@ export function handler(
             const t0 = now();
             if (!(await heldWithin(senders, HELPER_BIND_ANSWER_MS))) return SENDERS_LATE;
             const a = await bindAnswerWithin(bind.intents(body), BIND_LATE, HELPER_BIND_ANSWER_MS - (now() - t0));
-            return { status: a.status, body: JSON.stringify(a.body) };
+            return { status: a.status, headers: upstreamWait(a), body: JSON.stringify(a.body) };
           })
           .then(reply)
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
@@ -582,11 +592,15 @@ export function handler(
         const q = raw.indexOf("?");
         const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
         if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
+        // card evm-pool-leaves-any-source: ?keyed=only, exactly once, reads the chain's keyed URLs alone (rpc.ts); any
+        // other value of keyed is refused before the body is read
+        const flag = new URL(raw, "http://helper.invalid").searchParams.getAll("keyed");
+        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
         void readBody(req, RPC_BODY_MAX)
           .then((body) =>
             body === undefined
               ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
-              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req)),
+              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req), false, flag.length === 1),
           )
           // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
           // in the standard Server-Timing header, 429 and 503 included

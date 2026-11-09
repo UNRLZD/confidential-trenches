@@ -11,7 +11,7 @@ const { SOL_LADDER } = await import("../../wallet/src/pool/solana.ts");
 const { ladderSplit } = await import("../../wallet/src/pool/ladder.ts");
 type Deps = Parameters<typeof followPoolQuote>[1];
 type Rec = Parameters<typeof followPoolQuote>[0];
-type End = Awaited<ReturnType<Deps["deposit"]>>;
+type End = Awaited<ReturnType<Deps["deposit"]>>["end"];
 
 const F: Rec = { chain: "solana", s: "777", i: 3, u: "U_X", refund_id: "ab".repeat(32), address: "DEPOSIT", deadline_ms: 1, origin: "nep141:base-usdc", min_out: "20000000" };
 // today's rent (5,080 lamports a byte): one deposit's worst case 2,936,160 and the 650,240 U_X keeps
@@ -35,7 +35,7 @@ function world(rounds: Round[], o: { refund?: Deps["refund"] } = {}) {
     ladder: SOL_LADDER,
     deposit: async (_f, amount) => {
       deposits.push(amount);
-      return now().end ?? "filled";
+      return { end: now().end ?? "filled", txs: [] };
     },
     past: async () => now().past === true,
     stage: async (s) => void stages.push(s),
@@ -209,19 +209,19 @@ test("depositToEnd: the page's handler asked for the amount at the coin's decima
     after: Promise.resolve().then(() => setTimeout(() => (ctx.progress("sent"), ctx.progress(end)), 1)),
     answer: () => ({ result: { stage: "sent", txs: [] } }),
   });
-  assert.equal(await depositToEnd(sentThen("filled"), "solana", 9, 10_000_000n, ac.signal), "filled");
+  assert.equal((await depositToEnd(sentThen("filled"), "solana", 9, 10_000_000n, ac.signal)).end, "filled");
   assert.deepEqual(asked[0], { chain: "solana", amount: "0.01" });
-  assert.equal(await depositToEnd(sentThen("not_landed"), "solana", 9, 1_230_000_000n, ac.signal), "not_landed");
+  assert.equal((await depositToEnd(sentThen("not_landed"), "solana", 9, 1_230_000_000n, ac.signal)).end, "not_landed");
   assert.deepEqual(asked[1], { chain: "solana", amount: "1.23" });
-  assert.equal(await depositToEnd(() => ({ error: "not_funded" }), "solana", 9, 1n, ac.signal), "not_funded");
-  assert.equal(await depositToEnd(() => null, "solana", 9, 1n, ac.signal), "not_allowed");
-  assert.equal(await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ error: "busy" }) }), "solana", 9, 1n, ac.signal), "down");
-  assert.equal(await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled" } }) }), "solana", 9, 1n, ac.signal), "filled");
+  assert.equal((await depositToEnd(() => ({ error: "not_funded" }), "solana", 9, 1n, ac.signal)).end, "not_funded");
+  assert.equal((await depositToEnd(() => null, "solana", 9, 1n, ac.signal)).end, "not_allowed");
+  assert.equal((await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ error: "busy" }) }), "solana", 9, 1n, ac.signal)).end, "down");
+  assert.equal((await depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled" } }) }), "solana", 9, 1n, ac.signal)).end, "filled");
   // a sent answer whose end never comes: the stop reads down
   const stop = new AbortController();
   const hang = depositToEnd(() => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "sent" } }) }), "solana", 9, 1n, stop.signal);
   stop.abort();
-  assert.equal(await hang, "down");
+  assert.equal((await hang).end, "down");
 });
 
 test("Solana's reads: U_X's finalized balance per RPC, the costs at today's rent, the deadline on both clocks, the status for U_X and U_{s,i}", async () => {
@@ -250,16 +250,16 @@ test("Solana's reads: U_X's finalized balance per RPC, the costs at today's rent
     assert.ok(String(url).startsWith(DEPOSIT_STATUS_URL));
     return Response.json({ status: "SUCCESS", quoteResponse: { quote: { depositAddress: F.address }, quoteRequest: { recipient: F.u, refundTo } }, swapDetails: { amountOut: "20000000" } });
   }) as typeof fetch;
-  const d = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 30, 2_000), rpcOf("https://b.example", 40, 1_000)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.refund_id) });
+  const d = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 30, 2_000), rpcOf("https://b.example", 40, 1_000)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => ({ end: "filled", txs: [] }), fetch: status(F.refund_id) });
   const U = base58.encode(new Uint8Array(32).fill(5));
   const f = { ...F, u: U, deadline_ms: 1_500_000 };
   assert.deepEqual(await d.balances(f), [30n, 40n]);
   assert.deepEqual(await d.costs(f), { floor: 13_586_400n, perRung: 2_936_160n, keep: 650_240n });
   assert.equal(await d.past(f), false, "one RPC's finalized clock is still before the deadline");
   assert.equal(await d.past({ ...f, deadline_ms: 999_000 }), true);
-  const ok = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.refund_id) });
+  const ok = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => ({ end: "filled", txs: [] }), fetch: status(F.refund_id) });
   assert.deepEqual(await ok.status(F, new AbortController().signal), { status: "SUCCESS", delivered: 20_000_000n });
-  const bad = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => "filled", fetch: status(F.u) });
+  const bad = solanaPoolFollowDeps({ rpcs: [rpcOf("https://a.example", 0, 0), rpcOf("https://b.example", 0, 0)], program: base58.encode(new Uint8Array(32).fill(7)), deposit: async () => ({ end: "filled", txs: [] }), fetch: status(F.u) });
   assert.equal(await bad.status(F, new AbortController().signal), null, "a status whose refund is not U_{s,i} is no read");
 });
 
@@ -469,4 +469,250 @@ test("review P2 with P3 1: a legacy refunded record (the helper's word, no refun
   // a refunded record this build wrote (its refunded fact set at the chain's read) is followed on as it is
   const own = { kind: "pool_deposit" as const, stage: "refunded" as const, txs: [], created_ms: 1, follow: F, since_ms: 5, refunded: true as const };
   assert.equal(resumeOf(own), own);
+});
+
+// ------------------------------------------------------------------------------- card pool-deposit-op-txs
+
+const { base58: b58 } = await import("@scure/base");
+const sig = (n: number) => b58.encode(new Uint8Array(64).fill(n));
+const sol = (n: number) => ({ chain: "solana" as const, hash: sig(n) });
+
+test("pool-deposit-op-txs: depositToEnd yields the txs of both answers: the direct answer's landed txs, and the sent answer's txs once its end comes as a stage-only progress event", async () => {
+  const { depositToEnd } = await import("../src/pool-deposit-follow.ts");
+  const ac = new AbortController();
+  // the direct answer (no RPC took a send before the run's end): its landed txs
+  const direct = () => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled", txs: [sol(1), sol(2)] } }) });
+  assert.deepEqual(await depositToEnd(direct, "solana", 9, 1n, ac.signal), { end: "filled", txs: [sol(1), sol(2)] });
+  // the sent answer at its first send, the end as progress with no tx (pool-deposit.ts poolDepositKind)
+  const sent = (end: string) => (_p: unknown, ctx: { progress(s: string): void }) => ({
+    running: true,
+    after: Promise.resolve().then(() => setTimeout(() => (ctx.progress("sent"), ctx.progress(end)), 1)),
+    answer: () => ({ result: { stage: "sent", txs: [sol(3)] } }),
+  });
+  assert.deepEqual(await depositToEnd(sent("part_filled"), "solana", 9, 1n, ac.signal), { end: "part_filled", txs: [sol(3)] });
+  assert.deepEqual(await depositToEnd(sent("not_landed"), "solana", 9, 1n, ac.signal), { end: "not_landed", txs: [sol(3)] });
+  // a refusal has none; a tx of another shape is not taken
+  assert.deepEqual(await depositToEnd(() => ({ error: "not_funded" }), "solana", 9, 1n, ac.signal), { end: "not_funded", txs: [] });
+  const odd = () => ({ after: Promise.resolve(), answer: () => ({ result: { stage: "filled", txs: [{ chain: "solana", hash: 7 }, { chain: "near", hash: sig(4) }, sol(5)] } }) });
+  assert.deepEqual(await depositToEnd(odd, "solana", 9, 1n, ac.signal), { end: "filled", txs: [sol(5)] });
+});
+
+test("pool-deposit-op-txs: the follow writes only the txs its two-RPC read returns, after each landed deposit and once more before its end", async () => {
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  const heardAsked: string[][] = [];
+  const written: string[] = [];
+  w.deps.deposit = async (_f, amount) => (w.deposits.push(amount), { end: "filled", txs: [sol(1)] });
+  // the read: what the chain shows on both RPCs (sol(1) heard and read, sol(2) only listed, a third run's heard tx not read)
+  w.deps.landed = async (_f, heard) => (heardAsked.push(heard.map((t) => t.hash)), [sol(1), sol(2)]);
+  w.deps.txs = async (t) => void written.push(...t.map((x) => x.hash));
+  assert.equal(await followPoolQuote(F, w.deps), "in_pool");
+  assert.deepEqual(heardAsked, [[sig(1)], []], "after the deposit with its heard txs, then once at the end");
+  assert.deepEqual(written, [sig(1), sig(2)], "each written once");
+  // a read that fails at the end is no end: read again next round
+  const v = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  let fail = true, reads = 0;
+  v.deps.landed = async (_f, heard) => {
+    if (heard.length === 0) reads++;
+    if (heard.length === 0 && fail) throw ((fail = false), new Error("one RPC down"));
+    return [];
+  };
+  v.deps.txs = async () => {};
+  // inside the quote's deadline and the margin on the device's clock
+  v.deps.now = () => F.deadline_ms;
+  assert.equal(await followPoolQuote(F, v.deps), "in_pool");
+  assert.equal(reads, 2, "read again, then the end");
+});
+
+test("review P2-b: an end whose tx read keeps failing is read again until the quote's deadline, or the follow's first end, and the margin are past on the device's clock, then ends with the txs read so far", async () => {
+  const { POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
+  // the device's clock starts at `start` and moves on by `step` at each round's sleep
+  const run = async (start: number, step: number, f = F) => {
+    const w = world([
+      { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+      { bal: [0n, 0n], status: "SUCCESS", past: true },
+    ]);
+    const written: string[] = [];
+    let clock = start;
+    w.deps.deposit = async () => ({ end: "filled", txs: [sol(1)] });
+    w.deps.landed = async (_f, heard) => {
+      if (heard.length === 0) throw new Error("429");
+      return [sol(1)];
+    };
+    w.deps.txs = async (t) => void written.push(...t.map((x) => x.hash));
+    w.deps.now = () => clock;
+    const s0 = w.deps.sleep;
+    w.deps.sleep = async (ms, sg) => ((clock += step), s0(ms, sg));
+    const end = await followPoolQuote(f, w.deps);
+    return { end, aborted: w.deps.signal.aborted, written };
+  };
+  assert.equal((await run(F.deadline_ms, 0)).aborted, true, "inside the margin: read again each round, never ended by itself");
+  const past = await run(F.deadline_ms, POOL_TX_READ_MARGIN_MS + 1);
+  assert.deepEqual(past, { end: "in_pool", aborted: false, written: [sig(1)] }, "past it: the end, with the txs read so far");
+  // a quote with deadline_ms 0 and reads that never answer: it ends
+  assert.deepEqual(await run(Date.now(), POOL_TX_READ_MARGIN_MS + 1, { ...F, deadline_ms: 0 }), { end: "in_pool", aborted: false, written: [sig(1)] });
+});
+
+test("re-check P2: a follow first at its end long past the quote's deadline (the page opened late) still reads a failing tx read again: the margin runs from its own first end", async () => {
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  let fail = true, reads = 0;
+  w.deps.landed = async (_f, heard) => {
+    if (heard.length === 0) reads++;
+    if (heard.length === 0 && fail) throw ((fail = false), new Error("429"));
+    return [];
+  };
+  w.deps.txs = async () => {};
+  w.deps.deposit = async () => ({ end: "filled", txs: [sol(1)] });
+  w.deps.now = () => F.deadline_ms + 11 * 60_000;
+  assert.equal(await followPoolQuote(F, w.deps), "in_pool");
+  assert.equal(reads, 2, "not ended on the first round: read again, then the end");
+});
+
+test("pool-deposit-op-txs: the page's follower merges the txs into the op once each, and the app is sent them", async () => {
+  const { poolFollows } = await import("../src/pool-deposit-follow.ts");
+  const { opOf } = await import("../src/state.ts");
+  const rows = new Map<string, unknown>();
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) rows.set(k, v);
+      return rows.get(k);
+    },
+  };
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+    { bal: [FLOOR, FLOOR], status: "SUCCESS" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  let n = 0;
+  w.deps.deposit = async () => ({ end: "filled", txs: [sol(++n)] });
+  w.deps.landed = async (_f, heard) => [...heard, sol(1)];
+  // each round yields a turn, and the follow is stopped at 2 s, so a build that never ends it fails here and never hangs
+  const s0 = w.deps.sleep;
+  w.deps.sleep = async (ms, sg) => (await new Promise((r) => setTimeout(r, 1)), s0(ms, sg));
+  const host = poolFollows({ store: async () => store, deps: () => w.deps, decimals: () => 9, locks: () => null, now: () => 5 });
+  const quote = { deposit_address: "DEPOSIT", origin_asset: "nep141:base-usdc", min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
+  await host.quoted("op-1", "solana", quote, { scope: 777n, index: 3, wallet: "U_X", refundId: "ab".repeat(32) });
+  await Promise.race([host.idle(), new Promise((r) => setTimeout(r, 2_000))]);
+  host.stop();
+  await host.idle();
+  const op = rows.get("op-1") as { stage: string; txs: unknown[] };
+  assert.equal(op.stage, "in_pool");
+  assert.deepEqual(op.txs, [sol(1), sol(2)]);
+  assert.deepEqual(opOf("op-1", op)?.txs, [sol(1), sol(2)], "the app is sent them");
+});
+
+/** One Solana RPC: U_X's finalized signatures (`listed`) and each tx's finalized read (`txs`: hash -> answer or null). */
+function solRpc(listed: { signature: string; err: unknown }[], txs: Record<string, unknown>) {
+  const asked: [string, unknown][] = [];
+  const f = (async (method: string, params: unknown[]) => {
+    asked.push([method, params]);
+    if (method === "getSignaturesForAddress") return listed;
+    if (method === "getTransaction") return txs[params[0] as string] ?? null;
+    throw new Error(method);
+  }) as unknown as import("../../kit/src/trade/solana/send.ts").SolanaRpc;
+  return { f, asked };
+}
+
+test("pool-deposit-op-txs: Solana's read shows a tx only when both RPCs read it finalized, paid by U_X, with no error, a deposit instruction of the pool program", async () => {
+  const { solanaPoolFollowDeps } = await import("../src/pool-deposit-follow.ts");
+  const { SOLANA_POOL_TAG_DEPOSIT } = await import("../../kit/src/trade/solana/pool-deposit.ts");
+  const U = b58.encode(new Uint8Array(32).fill(5)), PROGRAM = b58.encode(new Uint8Array(32).fill(7)), OTHER = b58.encode(new Uint8Array(32).fill(8));
+  const DEPOSIT_DATA = b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...new Uint8Array(8).fill(1), ...new Uint8Array(32).fill(2)));
+  const tx = (s: string, o: { payer?: string; err?: unknown; program?: string; data?: string } = {}) => ({
+    slot: 9,
+    meta: { err: o.err ?? null },
+    transaction: { signatures: [s], message: { header: { numRequiredSignatures: 1 }, accountKeys: [o.payer ?? U, o.program ?? PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data: o.data ?? DEPOSIT_DATA }] } },
+  });
+  const good = (n: number) => [sig(n), tx(sig(n))] as const;
+  const answers = Object.fromEntries([
+    good(1), good(2), good(3),
+    [sig(4), tx(sig(4), { payer: OTHER })],
+    [sig(5), tx(sig(5), { err: { InstructionError: [0, "Custom"] } })],
+    [sig(6), tx(sig(6), { program: OTHER })],
+    good(7),
+    // review P3 3: the pool program's other instructions (a withdraw's tag) are no deposit
+    [sig(8), tx(sig(8), { data: b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT + 1, ...new Uint8Array(40))) })],
+    [sig(9), tx(sig(9), { data: "" })],
+  ]);
+  const listed: { signature: string; err: unknown }[] = [1, 3, 4, 5, 6, 8, 9].map((n): { signature: string; err: unknown } => ({ signature: sig(n), err: null })).concat([{ signature: sig(7), err: { InstructionError: [0, "Custom"] } }]);
+  const a = solRpc(listed, answers);
+  const b = solRpc(listed.slice(0, 1), answers);
+  const d = solanaPoolFollowDeps({ rpcs: [a.f, b.f], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
+  const f = { ...F, u: U };
+  // sig(2) is heard only (not listed yet): read on both, shown. sig(1) and sig(3) listed and read on both: shown
+  assert.deepEqual(await d.landed!(f, [sol(2)]), [sol(2), sol(1), sol(3)]);
+  for (const [m, p] of a.asked) {
+    if (m === "getSignaturesForAddress") assert.deepEqual(p, [U, { commitment: "finalized", limit: 1000 }]);
+    if (m === "getTransaction") assert.deepEqual((p as unknown[])[1], { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 });
+  }
+  // a hash already shown is not read again; review P3 2: nor one both RPCs answered as no deposit
+  a.asked.length = 0;
+  b.asked.length = 0;
+  assert.deepEqual(await d.landed!(f, [], new Set([sig(1), sig(3)])), []);
+  for (const r of [a, b]) assert.deepEqual(r.asked.filter(([m]) => m === "getTransaction"), [], "nothing read again");
+  // a listing that fails on one RPC is no read: it throws, read again next round
+  const down = solanaPoolFollowDeps({ rpcs: [a.f, (async () => { throw new Error("down"); }) as never], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
+  await assert.rejects(down.landed!(f, []));
+});
+
+test("review P2-a: a candidate whose read throws or answers null on either RPC is no answer: landed throws (read again), never a deposit with no tx", async () => {
+  const { solanaPoolFollowDeps } = await import("../src/pool-deposit-follow.ts");
+  const { SOLANA_POOL_TAG_DEPOSIT } = await import("../../kit/src/trade/solana/pool-deposit.ts");
+  const U = b58.encode(new Uint8Array(32).fill(5)), PROGRAM = b58.encode(new Uint8Array(32).fill(7)), OTHER = b58.encode(new Uint8Array(32).fill(8));
+  const data = b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...new Uint8Array(40)));
+  const tx = (s: string, payer = U) => ({ slot: 9, meta: { err: null }, transaction: { signatures: [s], message: { accountKeys: [payer, PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data }] } } });
+  const listed = [{ signature: sig(11), err: null }];
+  const f = { ...F, u: U };
+  const throwing = (async (method: string) => {
+    if (method === "getSignaturesForAddress") return listed;
+    throw new Error("429");
+  }) as never;
+  for (const [what, other] of [
+    ["not indexed yet (null)", solRpc(listed, {}).f],
+    ["a 429", throwing],
+    ["another payer (the RPCs disagree)", solRpc(listed, { [sig(11)]: tx(sig(11), OTHER) }).f],
+  ] as const) {
+    const first = solRpc(listed, { [sig(11)]: tx(sig(11)) }).f;
+    await assert.rejects(solanaPoolFollowDeps({ rpcs: [first, other], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), what);
+    await assert.rejects(solanaPoolFollowDeps({ rpcs: [other, first], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), `${what}, the other way`);
+  }
+  // both answered and both agree it is no deposit: rejected, and not read again
+  const no = solRpc(listed, { [sig(11)]: tx(sig(11), OTHER) });
+  const d = solanaPoolFollowDeps({ rpcs: [no.f, no.f], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
+  assert.deepEqual(await d.landed!(f, []), []);
+  no.asked.length = 0;
+  assert.deepEqual(await d.landed!(f, []), []);
+  assert.deepEqual(no.asked.map(([m]) => m), ["getSignaturesForAddress", "getSignaturesForAddress"]);
+});
+
+test("pool-deposit-op-txs: past its deadline the follow ends only once a refund move's heard tx is settled (read final, or past the move's deadline)", async () => {
+  const w = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  const answers = [false, false, true];
+  let asked = 0;
+  const refund = Object.assign(async () => "none" as const, { settle: async () => answers[asked++] ?? true });
+  w.deps.refund = refund;
+  assert.equal(await followPoolQuote(F, w.deps), "in_pool");
+  assert.equal(asked, 3, "read again each round until settled");
+  // a carry with no settle (none given) ends as before
+  const v = world([
+    { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+    { bal: [0n, 0n], status: "SUCCESS", past: true },
+  ]);
+  v.deps.refund = async () => "none";
+  assert.equal(await followPoolQuote(F, v.deps), "in_pool");
+  assert.ok(v.sleeps.length <= 2);
 });

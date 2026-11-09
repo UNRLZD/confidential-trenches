@@ -101,7 +101,7 @@ import type { Deferred, KindContext } from "./api.ts";
 import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
 import { pageRpc } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { PAGE_SOL_PIN, pageEvmPoolRpcs, pageSolanaRpcs } from "./pool-testnet.ts";
+import { PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaRpcs } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
@@ -307,7 +307,7 @@ async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: Abort
     if (amount === 0n) return null;
     if (!noted) return `holds ${String(a)}, with no deposit note on this device for its index to carry it into the pool`;
     signal.throwIfAborted();
-    const end = await ux.deposit(f, amount, signal);
+    const { end } = await ux.deposit(f, amount, signal);
     if (end !== "filled" && end !== "part_filled") return `holds ${String(a)}; its carry into the pool ended ${end}: restore again to carry it`;
     before = a;
   }
@@ -474,7 +474,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), signal })).notes;
           // the notes only: no W is read or named to a provider for a record the page keeps none of
-          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false })).notes;
+          // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
+          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin), history: pageEvmHistory(p.pin) })).notes;
         });
         const walked: Walked[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {

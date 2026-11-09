@@ -22,7 +22,7 @@
 //     an id NEAR reads as money is noted for the held reads; and that reader is the one the scope's restoreDepositIds
 //     call right after it is handed;
 //   - ux_carry: a U_X is carried as the follow carries it: the lower of two equal balances, the follow's floor and
-//     askOf's ask, the page's pool.deposit, read again after a filled one, and named when it does not fill or a filled
+//     askOf's ask, the page's pool.deposit (its run's end, card pool-deposit-op-txs), read again after a filled one, and named when it does not fill or a filled
 //     one leaves the balance as it was; a U_X whose index has no deposit note in the store is named with its index,
 //     address and balance, never carried (card notes-plan-at-restored-index makes that note); the carry called is this
 //     one, on the scope's own U_X reads and held map;
@@ -92,7 +92,7 @@ const UX_CARRY = new RegExp(
   `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null;for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\7!==\\8\\)return${Q}reads [^${Q}]*${Q};` +
     `if\\(\\6!==null&&\\7>=\\6\\)return${Q}holds [^${Q}]*after a deposit from it filled: read again${Q};if\\(\\7<\\2\\.ladder\\.min\\)return null;let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\7<\\9\\.floor\\)return null;` +
     `let (${N})=${N}\\(\\2\\.ladder,\\7,\\9\\.perRung,\\9\\.keep\\);if\\(\\10===0n\\)return null;if\\(!\\4\\)return${Q}holds \\$\\{String\\(\\7\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q};` +
-    `\\5\\.throwIfAborted\\(\\);let (${N})=await \\2\\.deposit\\(\\3,\\10,\\5\\);` +
+    `\\5\\.throwIfAborted\\(\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\10,\\5\\);` +
     `if\\(\\11!==${Q}filled${Q}&&\\11!==${Q}part_filled${Q}\\)return${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q};\\6=\\7\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:

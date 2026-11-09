@@ -1,0 +1,104 @@
+{
+ "good": {
+  "base": "https://ct-api.unrealized.trade",
+  "reads": [
+   {
+    "route": "withdraw-fee",
+    "asked": "/v1/withdraw/fee?token=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "124994e76d0ddf663082e7975ce4340074be6eb9"
+    },
+    "body": "{\"relayer_account\":\"4519129d35447942d92ef046ffa52af0430fb06b95b59936d7173290a6972756\",\"fee_recipient\":\"fees.unrlzd.near\",\"relay_fee\":\"177073\",\"gp\":\"100000000\",\"px\":\"3.52748385145\",\"g_w\":\"92505000000000\",\"valid_until_block\":223767401}"
+   },
+   {
+    "route": "pool-fee",
+    "asked": "/v1/pool/fee?cluster=devnet&pool=92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+    "status": 200,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "124994e76d0ddf663082e7975ce4340074be6eb9"
+    },
+    "body": "{\"chain\":\"solana\",\"cluster\":\"devnet\",\"program\":\"9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8\",\"pool\":\"92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr\",\"fee_payer\":\"9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb\",\"epoch_ms\":60000,\"epoch_start_ms\":1794227400000,\"fee\":\"1300000\",\"step\":\"100000\"}"
+   }
+  ],
+  "note": "the deployed helper (X-Helper-Commit 124994e7) read 2026-11-09T12:30:31Z with Origin SIGN_HOST: both fee routes answer 200, Retry-After exposed; PASS"
+ },
+ "good_busy": {
+  "base": "http://127.0.0.1:60332",
+  "reads": [
+   {
+    "route": "withdraw-fee",
+    "asked": "/v1/withdraw/fee?token=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "status": 503,
+    "headers": {
+     "retry-after": "2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "0000000000000000000000000000000000000000"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "route": "pool-fee",
+    "asked": "/v1/pool/fee?cluster=devnet&pool=92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+    "status": 503,
+    "headers": {
+     "retry-after": "2",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "0000000000000000000000000000000000000000"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   }
+  ],
+  "note": "this card's apps/helper/src/server.ts (branch card/withdraw-fee-busy-waits at abbd2a43) run in process (scratchpad wfbw-record-busy.ts) with the withdraw fee quoter refusing its reads (FeeReadRefused) and the devnet pool's fee read failing, read 2026-11-09 ~12:32Z: both routes 503 upstream with Retry-After 2 (UPSTREAM_RETRY_AFTER_S); PASS, a busy answer the device waits out"
+ },
+ "bad_pre_card": {
+  "base": "http://127.0.0.1:60337",
+  "reads": [
+   {
+    "route": "withdraw-fee",
+    "asked": "/v1/withdraw/fee?token=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "status": 503,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "0000000000000000000000000000000000000000"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   },
+   {
+    "route": "pool-fee",
+    "asked": "/v1/pool/fee?cluster=devnet&pool=92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+    "status": 503,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "x-helper-commit": "0000000000000000000000000000000000000000"
+    },
+    "body": "{\"error\":{\"code\":\"upstream\"}}"
+   }
+  ],
+  "note": "the same run on origin/main f6066882, before this card: both routes 503 upstream with no Retry-After, a busy answer naming no wait; FAIL"
+ },
+ "sign_good": {
+  "part": "sign",
+  "sign": "http://127.0.0.1:55972",
+  "want": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "pin": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "sha384": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "note": "this card's signing page build (branch card/withdraw-fee-busy-waits at 71baf5eb: packages/signpage/index.html and public/app.js, build-app --check rc 0) served on 127.0.0.1 as SIGN_HOST serves / and /app.js (scratchpad wfbw-serve-sign.mjs), read 2026-11-09T13:11:11Z: the index pins this commit's /app.js and serves it; PASS"
+ },
+ "sign_bad_pre_card": {
+  "part": "sign",
+  "sign": "https://confidential.unrealized.trade",
+  "want": "sha384-e33JYe9J4WBBqfpPK+IMtnFqD2jgtNhoTUlafXkRZXKKmogt5ztWEBiktZKnWJq9",
+  "pin": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+  "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+  "note": "SIGN_HOST as served before this card, read 2026-11-09T13:10:41Z: its index pins and serves sha384-1aGrtaUQ..., not this commit's build; FAIL"
+ }
+}

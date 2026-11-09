@@ -19,7 +19,16 @@
 //     function), with kit-v1.6 and kit-v1.5 as their own levels below it (`?\`current\`:i(1,6)?\`1.6\`:i(1,5)?\`1.5\`:\`1.4\``),
 //     and the state shaper the shaper calls leaves every pool_deposit op out at both (`e.filter(e=>e.kind!==\`pool_deposit\`)`):
 //     kit-v1.6 and before have no kind for a pool deposit's op; the answer shaper it calls has kit-v1.6's own branch,
-//     its state through that state shaper and every other result (deposit.confirm's moved_out) as it is.
+//     its state through that state shaper and every other result (deposit.confirm's moved_out) as it is;
+//   - (card signpage-state-holdings) kit-v1.7 is a level of its own below kit 1.8, and the state shaper sends every level
+//     below the current one each position with no decimals (`n=Al(t);if(e===\`1.7\`)return n;`, Al being
+//     `e=>({...e,positions:e.positions.map(({decimals:e,...t})=>t)})`): kit-v1.7's schema refuses the key, whole state
+//     and all. judge(answer, era) also reads a record of an earlier build at the version and levels it was cut at;
+//   - (card pool-deposit-op-txs) a kit-v1.7+ app's pool_deposit op carries the txs that moved its money, each shown only
+//     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
+//     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
+//     a refund move's NEAR tx is read wait_until FINAL, sent by the release relayer to intents.near, with SuccessValue
+//     on both RPCs (`return i&&a`), and the op adds it only once tx_final is set.
 // A page without them sends a kit-v1.4 app a state with a stage or field that kit refuses whole, so that app stops
 // receiving states. That the page applies them to every state, answer and event it posts is
 // packages/signpage/test/kit-version.test.ts's, against kit-v1.4's own schema, with its mutant sweep.
@@ -36,8 +45,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.7";
-export const LEVELS = ["1.6", "1.5"];
+export const KIT = "1.8";
+export const LEVELS = ["1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -61,6 +70,8 @@ const READER = /function ([\w$]+)\([\w$]+\)\{[^{}]{0,200}?\.type!==`hello`[^{}]{
 const LEVEL = /function ([\w$]+)\(([\w$]+)\)\{let ([\w$]+)=[\w$]+\.exec\(\2\);if\(!\3\)return`1\.4`;[^{}]{0,200}?([\w$]+)\(([\w$]+)\[0\],\5\[1\]\)\?`current`:((?:\4\(1,\d{1,4}\)\?`1\.\d{1,4}`:)*)`1\.4`\}/;
 /** The ops filter that leaves out a pool deposit's op (card pool-deposit-stages), as minified. */
 const POOL_FILTER = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\2\.filter\(([\w$]+)=>\3\.kind!==`pool_deposit`\)/;
+/** The positions with no decimals (card signpage-state-holdings), as minified. */
+const NO_DECIMALS = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\(\{\.\.\.\2,positions:\2\.positions\.map\(\(\{decimals:[\w$]+,\.\.\.([\w$]+)\}\)=>\3\)\}\)/;
 
 /** The pairs of a `key:\`value\`` object literal, as an object. */
 const pairsOf = (src) => Object.fromEntries(src.split(",").map((p) => p.split(":").map((x) => x.replace(/`/g, ""))));
@@ -85,13 +96,22 @@ function helloPath(js) {
   // filter, and the answer shaper's kit-v1.6 branch through that state shaper with every other kind's result as it is
   // (deposit.confirm keeps moved_out at kit-v1.6)
   const filter = POOL_FILTER.exec(js)?.[1];
+  const noDec = NO_DECIMALS.exec(js)?.[1];
   const stateFn = shaper ? esc(shaper[5]) : null;
   const poolOps = filter && stateFn
-    ? (new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null)
+    ? (new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\.map\\(`).exec(js)?.[0] ??
+      // card signpage-state-holdings: every level below the current one first takes the positions with no decimals
+      (noDec
+        ? new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=${esc(noDec)}\\(\\2\\);if\\(\\1===\`1\\.7\`\\)return \\3;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
+        : null))
     : null;
+  const decimals = noDec && poolOps && poolOps.includes(`=${noDec}(`) ? poolOps : null;
   const result16 = shaper && stateFn
-    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\(\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
+    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.7\`\\|\\|)?\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
     : null;
+  // review of edc6815f: at 1.8 the answer shaper's kit-v1.6 branch also takes kit-v1.7 (`e===\`1.7\`||e===\`1.6\``), so a
+  // kit-v1.7 app's deposit.confirm keeps its facts; a 1.7-era build has no such alternative
+  const result17 = result16 && /===`1\.7`\|\|/.test(result16) ? result16 : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
@@ -115,8 +135,22 @@ function helloPath(js) {
     levels,
     poolOps,
     result16,
+    decimals,
+    result17,
   };
 }
+
+/** The pool deposit op's tx reads, as minified (card pool-deposit-op-txs): U_X's listing; each tx kept only once both
+ *  RPCs answered it (a read that fails or answers null throws, two that disagree throw; review P2-a); the NEAR move tx
+ *  read FINAL on both, its one execute_intents carrying this move's own intent alone (its signer and nonce; review P1);
+ *  and the op adding a move tx only once final, never one let go. */
+const OP_TXS = {
+  landed: /`getSignaturesForAddress`,\[[\w$]+\.u,\{commitment:`finalized`,limit:1e3\}\]/,
+  every: /`getTransaction`,\[[\w$]+,\{commitment:`finalized`,encoding:`json`,maxSupportedTransactionVersion:0\}\]\)\);if\(([\w$]+)\.some\(([\w$]+)=>typeof \2!=`object`\|\|!\2\)\)throw Error\(`[^`]*`\);let\[([\w$]+),([\w$]+)\]=\1\.map\(([\w$]+)=>[\w$]+\(\5,[\w$]+,[\w$]+\.u,[\w$]+\.program\)\);if\(\3!==\4\)throw Error\(/,
+  nearFinal: /function ([\w$]+)\([\w$]+,([\w$]+)\)\{[^]{0,200}?method_name:([\w$]+)[^]{0,60}?if\(\3!==`execute_intents`[^]{0,300}?\.signed\.length!==1\)return!1;[^]{0,200}?let ([\w$]+)=JSON\.parse\([\w$]+\.payload\);return typeof \4==`object`&&!!\4&&\4\.signer_id===\2\.signer&&\4\.nonce===\2\.nonce\}async function [\w$]+\([\w$]+,[\w$]+,([\w$]+)\)\{[^]{0,200}?sender_account_id:([\w$]+),wait_until:`FINAL`\}\)[^]{0,300}?final_execution_status!==`FINAL`[^]{0,200}?`SuccessValue`[^]{0,200}?\.signer_id!==\6\|\|[\w$]+\.receiver_id!==`intents\.near`\?!1:Array\.isArray\(([\w$]+)\.actions\)&&\7\.actions\.length===1&&\1\(\7\.actions\[0\],\5\)\}catch\{return!1\}\},\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[[\w$]+\([\w$]+\[0\]\),[\w$]+\([\w$]+\[1\]\)\]\);return \8&&\9\}/,
+  moveShown: /\.filter\(([\w$]+)=>\1\.final===!0&&\1\.dropped!==!0&&typeof \1\.hash==`string`\)\.map\(([\w$]+)=>\(\{chain:`near`,hash:\2\.hash\}\)\);return ([\w$]+)\.length===0\?[\w$]+:[\w$]+\([\w$]+,\3\)\}/,
+};
+const opTxsOf = (js) => Object.fromEntries(Object.entries(OP_TXS).map(([k, re]) => [k, re.exec(js)?.[0] ?? null]));
 
 /** Every post to the frame's parent, as written or as minified: the one through the shaper is the only one there may be. */
 const POSTS = /parent\.postMessage\(/g;
@@ -128,15 +162,17 @@ export function facts(index, js) {
     .map((m) => pairsOf(m[1]))
     .filter((o) => Object.hasOwn(o, "quote_checked") && Object.hasOwn(o, "halted"));
   const keys = [...js.matchAll(ARRAYS)].map((m) => m[1].split(",").map((s) => s.slice(1, -1))).filter((l) => l[0] === "release" && l.includes("ops"));
-  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js), posts: (js.match(POSTS) ?? []).length };
+  return { index, sha384: sha384(js), maps, keys, hello: helloPath(js), posts: (js.match(POSTS) ?? []).length, opTxs: opTxsOf(js) };
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** The same stage map in any key order. */
 const sameMap = (m, want) => !!m && typeof m === "object" && same(Object.keys(m).sort(), Object.keys(want).sort()) && Object.entries(want).every(([k, v]) => m[k] === v);
 
-/** The verdict on an answer { index, sha384, maps, keys, hello, posts }. */
-export function judge(a) {
+/** The version and levels a build is judged at: this card's, or (`era`) an earlier build's, for its own records. */
+export const ERA = { kit: KIT, levels: LEVELS };
+/** The verdict on an answer { index, sha384, maps, keys, hello, posts }, at `era`'s kit and levels. */
+export function judge(a, era = ERA) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
@@ -151,10 +187,12 @@ export function judge(a) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== KIT) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${KIT}: a kit-v${KIT} app's pool deposit op has no level of its own`);
-    if (!same(h.levels, LEVELS)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(LEVELS)}: a kit-v1.6 app is sent what it has no kind for`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : "position decimals"} has no level of its own`);
+    if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
+    if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
     if (typeof h.result16 !== "string") bad("kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out");
+    if (era.kit !== "1.7" && typeof h.result17 !== "string") bad("kit-v1.7's answers do not go through its own level: its deposit.confirm is sent with no facts");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);
@@ -167,6 +205,11 @@ export function judge(a) {
     for (const [from, to] of Object.entries(MAP)) if (map[from] !== to) bad(`the map sends kit-v1.4 ${from} as ${map[from]}, not ${to}`);
   }
   if (!(a?.keys ?? []).some((l) => same([...l].sort(), [...V1_4_KEYS].sort()))) bad("the bundle has no kit-v1.4 state field list of exactly its twelve fields");
+  // card pool-deposit-op-txs: a tx shown on the pool_deposit op is one the device read on both RPCs
+  const o = a?.opTxs;
+  if (typeof o?.landed !== "string" || typeof o?.every !== "string") bad("the pool deposit op's txs are not read on both of the pool chain's RPCs: a tx one RPC alone names may be shown, or a landed deposit shows none");
+  if (typeof o?.nearFinal !== "string") bad("a refund move's tx is not read FINAL with success on both NEAR RPCs, sent by the release relayer to intents.near, carrying that move's own intent alone");
+  if (typeof o?.moveShown !== "string") bad("the pool deposit op shows a refund move's tx before it is read final");
   return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
 }
 

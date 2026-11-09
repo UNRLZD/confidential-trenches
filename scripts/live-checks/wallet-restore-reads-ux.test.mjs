@@ -89,6 +89,8 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, "if($1<$2.keep)return null;").ux_carry, false, "another floor");
   assert.equal(mut(/if\(([\w$]+)!==null&&([\w$]+)>=\1\)return`holds/, "if(!1)return`holds").ux_carry, false, "a filled deposit that moved nothing carried on");
   assert.equal(mut(/if\(([\w$]+)!==`filled`&&\1!==`part_filled`\)return`holds/, "if($1===`failed`)return`holds").ux_carry, false, "a carry that did not fill passed");
+  // card pool-deposit-op-txs: the follow's deposit answers its run ({ end, txs }); the run read as its end never fills
+  assert.equal(mut(/let\{end:([\w$]+)\}=await ([\w$]+)\.deposit\(/, "let $1=await $2.deposit(").ux_carry, false, "the deposit's run read as its end");
   assert.equal(mut(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1zz$2({chain:").ux_wired, false, "other deps than the follow's");
   assert.equal(mut(/`https:\/\/solana\.api\.pocket\.network`\]\);function/, "`https://ct-api.unrealized.trade`]);function").ux_pair, false, "our helper as the second");
   assert.equal(mut(/`https:\/\/solana\.api\.pocket\.network`\]\);function/, "`https://api.mainnet-beta.solana.com`]);function").ux_pair, false, "the operator that refuses a page as the second");

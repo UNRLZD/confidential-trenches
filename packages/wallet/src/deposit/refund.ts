@@ -20,7 +20,7 @@
 //   its own refusal to an empty body (ask.probe) gets no new quote and no signature.
 // Nothing here logs. The request names U, the asset and the amount; the intent is U's own.
 import { HELPER_FETCH_INIT, HELPER_INTENTS_CODES, type HelperIntentsCode, type HelperSignedIntent, type OneClickRequest } from "@blindfill/kit";
-import { base64 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { readCapped } from "./capped.ts";
 import { askDepositQuote, checkPoolDepositWallet, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_DESTINATION, type DepositQuoteReply, type PoolDepositChain } from "./quote.ts";
 
@@ -167,13 +167,15 @@ export interface RefundMoveDeps<Q, I> {
 
 /** sent: recorded and handed to the relayer (its answer read as data only); under_min: waits for withdraw.open;
  *  refused: nothing signed (a quote off the request, the helper down, a read that moved), tried again on a later round. */
-export type RefundMoveResult = { kind: "sent"; move: MoveRecord; status: number; code: HelperIntentsCode | null } | { kind: "under_min" } | { kind: "refused"; why: string };
+export type RefundMoveResult = { kind: "sent"; move: MoveRecord; status: number; code: HelperIntentsCode | null; tx: string | null } | { kind: "under_min" } | { kind: "refused"; why: string };
 
 /** The relayer's answer is {tx_hash} or {error: {code}}: anything longer is not one. */
 export const INTENTS_ANSWER_MAX_BYTES = 1_024;
 
-/** POST /v1/intents with `body`: the HTTP status (0 when none came) and its listed code, or null. */
-async function postIntents(body: string, fetchFn: typeof fetch, signal?: AbortSignal): Promise<{ status: number; code: HelperIntentsCode | null }> {
+/** POST /v1/intents with `body`: the HTTP status (0 when none came), its listed code or null, and (card
+ *  pool-deposit-op-txs) the tx_hash of a 200 {tx_hash} answer as heard, base58 of 32 bytes, or null: data only, which a
+ *  caller shows only once its own reads find that tx final. */
+async function postIntents(body: string, fetchFn: typeof fetch, signal?: AbortSignal): Promise<{ status: number; code: HelperIntentsCode | null; tx: string | null }> {
   try {
     const timeout = AbortSignal.timeout(RELEASE_INTENTS_TIMEOUT_MS);
     const res = await fetchFn(RELEASE_INTENTS_URL, {
@@ -185,18 +187,31 @@ async function postIntents(body: string, fetchFn: typeof fetch, signal?: AbortSi
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     let code: HelperIntentsCode | null = null;
+    let tx: string | null = null;
     try {
       const j: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readCapped(res, INTENTS_ANSWER_MAX_BYTES)));
       const e = typeof j === "object" && j !== null && Object.hasOwn(j, "error") ? (j as { error: unknown }).error : undefined;
       const c = typeof e === "object" && e !== null && Object.hasOwn(e, "code") ? (e as { code: unknown }).code : undefined;
       if (typeof c === "string" && (HELPER_INTENTS_CODES as readonly string[]).includes(c) && res.status >= 400 && res.status < 500) code = c as HelperIntentsCode;
+      const h = typeof j === "object" && j !== null && Object.hasOwn(j, "tx_hash") ? (j as { tx_hash: unknown }).tx_hash : undefined;
+      if (res.status === 200 && e === undefined && typeof h === "string" && txHashOk(h)) tx = h;
     } catch {
       code = null;
+      tx = null;
     }
-    return { status: res.status, code };
+    return { status: res.status, code, tx };
   } catch {
     signal?.throwIfAborted();
-    return { status: 0, code: null };
+    return { status: 0, code: null, tx: null };
+  }
+}
+
+/** A NEAR tx hash: base58 of exactly 32 bytes. */
+function txHashOk(h: string): boolean {
+  try {
+    return base58.decode(h).length === 32;
+  } catch {
+    return false;
   }
 }
 
@@ -260,6 +275,6 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
   await deps.record(move);
   // 4. the send: the relayer's answer is data (its code read for the follow's pace); the follow reads the chain for the
   // move's debit
-  const { status, code } = await postIntents(JSON.stringify({ signed_intent: signed }), deps.fetchFn ?? fetch, deps.signal);
-  return { kind: "sent", move, status, code };
+  const { status, code, tx } = await postIntents(JSON.stringify({ signed_intent: signed }), deps.fetchFn ?? fetch, deps.signal);
+  return { kind: "sent", move, status, code, tx };
 }
