@@ -2,19 +2,19 @@
  "good": {
   "key": "wallet-restore-id-reader",
   "url": "local build",
-  "at": "2026-11-09T03:48:46.844Z",
+  "at": "2026-11-09T04:51:10.608Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-Yok1RIvFcaog0ekGD/RJY0VRQAUkfkiBrAN38GLYBBn4jGKRqNV2Q0fx7gJcMhVd",
+   "integrity": "sha384-hDkzBPDVBm8yOzlXYCUycoGptaOldnWxwrl0teRzh0MhBkJ9OWGF9GdILq5CAbKp",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 813600,
-   "sha384": "sha384-Yok1RIvFcaog0ekGD/RJY0VRQAUkfkiBrAN38GLYBBn4jGKRqNV2Q0fx7gJcMhVd",
+   "bytes": 814363,
+   "sha384": "sha384-hDkzBPDVBm8yOzlXYCUycoGptaOldnWxwrl0teRzh0MhBkJ9OWGF9GdILq5CAbKp",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -36,12 +36,14 @@
     "ids_ux_push": 1,
     "busy_wait": 1,
     "pair_wrong": 1,
+    "id_keep": 1,
+    "id_signout": 1,
     "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "ba9b9fe6c0e51353aa070167632b6a1edcfe8bf4230d31d14edecbdd982ac24f"
+   "unused": "1952996eb2ea0f4aae76f6681053c1a61d7e7ce5139064fa72047b799523d01c"
   },
   "rpc": {
    "rpc_0": {
@@ -143,7 +145,7 @@
  "bad_main_bundle": {
   "key": "wallet-restore-id-reader",
   "url": "local build of main-610143c2",
-  "at": "2026-11-09T03:48:47.660Z",
+  "at": "2026-11-09T04:51:12.103Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
@@ -177,12 +179,14 @@
     "ids_ux_push": 0,
     "busy_wait": 0,
     "pair_wrong": 0,
+    "id_keep": 0,
+    "id_signout": 0,
     "seed_per_use_lock": 0
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "93e6bd355c3dba1c53075bbec6e57c5e41436ce878d2df3f7b15b47b3dbcf527"
+   "unused": "363b0cc1dfb6e2491288b55b2bbfc8f18b1bba93e1cec3ea7452f615177b155c"
   },
   "rpc": {
    "rpc_0": {
@@ -284,7 +288,7 @@
  "bad_live_before": {
   "key": "wallet-restore-id-reader",
   "url": "https://confidential.unrealized.trade",
-  "at": "2026-11-09T03:48:49.029Z",
+  "at": "2026-11-09T04:51:13.480Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
@@ -318,12 +322,14 @@
     "ids_ux_push": 0,
     "busy_wait": 0,
     "pair_wrong": 0,
+    "id_keep": 0,
+    "id_signout": 0,
     "seed_per_use_lock": 0
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "b44187d5fc02bd7517ffd4601900a6299e2121b9adcd559bbb81ef0abce751fe"
+   "unused": "49c35415661b27d652c4134781841604d972ba81475c488bacade5dae4c25a20"
   },
   "rpc": {
    "rpc_0": {
@@ -425,19 +431,19 @@
  "bad_no_cors": {
   "key": "wallet-restore-id-reader",
   "url": "https://confidential.unrealized.trade",
-  "at": "2026-11-09T03:48:52.195Z",
+  "at": "2026-11-09T04:51:16.871Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-Yok1RIvFcaog0ekGD/RJY0VRQAUkfkiBrAN38GLYBBn4jGKRqNV2Q0fx7gJcMhVd",
+   "integrity": "sha384-hDkzBPDVBm8yOzlXYCUycoGptaOldnWxwrl0teRzh0MhBkJ9OWGF9GdILq5CAbKp",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 813600,
-   "sha384": "sha384-Yok1RIvFcaog0ekGD/RJY0VRQAUkfkiBrAN38GLYBBn4jGKRqNV2Q0fx7gJcMhVd",
+   "bytes": 814363,
+   "sha384": "sha384-hDkzBPDVBm8yOzlXYCUycoGptaOldnWxwrl0teRzh0MhBkJ9OWGF9GdILq5CAbKp",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -459,12 +465,14 @@
     "ids_ux_push": 1,
     "busy_wait": 1,
     "pair_wrong": 1,
+    "id_keep": 1,
+    "id_signout": 1,
     "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "45154d3514d3c6387dd553375266072a835cfa595ce3bdfe7bd561a34f7f3205"
+   "unused": "e3ff988e88abd7284ddc637d5caafddcc35e2068b6bc865b26f2630bd14b1eb0"
   },
   "rpc": {
    "rpc_0": {
@@ -556,19 +564,19 @@
  "bad_catch_done": {
   "key": "wallet-restore-id-reader",
   "url": "local build of catch-mutant",
-  "at": "2026-11-09T03:48:49.792Z",
+  "at": "2026-11-09T04:51:14.319Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-Xcb+FQ4snyCIiKu5mME8zIhIaxqFcDbzcSC2Wb9vxi2PnmZMw6+aAL8wdotcTEwP",
+   "integrity": "sha384-vJJvmU/MEE8150Wg47mC4vf5t6r5hmLWHp5YFG9EULoe6w8Hvg9K0/4e3/47XWS5",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 813523,
-   "sha384": "sha384-Xcb+FQ4snyCIiKu5mME8zIhIaxqFcDbzcSC2Wb9vxi2PnmZMw6+aAL8wdotcTEwP",
+   "bytes": 814286,
+   "sha384": "sha384-vJJvmU/MEE8150Wg47mC4vf5t6r5hmLWHp5YFG9EULoe6w8Hvg9K0/4e3/47XWS5",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -590,12 +598,14 @@
     "ids_ux_push": 1,
     "busy_wait": 1,
     "pair_wrong": 1,
+    "id_keep": 1,
+    "id_signout": 1,
     "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "4ac6cf4ea7121a50239dfd7ce0e6df4d59bd7589dbbbefdb61605ecd854529d0"
+   "unused": "01e4a4c3296775cf9ae48a85de7f575ddcb2183e45cf429c680f8ec0557ffb76"
   },
   "rpc": {
    "rpc_0": {
@@ -697,19 +707,19 @@
  "bad_busy_guard": {
   "key": "wallet-restore-id-reader",
   "url": "local build of busy-guard",
-  "at": "2026-11-09T03:48:50.602Z",
+  "at": "2026-11-09T04:51:15.162Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-vMhgKQx8LQPYtUNHoA10b50bF+c8F5U5RCLoGiABb9vyiS7GAKaIj55tEqb2VbKf",
+   "integrity": "sha384-UVOE5WuTcyRv7nXyqgRTLm0JUBkEvr4dfpLH4llj2cEbPx058KFEs8LrSyg9sNMf",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 813611,
-   "sha384": "sha384-vMhgKQx8LQPYtUNHoA10b50bF+c8F5U5RCLoGiABb9vyiS7GAKaIj55tEqb2VbKf",
+   "bytes": 814374,
+   "sha384": "sha384-UVOE5WuTcyRv7nXyqgRTLm0JUBkEvr4dfpLH4llj2cEbPx058KFEs8LrSyg9sNMf",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -731,12 +741,14 @@
     "ids_ux_push": 1,
     "busy_wait": 0,
     "pair_wrong": 1,
+    "id_keep": 1,
+    "id_signout": 1,
     "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "1cdafd811e5b91c7cab7366604f53b81f772b25e89069f0a453015f605a66a70"
+   "unused": "67d4de20bc983f3f2dab0a03da5a64542bfce70c71ff572defa824a427d2d406"
   },
   "rpc": {
    "rpc_0": {
@@ -838,19 +850,19 @@
  "bad_pair_guard": {
   "key": "wallet-restore-id-reader",
   "url": "local build of pair-guard",
-  "at": "2026-11-09T03:48:51.376Z",
+  "at": "2026-11-09T04:51:15.997Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-FIH/T/+kk3EK2r4BGrHUztIBRwHQPbdJZf1rXdLGVpZMpPNaP8NMmtZUT1aRFZLN",
+   "integrity": "sha384-Vq0dDlFXha7ggaqovFZZAs2tXC+yo9ZyyAhmTOeFTXw6awMQZrbzubabdSxqcFfN",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 813620,
-   "sha384": "sha384-FIH/T/+kk3EK2r4BGrHUztIBRwHQPbdJZf1rXdLGVpZMpPNaP8NMmtZUT1aRFZLN",
+   "bytes": 814383,
+   "sha384": "sha384-Vq0dDlFXha7ggaqovFZZAs2tXC+yo9ZyyAhmTOeFTXw6awMQZrbzubabdSxqcFfN",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -872,12 +884,14 @@
     "ids_ux_push": 1,
     "busy_wait": 1,
     "pair_wrong": 0,
+    "id_keep": 0,
+    "id_signout": 1,
     "seed_per_use_lock": 1
    }
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "6ca3f277ec71bb3815a310cd00574e989e1e9127265bb62cd3420f16399d4566"
+   "unused": "eca3bfc057ab637ab26e89303ac17c5eb724cf0645958f3e9374e2f72e3ceebc"
   },
   "rpc": {
    "rpc_0": {

@@ -20,6 +20,10 @@
 // - bad_catch_done: this card's build with step 5's catch swallowing its throw (`.catch(() => {})`, the review's
 //   mutant B3: a step 5 that throws would end the run done), built and run with --local --root <that folder>: FAIL on
 //   the markers alone, ids_catch and ids_end at 0;
+// Re-recorded again (9 Nov 04:51Z) by that card's fold of its review (P2-3), whose MARK gained id_keep and id_signout
+// and whose busy_wait and pair_wrong bind more, each record as above from the fold's commit 648d10c2 (its mutants built
+// in a worktree of that commit with its own install, whose fresh build matched the committed one); bad_pair_guard
+// counts id_keep 0 as well, since the keep is bound with readId in one pattern.
 // - bad_busy_guard and bad_pair_guard (card wallet-id-reader-paced): this card's build with one guard planted in the
 //   IdReader's source, built and run with --local --root <that folder>: busy_guard asks the busy wait only when more
 //   than one try is allowed (`if (b !== null && o.tries > 1)` in asked: the page's default tries would still wait, so
@@ -95,7 +99,7 @@ test("the recorded good answer (the card's build and both providers' real reads)
 test("main's build before the IdReader was wired (the walk's reach, none of the IdReader's rules) fails, on the markers alone", () => {
   assert.equal(answers.bad_main_bundle.url, "local build of main-610143c2");
   assert.deepEqual(BAD(answers.bad_main_bundle), [MARKS]);
-  assert.equal(ID_MARKERS.length, 18);
+  assert.equal(ID_MARKERS.length, 20);
   for (const m of MARKERS) assert.equal(answers.bad_main_bundle.app.markers[m], m.startsWith("reach_") ? 1 : 0, m);
 });
 
