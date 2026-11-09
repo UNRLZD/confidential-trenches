@@ -11,6 +11,9 @@
 // The sell's button runs the buy side's own state machine (trade/model.ts tap, progress, outcome: Sending, Landing,
 // Filled, one request for a double tap); nothing is forked here.
 
+import type { SignpageClientSnapshot } from "@blindfill/kit";
+import type { Phase } from "../trade/model.ts";
+
 /** 100% in basis points. */
 export const WHOLE = 10_000;
 
@@ -48,13 +51,21 @@ const isBps = (b: number) => Number.isInteger(b) && b > 0 && b <= WHOLE;
 /**
  * The token amount a sell of `bps` of the position asks for, as the kit's decimal string; null when there is nothing to
  * sell (a zero or unreadable position, a percent outside 0-100%, or dust: the share comes to zero base units).
+ * `decimals` is the token's own (the token read's): the share floors at the token's base unit, or at the string's own
+ * scale when that is finer, never at however many decimals the kit's trimmed string happens to carry ("2" at 75% is
+ * "1.5", not "1"; card app-sell-mount review P1). The signing page refuses a fraction longer than the token's
+ * (rules/pool.ts), so a wrong `decimals` is refused, never sold. Null or not a whole 0-36 (the helper sent none): the
+ * string's own scale plus 4, so a trimmed string still sells its share ("2" at 75% is "1.5", card app-sell-mount
+ * re-check P3); a fraction longer than the token's is refused there, never sold.
  */
-export function sellAmount(amount: string, bps: number): string | null {
+export function sellAmount(amount: string, bps: number, decimals: number | null = null): string | null {
   const u = toUnits(amount);
   if (!u || u.n === 0n || !isBps(bps)) return null;
   if (bps === WHOLE) return amount;
-  const part = (u.n * BigInt(bps)) / BigInt(WHOLE);
-  return part === 0n ? null : fromUnits(part, u.scale);
+  const d = decimals !== null && Number.isInteger(decimals) && decimals >= 0 && decimals <= 36 ? decimals : u.scale + 4;
+  const scale = Math.max(u.scale, d);
+  const part = (u.n * 10n ** BigInt(scale - u.scale) * BigInt(bps)) / BigInt(WHOLE);
+  return part === 0n ? null : fromUnits(part, scale);
 }
 
 /** The box's typed percent ("50", "12.5", "0.01") as basis points, more than 0 and at most 100; anything else null. */
@@ -85,4 +96,70 @@ export function pctLabel(bps: number): string {
   const w = Math.trunc(bps / 100);
   const f = String(bps % 100).padStart(2, "0").replace(/0+$/, "");
   return f ? `${w}.${f}%` : `${w}%`;
+}
+
+/** A sell's op stages on the device's record (state.ops): open (signed, sent), landed (filled, part filled), and every
+ *  end (the signing page's END_STAGES, packages/signpage/src/api.ts). */
+const OPEN: ReadonlySet<string> = new Set(["signed", "sent"]);
+const LANDED: ReadonlySet<string> = new Set(["filled", "part_filled"]);
+const SELL_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed", "refused"]);
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+
+/** The holding a sell was tapped on: its chain, token and units at the tap. */
+export interface Tapped {
+  chain: string;
+  token: string;
+  units: string | null;
+  /** state.ops has shown this sell's op (from then on, its stage there speaks for it). */
+  seen?: boolean;
+}
+
+/**
+ * Every sell button is locked (card app-sell-mount, re-checks of 0ea1ef58, 68b288e7, c01c07a4 and 91fb908e):
+ * - while the device's record (state.ops) holds a sell that is open (signed, sent), from any mount or tab: a box
+ *   mounted again finds it there, never READY (P2). No row move lets go of it: the signing page settles every open
+ *   sell itself (trade.ts settleTradeOps, pool-sell.ts settleSellOps), so the op is what ends the lock;
+ * - while a sell tapped on this page for this holding (`here`) is not in state.ops yet (pending, which the record never
+ *   shows), whatever the row does, until its outcome or the record shows it (P3-3a; re-check of 91fb908e);
+ * - while a sell tapped on this page for this holding has landed (filled, part filled) but the row still shows the
+ *   units it was tapped on: the holdings read lags the op's end (P3-2 in this page);
+ * - after this mount's sell may have sold (filled, part filled, not landed), until its op shows an end and while the
+ *   snapshot is stale, unless the row moved off the tapped units; an end that sold nothing (refused, not landed) lets go.
+ * `tapped` holds the request id's holding at the tap, kept for the page; a row is compared with one only when it is the
+ * same holding (chain and token). `here.units` is null with no row (a 100% sell's row is gone).
+ */
+export function sellLocked(phase: Phase, snap: Pick<SignpageClientSnapshot, "state" | "stale">, here: { chain: string; token: string; units: string | null }, tapped: ReadonlyMap<string, Tapped>): boolean {
+  const ops = snap.state?.ops ?? [];
+  const mine = (id: string) => {
+    const t = tapped.get(id);
+    return t !== undefined && t.chain === here.chain && t.token === here.token ? t : undefined;
+  };
+  const moved = (id: string) => {
+    const t = mine(id);
+    return t !== undefined && t.units !== here.units;
+  };
+  for (const o of ops) {
+    if (o.kind !== "sell") continue;
+    if (OPEN.has(o.stage)) return true;
+    if (LANDED.has(o.stage) && mine(o.id) && !moved(o.id)) return true;
+  }
+  // a sell tapped here that the record does not show yet holds its holding whatever the row does (re-check of
+  // 91fb908e): only its outcome (an id not in TAPPED) or the record showing it lets go
+  for (const [id, t] of tapped) if (!t.seen && mine(id) && !ops.some((o) => o.id === id)) return true;
+  const sold = phase.k === "filled" || (phase.k === "ended" && phase.stage !== "refused");
+  if (!sold || moved(phase.id)) return false;
+  if (snap.stale) return true;
+  const op = ops.find((o) => o.id === phase.id && o.kind === "sell");
+  return op === undefined || !SELL_ENDS.has(op.stage);
+}
+
+/** A token amount (decimal string) as whole base units at the token's `decimals`, as the vault's sell takes it
+ *  (packages/signpage/src/trade.ts UNITS: /^[1-9]\d{0,19}$/); null with no decimals read (not a whole 0-36), a fraction
+ *  longer than the token's, zero, or past 2^64 - 1, the most a token account holds (trade.ts U64_MAX; card app-sell-mount
+ *  re-check P3-3 and its re-check). */
+export function baseUnits(amount: string, decimals: number | null): string | null {
+  const u = toUnits(amount);
+  if (!u || decimals === null || !Number.isInteger(decimals) || decimals < 0 || decimals > 36 || u.scale > decimals) return null;
+  const n = u.n * 10n ** BigInt(decimals - u.scale);
+  return n === 0n || n > U64_MAX ? null : n.toString();
 }
