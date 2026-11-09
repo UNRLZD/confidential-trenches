@@ -1,5 +1,5 @@
 {
- "note": "good: the live helper (a5ffb026dcea0cc3502f37aab4b9f4f303413214) at 2026-11-09T18:06:29.110Z, its fee answer and the fee payer's balance on the check's two public RPCs read live; SIGN_HOST's /app.js stood for by this card's signing page build (--sign-bundle, signBuilt()), since SIGN_HOST serves no mainnet pin until this card's sign deploy: PASS. bad_sign_no_pin: the same live reads at 2026-11-09T18:06:52.163Z with SIGN_HOST's served /app.js (no mainnet pin): FAIL on the three pin lines. bad_other_payer: the earlier good's helper answer (a local helper on a thrown-away fee payer key, read 2026-11-09T04:29:09.695Z), with SIGN_HOST's pin read later from this card's build (2026-11-09T18:06:52.736Z): FAIL on one line, the helper's fee payer is not the pin's. bad_not_found and bad_unfunded: unchanged. Before: good: apps/helper at this card's branch (8ccc7d84) run on the Mac with node src/server.ts on the deploy/.env apps/helper/deploy/sol-fee-payer-key.sh wrote on a temp server (its stub docker running this machine's node from apps/helper; a fresh key made by the script, never funded, thrown away), its POOL_SOLANA_RPCS_MAINNET and the check's --rpcs two local RPCs that answer the Rent sysvar exactly as api.mainnet-beta.solana.com answered it at 2026-11-09T04:28:23.676Z (5,080 a byte, factor 1) and getBalance 3,000,000 lamports for any address (a funded fee payer stands in for the owner's send, not yet made), read 2026-11-09T04:29:09.695Z: PASS. bad_not_found: the deployed helper ct-api.unrealized.trade (X-Helper-Commit ca80421e4f8e3c504aa1d716e9cb0e54266508b8) with the Rent sysvar on the real pair, 2026-11-09T04:28:23.676Z: 404 not_found, no mainnet pool carried: FAIL. bad_unfunded: the same branch and key step as good with the real pair everywhere (the script read the real rent and wrote fee 1300000; the helper read it again), the new fee payer read on both real RPCs at 0 lamports, 2026-11-09T04:29:24.616Z: FAIL on its balance only.",
+ "note": "good: the live helper (a5ffb026dcea0cc3502f37aab4b9f4f303413214) at 2026-11-09T18:06:29.110Z, its fee answer and the fee payer's balance on the check's two public RPCs read live; SIGN_HOST's /app.js stood for by this card's signing page build (--sign-bundle, signBuilt()), since SIGN_HOST serves no mainnet pin until this card's sign deploy: PASS. bad_sign_no_pin: the same live reads at 2026-11-09T18:06:52.163Z with SIGN_HOST's served /app.js (no mainnet pin): FAIL on the three pin lines. bad_not_found and bad_unfunded: unchanged. Before: good: apps/helper at this card's branch (8ccc7d84) run on the Mac with node src/server.ts on the deploy/.env apps/helper/deploy/sol-fee-payer-key.sh wrote on a temp server (its stub docker running this machine's node from apps/helper; a fresh key made by the script, never funded, thrown away), its POOL_SOLANA_RPCS_MAINNET and the check's --rpcs two local RPCs that answer the Rent sysvar exactly as api.mainnet-beta.solana.com answered it at 2026-11-09T04:28:23.676Z (5,080 a byte, factor 1) and getBalance 3,000,000 lamports for any address (a funded fee payer stands in for the owner's send, not yet made), read 2026-11-09T04:29:09.695Z: PASS. bad_not_found: the deployed helper ct-api.unrealized.trade (X-Helper-Commit ca80421e4f8e3c504aa1d716e9cb0e54266508b8) with the Rent sysvar on the real pair, 2026-11-09T04:28:23.676Z: 404 not_found, no mainnet pool carried: FAIL. bad_unfunded: the same branch and key step as good with the real pair everywhere (the script read the real rent and wrote fee 1300000; the helper read it again), the new fee payer read on both real RPCs at 0 lamports, 2026-11-09T04:29:24.616Z: FAIL on its balance only.",
  "good": {
   "base": "https://ct-api.unrealized.trade",
   "record": {
@@ -103,60 +103,6 @@
     "error": "SOL_POOLS.mainnet's literal is in the bundle 0 times, not once"
    }
   }
- },
- "bad_other_payer": {
-  "base": "http://127.0.0.1:18441",
-  "record": {
-   "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
-   "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"
-  },
-  "rpcs": [
-   "http://127.0.0.1:51336",
-   "http://127.0.0.1:51337"
-  ],
-  "readAt": "2026-11-09T04:29:09.695Z",
-  "fee": {
-   "status": 200,
-   "headers": {
-    "x-helper-commit": "8ccc7d84692265241f6c3b50251ce84232c32d02",
-    "access-control-allow-origin": "https://ct-app.unrealized.trade"
-   },
-   "body": "{\"chain\":\"solana\",\"cluster\":\"mainnet\",\"program\":\"EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF\",\"pool\":\"7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8\",\"fee_payer\":\"8Rj4ZJubKsa3dB9b63Y4eopdFbuchWPWsjohC8YAnEzL\",\"epoch_ms\":60000,\"epoch_start_ms\":1794198540000,\"fee\":\"1300000\",\"step\":\"100000\"}"
-  },
-  "rent": [
-   {
-    "url": "http://127.0.0.1:51336",
-    "status": 200,
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709552000,\"space\":17}}}"
-   },
-   {
-    "url": "http://127.0.0.1:51337",
-    "status": 200,
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":{\"data\":[\"2BMAAAAAAAAAAAAAAADwPzI=\",\"base64\"],\"executable\":false,\"lamports\":1009200,\"owner\":\"Sysvar1111111111111111111111111111111111111\",\"rentEpoch\":18446744073709552000,\"space\":17}}}"
-   }
-  ],
-  "balance": [
-   {
-    "url": "http://127.0.0.1:51336",
-    "status": 200,
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":3000000}}"
-   },
-   {
-    "url": "http://127.0.0.1:51337",
-    "status": 200,
-    "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"context\":{\"slot\":1},\"value\":3000000}}"
-   }
-  ],
-  "sign": {
-   "url": "packages/signpage/public/app.js (readSign on this checkout's build) standing for https://confidential.unrealized.trade/app.js",
-   "status": 200,
-   "pin": {
-    "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
-    "table": "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ",
-    "feePayer": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU"
-   }
-  },
-  "signReadAt": "2026-11-09T18:06:52.736Z"
  },
  "bad_not_found": {
   "base": "https://ct-api.unrealized.trade",
