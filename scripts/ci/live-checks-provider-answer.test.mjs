@@ -137,14 +137,59 @@ test("planted: a JSON-RPC request through a relative import is refused; a name t
     `import { harnessRoute } from "./app-in-shell.mjs";\nexport const x = harnessRoute;`,
   ])
     assert.deepEqual(refused(src), [], src);
-  assert.ok("scripts/live-checks/app-in-shell.mjs" in MOCKS);
+  assert.deepEqual(Object.keys(MOCKS), ["scripts/live-checks/app-in-shell.mjs"]);
 });
 
-// review of 6cfd2778, P2-3: NOT_MOVED only shrinks: every name it holds was a live check at a70ea92b (the commit this
-// card started from), and it never holds more than the 61 it holds at this card (46 that build their own, 16 that
-// import an rpc, less app-in-shell, a mock)
-test("NOT_MOVED names only files that were there at a70ea92b, and never more than 61", () => {
-  assert.ok(NOT_MOVED.length <= 61, `NOT_MOVED holds ${NOT_MOVED.length}: move a check onto provider-answer.mjs, never add one`);
+// review of 6cfd2778, P2-3, and its delta review P3-c: NOT_MOVED only shrinks. Its names are frozen here as they stand at
+// this card (46 that build their own, less app-in-shell, a mock; 16 that import an rpc; 13 that import a name calling
+// one): every name it holds is one of them, so a swap is refused too, and each was a live check at a70ea92b, the
+// commit this card started from
+const FROZEN = Object.freeze(`app-footer-bar base-200ms-blocks delete-refund-readback.sweep evm-buy-gas-floor evm-pool-index
+evm-quote-lag-held evm-quote-warm-round evm-rpc-spare-list evm-scan-second-provider evm-sell-hook-intrablock held-move-forgotten-tx
+helper-create-u helper-evm-abi-tie helper-launchpad-origin helper-mainnet-vault-env helper-pool-senders helper-rpc-proxy
+helper-rpc-sell-methods helper-tape-4337-trader helper-usdc-event-watch helper-usdc-pending-pause helper-v4-hook-liquidity
+index-evm-swaps index-sol-trades intents-u-registered-first-run near-rpc-operators notes-per-pool-evm pool-buy-send-fast
+pool-evm-deploy pool-sol-deploy relayer-cost-guards relayer-withdraw-fee rh-cold-quote robinhood-mainnet-rpcs
+signpage-solana-trade solana-quote-under-1s vault-mainnet-money vault-review-fixes-1 vault-review-fixes-kit vault-testnet-t02
+vault-testnet-usdc wallet-mainnet-relayer-pins wallet-refund-move wallet-restore-id-reader wallet-rpc-hex-case
+evm-fee-collector evm-mainnet-senders evm-sell-v4 evm-testnet-delegate-review3 evm-venues-pin pool-evm-buy-pays-revert
+pool-evm-deploy-resume-safe pool-sol-deploy-after-run pool-sol-deploy-sweep precommit-taken-recover signpage-pool-flow
+signpage-pool-notes signpage-pool-withdraw-form vault-kit-settle vault-mainnet vault-skeleton
+delete-refund-readback evm-selldelegate-exact-debit helper-evm-sender helper-sender-fee-proof money-gate-testnet pool-deposits
+pool-evm-deploy-mainnet pool-evm-testnet-run pool-sol-deploy-mainnet vault-final-sha vault-review-fixes-3 vault-testnet-t01
+vault-testnet-t04`.split(/\s+/).map((k) => `scripts/live-checks/${k}.mjs`));
+
+test("NOT_MOVED names only the frozen names, each a file at a70ea92b, never more than 74", () => {
+  assert.equal(FROZEN.length, 74);
+  assert.ok(NOT_MOVED.length <= 74, `NOT_MOVED holds ${NOT_MOVED.length}: move a check onto provider-answer.mjs, never add one`);
   assert.equal(new Set(NOT_MOVED).size, NOT_MOVED.length, "no name twice");
-  for (const f of NOT_MOVED) assert.equal(spawnSync("git", ["cat-file", "-e", `a70ea92b:${f}`], { cwd: ROOT }).status, 0, `${f} was not a live check at a70ea92b: a new check reads providers through provider-answer.mjs`);
+  for (const f of NOT_MOVED) assert.ok(FROZEN.includes(f), `${f} is not one of the names frozen here: a new check reads providers through provider-answer.mjs`);
+  for (const f of FROZEN) assert.equal(spawnSync("git", ["cat-file", "-e", `a70ea92b:${f}`], { cwd: ROOT }).status, 0, `${f} was not a live check at a70ea92b`);
+});
+
+// delta review of 323af592, P1-a: a name counts when what it calls holds JSON-RPC, followed through every file
+test("planted: an imported name that calls an rpc, in another file or its own, is refused; a cycle ends", () => {
+  const tree = {
+    "scripts/ci/rpc-wait.mjs": `export async function rpc(f, u, method, params) {\n  return f(u, { body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });\n}\n`,
+    "scripts/ci/x.mjs": `import { rpc } from "./rpc-wait.mjs";\nexport const wrap = (u) => rpc(fetch, u, "eth_chainId", []);\n`,
+    "scripts/ci/money-gate.mjs": `import { rpc as r } from "./rpc-wait.mjs";\nconst inner = (u) => r(fetch, u, "tx", []);\nexport async function readTx(u) {\n  return inner(u);\n}\nexport const quiet = 1;\n`,
+    "scripts/live-checks/evm-fee-collector.mjs": `import { rpc } from "./pool-evm-deploy.mjs";\nexport async function check(u) {\n  return rpc(fetch, u, "eth_call", []);\n}\n`,
+    "scripts/live-checks/pool-evm-deploy.mjs": `export const rpc = (f, u, m, p) => f(u, { body: JSON.stringify({ jsonrpc: "2.0", method: m, params: p }) });\n`,
+    "scripts/live-checks/a.mjs": `import { b } from "./b.mjs";\nexport const a = () => b();\n`,
+    "scripts/live-checks/b.mjs": `import { a } from "./a.mjs";\nexport const b = () => a();\n`,
+  };
+  const listed = ["scripts/live-checks/evm-fee-collector.mjs", "scripts/live-checks/pool-evm-deploy.mjs"];
+  const run = (src) => refusalsOf([F, ...Object.keys(tree).filter((f) => f.startsWith("scripts/live-checks/"))], (f) => ({ ...tree, [F]: src })[f] ?? null, listed).filter((x) => x.startsWith(F));
+  for (const src of [
+    `import { check } from "./evm-fee-collector.mjs";\nexport const go = (u) => check(u);`,
+    `import { readTx } from "../ci/money-gate.mjs";\nexport const go = (u) => readTx(u);`,
+    `import { wrap } from "../ci/x.mjs";\nexport const go = (u) => wrap(u);`,
+    `import { wrap } from "../ci/x.mjs";\nconst local = (u) => wrap(u);\nexport const go = (u) => local(u);`,
+  ]) {
+    const r = run(src);
+    assert.equal(r.length, 1, src);
+    assert.match(r[0], /builds a JSON-RPC request outside provider-answer\.mjs \(through /, src);
+  }
+  // a name that calls none, and two files that only call each other, hold nothing
+  for (const src of [`import { quiet } from "../ci/money-gate.mjs";\nexport const x = quiet;`, `import { a } from "./a.mjs";\nexport const x = () => a();`]) assert.deepEqual(run(src), [], src);
 });

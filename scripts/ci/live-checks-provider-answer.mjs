@@ -4,12 +4,15 @@
 // limit, a block or state it does not hold) and leaves it out, never judging it as a wrong answer or a pass. This gate
 // refuses a live check that builds a JSON-RPC request itself:
 //   node scripts/ci/live-checks-provider-answer.mjs [root]      (exit 1 and one line per refusal)
-// It reads every scripts/live-checks/*.mjs git lists (tracked, and untracked but not ignored) but the tests and the
+// It reads every code file under scripts/live-checks/ git lists (tracked, and untracked but not ignored) but the tests and the
 // shared module, and refuses one whose code holds a JSON-RPC request or answer ("jsonrpc": "2.0" in any quoting),
 // unless NOT_MOVED names it. NOT_MOVED can only shrink: a check it names that builds none is refused too (moved: take
 // it off), and a check that imports the shared module may not also build its own. Risk it holds: a check that parses
 // a provider's answer itself dies on one provider's bad answer (evm-buy-gas-depth exit 2 on drpc's code 27 "Unknown
 // state", helper live run 42556116812, 9 Nov 03:54Z).
+// Its scope ends at scripts/: a name it follows is a relative import under scripts/. An import from apps/ or packages/
+// (the kit's entry included), a .cjs require() and an import() of a computed path are not followed, and a request
+// body with no version field is not seen: those are the hand read's.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { posix } from "node:path";
@@ -89,6 +92,21 @@ export const NOT_MOVED = Object.freeze([
   "vault-kit-settle.mjs",
   "vault-mainnet.mjs",
   "vault-skeleton.mjs",
+  // reading a provider through an imported name that calls an rpc (vault-skeleton.mjs query, evm-fee-collector.mjs
+  // check, money-gate.mjs readTx, ...)
+  "delete-refund-readback.mjs",
+  "evm-selldelegate-exact-debit.mjs",
+  "helper-evm-sender.mjs",
+  "helper-sender-fee-proof.mjs",
+  "money-gate-testnet.mjs",
+  "pool-deposits.mjs",
+  "pool-evm-deploy-mainnet.mjs",
+  "pool-evm-testnet-run.mjs",
+  "pool-sol-deploy-mainnet.mjs",
+  "vault-final-sha.mjs",
+  "vault-review-fixes-3.mjs",
+  "vault-testnet-t01.mjs",
+  "vault-testnet-t04.mjs",
 ].map((f) => `scripts/live-checks/${f}`));
 
 const CODE = /\.(mjs|cjs|js|mts|cts|ts)$/;
@@ -114,34 +132,53 @@ function holds(node) {
   return found;
 }
 
-/** A file's code: `builds` (it holds JSON-RPC anywhere), `names` (each top-level declaration's name to whether it holds
- *  JSON-RPC: what an import of that name takes), and `imports` (each relative import or re-export: its specifier and the
- *  names it takes, "*" for a namespace, a default or an import()) */
+// the names a node refers to (an identifier that is not a property's name), and the relative specifiers of its import()s
+function refsOf(node) {
+  const refs = new Set();
+  const dyn = [];
+  const walk = (n) => {
+    if (ts.isIdentifier(n)) {
+      const p = n.parent;
+      const prop = p && ((ts.isPropertyAccessExpression(p) && p.name === n) || (ts.isPropertyAssignment(p) && p.name === n) || (ts.isMethodDeclaration(p) && p.name === n));
+      if (!prop) refs.add(n.text);
+    }
+    if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && n.arguments[0].text.startsWith(".")) dyn.push(n.arguments[0].text);
+    ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return { refs, dyn };
+}
+
+/** A file's code: `builds` (it holds JSON-RPC of its own anywhere); `decls` (each top-level declaration's name to
+ *  { own, refs, dyn }: whether it holds JSON-RPC itself, the names it refers to and its import()s); `bindings` (each
+ *  name a relative import or re-export brings in, to { spec, name }, name "*" for a namespace or a default); `file`
+ *  (the whole file as one declaration: what an import of it all, or the check itself, takes) */
 export function readCode(file, src) {
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ESNext, true, kindOf(file));
-  const names = new Map();
-  const imports = [];
+  const decls = new Map();
+  const bindings = new Map();
+  const decl = (name, node) => decls.set(name, { own: holds(node), ...refsOf(node) });
   for (const st of sf.statements) {
-    if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name) names.set(st.name.text, holds(st));
-    if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) names.set(d.name.text, holds(d));
+    if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name) decl(st.name.text, st);
+    if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) decl(d.name.text, d);
     const spec = (ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && st.moduleSpecifier && ts.isStringLiteralLike(st.moduleSpecifier) ? st.moduleSpecifier.text : null;
     if (spec === null || !spec.startsWith(".")) continue;
     if (ts.isImportDeclaration(st)) {
       const c = st.importClause;
-      const nb = c?.namedBindings;
-      if (c === undefined) continue; // a bare import "./x.mjs" takes no name (net-window.mjs)
-      imports.push({ spec, names: c.name || (nb && ts.isNamespaceImport(nb)) ? "*" : nb ? nb.elements.map((e) => (e.propertyName ?? e.name).text) : [] });
+      if (c === undefined) continue; // a bare import "./x.mjs" brings in no name (net-window.mjs)
+      if (c.name) bindings.set(c.name.text, { spec, name: "*" });
+      const nb = c.namedBindings;
+      if (nb && ts.isNamespaceImport(nb)) bindings.set(nb.name.text, { spec, name: "*" });
+      else if (nb) for (const e of nb.elements) bindings.set(e.name.text, { spec, name: (e.propertyName ?? e.name).text });
     } else {
       const ec = st.exportClause;
-      imports.push({ spec, names: ec && ts.isNamedExports(ec) ? ec.elements.map((e) => (e.propertyName ?? e.name).text) : "*" });
+      // a re-export: the name it exports refers to the other file's; export * counts the whole file
+      if (ec && ts.isNamedExports(ec)) for (const e of ec.elements) bindings.set(e.name.text, { spec, name: (e.propertyName ?? e.name).text });
+      else bindings.set(`* ${spec}`, { spec, name: "*" });
     }
   }
-  const dyn = (n) => {
-    if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && n.arguments[0].text.startsWith(".")) imports.push({ spec: n.arguments[0].text, names: "*" });
-    ts.forEachChild(n, dyn);
-  };
-  dyn(sf);
-  return { builds: holds(sf), names, imports };
+  const whole = refsOf(sf);
+  return { builds: holds(sf), decls, bindings, file: { own: holds(sf), refs: new Set([...whole.refs, ...[...bindings.keys()].filter((k) => k.startsWith("* "))]), dyn: whole.dyn } };
 }
 
 /** True when the code holds a JSON-RPC request or answer of its own */
@@ -150,9 +187,12 @@ export function buildsRpc(src, file = "x.mjs") {
 }
 
 /** The refusals for a set of files under scripts/live-checks/: `read(path)` gives a repo file's text, or null when it is
- *  not there. A check counts as building JSON-RPC when its own code does, or when it imports, by a relative path, a
- *  name whose declaration does (scripts/ci/rpc-wait.mjs's rpc, pool-evm-deploy.mjs's rpc) or a whole file that does
- *  (a namespace, a default, an import()); the shared module and its plants never count. */
+ *  not there. A check counts as building JSON-RPC when its own code does, or when it refers to a name that does: a
+ *  top-level declaration of the same file or a name imported by a relative path under scripts/, which holds JSON-RPC
+ *  when its declaration does or refers in turn to a name that does (scripts/ci/rpc-wait.mjs's rpc, vault-skeleton.mjs's
+ *  query, which calls it), followed through every file, each name read once (a cycle holds nothing more). A namespace,
+ *  a default, an import() or a name a file does not declare takes the whole file; a file under scripts/ that is not
+ *  there counts as building. The shared module, its plants and MOCKS never count. */
 export function refusalsOf(files, read, notMoved = NOT_MOVED) {
   const out = [];
   const listed = new Set(notMoved);
@@ -164,23 +204,42 @@ export function refusalsOf(files, read, notMoved = NOT_MOVED) {
     }
     return memo.get(f);
   };
-  const through = (f, c) =>
-    c.imports.flatMap(({ spec, names }) => {
-      const g = posix.normalize(posix.join(posix.dirname(f), spec));
-      if (SHARED.has(g) || g in MOCKS || !g.startsWith("scripts/") || !CODE.test(g)) return [];
-      const t = code(g);
-      // a file under scripts/ it imports that is not there cannot be read, so it is refused as building
-      if (t === null) return [`${g} (not there)`];
-      // a name it does not declare (a re-export, a name it lacks) is read as the whole file
-      return (names === "*" ? t.builds : names.some((n) => (t.names.has(n) ? t.names.get(n) : t.builds))) ? [g] : [];
-    });
+  const held = new Map(); // `${file}\0${name}` to true or false; in progress: false (a cycle adds nothing)
+  const target = (f, spec) => posix.normalize(posix.join(posix.dirname(f), spec));
+  const outside = (g) => SHARED.has(g) || g in MOCKS || !g.startsWith("scripts/") || !CODE.test(g);
+  // the file `g` reached through an import holds JSON-RPC in `name` ("*": the whole file)
+  const holdsIn = (g, name) => {
+    if (outside(g)) return false;
+    const c = code(g);
+    if (c === null) return true;
+    const key = `${g}\0${name}`;
+    if (held.has(key)) return held.get(key);
+    held.set(key, false);
+    let r;
+    if (name === "*") r = declHolds(g, c, c.file);
+    else if (c.decls.has(name)) r = declHolds(g, c, c.decls.get(name));
+    else if (c.bindings.has(name)) r = holdsIn(target(g, c.bindings.get(name).spec), c.bindings.get(name).name);
+    else r = declHolds(g, c, c.file);
+    held.set(key, r);
+    return r;
+  };
+  const declHolds = (f, c, d) => {
+    if (d.own) return true;
+    if (d.dyn.some((spec) => holdsIn(target(f, spec), "*"))) return true;
+    for (const n of d.refs) {
+      if (c.decls.has(n) && c.decls.get(n) !== d && holdsIn(f, n)) return true;
+      const b = c.bindings.get(n);
+      if (b && holdsIn(target(f, b.spec), b.name)) return true;
+    }
+    return false;
+  };
   for (const f of files) {
     if (SHARED.has(f) || f in MOCKS || !f.startsWith("scripts/live-checks/") || !CODE.test(f) || TEST.test(f)) continue;
     const c = code(f);
     if (c === null) continue;
-    const by = through(f, c);
-    const builds = c.builds || by.length > 0;
-    const via = c.builds ? "" : ` (through ${by.join(", ")})`;
+    const by = [...new Set([...c.bindings.values()].filter((b) => holdsIn(target(f, b.spec), b.name)).map((b) => target(f, b.spec)))];
+    const builds = c.builds || declHolds(f, c, c.file);
+    const via = c.builds ? "" : ` (through ${by.length ? by.join(", ") : "an import()"})`;
     if (c.builds && IMPORTS_SHARED.test(c.src)) out.push(`${f}: imports provider-answer.mjs and builds a JSON-RPC request itself too: read every provider through rpcAnswer`);
     else if (builds && !listed.has(f)) out.push(`${f}: builds a JSON-RPC request outside provider-answer.mjs${via}: read it through rpcAnswer, which names a provider's no-answer`);
     else if (!builds && listed.has(f)) out.push(`${f}: NOT_MOVED names it but it builds no JSON-RPC request: take it off the list`);

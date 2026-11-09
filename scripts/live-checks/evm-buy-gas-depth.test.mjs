@@ -148,13 +148,16 @@ test("planted: every provider that answered holds no such block: BAD, the helper
   const r = judge(await collect(feeOf, none, ONE_POOL));
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith(`BAD base-sepolia ${POOLS[0]}: no provider holds block 0x10 (`)), r.lines.join("\n"));
-  // one null and the rest rate-limited: still the helper's block nobody holds among those that answered
-  const mixed = async (url, init) => {
+  // one null and the rest rate-limited: one provider lagging at an epoch's turn, INCONCLUSIVE (delta review P3-a); two
+  // nulls and one rate-limited: FAIL
+  const nulls = (k) => async (url, init) => {
     const { method } = JSON.parse(init.body);
     if (method !== "eth_getBlockByNumber") return honest(url, { method });
-    return new URL(url).host === HOSTS[0] ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : new Response("", { status: 429 });
+    return HOSTS.indexOf(new URL(url).host) < k ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : new Response("", { status: 429 });
   };
-  assert.equal(judge(await collect(feeOf, mixed, ONE_POOL)).verdict, "FAIL");
+  assert.equal(judge(await collect(feeOf, nulls(1), ONE_POOL)).verdict, "INCONCLUSIVE");
+  assert.equal(judge(await collect(feeOf, nulls(2), ONE_POOL)).verdict, "FAIL");
+  assert.equal(HOSTS.length, 3);
   // one null beside two that hold it: that provider lags, the pool is judged on the two
   const lag = async (url, init) => {
     const { method } = JSON.parse(init.body);

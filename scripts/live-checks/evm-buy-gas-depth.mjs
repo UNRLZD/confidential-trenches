@@ -98,9 +98,10 @@ export function judge(runs) {
     // a provider's no-answer is named and left out; the pool is judged on the providers that answered
     const reads = all.filter((x) => x?.noAnswer === undefined);
     for (const x of all.filter((y) => y?.noAnswer !== undefined)) lines.push(`--- ${n} ${x.host}: no answer: ${x.noAnswer}`);
-    // the helper named a block that every provider that answered says it does not hold: the helper's answer is wrong,
-    // and no read again clears it (review of 6cfd2778, P2-1)
-    if (reads.length === 0 && all.some((x) => x?.noBlock === true)) {
+    // the helper named a block that every provider that answered says it does not hold, two or more of them: the
+    // helper's answer is wrong, and no read again clears it (review of 6cfd2778, P2-1); one null beside no-answers is
+    // one provider lagging at an epoch's turn, INCONCLUSIVE (delta review of 323af592, P3-a)
+    if (reads.length === 0 && all.filter((x) => x?.noBlock === true).length >= 2) {
       say(false, `${n}: no provider holds block ${b.block} (${all.filter((x) => x?.noBlock === true).map((x) => x.host).join(", ")} answered none)`);
       continue;
     }
