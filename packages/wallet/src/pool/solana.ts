@@ -201,10 +201,11 @@ export type SolanaPoolVenueName = "pump-curve" | "pumpswap";
  *  <cluster>.json, which contracts/pool-solana/scripts/venue-table.mjs writes once both RPCs read the table back
  *  frozen; test/sol-pool-venue-tables.test.ts fails whenever a pin and its record differ. A venue with no table here is
  *  refused by the signing page before anything is signed. Mainnet: the curve's table of the pool's own deploy
- *  (SOL_MAINNET_DEPLOY.table); PumpSwap's after its paste. */
+ *  (SOL_MAINNET_DEPLOY.table); PumpSwap's after its paste. Devnet: both frozen by venue-table.mjs on 9 Nov (the
+ *  testnet build's earlier curve table 6bbfV79e…, authority T, is no longer pinned). */
 export const SOL_POOL_TABLES: Readonly<Partial<Record<"devnet" | "mainnet", Readonly<Partial<Record<SolanaPoolVenueName, string>>>>>> = Object.freeze(
   POOL_TESTNET
-    ? { devnet: Object.freeze({ "pump-curve": "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ" }) }
+    ? { devnet: Object.freeze({ "pump-curve": "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", pumpswap: "4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT" }) }
     : { mainnet: Object.freeze({ "pump-curve": SOL_MAINNET_DEPLOY.table }) },
 );
 

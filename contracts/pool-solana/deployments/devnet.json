@@ -1,0 +1,101 @@
+{
+  "cluster": "devnet",
+  "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "program_id": "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8",
+  "pool": "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+  "tables": {
+    "pumpswap": {
+      "table": "4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT",
+      "addresses": [
+        "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+        "D8zR1ZCAViWBfV49xmKMNivB5AiKE6Npik1QnkYoJdcQ",
+        "8a4BPKPTkSNrPeWKUaYSyUm2cSJ4zoZgBaAXsSQVNGo9",
+        "74HD9CHiWZjbRxBk2xqUhhAsYK8fg5vkomfFzqdbEZXk",
+        "7VNmNoiWjq6NGr4kdAwDcBG6e7N15f2XPKW8t8tHfTR3",
+        "11111111111111111111111111111111",
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "So11111111111111111111111111111111111111112",
+        "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+        "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+        "ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw",
+        "12e2F4DKkD3Lff6WPYsU7Xd76SHPEyN9T8XSsTJNF8oT",
+        "GjJkcak9e4L2HsxSZqVsc81L7coChdR7F3ciJYnQcSnU",
+        "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR",
+        "C2aFPdENg4A2HQsmrd5rTw5TaYBX5Ku887cWjbFKtZpw",
+        "5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx",
+        "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+        "HjQjngTDqoHE6aaGhUqfz9aQ7WZcBRjy5xB8PScLSr8i",
+        "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+        "GAFuhgcd328SkkBYHpfadzmef9hTGAFRCi9QoCnsZQug",
+        "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+        "AktftA98kSWAxn6kVSoqBXBELUArjKu2H9WmKB48ULFY",
+        "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+        "6rVkF4HSgy1jrnC3HogfRgPHrq4CtLg5f11URpsC4i9D",
+        "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+        "GYH1Gae1wJytMSvMvw8JVcv7nuAbxi8i9erNVbERnzXd",
+        "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+        "CA7v8gHfbquYXyDnDx6QxWW8hmL1H7X6Y2RYDrGLnuck",
+        "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+        "CASRL2zkwDnppxEFQ4LgdwgR9pdz5Q8R8nEMKVZ9QoLp",
+        "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+        "qkYdTGRPHbWTWuBMz45bCiU6a23axRqf6sBHm9295WY"
+      ],
+      "txs": [
+        {
+          "step": "lookup table: create and extend with 30 addresses",
+          "signature": "ZmCXpmTeBuGQ8L3KYvZMy74qGByzxPHarPqUZ3CkgvSqxW5Z9d66LHAPtKJsHwz8JGDF1AR97G58DEzhjTMRPhR"
+        },
+        {
+          "step": "lookup table: extend with 4 addresses",
+          "signature": "4VJfUmhUK9W32atgBacsbAqrA71J3YqroLxTPjzisEDE8cA6Y5T8ik1f572joDCqVDE4Byop2CY2yBUTKQeFsU8R"
+        },
+        {
+          "step": "lookup table: freeze (authority none)",
+          "signature": "2XxftHmqJfVMzJFu86ddeiFiiooxrGap2QDj2Hdnr6PhPZTNCNDH475b7G4rJYxjWLNUjBNXGMGrDxb92oRFi2tJ"
+        }
+      ]
+    },
+    "pump-curve": {
+      "table": "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ",
+      "addresses": [
+        "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr",
+        "D8zR1ZCAViWBfV49xmKMNivB5AiKE6Npik1QnkYoJdcQ",
+        "8a4BPKPTkSNrPeWKUaYSyUm2cSJ4zoZgBaAXsSQVNGo9",
+        "74HD9CHiWZjbRxBk2xqUhhAsYK8fg5vkomfFzqdbEZXk",
+        "7VNmNoiWjq6NGr4kdAwDcBG6e7N15f2XPKW8t8tHfTR3",
+        "11111111111111111111111111111111",
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "So11111111111111111111111111111111111111112",
+        "pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ",
+        "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+        "68yFSZxzLWJXkxxRGydZ63C6mHx1NLEDWmwN9Lb5yySg",
+        "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+        "Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y",
+        "8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt",
+        "5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD",
+        "9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7",
+        "GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL",
+        "3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR",
+        "5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6",
+        "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+        "5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD",
+        "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW"
+      ],
+      "txs": [
+        {
+          "step": "lookup table: create and extend with 25 addresses",
+          "signature": "2N7buhaLg6ysxzxmhgMu6RFMczDQPUapmZSB1FSkdAqWVHoxDAnYfNFdohVvgX8tXftUPJMsYvcE5aK2C6PXuipd"
+        },
+        {
+          "step": "lookup table: freeze (authority none)",
+          "signature": "5TqCfuHtjzW9fsqEeXrMCMnn6sbmsxEjkAavm7MSNQMvfVM8EZ27HN1MwnVnHME6yUzwwgYA4Gh3Cz8zav65s81Z"
+        }
+      ]
+    }
+  }
+}

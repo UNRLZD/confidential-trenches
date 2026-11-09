@@ -33,8 +33,7 @@ test("the testnet build pins each venue's devnet table as the devnet record hold
   const pins = JSON.parse(out) as Record<string, Record<string, string>>;
   assert.deepEqual(Object.keys(pins), ["devnet"]);
   const rec = record("devnet");
-  // the devnet curve's table before its frozen one (pool-table-devnet.mjs, authority T) is pinned until the record names one
-  const want = { "pump-curve": "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", ...rec };
-  assert.deepEqual(pins.devnet, want);
+  assert.deepEqual(pins.devnet, rec);
+  assert.deepEqual(Object.keys(rec).sort(), [...SOLANA_POOL_BUY_VENUES].sort(), "devnet pins a frozen table for every venue the kit builds");
   for (const v of Object.keys(pins.devnet!)) assert.ok(SOLANA_POOL_BUY_VENUES.includes(v as never), `${v}: a venue the kit builds`);
 });

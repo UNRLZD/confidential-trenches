@@ -13,7 +13,8 @@ const PKG = signBuilt(); // the page's build, made from this tree's sources firs
 const TESTNET_ONLY = [
   "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
-  "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", // the devnet pool's lookup table (src/pool-testnet.ts DEVNET_TABLE)
+  "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", // the devnet pool's curve table (wallet SOL_POOL_TABLES.devnet)
+  "4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", // the devnet pool's PumpSwap table (wallet SOL_POOL_TABLES.devnet)
   "api.devnet.solana.com",
   "/v1/rpc/solana-devnet", // the helper's devnet route, the second devnet provider (card pool-buy-send-fast)
   "base-sepolia-rpc.publicnode.com",

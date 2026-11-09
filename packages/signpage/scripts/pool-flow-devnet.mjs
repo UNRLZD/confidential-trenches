@@ -267,7 +267,16 @@ const balance = async () => {
 // the coin's venue and what a buy on it leaves W for its sell, read before U is funded: a run that cannot compute its
 // own spend fails here, before any money moves (run 6's first try deposited, then threw on a stale call here, and its
 // seed went with it)
-const VENUE = SPEND === "max" ? await readSolanaPoolBuyVenue(rpcs, "pump-curve", MINT) : null;
+// the venue is the one the page's buy takes: the reference's best of the coin's pools (pump's curve, or PumpSwap once
+// the coin graduated; card sol-pool-venue-tables)
+const { readSolanaReference } = await import("../../kit/src/trade/solana/pool.ts");
+const venueKind = async () => {
+  const ref = await readSolanaReference(rpcs, { side: "buy", token: MINT, amount: 1_000_000n });
+  const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
+  if (!best) throw new Error(`no reference pool for ${MINT}`);
+  return best.venue;
+};
+const VENUE = SPEND === "max" ? await readSolanaPoolBuyVenue(rpcs, await venueKind(), MINT) : null;
 const KEEPS = VENUE === null ? null : solanaPoolBuySellNeed(VENUE, rent);
 if (VENUE !== null) log(`venue ${VENUE.kind} (token account ${VENUE.tokenAccountSize} B, cashback ${VENUE.cashback}); a buy leaves W ${KEEPS} for its sell on any venue the coin sells on`);
 // FLOW_DUST: S, its key kept beside the seed, funded by someone else before anything moves
