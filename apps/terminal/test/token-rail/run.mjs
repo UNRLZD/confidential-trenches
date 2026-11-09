@@ -10,7 +10,8 @@
 //     a link to /token/solana/<mint>, the page's own token marked (aria-current);
 //   - the header's strip whole in every mode (no tile cut, clear of the trade column and the rail: the design's one-row
 //     rule), no horizontal scroll, no text under 11 px, no layout shift from the first paint (CLS 0), no page error;
-//   - opening / reads the lists once (the rail and the top-token read share the read in flight);
+//   - opening / reads the lists once, each chain's once (the rail and the top-token read share the read in flight; every
+//     chain's lists since card app-chains-evm-rail, the other chains answered with Solana's recording and so dropped);
 //   - a click on another rail row opens that token's page (its data-token, the frame at /token/solana/<mint>) with the
 //     rail still drawn and no second lists read; New shows the New column and its row opens its token; on the slim rail
 //     the expand button draws the full rail over the chart with the main column unmoved, and its row opens its token;
@@ -24,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
-import { REFRESH_MS } from "../../src/screens/discover/data.ts";
+import { LIST_CHAINS, REFRESH_MS } from "../../src/screens/discover/data.ts";
 import { columnRows } from "../../src/screens/discover/model.ts";
 
 const HELPER = "https://ct-api.unrealized.trade";
@@ -89,6 +90,8 @@ async function open(browser, route, w, reads, hint) {
     const u = new URL(r.request().url());
     if (u.origin === HELPER && u.pathname === "/v1/market/lists") {
       reads.lists++;
+      const c = u.searchParams.get("chain");
+      reads.by[c] = (reads.by[c] ?? 0) + 1;
       return r.fulfill(json(200, { ...(reads.topped ? TOPPED : SNAP), as_of_ms: Date.now() }));
     }
     if (u.origin === HELPER && u.pathname === "/v1/market/token") {
@@ -176,7 +179,10 @@ try {
     for (const w of WIDTHS) {
       n++;
       const tag = `@${w.name} ${k.name}`;
-      const reads = { lists: 0 };
+      const reads = { lists: 0, by: {} };
+      // one read of the lists: each chain's once
+      const once = () => reads.lists === LIST_CHAINS.length && LIST_CHAINS.every((c) => reads.by[c] === 1);
+      const seen = () => JSON.stringify(reads.by);
       const { ctx, page, f, errors } = await open(browser, route, w, reads, k.name);
       const top = TRENDING[0];
       check(await ready(f, top), `${tag}: / did not draw the top Trending token ${top}`);
@@ -188,12 +194,12 @@ try {
       // the mode
       if (w.mode === "hidden") {
         check(p.railW === null && tracks === 2, `${tag}: a rail under 1180 (rail ${p.railW}, tracks ${p.tracks})`);
-        check(reads.lists === 1, `${tag}: ${reads.lists} lists reads with no rail drawn, not the page's one`);
+        check(once(), `${tag}: lists reads ${seen()} with no rail drawn, not the page's one`);
       } else {
         check(tracks === 3 && Math.abs(first - w.track) < 0.5, `${tag}: the rail's track is ${p.tracks}, want ${w.track}px first`);
         check(p.railW !== null && Math.abs(p.railW - w.track) <= 1, `${tag}: the rail is ${p.railW} wide, want ${w.track}`);
         check(p.railState === "ready", `${tag}: the rail's state ${p.railState}`);
-        check(reads.lists === 1, `${tag}: opening / read the lists ${reads.lists} times, not once (the rail and the top token share it)`);
+        check(once(), `${tag}: opening / read the lists ${seen()}, not once (the rail and the top token share it)`);
         check(JSON.stringify(p.rows.map((r) => r.token)) === JSON.stringify(TRENDING), `${tag}: the rail's rows ${p.rows.length} are not the Trending column's ${TRENDING.length} in Discover's order`);
         const bad = p.rows.filter((r) => r.href !== `/token/solana/${r.token}`);
         check(bad.length === 0, `${tag}: rows not linked to their token: ${bad.slice(0, 3).map((r) => `${r.token} ${r.href}`).join(" ")}`);
@@ -230,7 +236,7 @@ try {
         const after = await readPage(f);
         const cur = after.rows.filter((r) => r.current === "page").map((r) => r.token);
         check(cur.length === 1 && cur[0] === next, `${tag}: after the hop the marked row(s) ${JSON.stringify(cur)}, want ${next}`);
-        check(reads.lists === 1, `${tag}: the hop read the lists again (${reads.lists} reads)`);
+        check(once(), `${tag}: the hop read the lists again (${seen()})`);
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `rail-${w.name}-click.png`) });
         await f.locator('[data-testid="token-rail"] .tkr-chip[data-list="new"]').click();
         const nw = await readPage(f);
