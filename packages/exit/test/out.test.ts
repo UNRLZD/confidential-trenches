@@ -13,7 +13,7 @@ import { type VaultSyncRpc } from "@blindfill/kit";
 import { buildMoveOut, buildRegisterOut, buildWithdrawOut, depositId, HEIGHT_SPREAD_MAX, MoveOutRefused, wordsToSeed64, type BuiltMove, type MoveOutReadFor, type WithdrawOutReadFor } from "@blindfill/kit/core";
 import { EXIT_NETWORKS, ExitRpcRefused } from "../src/rpc.ts";
 import { EXIT_TOKENS } from "../src/scan.ts";
-import { EXIT_INTENTS, exitBuildMove, exitHoldings, exitKey, ExitOutStopped, exitRecipient, type ExitAccount, type ExitMove, type ExitRecipient } from "../src/out.ts";
+import { EXIT_INTENTS, exitBuildMove, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipient, exitSettleDue, type ExitAccount, type ExitMove, type ExitRecipient } from "../src/out.ts";
 
 const SEED = wordsToSeed64("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
 const TYPED = "typed-user.testnet";
@@ -353,4 +353,62 @@ test("exitBuildMove reads its move's leg and its account's kind once: a getter t
 test("an unknown account kind or network is refused", () => {
   assert.throws(() => exitBuildMove({ seed64: SEED, account: { kind: "W", l: 1n, j: 0 } as unknown as ExitAccount, network: "testnet", to: R_TEST, move: { leg: "token", read: tokenRead(ACCOUNTS[0]!, 5n), storageMin: STORAGE_MIN } }), ExitRpcRefused);
   assert.throws(() => exitBuildMove({ seed64: SEED, account: ACCOUNTS[0]!, network: "betanet" as "testnet", to: R_TEST, move: { leg: "token", read: tokenRead(ACCOUNTS[0]!, 5n), storageMin: STORAGE_MIN } }), ExitRpcRefused);
+});
+
+// ---------- the settle (step 4) ----------
+const NH = 9_876_543_210_987_654_321n;
+const spendOf = (status: "in_flight" | "paid" | "refund_pending" | "settled", l = 7n, j = 2) =>
+  ({ l, j, note: "n", spend: { index: 0, nullifierHash: NH, withdrawn: 1n, newLeafIndex: 0n, refundPrecommitment: 5n, refundValue: 0n, refundLabel: 0n, refundLeafIndex: 0n, status, payer: "relayer.testnet", reserve: 1n, recipient: "x", fee: 0n, context: 0n } }) as never;
+const settleRead = (l = 7n, j = 2) => ({ height: H, blockHash: BLOCK, nonce: 41n, free: 10n ** 24n, gasPrice: 100_000_000n, a: idOf({ kind: "A", l, j }) });
+
+test("settle: the spends due are refund_pending and paid; in_flight and settled are not", () => {
+  const all = (["in_flight", "paid", "refund_pending", "settled"] as const).map((x) => spendOf(x));
+  assert.deepEqual(exitSettleDue(all).map((x: { spend: { status: string } }) => x.spend.status), ["paid", "refund_pending"]);
+});
+
+test("settle: signed by the spend's own A_{l,j} on the network's vault, the one call settle(nullifier_hash) with the kit's gas and attachment, no token named", () => {
+  for (const network of ["testnet", "mainnet"] as const) {
+    for (const status of ["refund_pending", "paid"] as const) {
+      const m = exitBuildSettle({ seed64: SEED, network, spend: spendOf(status), read: settleRead() });
+      const tx = decode(m);
+      assert.equal(tx.signer, idOf({ kind: "A", l: 7n, j: 2 }));
+      assert.equal(tx.receiver, EXIT_NETWORKS[network].vault);
+      assert.deepEqual(tx.actions.map((a) => [a.method, a.args]), [["settle", { nullifier_hash: NH.toString() }]]);
+      assert.equal(m.calls[0]!.deposit, status === "refund_pending" ? 148n * 10n ** 19n : 0n);
+      assert.equal(m.nonce, 42n);
+      assert.ok(!JSON.stringify(tx.actions.map((a) => a.args)).includes(EXIT_TOKENS[network]), "settle names no token");
+    }
+  }
+  // another spend's A, or a read of another account, is refused before signing
+  assert.throws(() => exitBuildSettle({ seed64: SEED, network: "testnet", spend: spendOf("paid", 7n, 3), read: settleRead() }), MoveOutRefused);
+  for (const status of ["in_flight", "settled"] as const) assert.throws(() => exitBuildSettle({ seed64: SEED, network: "testnet", spend: spendOf(status), read: settleRead() }), ExitRpcRefused, status);
+  assert.throws(() => exitBuildSettle({ seed64: SEED, network: "devnet" as "testnet", spend: spendOf("paid"), read: settleRead() }), ExitRpcRefused);
+});
+
+test("settle: A's key is zeroed on a build and on a refusal", () => {
+  for (const refuse of [false, true]) {
+    let k: { secretKey: Uint8Array } | undefined;
+    const keyOf = (seed: Uint8Array, a: ExitAccount) => (k = exitKey(seed, a));
+    const run = () => exitBuildSettle({ seed64: SEED, network: "testnet", spend: spendOf("paid"), read: refuse ? { ...settleRead(), nonce: -1n } : settleRead() }, keyOf);
+    if (refuse) assert.throws(run, MoveOutRefused);
+    else run();
+    assert.ok(k && k.secretKey.every((x) => x === 0), `zeroed (refused: ${refuse})`);
+  }
+});
+
+test("nothing into the vault: of every call the tool signs, only settle has the vault as receiver, and none moves a token to it", () => {
+  const vaults = [EXIT_NETWORKS.mainnet.vault, EXIT_NETWORKS.testnet.vault];
+  const built: BuiltMove[] = [exitBuildSettle({ seed64: SEED, network: "testnet", spend: spendOf("refund_pending"), read: settleRead() })];
+  for (const account of ACCOUNTS) {
+    built.push(exitBuildMove({ seed64: SEED, account, network: "testnet", to: R_TEST, move: { leg: "token", read: tokenRead(account, 2_500_000n, false), storageMin: STORAGE_MIN } }));
+    built.push(exitBuildMove({ seed64: SEED, account, network: "mainnet", to: R_MAIN, move: { leg: "intents", read: intentsRead(account, 2n) } }));
+  }
+  for (const m of built) {
+    const tx = decode(m);
+    if (vaults.includes(tx.receiver)) assert.deepEqual(tx.actions.map((a) => a.method), ["settle"]);
+    for (const a of tx.actions) {
+      assert.ok(!["ft_transfer_call", "mt_transfer_call"].includes(a.method));
+      if (a.method === "ft_transfer" || a.method === "ft_withdraw") for (const v of vaults) assert.ok(a.args.receiver_id !== v && !JSON.stringify(a.args).includes(v));
+    }
+  }
 });

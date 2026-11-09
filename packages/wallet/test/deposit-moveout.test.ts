@@ -499,6 +499,8 @@ const SECRET_LINES = [
   "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);",
   "key.secretKey.fill(0);",
   "return signMoveTx(k.publicKey, k.secretKey, nonce, read.blockHash, move);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
   "k.secretKey.fill(0);",
 ];
 test("moveout.ts touches a secret key only in the pinned expressions (review 4, L1)", () => {

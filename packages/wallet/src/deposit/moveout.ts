@@ -40,7 +40,7 @@
 // - U's key: depositId(seed, s, i), the derivation the refund move opens (follow.ts openKey), under deps.seedLock, checked
 //   to be U and zeroed at once. Nothing here logs. Each read names U, the token or the typed account; the send carries
 //   the signed bytes alone.
-import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
+import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P, VAULT_SETTLE_GAS, VAULT_SETTLE_REFUND_ATTACH, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
@@ -382,7 +382,7 @@ function plainCalls<C extends MoveCall | WithdrawCall>(given: readonly C[]): C[]
 
 /** A move a check passed (card signers-own-bytes): U, the receiver and the calls, deep-frozen, the only thing signMoveTx
  *  signs. Only a check of this module makes one (seal, module private); a copy, a look-alike or a changed one is not. */
-export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly (MoveCall | WithdrawCall)[] };
+export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly (MoveCall | WithdrawCall | SettleCall)[] };
 const SEALED = new WeakSet<object>();
 const frozen = <T>(v: T): T => {
   if (typeof v === "object" && v !== null) {
@@ -430,7 +430,7 @@ export interface OwnKey {
 /** What the move signs: its calls, the signed bytes and their hash, the nonce, and the amount the typed account gets. */
 export interface BuiltMove {
   receiver: string;
-  calls: readonly (MoveCall | WithdrawCall)[];
+  calls: readonly (MoveCall | WithdrawCall | SettleCall)[];
   amount: bigint;
   nonce: bigint;
   hash: string;
@@ -638,6 +638,107 @@ export function buildWithdrawOut(a: { read: WithdrawOutReadFor; key: OwnKey; kin
     const nonce = read.nonce + 1n;
     const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);
     return { receiver: move.receiver, calls: move.calls, amount: read.held - keep, nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+// ---------- the exit tool's settle (card exit-ids-out; vault paper 2.12 step 4, 2.5.5) ----------
+/** The vault's settle(nullifier_hash), as the kit builds it (vaultSettleCall): 150 Tgas, the refund note's 148 B attached
+ *  for a refund_pending spend and nothing for a paid one. It moves no token: the vault's reserve goes to the payer. */
+export type SettleCall = { method: "settle"; args: Obj; gas: bigint; deposit: bigint };
+/** The settle payload rule: exactly one settle on the release's vault of a network, its one argument a canonical
+ *  decimal field element (not 0), the kit's gas, and the kit's attachment for its status. Signed by the spend's own
+ *  arming account A, a 64-hex implicit account, which pays the gas. */
+export function checkSettleCalls(a: string, vault: string, given: readonly SettleCall[], status: "refund_pending" | "paid"): SealedMove {
+  if (typeof a !== "string" || typeof vault !== "string" || !IMPLICIT.test(a)) throw new MoveOutRefused("the settle's signer is a 64-hex implicit account and the vault a string");
+  if (!Object.values(NEAR_NETWORKS).some((n) => n.vault === vault)) throw new MoveOutRefused("the vault is no release's vault");
+  if (status !== "refund_pending" && status !== "paid") throw new MoveOutRefused("settle takes refund_pending or paid");
+  let calls: SettleCall[];
+  try {
+    calls = structuredClone([...given]);
+  } catch {
+    throw new MoveOutRefused("the calls are not plain data");
+  }
+  const c = calls[0];
+  if (calls.length !== 1 || !isObj(c) || Object.keys(c).sort().join() !== "args,deposit,gas,method" || !isObj(c.args) || c.method !== "settle") throw new MoveOutRefused("one settle call, method, args, gas and deposit");
+  if (Object.keys(c.args).join() !== "nullifier_hash" || typeof c.args.nullifier_hash !== "string") throw new MoveOutRefused("settle names the nullifier hash alone, as a string");
+  const nh = big(c.args.nullifier_hash);
+  if (nh === null || nh < 1n || nh >= VAULT_FIELD_P || nh.toString() !== c.args.nullifier_hash) throw new MoveOutRefused("the nullifier hash is not a canonical field element");
+  if (c.gas !== VAULT_SETTLE_GAS || c.deposit !== (status === "refund_pending" ? VAULT_SETTLE_REFUND_ATTACH : 0n)) throw new MoveOutRefused("settle's gas and attachment are the kit's");
+  return seal({ signer: a, receiver: vault, calls });
+}
+/** What a settle needs read, at one block on both RPCs: the block, A's key nonce and A's NEAR free of its storage. */
+export type SettleReadFor = { height: number; blockHash: string; nonce: bigint; free: bigint; gasPrice: bigint; a: string };
+/**
+ * A's key nonce (its key list exactly its own key), its NEAR and the gas price at the lower final height of both RPCs,
+ * equal on both, else null. A that does not exist reads null too: it is funded by a Transfer from the typed account.
+ */
+export async function readSettle(a: string, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<SettleReadFor | null> {
+  if (typeof a !== "string" || !IMPLICIT.test(a)) return null;
+  const own = ownKey(a);
+  const finals = await Promise.all(rpcs.map(async (r) => {
+    try {
+      const b = await r.block({ finality: "final" });
+      const h = isObj(b) && isObj(b.result) && isObj(b.result.header) ? b.result.header.height : undefined;
+      return typeof h === "number" && Number.isSafeInteger(h) && h > 0 ? h : null;
+    } catch {
+      return null;
+    }
+  }));
+  if (finals.some((h) => h === null) || heightSpreadOver(finals as number[]) !== null) return null;
+  const at = Math.min(...(finals as number[]));
+  const side = async (r: MoveOutRpc) => {
+    try {
+      const [b, keys, acct, gp] = await Promise.all([
+        r.block({ block_id: at }),
+        r.query({ request_type: "view_access_key_list", account_id: a, block_id: at }),
+        r.query({ request_type: "view_account", account_id: a, block_id: at }),
+        r.call("gas_price", [at]),
+      ]);
+      const head = isObj(b) && isObj(b.result) && isObj(b.result.header) ? b.result.header : undefined;
+      if (!head || head.height !== at || typeof head.hash !== "string" || hash32(head.hash) === null) return null;
+      const nonce = keyNonce(keys, at, own);
+      const acc = resultAt(acct, at);
+      const amount = big(acc?.amount), usage = big(acc?.storage_usage);
+      const price = isObj(gp) && isObj(gp.result) ? big(gp.result.gas_price) : null;
+      if (nonce === null || amount === null || usage === null || price === null) return null;
+      return { blockHash: head.hash, nonce, free: amount - usage * BYTE_COST, gasPrice: price };
+    } catch {
+      return null;
+    }
+  };
+  const [x, y] = await Promise.all(rpcs.map(side));
+  if (!x || !y || x.blockHash !== y.blockHash || x.nonce !== y.nonce || x.free !== y.free || x.gasPrice !== y.gasPrice) return null;
+  return { height: at, ...x, a };
+}
+/** What A must hold for one settle: its attachment and its prepaid gas at GAS_PRICE_MARGIN times the price read. */
+export function settleNeed(read: Pick<SettleReadFor, "gasPrice">, status: "refund_pending" | "paid"): bigint {
+  return (status === "refund_pending" ? VAULT_SETTLE_REFUND_ATTACH : 0n) + (VAULT_SETTLE_GAS + MOVE_GAS.send) * read.gasPrice * GAS_PRICE_MARGIN;
+}
+/**
+ * settle(nullifierHash) on `vault`, signed by the spend's own arming account A (key: A's own, as armAccount derives
+ * it), at A's nonce + 1 on the read's block. The call is the kit's (vaultSettleCall's shape), checked and sealed by
+ * checkSettleCalls before the private signer runs; the key's copy is zeroed whichever way.
+ */
+export function buildSettleOut(x: { read: SettleReadFor; key: OwnKey; vault: string; nullifierHash: bigint; status: "refund_pending" | "paid" }): BuiltMove {
+  const { vault, nullifierHash, status } = x;
+  const key = ownKeyCopy(x.key);
+  try {
+    const r = { ...x.read };
+    let hash: Uint8Array | null = null;
+    try {
+      hash = typeof r.blockHash === "string" ? base58.decode(r.blockHash) : null;
+    } catch {
+      hash = null;
+    }
+    if (r.a !== key.id || typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash === null || hash.length !== 32) throw new MoveOutRefused("the read is not A's, or its nonce or block hash is not one");
+    if (typeof nullifierHash !== "bigint") throw new MoveOutRefused("the nullifier hash is a bigint");
+    const calls: SettleCall[] = [{ method: "settle", args: { nullifier_hash: nullifierHash.toString() }, gas: VAULT_SETTLE_GAS, deposit: status === "refund_pending" ? VAULT_SETTLE_REFUND_ATTACH : 0n }];
+    const move = checkSettleCalls(key.id, vault, calls, status);
+    const nonce = r.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);
+    return { receiver: move.receiver, calls: move.calls, amount: 0n, nonce, ...tx };
   } finally {
     key.secretKey.fill(0);
   }

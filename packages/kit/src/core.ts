@@ -23,20 +23,25 @@ export { refKey } from "../../wallet/src/notes/store.ts";
 export { typedSeed } from "../../wallet/src/signin/words.ts";
 export { armAccount, depositId, entropyToWords, refundId, returnId, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 // card exit-ids-out: the moves out of a one-time id or an arming account, each built and checked by the wallet's own
-// payload rule before its private signer runs, and the reads they are built from (vault paper 2.12 step 5)
+// payload rule before its private signer runs, and the reads they are built from (vault paper 2.12 step 5); and the
+// settle of a spend of ours, signed by its own arming account (step 4)
 export {
   buildMoveOut,
   buildRegisterOut,
+  buildSettleOut,
   buildWithdrawOut,
   moveOutRpc,
   MoveOutRefused,
   readMoveOutFor,
+  readSettle,
   readWithdrawOut,
+  settleNeed,
   type BuiltMove,
   type MoveOutReadFor,
   type MoveOutRpc,
   type OwnKey,
   type RegisterOutReadFor,
+  type SettleReadFor,
   type WithdrawOutReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
 // the wallet's bound on two providers' final heights, which the exit tool's reads hold too

@@ -1,5 +1,5 @@
-// The exit tool's moves out of the one-time ids and arming accounts (vault paper 2.12 step 5 and "Nothing into the
-// vault", docs/plan1/vault.md at research db647d3 l.951-962 and l.972-997; V4.2 l.1243): what a deposit's account U, a
+// The exit tool's settle of pending spends (vault paper 2.12 step 4) and its moves out of the one-time ids and arming
+// accounts (step 5 and "Nothing into the vault", docs/plan1/vault.md at research db647d3 l.951-962 and l.972-997; V4.2 l.1243): what a deposit's account U, a
 // return id R, a refund id V or an arming account A holds, on the token or inside intents.near, goes out to the NEAR
 // account the user types, by the account's own transaction, and never into the vault.
 //
@@ -13,11 +13,18 @@
 //   ft_withdraw out of intents.near (no memo, no msg). Each is checked before it is signed; the typed account is never
 //   the vault, intents.near, the token or the moving account. An id (U, R, V) keeps one base unit, so restore still
 //   finds it by its balance (l.988-990); A moves all, so its DeleteAccount can follow (exit-withdraw).
+// - The settle (step 4): a spend of ours the restore read refund_pending or paid, not settled, is settled by the tool
+//   itself with the vault's own settle(nullifier_hash), the kit's call (vaultSettleCall: 150 Tgas, the refund note's
+//   148 B attached for refund_pending, nothing for paid), signed by that spend's own arming account A_{l,j}, which pays
+//   its gas (funded, when short, by a Transfer from the typed account, never another account of the seed). It moves no
+//   token: the reserve goes to the payer and a refund note is written for the next restore to find. It is the one call
+//   the tool signs with the vault as receiver; every move of money goes to the typed account.
 // - The key: derived from seed64 here for the one signature, checked to be the account's own by the builder, and zeroed
 //   on every path. Nothing here sends: the signed bytes go to the caller, who self-submits them.
 import {
   armAccount,
   buildMoveOut,
+  buildSettleOut,
   buildRegisterOut,
   buildWithdrawOut,
   depositId,
@@ -28,6 +35,8 @@ import {
   type MoveOutReadFor,
   type OwnKey,
   type RegisterOutReadFor,
+  type RestoredSpend,
+  type SettleReadFor,
   type WithdrawOutReadFor,
 } from "@blindfill/kit/core";
 import { nearPairNetwork, nearPairRule, VAULT_SYNC_BUSY_WAITS_MS, vaultViewBusy, type NearNetwork, type VaultSyncRpc } from "@blindfill/kit";
@@ -264,6 +273,32 @@ export function exitBuildMove(a: { seed64: Uint8Array; account: ExitAccount; net
     if (leg === "register") { const m = move as Extract<ExitMove, { leg: "register" }>; return buildRegisterOut({ read: m.read, key, to: typed, token, storageMin: m.storageMin }); }
     if (leg === "intents") { const m = move as Extract<ExitMove, { leg: "intents" }>; return buildWithdrawOut({ read: m.read, key, kind, to: typed, token }); }
     throw new ExitRpcRefused(`no move leg ${JSON.stringify(leg)}`);
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+// ---------- the settle (step 4) ----------
+/** The spends of ours the tool settles: refund_pending or paid, not yet settled (in_flight waits for its callback). */
+export function exitSettleDue(spends: readonly RestoredSpend[]): RestoredSpend[] {
+  return spends.filter((x) => x.spend.status === "refund_pending" || x.spend.status === "paid");
+}
+
+/**
+ * settle of `spend` on `network`'s vault, signed by the spend's own arming account A_{l,j} at the read's nonce + 1, its
+ * key zeroed before this returns, whichever way. `read` is readSettle's of A (both RPCs at one block). A spend that is
+ * in_flight or settled is refused: nothing to settle. The caller self-submits the signed bytes, then reads the spends
+ * row again on both RPCs: the sender's answer is never the outcome. `keyOf` is exitKey unless a test says.
+ */
+export function exitBuildSettle(a: { seed64: Uint8Array; network: NearNetwork; spend: RestoredSpend; read: SettleReadFor }, keyOf: typeof exitKey = exitKey): BuiltMove {
+  const { seed64, network } = a;
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  const spend = a.spend, row = spend.spend;
+  const status = row.status, nullifierHash = row.nullifierHash;
+  if (status !== "refund_pending" && status !== "paid") throw new ExitRpcRefused(`a ${String(status)} spend has nothing to settle`);
+  const key = keyOf(seed64, { kind: "A", l: spend.l, j: spend.j });
+  try {
+    return buildSettleOut({ read: a.read, key, vault: EXIT_NETWORKS[network].vault, nullifierHash, status });
   } finally {
     key.secretKey.fill(0);
   }
