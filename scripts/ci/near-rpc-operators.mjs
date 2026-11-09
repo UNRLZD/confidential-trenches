@@ -25,7 +25,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { signBuilt } from "../signpage-built.mjs";
 
 /** host -> { operator, network } */
 export const NEAR_RPC_OPERATORS = Object.freeze({
@@ -271,7 +270,10 @@ export function scanTree(cwd) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  signBuilt(); // the served bundle is build output: built from this checkout's sources first
+  // the served bundle is build output: built from this checkout's sources first. Imported here, in the CLI alone, so a
+  // library import of this file (the vault's deploy.mjs reads its map) never reaches the signing page's build
+  const { signBuilt } = await import("../signpage-built.mjs");
+  signBuilt();
   const problems = scanTree(process.cwd());
   for (const p of problems) console.error(`near-rpc-operators: REFUSED: ${p}`);
   if (problems.length) process.exit(1);
