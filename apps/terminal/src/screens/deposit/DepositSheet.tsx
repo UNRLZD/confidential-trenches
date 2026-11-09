@@ -8,7 +8,7 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, poolAskAgainIn, poolQuote, poolReady, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, formHeld, pickAsset, poolAskAgainIn, poolQuote, poolReady, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
@@ -267,7 +267,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     body = (
       <>
         <Dests dest={dest} open={open} locked={checked.kind === "pending"} pick={pickDest} />
-        <Form s={s} frozen={checked.kind === "pending"} lines={dest === "near"} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
+        <Form s={s} held={formHeld(s, checked)} lines={dest === "near"} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
         <Recent rows={recentRows(state?.ops)} />
       </>
     );
@@ -323,10 +323,10 @@ function Stat({ tone, label, counter = null }: { tone: "warn" | "blue"; label: R
   );
 }
 
-function Form({ s, frozen, lines, amount, setAmount, dry, asset, assets, pick, retry }: { s: SheetState; frozen: boolean; lines: boolean; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: Asset | null; assets: readonly Asset[]; pick(p: { symbol: string; chain: string }): void; retry(): void }) {
+function Form({ s, held, lines, amount, setAmount, dry, asset, assets, pick, retry }: { s: SheetState; held: { pickers: boolean; amount: boolean }; lines: boolean; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: Asset | null; assets: readonly Asset[]; pick(p: { symbol: string; chain: string }): void; retry(): void }) {
   const loading = s === "S4.1";
   // a checked quote pending: the asset, chain and amount it was asked for are held still until it answers (review P1)
-  const still = loading || frozen;
+  const frozen = held.pickers;
   const q = dry.kind === "ok" && !["S4.4", "S4.5"].includes(s) ? dry.value : null;
   const cell = (v: string | null) => (s === "S4.2" ? <span className="sk" /> : <span className={v ? "num" : "num t3"}>{v ?? "—"}</span>);
   // the quote lines come from the vault's dry quote; a pool has none (its one quote is the checked one, with the address)
@@ -361,7 +361,7 @@ function Form({ s, frozen, lines, amount, setAmount, dry, asset, assets, pick, r
       <label className={s === "S4.4" || s === "S4.5" ? "damt bad" : "damt"}>
         <span className="lb"><W id="amount" /></span>
         <span className="row">
-          <input className="v num" inputMode="decimal" autoComplete="off" value={amount} disabled={still} onChange={(e) => setAmount(e.target.value)} data-field="amount" />
+          <input className="v num" inputMode="decimal" autoComplete="off" value={amount} disabled={held.amount} onChange={(e) => setAmount(e.target.value)} data-field="amount" />
           <span className="u">{asset?.symbol}</span>
         </span>
       </label>

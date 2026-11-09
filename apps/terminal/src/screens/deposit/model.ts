@@ -103,6 +103,16 @@ export function quoteFits(q: Pick<SignpageResults["deposit.quote"], "origin_asse
   return q.origin_asset === asked.asset.id && a !== null && b !== null && !lessThan(a, b) && !lessThan(b, a);
 }
 
+/**
+ * What the form holds still (review P1): everything while the asset list loads, and the asset, chain and amount while a
+ * checked quote is pending, so the answer always lands on what was asked. A dry quote pending (the vault's lines, as the
+ * amount is typed) holds nothing.
+ */
+export function formHeld(s: SheetState, checked: Answer<unknown>): { pickers: boolean; amount: boolean } {
+  const held = s === "S4.1" || checked.kind === "pending";
+  return { pickers: held, amount: held };
+}
+
 /** pool.address's checked quote, only when the answer names the chain asked: an answer for another chain, or an address
  *  with no checked quote (nothing follows it), draws no address. */
 export function poolQuote(chain: PoolChain, a: SignpageResults["pool.address"]): SignpageResults["deposit.quote"] | null {

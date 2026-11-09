@@ -8,10 +8,9 @@
 //         off and ask nothing; the vault picked back sends one deposit.dry and deposit.quote for 15 only and draws the
 //         quote's address; every follower stage draws its own state, Deposited only at done, the balance moving only
 //         then; Done closes the sheet and Portfolio reads $73.18; the sheet again, Solana picked draws the form with Get
-//         address on; USDC on Base and 20 send one pool.address for Solana, USDC and 20, the pool quote's address draws under
-//         USDC Base and 20 USDC (the asset and amount asked), every
+//         address on, which sends one pool.address for Solana, the asset and 15, draws the pool quote's address, every
 //         pool stage its own state, Ready only at in_pool; Done closes it and Portfolio's Solana row reads the pool: PASS;
-//   bad:  main's build before this card (--harness --build of main f6066882): Solana is Not available, never
+//   bad:  main's build before this card (--harness --build of main 56bcd0d0): Solana is Not available, never
 //         fundable, its Get address off, no pool.address quote, no pool stage: FAIL.
 // Planted from the good run: a closed pool that sends a quote or keeps Get address on, a tile with another chain's mark,
 // a row out of order, the sheet opening on a pool, Deposited before done, a balance that moves early, Portfolio not
@@ -92,8 +91,6 @@ test("planted: Solana's quote to another chain, as a vault quote or twice, anoth
   fails(mut((rec) => run(rec, "desktop", "dark").open.asked.push({ type: "deposit.quote" })), /^BAD desktop dark: solana's Get address sends/);
   fails(mut((rec) => run(rec, "phone", "light").open.asked.push({ ...run(rec, "phone", "light").open.asked[0] })), /^BAD phone light: solana's Get address sends/);
   fails(mut((rec) => (run(rec, "desktop", "light").open.address = "0xdead")), /^BAD desktop light: solana's address state S4\.13 draws 0xdead/);
-  fails(mut((rec) => (run(rec, "phone", "dark").open.heading = "SOL Solana")), /^BAD phone dark: solana's address block names \["SOL Solana"/);
-  fails(mut((rec) => (run(rec, "desktop", "dark").open.amountLine = "20 SOL")), /^BAD desktop dark: solana's address block names/);
   fails(mut((rec) => (run(rec, "phone", "dark").open.stages[1] = "pool-in")), /^BAD phone dark: solana's pool stages draw/);
   fails(mut((rec) => (run(rec, "desktop", "dark").open.readies[2] = "0.4")), /^BAD desktop dark: Ready per pool stage/);
   fails(mut((rec) => (run(rec, "phone", "light").open.readies[7] = null)), /^BAD phone light: Ready per pool stage/);

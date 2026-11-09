@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { POOL_DEPOSIT_STAGES } from "@blindfill/kit";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { POOL_ASK_TRIES, poolAskAgainIn, quoteFits, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { formHeld, POOL_ASK_TRIES, poolAskAgainIn, quoteFits, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, PoolDepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -364,4 +364,12 @@ test("a checked quote stands only for the asset and amount it was asked for, the
   assert.equal(quoteFits(checked, { asset: usdcBase, amount: "15" }), false, "another origin asset: its address is not this asset's");
   assert.equal(quoteFits(checked, { asset: near, amount: "20" }), false, "another amount");
   assert.equal(quoteFits({ ...checked, amount_in: "1e3" }, { asset: near, amount: "15" }), false, "an amount that is not a decimal");
+});
+
+test("review P1: while a checked quote is pending the asset, chain and amount are held still; typing under a dry quote is not", () => {
+  assert.deepEqual(formHeld("S4.2", { kind: "pending" }), { pickers: true, amount: true }, "Get address pending: nothing to switch to under the answer");
+  assert.deepEqual(formHeld("S4.2", { kind: "idle" }), { pickers: false, amount: false }, "the vault's dry quote pending: the amount stays typeable");
+  assert.deepEqual(formHeld("S4.3", { kind: "idle" }), { pickers: false, amount: false });
+  assert.deepEqual(formHeld("S4.3", { kind: "refused", code: "busy" }), { pickers: false, amount: false }, "refused: free again");
+  assert.deepEqual(formHeld("S4.1", { kind: "idle" }), { pickers: true, amount: true }, "the asset list loading");
 });
