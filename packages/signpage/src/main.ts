@@ -226,7 +226,7 @@ else {
       deposit: (g, amount, signal) =>
         depositToEnd((p, ctx) => (testnet === null ? null : testnet.depositFrom(p, { s: BigInt(g.s), i: g.i, u: g.u }, ctx as KindContext)), "solana", POOL_ASSET_DECIMALS.SOL, amount, signal),
       refund: poolRefundMover({
-        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair()),
+        read: (g, nonce) => readMoveAt("intents.near", g.refund_id, nonce, g.origin, nearPair(), NEAR_NETWORKS.mainnet.usdc),
         floor: async (g) => readSolanaPoolFloor(pair, program, g.u),
         priced: (g) => pricedFor(g.chain, g.origin),
         decimals: (c) => POOL_ASSET_DECIMALS[POOL_ADDRESS_ASSET[c]],

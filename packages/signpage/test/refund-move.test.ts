@@ -36,6 +36,7 @@ type FollowRpc = import("../../wallet/src/deposit/follow.ts").FollowRpc;
 const { ID_INTENT_WINDOW_MS } = await import("../src/rules/refund.ts");
 const { REFUND_INTENT_WINDOW_MS, RELEASE_INTENTS_URL } = await import("../../wallet/src/deposit/refund.ts");
 const { DEPOSIT_QUOTE_URL } = await import("../../wallet/src/deposit/quote.ts");
+const { NEAR_NETWORKS } = await import("../../kit/src/near/networks.ts");
 type FollowMoveAsk = import("../../wallet/src/deposit/follow.ts").FollowMoveAsk;
 type MoveRecord = import("../../wallet/src/deposit/refund.ts").MoveRecord;
 
@@ -73,7 +74,7 @@ function harness(o: { held?: bigint; answer?: (req: OneClickRequest) => Answer; 
   const ask: FollowMoveAsk = {
     u: ID,
     asset: SOL_USDC,
-    reads: [{ blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held }, { blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held }],
+    reads: [{ blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held, registered: true }, { blockTimeNs: BigInt(BLOCK_MS) * 1_000_000n, held, registered: true }],
     salt: SALT,
     priorMs: null,
     height: 223_478_949,
@@ -204,6 +205,7 @@ test("SIGN_HOST's follow passes the refund move: a REFUNDED op on mainnet with U
     method === "mt_balance_of" ? (args.account_id === u && args.token_id === SOL_USDC ? AMOUNT.toString() : "0")
     : method === "current_salt" ? SALT
     : method === "is_nonce_used" ? false
+    : method === "storage_balance_of" ? { total: "1250000000000000000000", available: "0" }
     : "0";
   const one = (name: string): FollowRpc => ({
     name,
@@ -251,6 +253,72 @@ test("SIGN_HOST's follow passes the refund move: a REFUNDED op on mainnet with U
   assert.equal(op.stage, "refund_move");
 });
 
+test("card intents-u-registered-first: SIGN_HOST's follow signs no refund move while storage_balance_of(U) on USDC reads null on one RPC; once both read it registered, it moves", async () => {
+  const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16))); // the first published BIP-39 vector (all-zero entropy)
+  const u = depositAccount(SEED, 7n, 3).account;
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  after(() => w.close());
+  await w.put("ops", "dq-r", { kind: "deposit", stage: "refunded", held_id: u, since_ms: NOW, txs: [], created_ms: NOW, follow: { network: "mainnet", s: "7", i: 3, u, address: "f".repeat(64), deadline_ms: NOW + 72 * 3_600_000, origin: SOL_USDC, min_out: "24705126", sent: true, status: "REFUNDED" } });
+  let registeredOnB = false; // a lying or lagging RPC b, or a helper that has not registered U yet
+  const storageAsked: string[] = [];
+  const view = (rpc: string, p: any, args: any): unknown => {
+    const method = p.method_name;
+    if (method === "storage_balance_of") {
+      storageAsked.push(`${rpc} ${p.account_id} ${args.account_id}`);
+      return rpc === "b" && !registeredOnB ? null : { total: "1250000000000000000000", available: "0" };
+    }
+    return method === "mt_balance_of" ? (args.account_id === u && args.token_id === SOL_USDC ? AMOUNT.toString() : "0") : method === "current_salt" ? SALT : method === "is_nonce_used" ? false : "0";
+  };
+  const one = (name: string): FollowRpc => ({
+    name,
+    tx: async () => ({}),
+    block: async () => ({ result: { header: { height: 100, timestamp_nanosec: (BigInt(BLOCK_MS) * 1_000_000n).toString() } } }),
+    query: async (p: any) => {
+      const args = JSON.parse(Buffer.from(p.args_base64 ?? "e30=", "base64").toString());
+      return { result: { block_height: 100, block_hash: "h", logs: [], result: [...Buffer.from(JSON.stringify(view(name, p, args)))] } };
+    },
+  });
+  const posted: any[] = [];
+  let quotes = 0;
+  const fetchFn = (async (url: string, init?: RequestInit) => {
+    if (url === DEPOSIT_QUOTE_URL) {
+      quotes++;
+      const a = liveAnswer(JSON.parse(String(init?.body)), NOW - 500);
+      a.quote.depositAddress = DEPOSIT;
+      signAnswer(a, mockKey.privateKey);
+      return Response.json(a, { status: 201 });
+    }
+    if (url === RELEASE_INTENTS_URL && init?.body === "{}") return Response.json({ error: { code: "bad_shape" } }, { status: 400 });
+    if (url === RELEASE_INTENTS_URL) return (posted.push(JSON.parse(String(init?.body))), Response.json({ tx_hash: "1" }));
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  let rounds = 0;
+  const f = depositFollows({ network: () => "mainnet", store: async () => w, seed64: async () => Uint8Array.from(SEED), rpcs: () => [one("a"), one("b")], fetch: fetchFn, sleep: async () => void (rounds++, await new Promise<void>((ok) => setImmediate(ok))), locks: () => null, now: () => NOW });
+  await f.settle();
+  // a failing assertion still stops the follow, so the run ends (red before the gate, not a hang)
+  try {
+  const waitRounds = async (until: () => boolean, max: number) => {
+    for (let still = 0; !until() && rounds < max && still < 2000; ) {
+      const n = rounds;
+      await new Promise((ok) => setTimeout(ok, 5));
+      still = rounds === n ? still + 1 : 0;
+    }
+  };
+  await waitRounds(() => false, 6);
+  assert.ok(rounds >= 6, "the follow ran its rounds");
+  assert.equal(posted.length, 0, "nothing signed or sent while RPC b reads U unregistered");
+  assert.equal(quotes, 0, "no quote asked either");
+  assert.ok(storageAsked.includes(`a ${NEAR_NETWORKS.mainnet.usdc} ${u}`) && storageAsked.includes(`b ${NEAR_NETWORKS.mainnet.usdc} ${u}`), "U's registration read on USDC on both RPCs");
+  registeredOnB = true;
+  await waitRounds(() => posted.length > 0, rounds + 50);
+  assert.equal(posted.length >= 1, true, "signed and sent once both read U registered");
+  assert.equal(JSON.parse(posted[0].signed_intent.payload).signer_id, u);
+  } finally {
+    f.signedOut();
+    await f.idle();
+  }
+});
+
 // ---------- review wrm-58c238ab M2: SIGN_HOST's real wiring when POST /v1/intents does not carry the move ----------
 // A simulated clock: each sleep(ms) moves the follow's clock by ms and the chain by ms/1000 blocks of 1 s. Counts the
 // live 1Click quotes, the seed openings, the signed sends, the route probes, the RPC calls and the status reads.
@@ -266,7 +334,7 @@ async function relayLoop(intentsAnswer: () => Response, simMinutes: number) {
   const c = { rpc: 0, quotes: 0, sends: 0, probes: 0, seeds: 0, statusReads: 0 };
   const timeAt = (x: number) => T0 + (x - H0) * 1_000;
   const view = (method: string, args: { account_id?: string; token_id?: string }): unknown =>
-    method === "mt_balance_of" ? (args.account_id === u && args.token_id === SOL_USDC ? AMOUNT.toString() : "0") : method === "current_salt" ? SALT : method === "is_nonce_used" ? false : "0";
+    method === "mt_balance_of" ? (args.account_id === u && args.token_id === SOL_USDC ? AMOUNT.toString() : "0") : method === "current_salt" ? SALT : method === "is_nonce_used" ? false : method === "storage_balance_of" ? { total: "1250000000000000000000", available: "0" } : "0";
   const one = (name: string): FollowRpc => ({
     name,
     tx: async () => ({}),

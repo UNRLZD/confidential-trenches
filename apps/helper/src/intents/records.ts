@@ -41,10 +41,25 @@ export type QuoteRecord = {
 /** Failed sends that strike a signer on this endpoint (bind/send.ts MAX_FAILED_SENDS, R3's three). */
 export const STRUCK_AT = 3;
 
-/** The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran. */
-export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null };
-/** `sent`: the execute_intents this endpoint sent for the signer, landed or not (carry.ts signer_cap). */
-export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number };
+/**
+ * The registration the relayer pays a signer, once: pending while its storage_deposit is out, landed once it ran and
+ * reads registered on both providers. `at`: when its outcome first read ran. `reserved` (a receiver's): the slot its
+ * claim holds for the intent it is paid for, under carry.ts INTENTS_SENDS_MAX, until that intent spends it. `read` (the
+ * signer's own): read registered on both providers, so never paid again, a restart included. `id`: its claim's
+ * identity (carry.ts cas): every write after an await is on the registration it judged, by this id (or, for a record
+ * written before ids, its transaction's hash).
+ */
+export type Registration = { receiver: string; state: "pending" | "landed"; tx: TxRef | null; at?: number; reserved?: boolean; read?: boolean; id?: string };
+/** A signer still owed its own registration on USDC (card intents-u-registered-first, review F2): written at first
+ *  sight, kept apart from the quote records (never swept with them), removed once it reads registered. `tries`: its
+ *  failed registrations; `next_ms`: when the next may go (carry.ts SWEEP_MS backoff). */
+export type OwedRecord = { signer: string; tries: number; next_ms: number };
+/** `sent`: the slots taken under carry.ts INTENTS_SENDS_MAX: the execute_intents and receiver registrations this
+ *  endpoint signed for the signer, landed or not, a receiver registration's reserved slot, and `taking`'s. `taking`: the
+ *  nonces of intents whose slot is taken and whose transaction is not signed yet; one a process left there (it stopped
+ *  before the signing) is given back (review PROBE-5). `own`: the
+ *  signer's own registration on the release's USDC (card intents-u-registered-first), its receiver the signer itself. */
+export type SignerRecord = { signer: string; failed: number; registration: Registration | null; sent?: number; own?: Registration | null; taking?: string[] };
 
 export type IntentsStore = {
   quote(depositAddress: string): QuoteRecord | null;
@@ -57,6 +72,14 @@ export type IntentsStore = {
   see(signer: string): void;
   signer(signer: string): SignerRecord;
   putSigner(rec: SignerRecord): void;
+  /** The signer's owed record, or null. */
+  owed(signer: string): OwedRecord | null;
+  /** Writes it, durable before it returns. */
+  owe(rec: OwedRecord): void;
+  /** Removes it: registered, or struck. */
+  paid(signer: string): void;
+  /** Every owed record. */
+  owing(): OwedRecord[];
   close(): void;
 };
 
@@ -203,6 +226,9 @@ function storeOn(d: DurableDir, dir: string, now: () => number, pruneEveryMs: nu
   const timer = setInterval(() => void prune().catch(() => undefined), pruneEveryMs);
   timer.unref();
   const gName = (s: string) => `g-${h(s)}.json`;
+  const oName = (s: string) => `o-${h(s)}.json`;
+  const owedOf = (t: OwedRecord | null, s?: string): OwedRecord | null =>
+    t !== null && typeof t.signer === "string" && (s === undefined || t.signer === s) && Number.isSafeInteger(t.tries) && Number.isSafeInteger(t.next_ms) ? t : null;
   const sName = (s: string) => `s-${h(s)}.json`;
   return {
     quote(a) {
@@ -230,6 +256,24 @@ function storeOn(d: DurableDir, dir: string, now: () => number, pruneEveryMs: nu
       d.held();
       d.replace(sName(rec.signer), JSON.stringify(rec));
     },
+    // a record there that does not read is owed afresh (tries 0), never dropped
+    owed: (s) => (d.text(oName(s)) === null ? null : (owedOf(read<OwedRecord>(oName(s)), s) ?? { signer: s, tries: 0, next_ms: 0 })),
+    owe(rec) {
+      d.held();
+      d.replace(oName(rec.signer), JSON.stringify({ signer: rec.signer, tries: rec.tries, next_ms: rec.next_ms }));
+    },
+    paid(s) {
+      d.held();
+      if (d.text(oName(s)) !== null) d.remove(oName(s));
+    },
+    owing: () =>
+      d
+        .names()
+        .filter((f) => /^o-[0-9a-f]{64}\.json$/.test(f))
+        // a record is its file's own signer's: one written under another name is not read
+        .map((f) => [f, owedOf(read<OwedRecord>(f))] as const)
+        .filter(([f, r]) => r !== null && oName(r.signer) === f)
+        .map(([, r]) => r!),
     close: () => {
       closed = true;
       clearInterval(timer);
