@@ -1,5 +1,6 @@
 // The planted provider answers every RPC-reading live check's test replays (card live-checks-provider-no-answer): each
 // kind of no-answer provider-answer.mjs must name and leave out, and the answers it must keep and judge. Test data only.
+// Runs: once, no check: planted answers the RPC-reading checks' tests import; nothing here reads a host
 const rpcErr = (code, message) => JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message } });
 const ok = (result) => JSON.stringify({ jsonrpc: "2.0", id: 1, result });
 

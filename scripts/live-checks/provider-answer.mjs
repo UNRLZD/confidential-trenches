@@ -12,6 +12,7 @@
 // never one of these: its string is the called contract's. Any other JSON-RPC error is an answer and is judged, on a
 // status outside 2xx too (robinhood-rpc.publicnode.com answers a read past its state 403 with a JSON-RPC error inside).
 // A lying provider can fake a no-answer and so make a check INCONCLUSIVE, never PASS.
+// Runs: once, no check: the shared module the RPC-reading checks import; each of them runs after its own host's deploy
 
 import "../net-window.mjs";
 
