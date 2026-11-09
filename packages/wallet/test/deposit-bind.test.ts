@@ -33,6 +33,7 @@ import {
   txCarriesFinal,
 } from "../src/deposit/bind.ts";
 import { depositDelegate, RELEASE_BIND_URL } from "../src/deposit/delegate.ts";
+import { BUSY_WAIT_FIRST_MS } from "../src/busy.ts";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../src/notes/store.ts";
@@ -166,7 +167,7 @@ const publicKeyOf = (u: string) => `ed25519:${base58.encode(Uint8Array.from(u.ma
 
 // ---------- the mock relayer ----------
 type Sent = { nonce: bigint; mbh: bigint; p: bigint; bytes: string; low: bigint; hash: string; sender: string; receiver: string; pk: string; sig: string; inner: unknown };
-type Reply = "tx" | "lost" | string; // "tx": 200 {tx_hash}; "lost": no answer; else an error code
+type Reply = "tx" | "lost" | string; // "tx": 200 {tx_hash}; "lost": no answer; else an error code ("code@s": with Retry-After s)
 function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => {}) {
   const sent: Sent[] = [];
   const fetchFn = (async (url: string, init: RequestInit) => {
@@ -194,8 +195,9 @@ function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => 
       return Response.json({ tx_hash: s.hash });
     }
     if (reply.startsWith("hash:")) return Response.json({ tx_hash: reply.slice(5) }); // whatever hash the relayer says
-    const status = (HELPER_CODE_STATUS as Record<string, number>)[reply] ?? 400;
-    return Response.json({ error: { code: reply } }, { status });
+    const [code, retryAfter] = reply.split("@") as [string, string | undefined];
+    const status = (HELPER_CODE_STATUS as Record<string, number>)[code] ?? 400;
+    return Response.json({ error: { code } }, { status, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
   }) as typeof fetch;
   return { sent, fetchFn };
 }
@@ -356,6 +358,53 @@ for (const reply of ["tx", "lost"] as const) {
     assert.ok(t.sent[1]!.mbh > t.sent[0]!.mbh);
   });
 }
+
+// card withdraw-fee-busy-waits (re-check of 12e71ddf, P2): a busy relayer (429 rate_limited, 503 upstream) is a RETRY code:
+// the send asks once, the bind tells onWait before its wait (the follow ends the phase there, the seed shut) and sends
+// the same bytes again after it; no wait ever runs inside the phase.
+test("busy: 503 upstream: onWait is told before any wait and no sleep runs inside the phase; the next phase sends the same bytes and the note lands", async () => {
+  const t = await setup(["upstream", "tx"]);
+  const events: string[] = [];
+  const phase = { ...t.deps, onWait: (code: string) => { events.push(`onWait ${code}`); throw new Error("the phase ends"); }, sleep: async (ms: number) => void events.push(`sleep ${ms}`) };
+  await assert.rejects(bindDeposit(SEED, t.args, phase), /the phase ends/);
+  assert.deepEqual(events, ["onWait upstream"]);
+  assert.equal(t.sent.length, 1);
+  // the next round (the follow's next phase): the same signed bytes again, never a new signature
+  const note = landed(await bindDeposit(SEED, t.args, t.deps));
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes);
+  assert.deepEqual((note.calls ?? []).flatMap((c) => c.tx_hashes), [t.sent[1]!.hash]);
+});
+
+test("busy: 429 rate_limited, then a tx_hash: the wait is the bind's pause after onWait, its Retry-After's (BUSY_WAIT_FIRST_MS when none), the same bytes again, the hash lands", async () => {
+  const t = await setup(["rate_limited", "tx"]);
+  const events: string[] = [];
+  const deps = { ...t.deps, onWait: (code: string) => void events.push(`onWait ${code}`), sleep: async (ms: number) => (events.push(`sleep ${ms}`), await t.deps.sleep()) };
+  const note = landed(await bindDeposit(SEED, t.args, deps));
+  assert.deepEqual(events.slice(0, 2), ["onWait rate_limited", `sleep ${BUSY_WAIT_FIRST_MS}`]);
+  assert.equal(t.sent.length, 2);
+  assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes);
+  assert.deepEqual((note.calls ?? []).flatMap((c) => c.tx_hashes), [t.sent[1]!.hash]);
+});
+
+test("busy: Retry-After 0 is floored at the bind's pollMs: onWait and the pause both get pollMs, never 0 (re-check of 1d2c4e9a, P3)", async () => {
+  const t = await setup(["rate_limited@0", "tx"]);
+  const waits: string[] = [];
+  const deps = { ...t.deps, pollMs: 1_000, onWait: (code: string, ms?: number) => void waits.push(`onWait ${code} ${ms}`), sleep: async (ms: number) => (waits.push(`sleep ${ms}`), await t.deps.sleep()) };
+  landed(await bindDeposit(SEED, t.args, deps));
+  assert.deepEqual(waits.slice(0, 2), ["onWait rate_limited 1000", "sleep 1000"]);
+});
+
+test("busy: a stop during a busy pause with the bind's default sleep ends the bind at once, not after the Retry-After (re-check of 1d2c4e9a, P3)", async () => {
+  const t = await setup(["rate_limited@10", "tx"]);
+  const stop = new AbortController();
+  let told = 0;
+  const { sleep: _own, ...noSleep } = t.deps;
+  const deps = { ...noSleep, signal: stop.signal, onWait: () => void ((told = performance.now()), setTimeout(() => stop.abort(new Error("stop")), 20)) };
+  await assert.rejects(bindDeposit(SEED, t.args, deps), /stop/);
+  assert.ok(told > 0, "the bind paused on the busy answer");
+  assert.ok(performance.now() - told < 150, `${(performance.now() - told).toFixed(0)} ms after the pause began`);
+});
 
 test("refused: U's nonce moved past the call, P not held and the USDC back in U: a new call on the same P, past the dead nonce", async () => {
   let calls = 0;

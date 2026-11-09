@@ -300,6 +300,54 @@ test("the devnet pool's relay fee: GET /v1/pool/fee on the helper for the pool a
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchOf(200, JSON.stringify({ ...answer, pad: "x".repeat(1024) }))), /over 1024 B/);
 });
 
+test("the pool fee, busy (card withdraw-fee-busy-waits): 429 rate_limited or 503 upstream waits its Retry-After, capped, and asks again, BUSY_ASKS asks at most; any other status refuses at once", async () => {
+  const { BUSY_ASKS, BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } = await import("../../wallet/src/busy.ts");
+  const pool = solanaPoolOf(SOL_POOLS.devnet!.program).pool;
+  const answer = { chain: "solana", cluster: "devnet", program: SOL_POOLS.devnet!.program, pool, fee_payer: FEE_PAYER, epoch_ms: 60000, epoch_start_ms: 1800000000000, fee: "1300000", step: "100000" };
+  type A = { status: number; body: unknown; retryAfter?: string };
+  const run = async (answers: A[]) => {
+    let asks = 0;
+    const slept: number[] = [];
+    const fetchFn = (async () => {
+      const a = answers[Math.min(asks++, answers.length - 1)]!;
+      return new Response(JSON.stringify(a.body), { status: a.status, headers: a.retryAfter === undefined ? {} : { "retry-after": a.retryAfter } });
+    }) as typeof fetch;
+    const out = poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchFn, async (ms: number) => void slept.push(ms));
+    return { out, slept, asks: () => asks };
+  };
+  const busy = { status: 429, body: { error: { code: "rate_limited" } }, retryAfter: "1" };
+  const good = { status: 200, body: answer };
+  // a 429 with Retry-After 1, then a 200: the fee
+  let r = await run([busy, good]);
+  assert.deepEqual(await r.out, answer);
+  assert.deepEqual(r.slept, [1_000]);
+  // a 503 upstream naming no wait: BUSY_WAIT_FIRST_MS
+  r = await run([{ status: 503, body: { error: { code: "upstream" } } }, good]);
+  assert.deepEqual(await r.out, answer);
+  assert.deepEqual(r.slept, [BUSY_WAIT_FIRST_MS]);
+  // a 429 that never clears: refused after BUSY_ASKS asks, the waits within the bound
+  r = await run([{ ...busy, retryAfter: "75" }]);
+  await assert.rejects(r.out, /HTTP 429/);
+  assert.equal(r.asks(), BUSY_ASKS);
+  assert.ok(r.slept.length === BUSY_ASKS - 1 && r.slept.every((ms) => ms <= BUSY_WAIT_MAX_MS));
+  // a 400 refuses at once
+  r = await run([{ status: 400, body: { error: { code: "bad_shape" } }, retryAfter: "1" }, good]);
+  await assert.rejects(r.out, /HTTP 400/);
+  assert.equal(r.asks(), 1);
+  assert.deepEqual(r.slept, []);
+  // the kit's other 503 codes are no busy answer (review of 407ba3bc, P3): each refuses at once
+  for (const code of ["relayer_low", "token_halted", "index_behind"]) {
+    r = await run([{ status: 503, body: { error: { code } }, retryAfter: "1" }, good]);
+    await assert.rejects(r.out, /HTTP 503/, code);
+    assert.equal(r.asks(), 1, code);
+    assert.deepEqual(r.slept, [], code);
+  }
+  // a Retry-After over the cap waits only the cap
+  r = await run([{ ...busy, retryAfter: "3600" }, good]);
+  assert.deepEqual(await r.out, answer);
+  assert.deepEqual(r.slept, [BUSY_WAIT_MAX_MS]);
+});
+
 test("a state read settles a pool note still INCOMING, one pass at a time; with none open it reads nothing on chain", async () => {
   const { w, ns } = await wallet();
   const calls: string[] = [];
