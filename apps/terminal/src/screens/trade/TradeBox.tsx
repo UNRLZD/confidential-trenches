@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
+import { heldOf } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
+import { markEnd, staleAfterSell } from "../positions/model.ts";
+import type { SellEnd } from "../positions/model.ts";
 import { useBalance, useHeld } from "../portfolio/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
 import { useSell } from "../positions/source.tsx";
@@ -127,15 +130,22 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ amount: Cents; p: SetPreview } | null>(null);
   const [, tick] = useState(0);
-  // the Sell side: the position this token holds on this chain, and the sell of it; a sell that runs or has ended keeps
-  // its box though its position has left the state (a 100% sell), so its Filled or its end shows where it was tapped
-  const sell = useSell(chain, token, slippageBps);
-  const [side, setSide] = useState<"buy" | "sell">("buy");
+  // the Sell side: the position this token holds on this chain (the row's own token string), and the sell of it
   const heldNow = useHeld(signedOut ? null : snapshot, chain, token);
+  const sellLive = useSell(chain, heldNow?.token ?? token, slippageBps);
+  const [side, setSide] = useState<"buy" | "sell">("buy");
   const lastHeld = useRef<Row | null>(null);
   if (heldNow) lastHeld.current = heldNow;
-  else if (lastHeld.current && (lastHeld.current.chain !== chain || lastHeld.current.token !== token)) lastHeld.current = null;
-  const held = heldNow ?? (sell.phase.k !== "ready" ? lastHeld.current : null);
+  else if (lastHeld.current && heldOf([lastHeld.current], chain, token) === null) lastHeld.current = null;
+  // after a sell ends, the box is display only until a state newer than the one at its end arrives (review P2): the row
+  // it draws is what was held before the sell, so a tap would ask a share of an amount that is gone. While a sell runs
+  // or until that state, the box keeps its row though the position has left the state (a 100% sell), so its Filled or
+  // its end shows where it was tapped; after it, no position is no sell side.
+  const endMark = useRef<SellEnd | null>(null);
+  endMark.current = markEnd(endMark.current, sellLive.phase, snapshot.state);
+  const stale = staleAfterSell(endMark.current, sellLive.phase, snapshot.state);
+  const sell = stale ? { ...sellLive, ready: false } : sellLive;
+  const held = heldNow ?? (busy(sellLive.phase) || stale ? lastHeld.current : null);
   const onSell = side === "sell" && held !== null;
   // the side moves only while neither side runs: a running buy or sell keeps the box that draws its state
   const pickSide = (x: "buy" | "sell") => {
@@ -237,7 +247,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, onSell };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -266,12 +276,13 @@ export function TradeFillToast({ t, symbol }: { t: Trade; symbol: string }) {
 }
 
 /** The box drawn from a trade state; any number of views of one state draw the same trade. */
-export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean }) {
+/** `decimals` is the token's own (the token read's): the sell side floors a percent at its base unit. */
+export function TradeView({ t, symbol, footer, toast = true, decimals = null }: { t: Trade; symbol: string; footer?: ReactNode; toast?: boolean; decimals?: number | null }) {
   const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
-  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
+  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} decimals={decimals} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   const pending = shown === null && last !== null;
@@ -302,7 +313,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
     >
       <div className="trb-sides">
         <button type="button" className="trb-side" data-on="buy" aria-pressed="true"><W id="buy" /></button>
-        <button type="button" className="trb-side" aria-pressed="false" disabled={t.held === null || running} onClick={() => t.setSide("sell")} data-testid="trade-side-sell"><W id="sell" /></button>
+        <button type="button" className="trb-side" aria-pressed="false" disabled={t.heldNow === null || running} onClick={() => t.setSide("sell")} data-testid="trade-side-sell"><W id="sell" /></button>
       </div>
       <div className="trb-ot">
         <div className="trb-tabs" role="tablist">

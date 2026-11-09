@@ -2,17 +2,18 @@
 // (app-sell-mount.answers.json), each read on 9 Nov by app-sell-mount.mjs collect() in headless Chromium, the stand-in
 // shell sending app-portfolio-mount's account with its Solana pool and 1000 DJT held:
 //   good: this card's build served at APP_HOST's name (--harness --build): the switch's Sell (desktop) and the phone
-//         bar's Sell draw the sell side, ready, `1K DJT held`; 25% asks one pool.sell of 250 on solana and the box
-//         draws S8.32 (the shell refuses it), at 1440 and 390: PASS;
+//         bar's Sell draw the sell side, ready, `1K DJT held`; a double tap of 25% asks one pool.sell of 250 on solana
+//         and the box draws S8.32 (the shell refuses it); 100% then asks 1000, at 1440 and 390: PASS;
 //   bad:  the deployed APP_HOST on 9 Nov, before this card: the switch's Sell is off, no sell side, no pool.sell: FAIL.
-// Planted from the good run: a pool.sell of another amount, chain or token, two for one tap, a vault sell, a sell side
+// Planted from the good run: a pool.sell of another amount, chain or token, two for a double tap, a stray buy or
+// pool.buy, a 100% that is not the whole, a sell side
 // not ready or naming another holding, a box that leaves States.tsx's states, a missing run, no entry script.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, MINT, STATE, WANT } from "./app-sell-mount.mjs";
+import { judge, MINT, STATE, WANT, WANT_ALL } from "./app-sell-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-sell-mount.answers.json"), "utf8"));
@@ -34,13 +35,14 @@ test("the account holds 1000 of the token route's token on Solana, with a Solana
   assert.ok(STATE.pools.some((x) => x.chain === "solana"));
   assert.equal(MINT, "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"); // gitleaks:allow (a public Solana mint)
   assert.deepEqual(WANT, { chain: "solana", mint: MINT, amount: "250", slippage_bps: 1000 });
+  assert.deepEqual(WANT_ALL, { ...WANT, amount: "1000" });
 });
 
 test("recorded good answer: Sell draws the sell side and 25% asks one pool.sell of 250 on solana, at both widths: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(ANSWERS.good.runs.length, 2);
-  for (const x of ANSWERS.good.runs) assert.deepEqual(x.asked, [{ type: "pool.sell", params: WANT }], x.width);
+  for (const x of ANSWERS.good.runs) assert.deepEqual(x.asked, [{ type: "pool.sell", params: WANT }, { type: "pool.sell", params: WANT_ALL }], x.width);
 });
 
 test("recorded bad answer: the deployed app before this card has Sell off and no sell side: FAIL", () => {
@@ -50,12 +52,15 @@ test("recorded bad answer: the deployed app before this card has Sell off and no
   assert.ok(bad(r).some((l) => /^BAD phone: Sell drew no sell side/.test(l)), r.lines.join("\n"));
 });
 
-test("planted: a pool.sell of another amount, chain or token, two for one tap, or a vault sell fails", () => {
-  fails(mut((rec) => (run(rec, "desktop").asked[0].params.amount = "1000")), /^BAD desktop: the pool\.sell asked .*"amount":"1000"/);
-  fails(mut((rec) => (run(rec, "phone").asked[0].params.chain = "base")), /^BAD phone: the pool\.sell asked .*"chain":"base"/);
-  fails(mut((rec) => (run(rec, "desktop").asked[0].params.mint = "Fixture1Token1111111111111111111111111111111")), /^BAD desktop: the pool\.sell asked/);
-  fails(mut((rec) => run(rec, "phone").asked.push(structuredClone(run(rec, "phone").asked[0]))), /^BAD phone: 2 pool\.sell request\(s\) for one tap/);
-  fails(mut((rec) => (run(rec, "desktop").asked = [{ type: "buy", params: { ...WANT } }])), /^BAD desktop: the tap asked a vault buy or sell/);
+test("planted: a pool.sell of another amount, chain or token, a double tap sent twice, a stray kind, or a 100% not the whole fails", () => {
+  fails(mut((rec) => (run(rec, "desktop").asked[0].params.amount = "1000")), /^BAD desktop: the 25% pool\.sell asked .*"amount":"1000"/);
+  fails(mut((rec) => (run(rec, "phone").asked[0].params.chain = "base")), /^BAD phone: the 25% pool\.sell asked .*"chain":"base"/);
+  fails(mut((rec) => (run(rec, "desktop").asked[0].params.mint = "Fixture1Token1111111111111111111111111111111")), /^BAD desktop: the 25% pool\.sell asked/);
+  fails(mut((rec) => run(rec, "phone").asked.splice(1, 0, structuredClone(run(rec, "phone").asked[0]))), /^BAD phone: 3 pool\.sell request\(s\)/);
+  fails(mut((rec) => run(rec, "desktop").asked.push({ type: "buy", params: { ...WANT } })), /^BAD desktop: the taps asked buy, not pool\.sell/);
+  fails(mut((rec) => run(rec, "phone").asked.push({ type: "pool.buy", params: { ...WANT } })), /^BAD phone: the taps asked pool\.buy, not pool\.sell/);
+  fails(mut((rec) => (run(rec, "desktop").asked[1].params.amount = "750")), /^BAD desktop: the 100% pool\.sell asked .*"amount":"750"/);
+  fails(mut((rec) => run(rec, "phone").asked.pop()), /^BAD phone: 1 pool\.sell request\(s\)/);
 });
 
 test("planted: a sell side not ready, naming another holding, or leaving States.tsx's states fails", () => {

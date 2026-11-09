@@ -44,14 +44,15 @@ const Coins = () => (
 );
 
 /** `footer` draws inside the panel under the Route & fees line, as the buy side's does (the token page's safety grid). */
-export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode }) {
+/** `decimals` is the token's own (the token read's), so a percent floors at its base unit (positions/model.ts sellAmount). */
+export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onBuy, footer, decimals = null }: { row: Row; s: Sell; slippageBps?: number; initialPercent?: string; onBuy?: () => void; footer?: ReactNode; decimals?: number | null }) {
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview } | null>(null);
 
   const bps = parsePercent(text);
   const noRoute = row.mark === "noRoute";
-  const amount = bps === null ? null : sellAmount(row.units, bps);
+  const amount = bps === null ? null : sellAmount(row.units, bps, decimals);
   const running = busy(s.phase);
   const canSell = s.ready && !running && !noRoute && amount !== null;
 
@@ -75,9 +76,9 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
 
   function sellAt(b: number) {
     if (!canSellAt(b)) return;
-    s.sell(sellAmount(row.units, b), b);
+    s.sell(sellAmount(row.units, b, decimals), b);
   }
-  const canSellAt = (b: number) => s.ready && !running && !noRoute && sellAmount(row.units, b) !== null;
+  const canSellAt = (b: number) => s.ready && !running && !noRoute && sellAmount(row.units, b, decimals) !== null;
 
   const shown = preview && preview.amount === amount ? preview.p : null;
   const last = preview?.p ?? null;

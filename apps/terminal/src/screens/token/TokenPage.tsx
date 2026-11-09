@@ -508,7 +508,7 @@ function Ticket({ r, t, toast }: { r: Ready; t: Trade; toast?: boolean }) {
   const { row, risk } = r.data;
   return (
     <>
-      <TradeView t={t} symbol={row.symbol} toast={toast} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
+      <TradeView t={t} symbol={row.symbol} toast={toast} decimals={r.data.decimals} footer={<SafetyGrid row={row} risk={risk} nowMs={r.nowMs} filling={r.data.filling === true} />} />
       <About row={row} />
     </>
   );
@@ -673,7 +673,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
             ))}
           </div>
           <div className="tkp-trade2">
-            <button type="button" className="tkp-sell" onClick={() => { if (t.held) t.setSide("sell"); sheet.open(); }}><W id="sell" /></button>
+            <button type="button" className="tkp-sell" onClick={() => { if (t.heldNow) t.setSide("sell"); sheet.open(); }}><W id="sell" /></button>
             <button type="button" className="tkp-buy" onClick={() => { t.setSide("buy"); sheet.open(); }}><span className="tkp-buylbl" title={`${WORDS.buy.text} ${v.symbol}`}><W id="buy" /> {v.symbol}</span></button>
           </div>
         </div>

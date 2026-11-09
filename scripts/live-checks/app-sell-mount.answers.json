@@ -1,10 +1,10 @@
 {
  "good": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:07:46.724Z",
+  "at": "2026-11-09T06:27:17.381Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
-  "entry": "/assets/index-CtAPu9ie.js",
+  "entry": "/assets/index-Dlhrxsxp.js",
   "runs": [
    {
     "width": "desktop",
@@ -22,6 +22,15 @@
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
        "amount": "250",
+       "slippage_bps": 1000
+      }
+     },
+     {
+      "type": "pool.sell",
+      "params": {
+       "chain": "solana",
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+       "amount": "1000",
        "slippage_bps": 1000
       }
      }
@@ -50,6 +59,15 @@
        "amount": "250",
        "slippage_bps": 1000
       }
+     },
+     {
+      "type": "pool.sell",
+      "params": {
+       "chain": "solana",
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+       "amount": "1000",
+       "slippage_bps": 1000
+      }
      }
     ],
     "after": {
@@ -62,7 +80,7 @@
  },
  "bad": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:08:05.093Z",
+  "at": "2026-11-09T06:27:35.816Z",
   "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-DQm2uIN5.js",

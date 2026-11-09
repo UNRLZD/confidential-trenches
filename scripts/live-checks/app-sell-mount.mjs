@@ -4,10 +4,11 @@
 // signed-in account with its Solana pool and one more open position: 1000 of the token route's own token (DJT, the
 // recorded helper read the shell answers), since no check can sign a real account in. Headless Chromium opens / (the
 // token route) at 1440 x 900 (the box in the right column; the switch's Sell) and 390 x 844 (dpr 2; the phone bar's
-// Sell opens the trade sheet), taps 25%, and reads:
+// Sell opens the trade sheet), double-taps 25%, then taps 100%, and reads:
 //   - the switch's Sell is on, and Sell draws the sell side (sell-box), ready (S8.29), `1K DJT held`;
-//   - the tap asks the shell for exactly one pool.sell, on solana, of the token, for 250 (25% of 1000), and no buy;
-//   - the box then draws a state of trade/States.tsx's (the shell refuses the sell, so S8.32 Failed with Retry).
+//   - the double tap asks the shell for exactly one pool.sell, on solana, of the token, for 250 (25% of 1000), and no
+//     other trade kind; the box then draws a state of trade/States.tsx's (the shell refuses the sell: S8.32 with Retry);
+//   - a refused sell sold nothing, so 100% then asks one more pool.sell, for the kit's own string 1000.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
 // After: app
 //   node scripts/live-checks/app-sell-mount.mjs [--shots <dir>] [--record <file>]
@@ -37,6 +38,8 @@ export const HELD = "1000";
 /** What a 25% tap must ask: 25% of 1000 in the token's units, at the box's 10% slippage. A record names the request's
  *  `token` as `mint`: gitleaks' generic-api-key reads a "token" key with a base58 value as a secret. */
 export const WANT = { chain: "solana", mint: MINT, amount: "250", slippage_bps: 1000 };
+/** What the 100% tap after it must ask: the position's own string. */
+export const WANT_ALL = { ...WANT, amount: HELD };
 /** The account: app-portfolio-mount's (its Solana pool kept) with 1000 of the route's token held on Solana. */
 export const STATE = { ...ACCOUNT, positions: [...ACCOUNT.positions, { chain: "solana", token: MINT, amount: HELD, cost: "4.20", wallets: [ACCOUNT.wallets[0].address] }] };
 export const WIDTHS = [
@@ -68,12 +71,16 @@ export function judge(rec) {
     }
     const asked = r.asked ?? [];
     const sells = asked.filter((a) => a.type === "pool.sell");
-    if (asked.some((a) => a.type === "buy")) bad.push("the tap asked a vault buy or sell, not pool.sell");
-    if (sells.length !== 1) bad.push(`${sells.length} pool.sell request(s) for one tap`);
-    else if (JSON.stringify(sells[0].params) !== JSON.stringify(WANT)) bad.push(`the pool.sell asked ${JSON.stringify(sells[0].params)}, not ${JSON.stringify(WANT)}`);
+    const other = asked.filter((a) => a.type !== "pool.sell").map((a) => a.type);
+    if (other.length) bad.push(`the taps asked ${other.join(", ")}, not pool.sell`);
+    if (sells.length !== 2) bad.push(`${sells.length} pool.sell request(s) for a double tap of 25% and a tap of 100%`);
+    else {
+      if (JSON.stringify(sells[0].params) !== JSON.stringify(WANT)) bad.push(`the 25% pool.sell asked ${JSON.stringify(sells[0].params)}, not ${JSON.stringify(WANT)}`);
+      if (JSON.stringify(sells[1].params) !== JSON.stringify(WANT_ALL)) bad.push(`the 100% pool.sell asked ${JSON.stringify(sells[1].params)}, not ${JSON.stringify(WANT_ALL)}`);
+    }
     if (b && !SELL_STATES.has(r.after?.state)) bad.push(`after the tap the box is ${r.after?.state ?? "gone"}, not a state of States.tsx's sell side`);
     if (!r.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${r.width}: ${bad.length ? bad.join("; ") : `Sell drew the sell side (${b.held}), 25% asked pool.sell ${sells[0].params.amount} on ${sells[0].params.chain}, then ${r.after.state}`}`);
+    say(bad.length === 0, `${r.width}: ${bad.length ? bad.join("; ") : `Sell drew the sell side (${b.held}), 25% twice asked one pool.sell ${sells[0].params.amount} on ${sells[0].params.chain}, then ${r.after.state}; 100% asked ${sells[1].params.amount}`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -137,13 +144,18 @@ async function runOne(browser, w, shots, route) {
     run.before = before.box;
     await page.screenshot({ path: path.join(shots, `${w.name}-sell.png`) });
     if (run.before) {
-      await f.locator(`${scope} [data-testid="sell-box"] [data-pct="2500"]`).click({ timeout: 5_000 }).catch(() => {});
+      await f.locator(`${scope} [data-testid="sell-box"] [data-pct="2500"]`).dblclick({ timeout: 5_000 }).catch(() => {});
       await f.waitForFunction((s) => { const st = document.querySelector(`${s} [data-testid="sell-box"]`)?.getAttribute("data-state"); return !!st && st !== "S8.29"; }, scope, { timeout: 8_000 }).catch(() => {});
       await page.waitForTimeout(300);
       run.after = (await f.evaluate(BOX, w.isMobile)).box;
+      // the refused sell sold nothing: 100% asks the whole position
+      await f.locator(`${scope} [data-testid="sell-box"] [data-pct="10000"]`).click({ timeout: 5_000 }).catch(() => {});
+      await page.waitForFunction(() => (window.__ctShellAsked ?? []).filter((m) => m.type === "pool.sell").length >= 2, null, { timeout: 5_000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
-    // what the app asked the shell: the trade kinds only, each with its params (an envelope carries them beside its type)
-    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => m.type === "pool.sell" || m.type === "buy" || m.type === "pool.buy").map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, slippage_bps: m.slippage_bps } })));
+    // what the app asked the shell: every kind that trades or moves money (a buy, a sell, an order, a withdraw), each with
+    // its params (an envelope carries them beside its type)
+    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => /buy|sell|order|withdraw/.test(m.type)).map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, slippage_bps: m.slippage_bps } })));
     run.shot = `${w.name}-sold.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });
     return run;

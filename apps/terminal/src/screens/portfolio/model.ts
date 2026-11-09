@@ -293,11 +293,11 @@ export function portfolio(snap: SignpageClientSnapshot, d: PortfolioData, now: n
 
 /** The open position the trade box's Sell side sells (card app-sell-mount): the row of `rows` on `chain` whose token is
  *  `token`, holding more than nothing; null otherwise. Never another chain's row of the same address. An EVM address
- *  matches in any case (its checksum is case alone) and a NEAR account id is lower case by rule; a Solana mint is
- *  case-sensitive base58, so it matches exactly. */
+ *  matches in any case (its checksum is case alone); a Solana mint (case-sensitive base58) and a NEAR account id (lower
+ *  case by rule, apps/helper/src/withdraw/checks.ts) match exactly. */
 export function heldOf(rows: readonly Row[], chain: Chain, token: string): Row | null {
   if (!token) return null;
-  const same = chain === "solana" ? (t: string) => t === token : (t: string) => t.toLowerCase() === token.toLowerCase();
+  const same = chain === "solana" || chain === "near" ? (t: string) => t === token : (t: string) => t.toLowerCase() === token.toLowerCase();
   return rows.find((r) => r.chain === chain && same(r.token) && /^[0-9.]+$/.test(r.units) && /[1-9]/.test(r.units)) ?? null;
 }
 
