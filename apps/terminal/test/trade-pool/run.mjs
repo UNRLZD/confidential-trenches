@@ -202,7 +202,7 @@ try {
         } else check(calls.length === 0, `${tag}: a tap on an off button sent ${JSON.stringify(calls)}`);
         // the chunk button: a tap fills the amount with the chunk's USD and buys it, as a preset does; off, it does nothing
         if (name === "base-other" || name === "base-making") {
-          await page.locator('[data-testid="trade-presets"] [data-preset]').click({ force: true });
+          await page.locator('[data-testid="trade-presets"] [data-preset]').first().click({ force: true });
           await page.clock.runFor(100);
           const after = await page.evaluate(() => window.__calls);
           const typed = await page.locator(".trb-input").inputValue();
