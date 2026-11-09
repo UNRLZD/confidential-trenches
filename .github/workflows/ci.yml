@@ -95,9 +95,12 @@ jobs:
       # bundle's `TOKEN:` Circle USDC id passes by main's .gitleaks.toml rule for that exact value, as before)
       - name: build the signing page's bundle
         run: node packages/signpage/scripts/build-app.mjs
-      # the build ran the pull request's code (delta review P3-3), which could rewrite $RUNNER_TEMP: this step runs the
-      # gitleaks whose sha256 the install step took before any of that code ran (a step output, which a later step cannot
-      # change), and reads main's rules again into a folder of its own
+      # The scan reads a folder of its own holding only the four built files (scripts/ci/sign-build-inputs.mjs
+      # SIGN_BUILD_OUTPUTS) at their repository paths, with main's rules and main's ignore file: gitleaks dir also reads the
+      # scanned folder's own .gitleaksignore, so scanning packages/signpage in place would let a pull request that adds
+      # packages/signpage/.gitleaksignore silence it (delta review 2). The sha256 check holds against a file swapped in
+      # $RUNNER_TEMP by a later step only: on a pull request this workflow and fetch.sh are the pull request's own (only
+      # the verify and money gates run from main), so it is no guard against a pull request that edits them.
       - name: scan the signing page's built bundle with main's rules
         env:
           GITLEAKS_SHA256: ${{ steps.gitleaks-bin.outputs.sha256 }}
@@ -109,6 +112,12 @@ jobs:
           if git cat-file -e origin/main:.gitleaksignore; then
             git show origin/main:.gitleaksignore > "$rules/.gitleaksignore"
           fi
+          scan="$(mktemp -d)"
+          for f in packages/signpage/index.html packages/signpage/public/app.js packages/signpage/public/prover-worker.js packages/signpage/public/prover-thread.js; do
+            mkdir -p "$scan/$(dirname "$f")"
+            cp -- "$f" "$scan/$f"
+          done
+          cd "$scan"
           "$RUNNER_TEMP/gitleaks" dir packages/signpage --config "$rules/.gitleaks.toml" \
             --gitleaks-ignore-path "$rules/.gitleaksignore" --redact --no-banner
       - name: every gate refuses its planted cases

@@ -9,10 +9,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { SIGN_BUILD_OUTPUTS } from './sign-build-inputs.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -21,7 +22,7 @@ const RULES = readFileSync(join(ROOT, '.gitleaks.toml'), 'utf8');
 const BIN = resolve(process.env.GITLEAKS
   || execFileSync('bash', ['-c', 'command -v gitleaks'], { encoding: 'utf8' }).trim());
 const RULE = 'near-ed25519-secret-key';
-// the binary's sha256 as the install step records it (steps.gitleaks-bin.outputs.sha256), before any pull request code runs
+// the binary's sha256 as the install step records it (steps.gitleaks-bin.outputs.sha256)
 const BIN_SHA256 = createHash('sha256').update(readFileSync(realpathSync(BIN))).digest('hex');
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const b58 = (buf) => {
@@ -101,6 +102,7 @@ function scan(co, beforeStep = () => {}) {
   let out = '';
   try {
     for (const step of steps) {
+      if (BUNDLE_SCAN(step)) buildOutputs(co.repo); // CI's build step, which calls no gitleaks: the four outputs
       beforeStep(step, runnerTemp);
       const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', step], {
         cwd: co.repo, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, GITLEAKS_SHA256: BIN_SHA256 },
@@ -172,6 +174,14 @@ test("a pull request whose secret main's ignore covers passes", () => {
 // committed, so the tree scan (which runs before pnpm install) never reads it: a step after the install builds it and the
 // next scans packages/signpage with main's rules, the built files included though .gitignore names them
 const BUNDLE_SCAN = (step) => /"\$RUNNER_TEMP\/gitleaks" dir packages\/signpage /.test(step);
+/** The four built files, as the build step leaves them (each one line with no secret), where none is there yet. */
+function buildOutputs(repo) {
+  for (const f of SIGN_BUILD_OUTPUTS) {
+    mkdirSync(dirname(join(repo, f)), { recursive: true });
+    if (!existsSync(join(repo, f))) writeFileSync(join(repo, f), '// built\n');
+  }
+}
+const IGNORED = SIGN_BUILD_OUTPUTS.map((f) => `/${f}\n`).join('');
 test("the gitleaks job builds the signing page's bundle, then scans it with main's rules", () => {
   const yml = readFileSync(CI, 'utf8');
   const job = yml.slice(yml.indexOf('\n  gitleaks:\n'), yml.indexOf('\n  deep-import:\n'));
@@ -187,8 +197,8 @@ test("the gitleaks job builds the signing page's bundle, then scans it with main
 });
 
 // the bundle appears only after the tree scan, as CI's build step makes it: the tree scan never sees it, the bundle scan must
-function built(text, tamper = () => {}) {
-  const co = checkout({ main: [{ '.gitignore': '/packages/signpage/public/app.js\n' }] });
+function built(text, tamper = () => {}, pr = []) {
+  const co = checkout({ pr, main: [{ '.gitignore': IGNORED }] });
   const beforeStep = (step, runnerTemp) => {
     if (!BUNDLE_SCAN(step)) return;
     tamper(runnerTemp);
@@ -207,8 +217,8 @@ test("the bundle scan passes a built bundle with no secret", () => {
   passes(built('export const ok = 1;\n'));
 });
 
-// delta review P3-3: the build runs the pull request's code, which can rewrite $RUNNER_TEMP before the bundle scan. The
-// scan runs only the gitleaks whose sha256 the install step recorded, and reads main's rules again on its own
+// delta review P3-3: a gitleaks or rules file swapped in $RUNNER_TEMP by a later step (the build) is not the bundle scan's:
+// it runs only the gitleaks whose sha256 the install step recorded, and reads main's rules again on its own
 const allowAll = `[extend]\nuseDefault = true\n[[allowlists]]\ndescription = "planted"\npaths = ['''.*''']\n`;
 test("a gitleaks binary the build swapped fails the bundle scan on its sha256, though it would pass the bundle", () => {
   const r = built(leak(), (rt) => {
@@ -225,4 +235,19 @@ test("rules the build rewrote to allow everything are not the bundle scan's: mai
     writeFileSync(join(rt, 'rules', '.gitleaks.toml'), allowAll);
     writeFileSync(join(rt, 'rules', '.gitleaksignore'), 'packages/signpage/public/app.js:near-ed25519-secret-key:1\n');
   }));
+});
+
+// delta review 2: gitleaks dir reads the scanned folder's own .gitleaksignore. The bundle scan reads a folder of its own
+// holding the four built files alone, so a pull request that adds packages/signpage/.gitleaksignore naming the bundle's
+// finding does not silence it
+test("a pull request that adds packages/signpage/.gitleaksignore naming the bundle's finding does not silence the bundle scan", () => {
+  fails(built(leak(), () => {}, [{ 'packages/signpage/.gitleaksignore': `packages/signpage/public/app.js:${RULE}:1\n` }]));
+});
+
+test("the bundle scan copies exactly SIGN_BUILD_OUTPUTS into a folder of its own and scans from there", () => {
+  const [step] = scanSteps(readFileSync(CI, 'utf8')).filter(BUNDLE_SCAN);
+  assert.match(step, /^scan="\$\(mktemp -d\)"$/m);
+  assert.equal(/^for f in (.+); do$/m.exec(step)?.[1], SIGN_BUILD_OUTPUTS.join(' '));
+  assert.match(step, /cp -- "\$f" "\$scan\/\$f"/);
+  assert.ok(step.indexOf('cd "$scan"') < step.indexOf('"$RUNNER_TEMP/gitleaks" dir packages/signpage'), 'the scan runs in its own folder');
 });
