@@ -3,7 +3,10 @@
 // test/discover-data/helper-lists-2026-11-01.json is a recorded answer of GET /v1/market/lists?chain=solana.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HELPER_URL, readLists } from "../src/screens/discover/data.ts";
+import { HELPER_URL, readChainLists } from "../src/screens/discover/data.ts";
+
+/** One read of Solana's lists. */
+const readSolana = (f: typeof fetch) => readChainLists("solana", f);
 import { ROW_FIELDS, SNAPSHOT_LISTS } from "../src/screens/discover/fields.ts";
 import { columnRows } from "../src/screens/discover/model.ts";
 import recorded from "./discover-data/helper-lists-2026-11-01.json" with { type: "json" };
@@ -67,13 +70,13 @@ test("a live row's one-sided counts read 0, not null, as the fixtures' do", () =
   }
 });
 
-test("readLists: GET /v1/market/lists?chain=solana on HELPER_HOST with the kit's fetch settings; the snapshot draws in the columns", async () => {
+test("readChainLists solana: GET /v1/market/lists?chain=solana on HELPER_HOST with the kit's fetch settings; the snapshot draws in the columns", async () => {
   const calls: { url: string; init: RequestInit }[] = [];
   const f: typeof fetch = async (url, init) => {
     calls.push({ url: String(url), init: init ?? {} });
     return reply(answer())(url, init);
   };
-  const s = await readLists(f);
+  const s = await readSolana(f);
   assert.deepEqual(calls.map((c) => c.url), ["https://ct-api.unrealized.trade/v1/market/lists?chain=solana"]);
   assert.equal(HELPER_URL, calls[0]!.url);
   assert.equal(calls[0]!.init.credentials, "omit");
@@ -83,21 +86,21 @@ test("readLists: GET /v1/market/lists?chain=solana on HELPER_HOST with the kit's
   for (const k of ["new", "trending", "hot"] as const) assert.ok(columnRows(s, k).length > 0, k);
 });
 
-test("readLists: a failed read, a non-200, text that is not JSON, another chain or lists that are not lists all throw", async () => {
-  await assert.rejects(readLists(async () => { throw new TypeError("offline"); }));
-  await assert.rejects(readLists(reply(answer(), 503)));
-  await assert.rejects(readLists(reply({ error: { code: "upstream" } }, 503)));
-  await assert.rejects(readLists(reply("<html>")));
-  await assert.rejects(readLists(reply({ ...answer(), chain: "base" })));
-  await assert.rejects(readLists(reply({ ...answer(), lists: null })));
-  await assert.rejects(readLists(reply({ ...answer(), lists: { ...answer().lists, new: "x" } })));
-  await assert.rejects(readLists(reply([])));
+test("readChainLists solana: a failed read, a non-200, text that is not JSON, another chain or lists that are not lists all throw", async () => {
+  await assert.rejects(readSolana(async () => { throw new TypeError("offline"); }));
+  await assert.rejects(readSolana(reply(answer(), 503)));
+  await assert.rejects(readSolana(reply({ error: { code: "upstream" } }, 503)));
+  await assert.rejects(readSolana(reply("<html>")));
+  await assert.rejects(readSolana(reply({ ...answer(), chain: "base" })));
+  await assert.rejects(readSolana(reply({ ...answer(), lists: null })));
+  await assert.rejects(readSolana(reply({ ...answer(), lists: { ...answer().lists, new: "x" } })));
+  await assert.rejects(readSolana(reply([])));
 });
 
-test("readLists: a row that is not an object with a mint and a symbol is dropped, the others stay", async () => {
+test("readChainLists solana: a row that is not an object with a mint and a symbol is dropped, the others stay", async () => {
   const a = answer();
   const good = a.lists.new![0]!;
   const rows = [good, null, 7, "x", { ...good, token: 5 }, { ...good, symbol: "" }, { ...good, token: undefined }, ...a.lists.new!.slice(1)];
-  const s = await readLists(reply({ ...a, lists: { ...a.lists, new: rows } }));
+  const s = await readSolana(reply({ ...a, lists: { ...a.lists, new: rows } }));
   assert.equal(s.lists.new.length, 5);
 });

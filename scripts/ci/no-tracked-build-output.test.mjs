@@ -1,7 +1,7 @@
 // The build-output gate (no-tracked-build-output.mjs) on planted repositories: two signing page branches that each
 // change one source line merge into main with no conflict and pass; a branch that commits a built bundle (one that is
-// its source's build or one that is not) is refused, as is a tree whose .gitignore lets a build show as a new file; the
-// repo's own tree passes.
+// its source's build or one that is not) is refused, as is a tree whose .gitignore lets a build show as a new file, or a
+// tracked script that reads a build output without signBuilt() (card helper-live-red); the repo's own tree passes.
 //   node --test scripts/ci/no-tracked-build-output.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildOutputProblems } from "./no-tracked-build-output.mjs";
+import { buildOutputProblems, directReadProblems, NAMES_NOT_READS } from "./no-tracked-build-output.mjs";
 import { SIGN_BUILD_OUTPUTS } from "./sign-build-inputs.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -116,5 +116,45 @@ test("planted: a tracked file in packages/signpage/public/ that is not one of it
     ]);
   } finally {
     rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+// card helper-live-red: withdraw-fee-busy-waits.mjs read packages/signpage/index.html at load with no build first, so
+// live run 42694130536 failed it with ENOENT on a fresh checkout. Each form a reader takes, planted.
+const READS = {
+  "scripts/live-checks/one-path.mjs": 'export const PIN = readFileSync(path.join(ROOT, "packages/signpage/index.html"), "utf8");\n',
+  "scripts/live-checks/folder.mjs": 'const SIGNPAGE = path.resolve(HERE, "../../packages/signpage");\nexport const js = () => readFileSync(path.join(SIGNPAGE, "public/app.js"));\n',
+  "scripts/live-checks/segments.test.mjs": 'const w = readFileSync(path.join(ROOT, "packages", "signpage", "public", "prover-worker.js"));\n',
+  "apps/terminal/test/url.mjs": 'const t = readFileSync(new URL("../../../packages/signpage/public/prover-thread.js", import.meta.url));\n',
+};
+const refusal = (f) => `${f} reads the signing page's build output without signBuilt(): no checkout holds it until a build makes it; read it at path.join(signBuilt(), <file>) (scripts/signpage-built.mjs)`;
+
+test("planted: a tracked script that reads a build output without signBuilt() is refused, in each form; through signBuilt() it passes", () => {
+  const r = plantedRepo();
+  try {
+    for (const [f, text] of Object.entries(READS)) r.write(f, text);
+    // not reads: a sentence naming the file, a comment, a URL path on a host, the build through signBuilt()
+    r.write("scripts/live-checks/words.mjs", 'say("the pin is read from packages/signpage/index.html");\n// readFileSync("packages/signpage/index.html")\nconst u = new URL("/app.js", SIGN);\n');
+    r.write("scripts/live-checks/built.mjs", 'import { signBuilt } from "../signpage-built.mjs";\nconst SIGNPAGE = path.resolve(HERE, "../../packages/signpage");\nexport const pin = () => readFileSync(path.join(signBuilt(), "index.html"), "utf8");\n');
+    r.git("add", "--", "scripts", "apps");
+    r.git("commit", "-q", "-m", "Card bad: readers of the build");
+    const files = Object.keys(READS).sort();
+    assert.deepEqual(directReadProblems(r.dir).sort(), files.map(refusal));
+    assert.deepEqual(buildOutputProblems(r.dir).sort(), files.map(refusal));
+    const g = spawnSync(process.execPath, [GATE, r.dir], { encoding: "utf8" });
+    assert.equal(g.status, 1);
+    assert.equal(g.stderr.trim().split("\n").length, files.length, g.stderr);
+    // the fix: each reads through signBuilt()
+    for (const [f, text] of Object.entries(READS)) r.write(f, `import { signBuilt } from "../signpage-built.mjs";\nsignBuilt();\n${text}`);
+    assert.deepEqual(directReadProblems(r.dir), []);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+test("each file the gate lets name a build output without reading it exists and says why", () => {
+  for (const [f, why] of Object.entries(NAMES_NOT_READS)) {
+    assert.ok(readFileSync(join(ROOT, f), "utf8").length > 0, f);
+    assert.ok(why.length > 10, f);
   }
 });

@@ -183,3 +183,19 @@ test("with retry, Retry-After 0 is never a burst: the backoff is its floor (at m
   assert.ok(e instanceof SolanaRpcTransportError);
   assert.ok(p.tries() <= 5, `${p.tries()} requests`);
 });
+
+test("review of 39a4c67a, P3-4: an RPC error keeps its data's words after its message, so a range cap named there is read (Tenderly's, recorded)", async () => {
+  // base.gateway.tenderly.co, eth_getLogs over 2,001 blocks, 2026-11-09 19:43Z
+  const DATA = "Block range too large: maximum 1000 blocks without an access key. Try [0x33cf5a7, 0x33cf98f], or use an access key for larger ranges.";
+  const tenderly = { body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { code: -32602, message: "invalid params", data: DATA } }) };
+  for (const retry of [undefined, FAST]) {
+    const e = await solanaJsonRpc("https://rpc.example", { fetch: provider([tenderly]).fetch, ...(retry ? { retry } : {}) })("eth_getLogs", []).catch((x: unknown) => x);
+    assert.ok(e instanceof Error);
+    assert.equal(e.message, `RPC error -32602: invalid params: ${DATA}`);
+  }
+  // the same in a refusal's body after its status; data that is not text adds nothing
+  const as400 = { status: 400, body: tenderly.body.replace('"$ID"', "1") };
+  assert.equal(((await solanaJsonRpc("https://rpc.example", { fetch: provider([as400]).fetch })("eth_getLogs", []).catch((x: unknown) => x)) as Error).message, `HTTP 400: RPC error -32602: invalid params: ${DATA}`);
+  const objData = { body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { code: -32602, message: "invalid params", data: { x: 1 } } }) };
+  assert.equal(((await solanaJsonRpc("https://rpc.example", { fetch: provider([objData]).fetch })("eth_getLogs", []).catch((x: unknown) => x)) as Error).message, "RPC error -32602: invalid params");
+});

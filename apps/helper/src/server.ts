@@ -32,6 +32,7 @@ import { AHEAD_TICK_MS, CANDLES_MAX, createSolanaToken, type DataAnswer } from "
 import { createSolanaTrades, TRADES_RPCS, type SolanaTrades } from "./data/solana/trades.ts";
 import { health, releaseOf, type Part } from "./health.ts";
 import { checkVendorPlans, createProxy, PROXY_BODY_MAX } from "./proxy/proxy.ts";
+import { checkPoolRpcOperators } from "./env-check.ts";
 import { callsFiles } from "./proxy/shared-calls.ts";
 import { dayFiles } from "./limits/day-spend.ts";
 import { RPC_BODY_MAX } from "./rpc/methods.ts";
@@ -954,6 +955,8 @@ if (import.meta.main) {
   let drain = () => undefined as void;
   try {
     checkVendorPlans(process.env);
+    // card evm-pool-sync-holds: no keyed Base or Robinhood URL of a pool-list operator (env-check.ts, as the redeploy runs it)
+    checkPoolRpcOperators(process.env);
     // card helper-deploy-reads-fast: a deploy's two helpers draw on one key per vendor, so each counts the other's calls
     const id = randomUUID();
     const proxy = createProxy(process.env, { peers: callsFiles(storeDir, id) });
