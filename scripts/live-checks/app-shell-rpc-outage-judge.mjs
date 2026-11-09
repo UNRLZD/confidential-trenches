@@ -30,12 +30,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { harnessRoute } from "./app-in-shell.mjs";
-import { APP_HOST, open, watch, WIDTHS, withOutage } from "./app-shell.mjs";
+import { open, watch, WIDTHS, withOutage } from "./app-shell.mjs";
 import { footerEvidence, outages, rpcRows, verifyEvidence } from "./rpc-outage.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-shell-rpc-outage-judge";
+/** APP_HOST, the terminal's address, held in each app-* check as its own literal (check-deploy.test.ts). */
+export const APP_HOST = "https://ct-app.unrealized.trade";
 const SETTLE_MS = 2000;
 const STATUS = ["ok", "warn", "danger"];
 const POOLS = ["solana", "base", "robinhood"];
