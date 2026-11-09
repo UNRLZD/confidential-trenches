@@ -13,9 +13,14 @@
 # or error. The helper's commit is held to what the helper reports (X-Helper-Commit). APP_HOST and SIGN_HOST report none:
 # signpage-release holds their files to the commit's own build, and fails when a host serves another commit's.
 #
+# A check that ends INCONCLUSIVE (exit 3: too few of its providers answered, a public RPC's 429) runs again after a
+# pause, three runs at most (card live-inconclusive-rerun; scripts/ci/live-rerun.mjs: capped exponential backoff with equal
+# jitter). Still INCONCLUSIVE, the job is red and its last line names the providers that did not answer; a FAIL (1) or an
+# ERROR (2) is never run again.
+#
 # A serial group (card helper-live-jup-serial; SERIAL_GROUPS in scripts/ci/helper-live-checks.mjs) is ONE job: its checks
 # spend one shared budget, the helper's Jupiter window, so they run one after another (scripts/ci/live-serial.mjs), each
-# once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and none is retried. Run in parallel they
+# once the helper's own answer says the budget is idle (scripts/ci/jup-idle.mjs), and only an INCONCLUSIVE one runs again. Run in parallel they
 # spent it between them and a page fell back to chain reads (run 42332950254 attempt 1), a red that was no fault of the code.
 #
 # The workflow reads no secret and holds the read-only token alone. A check that needs one (helper-proxy reads the vendor
@@ -104,6 +109,21 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
+      # The runners come from this workflow's own commit, the checks from the deployed one (card live-inconclusive-rerun,
+      # review P2-2): a dispatch of a commit older than the runners still runs its checks, and no commit sets how its own
+      # verdict is read. The files are RUNNER_FILES in scripts/ci/live-workflow.mjs: the runners and all they import.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .live-runner
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/jup-idle.mjs
+            scripts/ci/live-rerun.mjs
+            scripts/ci/live-serial.mjs
+            scripts/live-checks/helper-token-page-cold.mjs
+            scripts/net-window.mjs
+          sparse-checkout-cone-mode: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -187,7 +207,9 @@ jobs:
             ~/.cache/ms-playwright
             ~/.cache/playwright-debs
           key: ${{ steps.engines-key.outputs.key }}
-      # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default
+      # TMPDIR is the folder the artifact takes: a check keeps its screenshots under the temporary folder by default.
+      # live-rerun runs the check, and again on INCONCLUSIVE (exit 3) alone, writes the log itself and exits with the
+      # check's own last code: the runner line is the step's only command, with nothing after it (the gate holds it whole).
       - name: ${{ matrix.name }}
         if: matrix.group == ''
         env:
@@ -198,10 +220,10 @@ jobs:
           out="$RUNNER_TEMP/live"
           mkdir -p "$out"
           export TMPDIR="$out"
-          set -o pipefail
           # shellcheck disable=SC2086
-          node "scripts/live-checks/$KEY.mjs" $ARGS 2>&1 | tee "$out/$ID.log"
-      # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, none retried
+          node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS
+      # a serial group: its checks one after another, each once the helper's Jupiter budget is idle, an INCONCLUSIVE one
+      # run again as a single check is (live-rerun.mjs), a FAIL or ERROR never
       - name: ${{ matrix.name }} (in turn)
         if: matrix.group != ''
         env:
@@ -211,9 +233,8 @@ jobs:
           out="$RUNNER_TEMP/live"
           mkdir -p "$out"
           export TMPDIR="$out"
-          set -o pipefail
           # shellcheck disable=SC2086
-          node scripts/ci/live-serial.mjs $GROUP 2>&1 | tee "$out/$ID.log"
+          node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP
       - name: the lines that matter, in the run's summary
         if: always()
         env:
