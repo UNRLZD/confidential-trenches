@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { APP, CSP as SITE_CSP, SIGN } from "./signpage-skeleton.mjs";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-prover-host";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -95,7 +96,7 @@ export function expected() {
   const pin = PINS.find(([n]) => n === "withdraw.vkey");
   if (vkey.length !== pin[1] || sha256(vkey) !== pin[2]) throw new Error("packages/kit/zk/withdraw.vkey is not the pinned file");
   return {
-    worker: sha256(repoFile(`packages/signpage/public${WORKER_PATH}`)),
+    worker: sha256(readFileSync(path.join(signBuilt(), "public", WORKER_PATH))), // built from the sources first (card signpage-generated-merge-free)
     licenses: Object.fromEntries(LICENSES.map(([p, f]) => [p, sha256(repoFile(f))])),
     input: JSON.parse(repoFile("packages/kit/test/prover/withdraw.input.json").toString("utf8")),
     signals: JSON.parse(repoFile("packages/kit/test/prover/withdraw.public.json").toString("utf8")).publicSignals,

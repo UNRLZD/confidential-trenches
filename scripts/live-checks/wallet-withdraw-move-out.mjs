@@ -21,10 +21,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "wallet-withdraw-move-out";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
-const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
 /** This card's strings in the bundle, each as the minifier writes it. */
 export const MARKERS = [
   "to: not a NEAR account id",
@@ -59,7 +59,7 @@ export function judge(rec) {
 /** Answers / and /app.js from this tree's committed build, as SIGN_HOST serves them. */
 export const localFetch = async (url) => {
   const p = new URL(url).pathname;
-  const file = p === "/" ? path.join(SIGNPAGE, "index.html") : p === "/app.js" ? path.join(SIGNPAGE, "public/app.js") : null;
+  const file = p === "/" ? path.join(signBuilt(), "index.html") : p === "/app.js" ? path.join(signBuilt(), "public/app.js") : null;
   if (file === null) return new Response("", { status: 404 });
   return new Response(readFileSync(file), { status: 200 });
 };

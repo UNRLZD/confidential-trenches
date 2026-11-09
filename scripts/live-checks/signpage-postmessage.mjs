@@ -39,6 +39,7 @@ import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { consoleError } from "./console-errors.mjs";
 import { named } from "./record-names.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-postmessage";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -200,7 +201,7 @@ export function headersOf(text) {
 /** packages/signpage built as its deploy builds it (deploy.mjs build(): index.html and public/ copied), read as files. */
 function build() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-pm-sign-"));
-  copyFileSync(path.join(REPO, "packages/signpage/index.html"), path.join(out, "index.html"));
+  copyFileSync(path.join(signBuilt(), "index.html"), path.join(out, "index.html"));
   cpSync(path.join(REPO, "packages/signpage/public"), out, { recursive: true });
   return out;
 }

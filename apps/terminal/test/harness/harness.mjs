@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../../../../scripts/browsers.mjs";
+import { signBuilt } from "../../../../scripts/signpage-built.mjs";
 import { makeCert } from "./certs.mjs";
 import { startServer } from "./server.mjs";
 
@@ -56,6 +57,7 @@ export function realSites(sites) {
  */
 export function buildSignpage() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-harness-sign-"));
+  signBuilt(); // index.html and public/'s app.js and prover files, built from this tree's sources first (card signpage-generated-merge-free)
   copyFileSync(path.join(SIGNPAGE, "index.html"), path.join(out, "index.html"));
   cpSync(path.join(SIGNPAGE, "public"), out, { recursive: true });
   return out;

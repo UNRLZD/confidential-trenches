@@ -46,6 +46,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
 import { named } from "./record-names.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "kit-deposit-assets-dry";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -231,7 +232,7 @@ export function headersOf(text) {
 /** packages/signpage as deploy.mjs build() makes it, minus the prover's setup files: index.html and public/ copied. */
 function build() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-dep-assets-dry-"));
-  copyFileSync(path.join(REPO, "packages/signpage/index.html"), path.join(out, "index.html"));
+  copyFileSync(path.join(signBuilt(), "index.html"), path.join(out, "index.html"));
   cpSync(path.join(REPO, "packages/signpage/public"), out, { recursive: true });
   return out;
 }
