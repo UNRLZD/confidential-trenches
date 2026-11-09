@@ -5,7 +5,12 @@
 // through (Playwright route.fetch, Origin APP_HOST) and puts its own origin in Access-Control-Allow-Origin, since
 // HELPER_HOST answers APP_HOST's origin only; SIGN_HOST's frame is answered with an empty page, since it refuses a
 // 127.0.0.1 parent.
-//   good:      the build of this card: Discover ready at both widths, 38 fields a row as read live: PASS;
+//   good:      re-recorded 2026-11-09T18:51Z for card app-chains-evm by collect({ build }) (--build): the terminal's
+//              build of card/app-chains-evm at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute),
+//              HELPER_HOST live, headless Chrome 157: Discover ready at both widths on Solana's, Base's and Robinhood's
+//              lists, 38 fields a row on every chain, Base and Robinhood rows drawn: PASS;
+//   noEvm:     the same run on main 182241d7's build (Discover reads Solana's lists alone): FAIL, no Base or Robinhood
+//              lists read and no row of either drawn;
 //   badKeys:   the same build, the helper's answer with every row's sells_1h taken out and a buys_15m put in: FAIL on the
 //              keys (the live shape no longer equals the fixtures') and on Trending's 1h buys and sells;
 //   notRouted: the build of main before this card (Screen.tsx draws an empty main for /discover): FAIL, nothing drawn and
@@ -20,7 +25,7 @@ import { ROW_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { consoleLine } from "./console-errors.mjs";
 import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
-import { allowed, APP_HOST, COLUMNS, frameErrors, HELPER_HOST, judge, keysFault, LISTS_URL, parseCsp, WIDTHS } from "./app-discover-live.mjs";
+import { allowed, APP_HOST, COLUMNS, EVM_CHAINS, frameErrors, HELPER_HOST, judge, keysFault, listsUrl, LISTS_URL, parseCsp, WIDTHS } from "./app-discover-live.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-discover-live.answers.json"), "utf8"));
@@ -36,8 +41,9 @@ test("recorded good answer: Discover ready at both widths, rows in every column,
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.lines[0], `ok  ${WIDTHS.length} loads of ${WIDTHS.length} (every width)`);
   for (const w of WIDTHS) {
-    assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} /discover: ready, new \\d+, trending \\d+, hot \\d+, graduating \\d+; \\d+ request\\(s\\), all on the CSP; no violation, no error$`).test(l)), w.name);
-    assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} /discover: the lists read at HELPER_HOST 200, \\d+ rows each with exactly the 38 fields of the fixtures$`).test(l)), w.name);
+    assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} /discover( \\(framed\\))?: ready, new \\d+, trending \\d+, hot \\d+, graduating \\d+; \\d+ request\\(s\\), all on the CSP; no violation, no error$`).test(l)), w.name);
+    assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} /discover( \\(framed\\))?: the lists read at HELPER_HOST 200, \\d+ rows each with exactly the 38 fields of the fixtures$`).test(l)), w.name);
+    for (const c of EVM_CHAINS) assert.ok(r.lines.some((l) => new RegExp(`^ok  ${w.name} /discover( \\(framed\\))?: ${c}: the lists read at HELPER_HOST 200, \\d+ rows each with exactly the 38 fields; [1-9]\\d* ${c} row\\(s\\) drawn, each a link to /token/${c}/<id>$`).test(l)), `${w.name} ${c}`);
   }
   assert.equal(ROW_FIELDS.length, 38);
   // the page read the lists from HELPER_HOST, and its own requests include that read
@@ -46,6 +52,27 @@ test("recorded good answer: Discover ready at both widths, rows in every column,
     assert.ok(l.requests.some((q) => q.url === LISTS_URL && q.type === "fetch"));
     assert.deepEqual(l.columns.map((c) => c.key).sort(), [...COLUMNS].sort());
   }
+});
+
+test("recorded bad answer (card app-chains-evm): main's build reads Solana's lists alone, so no Base or Robinhood list is read or drawn: FAIL", () => {
+  const r = judge(ANSWERS.noEvm);
+  assert.equal(r.ok, false);
+  for (const w of WIDTHS)
+    for (const c of EVM_CHAINS) assert.ok(bad(r.lines).includes(`BAD ${w.name} /discover (framed): ${c}: the page read no ${c} lists answer; Discover draws no ${c} row`), r.lines.join("\n"));
+  // its Solana part still passes: the fail is the EVM chains alone
+  assert.equal(bad(r.lines).length, 4, r.lines.join("\n"));
+});
+
+test("planted on the good answer (card app-chains-evm): a Base answer whose rows lose a field, a Robinhood read that fails, no Base row drawn: FAIL", () => {
+  for (const l of ANSWERS.good.loads) for (const c of EVM_CHAINS) assert.equal(l.chains[c].url, listsUrl(c));
+  let r = mut((rec) => rec.loads[1].chains.base.badRows.push({ list: "new", index: 0, fault: "missing sells_1h" }));
+  assert.ok(bad(r.lines).some((l) => /desktop \/discover \(framed\): base: 1 of \d+ row\(s\) differ from ROW_FIELDS, first new\[0\]: missing sells_1h/.test(l)), r.lines.join("\n"));
+  r = mut((rec) => (rec.loads[0].chains.robinhood.status = 429));
+  assert.ok(bad(r.lines).some((l) => /phone \/discover \(framed\): robinhood: status 429/.test(l)));
+  r = mut((rec) => (rec.loads[1].drawn.base = 0));
+  assert.ok(bad(r.lines).some((l) => /desktop \/discover \(framed\): base: Discover draws no base row/.test(l)));
+  r = mut((rec) => delete rec.loads[0].chains.robinhood);
+  assert.ok(bad(r.lines).some((l) => /phone \/discover \(framed\): robinhood: the page read no robinhood lists answer/.test(l)));
 });
 
 test("recorded bad answer: the helper's rows lose sells_1h and gain buys_15m, so the live shape differs from the fixtures': FAIL", () => {
@@ -64,21 +91,21 @@ test("recorded bad answer: a build whose /discover route draws an empty main: FA
 
 test("planted on the good answer: a CSP violation, a console error, a request off the CSP, a row count that disagrees with its header: FAIL", () => {
   let r = mut((rec) => rec.loads[1].violations.push({ directive: "connect-src", blocked: "https://evil.example" }));
-  assert.ok(bad(r.lines).some((l) => /desktop \/discover: CSP violation: connect-src https:\/\/evil\.example/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => /desktop \/discover \(framed\): CSP violation: connect-src https:\/\/evil\.example/.test(l)), r.lines.join("\n"));
   r = mut((rec) => rec.loads[0].consoleErrors.push("Failed to fetch"));
-  assert.ok(bad(r.lines).some((l) => /phone \/discover: console error: Failed to fetch/.test(l)));
+  assert.ok(bad(r.lines).some((l) => /phone \/discover \(framed\): console error: Failed to fetch/.test(l)));
   r = mut((rec) => rec.loads[1].requests.push({ url: "https://tracker.example/p.js", type: "script" }));
-  assert.ok(bad(r.lines).some((l) => /desktop \/discover: 1 request\(s\) off the CSP: script https:\/\/tracker\.example/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => /desktop \/discover \(framed\): 1 request\(s\) off the CSP: script https:\/\/tracker\.example/.test(l)), r.lines.join("\n"));
   r = mut((rec) => rec.loads[1].requests.push({ url: "https://tracker.example/q", type: "fetch" }));
   assert.ok(bad(r.lines).some((l) => /off the CSP: fetch https:\/\/tracker\.example/.test(l)));
   r = mut((rec) => (rec.loads[1].columns[1].rows = 0));
   assert.ok(bad(r.lines).some((l) => /trending says \d+, draws 0; trending draws no rows/.test(l)), r.lines.join("\n"));
   r = mut((rec) => (rec.loads[0].state = "error"));
-  assert.ok(bad(r.lines).some((l) => /phone \/discover: state error, not ready/.test(l)));
+  assert.ok(bad(r.lines).some((l) => /phone \/discover \(framed\): state error, not ready/.test(l)));
   r = mut((rec) => (rec.loads[0].csp = null));
   assert.ok(bad(r.lines).some((l) => /no CSP on Discover's document/.test(l)));
   r = mut((rec) => (rec.loads[1].lists.status = 503));
-  assert.ok(bad(r.lines).some((l) => /desktop \/discover: the lists read at HELPER_HOST 503/.test(l)));
+  assert.ok(bad(r.lines).some((l) => /desktop \/discover \(framed\): the lists read at HELPER_HOST 503/.test(l)));
   r = mut((rec) => (rec.loads[1].lists.url = "https://other.example/v1/market/lists?chain=solana"));
   assert.ok(bad(r.lines).some((l) => /read https:\/\/other\.example/.test(l)));
   r = mut((rec) => rec.loads.pop());
@@ -136,11 +163,11 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
   assert.deepEqual(kept, [`${text} (${HELPER_HOST}/v1/market/lists)`, "Uncaught boom"]);
   let r = mut((rec) => rec.loads[0].consoleErrors.push(kept[0]));
   assert.equal(r.ok, false);
-  assert.ok(bad(r.lines).some((l) => l.startsWith("BAD phone /discover: console error: ") && l.endsWith(`status of 429 () (${HELPER_HOST}/v1/market/lists)`)), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => l.startsWith("BAD phone /discover (framed): console error: ") && l.endsWith(`status of 429 () (${HELPER_HOST}/v1/market/lists)`)), r.lines.join("\n"));
   assert.ok(!r.lines.some((l) => l.includes("chain=solana)")), "no query in a console line");
   r = mut((rec) => rec.loads[1].consoleErrors.push(kept[1]));
   assert.equal(r.ok, false);
-  assert.ok(bad(r.lines).some((l) => l === "BAD desktop /discover: console error: Uncaught boom"), r.lines.join("\n"));
+  assert.ok(bad(r.lines).some((l) => l === "BAD desktop /discover (framed): console error: Uncaught boom"), r.lines.join("\n"));
 });
 
 test("planted on the good answer: Discover's failed footer read of a release NEAR RPC passes only beside a desktop footer showing the pair answered, any other failed load of a release RPC fails (card app-shell-rpc-outage-judge)", () => {
