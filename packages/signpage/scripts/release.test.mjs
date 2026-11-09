@@ -533,8 +533,9 @@ test("SIGN_BUILD_OUTPUTS names the prover's files by the kit's PROVER_WORKER_FIL
 // cut from a machine whose bytes are not the sources' build (a tsconfig above the repo, an edited node_modules) fails here
 test("the newest release list is this runner's clean build whenever its tree has HEAD's SIGN_BUILD_INPUTS", (t) => {
   const r = newestReleaseOnHead();
-  // heavy.sh's remote box holds no history (scripts/heavy-remote.sh), so the list's tree is not there: CI's test-packages
-  // job (fetch-depth: 0) holds this test; anywhere else a missing tree fails it
+  // the remote test machine (its job runner sets HEAVY_JOB, as release-list.mjs's header says) gets a checkout with no
+  // history, so the list's tree is not there: CI's test-packages job (fetch-depth: 0) holds this test; anywhere else a
+  // missing tree fails it
   if (r.missing && process.env.HEAVY_JOB) return t.skip(`${r.problems[0]}: held by CI's test-packages job, which checks out the whole history`);
   assert.deepEqual(r.problems, [], r.problems.join("\n"));
   if (!r.applies) assert.ok(r.newest, "a newest list to compare");
