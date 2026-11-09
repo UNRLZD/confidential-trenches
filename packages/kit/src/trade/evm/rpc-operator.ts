@@ -29,6 +29,8 @@ export const EVM_RPC_OPERATORS: Readonly<Record<string, string>> = /* @__PURE__ 
   "robinhood.api.pocket.network": "pocket.network",
   "robinhood.drpc.org": "drpc.org",
   "robinhood-testnet.drpc.org": "drpc.org",
+  "base-rpc.publicnode.com": "publicnode.com",
+  "base.api.pocket.network": "pocket.network",
 });
 
 /** domain -> the operator it answers for (card robinhood-mainnet-rpcs, delta review L-2): every host under it. */
