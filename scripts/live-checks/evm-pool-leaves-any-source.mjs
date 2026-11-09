@@ -14,6 +14,9 @@
 //      label tree (Deposited's _label) built from them with the kit's VaultTree (packages/wallet/src/pool/evm.ts
 //      decodeLog and evmTreeSync read the same words): their sizes and roots (an empty tree's root is 0) equal the views
 //      of step 2. An empty pool passes only with no logs and root 0.
+// Every provider is read through provider-answer.mjs (rpcAnswer): a provider's no-answer (no body, not JSON, a 429, a rate
+// limit, a block or state it does not hold), still one after three reads, makes that chain INCONCLUSIVE, never a FAIL
+// and never a PASS.
 // It fails on two operators that disagree on the head block's hash or on a view, on a log that is not the pool's or
 // not as the ABI has it, and on a history source that gives fewer or other leaves than the pool holds (a tree whose
 // size or root is not the view's). The history source is a parameter of the check, not part of its verdict: any source
@@ -21,7 +24,7 @@
 // Pure reads of public RPCs and the helper's route: no key, no write.
 // After: sign
 //   node scripts/live-checks/evm-pool-leaves-any-source.mjs [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (provider-answer.mjs EXIT)
 // --record writes every answer read, as the good run of evm-pool-leaves-any-source.answers.json, and the bad run: the
 // good answers with a leaf the pool does not hold added to Base's first page of logs (plantedBad; the file's note says so).
 import "../net-window.mjs";
@@ -29,10 +32,69 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { VAULT_FIELD_P, VaultTree, evmRpcOperator } from "../../packages/kit/src/index.ts";
-import { POOL_TOPICS, recorder, replayer } from "./robinhood-mainnet-rpcs.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "evm-pool-leaves-any-source";
-export { POOL_TOPICS, recorder, replayer };
+/** The pool's three events (packages/wallet/src/pool/evm.ts EVM_POOL_EVENTS), keccak256 of each signature; the test
+ *  holds them equal to robinhood-mainnet-rpcs.mjs's POOL_TOPICS. */
+export const POOL_TOPICS = Object.freeze([
+  "0xe3b53cd1a44fbf11535e145d80b8ef1ed6d57a73bf5daa7e939b6b01657d6549", // Deposited(address,uint256,uint256,uint256,uint256)
+  "0xfabb9e7afa4ef595f60e1ae9041b2b311b4acb27aeaed4b11b6f2abf689af10a", // Withdrawn(address,address,uint256,uint256,uint256,uint256)
+  "0xb8a1e6c10d45357f60b093ab761ca4af74bf300c039aa105fb946f7e5105727d", // Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)
+]);
+
+/** A provider's read: provider-answer.mjs's rpcAnswer, { result } or { error } (a JSON-RPC error, judged) or
+ *  { noAnswer } (the provider's no-answer, named). */
+export const live = (url, method, params) => rpcAnswer(url, method, params);
+
+/** The live transport, each answer kept in order: the good run's recording. */
+export function recorder(read = live) {
+  const log = [];
+  const transport = async (url, method, params) => {
+    const a = await read(url, method, params);
+    log.push({ url, method, params, ...a });
+    return a;
+  };
+  return { transport, log };
+}
+
+/** A transport that answers each call with the recorded answers to that same call, in their order; past the last, the
+ *  last again. A call with none recorded is a no-answer (the run is INCONCLUSIVE, never judged on it). */
+export function replayer(log) {
+  const queues = new Map();
+  for (const e of log) {
+    const k = JSON.stringify([e.url, e.method, e.params]);
+    if (!queues.has(k)) queues.set(k, []);
+    queues.get(k).push(e);
+  }
+  return async (url, method, params) => {
+    const q = queues.get(JSON.stringify([url, method, params]));
+    const e = q?.length > 1 ? q.shift() : q?.[0];
+    if (e === undefined) return { noAnswer: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
+    return "noAnswer" in e ? { noAnswer: e.noAnswer } : "error" in e ? { error: e.error } : { result: e.result };
+  };
+}
+
+/** A no-answer is read again after WAIT.ms, doubled each time, at most QUIET_TRIES reads in all: the helper's route
+ *  answers a run past its per-client pace HTTP 429 (a live run, 9 Nov 11:1xZ, 30-odd pages in), so the walk waits it out
+ *  as the old transport did (1-3 s a 429), never judged on it. The tests set WAIT.ms to 0. */
+export const WAIT = { ms: 2000 };
+const QUIET_TRIES = 5;
+const pause = (t) => new Promise((r) => setTimeout(r, WAIT.ms * 2 ** (t - 1)));
+/** One read of `url`, a no-answer read again (QUIET_TRIES): the last answer. */
+async function read(transport, url, method, params) {
+  let a;
+  for (let t = 1; t <= QUIET_TRIES; t++) {
+    a = await transport(url, method, params);
+    if (!("noAnswer" in a) || t === QUIET_TRIES) return a;
+    await pause(t);
+  }
+  return a;
+}
+/** A chain's provider that gave no answer: the chain is INCONCLUSIVE. */
+class Quiet extends Error {}
+/** A JSON-RPC error's words: a recorded string, or the error object's message. */
+const words = (e) => (typeof e === "string" ? e : typeof e?.message === "string" ? `${e.code ?? ""} ${e.message}`.trim() : JSON.stringify(e));
 export const HELPER = "https://ct-api.unrealized.trade";
 /** The first page, in blocks (packages/wallet/src/pool/evm.ts EVM_LOG_PAGE_BLOCKS). */
 export const PAGE = 10_000;
@@ -110,17 +172,21 @@ async function history(transport, url, pool, from, head, headHash) {
     const to = at + size - 1n > head ? head : at + size - 1n;
     let answer;
     let error = "";
+    let quiet = null;
     for (let t = 1; t <= TRIES && answer === undefined; t++) {
       if (++calls > MAX_CALLS) throw new Error(`${host(url)}: more than ${MAX_CALLS} log reads`);
-      const a = await transport(url, "eth_getLogs", [{ address: pool, topics: [[...POOL_TOPICS]], fromBlock: hx(at), toBlock: hx(to) }]);
-      if ("error" in a) {
-        error = a.error;
+      const a = await read(transport, url, "eth_getLogs", [{ address: pool, topics: [[...POOL_TOPICS]], fromBlock: hx(at), toBlock: hx(to) }]);
+      quiet = null;
+      if ("noAnswer" in a) quiet = a.noAnswer;
+      else if ("error" in a) {
+        error = words(a.error);
         refused++;
       } else if (!Array.isArray(a.result)) {
         error = "not a list of logs";
         refused++;
       } else answer = a.result;
     }
+    if (answer === undefined && quiet !== null) throw new Quiet(`the pool's logs ${at}-${to}: ${quiet}`);
     if (answer === undefined) {
       if (size === 1n || !RANGE.test(error)) throw new Error(`${host(url)}: the pool's logs ${at}-${to}: ${error}`);
       size = (to - at + 1n) / 2n;
@@ -145,10 +211,11 @@ async function chain(transport, c) {
   const ask = async (url, method, params, what) => {
     let a;
     for (let t = 1; t <= TRIES; t++) {
-      a = await transport(url, method, params);
-      if (!("error" in a)) return a.result;
+      a = await read(transport, url, method, params);
+      if (!("error" in a) && !("noAnswer" in a)) return a.result;
     }
-    throw new Error(`${name}: ${host(url)}: ${what}: ${a.error}`);
+    if ("noAnswer" in a) throw new Quiet(`${what}: ${a.noAnswer}`);
+    throw new Error(`${name}: ${host(url)}: ${what}: ${words(a.error)}`);
   };
   const heads = [];
   for (const u of ops) heads.push(qty(await ask(u, "eth_blockNumber", [], "eth_blockNumber"), `${name}: ${host(u)} head`));
@@ -190,19 +257,27 @@ async function chain(transport, c) {
   return `${name}: head ${head} ${headHash}, state size ${state.size} root ${hx(root)}, label size ${label.size} root ${hx(labelRoot)}, ${h.logs.length} logs in ${h.pages} pages from ${host(c.history)} (${h.refused} refused), operators ${ops.map(host).join(" and ")} agree`;
 }
 
-/** The check: { ok, lines }. `chains`: both pools unless a test names others. Every chain is read; one FAIL fails the run. */
+/** The check: { ok, verdict, lines }. `chains`: both pools unless a test names others. Every chain is read; one FAIL
+ *  fails the run; else a chain whose provider gave no answer makes it INCONCLUSIVE (provider-answer.mjs verdictOf). */
 export async function check(transport, chains = CHAINS) {
   const lines = [];
-  let ok = true;
+  let bad = false;
+  let quiet = false;
   for (const c of chains) {
     try {
       lines.push(`PASS ${await chain(transport, c)}`);
     } catch (e) {
-      ok = false;
-      lines.push(`FAIL ${e?.message ?? e}`);
+      if (e instanceof Quiet) {
+        quiet = true;
+        lines.push(`INCONCLUSIVE ${c.name}: ${e.message}`);
+      } else {
+        bad = true;
+        lines.push(`FAIL ${e?.message ?? e}`);
+      }
     }
   }
-  return { ok, lines };
+  const verdict = verdictOf(bad, quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** A Deposited log the pool does not hold (_commitment 5, _label 6), in the first page `fromBlock` of `pool`'s history. */
@@ -241,11 +316,11 @@ async function main(argv) {
   const r = await check(rec.transport);
   for (const l of r.lines) console.log(l);
   if (record) {
-    if (!r.ok) throw new Error("the good run did not pass: nothing to record");
+    if (r.verdict !== "PASS") throw new Error("the good run did not pass: nothing to record");
     const good = { chains: [...CHAINS], log: rec.log };
     const bad = plantedBad(good);
     const b = await check(replayer(bad.log), bad.chains);
-    if (b.ok) throw new Error("the planted bad run passed");
+    if (b.verdict !== "FAIL") throw new Error("the planted bad run did not fail");
     for (const l of b.lines) console.log(`bad: ${l}`);
     const note = {
       good: "a real run from a Mac, read only: every answer the two operators and the helper's route gave",
@@ -254,9 +329,9 @@ async function main(argv) {
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { note: note.good, ...good }, bad: { note: note.bad, ...bad } }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
-  console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return r.ok ? 0 : 1;
+  console.log(`${r.verdict} ${KEY}`);
+  return EXIT[r.verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  main(process.argv.slice(2)).then((c) => process.exit(c), (e) => (console.error(`error: ${e?.stack ?? e}`), process.exit(2)));
+  main(process.argv.slice(2)).then((c) => process.exit(c), (e) => (console.error(`error: ${e?.stack ?? e}`), process.exit(EXIT.ERROR)));

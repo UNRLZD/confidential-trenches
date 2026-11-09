@@ -207,3 +207,54 @@ test("two operators of one company fail before any read", async () => {
   assert.match(r.lines[0], /^FAIL synth: the two operators are not two companies: /);
   assert.equal(s.calls.length, 0);
 });
+
+// card live-checks-provider-no-answer: every provider read goes through provider-answer.mjs; a provider's no-answer,
+// still one after three reads, makes that chain INCONCLUSIVE (exit 3), never a FAIL or a PASS
+test("a no-answer from an operator or from the history source makes that chain INCONCLUSIVE, the other still judged", async () => {
+  const { EXIT } = await import("./provider-answer.mjs");
+  const { WAIT } = await import("./evm-pool-leaves-any-source.mjs");
+  WAIT.ms = 0;
+  for (const [name, quiet] of [
+    ["an operator's view", (url, method) => url === "https://two.example" && method === "eth_call"],
+    ["the history's page", (_url, method) => method === "eth_getLogs"],
+  ]) {
+    const s = synthetic({ deposits });
+    const t = async (url, method, params) => (quiet(url, method) ? { noAnswer: `${new URL(url).host} HTTP 429: 429 Too Many Requests` } : s.transport(url, method, params));
+    const r = await check(t, [s.chain]);
+    assert.equal(r.verdict, "INCONCLUSIVE", name);
+    assert.equal(r.ok, false, name);
+    assert.match(r.lines[0], /^INCONCLUSIVE synth: .*HTTP 429/, name);
+    assert.equal(EXIT[r.verdict], 3);
+  }
+  // a wrong answer on one chain is a FAIL whatever the other chain's no-answer
+  const w = synthetic({ deposits, mutate: (l) => l.slice(1) });
+  const q = synthetic({ deposits });
+  const other = { ...q.chain, name: "other", pool: `0x${"b".repeat(40)}` };
+  const pick = (params) => params?.[0]?.to ?? params?.[0]?.address;
+  const t = async (url, method, params) => {
+    if (pick(params) !== other.pool) return w.transport(url, method, params);
+    return method === "eth_getLogs" ? { noAnswer: "history.example: no answer (ETIMEDOUT)" } : q.transport(url, method, params);
+  };
+  const r = await check(t, [w.chain, other]);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.match(r.lines[0], /^FAIL the state tree from 2 logs has 2 leaves, not the pool's 3: /);
+  assert.match(r.lines[1], /^INCONCLUSIVE other: the pool's logs 10-100: history\.example: no answer \(ETIMEDOUT\)$/);
+});
+
+test("the pool's topics are robinhood-mainnet-rpcs's, and the check reads providers only through provider-answer.mjs", async () => {
+  const { POOL_TOPICS: theirs } = await import("./robinhood-mainnet-rpcs.mjs");
+  assert.deepEqual([...POOL_TOPICS], [...theirs]);
+  const src = readFileSync(new URL("./evm-pool-leaves-any-source.mjs", import.meta.url), "utf8");
+  assert.match(src, /from "\.\/provider-answer\.mjs"/);
+  assert.doesNotMatch(src, /jsonrpc/);
+});
+
+test("a no-answer read again is judged on the answer that follows (the helper's 429 waited out)", async () => {
+  const { WAIT } = await import("./evm-pool-leaves-any-source.mjs");
+  WAIT.ms = 0;
+  const s = synthetic({ deposits });
+  let n = 0;
+  const t = async (url, method, params) => (method === "eth_getLogs" && n++ < 4 ? { noAnswer: "history.example HTTP 429: 429 Too Many Requests" } : s.transport(url, method, params));
+  const r = await check(t, [s.chain]);
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+});
