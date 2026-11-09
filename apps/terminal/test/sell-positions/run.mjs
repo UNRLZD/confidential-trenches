@@ -46,8 +46,12 @@ const LATE = () => {
 const NOW = Date.parse("2026-11-02T06:00:00Z");
 // the fixture's mint (fixtures.tsx), kept apart from a `token:` key (gitleaks reads a long id beside that word as a secret)
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
-const WHOLE = "1234567.891234";
 const sellOf = (amount) => JSON.stringify({ chain: "solana", token: MINT, side: "sell", amount, slippage_bps: 1000 });
+/** The request a tap sends: the vault's sell (`buy`, side sell, whole base units at the token's 6 decimals, trade.ts
+ *  UNITS), or pool.sell (the token amount) on a chain with a pool. */
+const vault = (units) => JSON.stringify({ kind: "buy", params: JSON.parse(sellOf(units)) });
+const pool = (amount) => JSON.stringify({ kind: "pool.sell", params: { chain: "solana", token: MINT, amount, slippage_bps: 1000 } });
+const sent = (c) => JSON.stringify({ kind: c?.kind, params: c?.params });
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
@@ -55,9 +59,12 @@ const WIDTHS = [
 // Exact amounts for the fixture's 1234567.891234 units at $0.00017739 (value 21899 cents, cost $100): 50% is
 // 617283.945617 (617283945617 base units, rounded down from .5); 25% is 308641.972808; Initials is ceil(1e8 / 21899)
 // = 4567 bps, 563827.155926.
-const HALF = "617283.945617";
-const QUARTER = "308641.972808";
-const INITIALS = "563827.155926";
+const HALF = vault("617283945617");
+const QUARTER = vault("308641972808");
+const INITIALS = vault("563827155926");
+const ALL = vault("1234567891234");
+// nodec (no decimals read): 25% floors at the string's scale plus 4, 308641.9728085, which the token's 6 decimals refuse
+const QUARTER_NODEC = pool("308641.9728085");
 
 // name, fixture, what is tapped (cta, a quick sell, or none), ms after it, the box's state, its button, the sent amount,
 // the presets on (25 50 75 100), the quick sells on (25 50 All Initials)
@@ -77,6 +84,11 @@ const STATES = [
   ["S8.33", "noroute", null, 0, "S8.33", "No route", null, "0000", "0000"],
   ["down", "down", null, 0, "S8.29", "Sell 50%", null, "1111", "1110"],
   ["dust", "dust", null, 0, "S8.29", "Sell 50%", null, "0111", "0110"],
+  ["nodec-25", "nodec", '[data-quick="2500"]', 400, "S8.32", "Retry", QUARTER_NODEC, "1111", "1111"],
+  // no decimals on the vault's path: refused here, nothing sent (re-check 2 P3-3)
+  ["nodec-vault-25", "nodec-vault", '[data-quick="2500"]', 400, "S8.32", "Retry", null, "1111", "1111"],
+  // a box mounted while the device's record holds an open sell: every sell button locked (re-check 2 P2)
+  ["open", "open", null, 0, "S8.29", "Sell 50%", null, "0000", "0000"],
 ];
 
 async function build() {
@@ -188,8 +200,8 @@ try {
       const got = await settle(() => box.getAttribute("data-state"), want);
       check(got === want, `${tag}: state ${got}, want ${want}`);
       // an ended sell's one line above the button (app-trade-box-states), empty otherwise
-      const END = { refuse: "Price check failed", notsent: "Not sent", other: "Failed", notlanded: "Not landed", partial: "1/2 sold", "partial-nocount": "Part sold" };
-      const STAGE = { refuse: "refused", notsent: "refused", other: "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" };
+      const END = { refuse: "Price check failed", notsent: "Not sent", other: "Failed", nodec: "Failed", "nodec-vault": "Failed", notlanded: "Not landed", partial: "1/2 sold", "partial-nocount": "Part sold" };
+      const STAGE = { refuse: "refused", notsent: "refused", other: "refused", nodec: "refused", "nodec-vault": "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" };
       const line = await settle(async () => norm(await page.locator('[data-testid="sell-line"]').innerText()), END[f] ?? "");
       check(line === (END[f] ?? ""), `${tag}: the line above the button "${line}", want "${END[f] ?? ""}"`);
       if (STAGE[f]) check((await box.getAttribute("data-stage")) === STAGE[f], `${tag}: the end's stage`);
@@ -224,8 +236,8 @@ try {
       check(dialogs.length === 0 && (await page.locator('[role="dialog"], dialog').count()) === 0, `${tag}: a dialog ${dialogs.join(" ")}`);
       check(navs.length === 0, `${tag}: navigated ${navs.join(" ")}`);
       const c = await calls(page);
-      check(c.length === (tapIt ? 1 : 0), `${tag}: ${c.length} sell requests`);
-      if (tapIt) check(c[0]?.kind === "buy" && JSON.stringify(c[0]?.params) === sellOf(amount), `${tag}: the sell ${JSON.stringify(c[0])}`);
+      check(c.length === (amount ? 1 : 0), `${tag}: ${c.length} sell requests`);
+      if (amount) check(sent(c[0]) === amount, `${tag}: the sell ${JSON.stringify(c[0])}, want ${amount}`);
       for (const d of await page.$$eval("[data-draft-copy]", (els) => els.filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(name);
@@ -243,13 +255,14 @@ try {
       await cta.click();
       await page.clock.runFor(100);
       const c = await calls(page);
-      check(c.length === 2 && JSON.stringify(c[1].params) === sellOf(HALF), `@${w.name}: Retry sent ${JSON.stringify(c)}`);
+      check(c.length === 2 && sent(c[1]) === HALF, `@${w.name}: Retry sent ${JSON.stringify(c)}`);
       check((await settle(() => page.locator('[data-testid="sell-box"]').getAttribute("data-state"), "S8.30")) === "S8.30", `@${w.name}: Retry not Sending`);
       check(dialogs.length === 0, `@${w.name}: a dialog on Retry`);
       await ctx.close();
     }
 
-    // after a part fill there is no Retry: one tap is one new sell of the share the box shows, never the rest re-sent
+    // after a part fill there is no Retry: one tap is one new sell of the share the box shows, never the rest re-sent: 50%
+    // of what is left once the part fill reached the row (half the ask sold, 925925.918426 left)
     {
       const { ctx, page, dialogs } = await open(browser, w, "partial");
       const cta = page.locator('[data-testid="sell-cta"]');
@@ -259,7 +272,7 @@ try {
       await cta.click();
       await page.clock.runFor(100);
       const c = await calls(page);
-      check(shown === "Sell 50%" && c.length === 2 && JSON.stringify(c[1].params) === sellOf(HALF), `@${w.name}: after a part fill, shown "${shown}", sent ${JSON.stringify(c)}`);
+      check(shown === "Sell 50%" && c.length === 2 && sent(c[1]) === vault("462962959213"), `@${w.name}: after a part fill, shown "${shown}", sent ${JSON.stringify(c)}`);
       check((await settle(() => page.locator('[data-testid="sell-box"]').getAttribute("data-state"), "S8.30")) === "S8.30", `@${w.name}: the tap after a part fill is not Sending`);
       check(dialogs.length === 0, `@${w.name}: a dialog after a part fill`);
       await ctx.close();
@@ -278,13 +291,14 @@ try {
       check((await settle(() => page.locator('[data-testid="sell-box"]').getAttribute("data-state"), "filled")) === "filled", `@${w.name}: the double tap's sell did not fill`);
       await ctx.close();
     }
-    // 100% sends the kit's amount string unchanged; All too; Initials sends the share that returns the cost
-    for (const [sel, want] of [['[data-pct="10000"]', WHOLE], ['[data-quick="10000"]', WHOLE], ['[data-quick="initials"]', INITIALS]]) {
+    // 100% sends the kit's whole amount (its base units on the vault's path); All too; Initials sends the share that
+    // returns the cost
+    for (const [sel, want] of [['[data-pct="10000"]', ALL], ['[data-quick="10000"]', ALL], ['[data-quick="initials"]', INITIALS]]) {
       const { ctx, page } = await open(browser, w, "up");
       await page.locator(sel).click();
       await page.clock.runFor(100);
       const c = await calls(page);
-      check(c.length === 1 && JSON.stringify(c[0].params) === sellOf(want), `@${w.name}: ${sel} sent ${JSON.stringify(c)}, want ${want}`);
+      check(c.length === 1 && sent(c[0]) === want, `@${w.name}: ${sel} sent ${JSON.stringify(c)}, want ${want}`);
       await ctx.close();
     }
     // a typed percent sells its share; a percent over 100 is not taken
@@ -301,7 +315,7 @@ try {
       await page.locator('[data-testid="sell-cta"]').click();
       await page.clock.runFor(100);
       const c = await calls(page);
-      check(c.length === 1 && JSON.stringify(c[0].params) === sellOf(QUARTER), `@${w.name}: typed 25% sent ${JSON.stringify(c)}`);
+      check(c.length === 1 && sent(c[0]) === QUARTER, `@${w.name}: typed 25% sent ${JSON.stringify(c)}`);
       await ctx.close();
     }
     // Share goes to the mount

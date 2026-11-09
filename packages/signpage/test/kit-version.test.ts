@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { APP_ORIGIN, startApi, type ApiHost, type IncomingMessage } from "../src/api.ts";
 import * as NOW from "../../kit/src/signpage/schema.ts";
 import * as V14 from "./fixtures/kit-v1.4/signpage/schema.ts";
-import { SIGNPAGE_KIT_VERSION, type DepositStage, type SignpageState, type Stage } from "../../kit/src/signpage/messages.ts";
+import { POOL_DEPOSIT_STAGES, SIGNPAGE_KIT_VERSION, type DepositStage, type PoolChain, type PoolDepositStage, type SignpageState, type Stage } from "../../kit/src/signpage/messages.ts";
 
 const TAG_FILES = {
   "signpage/schema.ts": "6efa19805b2856212bdfbb2e3c5ae56ecd5ad24189553ced229ec3eea9415092",
@@ -63,6 +63,22 @@ const OPS = [
   { id: "r", kind: "return" as const, stage: "done" as const, txs: tx },
   { id: "x", kind: "restore" as const, stage: "reading" as const, txs: [] },
 ];
+const pdep = (id: string, stage: PoolDepositStage, facts: Record<string, unknown> = {}, chain: PoolChain = "solana") => ({ id, kind: "pool_deposit" as const, chain, stage, txs: [], ...facts });
+/** Every pool deposit stage (card pool-deposit-stages), each with the facts it may carry, the refund's legs too, and a
+ *  pool deposit on each pool chain. */
+const POOL_OPS = [
+  pdep("p-quote", "quote_checked"),
+  pdep("p-wait", "waiting", { since_ms: 1 }),
+  pdep("p-transit", "in_transit", { since_ms: 1 }, "base"),
+  pdep("p-in", "in_pool", { since_ms: 1 }),
+  pdep("p-refunded", "refunded", { since_ms: 1 }),
+  pdep("p-move", "refund_move", { refunded: true, since_ms: 1 }),
+  pdep("p-move-in", "in_pool", { refunded: true, since_ms: 1 }, "robinhood"),
+  pdep("p-failed", "failed", { since_ms: 1 }),
+  pdep("p-short", "short", { since_ms: 1 }),
+  pdep("p-expired", "expired"),
+];
+const ALL_OPS = [...OPS, ...POOL_OPS];
 /** What kit-v1.4 is sent of each deposit in OPS: its stage mapped (a refund's leg on its way read as refunded), its facts
  *  left out; every other op as it is. */
 const DEPOSIT_V1_4: Record<string, string> = {
@@ -87,13 +103,17 @@ const FULL: SignpageState = {
   positions: [{ chain: "solana", token: "T", amount: "1", cost: "2", wallets: ["W1"] }],
   orders: [{ order_id: "o", chain: "solana", wallet: "W1", token: "T", group_id: "g", trigger: { kind: "stop", pool: "P", venue: "pumpswap", direction: "lte", price: "1", quote_asset: "SOL" }, state: "ARMED", last_check: 5 }],
   held: [{ id: "u.near", asset: "USDC", amount: "3" }],
-  ops: OPS as SignpageState["ops"],
+  ops: ALL_OPS as SignpageState["ops"],
 };
 const { pools: _p, deposit_wallets: _d, ...FULL_V1_4_BASE } = FULL;
 const FULL_V1_4 = { ...FULL_V1_4_BASE, ops: OPS_V1_4 };
 /** What kit-v1.5 is sent (card held-move-forgotten-tx): FULL with each moved-out deposit's moved_out and held_id left
  *  out (review L1: no live Withdraw on an older app). */
 const FULL_V1_5 = { ...FULL, ops: OPS.map((o) => (o.kind === "deposit" && "moved_out" in o ? (({ moved_out: _m, held_id: _h, ...r }: Record<string, unknown>) => r)(o) : o)) } as SignpageState;
+
+/** What kit-v1.6 is sent (card pool-deposit-stages): FULL with every pool_deposit op left out, kit-v1.6 having no kind
+ *  for it; every other op as it is, moved_out included. */
+const FULL_V1_6 = { ...FULL, ops: OPS } as SignpageState;
 
 /** What deposit.confirm answers, by its address: the stage named, with the facts that stage carries in OPS. */
 const confirmOf = (address: string) => {
@@ -279,7 +299,7 @@ test("hello at the kit's own version: every message as it is, and the kit's own 
 
 test("a hello gets no answer; a later or higher version reads everything, an older, malformed or extra-keyed one is kit-v1.4", async () => {
   for (const [msg, full] of [
-    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.5"), FULL_V1_5],
+    [hello(SIGNPAGE_KIT_VERSION), FULL], [hello("1.12"), FULL], [hello("2.0"), FULL], [hello("1.6"), FULL_V1_6], [hello("1.5"), FULL_V1_5],
     [hello("1.4"), FULL_V1_4], [hello("1.0"), FULL_V1_4], [hello("1.5.0"), FULL_V1_4], [hello("v1.5"), FULL_V1_4], [hello(15), FULL_V1_4],
     [{ ...hello(SIGNPAGE_KIT_VERSION), id: crypto.randomUUID() }, FULL_V1_4], [{ v: 2, type: "hello", kit: SIGNPAGE_KIT_VERSION }, FULL_V1_4],
   ] as const) {
@@ -313,10 +333,10 @@ test("in the shell's order (hello, a 1.5 answer, the next document's ready, a st
   assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL, vault_balance: "100" } }], "events again after its answer, in its own shape");
 });
 
-test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.5's", async () => {
+test("the version the page reads every kit at in full is the kit's own SIGNPAGE_KIT_VERSION; the one before it is kit-v1.6's", async () => {
   const [major, minor] = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];
-  assert.equal(`${major}.${minor - 1}`, "1.5", "raising the version again adds its level here");
-  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
+  assert.equal(`${major}.${minor - 1}`, "1.6", "raising the version again adds its level here");
+  for (const [kit, want] of [[SIGNPAGE_KIT_VERSION, FULL], [`${major}.${minor - 1}`, FULL_V1_6], [`${major}.${minor - 2}`, FULL_V1_5], [`${major}.${minor + 1}`, FULL]] as const) {
     const p = page();
     p.send(hello(kit));
     const id = await p.ask();
@@ -407,4 +427,54 @@ test("no hello: the deployed shape today (pools and deposit_wallets, kit-v1.4's 
   assert.ok(reads(V14, p.answer(id), "state"), "kit-v1.4 reads it now");
   const { pools: _a, deposit_wallets: _b, ...rest } = deployed;
   assert.deepEqual(p.answer(id).result, rest, "the two fields left out, every other field and op as it is");
+});
+
+// ------------------------------------------------------------------------------------------------ card pool-deposit-stages
+test("the pool ops here hold every pool deposit stage the kit names", () => {
+  assert.deepEqual([...new Set(POOL_OPS.map((o) => o.stage))].sort(), [...POOL_DEPOSIT_STAGES].sort());
+});
+
+test("hello at the kit's own version (1.7): every pool deposit op as it is, each stage with its facts, and the kit's schema reads the state", async () => {
+  const p = page();
+  p.send(hello(SIGNPAGE_KIT_VERSION));
+  const id = await p.ask();
+  const ops = (p.answer(id).result as unknown as SignpageState).ops;
+  assert.deepEqual(ops.filter((o) => o.kind === "pool_deposit"), POOL_OPS);
+  assert.ok(reads(NOW, p.answer(id), "state"));
+});
+
+test("hello kit 1.6: the state with every pool_deposit op left out and everything else as it is, moved_out included; its events too", async () => {
+  const p = page();
+  p.send(hello("1.6"));
+  const id = await p.ask();
+  assert.deepEqual(p.answer(id).result, FULL_V1_6);
+  assert.ok(!JSON.stringify(p.answer(id)).includes("pool_deposit"), "no pool_deposit op in kit-v1.6's state");
+  assert.ok(reads(NOW, p.answer(id), "state"));
+  const cid = await p.confirm("d-moved");
+  assert.deepEqual(p.answer(cid).result, { stage: "held", held_id: "u.near", since_ms: 1, moved_out: true }, "deposit.confirm as it is: kit-v1.6 reads moved_out");
+  // a change to a pool op alone: kit-v1.6 sees no change, so no event
+  p.set({ ...FULL, ops: FULL.ops.map((o) => (o.id === "p-quote" ? { ...o, stage: "waiting", since_ms: 2 } : o)) as SignpageState["ops"] });
+  await p.api.idle();
+  assert.equal(p.posted.filter((m) => (m as { type?: string }).type === "state").length, 0, "a pool op's change only: no event to kit-v1.6");
+  p.set({ ...FULL, vault_balance: "99" });
+  await p.api.idle();
+  const ev = p.posted.filter((m) => (m as { type?: string }).type === "state");
+  assert.deepEqual(ev, [{ v: 1, type: "state", state: { ...FULL_V1_6, vault_balance: "99" } }]);
+  // the kit at its own version sees the pool op's change
+  const q = page();
+  q.send(hello(SIGNPAGE_KIT_VERSION));
+  await q.ask();
+  q.set({ ...FULL, ops: FULL.ops.map((o) => (o.id === "p-quote" ? { ...o, stage: "waiting", since_ms: 2 } : o)) as SignpageState["ops"] });
+  await q.api.idle();
+  assert.equal(q.posted.filter((m) => (m as { type?: string }).type === "state").length, 1, "kit-v1.7 gets the pool op's change");
+});
+
+test("hello kit 1.5 and no hello: no pool_deposit op either", async () => {
+  for (const msg of [hello("1.5"), null]) {
+    const p = page();
+    if (msg) p.send(msg);
+    const id = await p.ask();
+    assert.ok(!JSON.stringify(p.answer(id)).includes("pool_deposit"), JSON.stringify(msg));
+    assert.deepEqual(p.answer(id).result, msg ? FULL_V1_5 : FULL_V1_4);
+  }
 });

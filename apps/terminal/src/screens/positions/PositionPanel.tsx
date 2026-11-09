@@ -28,7 +28,7 @@ function price(costCents: bigint, amount: string): string {
 
 const tone = (c: bigint | null) => (c === null ? undefined : String(c >= 0n));
 
-export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now: number; onShare?: () => void }) {
+export function PositionPanel({ row, s, now, onShare, decimals = null }: { row: Row; s: Sell; now: number; onShare?: () => void; decimals?: number | null }) {
   const running = busy(s.phase);
   const noRoute = row.mark === "noRoute";
   const total = row.pnl === null ? null : row.pnl + row.realized;
@@ -71,7 +71,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
       <div className="tk-quick" data-testid="position-quick">
         {QUICK.map((q) => {
           const b = q === "initials" ? initialsBps(row.cost, row.value) : q;
-          const amount = b === null ? null : sellAmount(row.units, b);
+          const amount = b === null ? null : sellAmount(row.units, b, decimals);
           const live = running && b !== null && s.bps === b;
           const off = !s.ready || running || noRoute || amount === null;
           return (
@@ -82,7 +82,7 @@ export function PositionPanel({ row, s, now, onShare }: { row: Row; s: Sell; now
               data-bps={b ?? undefined}
               data-live={live || undefined}
               disabled={off}
-              onClick={() => !off && s.sell(amount, b!)}
+              onClick={() => !off && s.sell(amount, b!, decimals)}
             >
               {q === "initials" ? <W id="initials" /> : q === WHOLE ? <W id="all" /> : pctLabel(q)}
             </button>

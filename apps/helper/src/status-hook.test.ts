@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { base58 } from "./bind/checks.ts";
 import { bindSenderFromEnv, type BindSender } from "./bind/env.ts";
@@ -112,7 +113,7 @@ test("only a 200 of oneclick /v0/status reaches the hook: a quote, another vendo
   assert.deepEqual(seen, []);
 });
 
-test("fold 5: during the senders' handover the hook waits (nothing opens the deposit store the old helper holds), the event loop never stalls past 50 ms, and it runs once they are this helper's", async (t) => {
+test("fold 5: during the senders' handover the hook waits (nothing opens the deposit store the old helper holds), no lock take waits and the event loop never stalls on one, and it runs once they are this helper's", async (t) => {
   const seed = Buffer.alloc(32, 5);
   const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
   const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
@@ -137,6 +138,19 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   const env = { BIND_VAULT_MAINNET: "vault.test.near", BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: `ed25519:${base58(Buffer.concat([seed, pub]))}`, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
   const errors: string[] = [];
   t.mock.method(console, "error", (l: string) => void errors.push(l));
+  // the store's lock is SQLite's BEGIN EXCLUSIVE, the only SQLite call there is (store/durable.ts), and its take blocks
+  // the thread for its busy timeout (LOCK_WAIT_MS, 250 ms) while the old helper holds it: each take's own synchronous
+  // time is measured, under a millisecond when nobody holds the lock, so a runner's scheduling cannot reach 50 ms
+  const exec = DatabaseSync.prototype.exec;
+  let lockWait = 0;
+  const takes = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+    const at = performance.now();
+    try {
+      return exec.call(this, sql);
+    } finally {
+      lockWait = Math.max(lockWait, performance.now() - at);
+    }
+  });
   const bind = bindSenderFromEnv(env, {}, near, env.BIND_VAULT_MAINNET); // a stand-in vault: its own pin
   t.after(() => bind.stop());
   let handOver: () => void = () => undefined;
@@ -156,14 +170,19 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
     assert.deepEqual([r.status, r.body], [200, UPSTREAM]);
   }
   await new Promise((ok) => setTimeout(ok, 300));
-  assert.deepEqual(reads, [], "nothing started while the senders are the old helper's");
+  const readsBefore = [...reads];
   // the handover: the old helper stops, its locks go with it
   old.close();
   oldOpen = false;
   handOver();
   for (let i = 0; i < 100 && errors.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(takes.mock.callCount() > 0, "the new helper took the store's lock, so its take was measured");
+  assert.ok(lockWait < 50, `a lock take waited ${Math.round(lockWait)} ms`);
+  // any other synchronous wait: under the 250 ms a held lock blocks, far over a shared runner's noise (52 ms, PR #510's
+  // fresh run on a kit-only change, run 42558532011)
+  assert.ok(worst < 200, `worst event-loop gap ${Math.round(worst)} ms`);
+  assert.deepEqual(readsBefore, [], "nothing started while the senders are the old helper's");
   assert.ok(reads.length > 0, "the hook ran once the senders were this helper's");
-  assert.ok(worst < 50, `worst event-loop gap ${Math.round(worst)} ms`);
 });
 
 test("card helper-id-intents: a 1Click quote answer the proxy carried (200 or 201) reaches bind.quoted once, after the device's answer; another path does not", async (t) => {

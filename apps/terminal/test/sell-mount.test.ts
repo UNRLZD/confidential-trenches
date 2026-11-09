@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { heldOf } from "../src/screens/portfolio/model.ts";
 import type { Row } from "../src/screens/portfolio/model.ts";
-import { markEnd, sellAmount, staleAfterSell } from "../src/screens/positions/model.ts";
+import { sellAmount } from "../src/screens/positions/model.ts";
 import type { Phase } from "../src/screens/trade/model.ts";
 import { poolSellAsk } from "../src/screens/trade/model.ts";
 
@@ -41,7 +41,7 @@ test("the Sell side's position: this chain's row of this token, holding more tha
 
 test("a partial sell asks pool.sell for the exact share of the row's own amount, on the row's chain, nothing else", () => {
   const pools = [{ chain: "solana" as const, asset: "SOL" as const, balance: "1" }, { chain: "base" as const, asset: "ETH" as const, balance: "1" }];
-  const amount = sellAmount("1234.567891", 2500)!;
+  const amount = sellAmount("1234.567891", 2500, 6)!;
   assert.equal(amount, "308.641972");
   assert.deepEqual(poolSellAsk(pools, "solana", MINT, amount, 1000), { kind: "pool.sell", params: { chain: "solana", token: MINT, amount, slippage_bps: 1000 } });
   assert.deepEqual(poolSellAsk(pools, "base", EVM, "2", 1000)?.params.chain, "base");
@@ -63,27 +63,20 @@ test("a percent floors at the token's own decimals, not the trimmed string's (re
   for (const a of ["2", "1.5", "1000"]) assert.equal(sellAmount(a, 10000, 9), a);
 });
 
-test("after a sell that may have sold, the box takes no tap until a state newer than its end (review P2)", () => {
-  const s0 = { tag: "state at the end" };
-  const s1 = { tag: "a newer state" };
-  const filled: Phase = { k: "filled", id: "s1", at: 0, ms: 900 };
-  const part: Phase = { k: "ended", id: "s2", at: 0, stage: "part_filled" };
-  const notLanded: Phase = { k: "ended", id: "s3", at: 0, stage: "not_landed" };
-  const refused: Phase = { k: "ended", id: "s4", at: 0, stage: "refused", code: "not_allowed" };
-  for (const p of [filled, part, notLanded]) {
-    const m = markEnd(null, p, s0);
-    assert.deepEqual(m, { id: (p as { id: string }).id, state: s0 });
-    // the same state as at the end: display only (a 100% fill's 25% tap, a partial's next tap send nothing)
-    assert.equal(staleAfterSell(m, p, s0), true, p.k);
-    // a newer state: the box takes taps again, on the new amount
-    assert.equal(markEnd(m, p, s1), m, "the mark moves only at a new end");
-    assert.equal(staleAfterSell(m, p, s1), false, p.k);
-  }
-  // a refused sell sold nothing: its Retry stays live
-  assert.equal(staleAfterSell(markEnd(null, refused, s0), refused, s0), false);
-  // no end, no mark
-  assert.equal(markEnd(null, { k: "ready" }, s0), null);
-  assert.equal(markEnd(null, { k: "sending", id: "s5", at: 0 }, s0), null);
+// the sell's lock (state.ops, the row's units, stale) is test/sell-lock.test.ts's, re-check 2 of 68b288e7
+
+test("with no decimals read, a percent floors at the string's scale plus 4, not at the string's own (re-check P3)", () => {
+  assert.equal(sellAmount("2", 7500, null), "1.5");
+  assert.equal(sellAmount("2", 7500), "1.5");
+  assert.equal(sellAmount("1", 2500), "0.25");
+  assert.equal(sellAmount("3", 3333), "0.9999");
+  // decimals that are not a whole 0-36 count as none
+  for (const d of [-1, 1.5, 37, Number.NaN]) assert.equal(sellAmount("2", 7500, d), "1.5", String(d));
+  // floored at scale + 4: 0.01% of the string's last digit is one unit there, never more than is held
+  assert.equal(sellAmount("0.000001", 1), "0.0000000001");
+  assert.equal(sellAmount("0.000007", 3333), "0.0000023331");
+  // 100% stays the kit's own string
+  assert.equal(sellAmount("2", 10000), "2");
 });
 
 test("the switch's Sell is live: on with a held position, it draws SellBox from the box's one trade state", () => {
@@ -99,10 +92,10 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
   assert.match(box, /if \(t\.onSell\) return <SellBox row=\{\{ \.\.\.t\.held!, symbol \}\} s=\{t\.sell\} slippageBps=\{slippageBps\} onBuy=\{\(\) => t\.setSide\("buy"\)\} footer=\{footer\} decimals=\{decimals\} \/>;/);
   // the position is Portfolio's Row for this chain and token, signed in only; the sell is useSell's, one per trade state
   assert.match(box, /const heldNow = useHeld\(signedOut \? null : snapshot, chain, token\);/);
-  assert.match(box, /const sellLive = useSell\(chain, heldNow\?\.token \?\? token, slippageBps\);/);
-  // after a sell that may have sold, the box is display only until a newer state (review P2); no position, no box
-  assert.match(box, /const sell = stale \? \{ \.\.\.sellLive, ready: false \} : sellLive;/);
-  assert.match(box, /const held = heldNow \?\? \(busy\(sellLive\.phase\) \|\| stale \? lastHeld\.current : null\);/);
+  assert.match(box, /const sell = useSell\(chain, heldNow\?\.token \?\? token, slippageBps, heldNow\?\.units \?\? null\);/);
+  // while the sell's lock holds (useSell), the box keeps the row it was tapped on, display only; no position, no box
+  assert.doesNotMatch(box, /markEnd|endMark/, "the lock still keys on the state object's identity (re-check P2)");
+  assert.match(box, /const held = heldNow \?\? \(busy\(sell\.phase\) \|\| sell\.locked \? lastHeld\.current : null\);/);
   // the token page passes the token's own decimals to the sell side (review P1)
   assert.match(src("screens/token/TokenPage.tsx"), /<TradeView t=\{t\} symbol=\{row\.symbol\} toast=\{toast\} decimals=\{r\.data\.decimals\}/);
   // the side never moves while a buy or a sell runs

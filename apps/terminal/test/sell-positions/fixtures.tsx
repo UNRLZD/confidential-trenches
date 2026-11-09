@@ -4,13 +4,20 @@
 // position and the market's price. The stub answers the sell preview (the share's value less the 1% fee, $0.02 network)
 // and the kit's `buy` with `side: "sell"` with its stages on the page clock: signed at 80 ms, sent at 150 ms, filled at
 // 1,100 ms. ?f= picks the position: up (R5's NEARLY numbers: $100 in, $219 now), down, dust (3 base units), noroute,
-// refuse (the sell refused with quote_check_failed at 300 ms). The trade states (app-trade-box-states), on up's
+// refuse (the sell refused with quote_check_failed at 300 ms), nodec (up's position with no decimals read: a percent floors
+// at the string's scale plus 4, card app-sell-mount re-check P3; its chain has a pool, so it asks pool.sell), nodec-vault
+// (no decimals and no pool: the vault's sell takes whole base units, so the app refuses it and sends nothing, re-check 2
+// P3-3), open (a box mounted while the device's record holds a sell at sent: every sell button locked, re-check 2 P2).
+// Every position passes the token's 6 decimals to SellBox and PositionPanel, as the token page does, but the two nodec.
+// The stub answers as the signing page does: the vault's `buy` side sell takes whole base units only (trade.ts UNITS),
+// pool.sell a fraction no longer than the token's 6 (rules/pool.ts checkPoolRequest); any other is refused not_allowed at
+// 300 ms (pool-kinds.ts). The trade states (app-trade-box-states), on up's
 // position: notsent (signpage_down) and other (not_allowed) refusals, slow (filled at 8 s), notlanded (not_landed at 3 s),
 // partial (part_filled, the kit's count 1 of 2) and partial-nocount. Every request is recorded in window.__calls; every Share
 // tap in window.__shares. ?pool=sol puts the devnet Solana pool in the state (card trade-box-pool: the 0.01 SOL note of
 // scripts/live-checks/signpage-pool-notes.run.json), so the sell goes into the pool (pool.sell). Test only.
 import type { SignpageClientSnapshot, SignpageOutcome, SignpageState, Stage } from "@blindfill/kit";
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { mulCents, portfolio } from "../../src/screens/portfolio/model.ts";
 import type { PortfolioData, TokenMarket } from "../../src/screens/portfolio/model.ts";
@@ -19,7 +26,7 @@ import { SellBox } from "../../src/screens/positions/SellBox.tsx";
 import { SellKitProvider, useSell } from "../../src/screens/positions/source.tsx";
 import type { SellKit } from "../../src/screens/positions/source.tsx";
 import { centsToDecimal } from "../../src/screens/trade/model.ts";
-import { TradeSourceProvider } from "../../src/screens/trade/source.tsx";
+import { TradeSourceProvider, useTradeSource } from "../../src/screens/trade/source.tsx";
 import type { TradeKit, TradeSource } from "../../src/screens/trade/source.tsx";
 import { fontsReady } from "../../src/shell/fonts.ts";
 import "../../src/shell/shell.css";
@@ -40,14 +47,22 @@ window.__shares = 0;
 const q = new URLSearchParams(location.search);
 const f = q.get("f") ?? "up";
 
-// the position: amount (token units, the kit's string), cost (USD), the market price (USD per unit)
-const POS: Record<string, { amount: string; cost: string; price: string; route: boolean }> = {
-  up: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true },
-  refuse: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true },
-  down: { amount: "1234567.891234", cost: "100", price: "0.0000729", route: true },
-  dust: { amount: "0.000003", cost: "0.03", price: "12000", route: true },
-  noroute: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: false },
+// the position: amount (token units, the kit's string), cost (USD), the market price (USD per unit), the token's decimals
+// as the token read gives them (null: none read)
+const POS: Record<string, { amount: string; cost: string; price: string; route: boolean; decimals: number | null }> = {
+  up: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true, decimals: 6 },
+  refuse: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true, decimals: 6 },
+  down: { amount: "1234567.891234", cost: "100", price: "0.0000729", route: true, decimals: 6 },
+  dust: { amount: "0.000003", cost: "0.03", price: "12000", route: true, decimals: 6 },
+  noroute: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: false, decimals: 6 },
+  nodec: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true, decimals: null },
+  "nodec-vault": { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true, decimals: null },
+  open: { amount: "1234567.891234", cost: "100", price: "0.000177390", route: true, decimals: 6 },
 };
+/** The vault's sell amount, as trade.ts takes it: whole base units. */
+const UNITS = /^[1-9]\d{0,19}$/;
+/** The token's own decimals, which the signing page reads itself: a longer fraction is refused there. */
+const TOKEN_DECIMALS = 6;
 const P = POS[f] ?? POS.up!;
 
 const STATE: SignpageState = {
@@ -61,8 +76,9 @@ const STATE: SignpageState = {
   positions: [{ chain: "solana", token: MINT, amount: P.amount, cost: P.cost, wallets: ["W1", "W2"] }],
   orders: [],
   held: [],
-  ops: [],
-  ...(q.get("pool") === "sol" ? { pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] } : {}),
+  // open: the device's record holds a sell at sent that this mount did not start (a remount while it runs)
+  ops: f === "open" ? [{ id: "sell-elsewhere", kind: "sell", stage: "sent", txs: [] }] : [],
+  ...(q.get("pool") === "sol" || f === "nodec" ? { pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] } : {}),
 };
 const MARKET: TokenMarket = { symbol: "TORCH", name: "Torch", price: P.price, route: P.route };
 const DATA: PortfolioData = {
@@ -74,7 +90,26 @@ const DATA: PortfolioData = {
   op: () => null,
   exported: [],
 };
-const snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: STATE, stale: false };
+let snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: STATE, stale: false };
+let setSnapshot: (s: SignpageClientSnapshot) => void = () => {};
+/** The device's record as the signing page keeps it: the sell's op at each stage, and the position less what a fill
+ *  sold (all of the ask; half of it, floored to the base unit, on a part fill), in the same state. */
+function record(id: string, stage: string, ask: string, pooled: boolean): void {
+  const st = snapshot.state!;
+  const ops = [...st.ops.filter((o) => o.id !== id), { id, kind: "sell", stage, txs: [] } as SignpageState["ops"][number]];
+  let positions = st.positions;
+  if (stage === "filled" || stage === "part_filled") {
+    const units = (s: string) => BigInt(s.replace(".", "").replace(/^0+(?=\d)/, "")) * 10n ** BigInt(TOKEN_DECIMALS - (s.split(".")[1]?.length ?? 0));
+    const sold = pooled ? units(ask) : BigInt(ask);
+    positions = positions.map((p) => {
+      const left = units(p.amount) - (stage === "filled" ? sold : sold / 2n);
+      const s = left.toString().padStart(TOKEN_DECIMALS + 1, "0");
+      return { ...p, amount: `${s.slice(0, -TOKEN_DECIMALS)}.${s.slice(-TOKEN_DECIMALS)}`.replace(/\.?0+$/, "") };
+    });
+  }
+  snapshot = { ...snapshot, state: { ...st, ops, positions } };
+  setSnapshot(snapshot);
+}
 
 const listeners = new Set<(id: string, stage: Stage) => void>();
 let n = 0;
@@ -85,11 +120,21 @@ const kit: TradeKit = {
   request: ((kind: string, params: unknown) => {
     const id = `sell-${++n}`;
     window.__calls.push({ kind, params, id });
-    const emit = (stage: Stage) => listeners.forEach((l) => l(id, stage));
+    const ask = String((params as { amount?: unknown }).amount ?? "");
+    const emit = (stage: Stage) => {
+      record(id, stage, ask, kind === "pool.sell");
+      listeners.forEach((l) => l(id, stage));
+    };
     const outcome = new Promise<SignpageOutcome<"buy">>((resolve) => {
-      const code = { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed" }[f];
+      const amount = String((params as { amount?: unknown }).amount ?? "");
+      const frac = /\.(\d+)$/.exec(amount)?.[1] ?? "";
+      const bad = kind === "pool.sell" ? frac.length > TOKEN_DECIMALS : !UNITS.test(amount);
+      const code = bad ? "not_allowed" : { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed" }[f];
       if (code) {
-        setTimeout(() => resolve({ ok: false, error: { code } }), 300);
+        setTimeout(() => {
+          record(id, "refused", ask, kind === "pool.sell");
+          resolve({ ok: false, error: { code } });
+        }, 300);
         return;
       }
       setTimeout(() => emit("signed"), 80);
@@ -124,12 +169,26 @@ const now = q.get("plant") === "clock" ? () => ((t0 ||= Date.now()), t0 + Math.r
 const src: TradeSource = { snapshot, moneyOn: true, kit, now };
 
 function Column() {
-  const row = portfolio(snapshot, DATA, NOW).rows[0]!;
-  const s = useSell(row.chain, row.token);
+  const [snap, set] = useState(snapshot);
+  setSnapshot = set;
+  return (
+    <TradeSourceProvider value={{ ...src, snapshot: snap }}>
+      <SellKitProvider value={sellKit}>
+        <Panels />
+      </SellKitProvider>
+    </TradeSourceProvider>
+  );
+}
+
+function Panels() {
+  // a 100% fill leaves no row (portfolio drops a zero position): the panels go with it
+  const row = portfolio(useTradeSource().snapshot, DATA, NOW).rows[0];
+  const s = useSell(row?.chain ?? "solana", row?.token ?? MINT, 1000, row?.units ?? null);
+  if (!row) return null;
   return (
     <div className="sp-fx">
-      <SellBox row={row} s={s} onBuy={() => {}} />
-      <PositionPanel row={row} s={s} now={NOW} onShare={() => void window.__shares++} />
+      <SellBox row={row} s={s} onBuy={() => {}} decimals={P.decimals} />
+      <PositionPanel row={row} s={s} now={NOW} onShare={() => void window.__shares++} decimals={P.decimals} />
     </div>
   );
 }
@@ -142,11 +201,7 @@ document.head.append(style);
 fontsReady().then(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <TradeSourceProvider value={src}>
-        <SellKitProvider value={sellKit}>
-          <Column />
-        </SellKitProvider>
-      </TradeSourceProvider>
+      <Column />
     </StrictMode>,
   ),
 );

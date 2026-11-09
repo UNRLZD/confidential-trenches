@@ -3,8 +3,6 @@ import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
 import { heldOf } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { markEnd, staleAfterSell } from "../positions/model.ts";
-import type { SellEnd } from "../positions/model.ts";
 import { useBalance, useHeld } from "../portfolio/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
 import { useSell } from "../positions/source.tsx";
@@ -132,20 +130,16 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const [, tick] = useState(0);
   // the Sell side: the position this token holds on this chain (the row's own token string), and the sell of it
   const heldNow = useHeld(signedOut ? null : snapshot, chain, token);
-  const sellLive = useSell(chain, heldNow?.token ?? token, slippageBps);
+  const sell = useSell(chain, heldNow?.token ?? token, slippageBps, heldNow?.units ?? null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const lastHeld = useRef<Row | null>(null);
   if (heldNow) lastHeld.current = heldNow;
   else if (lastHeld.current && heldOf([lastHeld.current], chain, token) === null) lastHeld.current = null;
-  // after a sell ends, the box is display only until a state newer than the one at its end arrives (review P2): the row
-  // it draws is what was held before the sell, so a tap would ask a share of an amount that is gone. While a sell runs
-  // or until that state, the box keeps its row though the position has left the state (a 100% sell), so its Filled or
-  // its end shows where it was tapped; after it, no position is no sell side.
-  const endMark = useRef<SellEnd | null>(null);
-  endMark.current = markEnd(endMark.current, sellLive.phase, snapshot.state);
-  const stale = staleAfterSell(endMark.current, sellLive.phase, snapshot.state);
-  const sell = stale ? { ...sellLive, ready: false } : sellLive;
-  const held = heldNow ?? (busy(sellLive.phase) || stale ? lastHeld.current : null);
+  // while a sell's lock holds (useSell, positions/model.ts sellLocked: a sell open on the device, or one whose end has not
+  // reached the row) the box is display only: the row it draws may be what was held before the sell. While a sell runs
+  // or the lock holds, the box keeps its row though the position has left the state (a 100% sell), so its Filled or its
+  // end shows where it was tapped; after it, no position is no sell side.
+  const held = heldNow ?? (busy(sell.phase) || sell.locked ? lastHeld.current : null);
   const onSell = side === "sell" && held !== null;
   // the side moves only while neither side runs: a running buy or sell keeps the box that draws its state
   const pickSide = (x: "buy" | "sell") => {

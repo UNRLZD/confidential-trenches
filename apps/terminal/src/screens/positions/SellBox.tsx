@@ -76,7 +76,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
 
   function sellAt(b: number) {
     if (!canSellAt(b)) return;
-    s.sell(sellAmount(row.units, b, decimals), b);
+    s.sell(sellAmount(row.units, b, decimals), b, decimals);
   }
   const canSellAt = (b: number) => s.ready && !running && !noRoute && sellAmount(row.units, b, decimals) !== null;
 
@@ -172,7 +172,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
         disabled={!canSell && !running}
         aria-disabled={running || undefined}
         data-testid="sell-cta"
-        onClick={() => bps !== null && canSell && s.sell(amount, bps)}
+        onClick={() => bps !== null && canSell && s.sell(amount, bps, decimals)}
       >
         {label}
       </button>
