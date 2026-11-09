@@ -22,8 +22,9 @@
 // change anywhere in the tree (the build carries the kit's prover too), no HEAD, a newest list whose tree has other
 // SIGN_HOST build inputs than HEAD (release-list.mjs releaseTreeProblems: only a list cut from HEAD's inputs was held to
 // a clean build by HEAD's push run, review P1), or a failed install. The upload is named by HEAD's commit, so it is HEAD's
-// build, made in a clean checkout of HEAD, never from this checkout's node_modules (review P2-1: an extra file in a
-// dependency or a re-pointed symlink changes app.js and passes pnpm store status): git worktree add --detach <tmp> HEAD,
+// build, made in a clean checkout of the HEAD commit it read (the sha main is held to before the build and again right
+// before the upload), never from this checkout's node_modules (review P2-1: an extra file in a dependency or a
+// re-pointed symlink changes app.js and passes pnpm store status): git worktree add --detach <tmp> <sha>,
 // pnpm install --frozen-lockfile --prefer-offline there, the build there by that checkout's own build-app.mjs, then git
 // worktree remove (never --force). Every refusal comes before its env check (CLOUDFLARE_*) and before any upload.
 // --dry-run makes every read and the build a deploy makes, keeps the build folder, and exits 1 with each REFUSED line
@@ -211,6 +212,14 @@ export function checkHeadersFile(text) {
 }
 
 /** Problems with a build folder (empty = fine). */
+const gated = (name, check) => {
+  try {
+    return check();
+  } catch (e) {
+    return [`${name} could not run on this checkout's node_modules (${`${e?.message ?? e}`.split("\n")[0]}): run pnpm install --frozen-lockfile here, then deploy again`];
+  }
+};
+
 export function checkDir(dir) {
   const p = [];
   if (!existsSync(join(dir, "index.html"))) p.push(`${dir} has no index.html`);
@@ -221,8 +230,10 @@ export function checkDir(dir) {
     if (existsSync(join(dir, f))) p.push(`${dir} carries ${f}: _headers is the only Pages config file the signing page has`);
   }
   if (existsSync(join(dir, ".well-known", "webauthn"))) p.push(`${dir} carries .well-known/webauthn: no other origin may use SIGN_HOST's passkeys`);
-  p.push(...checkProver(dir));
-  p.push(...checkPins(dir));
+  // both read this checkout's node_modules (the kit's prover build, the pins' sources): one that is not the lockfile's
+  // install, or none, is a REFUSED line naming the fix, never a throw past the gate (delta review 2)
+  p.push(...gated("the prover check", () => checkProver(dir)));
+  p.push(...gated("the 1Click pin check", () => checkPins(dir)));
   if (!existsSync(join(dir, "_headers"))) return [...p, `${dir} has no _headers file`];
   return [...p, ...checkHeadersFile(readFileSync(join(dir, "_headers"), "utf8"))];
 }
@@ -285,15 +296,16 @@ const USAGE = "usage: node packages/signpage/scripts/deploy.mjs [--dry-run | --b
 
 /** The deploy: { code, out, err }. `net` is the read-back's fetch and sleep (scripts/pages-readback.mjs), and
  *  `released` the release lists and their ledger ({ dir, ledger }; the committed ones by default), a test's stand-ins. */
-/** Review P2-1: a clean checkout of HEAD to install and build in, through `run`: { root, pkg, remove() } (remove returns
- *  a line naming a folder it could not remove, or null), or { refused }. A `pkg` outside this repository is a caller's
- *  own copy of the served files (the tests' plants), built as it is. */
-function cleanCheckout(run, pkg) {
+/** Review P2-1: a clean checkout of the commit `rev` (the sha the deploy read and holds main to, so a HEAD that moves
+ *  after that read builds nothing of its own) to install and build in, through `run`: { root, pkg, remove() } (remove
+ *  returns a line naming a folder it could not remove, or null), or { refused }. A `pkg` outside this repository is a
+ *  caller's own copy of the served files (the tests' plants), built as it is. */
+function cleanCheckout(run, pkg, rev) {
   const root = mkdtempSync(join(tmpdir(), "ct-signpage-head-"));
-  const add = run("git", ["-C", REPO, "worktree", "add", "--detach", root, "HEAD"], { encoding: "utf8" });
+  const add = run("git", ["-C", REPO, "worktree", "add", "--detach", root, rev], { encoding: "utf8" });
   if (add.status !== 0) {
     rmSync(root, { recursive: true, force: true });
-    return { refused: `the clean checkout of HEAD failed (git worktree add exit ${add.status ?? add.signal}): ${`${add.stderr ?? ""}`.trim()}` };
+    return { refused: `the clean checkout of ${rev} failed (git worktree add exit ${add.status ?? add.signal}): ${`${add.stderr ?? ""}`.trim().split("\n").slice(-3).join(" | ")}` };
   }
   const local = relative(REPO, pkg);
   const inRepo = !local.startsWith("..") && !isAbsolute(local);
@@ -321,9 +333,10 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     if (!dryRun && would.length) return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     head = sha;
   }
+  // (a --dry-run with no HEAD to read checks out "HEAD", which fails with its own REFUSED line)
   // HEAD's lockfile, exactly: the prover worker and thread file are built from the kit's installed packages. A deploy and
   // a --dry-run install it in a clean checkout of HEAD and build there (review P2-1); --build installs and builds here
-  const clean = buildOnly ? null : cleanCheckout(run, pkg);
+  const clean = buildOnly ? null : cleanCheckout(run, pkg, head || "HEAD");
   if (clean?.refused) return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), `REFUSED ${clean.refused}`, "nothing was uploaded"] };
   const inst = run("pnpm", buildOnly ? ["install", "--frozen-lockfile"] : ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: clean?.root ?? REPO, env, encoding: "utf8" });
   if (inst.status !== 0) {
@@ -347,7 +360,7 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
     // loaded here, not at the top: release-list.mjs imports this file and the terminal's deploy, which --live-runs needs not
     const { releaseTreeProblems, unreleasedProblems } = await import("./release-list.mjs");
     would.push(...unreleasedProblems(dir, ...(released.dir ? [released.dir, released.ledger] : [])));
-    would.push(...releaseTreeProblems(...(released.dir ? [released.dir] : [])));
+    would.push(...releaseTreeProblems(released.dir ?? undefined, head || "HEAD"));
     if (dryRun) {
       if (would.length) return { code: 1, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would refuse it:`], err: [...would.map((p) => `REFUSED ${p}`)] };
       return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would go ahead`] };

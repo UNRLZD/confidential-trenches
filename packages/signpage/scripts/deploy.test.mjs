@@ -38,19 +38,27 @@ function pkgWith(headers, extra = {}) {
 // the repository answers main's head `main` (HEAD's by default; a list is one head per read, the last kept), with exit
 // `lsRemote`; gh answers main's ci.yml push runs `runs` (one passed run of HEAD by default). `uploads` are the calls that
 // would send bytes (the reads any run may make)
-const HEAD = "a".repeat(40);
+// HEAD is this checkout's real commit: the deploy checks out the sha it read (delta review 2), so the stand-in names one
+const HEAD = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const OTHER = "b".repeat(40);
 const passed = (sha = HEAD, id = 1) => ({ headSha: sha, status: "completed", conclusion: "success", databaseId: id });
 // The clean checkout a deploy builds in (review P2-1) is made for real: git worktree add and remove, and its install
 // (--prefer-offline, about 1 s from the store), run as asked; the install in the repository (--build's) is answered.
-function recorder({ head = HEAD, status = "", install = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
+// `add` is git worktree add's exit (0: run for real); `checkedOut` the commits each clean checkout holds once added.
+function recorder({ head = HEAD, status = "", install = 0, add = 0, lsRemote = 0, main = head, runs = [passed(head)] } = {}) {
   const calls = [];
+  const checkedOut = [];
   const heads = [main].flat();
   const run = (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
     if (cmd === "pnpm" && args[0] === "install" && install) return { status: install, stdout: "", stderr: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"\n" };
     if (cmd === "pnpm" && args[0] === "install") return args.includes("--prefer-offline") ? spawnSync(cmd, args, { ...opts, env: { ...process.env, ...opts?.env }, encoding: "utf8" }) : { status: 0, stdout: "", stderr: "" };
-    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree") return spawnSync(cmd, args, { ...opts, encoding: "utf8" });
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree" && args[3] === "add" && add) return { status: add, stdout: "", stderr: `fatal: '${args.at(-1)}' is not a commit\n` };
+    if (cmd === "git" && args[0] === "-C" && args[2] === "worktree") {
+      const r = spawnSync(cmd, args, { ...opts, encoding: "utf8" });
+      if (args[3] === "add" && r.status === 0) checkedOut.push(spawnSync("git", ["-C", args.at(-2), "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim());
+      return r;
+    }
     if (cmd === "gh") return { status: 0, stdout: JSON.stringify(runs) };
     if (cmd !== "git") return { status: 0, stdout: "" };
     if (args[0] === "ls-remote") {
@@ -60,7 +68,7 @@ function recorder({ head = HEAD, status = "", install = 0, lsRemote = 0, main = 
     if (args.includes("rev-parse")) return { status: 0, stdout: head ? `${head}\n` : "" };
     return { status: 0, stdout: status };
   };
-  return { calls, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
+  return { calls, checkedOut, run, uploads: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "dlx"), installs: () => calls.filter((c) => c.cmd === "pnpm" && c.args[0] === "install") };
 }
 // a package folder that is not there: build() throws on it, so a deploy that returns on it never built
 const NO_PKG = join(tmpdir(), "ct-signpage-test-no-such-package");
@@ -311,7 +319,7 @@ test("the deploy installs HEAD's lockfile (pnpm install --frozen-lockfile) in a 
   await assert.rejects(deploy([], ENV, run, NO_PKG), /ENOENT|No such file/);
   assert.deepEqual(calls.map((c) => [c.cmd, c.args.at(c.cmd === "git" ? (c.args[0] === "-C" ? 2 : 0) : 0)].join(" ")), ["git rev-parse", "git status", "git ls-remote", "gh run", "git worktree", "pnpm install", "git worktree"]);
   const [add, , remove] = calls.slice(4);
-  assert.deepEqual(add.args.slice(2), ["worktree", "add", "--detach", installs()[0].opts.cwd, "HEAD"]);
+  assert.deepEqual(add.args.slice(2), ["worktree", "add", "--detach", installs()[0].opts.cwd, HEAD], "the sha the deploy read");
   assert.deepEqual(remove.args.slice(2), ["worktree", "remove", installs()[0].opts.cwd], "removed, never --force");
   assert.deepEqual(installs()[0].args, ["install", "--frozen-lockfile", "--prefer-offline"]);
   assert.notEqual(installs()[0].opts.cwd, dirname(dirname(PKG)), "never this checkout's node_modules");
@@ -335,6 +343,11 @@ test("planted: an extra file in a dependency or a re-pointed symlink passes pnpm
     return r;
   };
   sh("git", ["-C", repo, "worktree", "add", "--detach", a, "HEAD"]);
+  // this checkout's own deploy code, committed or not (delta review 2): every tracked file it changed goes into A
+  for (const f of sh("git", ["-C", repo, "diff", "--name-only", "HEAD"]).stdout.split("\n").filter(Boolean)) {
+    if (existsSync(join(repo, f))) cpSync(join(repo, f), join(a, f));
+    else rmSync(join(a, f), { force: true });
+  }
   const copy = mkdtempSync(join(tmpdir(), "ct-signpage-test-pl-"));
   try {
     sh("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], a);
@@ -408,13 +421,68 @@ test("planted: a newest list naming this build's bytes but cut from other inputs
   }
 });
 
-test("a failed install refuses before a token is read: no build, no upload", async () => {
+test("a failed install refuses before a token is read: no build, no upload, and the clean checkout is removed", async () => {
   for (const argv of [[], ["--dry-run"]]) {
-    const { run, uploads } = recorder({ install: 1 });
+    const { run, uploads, installs, calls } = recorder({ install: 1 });
     const r = await deploy(argv, {}, run, NO_PKG);
     assert.equal(r.code, 1, (r.out ?? []).join("\n"));
     assert.match(r.err.join("\n"), /REFUSED the install failed \(pnpm exit 1\): ERR_PNPM_OUTDATED_LOCKFILE[\s\S]*nothing was uploaded/);
     assert.equal(uploads().length, 0);
+    // M8b: the checkout the failed install ran in is gone, by git worktree remove
+    const root = installs()[0].opts.cwd;
+    assert.ok(calls.some((c) => c.cmd === "git" && c.args.slice(2).join(" ") === `worktree remove ${root}`), `${argv}`);
+    assert.equal(existsSync(root), false, `${argv}: ${root} is left`);
+  }
+});
+
+// M15: a clean checkout that cannot be made (git worktree add fails) refuses, naming the sha: no install, no build
+test("a failed git worktree add refuses with a REFUSED line: no install, no build, no upload", async () => {
+  for (const argv of [[], ["--dry-run"]]) {
+    const { run, uploads, installs } = recorder({ add: 128 });
+    const r = await deploy(argv, ENV, run, undefined, {}, RELEASED_TREE());
+    assert.equal(r.code, 1, (r.out ?? []).join("\n"));
+    assert.ok(r.err.some((l) => l.startsWith(`REFUSED the clean checkout of ${HEAD} failed (git worktree add exit 128): fatal:`)), `${argv}: ${r.err.join("\n")}`);
+    assert.equal(r.err.at(-1), "nothing was uploaded");
+    assert.equal(installs().length, 0);
+    assert.equal(uploads().length, 0);
+  }
+});
+
+// delta review 2: HEAD can move between the deploy's read of it and the clean checkout (a checkout, a pull): the build is
+// the commit read, whose sha main is held to before the build and again before the upload, never the later HEAD
+test("planted: HEAD moves after the deploy read its sha: the clean checkout and the build are the sha's", async () => {
+  const parent = execFileSync("git", ["-C", PKG, "rev-parse", "HEAD^1"], { encoding: "utf8" }).trim();
+  for (const argv of [["--dry-run"], []]) {
+    const rec = recorder({ head: parent }); // the sha read is HEAD^1; the repository's HEAD is past it
+    const r = await deploy(argv, ENV, rec.run, undefined, signHost(rec).net, RELEASED_TREE());
+    assert.deepEqual(rec.checkedOut, [parent], `${argv}: ${[...(r.out ?? []), ...(r.err ?? [])].join("\n")}`);
+    const kept = /gate ok on (\S+);/.exec(r.out?.[0] ?? "")?.[1];
+    if (kept) rmSync(kept, { recursive: true, force: true });
+  }
+});
+
+// delta review 2: the gate's prover and pin checks read this checkout's node_modules; a stale one (here: an install that
+// lacks the kit's snarkjs, as one made before it was added would) is a REFUSED line naming the install, never a throw
+test("planted: a checkout whose node_modules lacks the kit's snarkjs gets a gate problem naming the install, not a throw", async () => {
+  const repo = dirname(dirname(PKG));
+  const bare = mkdtempSync(join(tmpdir(), "ct-signpage-test-bare-"));
+  assert.equal(spawnSync("git", ["-C", repo, "worktree", "add", "--detach", bare, "HEAD"]).status, 0);
+  const dir = build();
+  try {
+    for (const f of execFileSync("git", ["-C", repo, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).split("\n").filter(Boolean)) {
+      if (existsSync(join(repo, f))) cpSync(join(repo, f), join(bare, f));
+    }
+    assert.equal(spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: bare }).status, 0);
+    unlinkSync(join(bare, "packages", "kit", "node_modules", "snarkjs")); // the link only, never the store's files
+    const { checkDir: checkAt } = await import(pathToFileURL(join(bare, "packages", "signpage", "scripts", "deploy.mjs")).href);
+    const p = checkAt(dir);
+    assert.ok(p.some((l) => /^the prover check could not run on this checkout's node_modules \(.+\): run pnpm install --frozen-lockfile here, then deploy again$/.test(l)), p.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    if (spawnSync("git", ["-C", repo, "worktree", "remove", bare]).status !== 0) {
+      rmSync(bare, { recursive: true, force: true });
+      spawnSync("git", ["-C", repo, "worktree", "prune"]);
+    }
   }
 });
 
