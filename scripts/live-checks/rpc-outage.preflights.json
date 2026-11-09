@@ -1,0 +1,63 @@
+{
+ "at": "2026-11-09T01:23:03.588Z",
+ "browser": "Chrome 157.0.8103.38, sandbox on",
+ "cases": {
+  "403": {
+   "preflightAnswer": 403,
+   "preflights": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "status": 403,
+     "failure": null,
+     "cors": false
+    }
+   ],
+   "reads": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "method": "POST",
+     "status": null,
+     "failure": "net::ERR_FAILED"
+    }
+   ]
+  },
+  "503": {
+   "preflightAnswer": 503,
+   "preflights": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "status": 503,
+     "failure": null,
+     "cors": false
+    }
+   ],
+   "reads": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "method": "POST",
+     "status": null,
+     "failure": "net::ERR_FAILED"
+    }
+   ]
+  },
+  "closed": {
+   "preflightAnswer": null,
+   "preflights": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "status": null,
+     "failure": "net::ERR_CONNECTION_REFUSED",
+     "cors": false
+    }
+   ],
+   "reads": [
+    {
+     "url": "http://127.0.0.1:PORT/",
+     "method": "POST",
+     "status": null,
+     "failure": "net::ERR_CONNECTION_REFUSED"
+    }
+   ]
+  }
+ }
+}

@@ -396,6 +396,12 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   assert.deepEqual(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET" })), [], "every read 200 then reset");
   assert.ok(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET", only: true })).length > 0, "only the first read reset, the rest 200");
   assert.ok(bad(run({ ...good, status: null, failure: "net::ERR_BLOCKED_BY_CLIENT" })).length > 0, "blocked by the browser");
+  // a network error text is down by itself, beside a cached good preflight (200); only net::ERR_FAILED needs the preflight's own word
+  const good200 = pf(200);
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_CONNECTION_REFUSED", pre: good200 })), [], "refused after a cached 200 preflight");
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_CONNECTION_RESET", pre: [] })), [], "reset, no preflight at all");
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_TIMED_OUT", pre: good200 })), []);
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: good200 })).length > 0, "ERR_FAILED beside only a 200 preflight is a CORS refusal of the POST, not an outage");
   // the height read feeds no check: it failing alone is no outage the panel shows (a), and the checks' reads failing after a
   // height read that answered is (b)
   assert.ok(bad(run({ ...good, which: "height" })).some((l) => /panel read, code warn/.test(l)), "(a) only the height read failed, every check amber");
@@ -428,6 +434,18 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   const faked = consoleLine(words, `${APP_HOST}/assets/index-abc.js`);
   assert.ok(bad(run({ ...good, errors: [faked] })).some((l) => l.includes("console Access to fetch")), "a faked preflight line from a script");
   assert.deepEqual(bad(run({ ...good, errors: [consoleLine(words, `${APP_HOST}/verify`)] })), [], "Chrome's own, located at the page");
+  // the terminal's own footer reads count against the footer's bound: 200 of them, every Verify read 429, is our storm
+  const footerReads = (rec, k) => {
+    const d = desktop(rec);
+    for (let i = 0; i < k; i++) d.requests.push({ url: `${near}/?ct=footer`, method: "POST", type: "fetch", status: 200, phase: "between", account: null, rpcId: "ct-footer", rpcMethod: "block", rpcParams: JSON.stringify({ finality: "final" }) });
+  };
+  const leaked = (k) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)] });
+    footerReads(rec, k);
+  });
+  assert.deepEqual(bad(leaked(2)), [], "two footer reads in 5 s: the footer's bound");
+  assert.match(bad(leaked(200)).join("\n"), /200 footer reads of rpc\.mainnet\.fastnear\.com, the footer makes 2 in 5000 ms/, "an interval leak");
+  assert.match(bad(leaked(3)).join("\n"), /3 footer reads of rpc\.mainnet\.fastnear\.com/);
   // the footer's failed read is not a Verify outage: the panel amber with every read 200 and the footer on still fails
   const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
   assert.ok(tagged.endsWith(" [footer read]"));

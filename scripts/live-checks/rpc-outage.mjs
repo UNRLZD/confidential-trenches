@@ -31,8 +31,9 @@
 // read is counted by the cap.
 // Not a check of its own; scripts/live-checks/app-shell.test.mjs holds it.
 // Runs: once, no check of its own: the shared judgment of a down RPC (app-shell.test.mjs holds it)
-import { readFileSync } from "node:fs";
 import { BLOCK_EVERY_MS } from "../../apps/terminal/src/shell/footer.ts";
+import { EVM_READS } from "../../apps/terminal/src/screens/verify/pools.ts";
+import { VERIFY_READS } from "../../apps/terminal/src/screens/verify/read.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
 const originOf = (u) => {
@@ -103,6 +104,10 @@ const failedOrigin = (line) => originOf((FAILED_LOAD.exec(line)?.[1] ?? prefligh
 /** What the same load's DOM shows for one row: its data-status (ok, warn, danger, loading), or "not drawn". */
 const shownRow = (verify, row) => (row === "code" || row === "funds" ? verify?.[row] : verify?.pools?.[row]) ?? "not drawn";
 
+/** The most footer block reads one origin gets in a load that has run `ms`: the footer's own bound, one at its mount and one
+ *  per BLOCK_EVERY_MS. */
+export const footerReadCap = (ms) => Math.floor(ms / BLOCK_EVERY_MS) + 1;
+
 /** What the footer shows: the pair answered (data-conn "on") and a block drawn (data-block a height). */
 const footerAnswered = (footer) => footer?.conn === "on" && /^\d+$/.test(footer?.block ?? "");
 
@@ -131,13 +136,15 @@ export const preflightDown = (pre) => (pre ?? []).length > 0 && !pre.some((p) =>
  *  - a failure text other than net::ERR_ABORTED (the page's own abort) wins over the status: a read answered 200 whose
  *    body then failed (a reset, an HTTP/2 error) is a failed read; one the browser blocked (ERR_BLOCKED_BY_*) is not
  *    the RPC's, as FAILED_LOAD does not take it;
- *  - a read with no answer is down only beside a preflight that answered 5xx or 429 or was unreachable;
+ *  - a read with no answer and net::ERR_FAILED (what every preflight refusal leaves) is down only beside a preflight that
+ *    answered 5xx or 429 or was unreachable; one with the network's own error text (a refused or reset connection, a
+ *    timeout, a name that does not resolve) is down by itself, which a cached good preflight cannot hide;
  *  - otherwise it answered 5xx or 429. A 4xx other than 429 is no outage. */
 export function readDown(x, pre = []) {
   const f = typeof x.failure === "string" ? x.failure : "";
   if (BLOCKED.test(f)) return false;
   const answered = !(x.status === null || x.status === undefined || x.status === 0);
-  if (f !== "" && !ABORTED.test(f)) return answered ? !is4xx(x.status) : preflightDown(pre);
+  if (f !== "" && !ABORTED.test(f)) return answered ? !is4xx(x.status) : f === "net::ERR_FAILED" ? preflightDown(pre) : true;
   return answered && downStatus(x.status);
 }
 
@@ -147,13 +154,7 @@ export const readAnswered = (x) => x.status === 200 && !(typeof x.failure === "s
 /** The Verify reads one open makes of one RPC, counted from the code (read.ts and pools.ts): the NEAR RPC's one final
  *  height read and VERIFY_READS; a Solana pool RPC's one getMultipleAccounts; an EVM pool RPC's one eth_blockNumber and
  *  EVM_READS. More than that of an RPC in one open, from any frame, is a read storm: the 429s it draws are our own. */
-const SRC = new URL("../../apps/terminal/src/screens/verify/", import.meta.url);
-const listLen = (file, name) => {
-  const m = new RegExp(`export const ${name} = \\[([^\\]]*)\\]`).exec(readFileSync(new URL(file, SRC), "utf8"));
-  if (!m) throw new Error(`${file}: no ${name} list to count the reads of`);
-  return m[1].split(",").filter((x) => x.trim() !== "").length;
-};
-export const READS_PER_OPEN = { near: 1 + listLen("read.ts", "VERIFY_READS"), solana: 1, evm: 1 + listLen("pools.ts", "EVM_READS") };
+export const READS_PER_OPEN = { near: 1 + VERIFY_READS.length, solana: 1, evm: 1 + EVM_READS.length };
 
 /** The most reads one open makes of this origin (READS_PER_OPEN), from the release row it feeds. */
 export function readCap(origin, network = "mainnet") {
@@ -252,7 +253,7 @@ export function outages(lines, verify, network = "mainnet", footer = null) {
     if (m && o) m.set(o, (m.get(o) ?? 0) + 1);
   }
   const reads = (o) => Math.max(loads.get(o) ?? 0, preflights.get(o) ?? 0);
-  const allowed = Number.isFinite(footer?.ms) ? Math.floor(footer.ms / BLOCK_EVERY_MS) + 1 : 0;
+  const allowed = Number.isFinite(footer?.ms) ? footerReadCap(footer.ms) : 0;
   const kept = [];
   const refused = [];
   const down = new Set();

@@ -177,6 +177,9 @@ test("planted on the good answer: a failed read is down only beside a 5xx, 429 o
   for (const s of [403, 404]) assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], s) }).join("\n"), /solana: row warn/, `a ${s} preflight`);
   assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: [] }).join("\n"), /solana: row warn/, "no preflight recorded");
   assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], null, { failure: "net::ERR_FAILED", cors: true }) }).join("\n"), /solana: row warn/, "a CORS refusal");
+  // a network error text is down by itself, beside a cached good preflight; ERR_FAILED beside only a 200 preflight is not
+  assert.deepEqual(run({ chain: "solana", urls: solana, status: null, failure: "net::ERR_CONNECTION_REFUSED", pre: pf(solana[0], 200) }), [], "refused after a cached 200 preflight");
+  assert.match(run({ chain: "solana", urls: solana, ...noAnswer, pre: pf(solana[0], 200) }).join("\n"), /solana: row warn/, "ERR_FAILED, only a 200 preflight");
   // a failure text wins over the status; a blocked read is not the RPC's
   assert.deepEqual(run({ chain: "solana", urls: solana, status: 200, failure: "net::ERR_CONNECTION_RESET" }), [], "answered 200, then reset");
   assert.match(run({ chain: "solana", urls: solana, status: null, failure: "net::ERR_BLOCKED_BY_CLIENT" }).join("\n"), /solana: row warn/);
