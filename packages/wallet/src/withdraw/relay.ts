@@ -4,8 +4,10 @@
 // comes from the kit's public entry; the paths and their answers are the kit's frozen helper API (helper/v1.ts).
 //
 // - The fee (askWithdrawFee): GET /v1/withdraw/fee?token=<id> on the release's helper. The answer is hostile input:
-//   exactly the frozen fields, each in its form; relayer_account and fee_recipient equal to the release's, byte for
-//   byte (HELPER_FEE_ANSWER_DISPLAY_ONLY: shown, never copied); relay_fee a canonical u128 below the amount. No caller
+//   exactly the frozen fields, each in its form; a busy answer (429 rate_limited, 503 upstream) is waited out, its
+//   Retry-After capped, and asked again, BUSY_ASKS asks at most (../busy.ts, card withdraw-fee-busy-waits);
+//   relayer_account and fee_recipient equal to the release's, byte for byte (HELPER_FEE_ANSWER_DISPLAY_ONLY: shown,
+//   never copied); relay_fee a canonical u128 below the amount. No caller
 //   names fee_max (an argument that tries is refused): the device's own (./feemax.ts, LD5's formula on its own reads)
 //   bounds the fee where it is bound, in withdrawRequest before the proof, and again here before the first send (the
 //   §2.8 arming row, wallet.md l.915). What goes into the withdrawal is the release's fee_recipient, never the answer's.
@@ -47,7 +49,7 @@
 //   body alone: the withdrawal data, the proof and its public signals, none of which names another note or a key.
 //
 // Not here: the refund note a settle writes, the "own" act on
-// A (the arming card), a withdrawal across several notes (WM-06), the busy answer's Retry-After (WU-08), and route 2
+// A (the arming card), a withdrawal across several notes (WM-06), the send's busy answer's Retry-After (WU-08), and route 2
 // itself (the exit tool, packages/exit).
 import {
   HELPER_CODE_STATUS,
@@ -73,6 +75,7 @@ import { FeeMaxRefused, type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 import { type NoteRecord, type NoteStore, refKey } from "../notes/store.ts";
 import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./request.ts";
 import { POOL_TESTNET } from "../pool/network.ts";
+import { askWhileBusy } from "../busy.ts";
 
 /** The release's helper (the signing page's CSP lets it reach no other, packages/signpage/public/_headers). */
 export const RELEASE_HELPER = "https://ct-api.unrealized.trade";
@@ -133,6 +136,8 @@ export type WithdrawFeeArgs = {
   amount: bigint;
   fetchFn?: typeof fetch;
   signal?: AbortSignal;
+  /** The wait out of a busy answer (../busy.ts); tests replace it. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 
 /** The fee to bind: relayFee and the release's own fee_recipient; the answer's validUntilBlock, for display. */
@@ -151,12 +156,17 @@ export async function askWithdrawFee(a: WithdrawFeeArgs): Promise<WithdrawFee> {
   if (relayer === null || typeof relayer !== "object" || typeof relayer.relayer_account !== "string" || typeof relayer.fee_recipient !== "string")
     throw new WithdrawRelayRefused("input", "relayer: not the release's relayer");
   if (typeof amount !== "bigint" || amount <= 0n) throw new WithdrawRelayRefused("input", "amount: not a bigint above 0");
-  const res = await (a.fetchFn ?? fetch)(`${WITHDRAW_FEE_URL}?token=${encodeURIComponent(token)}`, {
-    ...HELPER_FETCH_INIT,
-    redirect: "error",
-    method: "GET",
-    signal: a.signal ? AbortSignal.any([a.signal, AbortSignal.timeout(RELAY_TIMEOUT_MS)]) : AbortSignal.timeout(RELAY_TIMEOUT_MS),
-  });
+  // a busy helper (429 rate_limited, 503 upstream) is waited out and asked again, bounded (../busy.ts)
+  const res = await askWhileBusy(
+    () =>
+      (a.fetchFn ?? fetch)(`${WITHDRAW_FEE_URL}?token=${encodeURIComponent(token)}`, {
+        ...HELPER_FETCH_INIT,
+        redirect: "error",
+        method: "GET",
+        signal: a.signal ? AbortSignal.any([a.signal, AbortSignal.timeout(RELAY_TIMEOUT_MS)]) : AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      }),
+    { signal: a.signal, sleep: a.sleep },
+  );
   const body = await jsonOf(res);
   if (res.status !== 200) {
     const code = codeOf(body, res.status, []);

@@ -80,8 +80,9 @@
 // - Pace: 1 s while a status shows a send in flight, a credit is being bound or a carried move is out; else 15 s,
 //   doubling to 60 s. A status that read REFUNDED is read again once a minute at most. Past the
 //   deadline on both RPCs' block time with no send seen, expired shows and only the chain is read, slowly. 1Click's 429
-//   and Retry-After hold that op's status read. A throw that is no refusal pauses and the round runs again; only the
-//   signal ends a follow. No timer ever makes a stage.
+//   and Retry-After hold that op's status read; the relayer's busy answer on a bind send (429 rate_limited, 503
+//   upstream) holds the next round for its Retry-After (bind.ts onWait's ms). A throw that is no refusal pauses and
+//   the round runs again; only the signal ends a follow. No timer ever makes a stage.
 // - The seed: only a bind phase, or the refund move's signature, opens it (deps.seed64, under deps.seedLock), and zeroes
 //   it once the phase ends. Every wait of the bind ends the phase (bind.ts onWait), so no sleep ever runs with the seed
 //   open; the next round binds again from the call written. The refund move's quote is asked with the seed shut; it
@@ -733,6 +734,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   // U not created yet (the bind's not_created wait): the helper creates U on a status read of SUCCESS once the delivery
   // is final (card helper-create-u), so the op's status is read again each round until U exists
   let uMissing = false;
+  // the longest busy relayer wait (its Retry-After) the bind met this round, 0 when none
+  let busyMs = 0;
 
   // ---------- the refund move's signature: U's key open for `fn` only, under deps.seedLock, then zeroed ----------
   const openKey = <T,>(fn: (secretKey: Uint8Array) => T): Promise<T> =>
@@ -789,8 +792,10 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
             ...(deps.relayerAccount !== undefined ? { relayerAccount: deps.relayerAccount } : {}),
             // every wait of the bind ends the phase, so the seed is never open across a sleep; the next round binds
             // again, from the call written (bind.ts). A halt shows halted first, kept until a phase sees no halt.
-            onWait: async (code) => {
+            onWait: async (code, ms) => {
               uMissing = code === "not_created";
+              // a busy relayer: the next round no sooner than its Retry-After (bind.ts onWait)
+              if (ms !== undefined) busyMs = Math.max(busyMs, ms);
               if (HALTS.has(code)) {
                 halted = true;
                 for (const [id, op] of await opsOfU()) if (!ENDS.has(op.stage) && op.stage === "into_vault") await write(id, "halted", legFacts(op, "halted"));
@@ -1148,6 +1153,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
   let err = 0;
   for (;;) {
     signal.throwIfAborted();
+    busyMs = 0;
     let fast: boolean;
     try {
       fast = await round();
@@ -1155,7 +1161,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     } catch (e) {
       signal.throwIfAborted();
       err = Math.min(Math.max(err * 2, pollMs), SLOW_MAX_MS);
-      await sleep(err);
+      // a busy relayer's Retry-After met earlier in this round holds here too (re-check of 45f8904c)
+      await sleep(Math.max(err, busyMs));
       continue;
     }
     // r4: a held op lifted to done in this round has no waiter: adopt it, so its final is written in this session
@@ -1170,6 +1177,7 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     if (waiters.size === 0) return;
     if (fast) slow = 0;
     else slow = slow === 0 ? SLOW_MS : Math.min(slow * 2, SLOW_MAX_MS);
-    await sleep(fast ? pollMs : slow);
+    // a busy relayer's Retry-After this round holds the next one back that long (card withdraw-fee-busy-waits)
+    await sleep(Math.max(fast ? pollMs : slow, busyMs));
   }
 }

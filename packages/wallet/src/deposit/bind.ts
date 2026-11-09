@@ -58,6 +58,7 @@ import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
 import { deadlineOf, pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, heightSpreadOver } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
+import { sleepFor } from "../busy.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
 export const LAPSE_MARGIN = 5n;
@@ -138,9 +139,11 @@ export interface BindDeps {
    * Told before every wait of the bind (a code it reads again after: a halt among them, "halted", "token_halted"; the
    * pages, "pages"; a lapse, "lapse"; the relayer's answers). A throw from it ends the bind there, the seed zeroed, with
    * what it wrote kept: a later bind of the note picks up from the store (the call written) and the pages, so a caller
-   * that opens the seed only for each step (card wallet-deposit-follow) throws here and calls again.
+   * that opens the seed only for each step (card wallet-deposit-follow) throws here and calls again. `ms`: given only
+   * for a busy relayer (rate_limited, upstream), its Retry-After's wait (../busy.ts busyWaitMs), which a caller that
+   * ends the phase waits out before it binds again (card withdraw-fee-busy-waits).
    */
-  onWait?: (code: string) => Promise<void> | void;
+  onWait?: (code: string, ms?: number) => Promise<void> | void;
 }
 
 export type BindOutcome =
@@ -483,8 +486,10 @@ const isUs = (ref: NoteRef, s: bigint, i: number) =>
 // it is stale (a ran call's debit before its refund, audit V-01) or hostile, and the chain decides: the call lapses
 // and is signed again at its nonce once U holds the amount.
 const SETTLE = new Set(["in_flight", "expired", "bad_nonce", "p_used", "amount_above_balance"]);
-// Codes that say wait and send the same bytes again while their window is ahead.
-const RETRY = new Set(["token_halted", "relayer_low"]);
+// Codes that say wait and send the same bytes again while their window is ahead. rate_limited and upstream: the helper
+// busy (delegate.ts BIND_BUSY_CODES), waited out for its Retry-After, out of the phase as every pause (onWait first;
+// card withdraw-fee-busy-waits).
+const RETRY = new Set(["token_halted", "relayer_low", "rate_limited", "upstream"]);
 // Codes on which the device's own reads may continue (one RPC behind or down, a halt, USDC not back yet).
 const WAIT_READ = new Set(["rpc", "disagree", "height", "halted", "balance", "not_created"]);
 
@@ -506,7 +511,8 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   const store = deps.store;
   const fetchFn = deps.fetchFn ?? fetch;
   const pollMs = deps.pollMs ?? POLL_MS;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  // the default wait ends at once on deps.signal (a stop during a busy relayer's Retry-After never waits it out)
+  const sleep = deps.sleep ?? ((ms: number) => sleepFor(ms, deps.signal));
   const signal = deps.signal;
   const U = depositAccount(seed, own.s, own.i).account;
   const token = NEAR_NETWORKS[own.network].usdc;
@@ -554,12 +560,13 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
     const stopped = () => signal?.throwIfAborted();
     // the code the last sign waited on (an RPC behind, USDC not back, U not created): the next pause names it
     let waitOn: string | null = null;
-    const pause = async (code: string) => {
+    // `ms`: a busy relayer's own wait (its Retry-After, ../busy.ts busyWaitMs), else pollMs
+    const pause = async (code: string, ms?: number) => {
       code = waitOn ?? code;
       waitOn = null;
       stopped();
-      await deps.onWait?.(code);
-      await sleep(pollMs);
+      await (ms === undefined ? deps.onWait?.(code) : deps.onWait?.(code, ms));
+      await sleep(ms ?? pollMs);
       stopped();
     };
     const strike = (): BindOutcome => {
@@ -788,7 +795,8 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           const landed = await prepaid();
           if (landed !== null) return (resend.delete(own.noteId), landed);
         }
-        await pause(answer.code);
+        // a busy relayer's Retry-After, never under pollMs (a 0 or a past date would resend at once, re-check of 1d2c4e9a)
+        await pause(answer.code, "waitMs" in answer ? Math.max(pollMs, answer.waitMs) : undefined);
         step = await sendAgain(out);
       } else return { kind: "refused", code: answer.code };
     }
