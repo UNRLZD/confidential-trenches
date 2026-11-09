@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { entropyToWords, moveOutRpc, readMoveOutFor, readWithdrawOut, wordsToSeed64, type MoveOutRpc } from "@blindfill/kit/core";
 import { EXIT_NETWORKS } from "../src/rpc.ts";
 import { EXIT_TOKENS } from "../src/scan.ts";
-import { exitBuildMove, exitHoldings, exitKey, exitRecipient, type ExitAccount, type ExitMove } from "../src/out.ts";
+import { exitBuildMove, exitHoldings, exitKey, exitRecipient, exitStorageMin, type ExitAccount, type ExitMove } from "../src/out.ts";
 
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => typeof x === "object" && x !== null && !Array.isArray(x);
@@ -71,13 +71,9 @@ try {
       console.log(JSON.stringify({ ids, recipient: { ok: false, code: checked.code } }));
     } else {
       const holdings = (await exitHoldings({ network, ids, rpcs })).holdings;
-      // the token's storage minimum, as the wallet reads it (storage_balance_bounds().min), read only for a leg on the
+      // the token's storage minimum, the tool's own read (exitStorageMin, both RPCs), read only for a leg on the
       // token: while USDC is halted every view of it fails, and a holdings-only run must still read
-      const storageMinRead = async (): Promise<bigint> => {
-        const bounds = await call("query", { request_type: "call_function", account_id: token, method_name: "storage_balance_bounds", args_base64: btoa("{}"), finality: "final" });
-        const raw: unknown = isObj(bounds.result) && Array.isArray(bounds.result.result) ? JSON.parse(new TextDecoder().decode(Uint8Array.from(bounds.result.result as number[]))) : null;
-        return isObj(raw) && typeof raw.min === "string" && DEC.test(raw.min) ? BigInt(raw.min) : fail("storage_balance_bounds: no min");
-      };
+      const storageMinRead = (): Promise<bigint> => exitStorageMin(network, rpcs);
       const built: Obj[] = [];
       const results: Obj[] = [];
       for (const [k, account] of accounts.entries()) {

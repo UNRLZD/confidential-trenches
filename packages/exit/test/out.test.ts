@@ -8,12 +8,13 @@
 // Test secrets come from the published all-zero BIP-39 vector (packages/wallet/test/vectors/a8.json), never money.
 import assert from "node:assert/strict";
 import { createHash, createPublicKey, verify } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { type VaultSyncRpc } from "@blindfill/kit";
 import { buildMoveOut, buildRegisterOut, buildWithdrawOut, depositId, HEIGHT_SPREAD_MAX, MoveOutRefused, wordsToSeed64, type BuiltMove, type MoveOutReadFor, type WithdrawOutReadFor } from "@blindfill/kit/core";
 import { EXIT_NETWORKS, ExitRpcRefused } from "../src/rpc.ts";
 import { EXIT_TOKENS } from "../src/scan.ts";
-import { EXIT_INTENTS, exitBuildMove, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipient, exitSettleDue, type ExitAccount, type ExitMove, type ExitRecipient } from "../src/out.ts";
+import { EXIT_INTENTS, exitBuildMove, exitBuildSettle, exitHoldings, exitKey, ExitOutStopped, exitRecipient, exitSettleDue, exitStorageMin, type ExitAccount, type ExitMove, type ExitRecipient } from "../src/out.ts";
 
 const SEED = wordsToSeed64("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about");
 const TYPED = "typed-user.testnet";
@@ -411,4 +412,54 @@ test("nothing into the vault: of every call the tool signs, only settle has the 
       if (a.method === "ft_transfer" || a.method === "ft_withdraw") for (const v of vaults) assert.ok(a.args.receiver_id !== v && !JSON.stringify(a.args).includes(v));
     }
   }
+});
+
+// ---------- review 5 of exit-ids-out: the money-path mappings, pinned ----------
+// the published vector set (all-zero entropy, SEED above), as copied from the wallet's a8.json (test/fixtures/a8-ids.json)
+const A8 = JSON.parse(readFileSync(new URL("./fixtures/a8-ids.json", import.meta.url), "utf8")) as { ids: { kind: string; s?: string; i?: number; l?: string; j?: number; c?: string; id: string }[] };
+
+test("review 5 P2: exitKey maps U, R (each chain), V and A to the published one-time ids, never to another kind's", () => {
+  const hex = (h: string) => BigInt(`0x${h}`);
+  const kinds = new Map<string, number>();
+  for (const v of A8.ids) {
+    const acct: ExitAccount | null =
+      v.kind === "in" ? { kind: "U", s: hex(v.s!), i: v.i! } : v.kind === "return" ? { kind: "R", chain: v.c!, l: hex(v.l!), j: v.j! } : v.kind === "refund" ? { kind: "V", l: hex(v.l!), j: v.j! } : v.kind === "arm" ? { kind: "A", l: hex(v.l!), j: v.j! } : null;
+    if (acct === null) continue;
+    const k = exitKey(SEED, acct);
+    k.secretKey.fill(0);
+    assert.equal(k.id, v.id, `${v.kind} ${v.c ?? ""} ${v.l ?? v.s} ${v.j ?? v.i}`);
+    kinds.set(acct.kind === "R" ? `R ${v.c}` : acct.kind, (kinds.get(acct.kind === "R" ? `R ${v.c}` : acct.kind) ?? 0) + 1);
+  }
+  for (const k of ["U", "V", "A"]) assert.ok((kinds.get(k) ?? 0) >= 1, `a vector for ${k}`);
+  assert.ok([...kinds.keys()].filter((k) => k.startsWith("R ")).length >= 2, `vectors for two chains of R: ${[...kinds.keys()]}`);
+});
+
+test("review 5 P3: an error answer that is not the token's halt, on both RPCs, stops the read; it never reads as halted", async () => {
+  const id = "c".repeat(64);
+  const rpc = (name: string): VaultSyncRpc => ({
+    name,
+    query: async (p: Record<string, unknown>) =>
+      p.request_type === "view_account"
+        ? { jsonrpc: "2.0", id: "x", result: { amount: "1", code_hash: "x", storage_usage: 1, block_height: 200 } }
+        : { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR", cause: { name: "CONTRACT_EXECUTION_ERROR", info: { vm_error: "MethodResolveError(MethodNotFound)" } }, code: -32000 } },
+  });
+  const [a, b] = EXIT_NETWORKS.testnet.rpcs;
+  await assert.rejects(exitHoldings({ network: "testnet", ids: [id], rpcs: [rpc(a), rpc(b)] }, noSleep), ExitOutStopped);
+});
+
+test("review 5 P3: exitStorageMin is the token's storage_balance_bounds().min, equal on both RPCs of the release pair; a split, a failure or another pair is refused", async () => {
+  const bounds = (min: string | null, height = 200) => (name: string): VaultSyncRpc => ({
+    name,
+    query: async (p: Record<string, unknown>) => {
+      assert.equal(p.method_name, "storage_balance_bounds");
+      assert.equal(p.account_id, EXIT_TOKENS.testnet);
+      return min === null ? { jsonrpc: "2.0", id: "x", error: { name: "HANDLER_ERROR" } } : { jsonrpc: "2.0", id: "x", result: { result: [...new TextEncoder().encode(JSON.stringify({ min, max: null }))], logs: [], block_height: height } };
+    },
+  });
+  const [a, b] = EXIT_NETWORKS.testnet.rpcs;
+  assert.equal(await exitStorageMin("testnet", [bounds("1250000000000000000000")(a), bounds("1250000000000000000000", 201)(b)]), STORAGE_MIN);
+  await assert.rejects(exitStorageMin("testnet", [bounds("1250000000000000000000")(a), bounds("1250000000000000000001")(b)]), ExitOutStopped, "two minimums");
+  await assert.rejects(exitStorageMin("testnet", [bounds("1250000000000000000000")(a), bounds(null)(b)]), ExitOutStopped, "one read failed");
+  await assert.rejects(exitStorageMin("testnet", [bounds("1250000000000000000000")(a), bounds("1250000000000000000000")("https://rpc.example.org")]), ExitRpcRefused, "not the release pair");
+  await assert.rejects(exitStorageMin("mainnet", [bounds("1250000000000000000000")(a), bounds("1250000000000000000000")(b)]), ExitRpcRefused, "another network's pair");
 });

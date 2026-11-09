@@ -44,5 +44,7 @@ export {
   type SettleReadFor,
   type WithdrawOutReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
+// the token's storage minimum on both RPCs of the release pair: an unregistered typed account's registration deposit
+export { readTokenStorageMin } from "../../wallet/src/arming/accounts.ts";
 // the wallet's bound on two providers' final heights, which the exit tool's reads hold too
 export { HEIGHT_SPREAD_MAX } from "../../wallet/src/deposit/account.ts";

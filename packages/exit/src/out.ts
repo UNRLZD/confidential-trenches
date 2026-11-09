@@ -28,6 +28,7 @@ import {
   buildRegisterOut,
   buildWithdrawOut,
   depositId,
+  readTokenStorageMin,
   refundId,
   returnId,
   type BuiltMove,
@@ -275,6 +276,22 @@ export function exitBuildMove(a: { seed64: Uint8Array; account: ExitAccount; net
     throw new ExitRpcRefused(`no move leg ${JSON.stringify(leg)}`);
   } finally {
     key.secretKey.fill(0);
+  }
+}
+
+/**
+ * The token's storage minimum on `network` (storage_balance_bounds().min), the wallet's own read on both RPCs of the
+ * release pair, equal, at final blocks within the wallet's height bound: the deposit an unregistered typed account's
+ * registration needs (the "token" and "register" legs). Throws ExitRpcRefused before any read for an unknown network or
+ * a pair not the release's, and ExitOutStopped when a read fails or the two differ.
+ */
+export async function exitStorageMin(network: NearNetwork, rpcs: readonly [VaultSyncRpc, VaultSyncRpc]): Promise<bigint> {
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  try {
+    return await readTokenStorageMin(network, rpcs);
+  } catch (e) {
+    throw new ExitOutStopped(`the token's storage minimum: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

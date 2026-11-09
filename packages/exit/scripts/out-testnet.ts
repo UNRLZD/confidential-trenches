@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { entropyToWords, moveOutRpc, readMoveOutFor, wordsToSeed64, type MoveOutRpc } from "@blindfill/kit/core";
 import { exitRpc, EXIT_NETWORKS } from "../src/rpc.ts";
 import { EXIT_TOKENS } from "../src/scan.ts";
-import { exitBuildMove, exitHoldings, exitKey, exitRecipient, type ExitAccount } from "../src/out.ts";
+import { exitBuildMove, exitHoldings, exitKey, exitRecipient, exitStorageMin, type ExitAccount } from "../src/out.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = realpathSync.native(path.resolve(HERE, "../../.."));
@@ -151,6 +151,8 @@ async function main() {
   const vrpcs = [exitRpc(RPC_A), exitRpc(RPC_B)] as const;
   const mrpcs: readonly [MoveOutRpc, MoveOutRpc] = [moveOutRpc(RPC_A), moveOutRpc(RPC_B)];
   const typed = await exitRecipient(X, "testnet", vrpcs);
+  // X's registration deposit: the tool's own read on both RPCs (H's funding above used a one-RPC read of its own)
+  const storageMin = await exitStorageMin("testnet", vrpcs);
   if (!typed.ok) throw new Error(`typed account refused: ${typed.code}`);
   const before = await exitHoldings({ network: "testnet", ids: [U, A, X], rpcs: vrpcs });
   log(`before at ${before.height}: ${before.holdings.map((h) => `${h.id.slice(0, 6)} ${h.token.state === "held" ? h.token.amount : "halted"}`).join(", ")}`);
@@ -160,7 +162,7 @@ async function main() {
     let read = null;
     for (let k = 0; k < 5 && read === null; k++) (read = await readMoveOutFor(id, X, TOKEN, mrpcs)), read === null && (await sleep(3_000));
     if (read === null) throw new Error(`${id.slice(0, 6)}: unread on the pair`);
-    const m = exitBuildMove({ seed64: seed, account: acc, network: "testnet", to: typed.recipient, move: { leg: "token", read, storageMin: min } });
+    const m = exitBuildMove({ seed64: seed, account: acc, network: "testnet", to: typed.recipient, move: { leg: "token", read, storageMin } });
     await Promise.all(mrpcs.map((r) => r.call("send_tx", { signed_tx_base64: m.signed, wait_until: "NONE" }).catch(() => null)));
     await finalOnBoth(m.hash, id);
     txs.push([m.hash, id]);
@@ -181,7 +183,7 @@ async function main() {
     "",
     `The run: packages/exit/scripts/out-testnet.ts on NEAR testnet, the team's test USDC ${TOKEN}; the reads are the exit tool's exitHoldings and the wallet's readMoveOutFor on the release's testnet pair ${RPC_A} and ${RPC_B}, each move built by exitBuildMove (leg token) and self-submitted to both.`,
     `Accounts: H ${HOLDER} (the stand-in for the typed account's NEAR and for the money that reached U and A), U ${U} (U_{1,0} of this run's seed), A ${A} (A_{1,0}), X ${X} (the typed account: an implicit id, never created, unregistered before the run).`,
-    `Steps: H sends U and A ${FUND} yocto NEAR each (creates them), registers each on the token and sends U ${USDC_U} and A ${USDC_A}; the tool reads U, A and X at one block on both RPCs, then U's own tx [storage_deposit(X, registration_only) ${min} yocto, ft_transfer(X, ${moved[0]!.amount})] and A's own tx [ft_transfer(X, ${moved[1]!.amount})], each FINAL on both RPCs, every receipt a success.`,
+    `Steps: H sends U and A ${FUND} yocto NEAR each (creates them), registers each on the token and sends U ${USDC_U} and A ${USDC_A}; the tool reads U, A and X at one block on both RPCs, then U's own tx [storage_deposit(X, registration_only) ${storageMin} yocto (exitStorageMin, both RPCs), ft_transfer(X, ${moved[0]!.amount})] and A's own tx [ft_transfer(X, ${moved[1]!.amount})], each FINAL on both RPCs, every receipt a success.`,
     `Balances (exitHoldings, both RPCs at one block): before at ${before.height} U ${bu}, A ${ba}, X ${bx}; after at ${after.height} U ${au}, A ${aa}, X ${ax}.`,
     `Times: the two moves, read to FINAL on both, ${ms} ms.`,
     "Every Tx above read back FINAL on both testnet RPCs (H's by send_tx wait_until FINAL); then node scripts/ci/money-gate.mjs on this file.",

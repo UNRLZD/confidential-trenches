@@ -223,6 +223,28 @@ test("card exit-ids-out: readSettle reads A at the lower final height on both RP
   assert.equal(await moveout.readSettle("bob.testnet", [mk(1000), mk(1000)]), null, "a named A");
 });
 
+test("review 5 P3: readSettle is null when the two RPCs name different block hashes at one height; settleNeed is the attachment plus the prepaid gas at GAS_PRICE_MARGIN", async () => {
+  const mk = (hash: string): moveout.MoveOutRpc => ({
+    name: "x",
+    block: async (p: unknown) => ({ result: { header: { height: (p as { finality?: string }).finality ? 1000 : (p as { block_id: number }).block_id, hash } } }),
+    query: async (p: unknown) => {
+      const q = p as { request_type: string; block_id: number };
+      return q.request_type === "view_access_key_list"
+        ? { result: { block_height: q.block_id, keys: [{ public_key: `ed25519:${base58.encode(PK)}`, access_key: { nonce: 41, permission: "FullAccess" } }] } }
+        : { result: { block_height: q.block_id, amount: "2000000000000000000000000", storage_usage: 182, code_hash: "11111111111111111111111111111111" } };
+    },
+    tx: async () => ({}),
+    call: async () => ({ result: { gas_price: "100000000" } }),
+  }) as unknown as moveout.MoveOutRpc;
+  const h1 = base58.encode(new Uint8Array(32).fill(7));
+  const h2 = base58.encode(new Uint8Array(32).fill(8));
+  assert.notEqual(await moveout.readSettle(U, [mk(h1), mk(h1)]), null, "equal hashes read");
+  assert.equal(await moveout.readSettle(U, [mk(h2), mk(h1)]), null, "two hashes at one height");
+  const p = 100_000_000n;
+  assert.equal(moveout.settleNeed({ gasPrice: p }, "paid"), (150n + 5n) * 10n ** 12n * p * moveout.GAS_PRICE_MARGIN);
+  assert.equal(moveout.settleNeed({ gasPrice: p }, "refund_pending"), 148n * 10n ** 19n + (150n + 5n) * 10n ** 12n * p * moveout.GAS_PRICE_MARGIN);
+});
+
 // ---- the source pins the run-time rule rests on
 const uncommented = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 
