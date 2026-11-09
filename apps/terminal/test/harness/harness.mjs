@@ -49,9 +49,10 @@ export function realSites(sites) {
 }
 
 /**
- * SIGN_HOST's build as its deploy makes it (packages/signpage/scripts/deploy.mjs build(): index.html and public/
- * copied into a fresh folder), read as files, not imported: the terminal's code never imports a Blindfill package
- * past the kit's entry. The caller removes the folder.
+ * SIGN_HOST's served files for the harness: index.html and all of public/ copied into a fresh folder, read as files, not
+ * imported (the terminal's code never imports a Blindfill package past the kit's entry). Not the deploy's build:
+ * packages/signpage/scripts/deploy.mjs build() copies only the files git tracks (an ignored file such as public/.env.local
+ * never ships) and adds the prover's setup files; this copy takes whatever is in public/. The caller removes the folder.
  */
 export function buildSignpage() {
   const out = mkdtempSync(path.join(tmpdir(), "ct-harness-sign-"));

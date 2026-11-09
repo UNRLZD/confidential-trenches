@@ -8,8 +8,11 @@
 // (scripts/live-checks/signpage-skeleton.mjs) on the headers it sets for every path, checks the worker's own policy
 // rule (W:880) and the thread file's (card signpage-prover-threads), and reads every setup file back against its pin
 // and the worker and the thread file against a fresh build of the kit's.
-// A deploy is main's head, released (card signpage-release-at-deploy): it fetches origin main and refuses unless HEAD
-// is origin/main's head and that commit's push run of ci.yml passed (the read scripts/deploy/hosts-cutover.sh makes),
+// A deploy is main's head, released (card signpage-release-at-deploy): it reads main's head from GitHub itself
+// (git ls-remote on the repository's URL, never a local origin/main ref, which a fork, a mirror or a refspec can leave
+// stale) and refuses unless HEAD is that head and its push run of ci.yml passed (the read scripts/deploy/hosts-cutover.sh
+// makes; a cancelled or failed run is named, with the gh run rerun that redoes it), once before the build and again
+// right before the upload, so a merge that lands meanwhile refuses it,
 // and unless the newest committed release list (packages/signpage/releases, newest by N) names the build, file for file
 // and header for header, with the ledger holding every list as written (release-list.mjs unreleasedProblems). So every
 // build SIGN_HOST serves is a release on main; the flow that cuts one is in release-list.mjs's header, and the live
@@ -25,6 +28,13 @@
 // (Pages applies no _headers rule to a Function's response). It needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 // in the environment; neither is printed. A wrangler exit 0 is not done: SIGN_HOST must then serve this build's / and
 // /app.js (scripts/pages-readback.mjs, card pages-deploy-readback), or it exits 1 naming both hashes and prints no next:.
+// The undo after a failing live check is Cloudflare Pages' own rollback to the previous production deployment, which
+// serves that deployment's files as they were and builds nothing: POST
+// /client/v4/accounts/{account_id}/pages/projects/confidential-trenches-sign/deployments/{deployment_id}/rollback (a
+// token with Pages Write; the deployment ids from GET .../pages/projects/confidential-trenches-sign/deployments), or the
+// dashboard's Rollback. A redeploy of an older main commit is refused here by design. After a rollback the live check
+// signpage-release-at-deploy fails (the served build is not the newest list) until a fix lands as release-<N+1>, cut,
+// merged and deployed by the flow in release-list.mjs's header.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -75,14 +85,27 @@ export const RULES = {
   ...Object.fromEntries(Object.entries(EXACT).map(([path, exact]) => [path, Object.keys(exact)])),
 };
 
+/** `git -C pkg <args>`: { status, stdout, stderr }, and notTree when git says the folder is in no work tree. */
+function gitIn(pkg, args) {
+  const r = spawnSync("git", ["-C", pkg, ...args], { encoding: "utf8" });
+  return { ...r, notTree: r.status !== 0 && /not a git repository/i.test(r.stderr ?? "") };
+}
+
 /**
  * The package's served sources, relative to `pkg`: index.html and public/'s files as git tracks them (a release build is
- * the commit's tree, so an ignored file, such as public/.env.local, is never served or listed). A folder outside any git
- * tree (a test's copy of the package) is its own source: every file in it.
+ * the commit's tree, so an ignored file, such as public/.env.local, is never served or listed). A tracked file missing
+ * from the folder fails the build at its copy, and an untracked one not ignored is refused (untrackedSources), never
+ * left out unsaid. A folder git says is in no work tree (a test's copy of the package) is its own source: every file
+ * in it. Any other git failure (dubious ownership, no git) throws.
  */
 export function servedSources(pkg = PKG) {
-  const r = spawnSync("git", ["-C", pkg, "ls-files", "-z", "--", "index.html", "public"], { encoding: "utf8" });
-  if (r.status === 0) return r.stdout.split("\0").filter((f) => f && existsSync(join(pkg, f)));
+  const r = gitIn(pkg, ["ls-files", "-z", "--", "index.html", "public"]);
+  if (r.status === 0) {
+    const untracked = untrackedSources(pkg);
+    if (untracked.length) throw new Error(`untracked files the build would leave out: ${untracked.join(", ")}: git add them or remove them`);
+    return r.stdout.split("\0").filter(Boolean);
+  }
+  if (!r.notTree) throw new Error(`git ls-files in ${pkg} failed (exit ${r.status ?? r.signal}): ${`${r.stderr ?? r.error ?? ""}`.trim()}`);
   const all = [];
   const walk = (rel) => {
     for (const n of readdirSync(join(pkg, rel))) {
@@ -93,6 +116,16 @@ export function servedSources(pkg = PKG) {
   };
   walk("public");
   return ["index.html", ...all];
+}
+
+/** The package's served sources git does not track and does not ignore (empty for a folder in no work tree, or none:
+ *  the build of a missing folder fails at its first copy). */
+export function untrackedSources(pkg = PKG) {
+  if (!existsSync(pkg)) return [];
+  const r = gitIn(pkg, ["ls-files", "-z", "--others", "--exclude-standard", "--", "index.html", "public"]);
+  if (r.notTree) return [];
+  if (r.status !== 0) throw new Error(`git ls-files --others in ${pkg} failed (exit ${r.status ?? r.signal}): ${`${r.stderr ?? ""}`.trim()}`);
+  return r.stdout.split("\0").filter(Boolean);
 }
 
 /** Copies the package's served sources (servedSources: index.html at the root, public/'s files at their paths under it)
@@ -201,18 +234,29 @@ export function checkProver(dir) {
 
 /** The repository whose main a sign deploy must be, and whose ci.yml push run on that commit must have passed. */
 export const REPO_SLUG = "UNRLZD/confidential-trenches";
+export const REPO_URL = `https://github.com/${REPO_SLUG}`;
 
-/** Why HEAD `sha` is not a commit a sign deploy may serve (empty = none): it must be origin/main's head, fetched now,
- *  with a passed push run of ci.yml on main (a pull request's checks ran on its own tree, not the merge's). */
+/** Why HEAD `sha` is not a commit a sign deploy may serve (empty = none): it must be main's head as GitHub answers it
+ *  now (git ls-remote on REPO_URL, whatever this clone's remotes and refspecs say), with a passed push run of ci.yml on
+ *  main (a pull request's checks ran on its own tree, not the merge's); a cancelled or failed run names its rerun. */
 export function mainProblems(sha, run = spawnSync) {
-  const f = run("git", ["-C", REPO, "fetch", "-q", "origin", "main"], { encoding: "utf8" });
-  if (f.status !== 0) return [`git fetch origin main failed (exit ${f.status ?? f.signal}): the deploy reads origin/main's head`];
+  const ls = run("git", ["ls-remote", REPO_URL, "refs/heads/main"], { encoding: "utf8" });
+  const main = ls.status === 0 ? /^([0-9a-f]{40})\trefs\/heads\/main$/m.exec(ls.stdout ?? "")?.[1] : null;
+  if (!main) return [`git ls-remote ${REPO_URL} refs/heads/main ${ls.status === 0 ? "named no main" : `failed (exit ${ls.status ?? ls.signal})`}: the deploy reads main's head from GitHub`];
   const p = [];
-  const main = run("git", ["-C", REPO, "rev-parse", "origin/main"], { encoding: "utf8" }).stdout?.trim();
-  if (!sha || main !== sha) p.push(`HEAD ${sha || "(none)"} is not origin/main's head ${main || "(none)"}: a sign deploy is main's head, at the merge that holds its release`);
-  const ci = run("gh", ["run", "list", "-R", REPO_SLUG, "--branch", "main", "--workflow", "ci.yml", "--event", "push", "--status", "success", "-L", "200", "--json", "headSha", "-q", ".[].headSha"], { encoding: "utf8" });
-  if (ci.status !== 0) p.push(`gh did not read ci.yml's runs on main (exit ${ci.status ?? ci.signal})`);
-  else if (!sha || !`${ci.stdout ?? ""}`.split("\n").includes(sha)) p.push(`HEAD ${sha || "(none)"} has no passed push run of ci.yml on main`);
+  if (!sha || main !== sha) p.push(`HEAD ${sha || "(none)"} is not main's head ${main} on ${REPO_URL}: a sign deploy is main's head, at the merge that holds its release`);
+  const ci = run("gh", ["run", "list", "-R", REPO_SLUG, "--branch", "main", "--workflow", "ci.yml", "--event", "push", "-L", "200", "--json", "headSha,status,conclusion,databaseId"], { encoding: "utf8" });
+  let runs = null;
+  try {
+    runs = ci.status === 0 ? JSON.parse(ci.stdout) : null;
+  } catch {}
+  if (!Array.isArray(runs)) return [...p, `gh did not read ci.yml's push runs on main (exit ${ci.status ?? ci.signal})`];
+  const mine = runs.filter((r) => sha && r.headSha === sha);
+  if (mine.some((r) => r.conclusion === "success")) return p;
+  const last = mine[0];
+  if (!last) p.push(`HEAD ${sha || "(none)"} has no push run of ci.yml on main`);
+  else if (last.status !== "completed") p.push(`HEAD ${sha}'s push run of ci.yml on main (${last.databaseId}) is ${last.status}: wait for it to pass`);
+  else p.push(`HEAD ${sha}'s push run of ci.yml on main (${last.databaseId}) ended ${last.conclusion}: rerun it (gh run rerun ${last.databaseId} -R ${REPO_SLUG}) and deploy once it passes`);
   return p;
 }
 
@@ -225,6 +269,8 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
   const [dryRun, buildOnly] = [argv[0] === "--dry-run", argv[0] === "--build"];
   // what a deploy refuses, read before the install and the build: HEAD's commit, clean, main's released head
   const would = [];
+  const untracked = untrackedSources(pkg);
+  if (untracked.length) return { code: 1, err: [`REFUSED untracked files the build would leave out: ${untracked.join(", ")}: git add them or remove them`, "nothing was uploaded"] };
   let head = null;
   if (!buildOnly) {
     const sha = run("git", ["-C", REPO, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout?.trim();
@@ -239,13 +285,14 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
   const inst = run("pnpm", ["install", "--frozen-lockfile"], { cwd: REPO, env, encoding: "utf8" });
   if (inst.status !== 0) {
     const why = `${inst.stderr ?? ""}`.trim().split("\n").slice(-5).join(" | ");
-    return { code: 1, err: [`REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, "nothing was uploaded"] };
+    return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), `REFUSED the install failed (pnpm exit ${inst.status ?? inst.signal})${why ? `: ${why}` : ""}`, "nothing was uploaded"] };
   }
   const dir = build(pkg);
-  const keep = dryRun || buildOnly; // the build holds 24 MB of setup files; --dry-run and --build keep it to serve
+  let keep = false; // the build holds 24 MB of setup files: --dry-run and --build keep it, named, only once it passed its gate
   try {
     const problems = checkDir(dir);
-    if (problems.length) return { code: 1, err: [...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
+    if (problems.length) return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), ...problems.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
+    keep = dryRun || buildOnly;
     if (buildOnly) return { code: 0, out: [`gate ok on ${dir}; --build: the build's gate only, nothing read of main, CI or the releases; nothing was uploaded`] };
     // loaded here, not at the top: release-list.mjs imports this file and the terminal's deploy, which --live-runs needs not
     const { unreleasedProblems } = await import("./release-list.mjs");
@@ -254,6 +301,8 @@ export async function deploy(argv, env = process.env, run = spawnSync, pkg = PKG
       if (would.length) return { code: 1, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would refuse it:`], err: [...would.map((p) => `REFUSED ${p}`)] };
       return { code: 0, out: [`gate ok on ${dir}; --dry-run: nothing was uploaded; a deploy would go ahead`] };
     }
+    // main again, right before the upload: a merge that landed during the install and the build refuses it
+    if (!would.length) would.push(...mainProblems(head, run));
     if (would.length) return { code: 1, err: [...would.map((p) => `REFUSED ${p}`), "nothing was uploaded"] };
     const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((k) => !env[k]);
     if (missing.length) return { code: 2, err: [`gate ok; ${missing.join(" and ")} not set, nothing was uploaded`] };
