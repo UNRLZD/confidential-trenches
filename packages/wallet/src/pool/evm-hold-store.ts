@@ -3,8 +3,8 @@
 // pool's deploy block leaves each in days. A page that synced the pool keeps its hold (evm.ts EvmSyncHeld: the leaves
 // up to a finalized block, read alike by two operators and making the pool's trees at the head, and each source's
 // kept logs past it), so a new page, a restore or a reload syncs only the blocks after it and never needs the deploy
-// block again. The sync holds what it reads here to the pool's views at its first round, as it does any hold: a record
-// that does not make the pool's trees with the logs past it is dropped and the pool read again from its deploy block.
+// block again. The sync proves what it reads here by the pool's root times at its first round, as it does any hold: a
+// record they do not prove is cleared (drop) and the pool read again from its deploy block.
 //
 // One record per pool: meta evm-hold/<network>/<pool> (../store/index.ts WALLET_EVM_HOLD_PREFIX), as evm.ts writes it
 // (bigints, kept by IndexedDB's structured clone). The pool's public logs only, no secret: it is in the wallet store,
@@ -30,5 +30,8 @@ export function evmStoredHold(open: () => Promise<WalletStore>, pin: Pick<EvmPoo
   return {
     read: async () => (await open()).get("meta", evmHoldKey(pin)) as never,
     write: async (v) => void (await (await open()).update("meta", evmHoldKey(pin), (old) => (evmHoldRises(old ?? null, v) ? v : undefined))),
+    // a record the pool's views did not prove, cleared to null (no hold) in the same compare-and-set, unless another
+    // sync wrote one to another block since
+    drop: async (to) => void (await (await open()).update("meta", evmHoldKey(pin), (old) => (old !== null && typeof old === "object" && (old as { to?: unknown }).to === to ? null : undefined))),
   };
 }

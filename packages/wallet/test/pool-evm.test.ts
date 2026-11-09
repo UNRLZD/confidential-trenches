@@ -1053,7 +1053,7 @@ test("card evm-pool-sync-wide-pages: a held sync reads only the blocks after its
   // the hold inline, as the device's store would keep it
   const hold = () => {
     let h: unknown = null;
-    return { read: async () => h, write: async (v: unknown) => void (h = v), get: () => h as { to: bigint; events: unknown[] } | null, set: (v: unknown) => void (h = v) };
+    return { read: async () => h, write: async (v: unknown) => void (h = v), drop: async () => void (h = null), get: () => h as { to: bigint; events: unknown[] } | null, set: (v: unknown) => void (h = v) };
   };
   const c = longChain([...deps(PP, [10, 400_000]), { block: 700_000, kind: "wd", leaf: 999n }], 800_000);
   const h = hold();
@@ -2359,9 +2359,15 @@ test("review of the fold, P3-3: a seat's refusals never shrink the same provider
 
 // ---------- card evm-pool-sync-holds: the verified hold carries a page past every public window ----------
 // A hold as a store keeps it: each read a copy of what was written, the "new page" a new sync on the same record
-const storedHold = (): EvmSyncHold & { record: () => EvmSyncHeld | undefined } => {
+const storedHold = (): EvmSyncHold & { record: () => EvmSyncHeld | undefined; set: (x: EvmSyncHeld) => void } => {
   let v: EvmSyncHeld | undefined;
-  return { read: async () => structuredClone(v), write: async (x) => void (v === undefined || x.to >= v.to ? (v = structuredClone(x)) : undefined), record: () => v };
+  return {
+    read: async () => structuredClone(v),
+    write: async (x) => void (v === undefined || x.to >= v.to ? (v = structuredClone(x)) : undefined),
+    drop: async (to: bigint) => void (v !== undefined && v.to === to ? (v = undefined) : undefined),
+    record: () => v,
+    set: (x) => void (v = structuredClone(x)),
+  };
 };
 // a provider past its window: Pocket's HTTP 200 with no logs below `floor`
 const prunedBelow = (floor: number) => (l: Record<string, unknown>[]) => l.filter((x) => blockOf(x) >= floor);
@@ -2463,4 +2469,98 @@ test("card evm-pool-sync-holds: a source short of a longer read is behind only w
   const e = await evmTreeSync({ rpcs: seats, pin: PIN, history: [behind, forger], sleep: async (ms) => void waits.push(ms) }).events().catch((x: unknown) => x);
   assert.ok(e instanceof Error && !(e instanceof EvmLagError), `refused, never a lag on a forger's longer read: ${String((e as Error)?.message).slice(0, 200)}`);
   assert.deepEqual(waits, []);
+});
+
+// ---------- the independent review of 7eb8cfb9 ----------
+test("review of 7eb8cfb9, P2-1: a stored hold that lacks a leaf is not the pool's (its root has no time), so it is dropped, its record overwritten, and the pool read again from its deploy block", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  const full = box.record()!;
+  assert.equal(full.events.length, 4);
+  // the record loses the release at block 1,100,000; every source is honest
+  box.set({ ...full, events: full.events.filter((e) => e.block !== 1_100_000n) });
+  const r = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  assert.deepEqual(box.record()!.events.map((e) => e.bytes), full.events.map((e) => e.bytes), "the record overwritten with every leaf");
+  // the same with no source that reaches the deploy block: the round fails, and the record that lacks a leaf is gone
+  box.set({ ...full, events: full.events.filter((e) => e.block !== 1_100_000n) });
+  const pruned: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", ...refusedBelow(1_500_000) }), rpc(c, { url: "https://pocket.example", cap: 10_000, logs: pocketPruned })];
+  await assert.rejects(evmTreeSync({ rpcs: pruned, pin: PIN, held: box, ...noWait }).events());
+  assert.equal(box.record(), undefined, "the record that lacks a leaf dropped");
+});
+
+test("review of 7eb8cfb9, P2-1: a stored hold whose label is forged (its label root has no time) is dropped; a whole hold is proven and kept", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  const full = box.record()!;
+  const log: string[] = [];
+  // a whole hold: proven at the pool's views, never read again from the deploy block
+  await evmTreeSync({ rpcs: anySeats(c, log), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.ok(!log.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), "a proven hold kept");
+  assert.ok(log.some((l) => l.includes(sel("stateRootTimes(uint256)").slice(2))) && log.some((l) => l.includes(sel("labelRootTimes(uint256)").slice(2))), "both roots proven");
+  // the first deposit's label forged in its bytes too (as rebuilt, review P3-1): its state root holds, its label root not
+  const forged = (e: EvmSyncHeld["events"][number]) => {
+    const parts = e.bytes.split(" ");
+    const data = parts[8]!;
+    parts[8] = `${data.slice(0, 66)}${w64(e.label! + 1n)}${data.slice(130)}`;
+    return { ...e, label: e.label! + 1n, bytes: parts.join(" ") };
+  };
+  box.set({ ...full, events: full.events.map((e, i) => (i === 0 ? forged(e) : e)) });
+  const log2: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(c, log2), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  assert.deepEqual(box.record()!.events.map((e) => e.label), full.events.map((e) => e.label), "the record overwritten");
+});
+
+test("review of 7eb8cfb9, P3-1: a stored event whose fields are not its bytes is no hold", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  const full = box.record()!;
+  for (const bad of [
+    { ...full.events[1]!, nullifier: full.events[1]!.nullifier! + 1n },
+    { ...full.events[1]!, recipient: "0x000000000000000000000000000000000000dead" },
+    { ...full.events[1]!, value: full.events[1]!.value + 1n },
+    { ...full.events[0]!, precommitment: 7n },
+    { ...full.events[1]!, kind: "buy" as const },
+  ]) {
+    const i = bad.block === full.events[0]!.block ? 0 : 1;
+    box.set({ ...full, events: full.events.map((e, j) => (j === i ? bad : e)) });
+    const log: string[] = [];
+    await evmTreeSync({ rpcs: anySeats(c, log), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+    assert.ok(log.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), `a record not its bytes is no hold (${JSON.stringify(Object.keys(bad))})`);
+    assert.deepEqual(box.record()!.events.map((e) => [e.nullifier, e.recipient, e.value, e.precommitment, e.kind]), full.events.map((e) => [e.nullifier, e.recipient, e.value, e.precommitment, e.kind]));
+  }
+});
+
+test("review of 7eb8cfb9, P3-4: the hold's record is rewritten with new leaves or a day of blocks past the last write, never on every rise", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  let writes = 0;
+  const counted: EvmSyncHold = { ...box, write: async (x) => (writes++, box.write(x)) };
+  const move = (n: number) => ((c.head += n), (c.finalized += n));
+  const s = evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait });
+  await s.events();
+  assert.equal(writes, 1);
+  // 1,000 blocks on, no new leaf: no write
+  move(1_000);
+  await s.events();
+  assert.equal(writes, 1, "no write on a rise with no new leaf");
+  // a new deposit under the finalized block: written
+  move(100);
+  c.events.push({ block: c.finalized - 50, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) });
+  await s.events();
+  assert.equal(writes, 2);
+  assert.equal(box.record()?.events.length, 5);
+  assert.equal(box.record()?.to, BigInt(c.finalized));
+  // under a day of blocks (2 s each) with no new leaf: none; a day: written
+  move(43_199);
+  await s.events();
+  assert.equal(writes, 2);
+  move(1);
+  await s.events();
+  assert.equal(writes, 3);
+  assert.equal(box.record()?.to, BigInt(c.finalized));
 });

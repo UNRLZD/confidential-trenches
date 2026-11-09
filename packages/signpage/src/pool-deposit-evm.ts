@@ -75,8 +75,9 @@ export type PoolDepositEvmHost = {
   testnet: boolean;
   /** Two RPCs of different operators on the pool's network. */
   rpcs: readonly [EvmRpc, EvmRpc];
-  /** The pool's events on both RPCs (evmTreeSync over the same pair). */
-  round(): Promise<EvmDepositRound>;
+  /** The pool's events on both RPCs (evmTreeSync over the same pair); a follow's round ends with its `signal` (review
+   *  of 7eb8cfb9, P2-2: a sign out stops it, its reads and its hold's writes). */
+  round(signal?: AbortSignal): Promise<EvmDepositRound>;
   notes(): Promise<NoteStore>;
   /** The notes read only (the wallet's readNotes), for the end's reads: no notes lock, nothing written (fold review 6). */
   records(): Promise<readonly NoteRecord[]>;
@@ -431,7 +432,7 @@ async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][
   stopped(h);
   const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));
   stopped(h);
-  const round = await h.round();
+  const round = await h.round(h.signal);
   const d = round.events.find((e) => e.kind === "deposit" && e.precommitment === n.precommitment);
   if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";
   return fin[0] > nonce && fin[1] > nonce ? "expired" : null;

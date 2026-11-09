@@ -305,3 +305,53 @@ test("card evm-pool-sync-holds: the pool's hold is in the wallet store: a new pa
   w3.close();
   resetPageEvmHolds();
 });
+
+test("review of 7eb8cfb9, P2-2: a round still running at a sign out stops with the follow's signal, and its hold's write never makes the wallet database again", async () => {
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { evmPoolScopeOf, EVM_CHAIN_IDS } = await import("../../wallet/src/pool/evm.ts");
+  const { resetPageEvmHolds } = await import("../src/pool-testnet.ts");
+  type EvmHost = import("../src/pool-deposit-evm.ts").PoolDepositEvmHost;
+  resetPageEvmHolds();
+  const idb = new IDBFactory();
+  // the page's store as src/main.ts keeps it: store() opens one (making the database) when none is open
+  let cur: WalletStore | null = await openWalletStore({ indexedDB: idb });
+  const store = async () => (cur ??= await openWalletStore({ indexedDB: idb }));
+  const held = async () => cur ?? Promise.reject(new Error("no store open"));
+  const scope = evmPoolScopeOf(PIN.pool, EVM_CHAIN_IDS[PIN.network]);
+  const SCOPE = `0x${Buffer.from(keccak_256(new TextEncoder().encode("SCOPE()"))).toString("hex").slice(0, 8)}`;
+  let signOut: (() => Promise<void>) | null = null;
+  // an empty pool at block 100; the sign out lands while the round reads the logs
+  const rpc = (url: string): EvmRpc => Object.assign(async (method: string, params: readonly unknown[]) => {
+    if (method === "eth_chainId") return "0x14a34";
+    if (method === "eth_getBlockByNumber" || method === "eth_getBlockByHash") return { number: "0x64", hash: `0x${"11".repeat(32)}`, timestamp: "0x1", baseFeePerGas: "0xf4240", parentHash: `0x${"10".repeat(32)}` };
+    if (method === "eth_call") return (params[0] as { data: string }).data.startsWith(SCOPE) ? `0x${scope.toString(16).padStart(64, "0")}` : `0x${"0".repeat(64)}`;
+    if (method === "eth_getLogs") {
+      const s = signOut;
+      signOut = null;
+      await s?.();
+      return [];
+    }
+    throw new Error(`unmocked ${method}`);
+  }, { url });
+  const pair = [rpc("https://a.example"), rpc("https://b.example")] as const;
+  const evm: (() => EvmHost)[] = [];
+  const t = testnetPool({ store, held, seed64: async () => SEED.slice() }, {
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: () => pair,
+    depositKinds: { solana: () => () => ({ error: "not_allowed" }), evm: (host) => (ask) => (evm.push(host), { error: "not_allowed" }) },
+  });
+  t.flow(ASK, ctx);
+  const he = evm[0]!();
+  signOut = async () => {
+    await cur!.signOut();
+    cur = null;
+    await t.signedOut();
+  };
+  await he.round(he.signal).catch(() => {});
+  await new Promise((r) => setTimeout(r, 50));
+  const again = cur as WalletStore | null;
+  again?.close();
+  resetPageEvmHolds();
+  assert.equal(again, null, "no store opened again after the sign out");
+  assert.deepEqual((await idb.databases()).map((d) => d.name), [], "no wallet database made again after the sign out");
+});

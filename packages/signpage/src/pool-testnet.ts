@@ -89,6 +89,7 @@ const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinh
  *  keep and read, on this page and every later one, so each reads only the blocks past the last one's and a new page
  *  never needs the pool's deploy block once a page synced it. A sign out deletes it with the store. */
 const EVM_HOLDS = new Map<string, EvmSyncHold>();
+/** `store`: the page's wallet store when one is open, never opening one (TestnetPage.held, review of 7eb8cfb9, P2-2). */
 export const pageEvmHold = (pin: EvmPoolPin, store: () => Promise<WalletStore>): EvmSyncHold => {
   const key = `${pin.network}:${pin.pool.toLowerCase()}`;
   let h = EVM_HOLDS.get(key);
@@ -257,6 +258,10 @@ export function testnetPoolDeps(flow?: PoolKindsDeps["flow"]): PoolKindsDeps {
 /** What the page gives the testnet flow: its wallet store and the seed, each opened when a run needs it. */
 export type TestnetPage = {
   store(): Promise<WalletStore>;
+  /** The wallet store while one is open, and a rejection once none is (signed out here or on another tab): never one
+   *  opened, so a sync still running after a sign out never makes the store again (review of 7eb8cfb9, P2-2). The pool
+   *  syncs' holds are read and written through it alone; tests without it give store(). */
+  held?(): Promise<WalletStore>;
   seed64(): Promise<Uint8Array>;
   /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
   openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
@@ -283,7 +288,7 @@ export type TestnetOver = {
    *  otherwise), and its pool's event round (evmTreeSync over that list otherwise): tests run the EVM deposit flow on a fake pool. */
   evmPin?: (chain: "base" | "robinhood") => EvmPoolPin | undefined;
   evmRpcs?: (chain: "base" | "robinhood") => readonly EvmRpc[] | null;
-  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], list?: readonly EvmRpc[]) => () => Promise<EvmDepositRound>;
+  evmRound?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], list?: readonly EvmRpc[]) => (signal?: AbortSignal) => Promise<EvmDepositRound>;
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
    *  (its sign-out signal and its pass, fold review 3). */
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
@@ -492,9 +497,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc], list: readonly EvmRpc[] = []) => {
       // the deposit's own pair (one evmPair, its seats bound by every read), the page's hold, and as sources the list's
       // providers, then the page's history
-      const sync = evmTreeSync({ rpcs: r, pin: p, held: pageEvmHold(p, () => page.store()), history: [...list, ...pageEvmHistory(p)] });
-      return async (): Promise<EvmDepositRound> => {
-        const round = await sync.events();
+      const sync = evmTreeSync({ rpcs: r, pin: p, held: pageEvmHold(p, () => page.held ? page.held() : page.store()), history: [...list, ...pageEvmHistory(p)] });
+      return async (signal?: AbortSignal): Promise<EvmDepositRound> => {
+        const round = await sync.events(signal);
         return { events: round.events, finalBlock: round.fin.number };
       };
     });

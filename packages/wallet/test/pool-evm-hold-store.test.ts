@@ -74,3 +74,15 @@ test("a hold's write moves no seed, the frame's reader never reads or lists it, 
   const s2 = await open(idb);
   assert.equal(await evmStoredHold(async () => s2, PIN).read(), undefined, "gone with the sign out");
 });
+
+test("review of 7eb8cfb9, P2-1: a hold the pool's views did not prove is cleared; one written since to another block stays", async () => {
+  const s = await open(new IDBFactory());
+  const h = evmStoredHold(async () => s, PIN);
+  await h.write(at(100n));
+  await h.drop(90n);
+  assert.equal(((await h.read()) as EvmSyncHeld).to, 100n, "another block's record stays");
+  await h.drop(100n);
+  assert.equal(await h.read(), null, "cleared");
+  await h.write(at(80n));
+  assert.equal(((await h.read()) as EvmSyncHeld).to, 80n, "a new sync writes again after a clear");
+});

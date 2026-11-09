@@ -140,12 +140,13 @@ let shell: Shell | null = null;
 // the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
 // flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
 const prover = !framed ? proverHost() : null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
   ? poolRestore({
       store: () => open(),
+      held: () => opened(),
       seed64: () => openSeed64(),
       signedIn: async () => {
         const s = await readSeedSettled();
@@ -636,7 +637,7 @@ const open = async (): Promise<WalletStore> => {
   const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
-      moved += 1;
+      if (walletSeedMoved(e)) moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
       // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
       if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed(), poolFollow?.stop();
@@ -655,6 +656,9 @@ const open = async (): Promise<WalletStore> => {
   return s;
 };
 
+// The store only while one is open: the pool syncs' holds (src/pool-testnet.ts TestnetPage.held), so a round still
+// running after a sign out, here or on another tab, never makes the store again (review of 7eb8cfb9, P2-2).
+const opened = (): Promise<WalletStore> => (store !== null ? Promise.resolve(store) : Promise.reject(new Error("no wallet store is open")));
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
 // here and the seed64 by the signer when the trade ends.
