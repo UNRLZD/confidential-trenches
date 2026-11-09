@@ -37,7 +37,7 @@
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
 import { base64 } from "@scure/base";
-import { SOLANA_RPC_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, solanaJsonRpc, solanaPacedRpc, solanaWrappedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
@@ -119,13 +119,23 @@ export const pageEvmPoolRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] 
 export const PAGE_SOL_PIN: SolanaPoolPin | undefined = POOL_TESTNET ? SOL_POOLS.devnet : SOL_POOLS.mainnet;
 /** The page's Solana cluster: the fee route's and pool.buy's (its tip). */
 export const PAGE_CLUSTER: "mainnet" | "devnet" = POOL_TESTNET ? "devnet" : "mainnet";
+/** The helper's second route for the mainnet mark scan (card sol-pools-mainnet-pin): getProgramAccounts in the note
+ *  restore's exact shape alone, answered by another company's provider than /v1/rpc/solana's (apps/helper/src/rpc/rpc.ts
+ *  marksRoutes). No keyless mainnet provider answers that scan (publicnode 403 "Indexed requests require a personal
+ *  token", api.mainnet-beta 403, read 9 Nov 17:23Z), so provider A's place in the pair sends it here. */
+export const MAINNET_MARKS_ROUTE = `${TRADE_HELPER}/v1/rpc/solana-marks`;
 /** The page's Solana pair: two devnet RPCs in the testnet build; SIGN_HOST's provider A and the helper's keyed route
- *  (src/trade.ts, the pair main.ts gives every Solana read, in SIGN_HOST's connect-src) on mainnet. Each paced where it
- *  is made (card solana-release-reads-paced): every pool buy, sell, withdraw, settle and restore read takes its turn in
- *  the provider's one queue, the trade's own with it. */
+ *  (src/trade.ts, the pair main.ts gives every Solana read, in SIGN_HOST's connect-src) on mainnet, where provider A's
+ *  place sends the mark scan to MAINNET_MARKS_ROUTE: the wallet's solanaMarks reads the marks from both of the pair and
+ *  requires them to agree, so the two answers are two companies' through two routes of the helper. A mark read through
+ *  the helper can only delay, never move money: the reasons are at the helper's marksRoutes. Each paced where it is made
+ *  (card solana-release-reads-paced): every pool buy, sell, withdraw, settle and restore read takes its turn in the
+ *  provider's one queue, the trade's own with it. */
 export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] => {
-  const [a, b] = POOL_TESTNET ? [testnetRpc(TESTNET_RPCS.solana[0]), testnetRpc(TESTNET_RPCS.solana[1])] : [pageRpc(SOLANA_PROVIDER_A), pageHelperRpc(TRADE_HELPER)];
-  return [solanaPacedRpc(a), solanaPacedRpc(b)];
+  if (POOL_TESTNET) return [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0])), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1]))];
+  const a = solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A));
+  const marks = solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE));
+  return [solanaWrappedRpc(a, (method, params) => (method === "getProgramAccounts" ? marks : a)(method, params)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER))];
 };
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
