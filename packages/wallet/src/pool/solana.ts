@@ -339,9 +339,11 @@ export type SolanaTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: SolanaTreesOpts): Promise<PoolTrees>;
   /**
    * Every leaf of both trees both RPCs agree on, each RPC read at or past minContextSlot (a restore's marks' slot), and
-   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot.
+   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot. `counts`:
+   * each RPC's own state and label leaf counts at that slot, in rpcs order, since the agreed part is the shorter of the
+   * two and an RPC that returns a short page would otherwise hide a leaf from a count.
    */
-  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number] }>;
+  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number]; counts: [[number, number], [number, number]] }>;
 };
 
 export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, lagWait?: SolanaLagWait): SolanaTreeSync {
@@ -349,7 +351,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
   const held: [Entry[], Entry[]] = [[], []];
   const lastSlot = [0, 0];
   // beforeMs null: no cut, no reached check, every agreed entry
-  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number] }> {
+  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number]; counts: [[number, number], [number, number]] }> {
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(rpcs, async (rpc, k) => {
@@ -363,6 +365,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     }, signal);
     const next: Entry[][] = [];
     const cuts: Entry[][] = [];
+    const counts: [[number, number], [number, number]] = [[0, 0], [0, 0]];
     for (const tree of [TREE_STATE, TREE_LABEL]) {
       const kept = base[tree]!;
       const start = from[tree]! * SOL_PAGE_ENTRIES;
@@ -374,6 +377,8 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
         return [...kept.slice(0, start), ...fresh];
       });
       const [x, y] = lists as [Entry[], Entry[]];
+      counts[0][tree] = x.length;
+      counts[1][tree] = y.length;
       const common = Math.min(x.length, y.length);
       for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new Error(`tree ${tree}: the two RPCs differ at leaf ${i}`);
       for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new Error(`tree ${tree}: a time goes back at leaf ${i}`);
@@ -392,7 +397,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       for (const tree of [TREE_STATE, TREE_LABEL]) if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;
       reads.forEach((r, k) => (lastSlot[k] = Math.max(lastSlot[k]!, r.slot)));
     }
-    return { lists: beforeMs === null ? next : cuts, tops: [reads[0]!.top, reads[1]!.top] };
+    return { lists: beforeMs === null ? next : cuts, tops: [reads[0]!.top, reads[1]!.top], counts };
   }
   return {
     async trees(beforeMs, signal, opts) {
@@ -406,8 +411,8 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     },
     async leaves(minContextSlot, signal) {
       if (!Number.isSafeInteger(minContextSlot) || minContextSlot < 0) throw new Error("minContextSlot: a slot");
-      const { lists: [state, label], tops } = await run(null, "finalized", minContextSlot, signal);
-      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops };
+      const { lists: [state, label], tops, counts } = await run(null, "finalized", minContextSlot, signal);
+      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops, counts };
     },
   };
 }

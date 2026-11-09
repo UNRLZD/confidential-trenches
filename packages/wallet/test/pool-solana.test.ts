@@ -485,6 +485,8 @@ function restorePool() {
   marks.set(solanaMarkOf(PROGRAM, "spent", 12345n), spentData(20_000_000n, 1));
   state.push({ leaf: 12346n, t: (t += 1n) });
   const chain: Chain = { accounts: new Map([...pages(0, entries(state)), ...pages(1, entries(labels))]), slot: 700, time: () => t + 5n, marks };
+  // the same pool from an RPC whose state page stops one leaf short (the last release's change left out)
+  const shortState: Chain = { accounts: new Map([...pages(0, entries(state.slice(0, -1))), ...pages(1, entries(labels))]), slot: 700, time: () => t + 5n, marks };
   // the same pool with one more deposit of someone else's on top, at `slot`
   const withDeposit = (precommitment: bigint, value: bigint, slot: number): Chain => {
     deposit(precommitment, value);
@@ -494,7 +496,7 @@ function restorePool() {
     marks.delete(solanaMarkOf(PROGRAM, "pre", precommitment));
     return c;
   };
-  return { chain, l0, P, beforeSpend, afterSpend, withDeposit };
+  return { chain, l0, P, beforeSpend, afterSpend, withDeposit, shortState };
 }
 
 test("restore from the words alone: every note and each spent note's W, from the marks and pages on two RPCs", async () => {
@@ -1136,6 +1138,29 @@ test("a pass over RESERVED notes: spent is settled; no mark and both RPCs' block
   // nothing RESERVED: no read at all
   const quiet: SolanaRpc = Object.assign(async () => assert.fail("no read"), { url: "https://q.example" });
   assert.deepEqual(await pass(b.ns, [quiet, Object.assign(async () => assert.fail("no read"), { url: "https://r.example" })]), { spent: [], freed: [], held: [] });
+});
+
+test("a spent mark hidden on both RPCs never frees the note: the pages' releases must equal the spent marks (review P2-1)", async () => {
+  const { chain, l0, shortState } = restorePool();
+  const DEADLINE_S = 1_800_000_200n;
+  const at = (c: Chain, s: bigint): Chain => ({ ...c, time: () => s });
+  // the chain holds the spend and its change leaf, both RPCs agree on the pages, and both hide the spent mark
+  const spent0 = solanaMarkOf(PROGRAM, "spent", noteSecrets(SEED, { kind: "deposit", s: SCOPE, i: 0 }).nullifierHash);
+  const marks = new Map(chain.marks!);
+  assert.ok(marks.delete(spent0));
+  const hidden: Chain = { ...chain, marks };
+  const b = await reservedDeposit0(l0);
+  await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: pair(hidden, hidden) }), /rpc 0: 2 release\(s\) in the pages for 1 spent mark\(s\)/);
+  assert.deepEqual(await solanaSettleReserved({ seed64: SEED, notes: b.ns, program: PROGRAM, rpcs: pair(at(hidden, DEADLINE_S + 1n), at(hidden, DEADLINE_S + 1n)) }), { spent: [], freed: [], held: [b.id] });
+  assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  // and one RPC's state page short by a release's change, so the leaves both agree on count one release fewer: each
+  // RPC's own counts are held to the marks, never the shorter agreed part (review P2-1 with exit-pool-notes P1-1)
+  const short: Chain = { ...shortState, marks };
+  for (const rs of [pair(at(hidden, DEADLINE_S + 1n), at(short, DEADLINE_S + 1n)), pair(at(short, DEADLINE_S + 1n), at(hidden, DEADLINE_S + 1n))]) {
+    await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, rpcs: rs }), /rpc [01]: 2 release\(s\) in the pages for 1 spent mark\(s\)/);
+    assert.deepEqual(await solanaSettleReserved({ seed64: SEED, notes: b.ns, program: PROGRAM, rpcs: rs }), { spent: [], freed: [], held: [b.id] });
+    assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
+  }
 });
 
 test("already spent (MX6): the settle reads the pages at or past its marks' slot, and reads them whether or not the mark is there", async () => {

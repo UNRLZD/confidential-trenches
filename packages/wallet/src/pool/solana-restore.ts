@@ -422,7 +422,9 @@ export type SolanaSettled = { kind: "spent"; change: NoteRecord; withdrawn: bigi
  * marks are not read, review S4), then the pages past them. Only when the note's spent mark is there and its change
  * note (spentChange: value - withdrawnValue under change (l, j)) is a leaf both RPCs agree on is the change written
  * UNSPENT through the store's add(child, parent), which moves the note to SPENT, so the queue never offers it again.
- * No spent mark: nothing is written ("unspent"). A spent mark whose change is not in the state tree: a refusal, nothing
+ * No spent mark, and the pages' releases (state leaves less label leaves) equal to the spent marks: nothing is written
+ * ("unspent"); a count that differs is a refusal (held), since a mark hidden on both RPCs would otherwise free a spent
+ * note. A spent mark whose change is not in the state tree: a refusal, nothing
  * written. A change another tab wrote first, with this leaf, is taken. The marks and the pages are read whether or not
  * the mark is there, so the reads look the same either way.
  * The sender treats "unspent" as: the note stays RESERVED, and solanaSettleReserved settles it on a later pass (the marks
@@ -437,7 +439,17 @@ export async function solanaSettleSpent(a: { seed64: Uint8Array; notes: NoteStor
   const marks = await solanaMarks(a.rpcs, a.program, a.signal, a.minSlots, a.lagWait, "spent");
   const leaves = await solanaTreeSync(a.rpcs, a.program, a.lagWait).leaves(marks.slot, a.signal);
   const withdrawn = marks.spent.get(solanaMarkOf(a.program, "spent", noteSecrets(a.seed64, note.ref).nullifierHash))?.withdrawn;
-  if (withdrawn === undefined) return { kind: "unspent" };
+  if (withdrawn === undefined) {
+    // "unspent" lets solanaSettleReserved free the note past its deadline, so a spent mark hidden on both RPCs (both
+    // halves of the mainnet scan pass our helper) would free a spent note: hold unless each RPC's own pages, publicnode's
+    // among them, hold exactly one release per spent mark (each deposit adds a state and a label leaf, each release one
+    // state leaf: restore's count rule, solanaRestoreNotes). Each RPC's own counts, never the agreed part, which is the
+    // shorter of the two: a short page from one would hide a release (review P2-1; exit-pool-notes P1-1)
+    leaves.counts.forEach(([state, label], k) => {
+      if (state - label !== marks.spent.size) throw new Error(`settle: rpc ${k}: ${state - label} release(s) in the pages for ${marks.spent.size} spent mark(s)`);
+    });
+    return { kind: "unspent" };
+  }
   const leafAt = new Map<bigint, number>();
   leaves.state.forEach((c, k) => {
     if (leafAt.has(c)) throw new Error(`state leaf ${k} repeats`);
