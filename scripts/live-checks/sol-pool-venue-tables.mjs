@@ -9,8 +9,9 @@
 //     slot u64 max), authority none (frozen), and holds exactly, in order, (a) the record's `addresses` and (b) the kit's
 //     own list for the record's program_id and pool (solanaPoolVenueTableList over the venue's global account, which
 //     readSolanaPoolTableVenue reads at finalized on the same two RPCs and which must agree there).
-// The bytes are judged by contracts/pool-solana/scripts/deploy.mjs's tableProblems (the deploy's own read-back), not a
-// second decoder.
+// The bytes are decoded by the kit's solanaDecodeLookupTable (its type, size and authority-tag checks) beside the one
+// read it does not return, the authority at byte 21: a script outside Blindfill may not import the deploy script's own
+// tableProblems (check:imports, kit-public-entry-only).
 //   node scripts/live-checks/sol-pool-venue-tables.mjs [--dir <deployments folder>] [--record <file>]
 //     PASS exit 0 (every deployed row passes), FAIL exit 1, error exit 2. The last line names the counts:
 //     `live-check sol-pool-venue-tables: PASS (1 deployed, 3 not deployed yet)`.
@@ -21,8 +22,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as kit from "../../packages/kit/src/index.ts";
-import { tableProblems } from "../../contracts/pool-solana/scripts/deploy.mjs";
-import { account, ALT_PROGRAM, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, recorder, rpc, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
+import { account, ALT_PROGRAM, b58encode, DEVNET_GENESIS, MAINNET_GENESIS, MAINNET_RPCS, operatorProblems, recorder, rpc, RPCS as DEVNET_RPCS } from "./pool-sol-deploy.mjs";
 
 const KEY = "sol-pool-venue-tables";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +40,24 @@ const TABLE_MAX = 256;
 export function readRecord(cluster, dir = DEPLOYMENTS) {
   const file = path.join(dir, `${cluster}.json`);
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+}
+
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+/** What keeps `acc` from being a lookup table of the table program that is active, has no authority (frozen) and holds
+ * exactly `list` in order: [] when nothing does. */
+export function tableProblems(acc, list) {
+  if (!acc || acc.owner !== ALT_PROGRAM) return [`not a lookup table (${acc ? `owner ${acc.owner}` : "missing"})`];
+  let t;
+  try {
+    t = kit.solanaDecodeLookupTable(acc.data);
+  } catch (e) {
+    return [String(e.message).slice(0, 120)];
+  }
+  const out = [];
+  if (t.deactivationSlot !== U64_MAX) out.push(`deactivated at slot ${t.deactivationSlot}`);
+  if (acc.data[21] === 1) out.push(`authority ${b58encode(acc.data.subarray(22, 54))}, not none`);
+  if (t.addresses.length !== list.length || t.addresses.some((a, i) => a !== list[i])) out.push(`holds ${t.addresses.length} addresses, not exactly the list of ${list.length}`);
+  return out;
 }
 
 /** What is wrong with a venue's entry in a record, as a list (the record is read, never trusted). */
@@ -85,7 +103,7 @@ async function checkRow({ cluster, venue, rec, fetchFn, sleep }) {
     const tv = await kit.readSolanaPoolTableVenue(call, venue);
     const own = kit.solanaPoolVenueTableList({ program: rec.program_id, pool: rec.pool }, tv);
     const against = (name, list) => {
-      const p = tableProblems(reads[0], list, null);
+      const p = tableProblems(reads[0], list);
       say(p.length === 0, `the table is active, authority none (frozen), and holds exactly ${name} (${list.length} addresses, in order)${p.length ? `: ${p.join("; ")}` : ""}`);
     };
     against("the record's list", entry.addresses);
