@@ -8,7 +8,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { collect, judge } from "./evm-buy-gas-depth.mjs";
+import { EXIT, RETRY } from "./provider-answer.mjs";
+import { JUDGED_403, NO_ANSWERS, plantedFetch } from "./provider-answer.plants.mjs";
+
+// a no-answer is read again at once here, not after provider-answer.mjs's pause
+RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-gas-depth.answers.json", import.meta.url), "utf8"));
 const POOLS = ["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"];
@@ -43,18 +49,119 @@ test("planted: no pool, a fee answer that is not 200, two providers on different
   assert.equal(judge(with_((r) => ((r.fee.body.fee = "1"), r))).ok, false, "a fee of 1 wei");
 });
 
-test("collect reads the block on both fee providers and the depth at its hash, and skips a network with no pool", async () => {
+const HASH = `0x${"a".repeat(64)}`;
+const DEPTH = `0x${"0".repeat(63)}7`;
+const ONE_POOL = { base: null, "base-sepolia": POOLS[0] };
+const feeOf = async (network, pool) => ({ status: 200, body: { network, pool, block: "0x10", fee: "20000000000000" } });
+const honest = (_url, { method }) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: method === "eth_getBlockByNumber" ? { hash: HASH, baseFeePerGas: "0x4c4b40" } : DEPTH }), { status: 200 });
+// the fee providers, then the other quote providers (the check's providersOf)
+const HOSTS = [...new Set([...evmPoolVenues()["base-sepolia"].feeProviders, ...evmPoolVenues()["base-sepolia"].providers].map((u) => new URL(u).host))];
+
+test("collect reads the block on the fee providers then the quote providers and the depth at its hash, and skips a network with no pool", async () => {
   const calls = [];
   const fetchFn = async (url, init) => {
     const { method, params } = JSON.parse(init.body);
     calls.push([new URL(url).host, method, params]);
-    const result = method === "eth_getBlockByNumber" ? { hash: `0x${"a".repeat(64)}`, baseFeePerGas: "0x4c4b40" } : `0x${"0".repeat(63)}7`;
-    return { json: async () => ({ jsonrpc: "2.0", id: 1, result }) };
+    return honest(url, { method });
   };
-  const runs = await collect(async (network, pool) => ({ status: 200, body: { network, pool, block: "0x10", fee: "20000000000000" } }), fetchFn, { base: null, "base-sepolia": POOLS[0] });
+  const runs = await collect(feeOf, fetchFn, ONE_POOL);
   assert.equal(runs.length, 1);
-  assert.deepEqual(calls.map((c) => c[1]), ["eth_getBlockByNumber", "eth_call", "eth_getBlockByNumber", "eth_call"]);
-  assert.deepEqual(calls[1][2], [{ to: POOLS[0], data: "0x4a2b75c8" }, { blockHash: `0x${"a".repeat(64)}` }]);
-  assert.equal(new Set(calls.map((c) => c[0])).size, 2, "two providers");
-  assert.equal(judge(runs).ok, true, judge(runs).lines.join("\n"));
+  assert.deepEqual(calls.map((c) => c[1]), HOSTS.flatMap(() => ["eth_getBlockByNumber", "eth_call"]));
+  assert.deepEqual(calls[1][2], [{ to: POOLS[0], data: "0x4a2b75c8" }, { blockHash: HASH }]);
+  assert.deepEqual([...new Set(calls.map((c) => c[0]))], HOSTS);
+  assert.deepEqual(HOSTS.slice(0, 2), ["sepolia.base.org", "base-sepolia-rpc.publicnode.com"], "the fee providers first");
+  assert.ok(HOSTS.length >= 3, "a third provider to judge on when one does not answer");
+  assert.equal(judge(runs).verdict, "PASS", judge(runs).lines.join("\n"));
+});
+
+// card live-checks-provider-no-answer: robinhood.drpc.org answered "Unknown state. First available state is 1" (code
+// 27) and the check died with exit 2 (helper live run 42556116812, 9 Nov 03:54Z)
+test("planted: each kind of no-answer from one provider is named and left out; the pool is judged on the others", async () => {
+  for (const [name, ...plant] of NO_ANSWERS) {
+    for (const read of ["eth_getBlockByNumber", "eth_call"]) {
+      const fetchFn = async (url, init) => {
+        const { method } = JSON.parse(init.body);
+        return new URL(url).host === HOSTS[0] && method === read ? new Response(plant[1], { status: plant[0] }) : honest(url, { method });
+      };
+      const r = judge(await collect(feeOf, fetchFn, ONE_POOL));
+      assert.equal(r.verdict, "PASS", `${name} on ${read}: ${r.lines.join("\n")}`);
+      assert.ok(r.lines.some((l) => l.startsWith(`--- base-sepolia ${POOLS[0]} ${HOSTS[0]}: no answer: ${HOSTS[0]} HTTP ${plant[0]}`)), `${name} on ${read}: ${r.lines.join("\n")}`);
+    }
+  }
+  // a null block (a provider a block behind) is one too
+  const lag = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    return new URL(url).host === HOSTS[0] && method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : honest(url, { method });
+  };
+  assert.equal(judge(await collect(feeOf, lag, ONE_POOL)).verdict, "PASS");
+});
+
+test("planted: fewer than two providers answering is INCONCLUSIVE (exit 3), never a pass", async () => {
+  for (const [name, ...plant] of NO_ANSWERS) {
+    const fetchFn = async (url, init) => (HOSTS.indexOf(new URL(url).host) < HOSTS.length - 1 ? new Response(plant[1], { status: plant[0] }) : honest(url, JSON.parse(init.body)));
+    const r = judge(await collect(feeOf, fetchFn, ONE_POOL));
+    assert.equal(r.verdict, "INCONCLUSIVE", `${name}: ${r.lines.join("\n")}`);
+    assert.equal(r.ok, false);
+  }
+  assert.equal(EXIT.INCONCLUSIVE, 3);
+  // and on the recorded good run, a pool whose second provider did not answer
+  const good = structuredClone(A.good.runs);
+  good[0].reads[1] = { host: good[0].reads[1].host, noAnswer: "planted" };
+  assert.equal(judge(good).verdict, "INCONCLUSIVE");
+});
+
+test("planted: a wrong answer beside a no-answer still FAILs; a 403 that carries a real JSON-RPC error is judged", async () => {
+  for (const [name, ...plant] of NO_ANSWERS) {
+    for (const wrong of [{ hash: `0x${"b".repeat(64)}`, baseFeePerGas: "0x4c4b40" }, { hash: HASH, baseFeePerGas: "0x1" }]) {
+      const fetchFn = async (url, init) => {
+        const { method } = JSON.parse(init.body);
+        const h = new URL(url).host;
+        if (h === HOSTS[0]) return new Response(plant[1], { status: plant[0] });
+        if (h === HOSTS[2] && method === "eth_getBlockByNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: wrong }), { status: 200 });
+        return honest(url, { method });
+      };
+      const r = judge(await collect(feeOf, fetchFn, ONE_POOL));
+      assert.equal(r.verdict, "FAIL", `${name}: ${r.lines.join("\n")}`);
+    }
+  }
+  // a fee under the rule beside a no-answer
+  const runs = await collect(async (network, pool) => ({ status: 200, body: { network, pool, block: "0x10", fee: "1" } }), plantedFetch(HOSTS[0], NO_ANSWERS[0].slice(1), honest), ONE_POOL);
+  assert.equal(judge(runs).verdict, "FAIL");
+  // a 403 with a real JSON-RPC error inside, on either read
+  for (const read of ["eth_getBlockByNumber", "eth_call"]) {
+    const fetchFn = async (url, init) => {
+      const { method } = JSON.parse(init.body);
+      return new URL(url).host === HOSTS[1] && method === read ? new Response(JUDGED_403[1], { status: JUDGED_403[0] }) : honest(url, { method });
+    };
+    const r = judge(await collect(feeOf, fetchFn, ONE_POOL));
+    assert.equal(r.verdict, "FAIL", `${read}: ${r.lines.join("\n")}`);
+  }
+});
+
+// review of 6cfd2778, P2-1: a block the helper names that every provider answers null for is the helper's wrong
+// answer, a FAIL, never INCONCLUSIVE (no read again clears it)
+test("planted: every provider that answered holds no such block: BAD, the helper named a block none holds", async () => {
+  const none = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    return method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : honest(url, { method });
+  };
+  const r = judge(await collect(feeOf, none, ONE_POOL));
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD base-sepolia ${POOLS[0]}: no provider holds block 0x10 (`)), r.lines.join("\n"));
+  // one null and the rest rate-limited: one provider lagging at an epoch's turn, INCONCLUSIVE (delta review P3-a); two
+  // nulls and one rate-limited: FAIL
+  const nulls = (k) => async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method !== "eth_getBlockByNumber") return honest(url, { method });
+    return HOSTS.indexOf(new URL(url).host) < k ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : new Response("", { status: 429 });
+  };
+  assert.equal(judge(await collect(feeOf, nulls(1), ONE_POOL)).verdict, "INCONCLUSIVE");
+  assert.equal(judge(await collect(feeOf, nulls(2), ONE_POOL)).verdict, "FAIL");
+  assert.equal(HOSTS.length, 3);
+  // one null beside two that hold it: that provider lags, the pool is judged on the two
+  const lag = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    return new URL(url).host === HOSTS[2] && method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : honest(url, { method });
+  };
+  assert.equal(judge(await collect(feeOf, lag, ONE_POOL)).verdict, "PASS");
 });
