@@ -168,8 +168,8 @@ export function wiringProblems(ci) {
   if (!changes) return ["ci.yml has no changes job"];
   const keys = Object.keys(ALL_ON);
   for (const k of keys) if (!new RegExp(`^ {6}${k}: \\$\\{\\{ steps\\.decide\\.outputs\\.${k} \\}\\}$`, "m").test(changes)) p.push(`the changes job does not output ${k}`);
-  if (!/^ {14}node "\$RUNNER_TEMP\/base\/scripts\/ci\/pr-paths\.mjs" decide "\$EVENT" "\$BASE" "\$HEAD" ;;$/m.test(changes)) p.push("the changes job does not run main's copy of pr-paths.mjs on a pull request");
-  if (/^\s*node scripts\/ci\/pr-paths\.mjs/m.test(changes)) p.push("the changes job runs the head's own pr-paths.mjs");
+  if (!/ node "\$RUNNER_TEMP\/base\/scripts\/ci\/pr-paths\.mjs" decide "\$EVENT" "\$BASE" "\$HEAD"; /.test(changes)) p.push("the changes job does not run main's copy of pr-paths.mjs on a pull request");
+  if (/\bnode scripts\/ci\/pr-paths\.mjs/.test(changes)) p.push("the changes job runs the head's own pr-paths.mjs");
   const gated = { "test-wallet": "test_wallet", ...Object.fromEntries(Object.keys(JOBS).map((j) => [j, j.replaceAll("-", "_")])) };
   for (const [job, key] of Object.entries(gated)) {
     const body = all[job];
@@ -178,7 +178,8 @@ export function wiringProblems(ci) {
       continue;
     }
     if (!/^ {4}needs: (?:changes|\[[^\]]*\bchanges\b[^\]]*\])$/m.test(body)) p.push(`${job} does not need changes`);
-    const want = `    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.${key} == 'true')`;
+    // skips only on an output that is exactly false: a missing or garbled one runs the job
+    const want = `    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.${key} != 'false')`;
     if (!body.split("\n").includes(want)) p.push(`${job}'s if is not the pull-request-only gate on ${key}`);
   }
   const pkgs = all["test-packages"] ?? "";
@@ -193,9 +194,11 @@ test("ci.yml: the changes job runs main's rule, and each gated job reads its out
 });
 
 const PLANTED = {
-  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.test_mutants == 'true')", "(needs.changes.outputs.test_mutants == 'true')", "test-mutants's if is not the pull-request-only gate"],
-  "a job gated on another job's output": ["needs.changes.outputs.slither == 'true')", "needs.changes.outputs.test_vault == 'true')", "slither's if is not the pull-request-only gate"],
-  "the head's own rule": ['node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD" ;;', 'node scripts/ci/pr-paths.mjs decide "$EVENT" "$BASE" "$HEAD" ;;', "the changes job does not run main's copy"],
+  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.test_mutants != 'false')", "(needs.changes.outputs.test_mutants != 'false')", "test-mutants's if is not the pull-request-only gate"],
+  "a job gated on another job's output": ["needs.changes.outputs.slither != 'false')", "needs.changes.outputs.test_vault != 'false')", "slither's if is not the pull-request-only gate"],
+  // PR #549's first run: a gate that runs only on an explicit true skipped every job on an empty plan
+  "a gate that runs only on an explicit true": ["needs.changes.outputs.test_browser != 'false')", "needs.changes.outputs.test_browser == 'true')", "test-browser's if is not the pull-request-only gate"],
+  "the head's own rule": [' node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; ', ' node scripts/ci/pr-paths.mjs decide "$EVENT" "$BASE" "$HEAD"; ', "the changes job does not run main's copy"],
   "an output left out": ["      pool_solana: ${{ steps.decide.outputs.pool_solana }}\n", "", "the changes job does not output pool_solana"],
   "a package selector on the queue": ["SELECT: ${{ github.event_name == 'pull_request' && needs.changes.outputs.tests || '' }}", "SELECT: ${{ needs.changes.outputs.tests }}", "test-packages reads its tests selector"],
 };
@@ -219,3 +222,103 @@ test("the command line writes every output on a merge_group run, and refuses no 
   assert.deepEqual(got, ALL_ON);
   assert.equal(spawnSync(process.execPath, [path.join(ROOT, "scripts/ci/pr-paths.mjs"), "decide"], { cwd: ROOT }).status, 2);
 });
+
+// The changes job's decide step, replayed as GitHub runs it (bash -e, with RUNNER_TEMP and GITHUB_OUTPUT) in a planted
+// repo whose base commit holds `rule` as scripts/ci/pr-paths.mjs (or none). PR #549's first run was the bootstrap: main
+// had no rule, the step wrote no output, and every gated job skipped. The wiring test above read each if's text and
+// the rule's path but never ran the step, so it could not see an output left empty; these runs do.
+function decideRun(ci) {
+  const job = jobs(ci).changes ?? "";
+  const lines = job.split("\n");
+  const at = lines.findIndex((l) => l.trim() === "- name: which test jobs this change can affect");
+  const r = lines.findIndex((l, i) => i > at && /^ {8}run: \|\s*$/.test(l));
+  if (at < 0 || r < 0) return null;
+  const block = [];
+  for (let i = r + 1; i < lines.length && (!lines[i].trim() || lines[i].startsWith("          ")); i++) block.push(lines[i].slice(10));
+  return block.join("\n");
+}
+
+function replayDecide(ci, rule, { event = "pull_request", base } = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), "pr-paths-step-"));
+  try {
+    const repo = path.join(dir, "repo");
+    mkdirSync(path.join(repo, "scripts/ci"), { recursive: true });
+    const git = (...a) => execFileSync("git", a, { cwd: repo, encoding: "utf8" }).trim();
+    git("init", "--quiet");
+    writeFileSync(path.join(repo, "scripts/ci/other.mjs"), "// main's other gate\n");
+    if (rule !== null) writeFileSync(path.join(repo, "scripts/ci/pr-paths.mjs"), rule);
+    git("add", "--", "scripts");
+    const id = ["-c", "user.name=ci", "-c", "user.email=ci@example.invalid"];
+    git(...id, "commit", "--quiet", "--no-verify", "-m", "main");
+    const mainSha = git("rev-parse", "HEAD");
+    writeFileSync(path.join(repo, "docs.md"), "a change\n");
+    git("add", "--", "docs.md");
+    git(...id, "commit", "--quiet", "--no-verify", "-m", "head");
+    const temp = path.join(dir, "runner-temp");
+    mkdirSync(temp);
+    const output = path.join(temp, "github-output");
+    writeFileSync(output, "");
+    const run = decideRun(ci);
+    assert.ok(run, "ci.yml's changes job has no decide step");
+    const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", run], {
+      cwd: repo,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, EVENT: event, BASE: base ?? mainSha, HEAD: git("rev-parse", "HEAD"), MQ_BASE_REF: event === "merge_group" ? "refs/heads/main" : "" },
+    });
+    const pairs = readFileSync(output, "utf8").split("\n").filter(Boolean).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]);
+    return { status: r.status, out: r.stdout + r.stderr, keys: pairs.map(([k]) => k), plan: Object.fromEntries(pairs) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const RULE = (body) => `import { appendFileSync } from "node:fs";\nconst out = (t) => appendFileSync(process.env.GITHUB_OUTPUT, t);\n${body}\n`;
+const LIGHT = { ...Object.fromEntries([...HEAVY, "test_wallet"].map((k) => [k, "false"])), test_packages: "true", tests: "none", typecheck: "none" };
+const same = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+const lines = (o) => Object.entries(o).map(([k, v]) => `${k}=${v}\n`).join("");
+
+export function decideProblems(ci) {
+  const p = [];
+  const cases = {
+    "main has no rule yet (the bootstrap)": [null, ALL_ON],
+    "a rule that exits 0 and writes nothing": [RULE("process.exit(0);"), ALL_ON],
+    "a rule that fails": [RULE(`out(${JSON.stringify(lines(LIGHT))}); process.exit(1);`), ALL_ON],
+    "a rule that throws": [RULE('throw new Error("broken");'), ALL_ON],
+    "a rule that writes garbage": [RULE('out("test_mutants=maybe\\nnonsense\\n");'), ALL_ON],
+    "a rule that leaves one output out": [RULE(`out(${JSON.stringify(lines({ ...LIGHT, slither: undefined }).replace("slither=undefined\n", ""))});`), ALL_ON],
+    "a rule that writes an output twice": [RULE(`out(${JSON.stringify(lines(LIGHT) + "test_vault=true\n")});`), ALL_ON],
+    "a rule whose selector is no package filter": [RULE(`out(${JSON.stringify(lines({ ...LIGHT, tests: "--filter=x; rm -rf /" }))});`), ALL_ON],
+    "a rule whose flag is not exactly false": [RULE(`out(${JSON.stringify(lines({ ...LIGHT, slither: "False" }))});`), ALL_ON],
+    "a rule with a complete plan": [RULE(`out(${JSON.stringify(lines(LIGHT))});`), LIGHT],
+    "a rule with a package selection": [RULE(`out(${JSON.stringify(lines({ ...LIGHT, tests: "--filter=@blindfill/exit --filter=signpage", typecheck: "--filter=@blindfill/exit" }))});`), { ...LIGHT, tests: "--filter=@blindfill/exit --filter=signpage", typecheck: "--filter=@blindfill/exit" }],
+  };
+  for (const [name, [rule, want]] of Object.entries(cases)) {
+    const r = replayDecide(ci, rule);
+    if (r.status !== 0) p.push(`${name}: the step ended ${r.status}, so the changes job fails and its jobs skip: ${r.out}`);
+    else if (!same(r.plan, want) || r.keys.length !== new Set(r.keys).size) p.push(`${name}: the plan is ${JSON.stringify(r.plan)}, not ${JSON.stringify(want)}`);
+  }
+  for (const [name, opts] of [["a merge_group run", { event: "merge_group" }], ["a base main cannot read", { base: "0".repeat(40) }]]) {
+    const r = replayDecide(ci, RULE(`out(${JSON.stringify(lines(LIGHT))});`), opts);
+    if (r.status !== 0 || !same(r.plan, ALL_ON)) p.push(`${name}: the step ended ${r.status} with ${JSON.stringify(r.plan)}, not every job`);
+  }
+  return p;
+}
+
+test("the decide step writes the all-run plan on every path but a complete plan from main's rule", () => {
+  assert.deepEqual(decideProblems(CI), []);
+});
+
+const STEP_PLANTED = {
+  "the bootstrap exits with no output (PR #549)": [`elif [ ! -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ]; then echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"`, `elif [ ! -e "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" ]; then echo "main has no scripts/ci/pr-paths.mjs yet, so every job runs"; exit 0`, "main has no rule yet"],
+  "the rule's plan taken unchecked": [`elif ! valid "$plan"; then echo "the rule wrote no complete plan, so every job runs"\n`, "", "a rule that writes garbage"],
+  "a failed rule fails the step": [`elif ! GITHUB_OUTPUT="$plan" node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then echo "the rule failed, so every job runs"`, `elif ! GITHUB_OUTPUT="$plan" node "$RUNNER_TEMP/base/scripts/ci/pr-paths.mjs" decide "$EVENT" "$BASE" "$HEAD"; then exit 1`, "a rule that fails"],
+  "an all-run plan with a job left out": ["test_scripts=true test_vault=true", "test_scripts=true", "main has no rule yet"],
+};
+for (const [name, [from, to, want]] of Object.entries(STEP_PLANTED)) {
+  test(`planted: ${name} fails`, () => {
+    const planted = CI.replace(from, to);
+    assert.notEqual(planted, CI, `the plant for "${name}" matched nothing in ci.yml`);
+    const found = decideProblems(planted);
+    assert.ok(found.some((f) => f.startsWith(want)), `want "${want}", found: ${JSON.stringify(found)}`);
+  });
+}

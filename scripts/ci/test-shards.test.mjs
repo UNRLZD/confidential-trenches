@@ -90,7 +90,11 @@ export function shardProblems(ci) {
   // card ci-pr-light: the planned skip passes on a pull request, and nowhere else
   if (replay(run, ended("skipped", { say: "false" })) !== 0) p.push("test fails a pull request whose shard the changes job planned to skip");
   for (const ev of ["merge_group", "push", "workflow_dispatch"]) if (replay(run, ended("skipped", { say: "false" }), ev) === 0) p.push(`test passes a skipped shard on ${ev}, which runs every job`);
-  for (const say of ["", "maybe"]) if (replay(run, ended("skipped", { say })) === 0) p.push(`test passes a skipped shard the changes job said "${say}" for`);
+  for (const say of ["", "maybe", "False", "false "]) if (replay(run, ended("skipped", { say })) === 0) p.push(`test passes a skipped shard the changes job said "${say}" for`);
+  // PR #549's first run: changes passed with no output at all ({}), and every gated shard was skipped
+  const empty = ended("skipped", { say: "false" });
+  empty.changes.outputs = {};
+  if (replay(run, empty) === 0) p.push("test passes a skipped shard when the changes job wrote no plan");
   for (const plan of ["failure", "skipped", "cancelled"]) {
     if (replay(run, ended("success", { plan })) === 0) p.push(`test passes when the changes job is ${plan}`);
     if (replay(run, ended("skipped", { plan, say: "false" })) === 0) p.push(`test passes a planned skip when the changes job is ${plan}`);
@@ -147,6 +151,7 @@ const PLANTED = {
   // card ci-pr-light: each way the planned skip can widen
   "a planned skip on any event": ['$event == "pull_request" and ', "", "test passes a skipped shard on merge_group"],
   "a skip the plan did not say": [' and $plan[(.key | gsub("-"; "_"))] == "false"', "", 'test passes a skipped shard the changes job said ""'],
+  "a skip on any plan but true": ['$plan[(.key | gsub("-"; "_"))] == "false"', '$plan[(.key | gsub("-"; "_"))] != "true"', "test passes a skipped shard when the changes job wrote no plan"],
   "a skip read from a plan that did not pass": ['.changes.result == "success" and ', "", "test passes when the changes job is failure"],
   "test without the changes job": ["needs: [changes, test-wallet,", "needs: [test-wallet,", "test does not need changes"],
   "test without the event": ["          EVENT: ${{ github.event_name }}\n          NEEDS: ${{ toJSON(needs) }}", "          NEEDS: ${{ toJSON(needs) }}", "test's step does not read EVENT"],

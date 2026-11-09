@@ -127,13 +127,16 @@ function groupClone() {
   return { ...pr, head: git(pr.repo, ["rev-parse", "HEAD"]) };
 }
 
-// runs the lines as GitHub runs a step's run block (bash -e), in the checkout, with a fresh RUNNER_TEMP
+// runs the lines as GitHub runs a step's run block (bash -e), in the checkout, with a fresh RUNNER_TEMP and the step's
+// own GITHUB_OUTPUT file, as GitHub gives every step
 function replay(pr, lines, env, event = "pull_request", extra = {}) {
   const runnerTemp = mkdtempSync(path.join(pr.dir, "runner-temp-"));
+  const output = path.join(runnerTemp, "github-output");
+  writeFileSync(output, "");
   const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", lines.join("\n")], {
     cwd: pr.repo,
     encoding: "utf8",
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, ...prEnv(env, pr.base, pr.head, event), ...extra },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, GITHUB_OUTPUT: output, ...prEnv(env, pr.base, pr.head, event), ...extra },
   });
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
