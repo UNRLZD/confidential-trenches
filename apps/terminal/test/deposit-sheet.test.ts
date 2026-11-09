@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { POOL_DEPOSIT_STAGES } from "@blindfill/kit";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { POOL_ASK_TRIES, poolAskAgainIn, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, PoolDepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -324,7 +324,10 @@ test("Recent: a pool deposit is a deposit, by its stage's word", () => {
   assert.deepEqual(recentRows([pd("a", "in_pool", { since_ms: 1 }), pd("b", "refund_move", { refunded: true, since_ms: 1 }), pd("c", "waiting", { since_ms: 1 })]).map((r) => r.word), ["waiting", "refunded", "deposited"]);
   assert.deepEqual(recentRows([pd("q", "quote_checked"), pd("t", "in_transit", { since_ms: 1 }), pd("f", "failed", { since_ms: 1 })]).map((r) => r.word), ["processing", "processing", "waiting"]);
   assert.deepEqual(recentRows([pd("s", "short", { since_ms: 1 }), pd("r", "refunded", { since_ms: 1 }), pd("e", "expired")]).map((r) => r.word), ["expired", "refunded", "short"]);
-  assert.deepEqual(recentRows([pd("a", "in_pool", { since_ms: 1 })]), [{ id: "a", word: "deposited" }], "no USD amount: a pool holds its own asset");
+  // a vault row shows its word and, once done, the USD credited; the pool_deposit op carries no amount (kit messages.ts
+  // PoolDepositFacts: refunded, since_ms), so a pool row shows its word and its pool's chain, every stage
+  assert.deepEqual(recentRows([pd("a", "in_pool", { since_ms: 1 })]), [{ id: "a", word: "deposited", pool: "solana" }]);
+  assert.deepEqual(recentRows([{ id: "b", kind: "pool_deposit", chain: "base", stage: "waiting", txs: [], since_ms: 1 } as Operation]), [{ id: "b", word: "waiting", pool: "base" }]);
 });
 
 test("a deposit already asked follows its own stages: the destination cannot turn a vault deposit into a pool's", () => {
@@ -344,4 +347,12 @@ test("held-move-forgotten-tx: a moved-out deposit draws no Held mark and no with
   assert.equal(tracked({ stage: "held", held_id: "u1" }), "held", "still held without the fact");
   const op: Operation = { id: "m1", kind: "deposit", stage: "held", txs: [], held_id: "u1", since_ms: 5, moved_out: true };
   assert.equal(tracked(statusOf(op)), "moved", "the kit's op carries the fact through statusOf");
+});
+
+test("the pools' opening pool.address: busy or down asked again on a capped backoff within a bound; a refusal is Not available at once", () => {
+  assert.deepEqual(Array.from({ length: POOL_ASK_TRIES }, (_, i) => poolAskAgainIn("busy", i)), [1_000, 2_000, 4_000, 8_000, 16_000]);
+  assert.deepEqual(Array.from({ length: POOL_ASK_TRIES }, (_, i) => poolAskAgainIn("down", i)), [1_000, 2_000, 4_000, 8_000, 16_000]);
+  assert.equal(poolAskAgainIn("busy", POOL_ASK_TRIES), null, "past the bound: Not available");
+  assert.equal(poolAskAgainIn("down", 99), null);
+  for (const code of ["not_available", "quote_check_failed", "below_min", "above_max"] as const) assert.equal(poolAskAgainIn(code, 0), null, `${code}: never asked again`);
 });

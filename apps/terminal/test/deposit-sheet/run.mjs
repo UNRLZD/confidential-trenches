@@ -190,6 +190,9 @@ try {
         check(ready === (f === "pool-in" ? "0.4" : "none"), `${tag}: Ready ${ready}`);
         const pend = await page.locator("[data-pending]").first().getAttribute("data-pending").catch(() => null);
         check(pend === (f === "pool-in" ? "0.01" : "0.41"), `${tag}: Pending ${pend}`);
+        // Recent's row for the pool deposit: its word and its pool, as a done vault row its word and USD
+        const row = await page.$$eval(".drecent .it", (els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
+        check(JSON.stringify(row) === '["Deposited Solana"]', `${tag}: Recent ${JSON.stringify(row)}`);
       }
       if (["S4.3", "S4.13", "S4.15", "S4.16", "pool-in"].includes(want) && !boxes[want]) boxes[want] = { sheet: await rect(page, ".dep-box"), action: await rect(page, ".dfoot .dbtn") };
       for (const d of await page.$$eval("[data-draft-copy]", (els) => els.filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-draft-copy")))) {
@@ -273,6 +276,32 @@ try {
       const q = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "deposit.quote");
       check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
       await ctx.close();
+    }
+    {
+      // card deposit-to-pool-pools: the opening pool.address answered busy then down is asked again on the backoff
+      // (1 s, 2 s) and Solana turns fundable; down past the bound (five more asks, 31 s) is Not available; a refusal
+      // (pools-closed) is Not available with no second ask
+      const a = await open(browser, w, "pool-flaky", { clock: "run" });
+      await a.page.clock.runFor(4_000);
+      const asks = (await a.page.evaluate(() => window.__calls)).filter((c) => c.kind === "pool.address" && c.params.chain === "solana");
+      const fund = await a.page.locator('[data-dest="solana"]').getAttribute("data-fundable");
+      check(asks.length === 3 && fund === "yes", `@${w.name}: busy then down, asked ${asks.length} times, Solana fundable ${fund}`);
+      await a.ctx.close();
+      const b = await open(browser, w, "pool-down", { clock: "run" });
+      await b.page.clock.runFor(30_000);
+      const mid = await b.page.locator('[data-dest="solana"]').getAttribute("data-fundable");
+      await b.page.locator('[data-dest="solana"]').click();
+      const midState = await b.page.locator(".dep").getAttribute("data-state");
+      await b.page.clock.runFor(5_000);
+      const bAsks = (await b.page.evaluate(() => window.__calls)).filter((c) => c.kind === "pool.address" && c.params.chain === "solana");
+      const endState = await b.page.locator(".dep").getAttribute("data-state");
+      check(mid === "no" && midState === "S4.1" && bAsks.length === 6 && endState === "pool-off", `@${w.name}: down past the bound: asked ${bAsks.length} times, at 30 s ${midState}, then ${endState}`);
+      await b.ctx.close();
+      const c = await open(browser, w, "pools-closed", { clock: "run" });
+      await c.page.clock.runFor(35_000);
+      const cAsks = (await c.page.evaluate(() => window.__calls)).filter((x) => x.kind === "pool.address" && x.params.chain === "solana");
+      check(cAsks.length === 1, `@${w.name}: a refusal asked ${cAsks.length} times`);
+      await c.ctx.close();
     }
     {
       // card deposit-to-pool-pools: the vault's refused quote stays the vault's; Solana picked after it starts unasked

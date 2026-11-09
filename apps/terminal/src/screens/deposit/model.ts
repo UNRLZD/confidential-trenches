@@ -52,6 +52,19 @@ export const DESTS: readonly Dest[] = Object.freeze(["near", ...POOL_CHAINS]);
  */
 export type PoolOpen = Partial<Record<PoolChain, boolean>>;
 
+/** How many times the sheet asks a pool's chain again after a busy or down answer while it is open. */
+export const POOL_ASK_TRIES = 5;
+/**
+ * The wait before asking pool.address again for a chain whose answer was `code` on try `attempt` (0 first), in ms; null:
+ * ask no more. Busy and down are the page or its helper not answering now, so they are asked again: 1 s, doubling, at
+ * most 16 s, five times (31 s in all; the kit's refusal carries no Retry-After). Any other refusal is the page's answer
+ * for the chain (not_allowed, read as not_available): Not available at once.
+ */
+export function poolAskAgainIn(code: QuoteRefusal, attempt: number): number | null {
+  if ((code !== "busy" && code !== "down") || attempt >= POOL_ASK_TRIES) return null;
+  return Math.min(1_000 * 2 ** attempt, 16_000);
+}
+
 /** Whether the sheet can put money into a destination: the NEAR vault always (deposit.quote); a pool only once
  *  pool.address answered its chain. */
 export function destFundable(d: Dest, open: PoolOpen): boolean {
@@ -343,6 +356,8 @@ export interface RecentRow {
   id: string;
   word: "deposited" | "waiting" | "processing" | "short" | "refunded" | "held" | "moved" | "expired";
   amount_usd?: string;
+  /** A pool deposit's pool (its op's chain): the op carries no amount (PoolDepositFacts), so the row names its pool. */
+  pool?: PoolChain;
 }
 
 const RECENT_WORD: Record<DepositStage, RecentRow["word"]> = {
@@ -373,12 +388,13 @@ const POOL_RECENT_WORD: Record<PoolDepositStage, RecentRow["word"]> = {
 };
 
 /** The Recent rows: the deposits in state.ops (oldest first there), the vault's and the pools', newest first, three at
- *  most; a refund's later legs read Refunded until done. A pool deposit carries no USD amount: a pool holds its own asset. */
+ *  most; a refund's later legs read Refunded until done. A pool deposit's row names its pool where a done vault row
+ *  shows the USD credited: the pool_deposit op carries no amount. */
 export function recentRows(ops: readonly Operation[] | undefined): RecentRow[] {
   const rows: RecentRow[] = [];
   for (const op of [...(ops ?? [])].reverse()) {
     if (op.kind === "pool_deposit") {
-      rows.push({ id: op.id, word: POOL_RECENT_WORD[op.stage] });
+      rows.push({ id: op.id, word: POOL_RECENT_WORD[op.stage], pool: op.chain });
       if (rows.length === 3) break;
       continue;
     }

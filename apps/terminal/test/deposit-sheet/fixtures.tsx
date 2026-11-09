@@ -30,7 +30,10 @@ const CHECKED: SignpageResults["deposit.quote"] = {
 // Robinhood's refuse it, as the page does before pool-deposit-follow-evm; the checked quote to U_X is the vault's shape
 const U_SOL = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 const POOL_ANSWER: SignpageResults["pool.address"] = { chain: "solana", address: U_SOL, asset: "SOL", quote: { ...CHECKED, min_amount_out: "0.4" } };
-const SOL_IN_POOL = (ready?: string) => ({ pools: [{ chain: "solana" as const, asset: "SOL" as const, balance: "0.41", ...(ready ? { ready } : {}) }] });
+const SOL_IN_POOL = (ready?: string): Partial<SignpageState> => ({
+  pools: [{ chain: "solana", asset: "SOL", balance: "0.41", ...(ready ? { ready } : {}) }],
+  ops: [{ id: "p1", kind: "pool_deposit", chain: "solana", stage: "in_pool", txs: [], since_ms: NOW - 40_000 }],
+});
 const STATE: SignpageState = { release: "signpage-v1", api: 1, signed_in: true, way: "passkey", code_saved: true, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 
 interface Fx {
@@ -42,6 +45,8 @@ interface Fx {
   state?: Partial<SignpageState>;
   /** pool.address with no asset, per chain: true answers the chain's address, else refused. Default: Solana only. */
   pools?: PoolOpen;
+  /** Refusals pool.address answers in turn for a chain's opening ask, before `pools` answers it. */
+  flaky?: Partial<Record<PoolChain, QuoteRefusal[]>>;
   /** pool.address with the asset and amount. Default: Solana's checked quote. */
   poolQuote?: Reply<SignpageResults["pool.address"]>;
   /** The pool_deposit op under that request's id, on Solana. */
@@ -91,6 +96,9 @@ export const FIXTURES: Record<string, Fx> = {
   "pool-in-proving": { poolStatus: { pool: "solana", stage: "in_pool", since_ms: since(40) }, state: SOL_IN_POOL() },
   "pool-expired": { poolStatus: { pool: "solana", stage: "expired" } },
   "pool-refused": { poolQuote: refused("not_available") },
+  // the opening ask answered busy then down, then the address: asked again, Solana fundable; down past the bound: Not available
+  "pool-flaky": { flaky: { solana: ["busy", "down"] } },
+  "pool-down": { flaky: { solana: ["down", "down", "down", "down", "down", "down"] } },
   "pool-other-chain": { poolQuote: { ok: true, value: { ...POOL_ANSWER, chain: "base", asset: "ETH" } } },
 };
 
@@ -121,6 +129,8 @@ const src: DepositSource = {
   poolAddress: async (chain: PoolChain, q) => {
     window.__calls.push({ kind: "pool.address", params: q ? { chain, origin_asset: q.asset.id, amount: q.amount } : { chain } });
     if (q) return { id: "p1", reply: fx.poolQuote ?? { ok: true, value: POOL_ANSWER } };
+    const next = fx.flaky?.[chain]?.shift();
+    if (next) return { id: `a-${chain}`, reply: refused(next) };
     const open = (fx.pools ?? { solana: true })[chain] === true;
     return { id: `a-${chain}`, reply: open ? { ok: true, value: { chain, address: U_SOL, asset: "SOL" } } : refused("not_available") };
   },

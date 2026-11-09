@@ -1,5 +1,5 @@
 import { POOL_CHAINS } from "@blindfill/kit";
-import type { SignpageResults } from "@blindfill/kit";
+import type { PoolChain, SignpageResults } from "@blindfill/kit";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation } from "react-router";
@@ -8,7 +8,7 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, poolQuote, poolReady, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, poolAskAgainIn, poolQuote, poolReady, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
 import type { Answer, Asset, Dest, DryQuote, PoolOpen, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
@@ -51,14 +51,24 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   const [open, setOpen] = useState<PoolOpen>({});
   const { poolAddress } = src;
   const asksPools = signedIn && codeSaved && src.moneyOn;
+  // busy or down is asked again on model.ts poolAskAgainIn's backoff while the sheet is open (the tile loads meanwhile);
+  // any other refusal is Not available at once
   useEffect(() => {
     if (!asksPools) return;
     let live = true;
-    for (const chain of POOL_CHAINS)
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const ask = (chain: PoolChain, attempt: number): void =>
       void poolAddress(chain).then(({ reply }) => {
-        if (live) setOpen((o) => ({ ...o, [chain]: reply.ok && reply.value.chain === chain }));
+        if (!live) return;
+        const wait = reply.ok ? null : poolAskAgainIn(reply.code, attempt);
+        if (wait !== null) return void timers.push(setTimeout(() => ask(chain, attempt + 1), wait));
+        setOpen((o) => ({ ...o, [chain]: reply.ok && reply.value.chain === chain }));
       });
-    return () => void (live = false);
+    for (const chain of POOL_CHAINS) ask(chain, 0);
+    return () => {
+      live = false;
+      for (const t of timers) clearTimeout(t);
+    };
   }, [asksPools, poolAddress]);
   const fundable = destFundable(dest, open);
   const [picked, setPicked] = useState<{ symbol: string; chain: string } | null>(null);
@@ -415,6 +425,7 @@ function Recent({ rows }: { rows: RecentRow[] }) {
           <div className="it" key={r.id} data-op={r.id}>
             <span><W id={r.word} /></span>
             {r.amount_usd !== undefined && <span className="num">{usd(r.amount_usd)}</span>}
+            {r.pool !== undefined && <span className="pl" data-chain={r.pool}>{CHAINS[r.pool]!.name}</span>}
           </div>
         ))
       )}
