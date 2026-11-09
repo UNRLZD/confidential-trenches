@@ -243,7 +243,7 @@ test("planted: a new release list with no tree, a tree of no commit here, or a c
 
 test("planted: a new list naming a tree whose SIGN_HOST build inputs are not the head's is refused (the review's repro)", () => {
   // card signpage-generated-merge-free: the inputs are the bundle's sources, its lockfile and the files it serves as they are
-  for (const input of ["packages/signpage/src/main.ts", "packages/signpage/public/_headers", "packages/wallet/src/index.ts", "packages/kit/src/prover/worker.js", "packages/kit/zk/NOTICE", "pnpm-lock.yaml", "LICENSE"]) {
+  for (const input of ["packages/signpage/src/main.ts", "packages/signpage/public/_headers", "packages/wallet/src/index.ts", "packages/kit/src/prover/worker.js", "packages/kit/zk/NOTICE", "pnpm-lock.yaml", "LICENSE", "tsconfig.json", "packages/signpage/tsconfig.json", "packages/wallet/tsconfig.json"]) {
     const { r, base } = released();
     try {
       // the PR ships page v1, then v2, then adds a list naming v1's tree

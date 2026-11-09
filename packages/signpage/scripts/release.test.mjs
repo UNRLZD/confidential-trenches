@@ -486,7 +486,15 @@ test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate 
   const rel = (abs) => relative(repo, abs.split("?")[0]).split(sep).join("/");
   const own = modules.filter((id) => !id.startsWith("\0") && !/[\\/]node_modules[\\/]/.test(id)).map(rel);
   assert.ok(own.some((p) => p.startsWith("packages/wallet/src/")) && own.some((p) => p.startsWith("packages/kit/src/")), own.join("\n"));
-  const reads = [...own, "packages/signpage/public/_headers", "packages/kit/src/prover/build.mjs", ...SERVED.map((e) => rel(e.from)), ...SIGN_BUILD_CONFIG];
+  // the bundler applies the nearest tsconfig.json above each module it transforms (review P2: one in packages/signpage,
+  // packages/wallet or the root changes app.js), so every folder from a module's own up to the repository root may hold
+  // one that the build reads, whether or not it exists today; above the root bundle() refuses one (outsideTsconfigs)
+  const tsconfigs = new Set();
+  for (const p of own) {
+    const parts = p.split("/").slice(0, -1);
+    for (let i = parts.length; i >= 0; i--) tsconfigs.add([...parts.slice(0, i), "tsconfig.json"].join("/"));
+  }
+  const reads = [...own, ...tsconfigs, "packages/signpage/public/_headers", "packages/kit/src/prover/build.mjs", ...SERVED.map((e) => rel(e.from)), ...SIGN_BUILD_CONFIG];
   for (const p of reads) assert.ok(SIGN_BUILD_INPUTS.some((i) => p === i || p.startsWith(`${i}/`)), `${p} is read by the build, not in SIGN_BUILD_INPUTS`);
   for (const i of SIGN_BUILD_INPUTS) assert.ok(reads.some((p) => p === i || p.startsWith(`${i}/`)), `${i} is in SIGN_BUILD_INPUTS, read by no build step`);
   // no build output is an input: a list's tree is compared on sources only

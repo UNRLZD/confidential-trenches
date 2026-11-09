@@ -10,7 +10,13 @@ export const SIGN_BUILD_CONFIG = Object.freeze([
   "packages/signpage/scripts/build-app.mjs",
   "packages/wallet/package.json",
   "packages/kit/package.json",
+  // the bundler applies the nearest tsconfig.json above each module (review P2): every folder from the bundled sources up
+  // to the repository root, existing or not; bundle() refuses one above the root
+  "packages/signpage/tsconfig.json",
+  "packages/wallet/tsconfig.json",
   "packages/kit/tsconfig.json",
+  "packages/tsconfig.json",
+  "tsconfig.json",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
