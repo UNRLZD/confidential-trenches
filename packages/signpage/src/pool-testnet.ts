@@ -55,7 +55,7 @@ import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, tokenHeld, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { POSITION_COSTS_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { POSITION_COSTS_KEY, POSITIONS_GONE_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -637,19 +637,38 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // state.positions (src/positions.ts, card signpage-state-holdings): the buy wallets' tokens, each held amount read again
   // on both RPCs, one pass at a time, run at the first signed-in state read and again when a pool buy or sell ends
+  // the device's own records of its buys (src/positions.ts header): W's buy mint and W's buy record, gone ones left out;
+  // a record that does not read as one is left out
+  const boughtOf = async (): Promise<{ address: string; mint: string }[]> => {
+    const st = await page.store();
+    const rec = async (k: string) => {
+      const v = await st.get("meta", k);
+      return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+    };
+    const gone = await rec(POSITIONS_GONE_KEY);
+    const out = new Map<string, { address: string; mint: string }>();
+    for (const all of [await rec("owed/buy-sol"), await rec(POSITION_COSTS_KEY)])
+      for (const [address, r] of Object.entries(all)) {
+        const mint = (r as { mint?: unknown } | null)?.mint;
+        if (typeof mint === "string" && gone[address] !== mint) out.set(`${address} ${mint}`, { address, mint });
+      }
+    return [...out.values()];
+  };
   const positions = positionsCache(
-    async () => {
-      if (scope === null) return [];
+    async (memo) => {
+      if (scope === null) return { positions: [], whole: true };
       const r = rpcs();
       const notes = await openNoteStore(await page.store());
       try {
         return await positionsPass({
           wallets: async () =>
             (await poolBuyWallets(notes, r)).map((w) => ({ address: w.address, tokens: [...w.holdings.tokens].filter(([, h]) => h.amount > 0n).map(([m]) => m) })),
+          bought: boughtOf,
+          gone: async (address, mint) => void (await (await page.store()).update("meta", POSITIONS_GONE_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [address]: mint }))),
           held: async (address, mint) => (await tokenHeld(r, address, mint)).amount,
           costs: async () => ((await (await page.store()).get("meta", POSITION_COSTS_KEY)) as PositionCosts | undefined) ?? {},
           decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
-        });
+        }, memo);
       } finally {
         notes.close();
       }
@@ -659,7 +678,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   positions.watch(() => {
     for (const f of watchers) f();
   });
-  const BUY_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  const TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
   // a pool buy, its records written once its run ends (src/positions.ts recordPoolBuy: its ops record, and W's buy record
   // for the cost), the positions read again after them; its W and the amount W received come from the run's own route
   // facts, the price is the page's own read at the request. The kind's `after` settles at its first answer, which may be
@@ -682,22 +701,34 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
     const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
       ctx.progress(stage);
-      if (BUY_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
+      if (TRADE_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
     };
     r = buy(ask, { ...ctx, progress, route: routeInto(facts, ctx.route) });
     const run = r;
     if ("after" in run)
       void run.after.then(() => {
         const a = run.answer() as Parameters<typeof recordPoolBuy>[3];
-        if (a !== null && ("error" in a || BUY_ENDS.has(a.result.stage))) finish(a);
+        if (a !== null && ("error" in a || TRADE_ENDS.has(a.result.stage))) finish(a);
         else positions.refresh();
       });
     return run;
   };
-  // a pool sell's run, the positions read again once it ends, whatever its answer (a refusal ran nothing)
-  const positionsAfter = <R,>(r: R): R => {
-    if (typeof r === "object" && r !== null && "after" in r) void (r as { after: Promise<unknown> }).after.then(() => positions.refresh(), () => positions.refresh());
-    return r;
+  // a pool sell's run, the positions read again once it ends: its `after` settles at its first answer, which may be "sent"
+  // while the run goes on (poolSellKind answers at the send), so as for the buy, an end stage from the answer or from the
+  // progress the run posts at its end; a refusal ran nothing, read again all the same. A sell a closed page left is
+  // read again when the settle on load writes its end (settleSells).
+  const recordedSell = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof sell> => {
+    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
+      ctx.progress(stage);
+      if (TRADE_ENDS.has(stage)) positions.refresh();
+    };
+    const run = sell(ask, { ...ctx, progress });
+    if ("after" in run)
+      void run.after.then(() => {
+        const a = run.answer() as { result?: { stage?: string } };
+        if (a.result?.stage !== "sent") positions.refresh();
+      });
+    return run;
   };
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
   const sellHost = (): PoolSellKindHost & { end(): void } => {
@@ -731,7 +762,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         const ops = await page.store();
         // each sell's stage written before its record goes (a write that fails keeps it for the next read)
-        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: (signature, stage) => settleSellOps(ops, signature, stage) }, locks);
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
+          await settleSellOps(ops, signature, stage);
+          // a sell's end, written: its tokens read again (card signpage-state-holdings)
+          positions.refresh();
+        } }, locks);
       } finally {
         notes.close();
       }
@@ -1065,7 +1100,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           : ask.kind === "pool.buy" && table !== null
             ? recordedBuy(ask, ctx)
             : ask.kind === "pool.sell"
-              ? positionsAfter(sell(ask, ctx))
+              ? recordedSell(ask, ctx)
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" },
