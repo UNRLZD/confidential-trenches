@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 39 names in all. */
+/** The values core exports, and its types: 46 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -22,8 +22,10 @@ const VALUES = [
   "buildSettleOut", "readSettle", "settleNeed",
   // and the token's storage minimum, an unregistered typed account's registration
   "readTokenStorageMin",
+  // card exit-withdraw: the change index of a spent note, A's own withdrawal and A's DeleteAccount (step 6)
+  "changeIndex", "buildVaultWithdrawOut", "buildDeleteOut", "SETTLE_BLOCKS", "closeRefundsRan", "keyNonceAt",
 ];
-const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor"];
+const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor"];
 
 /** Every name core.ts exports, as its export declarations write them (types included). */
 function declaredNames(file: string): string[] {
