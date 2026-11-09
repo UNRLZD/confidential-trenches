@@ -484,7 +484,7 @@ test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by
  * secretKey or sk is pinned here. A new copy site fails this test until it is reviewed and the pin is changed with it.
  */
 const SECRET_LINES = [
-  "function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {",
+  "function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove<AnyCall>): { hash: string; signed: string } {",
   "const signature = ed25519.sign(digest, secretKey);",
   "secretKey: Uint8Array;",
   "const id = k.id, pk = k.publicKey, sk = k.secretKey;",
@@ -502,6 +502,11 @@ const SECRET_LINES = [
   "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
   "key.secretKey.fill(0);",
   "k.secretKey.fill(0);",
+  // card exit-withdraw: buildVaultWithdrawOut and buildDeleteOut, each signing its sealed move and zeroing its copy
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
 ];
 test("moveout.ts touches a secret key only in the pinned expressions (review 4, L1)", () => {
   const src = readFileSync(new URL("../src/deposit/moveout.ts", import.meta.url), "utf8");
@@ -510,20 +515,24 @@ test("moveout.ts touches a secret key only in the pinned expressions (review 4, 
   assert.deepEqual(touched.slice().sort(), SECRET_LINES.slice().sort());
 });
 
-test("the exit's typed-account rule refuses exactly what checkMoveCalls refuses, over every moving account, token and typed account (card exit-ids-out)", () => {
+// card exit-withdraw (review P2-1): the exit's rule refuses, beyond checkMoveCalls' (whose receiver, the token, pins the
+// network), every release's vault and USDC on every network and any account under a vault
+const ALSO_REFUSED = new Set<string>([NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, NEAR_NETWORKS.testnet.vault!, NEAR_NETWORKS.testnet.usdc, `x.${NEAR_NETWORKS.mainnet.vault}`, `x.${NEAR_NETWORKS.testnet.vault}`]);
+test("the exit's typed-account rule refuses what checkMoveCalls refuses and, on every network, every release's vault and USDC and any account under a vault (card exit-ids-out; exit-withdraw review P2-1)", () => {
   const k = depositId(SEED, 1n, 0);
-  const tos = [NET.vault, "intents.near", TOKEN, U, "bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, "other.testnet"];
+  const tos = [NET.vault, "intents.near", TOKEN, U, "bob.testnet", "c".repeat(64), NEAR_NETWORKS.mainnet.vault, NEAR_NETWORKS.mainnet.usdc, "other.testnet", `x.${NEAR_NETWORKS.mainnet.vault}`, `x.${NEAR_NETWORKS.testnet.vault}`];
   const verdict = (f: () => unknown) => { try { f(); return "ok"; } catch (e) { return e instanceof MoveOutRefused ? "refused" : `other: ${String(e)}`; } };
   let oks = 0;
   for (const u of [U, "bob.testnet"]) {
     for (const token of [TOKEN, NEAR_NETWORKS.mainnet.usdc, "other.testnet"]) {
       for (const to of tos) {
         const held = verdict(() => checkMoveCalls(u, to, token, moveCalls(to, 1n, false, 0n), 2n, 0n));
+        const want = ALSO_REFUSED.has(to) ? "refused" : held;
         const withdraw = verdict(() => checkWithdrawCalls(u, to, token, withdrawCalls(to, 1n, token), 2n));
-        assert.equal(withdraw, held, `withdraw: ${u} ${token} ${to}`);
+        assert.equal(withdraw, want, `withdraw: ${u} ${token} ${to}`);
         if (u === U) {
           const register = verdict(() => buildRegisterOut({ read: { nonce: 1n, blockHash: "11111111111111111111111111111111", registered: false, u, to, token }, key: { ...k, secretKey: k.secretKey.slice() }, to, token, storageMin: STORAGE_MIN }));
-          assert.equal(register, held, `register: ${token} ${to}`);
+          assert.equal(register, want, `register: ${token} ${to}`);
         }
         if (held === "ok") oks++;
       }

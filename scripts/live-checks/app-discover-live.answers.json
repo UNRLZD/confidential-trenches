@@ -1,36 +1,36 @@
 {
  "good": {
-  "url": "http://127.0.0.1:50798/discover",
-  "at": "2026-11-01T16:21:42.517Z",
-  "browser": "153.0.8010.12",
+  "url": "https://ct-app.unrealized.trade/discover",
+  "at": "2026-11-09T18:51:08.815Z",
+  "browser": "157.0.8103.38",
   "loads": [
    {
     "width": "phone",
     "path": "/discover",
-    "origin": "http://127.0.0.1:50798",
-    "framed": false,
+    "origin": "https://ct-app.unrealized.trade",
+    "framed": true,
     "route": "discover",
     "state": "ready",
     "columns": [
      {
       "key": "new",
-      "count": 30,
-      "rows": 30
+      "count": 70,
+      "rows": 70
      },
      {
       "key": "trending",
-      "count": 99,
-      "rows": 99
+      "count": 136,
+      "rows": 136
      },
      {
       "key": "hot",
-      "count": 99,
-      "rows": 99
+      "count": 129,
+      "rows": 129
      },
      {
       "key": "graduating",
-      "count": 28,
-      "rows": 28
+      "count": 26,
+      "rows": 26
      }
     ],
     "trendingSides": null,
@@ -57,6 +57,27 @@
       "https://ct-api.unrealized.trade",
       "wss://ct-api.unrealized.trade",
       "https://confidential.unrealized.trade",
+      "https://base-rpc.publicnode.com",
+      "https://base-mainnet.public.blastapi.io",
+      "https://mainnet.base.org",
+      "https://base.api.pocket.network",
+      "https://base.gateway.tenderly.co",
+      "https://rpc.sentio.xyz",
+      "https://robinhood-rpc.publicnode.com",
+      "https://robinhood.drpc.org",
+      "https://rpc.mainnet.chain.robinhood.com",
+      "https://robinhood.rpc.blxrbdn.com",
+      "https://rpc-robinhood.globalstake.io",
+      "https://robinhood.api.pocket.network",
+      "https://robinhood.daybreak-rpc.network",
+      "https://base-sepolia-rpc.publicnode.com",
+      "https://base-testnet.api.pocket.network",
+      "https://sepolia.base.org",
+      "https://rpc.testnet.chain.robinhood.com",
+      "https://robinhood-sepolia-rpc.publicnode.com",
+      "https://robinhood-testnet.drpc.org",
+      "https://solana-rpc.publicnode.com",
+      "https://solana.api.pocket.network",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -68,10 +89,10 @@
       "'none'"
      ],
      "frame-src": [
-      "https://confidential.unrealized.trade"
+      "'none'"
      ],
      "frame-ancestors": [
-      "'none'"
+      "https://confidential.unrealized.trade"
      ],
      "object-src": [
       "'none'"
@@ -92,53 +113,58 @@
     },
     "violations": [],
     "consoleErrors": [],
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2545
+    },
     "requests": [
      {
-      "url": "http://127.0.0.1:50798/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/index-D70fvtMW.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CQgq9Vjn.js",
       "type": "script"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/style-BYx-eVLR.css",
+      "url": "https://ct-app.unrealized.trade/assets/style-BQ03w6km.css",
       "type": "stylesheet"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-2x-cool-CyRdqxKi.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-cool-CyRdqxKi.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-2x-DCJZ3gWM.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-DCJZ3gWM.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "type": "image"
      },
      {
@@ -146,12 +172,68 @@
       "type": "fetch"
      },
      {
-      "url": "https://confidential.unrealized.trade/",
-      "type": "document"
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+      "type": "fetch"
      },
      {
-      "url": "https://confidential.unrealized.trade/",
-      "type": "document"
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+      "type": "fetch"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pumpfun-CzP5o1vG.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/raydium-Cj9-4qNB.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/meteora-DAMKb6zU.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/base-Cq6sCJBo.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/robinhood-CY6OFotH.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pons-PCbYTPWc.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/doppler-zFaQa6do.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/clanker-D2hIlSiE.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bonkfun-Bybx5U8g.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/torch-BQZ5SLLj.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/stonkfun-DtKL-dVT.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/virtuals-D8QuHs5k.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bags-DuVw1SSY.png",
+      "type": "image"
      }
     ],
     "lists": {
@@ -160,38 +242,57 @@
      "rows": 355,
      "badRows": []
     },
-    "shot": "<shots>/phone-discover.png"
+    "chains": {
+     "base": {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+      "status": 200,
+      "rows": 75,
+      "badRows": []
+     },
+     "robinhood": {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+      "status": 200,
+      "rows": 68,
+      "badRows": []
+     }
+    },
+    "drawn": {
+     "solana": 100,
+     "base": 20,
+     "robinhood": 20
+    },
+    "shot": "phone-discover.png"
    },
    {
     "width": "desktop",
     "path": "/discover",
-    "origin": "http://127.0.0.1:50798",
-    "framed": false,
+    "origin": "https://ct-app.unrealized.trade",
+    "framed": true,
     "route": "discover",
     "state": "ready",
     "columns": [
      {
       "key": "new",
-      "count": 30,
-      "rows": 30
+      "count": 70,
+      "rows": 70
      },
      {
       "key": "trending",
-      "count": 99,
-      "rows": 99
+      "count": 136,
+      "rows": 136
      },
      {
       "key": "hot",
-      "count": 99,
-      "rows": 99
+      "count": 129,
+      "rows": 129
      },
      {
       "key": "graduating",
-      "count": 28,
-      "rows": 28
+      "count": 26,
+      "rows": 26
      }
     ],
-    "trendingSides": 99,
+    "trendingSides": 136,
     "csp": {
      "default-src": [
       "'none'"
@@ -215,6 +316,27 @@
       "https://ct-api.unrealized.trade",
       "wss://ct-api.unrealized.trade",
       "https://confidential.unrealized.trade",
+      "https://base-rpc.publicnode.com",
+      "https://base-mainnet.public.blastapi.io",
+      "https://mainnet.base.org",
+      "https://base.api.pocket.network",
+      "https://base.gateway.tenderly.co",
+      "https://rpc.sentio.xyz",
+      "https://robinhood-rpc.publicnode.com",
+      "https://robinhood.drpc.org",
+      "https://rpc.mainnet.chain.robinhood.com",
+      "https://robinhood.rpc.blxrbdn.com",
+      "https://rpc-robinhood.globalstake.io",
+      "https://robinhood.api.pocket.network",
+      "https://robinhood.daybreak-rpc.network",
+      "https://base-sepolia-rpc.publicnode.com",
+      "https://base-testnet.api.pocket.network",
+      "https://sepolia.base.org",
+      "https://rpc.testnet.chain.robinhood.com",
+      "https://robinhood-sepolia-rpc.publicnode.com",
+      "https://robinhood-testnet.drpc.org",
+      "https://solana-rpc.publicnode.com",
+      "https://solana.api.pocket.network",
       "https://rpc.mainnet.fastnear.com",
       "https://rpc.mainnet.near.org",
       "https://near.drpc.org"
@@ -226,10 +348,10 @@
       "'none'"
      ],
      "frame-src": [
-      "https://confidential.unrealized.trade"
+      "'none'"
      ],
      "frame-ancestors": [
-      "'none'"
+      "https://confidential.unrealized.trade"
      ],
      "object-src": [
       "'none'"
@@ -250,53 +372,58 @@
     },
     "violations": [],
     "consoleErrors": [],
+    "footer": {
+     "conn": "on",
+     "block": "223500006",
+     "ms": 2201
+    },
     "requests": [
      {
-      "url": "http://127.0.0.1:50798/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
       "type": "font"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/index-D70fvtMW.js",
+      "url": "https://ct-app.unrealized.trade/assets/index-CQgq9Vjn.js",
       "type": "script"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/style-BYx-eVLR.css",
+      "url": "https://ct-app.unrealized.trade/assets/style-BQ03w6km.css",
       "type": "stylesheet"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-1x-z6B8R7os.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
       "type": "image"
      },
      {
-      "url": "http://127.0.0.1:50798/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
       "type": "image"
      },
      {
@@ -304,12 +431,72 @@
       "type": "fetch"
      },
      {
-      "url": "https://confidential.unrealized.trade/",
-      "type": "document"
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+      "type": "fetch"
      },
      {
-      "url": "https://confidential.unrealized.trade/",
-      "type": "document"
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+      "type": "fetch"
+     },
+     {
+      "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
+      "type": "fetch"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pumpfun-CzP5o1vG.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/raydium-Cj9-4qNB.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/meteora-DAMKb6zU.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/base-Cq6sCJBo.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/robinhood-CY6OFotH.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pons-PCbYTPWc.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/doppler-zFaQa6do.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/clanker-D2hIlSiE.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bonkfun-Bybx5U8g.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/torch-BQZ5SLLj.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/stonkfun-DtKL-dVT.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/virtuals-D8QuHs5k.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bags-DuVw1SSY.png",
+      "type": "image"
      }
     ],
     "lists": {
@@ -318,7 +505,26 @@
      "rows": 355,
      "badRows": []
     },
-    "shot": "<shots>/desktop-discover.png"
+    "chains": {
+     "base": {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=base",
+      "status": 200,
+      "rows": 75,
+      "badRows": []
+     },
+     "robinhood": {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=robinhood",
+      "status": 200,
+      "rows": 68,
+      "badRows": []
+     }
+    },
+    "drawn": {
+     "solana": 255,
+     "base": 56,
+     "robinhood": 50
+    },
+    "shot": "desktop-discover.png"
    }
   ]
  },
@@ -4476,6 +4682,433 @@
     ],
     "lists": null,
     "shot": "<shots>/desktop-discover.png"
+   }
+  ]
+ },
+ "noEvm": {
+  "url": "https://ct-app.unrealized.trade/discover",
+  "at": "2026-11-09T18:51:15.061Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "width": "phone",
+    "path": "/discover",
+    "origin": "https://ct-app.unrealized.trade",
+    "framed": true,
+    "route": "discover",
+    "state": "ready",
+    "columns": [
+     {
+      "key": "new",
+      "count": 30,
+      "rows": 30
+     },
+     {
+      "key": "trending",
+      "count": 100,
+      "rows": 100
+     },
+     {
+      "key": "hot",
+      "count": 99,
+      "rows": 99
+     },
+     {
+      "key": "graduating",
+      "count": 26,
+      "rows": 26
+     }
+    ],
+    "trendingSides": null,
+    "csp": {
+     "default-src": [
+      "'none'"
+     ],
+     "script-src": [
+      "'self'"
+     ],
+     "style-src": [
+      "'self'"
+     ],
+     "img-src": [
+      "'self'",
+      "data:",
+      "https://ct-api.unrealized.trade"
+     ],
+     "font-src": [
+      "'self'"
+     ],
+     "connect-src": [
+      "'self'",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
+      "https://base-rpc.publicnode.com",
+      "https://base-mainnet.public.blastapi.io",
+      "https://mainnet.base.org",
+      "https://base.api.pocket.network",
+      "https://base.gateway.tenderly.co",
+      "https://rpc.sentio.xyz",
+      "https://robinhood-rpc.publicnode.com",
+      "https://robinhood.drpc.org",
+      "https://rpc.mainnet.chain.robinhood.com",
+      "https://robinhood.rpc.blxrbdn.com",
+      "https://rpc-robinhood.globalstake.io",
+      "https://robinhood.api.pocket.network",
+      "https://robinhood.daybreak-rpc.network",
+      "https://base-sepolia-rpc.publicnode.com",
+      "https://base-testnet.api.pocket.network",
+      "https://sepolia.base.org",
+      "https://rpc.testnet.chain.robinhood.com",
+      "https://robinhood-sepolia-rpc.publicnode.com",
+      "https://robinhood-testnet.drpc.org",
+      "https://solana-rpc.publicnode.com",
+      "https://solana.api.pocket.network",
+      "https://rpc.mainnet.fastnear.com",
+      "https://rpc.mainnet.near.org",
+      "https://near.drpc.org"
+     ],
+     "manifest-src": [
+      "'self'"
+     ],
+     "worker-src": [
+      "'none'"
+     ],
+     "frame-src": [
+      "'none'"
+     ],
+     "frame-ancestors": [
+      "https://confidential.unrealized.trade"
+     ],
+     "object-src": [
+      "'none'"
+     ],
+     "base-uri": [
+      "'none'"
+     ],
+     "form-action": [
+      "'none'"
+     ],
+     "require-trusted-types-for": [
+      "'script'"
+     ],
+     "trusted-types": [
+      "'none'"
+     ],
+     "upgrade-insecure-requests": []
+    },
+    "violations": [],
+    "consoleErrors": [],
+    "footer": {
+     "conn": "wait",
+     "block": "",
+     "ms": 2453
+    },
+    "requests": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-BpEQ4Pc7.js",
+      "type": "script"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/style-BQ03w6km.css",
+      "type": "stylesheet"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-cool-CyRdqxKi.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-2x-DCJZ3gWM.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+      "type": "fetch"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pumpfun-CzP5o1vG.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/meteora-DAMKb6zU.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/raydium-Cj9-4qNB.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bonkfun-Bybx5U8g.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/stonkfun-DtKL-dVT.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bags-DuVw1SSY.png",
+      "type": "image"
+     }
+    ],
+    "lists": {
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+     "status": 200,
+     "rows": 355,
+     "badRows": []
+    },
+    "chains": {},
+    "drawn": {
+     "solana": 100
+    },
+    "shot": "phone-discover.png"
+   },
+   {
+    "width": "desktop",
+    "path": "/discover",
+    "origin": "https://ct-app.unrealized.trade",
+    "framed": true,
+    "route": "discover",
+    "state": "ready",
+    "columns": [
+     {
+      "key": "new",
+      "count": 30,
+      "rows": 30
+     },
+     {
+      "key": "trending",
+      "count": 100,
+      "rows": 100
+     },
+     {
+      "key": "hot",
+      "count": 99,
+      "rows": 99
+     },
+     {
+      "key": "graduating",
+      "count": 26,
+      "rows": 26
+     }
+    ],
+    "trendingSides": 100,
+    "csp": {
+     "default-src": [
+      "'none'"
+     ],
+     "script-src": [
+      "'self'"
+     ],
+     "style-src": [
+      "'self'"
+     ],
+     "img-src": [
+      "'self'",
+      "data:",
+      "https://ct-api.unrealized.trade"
+     ],
+     "font-src": [
+      "'self'"
+     ],
+     "connect-src": [
+      "'self'",
+      "https://ct-api.unrealized.trade",
+      "wss://ct-api.unrealized.trade",
+      "https://confidential.unrealized.trade",
+      "https://base-rpc.publicnode.com",
+      "https://base-mainnet.public.blastapi.io",
+      "https://mainnet.base.org",
+      "https://base.api.pocket.network",
+      "https://base.gateway.tenderly.co",
+      "https://rpc.sentio.xyz",
+      "https://robinhood-rpc.publicnode.com",
+      "https://robinhood.drpc.org",
+      "https://rpc.mainnet.chain.robinhood.com",
+      "https://robinhood.rpc.blxrbdn.com",
+      "https://rpc-robinhood.globalstake.io",
+      "https://robinhood.api.pocket.network",
+      "https://robinhood.daybreak-rpc.network",
+      "https://base-sepolia-rpc.publicnode.com",
+      "https://base-testnet.api.pocket.network",
+      "https://sepolia.base.org",
+      "https://rpc.testnet.chain.robinhood.com",
+      "https://robinhood-sepolia-rpc.publicnode.com",
+      "https://robinhood-testnet.drpc.org",
+      "https://solana-rpc.publicnode.com",
+      "https://solana.api.pocket.network",
+      "https://rpc.mainnet.fastnear.com",
+      "https://rpc.mainnet.near.org",
+      "https://near.drpc.org"
+     ],
+     "manifest-src": [
+      "'self'"
+     ],
+     "worker-src": [
+      "'none'"
+     ],
+     "frame-src": [
+      "'none'"
+     ],
+     "frame-ancestors": [
+      "https://confidential.unrealized.trade"
+     ],
+     "object-src": [
+      "'none'"
+     ],
+     "base-uri": [
+      "'none'"
+     ],
+     "form-action": [
+      "'none'"
+     ],
+     "require-trusted-types-for": [
+      "'script'"
+     ],
+     "trusted-types": [
+      "'none'"
+     ],
+     "upgrade-insecure-requests": []
+    },
+    "violations": [],
+    "consoleErrors": [],
+    "footer": {
+     "conn": "on",
+     "block": "223500005",
+     "ms": 2174
+    },
+    "requests": [
+     {
+      "url": "https://ct-app.unrealized.trade/assets/chivo-mono-latin-400-normal-DZ3T-ph7.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-400-normal-DPhJBilQ.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-500-normal-rf9C4Thp.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/schibsted-grotesk-latin-600-normal-Czv9Obfv.woff2",
+      "type": "font"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/index-BpEQ4Pc7.js",
+      "type": "script"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/style-BQ03w6km.css",
+      "type": "stylesheet"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-cool-BSLhwoVz.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-1x-z6B8R7os.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-cool-BFOZvkte.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/ct-stack-phone-2x-7fLYhN9M.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-cool-Bu-TV6zL.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/wordmark-dots-header-1x-DtpRNm76.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+      "type": "fetch"
+     },
+     {
+      "url": "https://rpc.mainnet.fastnear.com/?ct=footer",
+      "type": "fetch"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/pumpfun-CzP5o1vG.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/solana-BJOXkE6i.svg",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/meteora-DAMKb6zU.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/raydium-Cj9-4qNB.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bonkfun-Bybx5U8g.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/stonkfun-DtKL-dVT.png",
+      "type": "image"
+     },
+     {
+      "url": "https://ct-app.unrealized.trade/assets/bags-DuVw1SSY.png",
+      "type": "image"
+     }
+    ],
+    "lists": {
+     "url": "https://ct-api.unrealized.trade/v1/market/lists?chain=solana",
+     "status": 200,
+     "rows": 355,
+     "badRows": []
+    },
+    "chains": {},
+    "drawn": {
+     "solana": 255
+    },
+    "shot": "desktop-discover.png"
    }
   ]
  }

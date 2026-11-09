@@ -151,7 +151,7 @@ async function finalAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], token: strin
  * far. A halt on both RPCs reads as halted for that id; a halt on one only is a split, and stops the read. Each RPC is
  * asked one query at a time, and a busy answer is asked again after the kit's waits. `sleep` is for tests only.
  */
-export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc] }, sleep: (ms: number) => Promise<void> = realSleep): Promise<{ height: number; holdings: ExitHolding[] }> {
+export async function exitHoldings(a: { network: NearNetwork; ids: readonly string[]; rpcs: readonly [VaultSyncRpc, VaultSyncRpc]; at?: number }, sleep: (ms: number) => Promise<void> = realSleep): Promise<{ height: number; holdings: ExitHolding[] }> {
   const { network, rpcs } = a;
   const ids = [...a.ids];
   if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
@@ -159,7 +159,9 @@ export async function exitHoldings(a: { network: NearNetwork; ids: readonly stri
   for (const id of ids) if (typeof id !== "string" || !HEX64.test(id)) throw new ExitRpcRefused(`${JSON.stringify(id)} is not a 64-hex implicit account`);
   const token = EXIT_TOKENS[network];
   const intents = EXIT_INTENTS[network];
-  const at = await finalAt(rpcs, token, sleep);
+  // `at`, when given, is a block the caller read its other facts at (exit-withdraw: A's close reads every fact at one block)
+  if (a.at !== undefined && (!Number.isSafeInteger(a.at) || a.at <= 0)) throw new ExitRpcRefused("at is a block height");
+  const at = a.at ?? (await finalAt(rpcs, token, sleep));
   const side = async (r: VaultSyncRpc) => {
     const out: { bal: unknown; mt: unknown }[] = [];
     for (const id of ids) {
@@ -206,6 +208,10 @@ const IMPLICIT_ANY = /^([0-9a-f]{64}|0x[0-9a-f]{40})$/;
 /** A typed account exitRecipient checked; exitBuildMove takes only these. */
 export type ExitRecipient = { readonly account: string; readonly network: NearNetwork };
 const CHECKED = new WeakSet<object>();
+/** Whether `to` is a typed account exitRecipient checked for `network` (exit-withdraw takes only these too). */
+export function exitRecipientFor(to: unknown, network: NearNetwork): to is ExitRecipient {
+  return isObj(to) && CHECKED.has(to) && to.network === network;
+}
 export type ExitRecipientCheck = { ok: true; recipient: ExitRecipient } | { ok: false; code: "not-account" | "vault" | "intents" | "token" | "no-account" | "unread" };
 
 function seen(answer: unknown, at: number): "exists" | "absent" | "unread" {
@@ -214,6 +220,15 @@ function seen(answer: unknown, at: number): "exists" | "absent" | "unread" {
   if (result !== undefined && error === undefined) return isObj(result) && result.block_height === at && typeof result.amount === "string" && typeof result.code_hash === "string" ? "exists" : "unread";
   if (error !== undefined && result === undefined && isObj(error) && isObj(error.cause) && error.cause.name === "UNKNOWN_ACCOUNT") return "absent";
   return "unread";
+}
+
+/**
+ * Whether `account` exists at block `at` on both RPCs (view_account): exists or absent when both say so, else unread
+ * (card exit-withdraw: A's DeleteAccount pays a missing beneficiary nothing, its NEAR is burnt, so the close reads it).
+ */
+export async function exitAccountAt(rpcs: readonly [VaultSyncRpc, VaultSyncRpc], account: string, at: number, sleep: (ms: number) => Promise<void> = realSleep): Promise<"exists" | "absent" | "unread"> {
+  const reads = await Promise.all(rpcs.map((r) => ask(r, { request_type: "view_account", account_id: account, block_id: at }, sleep).then((x) => seen(x, at), () => "unread" as const)));
+  return reads[0] === reads[1] ? reads[0]! : "unread";
 }
 
 /** The typed account checked for `network` on its release pair; a pair that is not the network's throws ExitRpcRefused. `sleep` is for tests only. */
@@ -293,6 +308,49 @@ export async function exitStorageMin(network: NearNetwork, rpcs: readonly [Vault
   } catch (e) {
     throw new ExitOutStopped(`the token's storage minimum: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** The typed account's registration on the token as exitReadStorage read it; exitBuildWithdraw takes only these. */
+export type ExitStorage = { readonly network: NearNetwork; readonly account: string; readonly storageMin: bigint; readonly registered: boolean };
+const STORAGE_READ = new WeakSet<object>();
+/**
+ * Whether `s` is a registration exitReadStorage read for typed account `to`, and takes it: each read serves one
+ * withdrawal (delta review P3-3). Note 1's payout registers a fresh typed account, so a read reused for note 2 would
+ * attach the storage minimum again, refunded into the keyless vault.
+ */
+export function exitStorageTake(s: unknown, to: ExitRecipient): s is ExitStorage {
+  if (!isObj(s) || !STORAGE_READ.has(s) || s.network !== to.network || s.account !== to.account) return false;
+  STORAGE_READ.delete(s);
+  return true;
+}
+/**
+ * What a withdrawal to typed account `to` attaches for its registration on the token, read on both RPCs of `network`'s
+ * release pair (card exit-withdraw, delta review P3-3/P3-4): the token's storage minimum (exitStorageMin) and whether
+ * `to` is registered already (storage_balance_of at one final block, null or a balance, equal on both). A registered
+ * account gets register_deposit 0: NEP-145 refunds a registered account's storage_deposit to its caller, the keyless
+ * vault, where no one can take it. Throws ExitRpcRefused before any read for an unknown network, a pair not the
+ * release's or a typed account exitRecipient did not check; ExitOutStopped when a read fails or the two differ.
+ */
+export async function exitReadStorage(network: NearNetwork, to: ExitRecipient, rpcs: readonly [VaultSyncRpc, VaultSyncRpc], sleep: (ms: number) => Promise<void> = realSleep): Promise<ExitStorage> {
+  if (!Object.hasOwn(EXIT_NETWORKS, network)) throw new ExitRpcRefused(`no NEAR network named ${JSON.stringify(network)}`);
+  if (nearPairNetwork(rpcs) !== network) throw new ExitRpcRefused(nearPairRule(network));
+  if (!exitRecipientFor(to, network)) throw new ExitRpcRefused(`the typed account is not one exitRecipient checked for ${network}`);
+  const storageMin = await exitStorageMin(network, rpcs);
+  const token = EXIT_TOKENS[network];
+  const at = await finalAt(rpcs, token, sleep);
+  const [x, y] = await Promise.all(
+    rpcs.map(async (r) => {
+      const what = `${r.name} storage_balance_of(${to.account})`;
+      const v = viewValue(await ask(r, { request_type: "call_function", account_id: token, method_name: "storage_balance_of", args_base64: args64({ account_id: to.account }), block_id: at }, sleep), at, what);
+      if (v === null) return false;
+      if (isObj(v) && typeof v.total === "string" && DIGITS.test(v.total)) return true;
+      throw new ExitOutStopped(`${what}: neither null nor a storage balance`);
+    }),
+  );
+  if (x !== y) throw new ExitOutStopped("the two RPCs differ on the typed account's registration on the token");
+  const s: ExitStorage = Object.freeze({ network, account: to.account, storageMin, registered: x! });
+  STORAGE_READ.add(s);
+  return s;
 }
 
 // ---------- the settle (step 4) ----------

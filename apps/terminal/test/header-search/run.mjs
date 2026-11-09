@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // The top bar's search (card app-header-search-chain), from the built app at / inside the stand-in shell (as
 // test/token-rail/run.mjs): APP_HOST the build under its _headers, SIGN_HOST the stand-in shell, HELPER_HOST answered
-// from the recorded lists (test/discover-data) with one planted Base row (a copy of a listed row on chain "base", so the
-// chain filter has two chains with data to switch between) and, for a listed mint or the one planted unlisted mint, a
+// from the recorded lists (test/discover-data) and one planted Base row (a copy of a listed row on chain "base", so the
+// chain filter has two chains with data to switch between), served as the helper serves it, in Base's own lists
+// (chain=base; card app-chains-evm: the terminal reads each chain's lists, and a chain's answer holds only its rows), and, for a listed mint or the one planted unlisted mint, a
 // token read of its row (any other id answers 404, as the helper does). At 1920, 1440 and 1024 x 900 (the field and the
 // chain chip), 900 x 900 (the top bar's search button) and 390 x 844 (dpr 2, touch: the phone's search button):
 //   - the field (or the button's sheet) opens on the Trending column; a symbol typed key by key finds its token first,
@@ -68,8 +69,8 @@ if (!TARGET) throw new Error("no Trending row with a symbol of its own in the re
 // planted: the same symbol on Base (a copy of another listed row), so both chains hold it
 const BOTH = TRENDING.find((r) => r.token !== TARGET.token && r.token !== TRENDING[0].token) ?? TRENDING[0];
 const BASE_ROW = { ...BOTH, chain: "base", token: "0x07b3d902783c3c12b077508c3b5c00113d1291d0", launchpad: null };
-lists.new = [...lists.new, BASE_ROW];
 const SNAP = { chain: recorded.chain, as_of_ms: recorded.as_of_ms, lists };
+const BASE_SNAP = { chain: "base", as_of_ms: recorded.as_of_ms, lists: { new: [BASE_ROW], trending: [], trending_5m: [], trending_1h: [], graduating: [] } };
 const ROWS = new Map(SOL_ROWS.map((r) => [r.token, r]));
 // planted: a mint the lists do not hold, answered by the token read; and one the helper does not know (404)
 const UNLISTED = { ...TRENDING[0], token: "So11111111111111111111111111111111111111112", symbol: "WSOL", name: "Wrapped SOL" };
@@ -96,7 +97,9 @@ async function open(browser, route, v, reads) {
     const u = new URL(r.request().url());
     if (u.origin === HELPER && u.pathname === "/v1/market/lists") {
       reads.lists++;
-      return r.fulfill(json(200, { ...SNAP, as_of_ms: Date.now() }));
+      const chain = u.searchParams.get("chain");
+      const snap = chain === "solana" ? SNAP : chain === "base" ? BASE_SNAP : null;
+      return r.fulfill(snap ? json(200, { ...snap, as_of_ms: Date.now() }) : json(404, { error: { code: "not_found" } }));
     }
     if (u.origin === HELPER && u.pathname === "/v1/market/token") {
       const id = u.searchParams.get("token");

@@ -166,7 +166,8 @@ const keepOf = (text) => {
  * id_keep (review P2-2): a Retry reads on from what the restore kept, never past what can change. idReadKeep makes
  * the answers and the lasting ids; the IdReader keeps only lasting answers across a new pass and marks lasting only an
  * id both providers answered used (readerOf); keptIdReader opens a new pass only on StalePass (the very class); and the
- * page's step 5 reads through keptIdReader with the restore's keep. The count is 1 when all hold, else 0.
+ * page's step 5 reads through keptIdReader with the restore's keep (taking its pair and pass too, which the held reader
+ * opens on: card wallet-restore-reads-ux). The count is 1 when all hold, else 0.
  */
 export const ID_KEEP = (text) => {
   const P = pairClass(text);
@@ -174,7 +175,7 @@ export const ID_KEEP = (text) => {
   if (P === null || k === null) return 0;
   const r = readerOf(text, P);
   if (r === null || r.STALE !== k.SP) return 0;
-  return all(text, rx(String.raw`let\{reader:(?<rd>§)\}=await ${esc(r.KR)}\((?<net>§),(?<ids>§)\.rpcs,(?<kp>§),\{\.\.\.\k<ids>\.opts,signal:(?<sig>§)\}\)`)).length === 1 ? 1 : 0;
+  return all(text, rx(String.raw`let\{rpcs:§,pass:§,reader:(?<rd>§)\}=await ${esc(r.KR)}\((?<net>§),(?<ids>§)\.rpcs,(?<kp>§),\{\.\.\.\k<ids>\.opts,signal:(?<sig>§)\}\)`)).length === 1 ? 1 : 0;
 };
 /**
  * id_signout: signing out drops what the restore kept. The restore's keep starts as a new idReadKeep() beside its
@@ -207,8 +208,9 @@ export const MARK = Object.freeze({
   id_pass_stale: "blocks past it; open a fresh pass",
   ids_margin: "id reads failed with none showing history between them",
   // the page's wiring (src/pool-restore.ts readDepositIds): the first unread id stops every read after it,
-  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}`
-  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+)\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
+  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=e,e}` (the id and its index,
+  // card wallet-restore-reads-ux)
+  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+),[\w$]+\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
   // and a lane unfinished ends the run stalled by name (src/pool-restore.ts idsUndone)
   ids_undone: "past the note walk's end: restore again from there",
   // a pool scope is never done while its U_X on the pool's chain is unread (POOL_CHAIN_UNREAD)
@@ -223,11 +225,12 @@ export const MARK = Object.freeze({
   // drops some reasons, as `why.some((y)=>!y.endsWith(U_X))?"stalled":"done"`, holds none),
   // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
   ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
-  // each pool scope's step 5 pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
+  // each pool scope whose chain has no U_X reads on the page (its walked entry's `ux` null; card
+  // wallet-restore-reads-ux) pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
   // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
-  // (delta review 2: no condition in front of it):
-  // `var hV=`the pool's own chain is not read ...`; ... for(let e of gV(a))i.push(`${r.label}: ${e}`);i.push(`${r.label}: ${hV}`)}}`
-  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?\)([\w$]+)\.push\(`\$\{([\w$]+)\.label\}: \$\{[\w$]+\}`\);\2\.push\(`\$\{\3\.label\}: \$\{\1\}`\)\}\}/g,
+  // (delta review 2: no condition in front of it but that one), then goes to the next pool:
+  // `var hV=`the pool's own chain is not read ...`; ... let o=a.ux;if(o===null){let t=...;for(let e of gV(t))i.push(`${a.label}: ${e}`);i.push(`${a.label}: ${hV}`);continue}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?let ([\w$]+)=([\w$]+)\.ux;if\(\2===null\)\{[\s\S]{0,400}?\)([\w$]+)\.push\(`\$\{\3\.label\}: \$\{[\w$]+\}`\);\4\.push\(`\$\{\3\.label\}: \$\{\1\}`\);continue\}/g,
   // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, its HMAC kept
   // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
   // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is

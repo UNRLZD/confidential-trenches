@@ -1078,7 +1078,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   }
   /**
    * One identity read of every keyed URL (KEYED_IDENTITY: the chain id or genesis it must answer), each under its
-   * company's pace as a background read (one skipped while its pace, its day's budget or any hold on it says wait, its
+   * company's pace as a background read (one skipped while its pace, its day's probe share or any hold on it says wait, its
    * last state kept: review L5, the chain's hold on its first URL included). A URL is read again once its last read is
    * KEYED_PROBE_MS old, or KEYED_RETRY_MS when it did not answer its chain (review L6: a deploy's live check sees a
    * passing 429 or timeout cleared within minutes). Nothing a provider answers leaves here but the state.
@@ -1090,7 +1090,9 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
           const age = now() - (probedAt.get(k.url) ?? -Infinity);
           if (age < (probed.get(k.url) === "answers" ? KEYED_PROBE_MS : KEYED_RETRY_MS)) return;
           if (k.url === upstreams[c].url && budget.heldFor(c, true) > 0) return;
-          if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true) > 0) return;
+          // card helper-live-red: drawn on the day's probe share (limits.ts PROBE_DAY_SHARE), so a URL whose day the reads
+          // spent is still read, never past its plan's day
+          if (holdsAll.heldMs(k.url) > 0 || holdsAll.take(k.url, 1, true, false, true) > 0) return;
           probedAt.set(k.url, now());
           let state: KeyedState = "down";
           try {
