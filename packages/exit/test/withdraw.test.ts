@@ -19,7 +19,10 @@ const SEED = wordsToSeed64("abandon abandon abandon abandon abandon abandon aban
 const NET = "testnet" as const;
 const VAULT = EXIT_NETWORKS[NET].vault;
 const TOKEN = EXIT_TOKENS[NET];
-const SCOPE = BigInt((JSON.parse(readFileSync(new URL("../../../contracts/vault/deployments/testnet-v1.json", import.meta.url), "utf8")) as { scope: string }).scope);
+// the testnet vault's scope (contracts/vault/deployments/testnet-v1.json "scope"; not read from there: packages/exit reaches
+// nothing outside itself and the kit). Self-checking: the wallet's builder recomputes the vault's scope from (vault, token)
+// and refuses a context made with any other, so a wrong value here fails the builds below.
+const SCOPE = 1535477060801825460881825272651648228733961995907927460809153251087997597629n;
 const X = "c".repeat(64); // the typed account: an implicit one, so exitRecipient reads nothing
 const BH = "11111111111111111111111111111111";
 const LABEL = 987654321987654321n;
