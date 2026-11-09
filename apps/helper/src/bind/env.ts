@@ -172,7 +172,9 @@ export function bindSenderFromEnv(
     const store = createFileStore(join(storeDir, `bind-${net.network}`));
     // a start that fails after the store opens closes it, so the next try can take its lock again
     try {
-      const relayer = await startRelayer(rpcs, rpcs[0], net.account, net.key, net.vault, store);
+      // no archival provider of a third operator (the kit's archival hosts are one operator): none stands in for a
+      // provider that forgot a transaction, so an outcome is always both providers' word (card helper-judge-two-agree)
+      const relayer = await startRelayer(rpcs, null, net.account, net.key, net.vault, store);
       const watch = watches[net.network];
       const deps: SendDeps = {
         cfg: { vault: net.vault, token, marginK: BigInt(k) },

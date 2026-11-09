@@ -1243,7 +1243,10 @@ export function evmPoolSender(
     const got = rc.map((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? (x.value as { status?: unknown; blockHash?: unknown }) : undefined));
     const status = got.map((r) => (r === undefined ? undefined : evmRpcHex(r.status)));
     if (status.includes("0x1")) return "waiting";
-    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";
+    // a block hash each: two receipts naming none never agree on a block (review P3-3)
+    const blockOf = (r: { blockHash?: unknown } | undefined) => (r === undefined ? null : /^0x[0-9a-f]{64}$/.exec(evmRpcHex(r.blockHash) ?? "")?.[0] ?? null);
+    const [ha, hb] = [blockOf(got[0]), blockOf(got[1])];
+    if (status[0] === "0x0" && status[1] === "0x0" && ha !== null && ha === hb) return "reverted";
     if (superseded.has(hash)) return "dropped";
     if (rc.some((x) => x.status === "rejected" || x.value !== null)) return "waiting";
     if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return "waiting";

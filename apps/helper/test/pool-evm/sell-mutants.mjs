@@ -157,9 +157,9 @@ export const MUTANTS = [
   [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector", "fee_recipient: feeRecipient, sell_sender: sender, fee_collector", T, "the fee answer names"],
   [EVM, "fee_collector: feeCollector ?? null, epoch_ms", "fee_collector: feeRecipient, epoch_ms", T, "the fee answer names"],
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
-  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && ha !== null && ha === hb) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
   // card helper-judge-two-agree: reverted only on both providers' receipts in one block, never on one provider's
-  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (status.includes("0x0")) return "reverted";', T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && ha !== null && ha === hb) return "reverted";', '    if (status.includes("0x0")) return "reverted";', T, "a sale that reverted or was dropped"],
   // a landed send is never read dropped, whatever the lane's replacement did (card helper-judge-two-agree: with the revert
   // on both providers, the success line matters only for a send the lane replaced)
   [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a withdraw whose replacement was sent but whose first send landed"],

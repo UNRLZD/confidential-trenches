@@ -138,7 +138,7 @@ export type Relayer = {
   send<C extends string = BindCode>(action: RelayerAction, guard: () => Promise<C | null>, before: (tx: TxRef) => void, opts?: ReadOpts): Promise<TxOutcome | { kind: "guarded"; code: C }>;
   /**
    * A transaction of ours whose outcome was not read: its bytes sent again (unless `resend` is false), then read on
-   * both providers and the archival one.
+   * both providers (a third operator's archival one, when given, standing in for one that forgot it).
    */
   resolve(tx: TxRef, opts: { resend: boolean; fromBlocks?: boolean }): Promise<TxOutcome>;
 };
@@ -929,7 +929,7 @@ function receiverOf(signedTx: string): string {
  * start, so every carry answers 503 upstream (and the start is tried again) rather than signing what the chain refuses.
  * Then the gas account.
  */
-export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
+export async function startRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, account: string, secretKey: string, vault: string, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Promise<Relayer> {
   const validity = await transactionValidityPeriod(rpcs);
   const publicKey = `ed25519:${base58(relayerKey(secretKey).pub)}`;
   const held = await Promise.all(rpcs.map((r) => readKey(r, { finality: "final", account_id: account, public_key: publicKey })));
@@ -967,18 +967,22 @@ export const sameReceipts = (a: readonly Receipt[], b: readonly Receipt[]): bool
  *     gap), its hash the same on both; final, so found once and kept in the store. EXPERIMENTAL_changes for K at D on
  *     both: a change caused by this transaction means it was applied at D, and its outcome is read from the lookups
  *     on both providers, final only when both answer FINAL, name D and give the same receipts (executor, ok, failure
- *     and height, each height read on that provider's own blocks); the archival one stands in for a provider that
- *     forgot the transaction (UNKNOWN_TRANSACTION), and counts only when it agrees with the other (a lookup naming any
+ *     and height, each height read on that provider's own blocks); an archival provider of a third operator, when one
+ *     is given (`archival`, never one of `rpcs`: one provider read twice is still one word), stands in for a provider
+ *     that forgot the transaction (UNKNOWN_TRANSACTION), and counts only when it agrees with the other (a lookup naming any
  *     other block: a prepay's receipt is read from blocks, F56 and T1b; a delegate's keeps); a list that does not name
  *     it means K can never verify these bytes, (a2), dropped; an empty list keeps (a node that does not save state
  *     changes, F54).
  * Nothing else drops one: not UNKNOWN_TRANSACTION, not a failed outcome on its own, not a timer.
  */
-export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account: string, secretKey: string, vault: string, validity: bigint, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Relayer {
+export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc | null, account: string, secretKey: string, vault: string, validity: bigint, store: RelayerStore, waitMs = OUTCOME_WAIT_MS): Relayer {
   const { priv, pub } = relayerKey(secretKey);
   const publicKey = `ed25519:${base58(pub)}`;
   const counterKey = `${account}/${publicKey}`;
   let queue: Promise<unknown> = Promise.resolve();
+  // the stand-in for a provider that forgot a transaction: only a third provider, never rpcs[0] or rpcs[1] again
+  // (card helper-judge-two-agree review P1-1: the wiring passed rpcs[0], so provider 0 alone decided)
+  const standIn = archival !== null && archival !== rpcs[0] && archival !== rpcs[1] ? archival : null;
 
   const broadcast = async (signed: string): Promise<void> => {
     await Promise.allSettled(rpcs.map((r) => r("send_tx", { signed_tx_base64: signed, wait_until: "NONE" })));
@@ -1196,7 +1200,7 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
     // forgot it; final only when the two answer FINAL, name D and give the same receipts (one provider's word is never
     // an outcome: a liar naming D with a failed receipt would free a claim or strike a signer)
     const [r0, r1] = await Promise.all([readTx(rpcs[0], tx), readTx(rpcs[1], tx)]);
-    const pair = r0 === "forgot" && isLookup(r1) ? [await readTx(archival, tx), r1] : r1 === "forgot" && isLookup(r0) ? [r0, await readTx(archival, tx)] : [r0, r1];
+    const pair = standIn === null ? [r0, r1] : r0 === "forgot" && isLookup(r1) ? [await readTx(standIn, tx), r1] : r1 === "forgot" && isLookup(r0) ? [r0, await readTx(standIn, tx)] : [r0, r1];
     const reads = pair.filter(isLookup);
     if (reads.some((x) => x.at !== d.hash)) {
       // F56: one hash can carry two outcomes, and a lookup can name the failed one at another block for good, so a
@@ -1241,6 +1245,14 @@ export function createRelayer(rpcs: readonly [Rpc, Rpc], archival: Rpc, account:
         const ak = await readKey(rpcs[0], { finality: "final", account_id: account, public_key: publicKey });
         if (ak.kind !== "key" || ak.permission !== "FullAccess" || ak.block === undefined) throw new Error("relayer: the gas account's key is not a full-access key at final");
         const b0 = ak.block;
+        // b0 and K's nonce on both providers before anything is signed (review P2-2): b0's hash the same on both, and
+        // the key at b0 on the other the same nonce. One provider's non-canonical block or low nonce would sign bytes
+        // the chain never applies, read unknown for good; a disagreement refuses the send, nothing signed or counted
+        const [at, k1] = await Promise.all([mustBlock(b0.height), readKey(rpcs[1], { block_id: Number(b0.height), account_id: account, public_key: publicKey })]);
+        if (at.hash !== b0.hash) throw new Error(`relayer: b0 (${b0.height}) is ${b0.hash} on provider 0, ${at.hash} on both`);
+        if (k1.kind !== "key" || k1.permission !== "FullAccess" || k1.nonce !== ak.nonce || (k1.block !== undefined && k1.block.height !== b0.height)) {
+          throw new Error(`relayer: the providers disagree on the gas account's key at b0 (${b0.height})`);
+        }
         let nonce: bigint;
         for (;;) {
           nonce = c !== null && c > ak.nonce + 1n ? c : ak.nonce + 1n;

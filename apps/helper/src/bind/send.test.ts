@@ -3114,3 +3114,44 @@ test("a FunctionCall encodes as nearcore's Action::FunctionCall: tag 2, method, 
   assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 300_000_000_000_001n, deposit: 0n }), /gas/);
   assert.throws(() => encodeAction({ kind: "call", receiver: VAULT, method: "m", args: "{}", gas: 1n, deposit: 1n << 128n }), /deposit/);
 });
+
+test("two-agree (review P1-1): built as the wiring builds it (archival rpcs[0], or none), provider 0 naming D with every receipt failed while provider 1 forgot reads unknown, for every action a path acts on", async () => {
+  await everyKind(async (node, name, tx) => {
+    const rs = node.rpcs();
+    const wrap = (q: Rpc, e: Edit): Rpc => ((m: string, p: unknown) => e(m, p as Record<string, unknown>, () => q(m, p as never))) as Rpc;
+    const liar = wrap(rs[0], failedAtD);
+    const forgot = wrap(rs[1], forgets);
+    for (const [how, archival] of [["archival rpcs[0] (env.ts, withdraw/send.ts before the fix)", liar], ["archival rpcs[1]", forgot], ["no archival (the wiring now)", null]] as const) {
+      const out = await createRelayer([liar, forgot], archival, RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50).resolve(tx, noResend);
+      assert.equal(out.kind, "unknown", `${name}: ${how}`);
+    }
+    // honest and agreeing, with no archival one: final
+    assert.equal((await createRelayer(rs, null, RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50).resolve(tx, noResend)).kind, "final", name);
+  });
+});
+
+test("review P2-2: b0 and the key's nonce are read on both providers before the signing: one provider's non-canonical b0 hash, or a nonce below the chain's, refuses the send with nothing signed, sent or counted; agreeing, it lands", async () => {
+  const lies: [string, 0 | 1, Edit][] = [
+    ["b0 under a hash that is not the chain's", 0, async (m, p, real) => {
+      const a = await real();
+      return m === "query" && p.request_type === "view_access_key" && p.block_id === undefined ? { ...(a as object), block_hash: base58(createHash("sha256").update("not canonical").digest()) } : a;
+    }],
+    ["a nonce below the chain's", 0, async (m, p, real) => {
+      const a = (await real()) as { nonce?: number };
+      return m === "query" && p.request_type === "view_access_key" && p.block_id === undefined && typeof a.nonce === "number" ? { ...a, nonce: a.nonce - 5 } : a;
+    }],
+    ["the other provider's key at b0 under another nonce", 1, async (m, p, real) => {
+      const a = (await real()) as { nonce?: number };
+      return m === "query" && p.request_type === "view_access_key" && p.block_id !== undefined && typeof a.nonce === "number" ? { ...a, nonce: a.nonce + 1 } : a;
+    }],
+  ];
+  for (const [name, i, lie] of lies) {
+    const node = new Node();
+    const r = relayerWith(node, { [i]: lie });
+    const before = node.relayerStore.nonceNext(r.key);
+    const tx: TxRef[] = [];
+    await assert.rejects(r.send(prepayAction(1n), open, keep(tx)), /disagree|b0/, name);
+    assert.deepEqual([tx.length, node.sent.length, node.relayerStore.nonceNext(r.key)], [0, 0, before], `${name}: nothing signed, sent or counted`);
+    assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final", `${name}: the next send, both agreeing, lands`);
+  }
+});

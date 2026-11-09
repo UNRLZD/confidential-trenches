@@ -704,9 +704,9 @@ test("the fee answer names the sell sender's address as sell_sender (null with n
 // checked again after the queue.
 
 const tick = () => new Promise((ok) => setTimeout(ok, 5));
-/** A receipt as a node answers one: status, the gas used, its price and (OP chains) the L1 fee. */
+/** A receipt as a node answers one: status, its block, the gas used, its price and (OP chains) the L1 fee. */
 const receiptOf = (status: "0x0" | "0x1", o: { gasUsed?: bigint; price?: bigint; l1Fee?: bigint } = {}) => ({
-  status, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
+  status, blockHash: `0x${"e".repeat(64)}`, gasUsed: `0x${(o.gasUsed ?? 1_000_000n).toString(16)}`, effectiveGasPrice: `0x${(o.price ?? 2n * BASE + TIP).toString(16)}`, ...(o.l1Fee === undefined ? {} : { l1Fee: `0x${o.l1Fee.toString(16)}` }),
 });
 const reads = (calls: Calls, m: string) => calls.filter((c) => c.method === m).length;
 /** FeeCollector's Paid topic, written out here (card evm-fee-collector: event Paid(address indexed from, uint256 value)). */

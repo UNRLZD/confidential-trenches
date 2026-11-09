@@ -50,7 +50,7 @@ type Opts = {
   reverted?: boolean;
   /** eth_getTransactionReceipt answers null (no receipt yet) */
   noReceipt?: boolean;
-  /** the receipt's blockHash */
+  /** the receipt's blockHash (default one block's; "none": no blockHash) */
   receiptBlock?: string;
   code?: (tag: string) => string;
   /** eth_call reverts when the call carries fee fields (a GASPRICE-dependent revert). */
@@ -86,7 +86,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
       case "eth_maxPriorityFeePerGas": return "0x5f5e100";
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
-      case "eth_getTransactionReceipt": return o.noReceipt ? null : { status: o.reverted ? "0x0" : "0x1", ...(o.receiptBlock === undefined ? {} : { blockHash: o.receiptBlock }) };
+      case "eth_getTransactionReceipt": return o.noReceipt ? null : { status: o.reverted ? "0x0" : "0x1", ...(o.receiptBlock === "none" ? {} : { blockHash: o.receiptBlock ?? `0x${"e".repeat(64)}` }) };
       default: throw new Error(`unexpected ${method}`);
     }
   };
@@ -123,6 +123,14 @@ test("helper-judge-two-agree: one provider's revert never frees the nullifier: a
     ["no receipt on the other", { noReceipt: true }],
     ["the other's revert in another block", { reverted: true, receiptBlock: `0x${"b".repeat(64)}` }],
   ];
+  // review P3-3: two reverted receipts that name no block (or no well-formed one) never agree on one
+  for (const bad of ["none", "0x", `0x${"a".repeat(63)}`, `0x${"g".repeat(64)}`]) {
+    const a: Calls = [];
+    const s = make(a, { reverted: true, receiptBlock: bad }, [], NOW, { reverted: true, receiptBlock: bad });
+    assert.equal(code(await s.carry(req())), "ok");
+    assert.equal(code(await s.carry(req())), "ok", `both reverted with blockHash ${bad}: the first send's answer`);
+    assert.equal(sends(a).length, 1, `blockHash ${bad}: never sent again`);
+  }
   for (const [name, other] of lies) {
     for (const liarFirst of [true, false]) {
       const a: Calls = [];
