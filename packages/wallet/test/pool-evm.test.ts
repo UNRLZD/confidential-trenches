@@ -2618,3 +2618,22 @@ test("review of 39a4c67a, P3-5: a hold of a pool with no leaf yet is proven by t
   assert.equal(r.events.length, 4);
   assert.ok(log2.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), "an empty hold of a pool with leaves dropped");
 });
+
+test("review of 39a4c67a, P3-3: the record keeps its write's own time, so a new page on a pool with no new leaf rewrites it only a day after that write", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  let writes = 0;
+  const counted: EvmSyncHold = { ...box, write: async (x) => (writes++, box.write(x)) };
+  const move = (n: number) => ((c.head += n), (c.finalized += n));
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
+  assert.equal(writes, 1);
+  // a new page 1,000 blocks on (the last leaf is days older): no write
+  move(1_000);
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
+  assert.equal(writes, 1, "no rewrite on a new page within a day of the last write");
+  // a new page a day of blocks after the write: written
+  move(42_200);
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: counted, ...noWait }).events();
+  assert.equal(writes, 2);
+  assert.equal(box.record()?.to, BigInt(c.finalized));
+});

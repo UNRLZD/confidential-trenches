@@ -1183,7 +1183,17 @@ export type EvmSyncArgs = {
  * leaves, in log order, so the tree is rebuilt from them; `to` is the last block synced. The pool's public logs only: no
  * secret, and nothing that says which leaf is the user's.
  */
-export type EvmSyncHeld = { network: EvmNetwork; pool: string; fromBlock: bigint; to: bigint; events: readonly EvmPoolEvent[]; kept?: readonly EvmSyncKept[] };
+export type EvmSyncHeld = {
+  network: EvmNetwork;
+  pool: string;
+  fromBlock: bigint;
+  to: bigint;
+  events: readonly EvmPoolEvent[];
+  kept?: readonly EvmSyncKept[];
+  /** The time (s) of the finalized block the record was written at, so a sync with no new leaf rewrites it only a day
+   *  after (EVM_HOLD_WRITE_SECONDS; review of 39a4c67a, P3-3). Absent: not known, written at the next round. */
+  at?: bigint;
+};
 /** One source's logs past a hold's `to` (from = to + 1) up to a finalized block, by operator (card evm-pool-sync-holds):
  *  a source's own word, never taken as the pool's (only two operators' same bytes making the pool's trees are), kept
  *  with the hold so a later sync, a restore's or a new page's, reads that source on from them. */
@@ -1231,7 +1241,7 @@ function heldOf(h: unknown, pin: EvmPoolPin, pool: string): EvmSyncHeld | null {
     if (kept.some((y) => y.op === x.op) || !eventsIn(x.logs, x.from, x.to, pool)) continue;
     kept.push(x as EvmSyncKept);
   }
-  return { network: r.network, pool: r.pool, fromBlock: r.fromBlock, to, events: r.events as Ev[], kept };
+  return { network: r.network, pool: r.pool, fromBlock: r.fromBlock, to, events: r.events as Ev[], kept, ...(typeof r.at === "bigint" && r.at > 0n ? { at: r.at } : {}) };
 }
 /** Pool events of the shape the sync and a restore read, in blocks from..to, in order, each the very event its log's
  *  bytes decode to (review of 7eb8cfb9, P3-1: the views prove the leaves, never a release's other fields, which a
@@ -1455,6 +1465,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         held = [...h.events];
         heldTo = writtenTo = h.to;
         writtenCount = held.length;
+        writtenAt = h.at ?? null;
         fromHold = true;
       }
       if (h !== null && h.to === heldTo) for (const k of h.kept ?? []) kept.set(k.op, { from: k.from, to: k.to, logs: [...k.logs] });
@@ -1608,7 +1619,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       // the kept logs go with the hold, so a restore's sync or a new page reads each source on from them
       if (a.held !== undefined && kept.size > 0 && signal?.aborted !== true) {
         const ks = [...kept].filter(([, k]) => k.from === heldTo + 1n).map(([op, k]) => ({ op, from: k.from, to: k.to, logs: k.logs }));
-        await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: heldTo, events: held, kept: ks }).catch(() => {});
+        await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: heldTo, events: held, kept: ks, ...(writtenAt === null ? {} : { at: writtenAt }) }).catch(() => {});
       }
       if (lagged || moved || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
       throw new Error(`${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`);
@@ -1643,7 +1654,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       writtenTo = top;
       writtenCount = held.length;
       writtenAt = fin.timestamp;
-      await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: top, events: held }).catch(() => {});
+      await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: top, events: held, at: fin.timestamp }).catch(() => {});
     }
     return { fin, anchor, events, stateTree, labelTree };
   }
