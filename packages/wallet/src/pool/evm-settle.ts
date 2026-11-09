@@ -16,7 +16,10 @@
 //   A release whose _newCommitment is not that change (the note's secrets used elsewhere) is the chain's truth all the
 //   same: the note goes to SPENT with no change note, as a restore lists it (`elsewhere`), never freed.
 // - Freed: the pool refuses a release once block.timestamp * 1000 is past its deadlineMs (src/PrivacyPool.sol:241), and
-//   a block's timestamp never goes below its parent's, so once `fin`'s time * 1000 is past the note's deadline, any
+//   a block's timestamp is never below its parent's, and may equal it: on Robinhood (Arbitrum Nitro) the sequencer sets
+//   a block's time to its parent's when it would be lower (OffchainLabs/nitro arbos/block_processor.go:211-212 at
+//   ccc5c828); on Base it is observed, not cited: 40 consecutive blocks on each of Base and Base Sepolia (read 9 Nov
+//   22:33Z) had none below its parent and 32 equal to it. So once `fin`'s time * 1000 is past the note's deadline, any
 //   release of the note is in a block at or below `fin`, so in the round. `fin` is the lower of the two RPCs' finalized
 //   blocks, so both RPCs' final block time is past the deadline. No release in the round then: RESERVED -> UNSPENT (the
 //   store's own rule, blockTimeMs past deadlineMs), and the queue proves the note again. Before that the note is held:
@@ -60,7 +63,6 @@ export async function evmSettleReserved(a: EvmSettleArgs): Promise<EvmReservedPa
   const reserved = (await a.notes.list()).filter((n) => n.scope === a.scope && n.state === "RESERVED");
   if (reserved.length === 0) return out;
   const r = await a.round(a.signal);
-  a.signal?.throwIfAborted();
   if (typeof r?.fin?.number !== "bigint" || typeof r.fin.timestamp !== "bigint" || !Array.isArray(r.events)) throw new Error("round: not the sync's round");
   const finMs = r.fin.timestamp * 1000n;
   // each release by its nullifier: at most one (the pool refuses a nullifier twice; a round with two is not the pool's)
@@ -71,6 +73,7 @@ export async function evmSettleReserved(a: EvmSettleArgs): Promise<EvmReservedPa
     releases.set(e.nullifier!, at);
   });
   for (const n of reserved) {
+    a.signal?.throwIfAborted(); // a sign out (its round read or a note's write in hand) stops the pass before its next write
     try {
       const s = await settleOne(a, n, r, releases, finMs);
       out[s].push(n.id);

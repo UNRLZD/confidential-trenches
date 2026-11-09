@@ -242,3 +242,103 @@ test("a note of another scope is never read for, and a round that fails holds ev
   await assert.rejects(evmSettleReserved({ seed64: SEED, notes: ns, scope: SCOPE, round: async () => { throw new Error("rpc down"); } }), /rpc down/);
   assert.equal(await stateOf(ns, id), "RESERVED");
 });
+
+// The settle's own checks on a round as the sync gives it (review P3-1): each round below is built leaf by leaf, so one
+// check at a time decides the note. A RESERVED note `ref` at leaf `at`, its proof taken with the deadline DEADLINE_MS.
+async function reservedAt(ref: NoteRef, at: bigint): Promise<{ ns: NoteStore; id: string; commitment: bigint }> {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  const ns = await openNoteStore(w);
+  stores.push(ns, w);
+  const commitment = noteCommitment(VALUE, L0, P(ref));
+  const n = await ns.add({ ref, scope: SCOPE, precommitment: P(ref), state: "UNSPENT", leaf: { value: VALUE, label: L0, commitment, leafIndex: at } });
+  const held = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: DEADLINE_MS, context: "5" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: held.attempt! });
+  return { ns, id: n.id, commitment };
+}
+const row = (block: number) => ({ block: BigInt(block), blockHash: `0x${w64(BigInt(block))}`, logIndex: 0n, bytes: "0x" });
+const depEv = (state: bigint) => ({ ...row(5), kind: "deposit" as const, state, label: L0, value: VALUE, precommitment: 1n, nullifier: null, recipient: null, token: null });
+const relEv = (ref: NoteRef, state: bigint, value = WITHDRAWN) => ({ ...row(RELEASE_BLOCK), kind: "buy" as const, state, label: null, value, precommitment: null, nullifier: noteSecrets(SEED, ref).nullifierHash, recipient: W0, token: TA });
+/** One settle pass on a round whose finalized anchor is block 30 (past the deadline) and whose leaves are `events`. */
+const settleOn = (ns: NoteStore, events: unknown[]) => evmSettleReserved({ seed64: SEED, notes: ns, scope: SCOPE, round: async () => ({ fin: { number: 30n, timestamp: timeOf(30) }, events: events as never }) });
+const changeOf = (ref: NoteRef, value: bigint) => noteCommitment(value, L0, P(ref));
+
+test("a change note's own spend writes the next change, j + 1: never change j again", async () => {
+  // change 0 (j = 0) at leaf 1, spent at leaf 2: its change is change 1 under the same label
+  const { ns, id, commitment } = await reservedAt(C0, 1n);
+  const C1: NoteRef = { kind: "change", l: L0, j: 1 };
+  assert.deepEqual(await settleOn(ns, [depEv(9n), depEv(commitment), relEv(C0, changeOf(C1, VALUE - WITHDRAWN))]), { spent: [id], freed: [], held: [] });
+  const next = (await ns.list()).find((n) => n.parent === id)!;
+  assert.deepEqual(next.ref, C1);
+  assert.equal(next.precommitment, P(C1));
+  assert.deepEqual(next.leaf, { value: VALUE - WITHDRAWN, label: L0, commitment: changeOf(C1, VALUE - WITHDRAWN), leafIndex: 2n });
+});
+
+test("a release before the note's own leaf, one of 0 or above its value, or a round whose leaf is not the note's settles nothing", async () => {
+  // the release (with the change it would write) at leaf 1, before the note's leaf 2
+  const early = await reservedAt(D0, 2n);
+  assert.deepEqual(await settleOn(early.ns, [depEv(9n), relEv(D0, changeOf(C0, VALUE - WITHDRAWN)), depEv(early.commitment)]), { spent: [], freed: [], held: [early.id] });
+  // a release of 0 (whose change would be the whole value) and one above the note's value
+  const zero = await reservedAt(D0, 1n);
+  assert.deepEqual(await settleOn(zero.ns, [depEv(9n), depEv(zero.commitment), relEv(D0, changeOf(C0, VALUE), 0n)]), { spent: [], freed: [], held: [zero.id] });
+  const over = await reservedAt(D0, 1n);
+  assert.deepEqual(await settleOn(over.ns, [depEv(9n), depEv(over.commitment), relEv(D0, changeOf(C0, 0n), VALUE + 1n)]), { spent: [], freed: [], held: [over.id] });
+  // the round's leaf 1 is another commitment than the note's: the store and the round differ
+  const other = await reservedAt(D0, 1n);
+  assert.deepEqual(await settleOn(other.ns, [depEv(9n), depEv(other.commitment + 1n), relEv(D0, changeOf(C0, VALUE - WITHDRAWN))]), { spent: [], freed: [], held: [other.id] });
+  for (const x of [early, zero, over, other]) {
+    assert.equal(await stateOf(x.ns, x.id), "RESERVED");
+    assert.equal((await x.ns.list()).length, 1, "no change note written");
+  }
+});
+
+test("a round with one nullifier spent twice settles nothing, and a different change already on the ref is never taken", async () => {
+  const twice = await reservedAt(D0, 1n);
+  const change = changeOf(C0, VALUE - WITHDRAWN);
+  await assert.rejects(settleOn(twice.ns, [depEv(9n), depEv(twice.commitment), relEv(D0, 5n), relEv(D0, change)]), /a nullifier spent twice/);
+  assert.equal(await stateOf(twice.ns, twice.id), "RESERVED");
+  // another tab wrote change 0 between this pass's list and its write, at another leaf than this release's: not this
+  // change, so the pass settles nothing of its own (the note held), never "spent" on a ref match alone
+  const taken = await reservedAt(D0, 1n);
+  const listed = taken.ns.list.bind(taken.ns);
+  let first = true;
+  taken.ns.list = async () => {
+    const out = await listed();
+    if (first) {
+      first = false;
+      await taken.ns.add({ ref: C0, scope: SCOPE, precommitment: P(C0), state: "UNSPENT", leaf: { value: VALUE - WITHDRAWN, label: L0, commitment: change, leafIndex: 7n } });
+    }
+    return out;
+  };
+  assert.deepEqual(await settleOn(taken.ns, [depEv(9n), depEv(taken.commitment), relEv(D0, change)]), { spent: [], freed: [], held: [taken.id] });
+  assert.equal((await taken.ns.list()).find((n) => refKey(n.ref) === refKey(C0))!.leaf!.leafIndex, 7n, "the other tab's change is left as it is");
+});
+
+test("a pass stopped (sign out) writes nothing after the stop: not after its round, not after its note in hand", async () => {
+  // stopped while the round is read: it rejects, the note stays RESERVED
+  const a = await reservedAt(D0, 1n);
+  const stop = new AbortController();
+  const round = async () => {
+    stop.abort();
+    return { fin: { number: 30n, timestamp: timeOf(30) }, events: [depEv(9n), depEv(a.commitment), relEv(D0, changeOf(C0, VALUE - WITHDRAWN))] as never };
+  };
+  await assert.rejects(evmSettleReserved({ seed64: SEED, notes: a.ns, scope: SCOPE, round, signal: stop.signal }), { name: "AbortError" });
+  assert.equal(await stateOf(a.ns, a.id), "RESERVED");
+  assert.equal((await a.ns.list()).length, 1);
+  // two notes freed in one pass, stopped during the first one's write: the second is never written
+  const b = await reservedAt(D0, 1n);
+  const D1: NoteRef = { kind: "deposit", s: SCOPE, i: 1 };
+  const L1 = vaultLabelOf(keccak_256, SCOPE, 3n);
+  const c1 = noteCommitment(VALUE, L1, P(D1));
+  const n1 = await b.ns.add({ ref: D1, scope: SCOPE, precommitment: P(D1), state: "UNSPENT", leaf: { value: VALUE, label: L1, commitment: c1, leafIndex: 2n } });
+  const h1 = await b.ns.move(n1.id, "UNSPENT", "HELD", { deadlineMs: DEADLINE_MS, context: "6" });
+  await b.ns.move(n1.id, "HELD", "RESERVED", { attempt: h1.attempt! });
+  const later = new AbortController();
+  const move = b.ns.move.bind(b.ns);
+  b.ns.move = (async (...args: Parameters<NoteStore["move"]>) => {
+    const out = await move(...args);
+    later.abort();
+    return out;
+  }) as NoteStore["move"];
+  await assert.rejects(evmSettleReserved({ seed64: SEED, notes: b.ns, scope: SCOPE, round: async () => ({ fin: { number: 30n, timestamp: timeOf(30) }, events: [depEv(9n), depEv(b.commitment), depEv(c1)] as never }), signal: later.signal }), { name: "AbortError" });
+  assert.deepEqual((await b.ns.list()).map((n) => n.state).sort(), ["RESERVED", "UNSPENT"]);
+});
