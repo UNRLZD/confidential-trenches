@@ -29,8 +29,9 @@ const HELPER = "ct-api.unrealized.trade";
 // plus the archival RPC, read only for a held move out both of the pair forgot (card held-move-forgotten-tx)
 const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com"; // near-rpc-operators: one operator (the release's FastNEAR hosts and the archival list)
 // the Solana trade's own (card signpage-solana-trade): provider A of LD1 and the kit's three device-direct send paths
-// (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps
-const SOLANA = "https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
+// (packages/kit/src/trade/solana/send.ts); packages/signpage/test/trade.test.ts reads them from the page's trade deps;
+// and Pocket's gateway, the second of the restore's U_X pair (card wallet-restore-reads-ux, pool-restore.ts RESTORE_UX_SOLANA)
+const SOLANA = "https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists
 const EVM = evmOrigins().join(" ");
 

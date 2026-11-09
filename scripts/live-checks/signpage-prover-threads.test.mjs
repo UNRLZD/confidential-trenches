@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/signpage-prover-threads.test.mjs: the live check replays recorded answers
 // (signpage-prover-threads.answers.json), each the harness run on a build served under its own _headers (SIGN_HOST does
 // not serve the thread file before this card's deploy), on the test box. good: a fresh `deploy.mjs --dry-run` build of
-// this branch, in Playwright's WebKit (both re-recorded on the box for card page-evm-rpc-csp's site CSP, 2026-11-07, and with goodChromium for card held-move-forgotten-tx's, the mainnet archival RPCs, 2026-11-08); goodChromium: the same in the installed Google Chrome (over the harness's local HTTPS server): PASS. bad and badWebkit: main's build before this card (no thread file, the
+// this branch, in Playwright's WebKit (both re-recorded on the box for card page-evm-rpc-csp's site CSP, 2026-11-07, and with goodChromium for card held-move-forgotten-tx's, the mainnet archival RPCs, 2026-11-08; both again on the Mac for card wallet-restore-reads-ux's, Pocket's Solana gateway, 2026-11-09, WebKit 26.6 and Chrome 157); goodChromium: the same in the installed Google Chrome (over the harness's local HTTPS server): PASS. bad and badWebkit: main's build before this card (no thread file, the
 // worker on one thread), in Chromium and WebKit: FAIL. badLoose: this branch's build with the site's worker-src loosened
 // to 'self' data: blob:, the change the card refuses: the planted data: worker runs: FAIL. The other bad answers are
 // the good one with one fault planted each: FAIL.

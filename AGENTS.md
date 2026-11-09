@@ -34,7 +34,7 @@ For the longer read, see [docs/architecture.md](docs/architecture.md) and [docs/
 | A test browser | `scripts/browsers.mjs` | The only place a browser starts: the installed Google Chrome with its sandbox on, held by `scripts/ci/browser-launch.mjs` |
 | A live check | `scripts/live-checks/` | One per change, see below; `.github/workflows/live.yml` runs a deploy's checks on GitHub's runners |
 | The performance table | `perf/runs/*.json` | `scripts/perf-table.mjs` writes the table from these |
-| CI | `.github/workflows/ci.yml` | Five required jobs |
+| CI | `.github/workflows/ci.yml` | Six required jobs; the merge queue lands green pull requests in groups |
 
 `packages/exit/` holds the exit tool: money out with only the 12 words and public RPCs. Today it reads the vault's
 lists on two public NEAR RPCs that must agree byte for byte (`src/rpc.ts`) and loads the setup files, hash-checked
@@ -120,7 +120,8 @@ over public RPCs that rate-limit.
 
 ## CI
 
-`.github/workflows/ci.yml` runs five required jobs on every pull request into `main`:
+`.github/workflows/ci.yml` runs six required jobs on every pull request into `main`, and again on every merge queue
+group before it lands:
 
 | Job | Runs |
 |---|---|
@@ -129,8 +130,14 @@ over public RPCs that rate-limit.
 | `verify-gate` | `scripts/ci/verify-gate.mjs`: commit subjects and live checks |
 | `money-gate` | `scripts/ci/money-gate.mjs` on the change's records |
 | `test` | package tests, typecheck, live-check replays, vault scripts, `cargo test` |
+| `vault-sandbox` | the vault's tests on a local NEAR sandbox, when a change touches a file they read; otherwise a printed skip |
 
-On a pull request the verify and money gates run as `main` has them, so a pull request cannot loosen its own gate.
+Pull requests reach `main` only through GitHub's merge queue. A green pull request joins the queue, which runs the six
+jobs again on `main` with it and the pull requests ahead of it, then lands every one that passes, each as its own merge
+commit under its pull request's title. A pull request never has to catch up with `main` and wait for a second run.
+
+On a pull request and in the queue the verify and money gates run as `main` has them, so a pull request cannot loosen
+its own gate.
 Every action is pinned to a commit sha. `scripts/ci/tests-run.test.mjs` fails when a tracked test file is run by
 no command.
 

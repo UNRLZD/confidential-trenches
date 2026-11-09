@@ -3,6 +3,8 @@
 // fixed time, and says so when the budget never goes idle.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import * as gate from "./jup-idle.mjs";
 import { IDLE_MAX_MS, POLL_MS, RETRY_MAX_S, judge, readMs, retryMs, waitIdle } from "./jup-idle.mjs";
 
 const BASE = "https://helper.example";
@@ -36,12 +38,35 @@ function world(script) {
 }
 const GOOD = { timing: "lists;dur=1, read;dur=45, total;dur=46" };
 
-test("a cold page with its Jupiter row inside a second is idle on the first probe, and nothing is slept", async () => {
+test("a cold page with its Jupiter row inside a second is idle on the first probe, and only the probe's own search is waited out", async () => {
   const w = world([GOOD]);
   const r = await waitIdle({ base: BASE, ...w, rand: () => 0.5 });
   assert.equal(r.idle, true);
   assert.equal(r.probes, 1);
-  assert.deepEqual(w.seen.sleeps, []);
+  assert.deepEqual(w.seen.sleeps, [gate.DRAIN_MS]);
+});
+
+test("card helper-live-red: an idle probe's own search leaves the helper's Jupiter window before the check runs, so the check's first page has the room the probe read", async () => {
+  // live run 42662889061, 17:20:26.89Z: the gate's probe was the window's 6th send of the own reads' 6 (proxy.ts
+  // BUILD_ROOM leaves 4 of Free's 10 to builds); the check's page 0.3 s later waited 702 ms for a turn, past
+  // JUP_PAGE_WAIT_MS 500, and was named on chain (X-Helper-Source "chain")
+  const proxy = readFileSync(new URL("../../apps/helper/src/proxy/proxy.ts", import.meta.url), "utf8");
+  const burst = /export const BURST_MS = ([\d_]+);/.exec(proxy)?.[1];
+  assert.ok(burst !== undefined, "proxy.ts names BURST_MS");
+  assert.equal(gate.DRAIN_MS, Number(burst.replaceAll("_", "")), "the drain is the helper's window, BURST_MS");
+  // a fake helper whose own reads take 6 of a 10 s window: the page lands at once only with room left
+  const sends = [];
+  const w = world((n, clock) => {
+    const room = sends.filter((t) => t > clock - 10_000).length < 6;
+    sends.push(clock);
+    return room ? GOOD : { src: "chain", timing: 'lists;dur=1, jup;desc="late";dur=500, read;dur=600' };
+  });
+  for (let k = 0; k < 4; k++) sends.push(-1_000 - k); // a member before it spent 4, then the gate
+  const r = await waitIdle({ base: BASE, ...w, rand: () => 0.5 });
+  assert.equal(r.idle, true);
+  sends.push(w.now() - 1); // a background read meanwhile
+  const free = sends.filter((t) => t > w.now() - 10_000).length < 6;
+  assert.ok(free, "the check's page found the window as full as the gate left it");
 });
 
 test("each way the budget shows busy is read off the answer, and the next probe goes when the helper says", async () => {
@@ -56,7 +81,7 @@ test("each way the budget shows busy is read off the answer, and the next probe 
   const r = await waitIdle({ base: BASE, ...w, rand: () => 0.5 });
   assert.equal(r.idle, true);
   assert.equal(r.probes, 6);
-  assert.deepEqual(w.seen.sleeps, [POLL_MS, POLL_MS, POLL_MS, 7000, POLL_MS], "the helper's own 7 s where it names one, else the poll");
+  assert.deepEqual(w.seen.sleeps, [POLL_MS, POLL_MS, POLL_MS, 7000, POLL_MS, gate.DRAIN_MS], "the helper's own 7 s where it names one, else the poll; then the idle probe's drain");
   assert.equal(new Set(w.seen.pages).size, 6, "each probe asks another token");
 });
 
