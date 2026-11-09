@@ -531,7 +531,7 @@ test("pool-deposit-op-txs: the follow writes only the txs its two-RPC read retur
 
 test("review P2-b: an end whose tx read keeps failing is read again only until the quote's deadline and the margin are past on the device's clock, then ends with the txs read so far", async () => {
   const { POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
-  const run = async (clock: number) => {
+  const run = async (clock: number, f = F) => {
     const w = world([
       { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
       { bal: [0n, 0n], status: "SUCCESS", past: true },
@@ -544,13 +544,15 @@ test("review P2-b: an end whose tx read keeps failing is read again only until t
     };
     w.deps.txs = async (t) => void written.push(...t.map((x) => x.hash));
     w.deps.now = () => clock;
-    const end = await followPoolQuote(F, w.deps);
+    const end = await followPoolQuote(f, w.deps);
     return { end, aborted: w.deps.signal.aborted, written };
   };
   const inside = await run(F.deadline_ms + POOL_TX_READ_MARGIN_MS);
   assert.equal(inside.aborted, true, "inside the margin: read again each round, never ended by itself");
   const past = await run(F.deadline_ms + POOL_TX_READ_MARGIN_MS + 1);
   assert.deepEqual(past, { end: "in_pool", aborted: false, written: [sig(1)] }, "past it: the end, with the txs read so far");
+  // a quote with deadline_ms 0 and reads that never answer: ended on any real clock
+  assert.deepEqual(await run(Date.now(), { ...F, deadline_ms: 0 }), { end: "in_pool", aborted: false, written: [sig(1)] });
 });
 
 test("pool-deposit-op-txs: the page's follower merges the txs into the op once each, and the app is sent them", async () => {
