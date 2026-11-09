@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-withdraw-handoff";
 export const SIGN_URL = "https://confidential.unrealized.trade/";
@@ -80,7 +81,7 @@ const PKG = path.join(REPO, "packages/signpage");
 function localBuild() {
   const headers = readFileSync(path.join(PKG, "public/_headers"), "utf8");
   const csp = /^\/\*\n(?:\s.*\n)*?\s+Content-Security-Policy:\s*(.*)$/m.exec(headers)?.[1] ?? "";
-  return { html: readFileSync(path.join(PKG, "index.html"), "utf8"), csp, js: readFileSync(path.join(PKG, "public/app.js")) };
+  return { html: readFileSync(path.join(signBuilt(), "index.html"), "utf8"), csp, js: readFileSync(path.join(signBuilt(), "public/app.js")) };
 }
 
 /** The live answer: SIGN_HOST's policy and bundle (or this tree's, `local`), and the form's fee read on the testnet release. */

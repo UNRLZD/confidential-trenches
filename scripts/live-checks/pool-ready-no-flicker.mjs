@@ -21,12 +21,14 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "pool-ready-no-flicker";
 export const SIGN_HOST = "https://confidential.unrealized.trade";
 export const READ_EPOCHS = 4; // the epoch of the first ready read and three whole ones after it
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const RUN = path.join(REPO, "scripts/live-checks/pool-ready-no-flicker.devnet.json");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 const EPOCH_MS = 60_000;
@@ -62,7 +64,7 @@ export function judge(rec) {
 
 // ------------------------------------------------------------------------------------------------ the read
 export async function collect({ harness = false } = {}) {
-  const tree = readFileSync(TREE_BUNDLE);
+  const tree = readFileSync(treeBundlePath());
   const treeBundle = sha384(tree);
   let signBundle;
   if (harness) signBundle = { status: 200, sha384: treeBundle, readyWith: readyPath(tree.toString("utf8")) };

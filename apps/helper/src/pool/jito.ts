@@ -8,8 +8,9 @@
 //
 // Capacity (M369 (M1)): the keyless limit is "1 request per second per IP per region" (the same page), so the regions
 // are one shared resource of the helper's address. Each region has one pacer, shared by every carry: one request a
-// second. A carry's first send books the region whose next second comes first and waits for it, ahead of every
-// rebroadcast (a rebroadcast goes only into a second nobody booked, and never waits); a 429, a 5xx or a transport
+// second plus JITO_PACE_MARGIN_MS, counted from when the request was handed to fetch. A carry's first send books the
+// region whose next second comes first and waits for it, ahead of every rebroadcast (a rebroadcast goes only into a
+// second nobody booked, and never waits); a 429, a 5xx or a transport
 // failure goes on to the next region. A rebroadcast goes only to the region that took the carry's first send and never
 // walks the regions. So rebroadcasts, however many carries are in flight, never keep a first send out of a region for
 // more than the second already started there.
@@ -30,11 +31,29 @@ export const SOLANA_JITO_BLOCK_ENGINES: readonly string[] = Object.freeze(
     (h) => `https://${h}.mainnet.block-engine.jito.wtf/api/v1/transactions?bundleOnly=true`,
   ),
 );
+/**
+ * The margin over Jito's limit each region is paced at (card helper-jito-pace-margin). Jito counts refused requests too
+ * ("1 request per second per IP per region", docs.jito.wtf/lowlatencytxnsend), so one that arrives early is refused
+ * and the send moves to the next region. A region is marked once its request is handed to fetch, so the helper's own
+ * pauses (2.3 ms measured on a CI runner, run 42627030736; 5 ms in jito.test.ts) never shorten a gap; the margin
+ * covers what the helper cannot see, the request's path to the engine on a warm connection and the engine's own clock
+ * [design: 50 ms, 5% of one region's capacity, ten times the pause the tests plant].
+ */
+export const JITO_PACE_MARGIN_MS = 50;
+/** One region's pace: Jito's keyless 1 request a second plus JITO_PACE_MARGIN_MS. */
+export const JITO_REGION_INTERVAL_MS = SOLANA_KEYLESS_PATH_INTERVAL_MS + JITO_PACE_MARGIN_MS;
+/** What a pacer that drives rebroadcast() adds over the region's interval: the kit's (packages/kit send.ts paceArm)
+ *  counts whole Date.now() ms from its tick, the gate here performance.now() from the request's hand-off, so at an
+ *  equal interval a tick lands a fraction of a ms early and is refused unsent (review of 48c11e3c: 5-10% of ticks, one
+ *  gap 2,100.8 ms) [design: 2 ms, two of the kit clock's whole-ms steps]. */
+export const JITO_TICK_SLACK_MS = 2;
 /** How long one region gets before its try counts as a transport failure [design: a block engine answers in well under 1 s]. */
 export const JITO_TIMEOUT_MS = 2_000;
 /** The longest a first send waits for a region's second [design: past it every region is booked, so the answer is busy
- * rather than a wait that eats the release's send margin]. */
-export const JITO_QUEUE_MAX_MS = 2_000;
+ * rather than a wait that eats the release's send margin; two region intervals, so a burst of three first sends a
+ * region all go (card helper-jito-pace-margin: at 2,000 ms the margin put the third second at 2,100 ms, and a burst of
+ * 24 answered 8 busy)]. */
+export const JITO_QUEUE_MAX_MS = 2 * JITO_REGION_INTERVAL_MS;
 const ANSWER_MAX = 16_384;
 
 /** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
@@ -43,6 +62,8 @@ export type JitoSend = { kind: "ok"; region: string } | { kind: "busy"; detail: 
  * when a busy region said so (a 429 or rate-limit words, not a 5xx). */
 export type JitoTry = { kind: "ok" | "busy" | "transport" | "refused"; detail: string; throttled?: boolean };
 export type JitoSender = {
+  /** Each region's pace, ms between two requests to it (JITO_REGION_INTERVAL_MS unless given). */
+  readonly intervalMs: number;
   /** A carry's first send; `queueMaxMs` (default the sender's) is the longest it waits for a region's second. */
   send(base64Tx: string, signature: string, queueMaxMs?: number): Promise<JitoSend>;
   /** A rebroadcast to `region` (the one that took the first send) only, only in a second nobody booked. */
@@ -73,7 +94,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   if (regions.length === 0) throw new Error("no block engine");
   const doFetch = opts.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? JITO_TIMEOUT_MS;
-  const interval = opts.intervalMs ?? SOLANA_KEYLESS_PATH_INTERVAL_MS;
+  const interval = opts.intervalMs ?? JITO_REGION_INTERVAL_MS;
   const queueMax = opts.queueMaxMs ?? JITO_QUEUE_MAX_MS;
   const clock = () => performance.now(); // monotonic: a wall clock set back never books a second twice
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -82,7 +103,8 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   /** Per region: when its last request actually went (M374 (2)): a timer that fires late never brings two inside one
    * interval, as two sends booked a second apart would be after an event loop that stalled past both. */
   const sent = regions.map(() => -Infinity);
-  /** Marks region i's request as going now; the caller calls the region in the same turn, with no await between. */
+  /** Marks region i's request as gone at `now`: called in the same turn, right after the request is handed to fetch,
+   * so no pause between the mark and the request can shorten the next gap (card helper-jito-pace-margin). */
   const mark = (i: number, now: number) => {
     sent[i] = now;
     free[i] = Math.max(free[i]!, now + interval);
@@ -90,17 +112,25 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
 
   // M369 (L1): only a thrown fetch, a timeout or an oversized answer is transport; every HTTP answer is the region's
   // word: 429, 5xx or a rate-limit error is busy (the next region), anything else not the signature is refused.
-  async function one(url: string, b64: string, signature: string): Promise<JitoTry> {
+  // Region i: the request handed to fetch, then marked in the same turn (mark), then its answer read.
+  async function one(i: number, b64: string, signature: string): Promise<JitoTry> {
     let r: Response;
     let text: string;
     try {
-      r = await doFetch(url, {
+      const init: RequestInit = {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: [b64, { encoding: "base64" }] }),
         signal: AbortSignal.timeout(timeoutMs),
         redirect: "error",
-      });
+      };
+      let going: Promise<Response>;
+      try {
+        going = doFetch(regions[i]!, init);
+      } finally {
+        mark(i, clock());
+      }
+      r = await going;
       text = await bounded(r);
     } catch (e) {
       return { kind: "transport", detail: String((e as Error)?.message ?? e).slice(0, 120) };
@@ -125,6 +155,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
   }
 
   return {
+    intervalMs: interval,
     async send(b64, signature, queueMaxMs = queueMax) {
       const tried = new Set<number>();
       let transportOnly = true;
@@ -148,8 +179,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
         if (go > now) await sleep(go - now);
         // then what is left of the region's interval since its last actual request (a late timer), and go at once
         for (let wait = sent[at]! + interval - clock(); wait > 0; wait = sent[at]! + interval - clock()) await sleep(wait);
-        mark(at, clock());
-        const t = await one(regions[at]!, b64, signature);
+        const t = await one(at, b64, signature);
         if (t.kind === "ok") return { kind: "ok", region: regions[at]! };
         if (t.kind === "refused") return { kind: "refused", detail: t.detail };
         if (t.kind === "busy") transportOnly = false;
@@ -164,8 +194,7 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
       const now = clock();
       // free is never under the last actual request plus the interval (mark), so this holds both
       if (free[i]! > now) return { kind: "busy", detail: "the region's second is taken" };
-      mark(i, now);
-      return one(region, b64, signature);
+      return one(i, b64, signature);
     },
   };
 }

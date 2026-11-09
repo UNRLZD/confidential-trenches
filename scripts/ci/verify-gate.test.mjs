@@ -2,10 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { verifyGate, verifyGroup } from "./verify-gate.mjs";
+import { SIGN_BUILD_INPUTS } from "./sign-build-inputs.mjs";
 
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), "verify-gate-"));
@@ -182,7 +184,7 @@ const cut = (r, extra = {}) => {
 test("a new release list with its tree and a new ledger entry passes; old ones untouched", () => {
   const { r, base } = released();
   try {
-    r.commit("Card signpage-release: a page change", { "packages/signpage/index.html": "<!doctype html>\n" });
+    r.commit("Card signpage-release: a page change", { "packages/signpage/src/main.ts": "export {};\n" });
     const list = cut(r);
     const head = r.commit("Card signpage-release: release-2", { "packages/signpage/releases/release-2.json": list, [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
     assert.equal(refusals(r, base, head), "");
@@ -241,7 +243,8 @@ test("planted: a new release list with no tree, a tree of no commit here, or a c
 });
 
 test("planted: a new list naming a tree whose SIGN_HOST build inputs are not the head's is refused (the review's repro)", () => {
-  for (const input of ["packages/signpage/index.html", "packages/signpage/public/app.js", "packages/kit/zk/NOTICE", "LICENSE"]) {
+  // card signpage-generated-merge-free: the inputs are the bundle's sources, its lockfile and the files it serves as they are
+  for (const input of ["packages/signpage/src/main.ts", "packages/signpage/public/_headers", "packages/wallet/src/index.ts", "packages/kit/src/prover/worker.js", "packages/kit/zk/NOTICE", "pnpm-lock.yaml", "LICENSE", "tsconfig.json", "packages/signpage/tsconfig.json", "packages/wallet/tsconfig.json"]) {
     const { r, base } = released();
     try {
       // the PR ships page v1, then v2, then adds a list naming v1's tree
@@ -249,7 +252,7 @@ test("planted: a new list naming a tree whose SIGN_HOST build inputs are not the
       const v1 = r.g("rev-parse", "HEAD^{tree}");
       r.commit("Card signpage-release: v2", { [input]: "v2, the page shipped\n" });
       const head = r.commit("Card signpage-release: release-2", { "packages/signpage/releases/release-2.json": cut(r, { tree: v1 }), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
-      assert.match(refusals(r, base, head), /release-2\.json names a tree whose SIGN_HOST build inputs \(packages\/signpage\/index\.html, packages\/signpage\/public, packages\/kit\/zk, LICENSE\) are not the pull request's/, input);
+      assert.match(refusals(r, base, head), new RegExp(`release-2\\.json names a tree whose SIGN_HOST build inputs \\(${SIGN_BUILD_INPUTS.join(", ").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\) are not the pull request's`), input);
       // the base's tree while the PR changes the page: refused too
       const baseTree = r.g("rev-parse", `${base}^{tree}`);
       const head2 = r.commit("Card signpage-release: release-3", { "packages/signpage/releases/release-3.json": cut(r, { release: "release-3", tree: baseTree }) });
@@ -487,5 +490,20 @@ test("planted: a group judged from a main that already holds its first pull requ
     assert.match(out.refusals.join("\n"), /card docs-plan has no live check/);
   } finally {
     q.r.done();
+  }
+});
+
+// main's verify gate runs from scripts/ alone (ci.yml verify-gate: git archive "$BASE" scripts), so what it imports reads
+// nothing outside scripts/: sign-build-inputs.mjs loads in a folder that holds scripts/ci/ and nothing else (a read of the
+// kit's prover names there, delta review P3-2, would break main's gate; release.test.mjs holds the names instead)
+test("sign-build-inputs.mjs, which main's verify gate imports, loads from scripts/ alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vg-scripts-only-"));
+  try {
+    mkdirSync(join(dir, "scripts", "ci"), { recursive: true });
+    cpSync(join(dirname(fileURLToPath(import.meta.url)), "sign-build-inputs.mjs"), join(dir, "scripts", "ci", "sign-build-inputs.mjs"));
+    const out = execFileSync(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(join(dir, "scripts", "ci", "sign-build-inputs.mjs"))}); console.log(m.SIGN_BUILD_INPUTS.length)`], { encoding: "utf8" });
+    assert.ok(Number(out) > 0, out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
