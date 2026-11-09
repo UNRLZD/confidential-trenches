@@ -118,3 +118,20 @@ test("refused: an RPC on another genesis, an unknown venue or cluster, a record 
   const flip = (u, m, r) => (m === "getMultipleAccounts" && u === CLUSTERS.mainnet.rpcs[1] ? { ...r, value: [{ ...r.value[0], data: [Buffer.from(Buffer.from(r.value[0].data[0], "base64").map((b, i) => (i === 900 ? b ^ 1 : b))).toString("base64"), "base64"] }] } : r);
   await assert.rejects(plan("mainnet", "pumpswap", { fetchFn: fakeFetch(CLUSTERS.mainnet.genesis, flip) }), /disagree/);
 });
+
+test("regression (devnet 9 Nov 23:12Z): the need keeps the funder's rent floor; the create's slot is SLOT_BACK back in the sending node's SlotHashes", async () => {
+  const funder = b58encode(new Uint8Array(32).fill(3));
+  const steps = tableSteps(funder, funder, 1n, 255, Array.from({ length: 34 }, (_, i) => b58encode(new Uint8Array(32).fill(i + 10))), 0n);
+  // the run's funder must hold the rent, the fees and rent(0) until the sweep: without the floor the second extend was refused
+  assert.equal(needOf(6_461_760n, steps, 0n, 650_240n).total, 6_461_760n + 20_000n + 650_240n);
+  const { recentSlot, SLOT_BACK, SLOT_HASHES } = await import("./venue-table.mjs");
+  const d = Buffer.alloc(8 + 40 * 40);
+  d.writeBigUInt64LE(512n, 0);
+  for (let i = 0; i < 40; i++) d.writeBigUInt64LE(1000n - BigInt(i), 8 + 40 * i);
+  const call = async (m, params) => {
+    assert.equal(m, "getAccountInfo");
+    assert.equal(params[0], SLOT_HASHES);
+    return { value: { owner: "Sysvar1111111111111111111111111111111111111", data: [d.subarray(0, 8 + 40 * (SLOT_BACK + 1)).toString("base64"), "base64"] } };
+  };
+  assert.equal(await recentSlot(call), 1000n - BigInt(SLOT_BACK));
+});
