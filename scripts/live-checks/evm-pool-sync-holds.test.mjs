@@ -15,7 +15,7 @@ const run = (log, chains = A.good.chains) => check(replayer(log), chains);
 test("the good run is a run on both pools' sources as the signing page lists them, the helper's keyed-only route one of them", () => {
   assert.deepEqual(A.good.chains, JSON.parse(JSON.stringify(CHAINS)));
   for (const c of A.good.chains) assert.ok(c.sources.some((s) => s.op === "helper" && s.url.endsWith(`/v1/rpc/${c.name}?keyed=only`)));
-  assert.deepEqual(A.good.chains[0].sources.map((s) => s.url), ["https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", "https://base.rpc.blxrbdn.com"]);
+  assert.deepEqual(A.good.chains[0].sources.map((s) => s.url), ["https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://ct-api.unrealized.trade/v1/rpc/base?keyed=only", "https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co", "https://rpc.sentio.xyz/base"]);
 });
 
 test("the recorded good run passes: each chain two operators or more reach the deploy block 7 days out, each source's floor and date named", async () => {
@@ -63,6 +63,40 @@ test("the helper counts once: a second keyed-only route of it adds no operator",
   const r = await run([...heads, ...A.good.log], chains);
   assert.equal(r.verdict, "FAIL");
   assert.match(r.lines[0], /1 operator\(s\) reach .*\(helper\)$/);
+});
+
+// review P3-3: bloXroute answered a range that starts under its floor with logs from a later block. A source reaches
+// block n only when its first log is the busy contract's at n, or within the chain's measured slack of it (CHAINS
+// slack); a clamped answer, logs only from past that, never counts.
+test("a clamped answer, logs only from a block past the slack, does not reach: each Base source but the helper answering so FAILs Base", async () => {
+  const base = A.good.chains[0];
+  const helper = base.sources.find((s) => s.op === "helper").url;
+  assert.ok(Number.isInteger(base.slack) && base.slack >= 0 && base.slack < 100, `Base's slack: ${base.slack}`);
+  const busy = A.good.log.find((e) => e.method === "eth_getLogs" && e.url === base.sources[0].url && e.result?.length > 0).result[0];
+  let n = 0;
+  const log = A.good.log.map((e) => {
+    if (e.method !== "eth_getLogs" || e.url === helper || !base.sources.some((s) => s.url === e.url)) return e;
+    const from = Number(BigInt(e.params[0].fromBlock));
+    if (from > base.from) return e;
+    n++;
+    // the log a clamping provider gives: the busy contract's, but from a block past from + slack
+    return { url: e.url, method: e.method, params: e.params, result: [{ ...busy, blockNumber: `0x${(from + base.slack + 1).toString(16)}` }] };
+  });
+  assert.ok(n > 0, "a Base read to clamp");
+  const r = await run(log);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.match(r.lines[0], /^FAIL base: .*1 operator\(s\) reach the deploy block 7 days out \(helper\)$/);
+  // and another contract's log at n is not the busy contract's
+  const other = A.good.log.map((e) => (e.method === "eth_getLogs" && e.url !== helper && base.sources.some((s) => s.url === e.url) && Number(BigInt(e.params[0].fromBlock)) <= base.from ? { url: e.url, method: e.method, params: e.params, result: [{ ...busy, address: "0x0000000000000000000000000000000000000001", blockNumber: e.params[0].fromBlock }] } : e));
+  assert.equal((await run(other)).verdict, "FAIL");
+});
+
+test("the slack is measured, under the probe's span: Base's at most 10 blocks, Robinhood's at most 50", () => {
+  const [base, rh] = CHAINS;
+  assert.equal(base.name, "base");
+  assert.ok(base.slack <= 10, String(base.slack));
+  assert.equal(rh.name, "robinhood");
+  assert.ok(rh.slack <= 50, String(rh.slack));
 });
 
 test("the check reads providers only through provider-answer.mjs", () => {

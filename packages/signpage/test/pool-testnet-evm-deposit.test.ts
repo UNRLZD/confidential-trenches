@@ -268,16 +268,17 @@ test("card evm-pool-leaves-any-source: one hold per pool on the page; the helper
   assert.notEqual(pageEvmHold(PIN, noStore), pageEvmHold({ ...PIN, network: "robinhood-testnet" }, noStore));
   assert.deepEqual(pageEvmHistory(PIN), [], "no route for a testnet chain");
   const base = pageEvmHistory({ ...PIN, network: "base" });
-  assert.equal(base.length, 2);
+  assert.equal(base.length, 4);
   assert.equal(pageEvmHistory({ ...PIN, network: "base" })[0], base[0], "one paced route, the same each time");
   // review of 0b379bf4, P1-1: the route in its keyed-only mode, never the public fallback, one operator "helper"
   const r = base[0] as unknown as { url: string; operator: string };
   assert.match(r.url, /\/v1\/rpc\/base\?keyed=only$/);
   assert.equal(r.operator, "helper");
   assert.match((pageEvmHistory({ ...PIN, network: "robinhood" })[0] as unknown as { url: string }).url, /\/v1\/rpc\/robinhood\?keyed=only$/);
-  // card evm-pool-sync-holds: Base's bloXroute, a third deep operator; none past the helper on Robinhood
-  assert.match((base[1] as unknown as { url: string }).url, /^https:\/\/base\.rpc\.blxrbdn\.com\/?$/);
-  assert.equal(evmSourceOperator(base[1]!), "blxrbdn.com");
+  // card evm-pool-sync-holds: Base's bloXroute, Tenderly and Sentio (the kit's EVM_POOL_HISTORY, review P2-3), each its
+  // own deep operator; none past the helper on Robinhood
+  assert.deepEqual(base.slice(1).map((r) => (r as unknown as { url: string }).url.replace(/\/$/, "")), ["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co", "https://rpc.sentio.xyz/base"]);
+  assert.deepEqual(base.slice(1).map((r) => evmSourceOperator(r)), ["blxrbdn.com", "tenderly.co", "sentio.xyz"]);
   assert.equal(pageEvmHistory({ ...PIN, network: "robinhood" }).length, 1);
 });
 
