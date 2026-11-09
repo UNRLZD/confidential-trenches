@@ -45,22 +45,29 @@ function answerTo(req: Record<string, unknown>): Answer {
   return a;
 }
 
-function world(o: { read: MoveRead | null; move?: { nonce: string; deadline_ms: number; asset: string; amount: string; height: number }; seed?: Uint8Array; floor?: bigint; intents?: number }) {
+function world(o: { read: MoveRead | null; move?: { nonce: string; deadline_ms: number; asset: string; amount: string; height: number }; seed?: Uint8Array; floor?: bigint | Error; intents?: number; unpriced?: true; down?: true; unrecorded?: true }) {
   const log: string[] = [];
   const asked: Record<string, unknown>[] = [];
   const sentIntents: { signed_intent: { payload: string; public_key: string } }[] = [];
   let recorded: unknown;
   const host: Host = {
     read: async () => o.read,
-    floor: async () => o.floor ?? 13_586_400n,
-    priced: () => ({ decimalsIn: 6, pricing: PRICING }),
+    floor: async () => {
+      if (o.floor instanceof Error) throw o.floor;
+      return o.floor ?? 13_586_400n;
+    },
+    priced: () => (o.unpriced ? null : { decimalsIn: 6, pricing: PRICING }),
     decimals: () => 9,
     seed64: async () => (log.push("seed"), (o.seed ?? new Uint8Array(64)).slice()),
     seedLock: (fn) => fn(),
     move: async () => o.move,
-    record: async (m) => void ((recorded = m), log.push("record")),
+    record: async (m) => {
+      if (o.unrecorded) throw new Error("the store write failed");
+      void ((recorded = m), log.push("record"));
+    },
     now: () => NOW,
     fetch: (async (url: string, init?: RequestInit) => {
+      if (o.down) throw new TypeError("fetch failed");
       if (url === DEPOSIT_QUOTE_URL) {
         const req = JSON.parse(String(init?.body));
         asked.push(req);
@@ -117,4 +124,21 @@ test("past an unused move's deadline a new move goes, the earlier deadline hande
   assert.equal(await poolRefundMover(through.host)(F, signal), "moved");
   const done = world({ read: readOf(0n, true), move: { nonce: "n", deadline_ms: NOW + 60_000, asset: BASE_USDC, amount: "25000000", height: 99 } });
   assert.equal(await poolRefundMover(done.host)(F, signal), "none");
+});
+
+test("delta review: money read under U_{s,i} on both RPCs that cannot be moved now is held, never hidden: no price, a floor read that fails, a move that throws", async () => {
+  // each one, read as "wait" or thrown, would keep refunded off the screen with the money sitting under U_{s,i}
+  const unpriced = world({ read: readOf(25_000_000n), unpriced: true });
+  assert.equal(await poolRefundMover(unpriced.host)(F, signal), "held");
+  assert.deepEqual(unpriced.log, [], "no price: nothing quoted or signed");
+  const noFloor = world({ read: readOf(25_000_000n), floor: new Error("the pool's floor read failed") });
+  assert.equal(await poolRefundMover(noFloor.host)(F, signal), "held");
+  assert.deepEqual(noFloor.log, [], "no floor: nothing quoted or signed");
+  const down = world({ read: readOf(25_000_000n), down: true });
+  assert.equal(await poolRefundMover(down.host)(F, signal), "held");
+  assert.ok(!down.log.includes("send") && !down.log.includes("record"), "a quote that cannot be asked sends nothing");
+  // the move's record cannot be written: runRefundMove throws before the send (never a send it did not record)
+  const unrecorded = world({ read: readOf(25_000_000n), unrecorded: true });
+  assert.equal(await poolRefundMover(unrecorded.host)(F, signal), "held");
+  assert.deepEqual(unrecorded.log, ["quote", "seed"], "signed, not recorded, never sent");
 });

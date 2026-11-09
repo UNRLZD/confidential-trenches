@@ -417,12 +417,18 @@ test("review P2: an unsent quote with the helper answering REFUNDED and nothing 
   const w = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => "none" });
   await followPoolQuote(F, w.deps);
   assert.deepEqual(w.stages, ["expired"]);
-  // a read that did not count ("wait": the two RPCs did not agree) is read again before expired is shown
+  // a read that did not count ("wait": the two RPCs did not agree) is read again before expired is shown: here the next
+  // read finds the refund held under U_{s,i}, so the quote that was sent never shows expired on the way (delta review)
   let n = 0;
-  const v = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => (++n === 1 ? "wait" : "none") });
+  const v = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => (++n === 1 ? "wait" : "held") });
   await followPoolQuote(F, v.deps);
-  assert.deepEqual(v.stages, ["expired"]);
-  assert.ok(n >= 2, "expired only after a read that found nothing");
+  assert.deepEqual(v.stages, ["refunded"]);
+  assert.ok(n >= 2, "read again after the wait");
+  // and a wait then nothing under U_{s,i}: expired only after the read that found nothing
+  let m = 0;
+  const x = world([{ bal: [0n, 0n], status: "REFUNDED", past: true }], { refund: async () => (++m === 1 ? "wait" : "none") });
+  await followPoolQuote(F, x.deps);
+  assert.deepEqual(x.stages, ["expired"]);
 });
 
 test("review P2: the refund read under U_{s,i} on both RPCs and not moved (held) shows refunded; a later move shows refund_move", async () => {

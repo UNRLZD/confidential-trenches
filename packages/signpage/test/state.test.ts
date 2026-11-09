@@ -397,6 +397,10 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
     // review P3 1: a refund_move record of release-94 to 107 (no refunded fact) is still sent as a refund's leg
     [rec("refund_move"), want("refund_move", { refunded: true })],
     [rec("in_pool", { since_ms: 7, refunded: true, final: true }), want("in_pool", { since_ms: 7, refunded: true })],
+    // delta review P2: a refunded record of release-94 to 107 (the helper's word alone, no refunded fact) is sent as the
+    // follow reads it again, quote_checked with no send time, on the framed page that runs no follow too
+    [rec("refunded"), want("quote_checked")],
+    [rec("refunded", { since_ms: 7 }), want("quote_checked")],
     // a send time on a stage where nothing was sent is not sent
     [rec("expired", { since_ms: 7 }), want("expired")],
     [rec("in_pool", { txs: [{ chain: "solana", hash: "5sig", extra: 1 }] }), want("in_pool", { txs: [{ chain: "solana", hash: "5sig" }] })],

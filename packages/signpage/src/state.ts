@@ -43,6 +43,7 @@ import { depositKey, depositRecordOf, type WalletEvent, type WalletStoreReader }
 import type { DepositPublic } from "./deposit-wire.ts";
 import { SEED_SOURCES, type SeedSource } from "@blindfill/wallet/signin/words";
 import { API, RELEASE, signedOutState } from "./api.ts";
+import { refundedOnWord } from "./pool-deposit-follow.ts";
 
 const WAY: Record<SeedSource, SigninWay> = { prf: "passkey", random: "passkey", code: "words", wallet: "wallet" };
 
@@ -89,9 +90,12 @@ export function opOf(id: string, rec: unknown): Operation | null {
   // refunded stage on and `since_ms` from the first send seen; kit messages.ts PoolDepositFacts)
   if (rec.kind === "pool_deposit") {
     op.chain = isRecord(rec.follow) ? rec.follow.chain : undefined;
+    // a refunded on the helper's word alone (release-94 to 107, no refunded fact) goes out as the follow reads it again:
+    // quote_checked (pool-deposit-follow.ts resumeOf, the same rule)
+    if (refundedOnWord(rec)) op.stage = "quote_checked";
     // refund_move is shown only once the chain read the refund under U_{s,i} (every release): refunded with or without the record's fact
-    if ((rec.refunded === true || rec.stage === "refund_move") && POOL_DEPOSIT_REFUNDED_STAGES.includes(rec.stage as PoolDepositStage)) op.refunded = true;
-    if (rec.since_ms !== undefined && rec.stage !== "quote_checked" && rec.stage !== "expired") op.since_ms = rec.since_ms;
+    if ((rec.refunded === true || op.stage === "refund_move") && POOL_DEPOSIT_REFUNDED_STAGES.includes(op.stage as PoolDepositStage)) op.refunded = true;
+    if (rec.since_ms !== undefined && op.stage !== "quote_checked" && op.stage !== "expired") op.since_ms = rec.since_ms;
   }
   const probe = stateOf(true, undefined, [op as Operation]);
   return SIGNPAGE_RESULT_SCHEMAS.state(probe) ? (op as Operation) : null;

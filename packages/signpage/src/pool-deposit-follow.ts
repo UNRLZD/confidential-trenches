@@ -226,10 +226,12 @@ export function withStage(op: PoolDepositOp, s: PoolFollowStage, now: number): P
 /**
  * A record to follow on from (review P2): a refunded record with no refunded fact was written by release-94 to 107 on
  * the helper's REFUNDED alone, so it is read again from quote_checked (marked untimed: its send's time is unknown), and
- * shows refunded again only once the chain reads the money under U_{s,i}. Every other record as it is.
+ * shows refunded again only once the chain reads the money under U_{s,i}. Every other record as it is. The one rule,
+ * refundedOnWord, also holds what src/state.ts opOf sends the app (the framed page runs no follow).
  */
+export const refundedOnWord = (r: { stage?: unknown; refunded?: unknown }): boolean => r.stage === "refunded" && r.refunded !== true;
 export function resumeOf(op: PoolDepositOp): PoolDepositOp {
-  return op.stage === "refunded" && op.refunded !== true ? { ...op, stage: "quote_checked", untimed: true } : op;
+  return refundedOnWord(op) ? { ...op, stage: "quote_checked", untimed: true } : op;
 }
 
 /** One follower per op across tabs: POOL_FOLLOW_LOCK/<op id>, held while it is followed. */
