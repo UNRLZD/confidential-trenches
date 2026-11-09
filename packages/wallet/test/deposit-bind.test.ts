@@ -167,7 +167,7 @@ const publicKeyOf = (u: string) => `ed25519:${base58.encode(Uint8Array.from(u.ma
 
 // ---------- the mock relayer ----------
 type Sent = { nonce: bigint; mbh: bigint; p: bigint; bytes: string; low: bigint; hash: string; sender: string; receiver: string; pk: string; sig: string; inner: unknown };
-type Reply = "tx" | "lost" | string; // "tx": 200 {tx_hash}; "lost": no answer; else an error code
+type Reply = "tx" | "lost" | string; // "tx": 200 {tx_hash}; "lost": no answer; else an error code ("code@s": with Retry-After s)
 function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => {}) {
   const sent: Sent[] = [];
   const fetchFn = (async (url: string, init: RequestInit) => {
@@ -195,8 +195,9 @@ function relayer(chain: Chain, script: Reply[], onTx: (s: Sent) => void = () => 
       return Response.json({ tx_hash: s.hash });
     }
     if (reply.startsWith("hash:")) return Response.json({ tx_hash: reply.slice(5) }); // whatever hash the relayer says
-    const status = (HELPER_CODE_STATUS as Record<string, number>)[reply] ?? 400;
-    return Response.json({ error: { code: reply } }, { status });
+    const [code, retryAfter] = reply.split("@") as [string, string | undefined];
+    const status = (HELPER_CODE_STATUS as Record<string, number>)[code] ?? 400;
+    return Response.json({ error: { code } }, { status, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } });
   }) as typeof fetch;
   return { sent, fetchFn };
 }
@@ -384,6 +385,25 @@ test("busy: 429 rate_limited, then a tx_hash: the wait is the bind's pause after
   assert.equal(t.sent.length, 2);
   assert.equal(t.sent[1]!.bytes, t.sent[0]!.bytes);
   assert.deepEqual((note.calls ?? []).flatMap((c) => c.tx_hashes), [t.sent[1]!.hash]);
+});
+
+test("busy: Retry-After 0 is floored at the bind's pollMs: onWait and the pause both get pollMs, never 0 (re-check of 1d2c4e9a, P3)", async () => {
+  const t = await setup(["rate_limited@0", "tx"]);
+  const waits: string[] = [];
+  const deps = { ...t.deps, pollMs: 1_000, onWait: (code: string, ms?: number) => void waits.push(`onWait ${code} ${ms}`), sleep: async (ms: number) => (waits.push(`sleep ${ms}`), await t.deps.sleep()) };
+  landed(await bindDeposit(SEED, t.args, deps));
+  assert.deepEqual(waits.slice(0, 2), ["onWait rate_limited 1000", "sleep 1000"]);
+});
+
+test("busy: a stop during a busy pause with the bind's default sleep ends the bind at once, not after the Retry-After (re-check of 1d2c4e9a, P3)", async () => {
+  const t = await setup(["rate_limited@10", "tx"]);
+  const stop = new AbortController();
+  let told = 0;
+  const { sleep: _own, ...noSleep } = t.deps;
+  const deps = { ...noSleep, signal: stop.signal, onWait: () => void ((told = performance.now()), setTimeout(() => stop.abort(new Error("stop")), 20)) };
+  await assert.rejects(bindDeposit(SEED, t.args, deps), /stop/);
+  assert.ok(told > 0, "the bind paused on the busy answer");
+  assert.ok(performance.now() - told < 150, `${(performance.now() - told).toFixed(0)} ms after the pause began`);
 });
 
 test("refused: U's nonce moved past the call, P not held and the USDC back in U: a new call on the same P, past the dead nonce", async () => {

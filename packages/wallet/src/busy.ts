@@ -100,7 +100,8 @@ async function isBusy(res: Response): Promise<boolean> {
   return (e as { code?: unknown }).code === want;
 }
 
-function sleepFor(ms: number, signal?: AbortSignal): Promise<void> {
+/** Waits ms, or rejects with the signal's reason as soon as it aborts. */
+export function sleepFor(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((ok, no) => {
     if (signal?.aborted) return no(signal.reason);
     const stop = () => (clearTimeout(t), no(signal!.reason));

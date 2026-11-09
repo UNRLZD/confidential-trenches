@@ -58,6 +58,7 @@ import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
 import { deadlineOf, pacedFetch, pacedRpc, requestSignal } from "../pace.ts";
 import { DepositAccountRefused, depositAccount, NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, type NearRpc, nearRpc, RPC_TIMEOUT_MS, heightSpreadOver } from "./account.ts";
 import { type BindAnswer, depositDelegate, sendDepositDelegate, type SignedDepositDelegate } from "./delegate.ts";
+import { sleepFor } from "../busy.ts";
 
 /** The margin past max_block_height, in blocks, before a call counts as dead (W:448; V:741-743 covers both readings). */
 export const LAPSE_MARGIN = 5n;
@@ -510,7 +511,8 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
   const store = deps.store;
   const fetchFn = deps.fetchFn ?? fetch;
   const pollMs = deps.pollMs ?? POLL_MS;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((ok) => setTimeout(ok, ms)));
+  // the default wait ends at once on deps.signal (a stop during a busy relayer's Retry-After never waits it out)
+  const sleep = deps.sleep ?? ((ms: number) => sleepFor(ms, deps.signal));
   const signal = deps.signal;
   const U = depositAccount(seed, own.s, own.i).account;
   const token = NEAR_NETWORKS[own.network].usdc;
@@ -793,7 +795,8 @@ export async function bindDeposit(seed64: Uint8Array, args: BindDepositArgs, dep
           const landed = await prepaid();
           if (landed !== null) return (resend.delete(own.noteId), landed);
         }
-        await pause(answer.code, "waitMs" in answer ? answer.waitMs : undefined);
+        // a busy relayer's Retry-After, never under pollMs (a 0 or a past date would resend at once, re-check of 1d2c4e9a)
+        await pause(answer.code, "waitMs" in answer ? Math.max(pollMs, answer.waitMs) : undefined);
         step = await sendAgain(out);
       } else return { kind: "refused", code: answer.code };
     }
