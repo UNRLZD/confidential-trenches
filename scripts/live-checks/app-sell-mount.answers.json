@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T05:59:01.468Z",
+  "at": "2026-11-09T06:07:46.724Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-CtAPu9ie.js",
@@ -62,7 +62,7 @@
  },
  "bad": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:02:30.454Z",
+  "at": "2026-11-09T06:08:05.093Z",
   "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
   "entry": "/assets/index-DQm2uIN5.js",
