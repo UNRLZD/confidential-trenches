@@ -4,12 +4,24 @@
 // evm-quote-warm-round failed after the deploy (live run 42521476520: base-partial-v4 warm p95 1440 ms, over 1000) and
 // both hosts were rolled back.
 //
-// The rule: when a change touches a file under PATHS, ci.yml's deep-import job runs CHECK on the runner, against the
+// The rule: when a change touches a file of PATHS (the change from the merge base, base...head, as money-gate and
+// vault-sandbox read it: a pull request branched before main changed the quote is judged on its own files, never on
+// main's), ci.yml's deep-import job runs CHECK on the runner, against the
 // checkout's own kit (one cold and 20 warm quotes of each case through the kit's public evmPoolBuyQuote on its pinned
 // providers). A try passes only when the run exits 0 and writes a record that the check's own check() passes, read here:
 // a run that writes no record (skipped, cut off, its main block never ran) is refused, so is a record whose verdict and
 // exit code disagree. Public RPCs are noisy, so a refused try is run once more before the gate refuses: TRIES, never
-// more. quote-speed.test.mjs fails when a file the quote imports is outside PATHS.
+// more. A try past TRY_MS is killed and refused. quote-speed.test.mjs traces every file node loads for the quote and fails
+// on one outside PATHS that is not a package the kit's package.json and pnpm-lock.yaml (both in PATHS) pin.
+//
+// What it holds: honest slowdowns. A hostile pull request's kit runs inside the measured process and can fake its own
+// times, and on pull_request GitHub runs the pull request's own ci.yml, which could drop the step: as with the verify
+// and money gates, the review of a change to ci.yml or the kit is what stands against that.
+//
+// What it measures: the two Base buy cases of CHECK. A Robinhood buy and the cbBTC two-hop are out of CHECK until their
+// cards bring them under a second (its CASES); a sell quote needs a wallet holding the token and its buy's block
+// (EvmPoolSellQuoteRequest's w and boughtBlock), so no fixed public case exists for it. A slowdown only those paths
+// take passes here.
 //
 // On a pull request ci.yml runs this file and CHECK as main has them (the base's scripts/ tree in $RUNNER_TEMP/base, as
 // verify-gate runs), so a pull request cannot loosen the KPI, the cases or the rerun; the quote it measures is the
@@ -18,7 +30,7 @@
 // The Solana quote (packages/kit/src/trade/solana/) has no warm-round check of the kit alone: solana-quote-under-1s
 // quotes through the deployed helper and is pending (its Runs line), so it is not run here.
 //
-//   node scripts/ci/quote-speed.mjs <base> <head>   the change base..head, read in the working directory
+//   node scripts/ci/quote-speed.mjs <base> <head>   the change base...head, read in the working directory
 //   node scripts/ci/quote-speed.mjs --all           measures whatever changed (a push with no before, a dispatch)
 // PASS exit 0 (measured under the KPI, or no file under PATHS changed), FAIL exit 1, error exit 2.
 import { execFileSync, spawn } from "node:child_process";
@@ -29,21 +41,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 /** The quote's code: every file evmPoolBuyQuote and evmPoolVenues import is under one of these (the test holds it). */
-export const PATHS = ["packages/kit/src/checks/evm/", "packages/kit/src/trade/evm/"];
+// A path ending in "/" is a folder; any other is one file. The two files pin the npm packages the quote loads (@noble).
+export const PATHS = ["packages/kit/src/checks/evm/", "packages/kit/src/trade/evm/", "packages/kit/package.json", "pnpm-lock.yaml"];
 export const CHECK = "scripts/live-checks/evm-quote-warm-round.mjs";
 export const TRIES = 2;
+/** A try's bound: CHECK's runner jobs took 98 to 128 s, setup included (live runs 42500836732 to 42522703562,
+ *  8 Nov), so 300 s is over twice the slowest; a cold quote's scan may stall 60 s (the quote's own bound) and still fit. */
+export const TRY_MS = 300_000;
 
 /** The changed files the quote reads. */
-export const watched = (files) => files.filter((f) => PATHS.some((p) => f.startsWith(p)));
+export const watched = (files) => files.filter((f) => PATHS.some((p) => (p.endsWith("/") ? f.startsWith(p) : f === p)));
 
-/** Every path base..head adds, changes or removes (a rename as its two paths). */
+/** Every path head adds, changes or removes since its merge base with base (a rename as its two paths). */
 export function changedFiles(base, head, cwd = process.cwd()) {
-  const out = execFileSync("git", ["diff", "--name-only", "--no-renames", base, head], { cwd, encoding: "utf8", maxBuffer: 64 << 20 });
+  const out = execFileSync("git", ["diff", "--name-only", "--no-renames", `${base}...${head}`], { cwd, encoding: "utf8", maxBuffer: 64 << 20 });
   return out.split("\n").filter(Boolean);
 }
 
 /** One try's verdict: the run exited 0 and its record passes the check's own judge. */
-export function judgeTry({ status, record }, check) {
+export function judgeTry({ status, record, killed = false }, check) {
+  if (killed) return { ok: false, lines: [`FAIL the try ran past ${TRY_MS / 1000} s and was killed`] };
   if (record === null) return { ok: false, lines: [`FAIL no record: the run exited ${status} and wrote none (skipped, cut off or its main block never ran)`] };
   const r = check(record);
   const lines = [...r.lines];
@@ -83,17 +100,26 @@ export function linkKit(root = ROOT, cwd = process.cwd()) {
   if (realpathSync(at) !== realpathSync(want)) throw new Error(`${at} is not the checkout's packages/ (${want})`);
 }
 
-/** A try: CHECK as a child, its record in a fresh dir, so no earlier try's record is ever read. */
-export function runCheck(root = ROOT, cwd = process.cwd()) {
+/** A try: CHECK as a child, its record in a fresh dir, so no earlier try's record is ever read; killed past killMs. */
+export function runCheck(root = ROOT, cwd = process.cwd(), killMs = TRY_MS) {
   return async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "quote-speed-"));
     const file = path.join(dir, "run.json");
     try {
+      let killed = false;
       const status = await new Promise((resolve) => {
         const c = spawn(process.execPath, [realpathSync(path.join(root, CHECK)), "--record", file], { cwd, stdio: "inherit" });
+        const t = setTimeout(() => {
+          killed = true;
+          c.kill("SIGKILL");
+        }, killMs);
         c.on("error", () => resolve(127));
-        c.on("close", (code) => resolve(code ?? 128));
+        c.on("close", (code) => {
+          clearTimeout(t);
+          resolve(code ?? 128);
+        });
       });
+      if (killed) return { status, record: null, killed };
       let record = null;
       try {
         record = JSON.parse(readFileSync(file, "utf8"));

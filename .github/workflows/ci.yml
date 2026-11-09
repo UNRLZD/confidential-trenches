@@ -91,12 +91,13 @@ jobs:
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
-  # 25 minutes: the quote-speed step's two tries, each up to about 6 minutes on a runner whose cold quote is slow (79 to
-  # 99 s read in evm-quote-warm-round's review), on top of the 17 s the rest takes (run 42532277117).
+  # 15 minutes: the quote-speed step's two tries, each killed at 300 s (quote-speed.mjs TRY_MS; evm-quote-warm-round's
+  # own runner jobs took 98 to 128 s with setup, live runs 42500836732 to 42522703562), so at most 10 minutes, on top
+  # of the 17 s the rest of the job takes (run 42532277117), with the rest as margin for the install and the clone.
   deep-import:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       # the full history: the quote-speed step reads the change base..head and the base's scripts/
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,8 +120,11 @@ jobs:
       # second on two tries (public RPCs are noisy, so one rerun); a run that writes no record is refused. On a pull
       # request the gate and the check run as main has them, from the base's whole scripts/ tree (see verify-gate), and
       # measure the checkout's kit; scripts/ci/quote-speed.test.mjs and base-gate.test.mjs replay these lines. While main
-      # has no copy of the gate, this pull request's own copy decides on the same change.
+      # has no copy of the gate, this pull request's own copy decides on the same change; that line goes once main has
+      # the gate. The shell is bash with pipefail, so a failed git archive stops the step instead of falling through to
+      # the pull request's own copy.
       - name: a change to the EVM quote keeps its warm p95 under a second (evm-quote-warm-round on this kit)
+        shell: bash
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}

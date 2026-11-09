@@ -1,16 +1,19 @@
 // The quote-speed gate (scripts/ci/quote-speed.mjs) refuses its planted cases: a slowed quote and a skipped run, each on
 // both tries; it passes the recorded good run, and a refused try then a good one (the one rerun); it skips a change
-// that touches no file of the quote; every file the quote imports is under its PATHS; ci.yml runs it as main has it,
+// that touches no file of the quote (read from the merge base); every file node loads for the quote is under its PATHS
+// or a package they pin; the glue (runCheck, its kill, the main block, linkKit) on a stub check; ci.yml runs it as main has it,
 // in the required deep-import job, with nothing that lets the step pass on a failure. No network: every try is replayed
 // from evm-quote-warm-round.answers.json through the check's own check().
 //   node --test scripts/ci/quote-speed.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { check } from "../live-checks/evm-quote-warm-round.mjs";
-import { CHECK, PATHS, TRIES, gate, judgeTry, watched } from "./quote-speed.mjs";
+import { CHECK, PATHS, TRIES, changedFiles, gate, judgeTry, linkKit, runCheck, watched } from "./quote-speed.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const A = JSON.parse(readFileSync(path.join(ROOT, "scripts/live-checks/evm-quote-warm-round.answers.json"), "utf8"));
@@ -92,31 +95,155 @@ test("a change that touches no file of the quote is a skip; one under either pat
   assert.equal(all.ran, 2);
 });
 
-// the relative imports of a file, resolved (export ... from counts, `import type` too: a moved type file is a moved file)
-function closure(start) {
-  const seen = new Set();
-  const walk = (f) => {
-    if (seen.has(f)) return;
-    seen.add(f);
-    for (const m of readFileSync(f, "utf8").matchAll(/(?:^|\n)\s*(?:import|export)\b[^;]*?\bfrom\s+["']([^"']+)["']/g)) {
-      if (m[1].startsWith(".")) walk(path.resolve(path.dirname(f), m[1]));
-    }
-  };
-  walk(path.join(ROOT, start));
-  return [...seen].map((f) => path.relative(ROOT, f));
+// Every file node loads for `entry` (its resolve hook, so a bare `import "./x"`, an `import()` and a package are all
+// seen), as paths from ROOT, in a child process of its own.
+const TRACE = `import { registerHooks } from "node:module";
+const seen = new Set();
+registerHooks({ resolve(s, c, n) { const r = n(s, c); if (r.url.startsWith("file:")) seen.add(r.url); return r; } });
+await import(process.argv[1]);
+process.stdout.write(JSON.stringify([...seen]));`;
+function traced(entry) {
+  const out = execFileSync(process.execPath, ["--input-type=module", "-e", TRACE, pathToFileURL(entry).href], { cwd: ROOT, encoding: "utf8" });
+  return JSON.parse(out).map((u) => realpathSync(fileURLToPath(u)));
+}
+// The npm packages the kit pins in its package.json (with pnpm-lock.yaml, both in PATHS).
+const PINNED = Object.keys(JSON.parse(readFileSync(path.join(ROOT, "packages/kit/package.json"), "utf8")).dependencies ?? {});
+/** Each loaded file that is neither under PATHS nor inside a pinned package's install. */
+function outside(files) {
+  return files.filter((f) => {
+    const rel = path.relative(ROOT, f);
+    if (!rel.startsWith("..") && watched([rel]).length === 1) return false;
+    const pkg = /\/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)\//.exec(f)?.[1];
+    return !(pkg !== undefined && PINNED.includes(pkg));
+  });
 }
 
-test("every file the quote imports is under PATHS, and the kit's entry exports the quote from there", () => {
+test("every file node loads for the quote is under PATHS or a package the kit pins, and the kit's entry exports it from there", () => {
   const index = readFileSync(path.join(ROOT, "packages/kit/src/index.ts"), "utf8");
   const from = /\bevmPoolBuyQuote,[\s\S]*?\}\s*from\s+"\.\/([^"]+)"/.exec(index)?.[1];
   assert.ok(from, "index.ts exports evmPoolBuyQuote by name");
   const src = `packages/kit/src/${from}`;
   assert.deepEqual(watched([src]), [src], `${src} is under PATHS`);
-  const files = closure(src);
-  assert.ok(files.includes("packages/kit/src/trade/evm/buy-unpinned.ts"), files.join("\n"));
-  assert.deepEqual(files.filter((f) => watched([f]).length === 0), [], "a file the quote imports outside PATHS");
-  // planted: a quote that reads through a helper outside PATHS is caught
-  assert.deepEqual(watched(["packages/kit/src/freeze.ts"]), []);
+  const files = traced(path.join(ROOT, src));
+  assert.ok(files.some((f) => f.endsWith("packages/kit/src/trade/evm/buy-unpinned.ts")), files.join("\n"));
+  assert.ok(files.some((f) => /node_modules\/.*@noble\/hashes/.test(f)), "the trace sees the npm packages too");
+  assert.deepEqual(outside(files), [], "a file the quote loads outside PATHS and the pinned packages");
+  // planted: a helper outside PATHS, and a package the kit does not pin, are both caught
+  assert.equal(outside([path.join(ROOT, "packages/kit/src/freeze.ts"), "/x/node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad/index.js"]).length, 2);
+  assert.deepEqual(watched(["packages/kit/package.json", "pnpm-lock.yaml", "packages/wallet/package.json"]), ["packages/kit/package.json", "pnpm-lock.yaml"]);
+});
+
+test("planted: the trace sees a bare import and a dynamic import()", (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "quote-trace-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(path.join(dir, "entry.mjs"), 'import "./side.mjs";\nawait import("./dyn.mjs");\n');
+  writeFileSync(path.join(dir, "side.mjs"), "");
+  writeFileSync(path.join(dir, "dyn.mjs"), "");
+  const files = traced(path.join(dir, "entry.mjs")).map((f) => path.basename(f));
+  assert.deepEqual(files.filter((f) => f !== "entry.mjs").sort(), ["dyn.mjs", "side.mjs"]);
+});
+
+const git = (cwd, ...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], { cwd, encoding: "utf8" }).trim();
+
+test("planted: a pull request branched before main changed the quote skips (the change is read from the merge base)", (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "quote-base-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const q = "packages/kit/src/checks/evm/quote.ts";
+  git(dir, "init", "-q", "-b", "main");
+  mkdirSync(path.join(dir, path.dirname(q)), { recursive: true });
+  mkdirSync(path.join(dir, "apps"));
+  writeFileSync(path.join(dir, q), "a\n");
+  writeFileSync(path.join(dir, "apps/x.ts"), "a\n");
+  git(dir, "add", "--", q, "apps/x.ts");
+  git(dir, "commit", "-qm", "m0", "--", q, "apps/x.ts");
+  git(dir, "checkout", "-qb", "pr");
+  writeFileSync(path.join(dir, "apps/x.ts"), "b\n");
+  git(dir, "commit", "-qm", "pr", "--", "apps/x.ts");
+  git(dir, "checkout", "-q", "main");
+  writeFileSync(path.join(dir, q), "main's change\n");
+  git(dir, "commit", "-qm", "m1", "--", q);
+  const files = changedFiles(git(dir, "rev-parse", "main"), git(dir, "rev-parse", "pr"), dir);
+  assert.deepEqual(files, ["apps/x.ts"]);
+  assert.deepEqual(watched(files), []);
+  // and a pull request that does change the quote is measured
+  git(dir, "checkout", "-q", "pr");
+  writeFileSync(path.join(dir, q), "the pr's change\n");
+  git(dir, "commit", "-qm", "pr2", "--", q);
+  assert.deepEqual(watched(changedFiles(git(dir, "rev-parse", "main"), git(dir, "rev-parse", "pr"), dir)), [q]);
+});
+
+// A temp root holding this gate and a stub CHECK: MODE pass writes a passing record, none writes none, fail a failing
+// one, exit2 a passing record then exit 2, hang never ends. The stub's check() passes a record with ok: true.
+const STUB = `import { writeFileSync } from "node:fs";
+export const check = (r) => ({ ok: r?.ok === true, lines: [\`\${r?.ok === true ? "PASS" : "FAIL"} stub\`] });
+if (import.meta.url === \`file://\${process.argv[1]}\`) {
+  const mode = process.env.MODE, at = process.argv.indexOf("--record"), file = process.argv[at + 1];
+  if (mode === "hang") setInterval(() => {}, 1000);
+  else {
+    if (mode !== "none") writeFileSync(file, JSON.stringify({ ok: mode !== "fail" }));
+    process.exit(mode === "exit2" ? 2 : mode === "fail" ? 1 : 0);
+  }
+}
+`;
+function stubRoot(t) {
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "quote-glue-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = path.join(dir, "base");
+  mkdirSync(path.join(root, "scripts/ci"), { recursive: true });
+  mkdirSync(path.join(root, "scripts/live-checks"), { recursive: true });
+  copyFileSync(path.join(ROOT, "scripts/ci/quote-speed.mjs"), path.join(root, "scripts/ci/quote-speed.mjs"));
+  writeFileSync(path.join(root, CHECK), STUB);
+  const checkout = path.join(dir, "checkout");
+  mkdirSync(path.join(checkout, "packages"), { recursive: true });
+  return { dir, root, checkout };
+}
+
+test("runCheck: a stub's record comes back; no record, a failing one, exit 2 and a hang past its bound are refused", async (t) => {
+  const { root, checkout } = stubRoot(t);
+  const run = async (mode, killMs) => {
+    process.env.MODE = mode;
+    try {
+      return await runCheck(root, checkout, killMs)();
+    } finally {
+      delete process.env.MODE;
+    }
+  };
+  // the stub's own check(), as STUB writes it
+  const stub = (r) => ({ ok: r?.ok === true, lines: [`${r?.ok === true ? "PASS" : "FAIL"} stub`] });
+  const pass = await run("pass");
+  assert.deepEqual(pass, { status: 0, record: { ok: true } });
+  assert.equal(judgeTry(pass, stub).ok, true);
+  for (const mode of ["none", "fail", "exit2"]) assert.equal(judgeTry(await run(mode), stub).ok, false, mode);
+  assert.equal((await run("none")).record, null);
+  const t0 = Date.now();
+  const hang = await run("hang", 500);
+  assert.ok(Date.now() - t0 < 5000, "the hang was killed at its bound");
+  assert.equal(hang.killed, true);
+  assert.match(judgeTry(hang, stub).lines.join("\n"), /FAIL the try ran past \d+ s and was killed/);
+});
+
+test("the main block measures with --all from a root apart from the checkout: links the kit, passes a passing run, refuses the rest", (t) => {
+  const { root, checkout } = stubRoot(t);
+  const main = (mode) => spawnSync(process.execPath, [path.join(root, "scripts/ci/quote-speed.mjs"), "--all"], { cwd: checkout, encoding: "utf8", env: { ...process.env, MODE: mode } });
+  const ok = main("pass");
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /quote-speed: PASS \(try 1 of 2\)/);
+  assert.equal(realpathSync(path.join(root, "packages")), realpathSync(path.join(checkout, "packages")), "ROOT/packages is the checkout's");
+  for (const mode of ["none", "fail", "exit2"]) {
+    const r = main(mode);
+    assert.equal(r.status, 1, `${mode}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout, /quote-speed: FAIL \(2 tries refused/);
+  }
+});
+
+test("linkKit refuses a packages link that is not the checkout's", (t) => {
+  const { dir, root, checkout } = stubRoot(t);
+  mkdirSync(path.join(dir, "elsewhere"));
+  symlinkSync(path.join(dir, "elsewhere"), path.join(root, "packages"), "dir");
+  assert.throws(() => linkKit(root, checkout), /is not the checkout's packages/);
+  const r = spawnSync(process.execPath, [path.join(root, "scripts/ci/quote-speed.mjs"), "--all"], { cwd: checkout, encoding: "utf8", env: { ...process.env, MODE: "pass" } });
+  assert.equal(r.status, 2, r.stdout);
+  assert.match(r.stdout, /quote-speed: ERROR .*is not the checkout's packages/);
 });
 
 // the lines of one job of ci.yml, from its id to the next job
@@ -138,6 +265,8 @@ test("ci.yml runs the gate as main has it in the required deep-import job, every
   const next = lines.findIndex((l, i) => i > start && /^ {6}- /.test(l));
   const step = lines.slice(start, next < 0 ? undefined : next).join("\n");
   assert.doesNotMatch(step, /^\s+(if|continue-on-error):/m, step);
+  // GitHub's bash is "bash --noprofile --norc -eo pipefail {0}": a failed git archive stops the step
+  assert.match(step, /^ {8}shell: bash$/m, step);
   assert.doesNotMatch(text, /^\s+continue-on-error:/m);
   assert.match(text, /^ {4}if: github\.event_name != 'schedule'$/m);
   assert.match(text, /^ {10}fetch-depth: 0$/m, "the base and the change are in the checkout");
@@ -154,5 +283,5 @@ test("ci.yml runs the gate as main has it in the required deep-import job, every
   assert.match(step, /node scripts\/ci\/quote-speed\.mjs "\$BEFORE" "\$AFTER"/);
   assert.match(step, /\*\) node scripts\/ci\/quote-speed\.mjs --all ;;/);
   assert.equal(CHECK, "scripts/live-checks/evm-quote-warm-round.mjs");
-  assert.deepEqual(PATHS, ["packages/kit/src/checks/evm/", "packages/kit/src/trade/evm/"]);
+  assert.deepEqual(PATHS, ["packages/kit/src/checks/evm/", "packages/kit/src/trade/evm/", "packages/kit/package.json", "pnpm-lock.yaml"]);
 });
