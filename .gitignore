@@ -22,3 +22,12 @@ packages/.kit-mutants-*/
 **/.pool-mutant-*.ts
 **/.pool-price-mutant-*.ts
 **/.rules-pool-mutant-*.test.ts
+
+# the signing page's build output, made from its sources by packages/signpage/scripts/build-app.mjs wherever it is read
+# and at every deploy, never committed (scripts/ci/sign-build-inputs.mjs SIGN_BUILD_OUTPUTS, held by
+# scripts/ci/no-tracked-build-output.mjs)
+/packages/signpage/index.html
+/packages/signpage/public/app.js
+/packages/signpage/public/prover-worker.js
+/packages/signpage/public/prover-thread.js
+/packages/signpage/**/*.tmp

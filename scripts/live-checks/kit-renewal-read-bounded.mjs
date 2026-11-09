@@ -26,10 +26,12 @@ import "../net-window.mjs";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "kit-renewal-read-bounded";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SIGN = { url: "https://confidential.unrealized.trade/", local: path.join(ROOT, "packages/signpage") };
+// local: this tree's build, made from its sources when first read (card signpage-generated-merge-free)
+const SIGN = { url: "https://confidential.unrealized.trade/", get local() { return signBuilt(); } };
 const ID = "[\\w$]+";
 /** The rule's parts in the signing page's bundle, by name. */
 export const MARKERS = {

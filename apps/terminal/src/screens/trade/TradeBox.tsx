@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
-import { useBalance } from "../portfolio/source.tsx";
+import { heldOf } from "../portfolio/model.ts";
+import type { Row } from "../portfolio/model.ts";
+import { useBalance, useHeld } from "../portfolio/source.tsx";
+import { SellBox } from "../positions/SellBox.tsx";
+import { useSell } from "../positions/source.tsx";
 import { headerModel } from "../signin/model.ts";
 import { useSigninSheet } from "../signin/source.tsx";
 import {
@@ -40,9 +44,14 @@ import "./trade.css";
 // ticket; unrlzd.css .tk-*): the side switch, the order tabs with `Bal`, the amount box, the four presets that buy on one
 // click, `You receive`, the max line, the main button and the Route & fees and settings line. States: S8.3 Ready,
 // S8.9 Sending, S8.10 Landing, S8.11 Slow, S8.12 Filled, and a buy the kit ended (States.tsx): S8.23 Failed, S8.24 Not
-// landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Sell, Limit and TP/SL
+// landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Limit and TP/SL
 // are drawn off; Route & fees opens on its own card. Signed out (S8.1, card app-trade-box-mount): `Bal —`, the exit plan
 // block off, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No dialog, no confirm, ever.
+// The Sell side (card app-sell-mount): the switch's Sell is on while the signing page's state holds a position of this
+// token on this chain (Portfolio's own Row, heldOf) and draws the sell side (positions/SellBox.tsx) from the same trade
+// state, whose sell (positions/source.tsx useSell) asks pool.sell on a chain with a pool: the request names the chain
+// and the token amount only, and the signing page picks the note and checks the quote (and keeps a partial sell's
+// deposit back over the pool's floor, card sol-sell-deposit-back-floor). Its states are States.tsx's, as the buy side's.
 
 /** A word, marked when it is still the owner's draft. */
 function W({ id }: { id: WordId }) {
@@ -119,6 +128,23 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ amount: Cents; p: SetPreview } | null>(null);
   const [, tick] = useState(0);
+  // the Sell side: the position this token holds on this chain (the row's own token string), and the sell of it
+  const heldNow = useHeld(signedOut ? null : snapshot, chain, token);
+  const sell = useSell(chain, heldNow?.token ?? token, slippageBps, heldNow?.units ?? null);
+  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const lastHeld = useRef<Row | null>(null);
+  if (heldNow) lastHeld.current = heldNow;
+  else if (lastHeld.current && heldOf([lastHeld.current], chain, token) === null) lastHeld.current = null;
+  // while a sell's lock holds (useSell, positions/model.ts sellLocked: a sell open on the device, or one whose end has not
+  // reached the row) the box is display only: the row it draws may be what was held before the sell. While a sell runs
+  // or the lock holds, the box keeps its row though the position has left the state (a 100% sell), so its Filled or its
+  // end shows where it was tapped; after it, no position is no sell side.
+  const held = heldNow ?? (busy(sell.phase) || sell.locked ? lastHeld.current : null);
+  const onSell = side === "sell" && held !== null;
+  // the side moves only while neither side runs: a running buy or sell keeps the box that draws its state
+  const pickSide = (x: "buy" | "sell") => {
+    if (!busy(phaseRef.current) && !busy(sell.phase)) setSide(x);
+  };
 
   const amount = text === "" ? null : parseUsd(text);
   // the pool path (card trade-box-pool): a chain whose pool the signing page reports buys from it, one proof a tap; Bal
@@ -215,7 +241,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
     buy(p);
   }
 
-  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview };
+  return { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, setDismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview, sell, side, setSide: pickSide, held, heldNow, onSell };
 }
 
 /** A trade state as useTrade gives it. */
@@ -248,6 +274,8 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
   const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
+  // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
+  if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
   const last = preview?.p ?? null;
   const pending = shown === null && last !== null;
@@ -278,7 +306,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
     >
       <div className="trb-sides">
         <button type="button" className="trb-side" data-on="buy" aria-pressed="true"><W id="buy" /></button>
-        <button type="button" className="trb-side" aria-pressed="false" disabled><W id="sell" /></button>
+        <button type="button" className="trb-side" aria-pressed="false" disabled={t.heldNow === null || running} onClick={() => t.setSide("sell")} data-testid="trade-side-sell"><W id="sell" /></button>
       </div>
       <div className="trb-ot">
         <div className="trb-tabs" role="tablist">

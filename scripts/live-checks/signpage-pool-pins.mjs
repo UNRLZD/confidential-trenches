@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSolanaRent, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { TESTNET_ONLY } from "./signpage-pool-flow.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-pins";
 export const SIGN_HOST = "https://confidential.unrealized.trade";
@@ -34,7 +35,8 @@ const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signing page's Solana pair (packages/signpage/src/trade.ts SOLANA_PROVIDER_A and TRADE_HELPER's route). */
 export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v1/rpc/solana`];
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const TREE_HEADERS = path.join(REPO, "packages/signpage/public/_headers");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
 
@@ -79,7 +81,7 @@ function treeCsp() {
 
 export async function collect({ harness = false } = {}) {
   const at = new Date().toISOString();
-  const tree = readFileSync(TREE_BUNDLE);
+  const tree = readFileSync(treeBundlePath());
   const treeBundle = sha384(tree);
   let signBundle;
   let signCsp;
