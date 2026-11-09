@@ -582,11 +582,15 @@ export function handler(
         const q = raw.indexOf("?");
         const chain = (q === -1 ? raw : raw.slice(0, q)).slice(RPC_PREFIX.length);
         if (!raw.startsWith(RPC_PREFIX) || chain === "" || chain.includes("/")) return send(404, { error: { code: "not_found" } }, cors(req));
+        // card evm-pool-leaves-any-source: ?keyed=only, exactly once, reads the chain's keyed URLs alone (rpc.ts); any
+        // other value of keyed is refused before the body is read
+        const flag = new URL(raw, "http://helper.invalid").searchParams.getAll("keyed");
+        if (flag.length > 1 || (flag.length === 1 && flag[0] !== "only")) return send(400, { error: { code: "method_not_allowed" } }, cors(req));
         void readBody(req, RPC_BODY_MAX)
           .then((body) =>
             body === undefined
               ? { status: 413, body: JSON.stringify({ error: { code: "too_large" } }) }
-              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req)),
+              : rpc.handle(chain, req.headers["content-type"], body, clientOf(req), false, flag.length === 1),
           )
           // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
           // in the standard Server-Timing header, 429 and 503 included
