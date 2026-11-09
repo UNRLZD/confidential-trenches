@@ -44,6 +44,7 @@ import { checkDir as checkApp } from "../../../apps/terminal/scripts/check-deplo
 import { build as buildTerminal } from "../../../apps/terminal/scripts/deploy.mjs";
 import { HOST_ARGS, readList, RELEASES, TAG } from "./check-signpage.mjs";
 import { build as buildSign, checkDir as checkSign } from "./deploy.mjs";
+import { SIGN_BUILD_INPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO = dirname(dirname(PKG));
@@ -317,6 +318,28 @@ export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
 }
 
 const git = (...args) => spawnSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).stdout.trim();
+
+/**
+ * Review P1(a): the newest list held to this checkout's own build whenever its tree has `head`'s SIGN_BUILD_INPUTS (the
+ * bundle is built where the list is cut, so CI's clean install rebuilds it and compares): { newest, applies, problems }.
+ * A list whose tree is not in this clone throws (CI checks out the whole history for it), never passes unread.
+ */
+export function newestReleaseOnHead(dir = RELEASES, ledger = RELEASED, head = "HEAD") {
+  const newest = newestRelease(dir);
+  if (!newest) return { newest, applies: false, problems: ["no release list"] };
+  const { tree } = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
+  if (typeof tree !== "string" || spawnSync("git", ["-C", REPO, "cat-file", "-e", `${tree}^{tree}`]).status !== 0)
+    throw new Error(`${newest} names tree ${tree}, which this clone does not hold: check out the whole history (fetch-depth: 0)`);
+  const d = spawnSync("git", ["-C", REPO, "diff", "--quiet", tree, head, "--", ...SIGN_BUILD_INPUTS], { encoding: "utf8" });
+  if (d.status !== 0 && d.status !== 1) throw new Error(`git diff ${tree} ${head} failed: ${(d.stderr ?? "").trim()}`);
+  if (d.status === 1) return { newest, applies: false, problems: [] };
+  const built = buildSign();
+  try {
+    return { newest, applies: true, problems: unreleasedProblems(built, dir, ledger) };
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
+}
 const uncommitted = () => git("status", "--porcelain", "--", ".", ":!packages/signpage/releases");
 
 /** The list of this checkout's own build, in memory, for the hosts named: what a deploy from this commit serves. */

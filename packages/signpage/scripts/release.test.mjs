@@ -13,7 +13,7 @@ import { bundle, SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
 import { SIGN_BUILD_CONFIG, SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
 import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
@@ -516,4 +516,43 @@ test("APP_HOST's part of a list is built by the terminal deploy's own build(), s
   const src = readFileSync(join(PKG, "scripts", "release-list.mjs"), "utf8");
   assert.match(src, /import \{ build as buildTerminal \} from "\.\.\/\.\.\/\.\.\/apps\/terminal\/scripts\/deploy\.mjs";/);
   assert.doesNotMatch(src, /vite\.js/, "release-list.mjs runs no vite build of its own");
+});
+
+// review P1(a): the bundle is built on the release machine, so CI rebuilds it on its own clean install and holds the
+// newest list to it whenever that list's tree has HEAD's SIGN_BUILD_INPUTS (a release merge, or a release branch): a list
+// cut from a machine whose bytes are not the sources' build (a tsconfig above the repo, an edited node_modules) fails here
+test("the newest release list is this runner's clean build whenever its tree has HEAD's SIGN_BUILD_INPUTS", () => {
+  const r = newestReleaseOnHead();
+  assert.deepEqual(r.problems, [], r.problems.join("\n"));
+  if (!r.applies) assert.ok(r.newest, "a newest list to compare");
+});
+
+test("planted: a newest list naming HEAD's tree passes as this build, and fails with one byte of its /app.js changed", () => {
+  const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+  const tag = `release-${n + 1}`;
+  const tree = spawnSync("git", ["-C", PKG, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).stdout.trim();
+  const list = JSON.parse(listText(tag));
+  const plant = (edit) => {
+    const dir = releasesCopy();
+    const text = `${JSON.stringify(edit({ ...structuredClone(list), tree }), null, 1)}\n`;
+    writeFileSync(join(dir, `${tag}.json`), text);
+    try {
+      return newestReleaseOnHead(dir, { ...RELEASED, [tag]: sha256(text) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const same = plant((l) => l);
+  assert.equal(same.applies, true);
+  assert.deepEqual(same.problems, []);
+  const byte = plant((l) => {
+    const app = l.hosts.SIGN_HOST.files.find((f) => f.path === "/app.js");
+    app.sha256 = `${app.sha256.slice(0, -1)}${app.sha256.at(-1) === "0" ? "1" : "0"}`;
+    return l;
+  });
+  assert.equal(byte.applies, true);
+  assert.ok(byte.problems.some((l) => l.includes(`${tag}, the newest release, is not this SIGN_HOST build (SIGN_HOST /app.js`)), byte.problems.join("\n"));
+  // a list whose tree's inputs are not HEAD's (here: the empty tree) is not held to this build
+  const other = plant((l) => ({ ...l, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
+  assert.equal(other.applies, false);
 });
