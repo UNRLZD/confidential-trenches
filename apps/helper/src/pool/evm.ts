@@ -1850,6 +1850,11 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     // evm-quote-warm-round fold 8), never the quote's providers, some of which keep no state that far back; set, two
     // URLs of the host's own, which ready() holds to the same 600 s before the sender serves
     const v = Object.hasOwn(venues, network) ? venues[network] : undefined;
+    // the pool is the kit's pin or nothing starts (card helper-evm-mainnet-pools): every send of this sender goes to it
+    // (a withdraw's and a buy's `to`, a sale's not_pool check), so any other address would carry a user's proof to a
+    // contract the device never pinned; a network whose venue pins no pool takes none
+    const poolPin = v !== undefined && Object.hasOwn(v, "pool") ? v.pool : undefined;
+    if (poolPin === undefined || pool!.toLowerCase() !== poolPin.toLowerCase()) throw new Error(`${names[0]} is not the kit's pinned pool for ${network} (${poolPin ?? "none pinned"})`);
     const pair = v !== undefined && Object.hasOwn(v, "feeProviders") ? v.feeProviders : undefined;
     if (rpcs === "" && pair === undefined) throw new Error(`${names[4]} must be set: the kit lists no fee providers for ${network}`);
     const urls = (rpcs === "" ? [...pair!] : rpcs!.split(",")).map(evmRpcUrlOf);
