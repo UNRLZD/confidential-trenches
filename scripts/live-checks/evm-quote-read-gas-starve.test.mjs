@@ -11,13 +11,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { judge } from "./evm-quote-read-gas-starve.mjs";
+import { collect, EXIT, judge } from "./evm-quote-read-gas-starve.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-quote-read-gas-starve.answers.json", import.meta.url), "utf8"));
 
 test("the good answer (the kit's per-read gas code) passes on every provider of both chains", () => {
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
+  assert.equal(r.verdict, "PASS");
   const providers = A.good.chains.reduce((n, c) => n + c.reads.length, 0);
   assert.ok(providers >= 4, `${providers} providers`);
   assert.equal(r.lines.length, 4 + 2 * A.good.chains.length + 5 * providers);
@@ -26,6 +27,7 @@ test("the good answer (the kit's per-read gas code) passes on every provider of 
 test("the bad answer (Multicall3's own code) fails: the loop and the caught out of gas answer as reverts on every provider", () => {
   const r = judge(A.bad);
   assert.equal(r.ok, false);
+  assert.equal(r.verdict, "FAIL");
   const providers = A.bad.chains.reduce((n, c) => n + c.reads.length, 0);
   assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 1 + 5 * providers, r.lines.join("\n"));
 });
@@ -66,4 +68,77 @@ test("planted: one provider on a chain, a chain missing, a read answered 0 where
   };
   assert.equal(plant((a) => (a.chains[0].reads[2].heavy = usedFirst(a.chains[0].reads[2].heavy, 100_000))), false, "the 14M revert answered as using 100,000");
   assert.equal(plant((a) => (a.chains[1].reads[3].sixtyFour = usedFirst(a.chains[1].reads[3].sixtyFour, 29_533_582))), false, "one provider's gas used differs");
+});
+
+// live run 42552050303 died on a provider's empty body ("Unexpected end of JSON input", exit 2). The run itself, its
+// fetch answered from the recorded good answer by host and read (block, six, sixtyFour, heavy, floor), with a planted
+// answer on the hosts named in `down`: `answer(n)` is that host's nth answer
+async function run(down) {
+  const byHost = new Map(A.good.chains.flatMap((c) => c.reads.map((r) => [r.provider, [{ hash: r.block }, r.six, r.sixtyFour, r.heavy, r.floor]])));
+  const seen = new Map();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const host = new URL(url).host;
+    const n = seen.get(host) ?? 0;
+    seen.set(host, n + 1);
+    if (down[host] !== undefined) {
+      const x = down[host](n);
+      if (x !== undefined) return x;
+    }
+    const k = n - (down[host] === undefined ? 0 : (down[host].skipped ?? 0));
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: byHost.get(host)[k] }), { status: 200 });
+  };
+  try {
+    return { ...judge({ ...(await collect()), code: A.good.code }), seen };
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+const always = (res) => () => res();
+const empty = () => new Response("", { status: 200 });
+const html429 = () => new Response("<html><head><title>429 Too Many Requests</title></head><body>rate limited</body></html>", { status: 429, headers: { "content-type": "text/html" } });
+
+test("planted (live run 42552050303): an empty body, an HTML 429 page, two providers of one chain down, all but one down, and a no-answer beside a wrong answer", async () => {
+  const control = await run({});
+  assert.equal(control.verdict, "PASS", control.lines.join("\n"));
+  // an empty body every time: named with its host and HTTP status, read again once, the chain judged on the other three
+  const e = await run({ "base.api.pocket.network": always(empty) });
+  assert.equal(e.verdict, "PASS", e.lines.join("\n"));
+  assert.ok(e.lines.includes("--- base base.api.pocket.network: no answer: base.api.pocket.network HTTP 200: empty body"), e.lines.join("\n"));
+  assert.equal(e.seen.get("base.api.pocket.network"), 2, "read again once");
+  // an empty body once, then the answer: read again, answered, no line
+  const once = Object.assign((n) => (n === 0 ? empty() : undefined), { skipped: 1 });
+  const o = await run({ "robinhood.drpc.org": once });
+  assert.equal(o.verdict, "PASS", o.lines.join("\n"));
+  assert.ok(!o.lines.some((l) => l.includes("robinhood.drpc.org: no answer")), o.lines.join("\n"));
+  // an HTML 429 page
+  const h = await run({ "rpc.mainnet.chain.robinhood.com": always(html429) });
+  assert.equal(h.verdict, "PASS", h.lines.join("\n"));
+  assert.ok(h.lines.some((l) => l.startsWith("--- robinhood rpc.mainnet.chain.robinhood.com: no answer: rpc.mainnet.chain.robinhood.com HTTP 429: not JSON")), h.lines.join("\n"));
+  // a JSON-RPC rate limit with HTTP 200, as some providers answer, after the block read: a no-answer, not a wrong answer
+  const limited = (n) => (n === 0 ? undefined : new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limit exceeded" } }), { status: 200 }));
+  const l = await run({ "base-rpc.publicnode.com": limited });
+  assert.equal(l.verdict, "PASS", l.lines.join("\n"));
+  assert.ok(l.lines.some((x) => x.startsWith("--- base base-rpc.publicnode.com: no answer: base-rpc.publicnode.com HTTP 200: error")), l.lines.join("\n"));
+  // two providers of one chain down: Base has four, so two answer and the chain is judged on them; each down one named
+  const two = await run({ "base.api.pocket.network": always(empty), "mainnet.base.org": always(html429) });
+  assert.equal(two.verdict, "PASS", two.lines.join("\n"));
+  assert.equal(two.lines.filter((x) => x.startsWith("--- base ")).length, 2, two.lines.join("\n"));
+  // all but one of a chain down: INCONCLUSIVE with each named, never a pass on one provider, never a crash
+  const three = await run({ "base.api.pocket.network": always(empty), "mainnet.base.org": always(html429), "base-mainnet.public.blastapi.io": always(() => new Response("upstream timeout", { status: 504 })) });
+  assert.equal(three.verdict, "INCONCLUSIVE", three.lines.join("\n"));
+  assert.equal(EXIT[three.verdict], 3);
+  assert.ok(three.lines.includes("INCONCLUSIVE base: 1 of 4 providers answered (base-mainnet.public.blastapi.io, mainnet.base.org, base.api.pocket.network did not)"), three.lines.join("\n"));
+  assert.ok(three.lines.some((x) => x.includes("base-mainnet.public.blastapi.io HTTP 504: not JSON")), three.lines.join("\n"));
+  // every provider of a chain down: INCONCLUSIVE
+  const none = await run(Object.fromEntries(A.good.chains[1].reads.map((r) => [r.provider, always(empty)])));
+  assert.equal(none.verdict, "INCONCLUSIVE", none.lines.join("\n"));
+  // a no-answer beside a wrong answer: the wrong answer fails the run
+  const wrong = (n) => (n === 1 ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: A.bad.chains[0].reads[0].six }), { status: 200 }) : undefined);
+  const w = await run({ "base.api.pocket.network": always(empty), "mainnet.base.org": always(html429), "base-mainnet.public.blastapi.io": always(empty), "base-rpc.publicnode.com": wrong });
+  assert.equal(w.verdict, "FAIL", w.lines.join("\n"));
+  // a JSON-RPC error that is not a rate limit stays an answer, judged: a provider that stops applying the override
+  const refused = (n) => (n === 1 ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "state override not supported" } }), { status: 200 }) : undefined);
+  const r = await run({ "robinhood-rpc.publicnode.com": refused });
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
 });
