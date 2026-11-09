@@ -143,6 +143,32 @@ function workspaceEntries(root, files) {
 
 const SPEC = /(?:\bimport\s[^'"]*?from\s*|\bimport\s*\(\s*|\bexport\s[^'"]*?from\s*|\bimport\s*)["']([^"']+)["']/g;
 
+// The text with its comments removed (strings kept whole): a comment inside an import or export list may hold a quote
+// ("A's"), which ends SPEC's [^'"] run before the list's "from" (packages/kit/src/core.ts's re-export of moveout.ts).
+// closure() reads specs from both texts, so a misread here can only add a spec, never lose one SPEC finds in the file.
+export function withoutComments(text) {
+  let out = "";
+  for (let i = 0; i < text.length; ) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== c && text[j] !== "\n") j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 2;
+      out += " ";
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
 // The import closure of `start` (repo-relative files): relative imports and workspace packages, never node_modules.
 export function closure(root, start, files = tracked(root)) {
   const have = new Set(files);
@@ -155,7 +181,7 @@ export function closure(root, start, files = tracked(root)) {
     seen.add(f);
     if (!/\.(m?[jt]s|tsx?)$/.test(f)) continue;
     const text = readFileSync(path.join(root, f), "utf8");
-    for (const [, spec] of text.matchAll(SPEC)) {
+    for (const [, spec] of [...text.matchAll(SPEC), ...withoutComments(text).matchAll(SPEC)]) {
       let to = null;
       if (spec.startsWith(".")) to = path.posix.normalize(path.posix.join(path.posix.dirname(f), spec));
       else if (pkgs.has(spec)) to = pkgs.get(spec);

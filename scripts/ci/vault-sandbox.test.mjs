@@ -71,6 +71,21 @@ test("planted: a test that starts reading a new file is followed by suiteReads",
   }
 });
 
+test("planted: a comment with a quote inside an import or export list hides nothing it names (packages/kit/src/core.ts's re-export of moveout.ts)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vault-sandbox-comments-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.join(root, path.dirname(f)), { recursive: true });
+      writeFileSync(path.join(root, f), text);
+    };
+    put("a.ts", 'export {\n  // A\'s list, with a quote\n  x,\n} from "./b.ts";\nimport {\n  /* it\'s "here" */ y,\n} from "./c.ts";\nexport type {\n  // "z"\n  Z,\n} from "./d.ts";\n');
+    for (const f of ["b.ts", "c.ts", "d.ts"]) put(f, "export const x = 1, y = 1;\nexport type Z = 1;\n");
+    assert.deepEqual(closure(root, ["a.ts"], ["a.ts", "b.ts", "c.ts", "d.ts"]), ["a.ts", "b.ts", "c.ts", "d.ts"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("include_str! paths count from the file's own directory, joins from the crate", () => {
   const files = ["packages/kit/test/vectors/vault-v1.json", "contracts/vault/scripts/deploy.mjs"];
   assert.deepEqual([...namedPaths('include_str!("../../../packages/kit/test/vectors/vault-v1.json")', files, "contracts/vault/tests")], [files[0]]);
