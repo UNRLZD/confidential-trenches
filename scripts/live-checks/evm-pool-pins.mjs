@@ -8,15 +8,18 @@
 //   - the pool's code is its build (pool-evm-deploy.mjs pinnedBuild: length and keccak256 with immutables zeroed);
 // and on the deployed helper, GET /v1/pool/fee for the pool names the pin's network, pool and fee recipient (the address
 // every proof binds; a pin naming another is a deposit whose notes no relayer can ever spend).
-//   node scripts/live-checks/evm-pool-pins.mjs [--record <file>]   PASS exit 0, FAIL 1, error 2
+// Each chain read goes through provider-answer.mjs rpcAnswer: a provider's no-answer is QUIET, and the run INCONCLUSIVE
+// (never PASS) unless a wrong answer fails it.
+//   node scripts/live-checks/evm-pool-pins.mjs [--record <file>]   PASS exit 0, FAIL 1, error 2, INCONCLUSIVE 3
 // --record writes the answers of a good run (PINS) and a bad run (BEFORE: the 3 Nov pools of pool-evm-deploy.md, which
 // no helper serves) to <file>, for the test's replay (evm-pool-pins.answers.json).
-// After: helper sign
+// After: helper
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHAINS, pinnedBuild, poolFile, runtimeOf } from "./pool-evm-deploy.mjs";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export const KEY = "evm-pool-pins";
 export const HELPER = "https://ct-api.unrealized.trade";
@@ -39,101 +42,122 @@ export function deployTxOf(net) {
   return r.txs.find((t) => t.contract === "PrivacyPoolSimple")?.hash ?? null;
 }
 
-/** A transport that answers through fetch and records each answer: { url, body, status, json }. */
+/** A fetch that answers through `fetchFn` and records each answer: { url, body, status, text }. */
 export function recorder(fetchFn = fetch) {
   const log = [];
-  const send = async (url, body) => {
-    const r = await fetchFn(url, body === null ? { method: "GET" } : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const json = await r.json().catch(() => null);
-    log.push({ url, body, status: r.status, json });
-    return { status: r.status, json };
+  const wrapped = async (url, init = {}) => {
+    const r = await fetchFn(url, init);
+    const text = await r.text().catch(() => "");
+    log.push({ url, body: init.body ?? null, status: r.status, text });
+    return new Response(text, { status: r.status });
   };
-  return { log, send };
+  return { log, fetchFn: wrapped };
 }
-/** A transport that answers from a recorded log, each answer once, by url and body. */
+/** A fetch that answers from a recorded log, each answer once, by url and body; one not recorded throws (a no-answer). */
 export function replayer(log) {
   const left = [...log];
-  return async (url, body) => {
-    const i = left.findIndex((e) => e.url === url && JSON.stringify(e.body) === JSON.stringify(body));
-    if (i < 0) throw new Error(`no recorded answer for ${url} ${JSON.stringify(body)}`);
+  return async (url, init = {}) => {
+    const i = left.findIndex((e) => e.url === url && e.body === (init.body ?? null));
+    if (i < 0) throw new Error(`no recorded answer for ${url}`);
     const [e] = left.splice(i, 1);
-    return { status: e.status, json: e.json };
+    return new Response(e.text, { status: e.status });
   };
 }
 
-const rpcCall = async (send, url, method, params) => {
-  const { status, json } = await send(url, { jsonrpc: "2.0", id: 1, method, params });
-  if (status !== 200 || !json || json.error) throw new Error(`${method}: HTTP ${status} ${JSON.stringify(json?.error ?? null).slice(0, 120)}`);
-  return json.result;
-};
 const hostOf = (u) => new URL(u).hostname;
 
-/** One pin's lines on its two RPCs and the helper. `epochMs`: the fee answer's epoch (a minute's start). */
-export async function checkPin(send, net, pin, tx, epochMs) {
+/** One pin's lines on its two RPCs and the helper: { bad, quiet, lines }. `epochMs`: the fee answer's epoch. */
+export async function checkPin(fetchFn, net, pin, tx, epochMs) {
   const lines = [];
-  let ok = true;
+  let bad = false;
+  let quiet = false;
   const say = (pass, text) => {
-    ok &&= pass;
+    bad ||= !pass;
     lines.push(`${pass ? "ok  " : "FAIL"} ${net}: ${text}`);
   };
   const chain = CHAINS[net];
   for (const url of chain.rpcs) {
     const on = `on ${hostOf(url)}`;
-    try {
-      const id = await rpcCall(send, url, "eth_chainId", []);
-      say(id === chain.chainId, `chain id ${id} ${on}`);
-      const r = await rpcCall(send, url, "eth_getTransactionReceipt", [tx]);
+    // one read; a no-answer is QUIET (undefined), a JSON-RPC error a FAIL (null)
+    const read = async (method, params) => {
+      const a = await rpcAnswer(url, method, params, { fetchFn });
+      if (a.noAnswer !== undefined) {
+        quiet = true;
+        lines.push(`QUIET ${net}: ${a.noAnswer} (${method})`);
+        return undefined;
+      }
+      if (a.error !== undefined) {
+        say(false, `${method} ${on}: ${JSON.stringify(a.error).slice(0, 120)}`);
+        return null;
+      }
+      return a.result;
+    };
+    const id = await read("eth_chainId", []);
+    if (id === undefined || id === null) continue;
+    say(id === chain.chainId, `chain id ${id} ${on}`);
+    const r = await read("eth_getTransactionReceipt", [tx]);
+    if (r !== undefined) {
       const block = r?.blockNumber ? BigInt(r.blockNumber).toString() : "none";
       say(r?.status === "0x1" && String(r?.contractAddress).toLowerCase() === pin.pool && block === pin.fromBlock,
         `deploy tx ${tx.slice(0, 12)}… made ${r?.contractAddress ?? "nothing"} in block ${block} (status ${r?.status ?? "none"}); the pin: ${pin.pool} in block ${pin.fromBlock} ${on}`);
-      const code = await rpcCall(send, url, "eth_getCode", [pin.pool, "latest"]);
+    }
+    const code = await read("eth_getCode", [pin.pool, "latest"]);
+    if (typeof code === "string") {
       const b = pinnedBuild(net, "PrivacyPoolSimple", pin.pool);
       const rt = runtimeOf(code, b.immutables);
       say(rt.length === b.length && rt.masked === b.masked, `the pool's code is its build (${rt.length} bytes, masked ${rt.masked.slice(0, 12)}…) ${on}`);
-    } catch (e) {
-      say(false, `${on}: ${e.message}`);
-    }
+    } else if (code === null) say(false, `no code read ${on}`);
   }
-  const { status, json } = await send(`${HELPER}/v1/pool/fee?pool=${pin.pool}&epoch=${epochMs}`, null);
-  const f = json ?? {};
+  let status = 0;
+  let f = {};
+  try {
+    const r = await fetchFn(`${HELPER}/v1/pool/fee?pool=${pin.pool}&epoch=${epochMs}`, { method: "GET" });
+    status = r.status;
+    f = (await r.json().catch(() => null)) ?? {};
+  } catch (e) {
+    f = { error: String(e?.message ?? e) };
+  }
   say(status === 200 && f.network === net && String(f.pool).toLowerCase() === pin.pool && String(f.fee_recipient).toLowerCase() === pin.feeRecipient,
     `the helper's fee answer (HTTP ${status}) names ${f.network ?? "-"}, ${f.pool ?? "-"}, fee recipient ${f.fee_recipient ?? JSON.stringify(f.error ?? null)}; the pin: ${pin.feeRecipient}`);
-  return { ok, lines };
+  return { bad, quiet, lines };
 }
 
 /** Every pin's lines and the verdict. `pins` and `txOf` are the good run's (PINS, deployTxOf) unless given. */
-export async function check(send, { pins = PINS, txOf = deployTxOf, epochMs } = {}) {
+export async function check(fetchFn, { pins = PINS, txOf = deployTxOf, epochMs } = {}) {
   const lines = [];
-  let ok = Object.keys(pins).length === 2;
-  if (!ok) lines.push(`FAIL the pins name ${Object.keys(pins).join(", ")}, not base-sepolia and robinhood-testnet`);
+  let bad = Object.keys(pins).length !== 2;
+  let quiet = false;
+  if (bad) lines.push(`FAIL the pins name ${Object.keys(pins).join(", ")}, not base-sepolia and robinhood-testnet`);
   for (const [net, pin] of Object.entries(pins)) {
     const tx = txOf(net);
     if (!tx) {
-      ok = false;
+      bad = true;
       lines.push(`FAIL ${net}: no deploy tx of its pool in ${poolFile(net)}`);
       continue;
     }
-    const r = await checkPin(send, net, pin, tx, epochMs);
-    ok &&= r.ok;
+    const r = await checkPin(fetchFn, net, pin, tx, epochMs);
+    bad ||= r.bad;
+    quiet ||= r.quiet;
     lines.push(...r.lines);
   }
-  return { ok, lines };
+  const verdict = verdictOf(bad, quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 async function main(argv) {
   const at = argv.indexOf("--record");
   const epochMs = Math.floor(Date.now() / 60_000) * 60_000;
   const good = recorder();
-  const r = await check(good.send, { epochMs });
+  const r = await check(good.fetchFn, { epochMs });
   for (const l of r.lines) console.log(l);
-  console.log(r.ok ? "PASS" : "FAIL");
+  console.log(r.verdict);
   if (at >= 0) {
     const bad = recorder();
-    const b = await check(bad.send, { pins: BEFORE, txOf: (n) => BEFORE[n].tx, epochMs });
+    const b = await check(bad.fetchFn, { pins: BEFORE, txOf: (n) => BEFORE[n].tx, epochMs });
     for (const l of b.lines) console.log(`bad run: ${l}`);
-    writeFileSync(argv[at + 1], JSON.stringify({ key: KEY, recorded: new Date().toISOString(), epochMs, good: { ok: r.ok, log: good.log }, bad: { ok: b.ok, log: bad.log } }, null, 1) + "\n");
+    writeFileSync(argv[at + 1], JSON.stringify({ key: KEY, recorded: new Date().toISOString(), epochMs, good: { verdict: r.verdict, log: good.log }, bad: { verdict: b.verdict, log: bad.log } }, null, 1) + "\n");
   }
-  return r.ok ? 0 : 1;
+  return EXIT[r.verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
