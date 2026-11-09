@@ -493,6 +493,139 @@ test("planted: a group judged from a main that already holds its first pull requ
   }
 });
 
+// ---------- a release list in a group is judged on its pull request's own merge base and commits, as on its pull request ----------
+
+/**
+ * PR 548 replayed (group run 42701775123): main at `old`, then `from` (release-1 and its ledger); pull request 2 cut at
+ * `from` (build(r) makes its commits there); pull request 1, cut at `from` too, writes `ahead` (in 548's group it was
+ * #547, which changed the wallet's and the kit's sources, both SIGN_HOST build inputs); main may gain mainAfter(r); then
+ * the queue's group: main, #1, #2, each a merge commit. Pull request 2's merge commit C has C^1 = main + #1, so the
+ * merge base of C^1 and C is C^1 itself, while its pull request's is `from`. { r, old, from, main, head, pr }.
+ */
+function queuedRelease(build, { ahead = { "packages/wallet/src/pool.ts": "export const v = 2;\n" }, mainAfter } = {}) {
+  const r = repo();
+  const old = r.commit("Card kickoff-kit: kit", { "README.md": "x\n" });
+  const from = r.commit("Card kickoff-kit: release-1", {
+    "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"x","hosts":{}}\n`,
+    [LEDGER]: ledgerText({ "release-1": H1 }),
+    "scripts/live-checks/signpage-release.mjs": check,
+    "scripts/live-checks/app-ahead.mjs": check,
+  });
+  r.g("checkout", "-q", "-b", "pr-2", from);
+  build(r);
+  const pr = r.g("rev-parse", "HEAD");
+  r.g("checkout", "-q", "-b", "pr-1", from);
+  r.commit("Card app-ahead: the pull request queued ahead", typeof ahead === "function" ? ahead(r) : ahead);
+  r.g("checkout", "-q", "main");
+  const main = mainAfter ? r.commit("Card signpage-later: main gains a list", mainAfter(r)) : from;
+  r.g("checkout", "-q", "-b", "gh-readonly-queue/main/pr", main);
+  r.g("merge", "-q", "--no-ff", "-m", "Card app-ahead: merge (#1)", "-m", "", "pr-1");
+  r.g("merge", "-q", "--no-ff", "-m", "Card signpage-release: merge (#2)", "-m", "", "pr-2");
+  return { r, old, from, main, head: r.g("rev-parse", "HEAD"), pr };
+}
+const release2 = (r, extra = {}) =>
+  r.commit("Card signpage-release: release-2", { [LIST2]: cut(r, extra), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
+
+test("a release list naming the tree its pull request was cut from passes in a group queued behind another pull request, and on its pull request run", () => {
+  const q = queuedRelease((r) => release2(r)); // cut() names HEAD's tree: `from`, the pull request's parent and merge base
+  try {
+    assert.equal(JSON.parse(q.r.g("show", `${q.pr}:${LIST2}`)).tree, q.r.g("rev-parse", `${q.from}^{tree}`));
+    assert.notEqual(q.r.g("rev-parse", `${q.head}^1`), q.from); // C^1 is main + #1, not the list's commit
+    assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, []);
+    assert.equal(refusals(q.r, q.from, q.pr), ""); // its pull request run, base main as it was
+    assert.equal(refusals(q.r, `${q.head}^1`, q.pr), ""); // and run again on main + #1
+  } finally {
+    q.r.done();
+  }
+  // the same pull request with a page change after the cut, its list naming that later commit's tree: passes too
+  const b = queuedRelease((r) => {
+    r.commit("Card signpage-release: a page change", { "packages/signpage/src/main.ts": "export {};\n" });
+    release2(r);
+  });
+  try {
+    assert.deepEqual(verifyGroup(b.r.dir, b.main, b.head).refusals, []);
+  } finally {
+    b.r.done();
+  }
+});
+
+test("planted: in a group, a release list naming a tree of no base, no merge base and no commit of its pull request is refused", () => {
+  for (const [what, tree] of [
+    ["an older main commit's tree", (r) => r.g("rev-parse", "HEAD~1^{tree}")],
+    ["a tree of no commit here", () => "f".repeat(40)],
+  ]) {
+    const q = queuedRelease((r) => release2(r, { tree: tree(r) }));
+    try {
+      assert.match(refusals(q.r, q.from, q.pr), /release-2\.json names no tree/, what); // as on its pull request run
+      assert.match(groupRefusals(q), /Card signpage-release: merge \(#2\): packages\/signpage\/releases\/release-2\.json names no tree of the base, of the merge base or of this pull request's commits/, what);
+    } finally {
+      q.r.done();
+    }
+  }
+  // the tree of the pull request queued ahead: a commit of the line, but on none of this pull request's three (main
+  // moved after #1 was cut, so main + #1 is another tree): refused
+  const r = repo();
+  try {
+    const from = r.commit("Card kickoff-kit: kit", { "README.md": "x\n", "scripts/live-checks/app-ahead.mjs": check, "scripts/live-checks/signpage-release.mjs": check });
+    r.g("checkout", "-q", "-b", "pr-1");
+    const aheadTree = r.g("rev-parse", `${r.commit("Card app-ahead: ahead", { "docs/x.md": "x\n" })}^{tree}`);
+    r.g("checkout", "-q", "-b", "pr-2", from);
+    r.commit("Card signpage-release: release-1", { "packages/signpage/releases/release-1.json": `${JSON.stringify({ release: "release-1", commit: null, tree: aheadTree, hosts: {} })}\n` });
+    r.g("checkout", "-q", "main");
+    const main = r.commit("Card app-other: main moves on", { "docs/y.md": "y\n" });
+    r.g("merge", "-q", "--no-ff", "-m", "Card app-ahead: merge (#1)", "-m", "", "pr-1");
+    r.g("merge", "-q", "--no-ff", "-m", "Card signpage-release: merge (#2)", "-m", "", "pr-2");
+    assert.notEqual(r.g("rev-parse", "HEAD^1^{tree}"), aheadTree);
+    assert.match(verifyGroup(r.dir, main, r.g("rev-parse", "HEAD")).refusals.join("\n"), /merge \(#2\): .*release-1\.json names no tree/);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: in a group, a list naming a tree whose SIGN_HOST build inputs are not its pull request's own is refused", () => {
+  // the pull request ships page v1, then v2, then names v1's tree (the review's repro, queued behind #1)
+  const q = queuedRelease((r) => {
+    r.commit("Card signpage-release: v1", { "packages/signpage/src/main.ts": "v1 (say, a script that sends the words out)\n" });
+    const v1 = r.g("rev-parse", "HEAD^{tree}");
+    r.commit("Card signpage-release: v2", { "packages/signpage/src/main.ts": "v2, the page shipped\n" });
+    release2(r, { tree: v1 });
+  });
+  try {
+    assert.match(groupRefusals(q), /merge \(#2\): .*release-2\.json names a tree whose SIGN_HOST build inputs .* are not the pull request's/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: in a group, a release list or ledger line main had, changed or removed by the pull request, is refused", () => {
+  for (const [what, change, want] of [
+    ["edit the list", (r) => r.commit("Card signpage-release: edit", { "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"y","hosts":{}}\n` }), /release-1\.json is on main and was changed/],
+    ["remove the list", (r) => { r.g("rm", "-q", "--", "packages/signpage/releases/release-1.json"); r.g("commit", "-q", "-m", "Card signpage-release: remove"); }, /release-1\.json is on main and was removed/],
+    ["edit the ledger line", (r) => r.commit("Card signpage-release: edit", { [LEDGER]: ledgerText({ "release-1": H2 }) }), /RELEASED release-1 is on main and was changed/],
+    ["drop the ledger line", (r) => r.commit("Card signpage-release: drop", { [LEDGER]: ledgerText({}) }), /RELEASED release-1 is on main and was removed/],
+  ]) {
+    const q = queuedRelease(change);
+    try {
+      assert.match(groupRefusals(q), want, what);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
+test("in a group, a list main gained after the pull request was cut, which it never touches, is no refusal", () => {
+  const later = (r) => ({ [LIST2]: cut(r), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) }); // names `from`'s tree
+  const test = (r) => r.commit("Card signpage-release: a test", { "packages/signpage/test/y.test.ts": "export {}\n" });
+  for (const [what, opts] of [["on main before the group", { mainAfter: later }], ["from the pull request queued ahead", { ahead: later }]]) {
+    const q = queuedRelease(test, opts);
+    try {
+      assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, [], what);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
 // main's verify gate runs from scripts/ alone (ci.yml verify-gate: git archive "$BASE" scripts), so what it imports reads
 // nothing outside scripts/: sign-build-inputs.mjs loads in a folder that holds scripts/ci/ and nothing else (a read of the
 // kit's prover names there, delta review P3-2, would break main's gate; release.test.mjs holds the names instead)
