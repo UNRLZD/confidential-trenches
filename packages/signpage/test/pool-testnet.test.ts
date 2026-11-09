@@ -19,6 +19,8 @@ import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
+import type { SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
+import { SOLANA_PROVIDER_A } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
@@ -473,7 +475,7 @@ test("review P2-1 of a34c1626: a sign out stops the Solana RESERVED pass's settl
     await gate;
     return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
   };
-  const cache: { marks?: unknown; pages?: unknown } = {};
+  const cache: SolanaPoolCache = {};
   const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache, prover: { vault: signalsProver(), stop: () => {} } });
   const { land } = fakePool();
   let n = await land(ns, await incoming(ns, null, 7));
@@ -1089,4 +1091,12 @@ test("card wallet-restore-reads-ux review P3: the testnet build's restore reads 
   } finally {
     store.close();
   }
+});
+
+// review P3-6 of a34c1626: the helper's start check (apps/helper/src/env-check.ts checkSolanaPairOperators) refuses a
+// keyed Solana URL of this page's direct seat's operator; it names that seat in its own constant (the helper imports no
+// page code), read here as text and held equal to the page's, so a new direct seat moves both
+test("the helper's start check names this page's direct Solana seat (SOLANA_PROVIDER_A)", () => {
+  const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
+  assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
 });

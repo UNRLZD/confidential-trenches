@@ -53,7 +53,7 @@ export function checkPoolRpcOperators(env: Record<string, string | undefined>): 
 }
 
 /** The signing page's direct Solana seat (packages/signpage/src/trade.ts SOLANA_PROVIDER_A; the helper imports no page
- *  code, so env-check.test.ts reads that file's constant and holds the two equal). */
+ *  code, so packages/signpage/test/pool-testnet.test.ts reads this file's constant and holds the two equal). */
 export const PAGE_SOLANA_DIRECT = "https://solana-rpc.publicnode.com";
 
 /**

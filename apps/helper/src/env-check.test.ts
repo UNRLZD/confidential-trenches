@@ -343,12 +343,9 @@ test("evm-pool-sync-holds: node src/env-check.ts exits 2 on a keyed URL of a poo
 // pair, PublicNode directly (seat 0) and this helper's /v1/rpc/solana (seat 1); a keyed Solana URL of PublicNode's here
 // would make the two seats one operator, so a lie of that one operator would pass both.
 test("a keyed Solana URL the helper reads /v1/rpc/solana from, run by the page's direct seat's operator (PublicNode), is refused naming the variable, never the URL or its key; another operator's, and none set, pass", async () => {
-  const { checkSolanaPairOperators, PAGE_SOLANA_DIRECT } = (await import("./env-check.ts")) as unknown as { checkSolanaPairOperators: (env: Record<string, string | undefined>) => void; PAGE_SOLANA_DIRECT: string };
+  const { checkSolanaPairOperators } = (await import("./env-check.ts")) as unknown as { checkSolanaPairOperators: (env: Record<string, string | undefined>) => void };
   assert.equal(typeof checkSolanaPairOperators, "function", "env-check.ts checkSolanaPairOperators");
-  const fs = await import("node:fs");
-  // the page's own constant (packages/signpage/src/trade.ts SOLANA_PROVIDER_A), read as text: the helper imports no page code
-  const page = fs.readFileSync(new URL("../../../packages/signpage/src/trade.ts", import.meta.url), "utf8");
-  assert.equal(/export const SOLANA_PROVIDER_A = "([^"]+)";/.exec(page)?.[1], PAGE_SOLANA_DIRECT);
+  // PAGE_SOLANA_DIRECT is held equal to the page's own constant by packages/signpage/test/pool-testnet.test.ts
   const KEY = "k3y-test-value-not-a-key";
   const why = (env: Record<string, string | undefined>): string | null => {
     try {

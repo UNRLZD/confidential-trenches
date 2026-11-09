@@ -813,8 +813,6 @@ export class SolanaPoolBuyError extends Error {
 export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: SolanaPoolBuyChain, opts: SolanaPoolBuyOptions = {}): SolanaPoolBuyBuilt {
   if (!isKey(chain.blockhash) || !Number.isSafeInteger(chain.lastValidBlockHeight) || chain.lastValidBlockHeight <= 0) throw new Error("the blockhash must be the device's own read");
   if (!solanaTableIsActive(chain.table.table)) throw new Error("our lookup table is deactivated");
-  const venueProgram = venue.kind === "pump-curve" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM;
-  if (!chain.table.table.addresses.includes(venueProgram)) throw new SolanaPoolBuyError("venue_not_in_table", `our lookup table holds no account of the ${venue.kind} program`);
   const tipAccount = req.tip > 0n ? (SOLANA_JITO_TIP_ACCOUNTS[(opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length)] as string) : null;
   const compile = (nextPage: boolean) => {
     const instructions = solanaPoolBuyInstructions(cfg, release, venue, req, chain.stateSize, chain.rent, tipAccount, nextPage);
@@ -822,6 +820,9 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
     return { instructions, message, size: 1 + 128 + message.length };
   };
   let built = compile(true);
+  // after the first compile, which refuses a venue of another token or of no known kind first
+  const venueProgram = venue.kind === "pump-curve" ? SOLANA_PUMP_PROGRAM : SOLANA_PUMP_AMM_PROGRAM;
+  if (!chain.table.table.addresses.includes(venueProgram)) throw new SolanaPoolBuyError("venue_not_in_table", `our lookup table holds no account of the ${venue.kind} program`);
   if (built.size > SOLANA_MAX_TX_BYTES) built = compile(false);
   const { instructions, message } = built;
   const wire = new Uint8Array(1 + 128 + message.length);
