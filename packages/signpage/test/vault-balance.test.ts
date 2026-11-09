@@ -63,9 +63,9 @@ test("review P2-1: a 100 USDC note reserved for a 10 USDC withdrawal reads 90 wh
   assert.equal((await withVaultBalance(SIGNED_IN, async () => [note("r", VAULT, 100_000_000n)], VAULT)).vault_balance, "100");
 });
 
-test("a reserved note whose request is missing, malformed or withdraws more than the note: the state as it is, as a failed read", async () => {
+test("a reserved note whose request is present but malformed or withdraws more than the note: the state as it is, as a failed read", async () => {
   const bad: NoteRecord[] = [
-    { ...note("r", VAULT, 100_000_000n, "RESERVED") },
+    { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "" },
     { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "{not json" },
     { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: JSON.stringify({ public_signals: "x" }) },
     { ...note("r", VAULT, 100_000_000n, "RESERVED"), request: "null" },
@@ -134,4 +134,12 @@ test("main.ts: the shell's state sets vault_balance from the vault's scope, on t
   // the frame keeps no note data: its state step adds neither
   const framed = src.slice(src.lastIndexOf("if (framed) {"));
   assert.doesNotMatch(framed, /withVaultBalance|withPools/);
+});
+
+test("review P3: a reserved note with no request (checkRecord allows it; withdrawSettle never settles it) counts 0 for that note, the rest still read", async () => {
+  const noRequest = note("r", VAULT, 100_000_000n, "RESERVED");
+  assert.equal(noRequest.request, undefined);
+  const out = await withVaultBalance(SIGNED_IN, async () => [note("u", VAULT, 5_000_000n), noRequest, reserved("q", 20_000_000n, "5000000")], VAULT);
+  assert.equal(out.vault_balance, "20", "5 unspent, 0 for the note with no request, 15 change of the other");
+  assert.equal(vaultBalanceOf([noRequest], VAULT), 0n);
 });

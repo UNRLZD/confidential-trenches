@@ -104,6 +104,9 @@ function helloPath(js) {
   const result16 = shaper && stateFn
     ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.7\`\\|\\|)?\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
     : null;
+  // review of edc6815f: at 1.8 the answer shaper's kit-v1.6 branch also takes kit-v1.7 (`e===\`1.7\`||e===\`1.6\``), so a
+  // kit-v1.7 app's deposit.confirm keeps its facts; a 1.7-era build has no such alternative
+  const result17 = result16 && /===`1\.7`\|\|/.test(result16) ? result16 : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
@@ -128,6 +131,7 @@ function helloPath(js) {
     poolOps,
     result16,
     decimals,
+    result17,
   };
 }
 
@@ -171,6 +175,7 @@ export function judge(a, era = ERA) {
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
     if (typeof h.result16 !== "string") bad("kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out");
+    if (era.kit !== "1.7" && typeof h.result17 !== "string") bad("kit-v1.7's answers do not go through its own level: its deposit.confirm is sent with no facts");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);

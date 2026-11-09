@@ -544,3 +544,16 @@ test("every level below the current one reads its own schema's positions: no dec
   const id = await p.ask();
   assert.ok(reads(V14, p.answer(id), "state"), "kit-v1.4 still reads it");
 });
+
+test("review: hello kit 1.7: every deposit.confirm answer with its facts as they are, moved_out included, and kit-v1.7's schema reads each", async () => {
+  const p = page();
+  p.send(hello("1.7"));
+  await p.ask();
+  for (const op of OPS.filter((o) => o.kind === "deposit")) {
+    const cid = await p.confirm(op.id);
+    assert.deepEqual(p.answer(cid).result, confirmOf(op.id), `deposit.confirm ${op.id}`);
+    assert.ok(reads(V17, p.answer(cid), "deposit.confirm"), `kit-v1.7 reads deposit.confirm ${op.id}`);
+  }
+  const cid = await p.confirm("d-moved");
+  assert.deepEqual(p.answer(cid).result, { stage: "held", held_id: "u.near", since_ms: 1, moved_out: true });
+});

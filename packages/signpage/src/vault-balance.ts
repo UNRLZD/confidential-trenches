@@ -29,13 +29,16 @@ import { ANSWER_ROOM, pickOps } from "./state.ts";
 /**
  * The vault's balance in USDC base units: its scope's UNSPENT and HELD notes, and each RESERVED note's change (review
  * P2-1): the note less the withdrawnValue its stored request names, the rule src/withdraw/handoff.ts storedRequest
- * reads its changeValue by. A counted note with no leaf value, or a RESERVED one whose request does not name a
- * withdrawnValue within the note, throws.
+ * reads its changeValue by; a RESERVED note with no request counts nothing. A counted note with no leaf value, or a
+ * RESERVED one whose request is present but does not name a withdrawnValue within the note, throws.
  */
 export function vaultBalanceOf(notes: readonly NoteRecord[], scope: bigint): bigint {
   let sum = 0n;
   for (const n of notes) {
     if (n.scope !== scope || (n.state !== "UNSPENT" && n.state !== "HELD" && n.state !== "RESERVED")) continue;
+    // a RESERVED note with no request (one from before the request was stored, which the note store allows and
+    // withdrawSettle never settles; review P3): no change can be read, so it counts nothing, never the whole balance
+    if (n.state === "RESERVED" && n.request === undefined) continue;
     const v = n.leaf?.value;
     if (typeof v !== "bigint" || v < 0n) throw new Error("vault balance: a counted note has no leaf value");
     sum += n.state === "RESERVED" ? v - withdrawnOf(n, v) : v;

@@ -88,6 +88,8 @@ export const MUTANTS = [
   ["kit", 'from(1, 7) ? "1.7" : ', 'from(1, 7) ? "current" : '],
   ["kit", 'from(1, 7) ? "1.7" : ', 'from(1, 6) ? "1.7" : '],
   ["kit", '  if (level === "1.7") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', '  if (level === "1.7") return result;\n'],
+  // review of edc6815f: kit-v1.7's answers through no level of its own (the kit-v1.4 path, every deposit fact lost)
+  ["kit", '  if (level === "1.7") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', ""],
   ["kit", 'kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;', 'result;'],
   ["kit", 'kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm"', 'kind === "deposit.confirm"'],
   ["kit", 'if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;', 'if (level === "current" || V1_4_STAGES.has(stage)) return stage;'],
