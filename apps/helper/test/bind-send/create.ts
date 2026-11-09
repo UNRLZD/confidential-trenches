@@ -12,7 +12,6 @@ type Input = { rpc: [string, string]; vault: string; token: string; relayer: { a
 const input = JSON.parse(readFileSync(0, "utf8")) as Input;
 const rpcs = [nearRpc(input.rpc[0]), nearRpc(input.rpc[1])] as const;
 const store = createFileStore(input.store);
-// the sandbox node keeps every block, so it stands in for the archival provider too
 const relayer = await startRelayer(rpcs, null, input.relayer.account_id, input.relayer.secret_key, input.vault, store, input.waitMs);
 const deps = { token: input.token, delivery: deliveryReads(rpcs, input.token), store, relayer };
 const answers = await Promise.all(input.ids.map((id) => createOnDelivery(id, deps).catch((e: unknown) => ({ code: "internal", why: e instanceof Error ? e.message : String(e) }))));

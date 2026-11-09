@@ -3298,3 +3298,28 @@ test("two-agree, PR4-3b on carry.ts: one provider (either) reading three landed 
   assert.deepEqual(codes, ["sent", "sent", "sent", "sender_struck"], "both agreeing on failed: struck");
   both.store.close();
 });
+
+test("two-agree, U's own storage_deposit on carry.ts: one provider (either) reading it failed pays once, owes nothing and strikes nothing; both agreeing on failed frees it (review P3-1)", async () => {
+  for (const liar of [0, 1] as const) {
+    const s = await carryOver([liar], "storage_deposit");
+    s.storage.set(`${CARRY_USDC}/${s.u}`, "none");
+    const codes: string[] = [];
+    for (let k = 0; k < 4; k++) codes.push(await s.codeOf("alice.near"));
+    s.storage.set(`${CARRY_USDC}/${s.u}`, "registered");
+    codes.push(await s.codeOf("alice.near"));
+    await s.carry.idle();
+    assert.deepEqual(codes, ["in_flight", "in_flight", "in_flight", "in_flight", "sent"], `liar ${liar}: unknown while one provider lies, sent once U reads registered`);
+    assert.equal(s.signed.filter((x) => x.method === "storage_deposit").length, 1, `liar ${liar}: one registration of U`);
+    assert.equal(s.store.owed(s.u), null, `liar ${liar}: nothing owed`);
+    assert.equal(s.store.signer(s.u).failed, 0, `liar ${liar}: no strike`);
+    s.store.close();
+  }
+  const both = await carryOver([0, 1], "storage_deposit");
+  both.storage.set(`${CARRY_USDC}/${both.u}`, "none");
+  const c = [await both.codeOf("alice.near"), await both.codeOf("alice.near")];
+  await both.carry.idle();
+  assert.deepEqual(c, ["registration_failed", "in_flight"], "both agreeing on failed: freed, answered once");
+  assert.equal(both.signed.filter((x) => x.method === "storage_deposit").length, 1, "both agreeing: one registration so far");
+  assert.equal(both.store.owed(both.u)?.tries, 1, "both agreeing: owed, tried once, again on the sweep's pace");
+  both.store.close();
+});
