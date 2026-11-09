@@ -75,7 +75,8 @@ function checkout({ pr = [], other = [], main = [] }) {
     git(repo, ['commit', '-q', '--no-verify', '-m', 'planted']);
     return git(repo, ['rev-parse', 'HEAD']);
   };
-  const root = write({ '.gitleaks.toml': RULES, 'README.md': 'planted\n' });
+  // packages/signpage/ is there as in every pull request: the bundle scan step reads it (its build is a step of its own)
+  const root = write({ '.gitleaks.toml': RULES, 'README.md': 'planted\n', 'packages/signpage/README.md': 'planted\n' });
   const shas = { pr: [], other: [], main: [] };
   for (const [name, commits] of [['pr', pr], ['other', other], ['main', main]]) {
     git(repo, ['checkout', '-q', '--detach', root]);
@@ -89,7 +90,8 @@ function checkout({ pr = [], other = [], main = [] }) {
 }
 
 // runs the scan steps in order as GitHub runs a step (bash -eo pipefail), stopping at the first that fails
-function scan(co) {
+// (beforeStep runs before each step, as a step of CI's that calls no gitleaks would: the bundle's build)
+function scan(co, beforeStep = () => {}) {
   const steps = scanSteps(readFileSync(CI, 'utf8'));
   const runnerTemp = join(co.dir, 'runner-temp');
   mkdirSync(runnerTemp);
@@ -97,6 +99,7 @@ function scan(co) {
   let out = '';
   try {
     for (const step of steps) {
+      beforeStep(step);
       const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', step], {
         cwd: co.repo, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp },
       });
@@ -161,4 +164,38 @@ test("a pull request whose secret main's ignore covers passes", () => {
     pr: [{ 'leak.txt': leak() }, { 'leak.txt': null }],
     main: [(s) => ({ '.gitleaksignore': `${s.pr[0]}:leak.txt:${RULE}:1\n` })],
   })));
+});
+
+// review P3-1 (card signpage-generated-merge-free): the signing page's bundle is build output, ignored and never
+// committed, so the tree scan (which runs before pnpm install) never reads it: a step after the install builds it and the
+// next scans packages/signpage with main's rules, the built files included though .gitignore names them
+const BUNDLE_SCAN = (step) => /"\$RUNNER_TEMP\/gitleaks" dir packages\/signpage /.test(step);
+test("the gitleaks job builds the signing page's bundle, then scans it with main's rules", () => {
+  const yml = readFileSync(CI, 'utf8');
+  const job = yml.slice(yml.indexOf('\n  gitleaks:\n'), yml.indexOf('\n  deep-import:\n'));
+  const install = job.indexOf('run: pnpm install --frozen-lockfile');
+  const build = job.indexOf('run: node packages/signpage/scripts/build-app.mjs');
+  const bundle = job.search(/"\$RUNNER_TEMP\/gitleaks" dir packages\/signpage --config "\$RUNNER_TEMP\/rules\/\.gitleaks\.toml"/);
+  assert.ok(install > 0 && build > install && bundle > build, 'install, then the build, then the bundle scan');
+  assert.equal(scanSteps(yml).filter(BUNDLE_SCAN).length, 1);
+});
+
+// the bundle appears only after the tree scan, as CI's build step makes it: the tree scan never sees it, the bundle scan must
+function built(text) {
+  const co = checkout({ main: [{ '.gitignore': '/packages/signpage/public/app.js\n' }] });
+  const beforeStep = (step) => {
+    if (!BUNDLE_SCAN(step)) return;
+    mkdirSync(join(co.repo, 'packages/signpage/public'), { recursive: true });
+    writeFileSync(join(co.repo, 'packages/signpage/public/app.js'), text);
+    assert.equal(git(co.repo, ['status', '--porcelain', '--', 'packages/signpage']), '', 'the planted bundle is ignored');
+  };
+  return scan(co, beforeStep);
+}
+
+test("a secret in the built bundle, ignored and untracked, fails the bundle scan", () => {
+  fails(built(leak()));
+});
+
+test("the bundle scan passes a built bundle with no secret", () => {
+  passes(built('export const ok = 1;\n'));
 });
