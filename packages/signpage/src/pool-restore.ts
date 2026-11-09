@@ -24,6 +24,10 @@
 //   does. Each id is read by the wallet's IdReader (../../wallet/src/restore/id-reader.ts nearIdReader) on the
 //   release's pair on the network 1Click pays out on (pageIdReads: FastNEAR and dRPC on mainnet), every view at one
 //   block agreed on both (openRestorePass, one pass for the whole run), the stronger answer of the two taken.
+//   - A Retry reads on where the last run stopped (card wallet-id-reader-paced): the page keeps the pass and every id's
+//     answer at it (keptIdReader, IdReadKeep), reused while the pass is fresh, so an id answered once is not asked
+//     again; a stale pass opens a new one with nothing kept, and a sign out drops them all. The run's signal goes to
+//     every view and every wait of the reader, so a sign out stops a provider's busy wait at once.
 //   - The walk's notes are the floor: they are written before any id is read, whatever the ids then show.
 //   - An id unread on both providers (after the IdReader's retries) stops the reads at once: no id is read after it,
 //     and the run ends stalled, never done, so the app's Retry reads again. A pass the providers refuse, a lane stopped
@@ -69,7 +73,7 @@ import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork, type EvmPool
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes } from "../../wallet/src/pool/solana-restore.ts";
-import { nearIdReader, openRestorePass, type IdReaderOpts, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { idReadKeep, keptIdReader, type IdReaderOpts, type IdReadKeep, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
 import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import type { Deferred, KindContext } from "./api.ts";
@@ -137,10 +141,8 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
  * after it (each throws at once, so its lane ends with restoreDepositIds's error); a sign out stops them the same way,
  * checked before each id (the id in flight then ends its lane, and the run's end checks it again). `seed` opens the seed for each window of a lane's ids only.
  */
-async function readDepositIds(seed: SeedUse, walked: readonly { label: string; scope: bigint; notes: readonly RestoredNote[] }[], ids: IdReads, signal: AbortSignal, why: string[]): Promise<void> {
-  const rpcs = ids.rpcs();
-  const pass = await openRestorePass(POOL_DEPOSIT_NETWORK, rpcs, ids.opts ?? {});
-  const reader = await nearIdReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
+async function readDepositIds(seed: SeedUse, walked: readonly { label: string; scope: bigint; notes: readonly RestoredNote[] }[], ids: IdReads, keep: IdReadKeep, signal: AbortSignal, why: string[]): Promise<void> {
+  const { reader } = await keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal });
   let stop: unknown;
   const holds: IdReader = async (u) => {
     signal.throwIfAborted();
@@ -229,6 +231,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
   const locks = (): Pick<LockManager, "request" | "query"> => h.locks ?? navigator.locks;
   let run: Run | null = null;
   let abort: AbortController | null = null;
+  // step 5's pass and answers, kept across this page's runs (a Retry reads on) and dropped at a sign out
+  let keep = idReadKeep();
 
   const read = async (signal: AbortSignal): Promise<RestoreStage> => {
     const pools = (h.pools ?? pagePools)();
@@ -308,7 +312,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           h.written?.();
         }
         // step 5 on each pool walked; each reason it is not done stalls the run, a throw among them
-        if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, signal, why).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
+        if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, keep, signal, why).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
         signal.throwIfAborted();
         return end(why.length > 0 ? "stalled" : "done");
       } finally {
@@ -389,7 +393,10 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       r.follow(crypto.randomUUID());
       return r.done;
     },
-    signedOut: () => abort?.abort(),
+    signedOut: () => {
+      abort?.abort();
+      keep = idReadKeep();
+    },
     settle: async () => {
       const ops = await h.store();
       const q = await locks().query();
