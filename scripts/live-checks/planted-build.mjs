@@ -7,14 +7,16 @@
 // held-deposit-way-out and wallet-withdraw-move-out .test.mjs hold it)
 import { createHash } from "node:crypto";
 
-/** An unrelated copy change, as a signing page card makes one: a button's word. */
-export const COPY_CHANGE = Object.freeze({ from: "`Sign out`", to: "`Log out`" });
-
-/** Replaces `from` once in `text`; throws when the tree's bundle no longer holds it, so a plant never silently plants nothing. */
-export function replaceOnce(text, from, to) {
-  const at = text.indexOf(from);
-  if (at < 0) throw new Error(`planted-build: the tree's /app.js holds no ${JSON.stringify(from)}`);
-  return text.slice(0, at) + to + text.slice(at + from.length);
+/** An unrelated copy change, as a signing page card makes one: the first words in the bundle (a literal such as
+ *  `Sign out`) that no string of `avoid` (the check's marks) holds or is held by, written in capitals. Any build has
+ *  such words, so the plant names none of today's; it throws when there are none, so a plant never plants nothing. */
+export function copyChange(text, avoid = []) {
+  const marks = avoid.filter((a) => typeof a === "string");
+  for (const m of text.matchAll(/`([A-Z][a-z]+(?: [a-z]+)+)`/g)) {
+    if (marks.some((a) => a.includes(m[1]) || m[1].includes(a))) continue;
+    return text.slice(0, m.index) + `\`${m[1].toUpperCase()}\`` + text.slice(m.index + m[0].length);
+  }
+  throw new Error("planted-build: the tree's /app.js holds no words to change");
 }
 
 /** Drops every occurrence of `rule` (a string or a global pattern) from `text`; throws when it holds none. */

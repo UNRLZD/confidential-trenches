@@ -26,7 +26,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
-import { COPY_CHANGE, dropRule, plantedFetch, replaceOnce } from "./planted-build.mjs";
+import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-restore-id-reader.answers.json"), "utf8"));
@@ -191,7 +191,7 @@ test("the committed build in this tree passes the live rule, with the recorded p
 });
 
 test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
-  const copy = await treeRecord(plantedFetch(localFetch, (js) => replaceOnce(js, COPY_CHANGE.from, COPY_CHANGE.to)));
+  const copy = await treeRecord(plantedFetch(localFetch, (js) => copyChange(js, Object.values(MARK))));
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await treeRecord()).app.sha384, "another bundle than the tree's");
   for (const m of MARKERS) {

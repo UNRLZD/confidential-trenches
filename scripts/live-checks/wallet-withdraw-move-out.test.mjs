@@ -12,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { HANDOFF_RE, judge, localFetch, MARKERS, probe, SIGN_ORIGIN } from "./wallet-withdraw-move-out.mjs";
-import { COPY_CHANGE, dropRule, plantedFetch, replaceOnce } from "./planted-build.mjs";
+import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-withdraw-move-out.answers.json"), "utf8"));
@@ -54,7 +54,7 @@ test("the committed build in this tree passes the live rule", async () => {
 });
 
 test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
-  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => replaceOnce(js, COPY_CHANGE.from, COPY_CHANGE.to)));
+  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, MARKERS)));
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await probe(SIGN_ORIGIN, localFetch)).app.sha384, "another bundle than the tree's");
   const ruleOf = (m) => (m === MARKERS[MARKERS.length - 1] ? HANDOFF_RE : m);
