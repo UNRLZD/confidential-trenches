@@ -12,7 +12,10 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { after, test } from "node:test";
+import { after, beforeEach, test } from "node:test";
+import { resetPaces } from "../../wallet/src/pace.ts";
+// each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
+beforeEach(() => resetPaces());
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";
@@ -101,7 +104,7 @@ function replay(url: string, as: ReadonlyMap<string, As>, log: string[]): NearRp
 function nearOf(as: ReadonlyMap<string, As> = new Map()) {
   const log: string[] = [];
   const found = new Map<bigint, DepositIds>();
-  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {} }, read: (scope, r) => void found.set(scope, r) };
+  const ids: NonNullable<PoolRestoreHost["ids"]> = { rpcs: () => [replay(FAST, as, log), replay(DRPC, as, log)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() }, read: (scope, r) => void found.set(scope, r) };
   return { ids, log, found };
 }
 
@@ -414,7 +417,7 @@ test("deposit ids: a pass the providers refuse (their blocks at one height diffe
       return p.block_id === REC.pass.h && url === DRPC ? { ...a, result: { ...a.result, block_hash: "4".repeat(44) } } : a;
     } };
   };
-  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {} } } });
+  const w = await world({ ids: { rpcs: () => [other(FAST), other(DRPC)], opts: { tries: 1, sleep: async () => {}, now: () => performance.now() } } });
   assert.equal(await w.r.auto(), "stalled");
   assert.deepEqual(log, []);
   assert.equal((await listed(w.store)).length, 6);
@@ -603,6 +606,57 @@ test("planted (review P3-5): `ended` is told once on an abort and on a floor wri
   assert.equal(b.ends.length, 1);
   assert.equal(b.ends[0]!.stage, "stalled");
   assert.match(b.ends[0]!.why.join("\n"), /^the restore stopped: note .* in the store has another precommitment$/m);
+});
+
+// ---------- card wallet-id-reader-paced: a Retry reads on, and the run's signal reaches every view and wait ----------
+
+test("a Retry reads on where the last run stopped: no id answered at the kept pass is asked again; a sign out drops what was kept", async () => {
+  const down = idOf(SOL_SCOPE, 43); // lane 3, its sixth id
+  const as = new Map<string, As>([[down, "down"]]);
+  const n = nearOf(as);
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.match(w.ends[0]!.why.join(" | "), /step 5 did not finish: lane 3: /);
+  const answered = new Set(n.log.map((l) => l.split(" ")[1]!).filter((u) => u !== down));
+  assert.ok(answered.size >= 20, `${answered.size} ids answered before the stop`);
+  // the Retry, the provider back: only the ids not answered are asked, and the lanes read whole
+  as.delete(down);
+  n.log.length = 0;
+  assert.equal(await w.r.auto(), "stalled");
+  assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
+  assert.deepEqual(n.log.map((l) => l.split(" ")[1]!).filter((u) => answered.has(u)), [], "an id answered at the kept pass asked again");
+  assert.ok(n.log.some((l) => l.endsWith(down)));
+  // a sign out drops the kept pass and answers: the next run asks every id again
+  w.r.signedOut();
+  n.log.length = 0;
+  assert.equal(await w.r.auto(), "stalled");
+  assert.ok([...answered].every((u) => n.log.some((l) => l.endsWith(u))), "every id asked again after a sign out");
+});
+
+test("the run's signal reaches the reader: a sign out ends a view a provider never answers, and a provider's busy wait, at once", async () => {
+  for (const how of ["hangs", "busy"] as const) {
+    const n = nearOf();
+    // the first id, asked within the pace's burst: its views wait no slot on the real clock
+    const first = idOf(SOL_SCOPE, 0);
+    let reached = false;
+    const gate = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p, signal?: AbortSignal) => {
+      const u = (p.request_type === "view_account" ? p.account_id : argsOf(p).account_id) as string;
+      if (u !== first) return r.query(p);
+      reached = true;
+      // never answered (only the signal ends it), or busy for good with a Retry-After of 50 s, waited on a real clock
+      if (how === "hangs") return new Promise((_, no) => signal?.addEventListener("abort", () => no(signal.reason), { once: true }));
+      throw Object.assign(new Error("HTTP 429"), { status: 429, retryAfterMs: 50_000 });
+    } });
+    const ids = { ...n.ids, opts: { tries: 1 }, rpcs: () => n.ids.rpcs().map(gate) as unknown as readonly [NearRpc, NearRpc] };
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids });
+    const run = w.r.auto();
+    await until("the first id asked", () => reached);
+    const t = performance.now();
+    w.r.signedOut();
+    const stage = await Promise.race([run, new Promise((ok) => setTimeout(() => ok("still running 2 s after the sign out"), 2_000))]);
+    assert.equal(stage, "stalled", how);
+    assert.ok(performance.now() - t < 2_000, how);
+  }
 });
 
 // card evm-pool-lists-mainnet: the page's mainnet pool lists are the kit's (evmPoolProvidersOf), seats first, and the
