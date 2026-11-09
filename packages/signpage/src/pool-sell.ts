@@ -78,6 +78,7 @@ import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleR
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
+import { decimal } from "./vault-balance.ts";
 
 /** What a sell run needs from the page. */
 export type PoolSellHost = {
@@ -1364,7 +1365,9 @@ const sentAnswer = (a: HostAnswer<"pool.sell"> | HostRefusal): boolean => "resul
 
 /** A pool sell's ops record (src/state.ts's op contract: nothing secret), keyed by its request's id: kind "sell", as
  *  the app reads a trade's; `pool` marks it as this kind's, so the settle on load finds it by its transaction. */
-type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number };
+/** A pool sell's ops record: its chain, token and the token amount it asks, whole units at the token's decimals, kept
+ *  from the request so state.ops names them (kit messages.ts OpDetail, card kit-portfolio-reads). */
+type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number; chain?: "solana"; token?: string; units?: string };
 
 /** What the kind needs beyond a run's host: the wallet store its ops records go in, and the end of the run. */
 export type PoolSellKindHost = PoolSellHost & { ops(): Promise<TradeStore>; end?(): void; storeMs?: number };
@@ -1437,7 +1440,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
               prior = await ops.get("ops", ctx.id);
             }
             if (prior !== undefined) return void (answer ??= fromRecord(prior, ctx.sha) as HostAnswer<"pool.sell"> | HostRefusal);
-            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())) };
+            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())), ...(ask.token === null ? {} : { chain: "solana" as const, token: ask.token, units: decimal(ask.amount, ask.decimals) }) };
             await ops.put("ops", ctx.id, { ...op });
             let writes: Promise<void> = Promise.resolve();
             const snap = () => ({ ...op, txs: op.txs.map((t) => ({ ...t })) });

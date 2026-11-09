@@ -55,7 +55,7 @@ function withdrawnOf(n: NoteRecord, value: bigint): bigint {
 }
 
 /** units / 10^d as an exact decimal string: no trailing zeros after the point, "0" for zero. */
-function decimal(units: bigint, d: number): string {
+export function decimal(units: bigint, d: number): string {
   const s = units.toString().padStart(d + 1, "0");
   const int = s.slice(0, s.length - d);
   const frac = s.slice(s.length - d).replace(/0+$/, "");

@@ -55,6 +55,8 @@ const MINT = fx.pump.mint as string;
 const AMOUNT = 4_000_000_000_000n;
 const SLIPPAGE = 300;
 const ASK: PoolAsk = { kind: "pool.sell", chain: "solana", token: MINT, amount: AMOUNT, slippageBps: SLIPPAGE, decimals: 6 };
+/** ASK's amount in whole units at its decimals, as its ops record names it (card kit-portfolio-reads). */
+const UNITS = "4000000";
 const FEE = 5_000;
 const N = 6; // leaves on each tree before the sell
 const ENOUGH = 1_000_000_000; // W's lamports: a reserve of 0
@@ -1059,10 +1061,11 @@ test("a request id seen before never runs twice: answered from its ops record, w
   await r.after;
   const sig = r.answer().result!.txs[0]!.hash;
   await until(async () => ((await w.store.get("ops", "t1")) as { stage?: string } | undefined)?.stage === "filled");
-  // the record, as state.ts's op contract reads it: a sell, its stage and W's signature, nothing secret
+  // the record, as state.ts's op contract reads it: a sell, its stage and W's signature, and its time, chain, token and
+  // the token amount asked in whole units at the token's decimals (card kit-portfolio-reads), nothing secret
   const rec = (await w.store.get("ops", "t1")) as Record<string, unknown>;
-  assert.deepEqual(opOf("t1", rec), { id: "t1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }] });
-  assert.deepEqual(Object.keys(rec).sort(), ["created_ms", "kind", "pool", "sha", "stage", "txs"]);
+  assert.deepEqual(opOf("t1", rec), { id: "t1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }], created_ms: 1000, chain: "solana", token: MINT, units: UNITS });
+  assert.deepEqual(Object.keys(rec).sort(), ["chain", "created_ms", "kind", "pool", "sha", "stage", "token", "txs", "units"]);
   // the same id again (a reload, or the app's retry after client_timeout): its record's answer, no second sale
   // (the sell's own sends: the first run's rent back may still be sending its own)
   const sellSends = () => w.c.calls.filter((c) => c.method === "sendTransaction" && base58.encode(base64.decode(c.params[0] as string).subarray(1, 65)) === sig).length;
@@ -1089,7 +1092,7 @@ test("the same id in a second tab while the first runs is id_reused at once; the
   await first.after;
   const sig = first.answer().result!.txs[0]!.hash;
   await new Promise((res) => setTimeout(res, 20));
-  assert.deepEqual(opOf("t2", await w.store.get("ops", "t2")), { id: "t2", kind: "sell", stage: "sent", txs: [{ chain: "solana", hash: sig }] });
+  assert.deepEqual(opOf("t2", await w.store.get("ops", "t2")), { id: "t2", kind: "sell", stage: "sent", txs: [{ chain: "solana", hash: sig }], created_ms: 1000, chain: "solana", token: MINT, units: UNITS });
   const second = poolSellKind(host, locks)(ASK, ctxOf("t2")) as KindAnswer;
   await second.after;
   assert.deepEqual(second.answer(), { error: "id_reused" });
@@ -1152,7 +1155,7 @@ test("a page killed right after the send keeps the note: the reload's settle sto
   await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2, settled: (s, stage) => void ends.push(settleSellOps(w.store, s, stage)) }, locks);
   await Promise.all(ends);
   assert.deepEqual(await ours(ns2), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
-  assert.deepEqual(opOf("k1", await w.store.get("ops", "k1")), { id: "k1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }] });
+  assert.deepEqual(opOf("k1", await w.store.get("ops", "k1")), { id: "k1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }], created_ms: 1000, chain: "solana", token: MINT, units: UNITS });
   // settled once: a second pass changes nothing
   await settlePoolSells({ pin: PIN, rpcs: w.c.rpcs, notes: async () => ns2 }, locks);
   assert.deepEqual((await ours(ns2)).length, 1);
@@ -1320,14 +1323,14 @@ test("a dead pending sell record: its re-ask answers failed and sends nothing; t
   await r.after;
   assert.deepEqual(r.answer(), { error: "failed" });
   assert.equal(sends(w).length, 0);
-  assert.deepEqual(opOf("d1", await w.store.get("ops", "d1")), { id: "d1", kind: "sell", stage: "refused", txs: [], code: "failed" });
+  assert.deepEqual(opOf("d1", await w.store.get("ops", "d1")), { id: "d1", kind: "sell", stage: "refused", txs: [], code: "failed", created_ms: 1 });
   // d3's request is live in another tab: its lock is held through the settle
   let release!: () => void;
   const live = locks.request(tradeLock("d3"), { mode: "exclusive" }, () => new Promise<void>((res) => (release = res)));
   modes.length = 0;
   await settleDeadSellOps(w.store, locks);
   assert.deepEqual(modes, [], "the settle takes no lock");
-  assert.deepEqual(opOf("d2", await w.store.get("ops", "d2")), { id: "d2", kind: "sell", stage: "refused", txs: [], code: "failed" });
+  assert.deepEqual(opOf("d2", await w.store.get("ops", "d2")), { id: "d2", kind: "sell", stage: "refused", txs: [], code: "failed", created_ms: 1 });
   assert.equal(((await w.store.get("ops", "d3")) as { stage?: string }).stage, "pending");
   release();
   await live;

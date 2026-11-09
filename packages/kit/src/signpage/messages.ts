@@ -290,7 +290,7 @@ export interface ReadyEvent {
  * The page sends a client only the states, stages and facts its version reads. A change to what the page may send
  * (a state field, an op kind, a stage, a fact) raises it, and the page maps the version before it down.
  */
-export const SIGNPAGE_KIT_VERSION = "1.8";
+export const SIGNPAGE_KIT_VERSION = "1.9";
 
 /**
  * The client's half of the handshake, app to page (card kit-frame-version): its kit version, posted before every
@@ -451,14 +451,35 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  * rest of the state (card kit-frame-version; kit-v1.4 and earlier refuse the whole state for one such op). A pool
  * deposit's op id is its pool.address request's id (card pool-deposit-stages), `chain` the pool's.
  */
-export type Operation =
+export type Operation = (
   | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
   | ({ readonly id: string; readonly kind: "pool_deposit"; readonly chain: PoolChain; readonly stage: PoolDepositStage; readonly txs: readonly TxRef[] } & PoolDepositFacts)
   | { readonly id: string; readonly kind: "withdraw"; readonly stage: WithdrawStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "buy" | "sell"; readonly stage: TradeStage; readonly txs: readonly TxRef[]; readonly code?: ErrorCode }
   | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "return"; readonly stage: ReturnStage; readonly txs: readonly TxRef[] }
-  | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] };
+  | { readonly id: string; readonly kind: "restore"; readonly stage: RestoreStage; readonly txs: readonly TxRef[] }
+) & OpDetail;
+
+/**
+ * What an op of any kind may carry beside its stage (card kit-portfolio-reads, kit 1.9, additive), so an app draws its
+ * Activity row from the kit alone. Each only when the device holds it, never made up; absent from a page of an earlier
+ * release, and from a record written before it:
+ * - created_ms: unix ms when the device started the op (its record's own time);
+ * - chain and token: the chain a buy or sell runs on and the token it trades, as its request named them (a pool
+ *   deposit's chain is its own required field);
+ * - units: the token amount a sell asked to sell, in the token's whole units at its own decimals;
+ * - amount_usd: the op's size in USD, a decimal string, only when the device knows it exactly (a trade-box buy's USDC
+ *   spend; a deposit's is its own fact, on "done" only, DepositFacts).
+ * Amounts, a chain and a token only: never a key, the 12 words, a wallet or which note is whose.
+ */
+export type OpDetail = {
+  readonly created_ms?: number;
+  readonly chain?: Chain;
+  readonly token?: string;
+  readonly units?: string;
+  readonly amount_usd?: string;
+};
 
 /** A pool asset's USD price in SignpageState.pools, as the signing page read it (card signpage-pool-price). */
 export type PoolStatePrice = { readonly price: string; readonly expo: number; readonly published_s: number; readonly read_ms: number };

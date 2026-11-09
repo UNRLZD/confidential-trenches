@@ -5,8 +5,9 @@ import { balanceOf, heldOf, NO_DATA, portfolio } from "./model.ts";
 import type { PortfolioData, Row } from "./model.ts";
 
 // What Portfolio and Activity read and do. The kit gives the signing page's state (cash, wallets, open positions and
-// every operation's stage and txs). It has no call yet for the rest of PortfolioData (model.ts: the market reads, the
-// position extras, the closed positions, the value series, the fees and each operation's facts), so the live source
+// every operation's stage, txs and, kit 1.9, its time, chain, token, units and USD size where the device holds them). It
+// has no call yet for the rest of PortfolioData (model.ts: the market reads, the position extras, the closed positions,
+// the value series and the fees), so the live source
 // answers none of them and the screen draws what the kit gives with dashes for the rest; the card's report names each
 // missing call. The screen tests pass fixtures through PortfolioSourceProvider, so the same component draws every
 // state with no signing page.
