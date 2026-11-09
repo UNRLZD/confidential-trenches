@@ -69,20 +69,27 @@ test("a pool buy on the pinned devnet pool reaches the flow; another chain, no f
   assert.deepEqual(k["pool.buy"](buy("solana"), ctx), { error: "busy" }, "the flow's answer");
   assert.equal(asks.length, 1);
   assert.deepEqual(asks[0], { kind: "pool.buy", chain: "solana", token: SOL_TOKEN, amount: 10_000_000n, slippageBps: 100, decimals: 9 });
-  // no EVM pool is pinned in the testnet build (EVM_POOLS is empty): Base Sepolia and Robinhood testnet are refused
-  for (const chain of ["base", "robinhood"]) assert.deepEqual(k["pool.buy"](buy(chain), ctx), { error: "not_allowed" }, chain);
-  assert.equal(asks.length, 1);
+  // the testnet build pins Base Sepolia's and Robinhood testnet's pools (EVM_POOLS, card evm-pool-pins): their buys
+  // reach the flow, which alone decides (the testnet flow refuses an EVM buy, below); a chain with no pin is refused
+  for (const chain of ["base", "robinhood"]) assert.deepEqual(k["pool.buy"](buy(chain), ctx), { error: "busy" }, chain);
+  assert.deepEqual(asks.slice(1).map((a) => a.chain), ["base", "robinhood"]);
+  const real = testnetPool({ store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") }).flow;
+  for (const chain of ["base", "robinhood"]) assert.deepEqual(poolKinds(testnetPoolDeps(real))["pool.buy"](buy(chain), ctx), { error: "not_allowed" }, `${chain}: the flow refuses it`);
+  const unpinned = poolKinds({ ...testnetPoolDeps(flow), pinned: (c) => c === "solana" });
+  for (const chain of ["base", "robinhood"]) assert.deepEqual(unpinned["pool.buy"](buy(chain), ctx), { error: "not_allowed" }, `${chain} unpinned`);
+  assert.equal(asks.length, 3);
   // a testnet page with no flow
   assert.deepEqual(poolKinds(testnetPoolDeps())["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
   // the mainnet table: nothing pinned
   assert.deepEqual(poolKinds({ ...testnetPoolDeps(flow), pinned: (c) => c === "solana" && SOL_POOLS.mainnet !== undefined })["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
-  assert.equal(asks.length, 1);
+  assert.equal(asks.length, 3);
 });
 
 test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs the deposit kind; every other op is refused", async () => {
   let opened = 0;
-  // a store that fails to open: the run ends at once, with no RPC read
-  const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }).flow;
+  // a store that fails to open: the run ends at once, with no RPC read. No EVM pin here: the build's own pins run a
+  // Base or Robinhood deposit (test/pool-testnet-evm-deposit.test.ts), and without one it is refused
+  const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }, { evmPin: () => undefined }).flow;
   const k = poolKinds(testnetPoolDeps(flow));
   const d = k["pool.deposit"]({ chain: "solana", amount: "0.01" }, ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(d.running, true);

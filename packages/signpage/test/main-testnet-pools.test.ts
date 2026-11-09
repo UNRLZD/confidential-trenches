@@ -37,6 +37,7 @@ registerHooks({
 const { SOL_POOLS, solanaPoolOf, SOL_TIP_CAP, solanaEpochFee } = await import("../../wallet/src/pool/solana.ts");
 const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
 const { noteCommitment } = await import("../../wallet/src/notes/secrets.ts");
+const { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
 const { solanaTapSpendOf } = await import("../../wallet/src/pool/balances.ts");
 
 const PROGRAM = SOL_POOLS.devnet!.program;
@@ -210,8 +211,15 @@ test("the testnet build's state: the devnet pool with the queue's ready proof as
   const quoted = await askKind("pool.address", { chain: "solana", origin_asset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", amount: "25" });
   assert.equal(quoted.ok, false);
   assert.equal(quoted.error?.code, "not_allowed");
-  const unpinned = await askKind("pool.address", { chain: "robinhood" });
-  assert.equal(unpinned.error?.code, "not_allowed", "a chain this build pins no pool of");
+  // card evm-pool-pins: the build pins Robinhood testnet's pool (EVM_POOLS), so its U_X is named under that pool's scope
+  // and answered from that record, as Solana's is
+  const pinned = EVM_POOLS["robinhood-testnet"]!;
+  const rhScope = evmPoolScopeOf(pinned.pool, EVM_CHAIN_IDS["robinhood-testnet"]);
+  const rh = await askKind("pool.address", { chain: "robinhood" });
+  const rhRec = (await w.get("meta", `deposit/${rhScope}`)) as { scope: string; evm?: string } | undefined;
+  assert.ok(rhRec?.evm !== undefined && rhRec.scope === rhScope.toString(), "the page named the Robinhood pool's U_X under its scope");
+  assert.equal(rh.ok, true, JSON.stringify(rh));
+  assert.deepEqual(rh.result, { chain: "robinhood", address: rhRec.evm, asset: "ETH" });
 
   // a notes read that fails (a record the store refuses) still answers the state, signed in and without pools,
   // as withPools answers any failed read: the read inside the queue's readyWith never throws past it
