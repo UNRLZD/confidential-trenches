@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { test } from "node:test";
-import { evmPoolVenues } from "@blindfill/kit";
+import { evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "@blindfill/kit";
 import { checkPoolEnv } from "./env-check.ts";
 import { evmPoolSendersFromEnv, POOL_EVM_ENV, POOL_EVM_SELL_ENV } from "./pool/evm.ts";
 import { POOL_SOLANA_ENV } from "./pool/solana.ts";
@@ -273,4 +273,54 @@ test("L-2/L-3: POOL_EVM_RPCS_* of one operator however written, a CNAME of the o
   }
   assert.equal(refusal(env("https://robinhood.drpc.org/,https://robinhood.drpc.org")), "POOL_EVM_RPCS_ROBINHOOD must be two different RPC URLs");
   assert.equal(refusal(env("https://robinhood.drpc.org/,https://rpc.mainnet.chain.robinhood.com/")), null);
+});
+
+// card evm-pool-sync-holds: the device's EVM pool sync keeps old logs only when two operators give them alike, the
+// helper's ?keyed=only route counted as operator "helper" (packages/wallet/src/pool/evm.ts evmSourceOperator). A keyed
+// Base or Robinhood URL run by an operator of that chain's pool list would be one operator counted twice, so the start
+// and the redeploy's check refuse it, naming the variable and the operator, never the URL or its key.
+test("evm-pool-sync-holds: a keyed Base or Robinhood URL whose operator runs that chain's pool list is refused, naming the variable and never the URL or its key; another operator's, and none set, pass", async () => {
+  const { checkPoolRpcOperators } = (await import("./env-check.ts")) as unknown as { checkPoolRpcOperators: (env: Record<string, string | undefined>) => void };
+  assert.equal(typeof checkPoolRpcOperators, "function", "env-check.ts checkPoolRpcOperators");
+  const why = (env: Record<string, string | undefined>) => {
+    try {
+      checkPoolRpcOperators(env);
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+  const KEY = "FAKEKEY123";
+  for (const [name, url, op, chain] of [
+    ["BASE_RPC_URL", `https://base-rpc.publicnode.com/${KEY}`, "publicnode.com", "base"],
+    ["BASE_RPC_URL_QUICKNODE", `https://x.base.api.pocket.network/${KEY}`, "pocket.network", "base"],
+    ["ROBINHOOD_RPC_URL_DRPC_1", `https://robinhood.rpc.grove.city/v1/${KEY}`, "pocket.network", "robinhood"],
+    ["ROBINHOOD_RPC_URL", `https://user:${KEY}@rpc.mainnet.chain.robinhood.com/?k=${KEY}`, "robinhood.com", "robinhood"],
+  ] as const) {
+    const m = why({ [name]: url });
+    assert.equal(m, `${name}: its operator ${op} runs the device's ${chain} pool list`, url);
+    assert.ok(!m!.includes(url) && !m!.includes(KEY), `a URL or key in: ${m}`);
+  }
+  // a keyed URL that is not http(s) has no operator: refused the same way, naming the variable only
+  for (const [name, url] of [["BASE_RPC_URL_DRPC_2", `ws://lb.drpc.live/base/${KEY}`], ["ROBINHOOD_RPC_URL_QUICKNODE", `not a url/${KEY}`]] as const) {
+    const m = why({ [name]: url });
+    assert.equal(m, `${name}: not an http(s) URL, so no operator apart from the device's pool list`, url);
+    assert.ok(!m!.includes(KEY), m!);
+  }
+  // dRPC's keyed URL on Base: drpc.org is not one of Base's pool-list operators (buy-unpinned.ts base poolProviders)
+  const basePool = (evmPoolProvidersOf(evmPoolVenues().base) ?? []).map(evmRpcOperator);
+  assert.ok(!basePool.includes("drpc.org"), `Base's pool list: ${basePool.join(", ")}`);
+  assert.equal(why({ BASE_RPC_URL_DRPC_1: `https://lb.drpc.live/base/${KEY}` }), null);
+  // none set, or set empty, passes; another chain's names are not read here
+  assert.equal(why({}), null);
+  assert.equal(why({ BASE_RPC_URL: "", ROBINHOOD_RPC_URL: "" }), null);
+  assert.equal(why({ SOLANA_RPC_URL: `https://base-rpc.publicnode.com/${KEY}` }), null);
+});
+
+test("evm-pool-sync-holds: node src/env-check.ts exits 2 on a keyed URL of a pool-list operator, naming the variable and never the URL or its key", () => {
+  const url = "https://base-rpc.publicnode.com/FAKEKEY123";
+  const r = spawnSync(process.execPath, [path.join(import.meta.dirname, "env-check.ts")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", BASE_RPC_URL: url } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /helper env: BASE_RPC_URL: its operator publicnode\.com runs the device's base pool list/);
+  assert.ok(!(r.stdout + r.stderr).includes("FAKEKEY123"), "the key was printed");
 });

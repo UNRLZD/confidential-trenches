@@ -55,7 +55,8 @@ import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
-import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
+import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
@@ -83,21 +84,43 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
  *  other directly; both with the page's retry. */
 export const testnetRpc = (url: string): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, init: HELPER_FETCH_INIT }) : pageRpc(url));
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
-/** Each EVM pool's synced tree on this page (card evm-pool-leaves-any-source): one hold per pool, which the deposit's
- *  sync and the restore's both keep and read, so each reads only the blocks past the last one's. */
+/** Each EVM pool's synced tree on this device (card evm-pool-leaves-any-source; card evm-pool-sync-holds: in the wallet
+ *  store, ../../wallet/src/pool/evm-hold-store.ts): one hold per pool, which the deposit's sync and the restore's both
+ *  keep and read, on this page and every later one, so each reads only the blocks past the last one's and a new page
+ *  never needs the pool's deploy block once a page synced it. A sign out deletes it with the store. */
 const EVM_HOLDS = new Map<string, EvmSyncHold>();
-export const pageEvmHold = (pin: EvmPoolPin): EvmSyncHold => {
+export const pageEvmHold = (pin: EvmPoolPin, store: () => Promise<WalletStore>): EvmSyncHold => {
   const key = `${pin.network}:${pin.pool.toLowerCase()}`;
   let h = EVM_HOLDS.get(key);
-  if (h === undefined) EVM_HOLDS.set(key, (h = evmMemoryHold()));
+  if (h === undefined) EVM_HOLDS.set(key, (h = evmStoredHold(store, pin)));
   return h;
 };
+/** The deep public sources past each chain's pool list (card evm-pool-sync-holds), in SIGN_HOST's connect-src: Base's
+ *  bloXroute keeps logs from block 52,500,000 ("4444: pruned history unavailable: requested 52400000, earliest available
+ *  52500000", read 2026-11-09 13:03Z and 14:14Z), under the pool's deploy block 54,325,671, where publicnode keeps
+ *  about 3.9M blocks and Pocket answers past its window with no logs. Not taken (read 14:17Z-14:21Z): base.drpc.org
+ *  (archive, but a range over 1,000 blocks refused, code 35: about 900 calls a 900,000-block read, and the helper's
+ *  keyed operator), base.llamarpc.com (HTTP 525), 1rpc.io/base ("earliest available 52000000", and its eth_getLogs
+ *  "discontinued"), base.blockpi.network and rpc.ankr.com/base (a key required). Robinhood's list has none: its
+ *  bloXroute answers HTTP 403 to eth_getLogs. scripts/live-checks/evm-pool-sync-holds.mjs reads each one's floor. */
+export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  base: /* @__PURE__ */ Object.freeze(["https://base.rpc.blxrbdn.com"]),
+  robinhood: /* @__PURE__ */ Object.freeze([] as string[]),
+});
+const HISTORY = new Map<string, readonly EvmRpc[]>();
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
  *  helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, its archive providers alone, never its public
- *  fallback: a keyless seat keeps a window of logs only), one operator, held to the pool's root at the head like any
- *  source and never taken on its word alone; none on a testnet, whose helper has no route for the chain. */
-export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => (pin.network === "base" || pin.network === "robinhood" ? [evmHelperKeyedRpc(TRADE_HELPER, pin.network)] : []);
-/** Tests only: forget every pool's hold on this page (EVM_HOLDS is the page's, one per pool). */
+ *  fallback: a keyless seat keeps a window of logs only), one operator, then MAINNET_POOL_HISTORY's, each held to the
+ *  pool's root at the head like any source and never taken on its word alone; none on a testnet, whose helper has no
+ *  route for the chain. The same RPCs each time (one pace per provider). */
+export const pageEvmHistory = (pin: EvmPoolPin): readonly EvmRpc[] => {
+  if (pin.network !== "base" && pin.network !== "robinhood") return [];
+  let h = HISTORY.get(pin.network);
+  if (h === undefined) HISTORY.set(pin.network, (h = Object.freeze([evmHelperKeyedRpc(TRADE_HELPER, pin.network), ...MAINNET_POOL_HISTORY[pin.network].map((u) => pageRpc(u))])));
+  return h;
+};
+/** Tests only: forget this page's hold objects (EVM_HOLDS; each pool's record stays in the wallet store, as on a new
+ *  page). */
 export const resetPageEvmHolds = (): void => EVM_HOLDS.clear();
 /** Each EVM chain's mainnet pool list, the pool sync's seats first (card evm-pool-lists-mainnet): the kit's
  *  evmPoolProvidersOf(evmPoolVenues()[chain]), copied, as TESTNET_RPCS copies the testnet pairs, since the venue table
@@ -469,7 +492,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     ((p: EvmPoolPin, r: readonly [EvmRpc, EvmRpc], list: readonly EvmRpc[] = []) => {
       // the deposit's own pair (one evmPair, its seats bound by every read), the page's hold, and as sources the list's
       // providers, then the page's history
-      const sync = evmTreeSync({ rpcs: r, pin: p, held: pageEvmHold(p), history: [...list, ...pageEvmHistory(p)] });
+      const sync = evmTreeSync({ rpcs: r, pin: p, held: pageEvmHold(p, () => page.store()), history: [...list, ...pageEvmHistory(p)] });
       return async (): Promise<EvmDepositRound> => {
         const round = await sync.events();
         return { events: round.events, finalBlock: round.fin.number };

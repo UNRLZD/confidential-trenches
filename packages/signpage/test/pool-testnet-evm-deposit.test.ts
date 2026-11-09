@@ -8,6 +8,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import type { EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { evmSourceOperator } from "../../wallet/src/pool/evm.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool } = await import("../src/pool-testnet.ts");
@@ -260,29 +261,47 @@ test("card evm-pool-leaves-any-source: the EVM deposit and its round's sync read
   assert.deepEqual(list, r.pair, "the list's providers are the sync's sources");
 });
 
+const noStore = async (): Promise<WalletStore> => assert.fail("no store read");
 test("card evm-pool-leaves-any-source: one hold per pool on the page; the helper's route a history source on mainnet only", async () => {
   const { pageEvmHold, pageEvmHistory } = await import("../src/pool-testnet.ts");
-  assert.equal(pageEvmHold(PIN), pageEvmHold({ ...PIN, pool: PIN.pool.toUpperCase().replace("0X", "0x") }));
-  assert.notEqual(pageEvmHold(PIN), pageEvmHold({ ...PIN, network: "robinhood-testnet" }));
+  assert.equal(pageEvmHold(PIN, noStore), pageEvmHold({ ...PIN, pool: PIN.pool.toUpperCase().replace("0X", "0x") }, noStore));
+  assert.notEqual(pageEvmHold(PIN, noStore), pageEvmHold({ ...PIN, network: "robinhood-testnet" }, noStore));
   assert.deepEqual(pageEvmHistory(PIN), [], "no route for a testnet chain");
   const base = pageEvmHistory({ ...PIN, network: "base" });
-  assert.equal(base.length, 1);
+  assert.equal(base.length, 2);
   assert.equal(pageEvmHistory({ ...PIN, network: "base" })[0], base[0], "one paced route, the same each time");
   // review of 0b379bf4, P1-1: the route in its keyed-only mode, never the public fallback, one operator "helper"
   const r = base[0] as unknown as { url: string; operator: string };
   assert.match(r.url, /\/v1\/rpc\/base\?keyed=only$/);
   assert.equal(r.operator, "helper");
   assert.match((pageEvmHistory({ ...PIN, network: "robinhood" })[0] as unknown as { url: string }).url, /\/v1\/rpc\/robinhood\?keyed=only$/);
+  // card evm-pool-sync-holds: Base's bloXroute, a third deep operator; none past the helper on Robinhood
+  assert.match((base[1] as unknown as { url: string }).url, /^https:\/\/base\.rpc\.blxrbdn\.com\/?$/);
+  assert.equal(evmSourceOperator(base[1]!), "blxrbdn.com");
+  assert.equal(pageEvmHistory({ ...PIN, network: "robinhood" }).length, 1);
 });
 
-test("review of 0b379bf4, P3-3: the page's hold never moves back; resetPageEvmHolds forgets every pool's", async () => {
+test("card evm-pool-sync-holds: the pool's hold is in the wallet store: a new page reads it, it never moves back, and a sign out deletes it", async () => {
   const { pageEvmHold, resetPageEvmHolds } = await import("../src/pool-testnet.ts");
+  const idb = new IDBFactory();
+  const w = await openWalletStore({ indexedDB: idb });
   const at = (to: bigint) => ({ network: PIN.network, pool: PIN.pool, fromBlock: 1n, to, events: [] });
-  const h = pageEvmHold(PIN);
+  resetPageEvmHolds();
+  const h = pageEvmHold(PIN, async () => w);
   await h.write(at(100n));
   await h.write(at(40n));
   assert.equal((await h.read())?.to, 100n);
+  // a new page: the page's hold objects gone, the store reopened
   resetPageEvmHolds();
-  assert.notEqual(pageEvmHold(PIN), h);
-  assert.equal(await pageEvmHold(PIN).read(), null);
+  const w2 = await openWalletStore({ indexedDB: idb });
+  const h2 = pageEvmHold(PIN, async () => w2);
+  assert.notEqual(h2, h);
+  assert.equal((await h2.read())?.to, 100n);
+  await w2.signOut();
+  w.close();
+  const w3 = await openWalletStore({ indexedDB: idb });
+  resetPageEvmHolds();
+  assert.equal(await pageEvmHold(PIN, async () => w3).read(), undefined);
+  w3.close();
+  resetPageEvmHolds();
 });

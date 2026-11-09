@@ -1183,11 +1183,16 @@ export type EvmSyncArgs = {
  * leaves, in log order, so the tree is rebuilt from them; `to` is the last block synced. The pool's public logs only: no
  * secret, and nothing that says which leaf is the user's.
  */
-export type EvmSyncHeld = { network: EvmNetwork; pool: string; fromBlock: bigint; to: bigint; events: readonly EvmPoolEvent[] };
+export type EvmSyncHeld = { network: EvmNetwork; pool: string; fromBlock: bigint; to: bigint; events: readonly EvmPoolEvent[]; kept?: readonly EvmSyncKept[] };
+/** One source's logs past a hold's `to` (from = to + 1) up to a finalized block, by operator (card evm-pool-sync-holds):
+ *  a source's own word, never taken as the pool's (only two operators' same bytes making the pool's trees are), kept
+ *  with the hold so a later sync, a restore's or a new page's, reads that source on from them. */
+export type EvmSyncKept = { op: string; from: bigint; to: bigint; logs: readonly EvmPoolEvent[] };
 /** Where a sync's held part is kept: read once, at its first round (a record that is not this pin's, or not in shape,
- * is not taken); written each time the held part rises. A later sync then reads only the blocks after `to`, and its
- * first round holds the held leaves to the pool's views with the new ones: a held part they do not make is dropped and
- * the pool read again from its deploy block, once. A write that fails leaves the sync as it is. */
+ * is not taken; a kept source not in shape is dropped alone); written each time the held part rises, and with the
+ * sources' kept logs when a round ends without the pool's leaves. A later sync then reads only the blocks after `to`,
+ * and its first round holds the held leaves to the pool's views with the new ones: a held part they do not make is
+ * dropped and the pool read again from its deploy block, once. A write that fails leaves the sync as it is. */
 export type EvmSyncHold = { read(): Promise<EvmSyncHeld | null | undefined>; write(h: EvmSyncHeld): Promise<void> };
 
 /** A hold in this page's memory: every sync given it (the pool's, a restore's) reads only past the last one's blocks. A
@@ -1195,8 +1200,11 @@ export type EvmSyncHold = { read(): Promise<EvmSyncHeld | null | undefined>; wri
  *  lower `to` over a higher one). */
 export function evmMemoryHold(): EvmSyncHold {
   let h: EvmSyncHeld | null = null;
-  return { read: async () => h, write: async (v) => void (h === null || v.to > h.to ? (h = v) : undefined) };
+  return { read: async () => h, write: async (v) => void (evmHoldRises(h, v) ? (h = v) : undefined) };
 }
+/** Whether `v` may replace the hold `h`: never a lower `to` (P3-3); the same `to` again carries its sources' kept logs. */
+export const evmHoldRises = (h: unknown, v: EvmSyncHeld): boolean =>
+  h === null || typeof h !== "object" || typeof (h as { to?: unknown }).to !== "bigint" || v.to >= (h as EvmSyncHeld).to;
 
 const KINDS = new Set(["deposit", "withdraw", "buy"]);
 const nullOr = (v: unknown, t: string): boolean => v === null || typeof v === t;
@@ -1205,16 +1213,30 @@ const nullOr = (v: unknown, t: string): boolean => v === null || typeof v === t;
 function heldOf(h: unknown, pin: EvmPoolPin, pool: string): EvmSyncHeld | null {
   const r = h as Partial<EvmSyncHeld> | null | undefined;
   if (r === null || typeof r !== "object" || r.network !== pin.network || typeof r.pool !== "string" || lower(r.pool) !== pool || r.fromBlock !== pin.fromBlock) return null;
-  if (typeof r.to !== "bigint" || r.to < pin.fromBlock - 1n || !Array.isArray(r.events)) return null;
+  if (typeof r.to !== "bigint" || r.to < pin.fromBlock - 1n || !eventsIn(r.events, pin.fromBlock, r.to)) return null;
+  // a kept source's logs: past `to`, one record per operator, each in shape
+  const to = r.to;
+  const kept: EvmSyncKept[] = [];
+  for (const k of Array.isArray(r.kept) ? (r.kept as unknown[]) : []) {
+    const x = k as Partial<EvmSyncKept> | null;
+    if (x === null || typeof x !== "object" || typeof x.op !== "string" || x.op === "" || x.op.length > 200 || x.from !== to + 1n || typeof x.to !== "bigint" || x.to < x.from) continue;
+    if (kept.some((y) => y.op === x.op) || !eventsIn(x.logs, x.from, x.to)) continue;
+    kept.push(x as EvmSyncKept);
+  }
+  return { network: r.network, pool: r.pool, fromBlock: r.fromBlock, to, events: r.events as Ev[], kept };
+}
+/** Pool events of the shape the sync and a restore read, in blocks from..to, in order. */
+function eventsIn(list: unknown, from: bigint, to: bigint): list is Ev[] {
+  if (!Array.isArray(list)) return false;
   let last: Ev | null = null;
-  for (const e of r.events as Ev[]) {
-    if (e === null || typeof e !== "object" || typeof e.block !== "bigint" || e.block < pin.fromBlock || e.block > r.to || typeof e.logIndex !== "bigint") return null;
-    if (last !== null && (e.block < last.block || (e.block === last.block && e.logIndex <= last.logIndex))) return null;
-    if (!KINDS.has(e.kind) || typeof e.state !== "bigint" || typeof e.value !== "bigint" || typeof e.blockHash !== "string" || typeof e.bytes !== "string") return null;
-    if (!nullOr(e.label, "bigint") || !nullOr(e.precommitment, "bigint") || !nullOr(e.nullifier, "bigint") || !nullOr(e.recipient, "string") || !nullOr(e.token, "string")) return null;
+  for (const e of list as Ev[]) {
+    if (e === null || typeof e !== "object" || typeof e.block !== "bigint" || e.block < from || e.block > to || typeof e.logIndex !== "bigint") return false;
+    if (last !== null && (e.block < last.block || (e.block === last.block && e.logIndex <= last.logIndex))) return false;
+    if (!KINDS.has(e.kind) || typeof e.state !== "bigint" || typeof e.value !== "bigint" || typeof e.blockHash !== "string" || typeof e.bytes !== "string") return false;
+    if (!nullOr(e.label, "bigint") || !nullOr(e.precommitment, "bigint") || !nullOr(e.nullifier, "bigint") || !nullOr(e.recipient, "string") || !nullOr(e.token, "string")) return false;
     last = e;
   }
-  return r as EvmSyncHeld;
+  return true;
 }
 
 const wait = (ms: number, signal?: AbortSignal): Promise<void> =>
@@ -1270,10 +1292,9 @@ export function evmSourceOperator(r: EvmRpc): string | null {
   const u = (r as { url?: unknown }).url;
   return typeof u === "string" ? evmRpcOperator(u) : null;
 }
-/** A source is read only when its page needs at most this many pages for the blocks, and stopped past EVM_SOURCE_CALLS
- *  log calls (its refusals while its pager finds its cap beside the pages). */
-export const EVM_SOURCE_PAGES = 200;
-export const EVM_SOURCE_CALLS = EVM_SOURCE_PAGES + 40;
+/** A source's log calls in one round (its pages and its pager's refusals while it finds its cap): past them it is
+ *  stopped, its pages up to the finalized anchor kept, and the round is a lag, so the next round reads on from them. */
+export const EVM_SOURCE_CALLS = 240;
 
 /**
  * The pool's tree sync on two RPCs. Every leaf event read at an EVM_POOL_TAG anchor on both RPCs, the same on both and
@@ -1296,13 +1317,15 @@ export const EVM_SOURCE_CALLS = EVM_SOURCE_PAGES + 40;
  * one operator's word (a broken-in helper's included) is ever taken, and with no two the round is refused and nothing
  * is kept. A source can stall the sync, never steer it.
  * Bounds (review of 0b379bf4, P2-1): the sources are read all at once and the first two operators that agree end the
- * rest; a source whose page (its own pager's, apart from the seats') needs more than EVM_SOURCE_PAGES pages for the
- * blocks is not read, and one that makes more than EVM_SOURCE_CALLS log calls is stopped. A source's logs up to a
- * finalized anchor are kept for the sync's next round, so a retry reads only past them, but only from a read that made
- * the pool's trees, one judged behind, or one stopped at its bound (its pages so far); any other's go (review of the
- * fold, P2-A). A reorg under the read, a source behind its head, or one source's logs a strict prefix of another's that
- * makes the pool's trees, lacking only logs past the finalized anchor, is a lag. A held part is dropped only when two
- * operators read every block past it alike and their logs do not make the pool's trees (P2-B).
+ * rest; a source that makes more than EVM_SOURCE_CALLS log calls in a round is stopped. A source's logs up to a
+ * finalized anchor are kept for the next round, the hold's too (card evm-pool-sync-holds: a restore or a new page reads
+ * on from them), so a retry reads only past them, but only from a read that made the pool's trees, one judged behind,
+ * or one stopped at its bound (its pages so far); any other's go (review of the fold, P2-A). A reorg under the read, a
+ * source behind its head, a source stopped at its bound past its first page, or one source's logs a strict prefix of
+ * another's that makes the pool's trees, lacking only logs past the finalized anchor, is a lag. A held part is dropped
+ * only when two operators read every block past it alike and their logs, as many leaves as the pool's or more, do not
+ * make the pool's trees (P2-B); logs short of the pool's leaves (a pruned provider's empty answer past its window)
+ * never drop it.
  */
 export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   const rpcs = evmPair(a.rpcs);
@@ -1379,6 +1402,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         heldTo = writtenTo = h.to;
         fromHold = true;
       }
+      if (h !== null && h.to === heldTo) for (const k of h.kept ?? []) kept.set(k.op, { from: k.from, to: k.to, logs: [...k.logs] });
     }
     if (!checked) {
       const ids = await both(rpcs, async (rpc, k, sig) => qty(await poolRead(`rpc ${k} eth_chainId`, () => rpc("eth_chainId", []), sig, sleep), `rpc ${k} eth_chainId`), signal);
@@ -1415,6 +1439,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         : null;
       return { events, stateTree, labelTree, wrong };
     };
+    // trees with fewer leaves than the pool's: logs missing (a provider past its window), never a word against the hold
+    const short = (b: { stateTree: VaultTree }): boolean => BigInt(b.stateTree.size) < size;
     // the blocks past what is held from each source alone, all at once (evmTreeSync's comment): the first logs two
     // operators give byte for byte whose trees are the pool's at the anchor, else a lag (a reorg, a source behind) or
     // refused with the seats' own refusal (`why`) first; `fullWrong` when a source read every block and its logs did not
@@ -1429,6 +1455,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       const reads: { op: string; fresh: Ev[]; ok: boolean; wrong: boolean }[] = [];
       const parts = new Map<string, { to: bigint; logs: Ev[] }>();
       let lagged = false;
+      let moved = false;
       let found: ReturnType<typeof build> | null = null;
       const stop = new AbortController();
       const outer = () => stop.abort(signal!.reason);
@@ -1439,11 +1466,6 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const k = kept.get(op);
         const prior = k !== undefined && k.from === from && k.to <= anchor.number ? k : null;
         const start = prior === null ? from : prior.to + 1n;
-        const page = sourcePager.of(src, i).size;
-        if (start <= anchor.number && anchor.number - start + 1n > page * BigInt(EVM_SOURCE_PAGES)) {
-          whys.push(`${name}: its page of ${page} blocks is more than ${EVM_SOURCE_PAGES} pages for ${anchor.number - start + 1n} blocks`);
-          return;
-        }
         const own = new AbortController();
         const end = () => own.abort(stop.signal.reason);
         stop.signal.addEventListener("abort", end, { once: true });
@@ -1469,7 +1491,11 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
           // a read stopped at its call bound keeps its pages up to the finalized anchor, so the next round reads on from
           // them (review of the fold, P3-3)
           const to = progress.to < fin.number ? progress.to : fin.number;
-          if (own.signal.aborted && to >= start) parts.set(op, { to, logs: [...(prior?.logs ?? []), ...progress.logs.filter((x) => x.block <= to)] });
+          if (own.signal.aborted && to >= start) {
+            parts.set(op, { to, logs: [...(prior?.logs ?? []), ...progress.logs.filter((x) => x.block <= to)] });
+            // card evm-pool-sync-holds: a read stopped past its first page reads on next round, a lag, never a refusal
+            moved = true;
+          }
           whys.push(`${name}: ${String(((own.signal.aborted ? own.signal.reason : e) as Error)?.message ?? e)}`);
           return;
         } finally {
@@ -1479,7 +1505,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const off = fresh.find((e) => (e.block === fin.number && e.blockHash !== fin.hash) || (e.block === anchor.number && e.blockHash !== anchor.hash));
         const b = off === undefined ? build(fresh) : null;
         const ok = b !== null && b.wrong === null;
-        reads.push({ op, fresh, ok, wrong: b !== null && b.wrong !== null });
+        // a full read short of the pool's leaves (a pruned provider's empty answer) is no word on what is held
+        reads.push({ op, fresh, ok, wrong: b !== null && b.wrong !== null && !short(b) });
         if (!ok) {
           whys.push(`${name}: ${b === null ? `a log of block ${off!.block} is not of the anchor` : b.wrong}`);
           return;
@@ -1509,7 +1536,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       }
       for (const [op, p] of parts) keep(op, p.to, p.logs);
       if (found !== null) return found;
-      if (lagged || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
+      // the kept logs go with the hold, so a restore's sync or a new page reads each source on from them
+      if (a.held !== undefined && kept.size > 0) {
+        const ks = [...kept].filter(([, k]) => k.from === heldTo + 1n).map(([op, k]) => ({ op, from: k.from, to: k.to, logs: k.logs }));
+        await a.held.write({ network: a.pin.network, pool, fromBlock: a.pin.fromBlock, to: heldTo, events: held, kept: ks }).catch(() => {});
+      }
+      if (lagged || moved || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
       // a held part is dropped only when two operators read every block alike and their logs do not make the pool's
       // trees (review of the fold, P2-B): one liar's full read never drops it
       const fullWrong = reads.some((x) => x.wrong && reads.some((y) => y.wrong && y.op !== x.op && same(x.fresh, y.fresh)));
@@ -1534,11 +1566,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       });
     }
     if (got === null || got.wrong !== null) {
-      // the sources, unless a held part read whole on the seats is not the pool's: a held part no source makes the
-      // pool's trees with is dropped, and the pool read again from its deploy block (once: the read again holds nothing
-      // from the hold)
+      // the sources, unless a held part read whole on the seats is not the pool's (as many leaves as the pool's or more:
+      // seats short of them are past their window, card evm-pool-sync-holds): a held part no source makes the pool's
+      // trees with is dropped, and the pool read again from its deploy block (once: the read again holds nothing from
+      // the hold)
       let found: ReturnType<typeof build> | null = null;
-      if (!(fromHold && got !== null)) {
+      if (!(fromHold && got !== null && !short(got))) {
         try {
           found = await fromSources(why, got !== null);
         } catch (e) {

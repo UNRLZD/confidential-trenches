@@ -33,13 +33,17 @@ const RPCS = "https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org http
 const SOLANA = "https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com";
 // the kit's EVM providers' origins (card page-evm-rpc-csp), read from the kit's venue lists
 const EVM = evmOrigins().join(" ");
+// the signing page's deep public pool sources past the kit's lists (card evm-pool-sync-holds: MAINNET_POOL_HISTORY in
+// packages/signpage/src/pool-testnet.ts, copied: this file reads Blindfill only through the kit's entry;
+// packages/signpage/test/pool-testnet-evm-deposit.test.ts holds the page's Base history to it)
+export const POOL_HISTORY = "https://base.rpc.blxrbdn.com";
 
 // the wallet paper's block (wallet.md 2.7) with HELPER_HOST, RPC_A, RPC_B, RPC_C and APP_HOST put in, plus font-src 'self'
 export const CSP = [
   ["default-src", "'none'"],
   ["script-src", "'self' 'wasm-unsafe-eval'"],
   ["worker-src", "'self'"],
-  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM}`],
+  ["connect-src", `'self' https://${HELPER} https://1click.chaindefuser.com ${RPCS} ${SOLANA} ${EVM} ${POOL_HISTORY}`],
   ["style-src", "'self'"],
   ["img-src", "'self' data:"],
   ["font-src", "'self'"], // app.md finding 1 (l.1085): the top-level SIGN_HOST screens draw in the brand fonts

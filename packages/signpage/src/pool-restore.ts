@@ -289,7 +289,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.chain === "solana") return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), signal })).notes;
           // the notes only: no W is read or named to a provider for a record the page keeps none of
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin), history: pageEvmHistory(p.pin) })).notes;
+          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.store()), history: pageEvmHistory(p.pin) })).notes;
         });
         const walked: { label: string; scope: bigint; notes: RestoredNote[] }[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {

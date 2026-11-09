@@ -2,7 +2,8 @@
 // (signpage-skeleton.answers.json). good: packages/signpage built by deploy.mjs --dry-run and served by the Pages
 // runtime of wrangler 4.151.1 (re-recorded on a Linux build machine for card signpage-solana-trade's connect-src, and on a Mac for card page-evm-rpc-csp's,
 // deploy.mjs --dry-run's build, 2026-11-07, its pre-card answer kept as beforeEvm: FAIL; and on a Mac for card held-move-forgotten-tx's
-// archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
+// archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; and on a Mac for card evm-pool-sync-holds' Base
+// bloXroute (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
@@ -12,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CSP, frameAllowed, judge, read } from "./signpage-skeleton.mjs";
+import { CSP, frameAllowed, judge, POOL_HISTORY, read } from "./signpage-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answers.json"), "utf8"));
@@ -81,6 +82,21 @@ test("recorded bad answer: the good build before card held-move-forgotten-tx (no
   const site = ANSWERS.beforeArchival.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+});
+
+test("recorded bad answer: the good build before card evm-pool-sync-holds (no Base bloXroute in connect-src): FAIL on connect-src alone", () => {
+  const r = judge(ANSWERS.beforeHistory);
+  assert.equal(r.ok, false);
+  const site = ANSWERS.beforeHistory.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
+  const want = CSP.find(([k]) => k === "connect-src")[1];
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+});
+
+test("card evm-pool-sync-holds: POOL_HISTORY is the signing page's Base history past the kit's lists", () => {
+  const src = readFileSync(path.join(HERE, "../../packages/signpage/src/pool-testnet.ts"), "utf8");
+  const m = src.match(/MAINNET_POOL_HISTORY[^=]*=[^]*?base: [^[]*\[([^\]]*)\]/);
+  assert.ok(m, "MAINNET_POOL_HISTORY's base list");
+  assert.deepEqual(m[1].split(",").map((x) => x.trim().replace(/^"|"$/g, "")).filter(Boolean), POOL_HISTORY.split(" "));
 });
 
 test("frame-src other than APP_HOST alone, and Origin-Agent-Cluster gone: FAIL", () => {

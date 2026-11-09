@@ -619,7 +619,7 @@ test("card evm-pool-leaves-any-source: the restore passes the page's hold and hi
   await until("done", () => a.posted.some((m) => m.id === id && m.stage === "done"));
   const pin = POOLS[1]!.chain === "evm" ? POOLS[1]!.pin : assert.fail("the EVM pool");
   assert.equal(args.length, 1);
-  assert.equal(args[0]!.held, pageEvmHold(pin));
+  assert.equal(args[0]!.held, pageEvmHold(pin, async () => assert.fail("the restore's hold, made already")));
   assert.deepEqual(args[0]!.history, pageEvmHistory(pin));
 });
 

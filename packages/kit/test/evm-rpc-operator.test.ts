@@ -80,6 +80,15 @@ test("every host of an aliased domain is the alias's operator: two hosts of Offc
   assert.equal(op("https://rpc2.degenprotocol.io"), "pocket.network");
 });
 
+// card evm-pool-sync-holds: dRPC's keyed hosts (lb.drpc.live) and Grove's (*.rpc.grove.city, Pocket's gateway) are the
+// operators of drpc.org and pocket.network, so a helper's keyed URL of either never counts as a second operator beside them
+test("dRPC's keyed domain is drpc.org and Grove's is pocket.network: a keyed URL of either is never another operator", () => {
+  assert.equal(op("https://lb.drpc.live/base/FAKEKEY123"), "drpc.org");
+  assert.equal(op("https://lb.drpc.live/x"), op("https://base.drpc.org"));
+  assert.equal(op("https://base.rpc.grove.city/v1/FAKEKEY123"), "pocket.network");
+  assert.equal(op("https://robinhood.rpc.grove.city/v1/x"), op("https://robinhood.api.pocket.network"));
+});
+
 test("every list the kit pins for an EVM venue, quote, fee and pool, is each entry another operator's", () => {
   for (const [chain, v] of Object.entries(evmPoolVenues()) as [string, EvmPoolVenue][]) {
     for (const [name, list] of [["providers", v.providers], ["feeProviders", v.feeProviders], ["poolProviders", v.poolProviders]] as const) {

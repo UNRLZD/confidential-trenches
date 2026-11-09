@@ -94,6 +94,16 @@ const M = [
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
   [S, "if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(", "if (false) await refuse(", T, "a lying Transfer RPC"],
   [S, "for (const e of [...x, ...y]) {\n    if (e.block === fin.number && e.blockHash !== fin.hash) throw", "for (const e of [...x, ...y]) {\n    if (false) throw", TE, "not of the anchor's block"],
+  // card evm-pool-sync-holds: the verified hold and each source's kept logs carry a sync past every public window
+  [S, "reads.some((y) => y.ok && y.fresh.length > x.fresh.length", "reads.some((y) => y.fresh.length > x.fresh.length", TE, "behind only when the longer read"],
+  [S, "const to = progress.to < fin.number ? progress.to : fin.number;", "const to = progress.to;", TE, "kept only up to the finalized"],
+  [S, "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, finTo, x.fresh);", "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, anchor.number, x.fresh);", TE, "kept only up to the finalized"],
+  [S, "wrong: b !== null && b.wrong !== null && !short(b) });", "wrong: b !== null && b.wrong !== null });", TE, "new page syncs from the stored hold"],
+  [S, "if (!(fromHold && got !== null && !short(got))) {", "if (!(fromHold && got !== null)) {", TE, "new page syncs from the stored hold"],
+  [S, "if (lagged || moved || reads.some(behindOf)) lag(", "if (lagged || reads.some(behindOf)) lag(", TE, "RV-D|RV-E|fold, P3-3: a source stopped"],
+  [S, "if (a.held !== undefined && kept.size > 0) {", "if (false) {", TE, "RV-E"],
+  [S, "if (h !== null && h.to === heldTo) for (const k of h.kept ?? [])", "if (false) for (const k of h.kept ?? [])", TE, "RV-E"],
+  [S, "v.to >= (h as EvmSyncHeld).to;", "v.to > (h as EvmSyncHeld).to;", "test/pool-evm-hold-store.test.ts", "the same block again"],
 ];
 let ok = 0;
 for (const [f, find, repl, file, pat] of M) {
