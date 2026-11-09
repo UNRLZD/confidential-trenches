@@ -28,6 +28,16 @@ import R5 from "./r5.json";
 export const NOW = Date.parse("2026-11-02T03:00:00Z");
 
 type Pos = (typeof R5.open)[number];
+type Act = (typeof R5.activity)[number];
+/** An R5 Activity row as the signing page sends its op (card kit-portfolio-reads, kit OpDetail): every op its time; a
+ *  deposit its USD at done; a buy its chain, token and USD spend (trade.ts); a sell its chain, token and units
+ *  (pool-sell.ts). Nothing the page does not send. */
+const opOf = (a: Act): Operation => {
+  const txs = [{ chain: (a.chain ?? "near") as "near", hash: `${a.id}Hx9QxkTn3d2bYpW8LhF4cVzR7mKe1sJ6uA5gN0oPiHq` }];
+  if (a.kind === "deposit") return { id: a.id, kind: "deposit", stage: "done", txs, created_ms: a.at, amount_usd: a.usd };
+  const trade = { id: a.id, kind: a.kind as "buy" | "sell", stage: "filled" as const, txs, created_ms: a.at, chain: a.chain as "near", token: a.token };
+  return a.kind === "buy" ? { ...trade, amount_usd: a.usd } : { ...trade, units: a.units };
+};
 const STATE: SignpageState = {
   release: "signpage-v1",
   api: 1,
@@ -39,12 +49,11 @@ const STATE: SignpageState = {
   positions: R5.open.map((p) => ({ chain: p.chain as Pos["chain"] & SignpageState["positions"][number]["chain"], token: p.token, amount: p.amount, cost: p.cost, wallets: [`${p.token}-w1`] })),
   orders: [],
   held: [],
-  ops: R5.activity.map((a) => ({ id: a.id, kind: a.kind as "buy", stage: a.kind === "deposit" ? "done" : "filled", txs: [{ chain: (a.chain ?? "near") as "near", hash: `${a.id}Hx9QxkTn3d2bYpW8LhF4cVzR7mKe1sJ6uA5gN0oPiHq` }] }) as Operation),
+  ops: R5.activity.map(opOf),
 };
 const MARKET = new Map<string, TokenMarket>(R5.open.map((p) => [`${p.chain}:${p.token}`, { symbol: p.symbol, name: p.name, price: p.price, route: true }]));
 for (const c of R5.closed) if (!MARKET.has(`${c.chain}:${c.token}`)) MARKET.set(`${c.chain}:${c.token}`, { symbol: c.symbol, name: c.name, price: null, route: true });
 const EXTRA = new Map<string, PositionExtra>(R5.open.map((p) => [`${p.chain}:${p.token}`, { bought: p.cost, realized: p.realized, opened_at: p.opened_at, exit: p.exit ? { tp_bps: 10000, sl_bps: 3000 } : undefined }]));
-const OPS = new Map(R5.activity.map((a) => [a.id, { at: a.at, usd: a.usd, units: a.units, chain: a.chain as "near" | undefined, token: a.token }]));
 
 const base: PortfolioData = {
   market: (c, t) => MARKET.get(`${c}:${t}`) ?? null,
@@ -52,7 +61,6 @@ const base: PortfolioData = {
   closed: R5.closed.map((c) => ({ chain: c.chain as "near", token: c.token, bought: c.bought, sold: c.sold, opened_at: c.opened_at, closed_at: c.closed_at })),
   series: R5.series as [number, string][],
   fees: "4.37",
-  op: (id) => OPS.get(id) ?? null,
   exported: [],
 };
 
@@ -77,8 +85,7 @@ export const FIXTURES: Record<string, Fx> = {
   closed: { ui: { closed: true } },
   search: { ui: { q: "r", hideSmall: true } },
   selling: {
-    state: { ops: [...STATE.ops, { id: "sell-live", kind: "sell", stage: "sent", txs: [] }] },
-    data: { op: (id) => (id === "sell-live" ? { at: NOW - 500, chain: "near", token: "WTH" } : OPS.get(id) ?? null) },
+    state: { ops: [...STATE.ops, { id: "sell-live", kind: "sell", stage: "sent", txs: [], created_ms: NOW - 500, chain: "near", token: "WTH", units: "891485.96" }] },
   },
   sheet: { ui: { sheet: "near:NEARLY" } },
   notrades: { data: { closed: [], fees: null } },

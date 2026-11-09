@@ -1584,7 +1584,7 @@ test("kit-deposit-calls: deposit.confirm answers the stage with its facts throug
 const HELLO = { v: 1, type: "hello", kit: MSG.SIGNPAGE_KIT_VERSION };
 
 test("kit-frame-version: the kit names its version in a hello to SIGN_HOST's origin, just before each handshake state request", async () => {
-  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.8");
+  assert.equal(MSG.SIGNPAGE_KIT_VERSION, "1.9");
   const h = makeHost();
   const c = C.createSignpageClient({ url: URL_, host: h.host });
   await flush();

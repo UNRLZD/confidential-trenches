@@ -20,7 +20,7 @@
 //   false, so the Backup dot shows, and no `way`, which the kit's state type leaves optional: the frame does not know it
 //   and says nothing. A status with no seed is signed out: signed_in comes from the seed's key alone.
 // - ops: every record of the store's "ops", keyed by its op id, as { id, kind, stage, txs, code? } and a deposit's facts, a
-//   pool deposit's chain and facts (the op contract is
+//   pool deposit's chain and facts, and any op's created_ms, chain, token, units and amount_usd (kit OpDetail; the op contract is
 //   at readOps). Only those fields are copied (a tx as { chain, hash }), and only when the op passes the kit's own state
 //   schema, the one the client checks every answer against: a record of another shape is left out, never sent, so one
 //   bad record cannot make the client refuse the whole state. Oldest first by created_ms; past the kit's
@@ -37,7 +37,7 @@
 //   change or sign out, also when no database exists yet, and the reader reports its own connection closed by a delete
 //   (versionchange). Each one calls the watchers, and the API posts a state event when the state read then differs. A
 //   sign out or a closed connection drops the reader; the next read opens a new one.
-import { POOL_DEPOSIT_REFUNDED_STAGES, type DepositFacts, type Operation, type PoolDepositStage, type SigninWay, type SignpageState } from "../../kit/src/signpage/messages.ts";
+import { POOL_DEPOSIT_REFUNDED_STAGES, type DepositFacts, type Operation, type OpDetail, type PoolDepositStage, type SigninWay, type SignpageState } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_MAX_ANSWER_BYTES, SIGNPAGE_MAX_ARRAY, SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { depositKey, depositRecordOf, type WalletEvent, type WalletStoreReader } from "@blindfill/wallet/store";
 import type { DepositPublic } from "./deposit-wire.ts";
@@ -71,6 +71,7 @@ export function stateOf(signedIn: boolean, status: Status | undefined, ops: Oper
 }
 
 const DEPOSIT_FACT_KEYS = ["refunded", "hold", "held_id", "since_ms", "amount_usd"] as const satisfies readonly (keyof DepositFacts)[];
+const OP_DETAIL_KEYS = ["created_ms", "chain", "token", "units", "amount_usd"] as const satisfies readonly (keyof OpDetail)[];
 
 /** The op the API may send for the ops record under `id`, or null when the record is not one. */
 export function opOf(id: string, rec: unknown): Operation | null {
@@ -97,8 +98,18 @@ export function opOf(id: string, rec: unknown): Operation | null {
     if ((rec.refunded === true || op.stage === "refund_move") && POOL_DEPOSIT_REFUNDED_STAGES.includes(op.stage as PoolDepositStage)) op.refunded = true;
     if (rec.since_ms !== undefined && op.stage !== "quote_checked" && op.stage !== "expired") op.since_ms = rec.since_ms;
   }
-  const probe = stateOf(true, undefined, [op as Operation]);
-  return SIGNPAGE_RESULT_SCHEMAS.state(probe) ? (op as Operation) : null;
+  const fits = (o: Record<string, unknown>): boolean => SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [o as Operation]));
+  if (!fits(op)) return null;
+  // what the op carries beside its stage (kit messages.ts OpDetail, card kit-portfolio-reads): its record's created_ms on
+  // every kind, and the chain, token, units and USD size a trade's record keeps from its request. Each copied only when
+  // the op still fits with it, so a record from before them, or one field of another shape, costs that field, never
+  // the op. A pool deposit's chain is its own (above), and a deposit's amount_usd is its done fact (above).
+  for (const k of OP_DETAIL_KEYS) {
+    if (rec[k] === undefined || Object.hasOwn(op, k)) continue;
+    const next = { ...op, [k]: rec[k] };
+    if (fits(next)) op[k] = rec[k];
+  }
+  return op as Operation;
 }
 
 /** Bytes kept free under SIGNPAGE_MAX_ANSWER_BYTES for the envelope around the state (an answer's v, id and ok). */
@@ -133,7 +144,8 @@ const createdMs = (rec: unknown): number =>
   isRecord(rec) && typeof rec.created_ms === "number" && Number.isFinite(rec.created_ms) ? rec.created_ms : -Infinity;
 
 // The op contract (for every card that writes "ops"): an ops record is keyed by its request's id (a deposit's, its
-// deposit.quote request's id) and holds { kind, stage, txs: [{ chain, hash }], code?, created_ms }, a deposit's
+// deposit.quote request's id) and holds { kind, stage, txs: [{ chain, hash }], code?, created_ms, chain?, token?, units?,
+// amount_usd? } (a trade's chain, token, units and USD size from its request; kit messages.ts OpDetail), a deposit's
 // also its facts { refunded?, hold?, held_id?, since_ms?, amount_usd? } (kit messages.ts DepositFacts), and nothing secret: no key, seed, words, note secret,
 // nullifier, context, proof or signed-but-unsent payload. The frame may open these records only because they hold no
 // secret (the frame's rule above); a field that is secret goes in another store, which the frame never reads. The frame

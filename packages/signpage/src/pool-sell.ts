@@ -74,7 +74,7 @@ import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync }
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -1364,7 +1364,9 @@ const sentAnswer = (a: HostAnswer<"pool.sell"> | HostRefusal): boolean => "resul
 
 /** A pool sell's ops record (src/state.ts's op contract: nothing secret), keyed by its request's id: kind "sell", as
  *  the app reads a trade's; `pool` marks it as this kind's, so the settle on load finds it by its transaction. */
-type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number };
+/** A pool sell's ops record: its chain, token and the token amount it asks, whole units at the token's decimals, kept
+ *  from the request so state.ops names them (kit messages.ts OpDetail, card kit-portfolio-reads). */
+type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number; chain?: "solana"; token?: string; units?: string };
 
 /** What the kind needs beyond a run's host: the wallet store its ops records go in, and the end of the run. */
 export type PoolSellKindHost = PoolSellHost & { ops(): Promise<TradeStore>; end?(): void; storeMs?: number };
@@ -1437,7 +1439,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
               prior = await ops.get("ops", ctx.id);
             }
             if (prior !== undefined) return void (answer ??= fromRecord(prior, ctx.sha) as HostAnswer<"pool.sell"> | HostRefusal);
-            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())) };
+            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())), ...(ask.token === null ? {} : { chain: "solana" as const, token: ask.token, units: poolUnits(ask.amount, ask.decimals) }) };
             await ops.put("ops", ctx.id, { ...op });
             let writes: Promise<void> = Promise.resolve();
             const snap = () => ({ ...op, txs: op.txs.map((t) => ({ ...t })) });

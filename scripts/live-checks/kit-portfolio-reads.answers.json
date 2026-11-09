@@ -1,0 +1,47 @@
+{
+ "_note": "Real runs of scripts/live-checks/kit-portfolio-reads.mjs on 9 Nov 2026: good is --local on this card's build (build-app from the branch's sources); bad_live_before is SIGN_HOST as served at that time (kit 1.6, before this card), whose ops carry id, kind, stage and txs only.",
+ "good": {
+  "key": "kit-portfolio-reads",
+  "url": "local build",
+  "at": "2026-11-09T20:50:24.052Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-vybhwqglO8pCqsQAcLVtrs6haoz3Ri1PQSbFHVjRbcWZ55rqxvjWgbhqen/KceK3",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 832584,
+   "sha384": "sha384-vybhwqglO8pCqsQAcLVtrs6haoz3Ri1PQSbFHVjRbcWZ55rqxvjWgbhqen/KceK3",
+   "marks": {
+    "fill": 1,
+    "sell": 1,
+    "trade": 1
+   }
+  }
+ },
+ "bad_live_before": {
+  "key": "kit-portfolio-reads",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-09T20:50:24.527Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 810182,
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "marks": {
+    "fill": 0,
+    "sell": 0,
+    "trade": 0
+   }
+  }
+ }
+}

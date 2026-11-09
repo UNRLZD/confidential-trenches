@@ -334,8 +334,10 @@ test("pool-deposit-stages: the follower writes since_ms at the first stage that 
   await host.quoted("op-r", "solana", quote, { scope: 777n, index: 3, wallet: "U_X", refundId: "ab".repeat(32) });
   await host.idle();
   const sent = seen.map((o) => {
-    const { id: _i, kind: _k, txs: _t, chain, ...rest } = o as Record<string, unknown>;
+    const { id: _i, kind: _k, txs: _t, chain, created_ms, ...rest } = o as Record<string, unknown>;
     assert.equal(chain, "solana");
+    // the record's own time, sent on every write (kit 1.9 OpDetail, card kit-portfolio-reads)
+    assert.equal(created_ms, (rows.get("op-r") as { created_ms: number }).created_ms);
     return rest;
   });
   // since_ms is the clock at the first stage past a send (refunded here), kept after; refunded only on the refund's legs
@@ -378,7 +380,9 @@ async function follower(rows: Map<string, unknown>, w: ReturnType<typeof world>,
       const v = change(rows.get(k));
       if (v !== undefined) {
         rows.set(k, v);
-        const { id: _i, kind: _k, txs: _t, chain: _c, ...rest } = opOf(k, v) as Record<string, unknown>;
+        const { id: _i, kind: _k, txs: _t, chain: _c, created_ms, ...rest } = opOf(k, v) as Record<string, unknown>;
+        // the record's own time rides on every op it sends (kit 1.9 OpDetail, card kit-portfolio-reads)
+        assert.equal(created_ms, (v as { created_ms?: unknown }).created_ms);
         sent.push(rest);
       }
       return rows.get(k);

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Operation, SignpageClientSnapshot, SignpageState } from "@blindfill/kit";
-import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_FILTER, pct, portfolio, restored, shortAddress, sortRows, stats, units, usd, walletRows } from "../src/screens/portfolio/model.ts";
+import { activity, amount, bps, calendar, cents, closedRows, filterActivity, filterRows, groupByDay, line, mulCents, NO_DATA, NO_FILTER, pct, portfolio, restored, shortAddress, sortRows, stats, units, usd, walletRows } from "../src/screens/portfolio/model.ts";
 import type { PortfolioData, TokenMarket } from "../src/screens/portfolio/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/portfolio/words.ts";
 
@@ -24,7 +24,6 @@ const data = (over: Partial<PortfolioData> = {}): PortfolioData => ({
   closed: [],
   series: [],
   fees: null,
-  op: () => null,
   exported: [],
   ...over,
 });
@@ -145,13 +144,10 @@ test("totals: cash is the vault plus ready wallets, on the way is arming and ret
 
 test("S10.7 and S10.8 marks come from the position's extra; S10.12 a sell on its way shows in its row", () => {
   const ops: Operation[] = [
-    { id: "s1", kind: "sell", stage: "sent", txs: [] },
-    { id: "s2", kind: "sell", stage: "filled", txs: [] },
+    { id: "s1", kind: "sell", stage: "sent", txs: [], created_ms: NOW - 500, chain: "solana", token: "WTH", units: "100" },
+    { id: "s2", kind: "sell", stage: "filled", txs: [], created_ms: NOW - 9000, chain: "base", token: "BOAR", units: "1" },
   ];
-  const d = data({
-    extra: (c, t) => (t === "NEAIR" ? { mark: "held" } : t === "BOAR" ? { mark: "reverted" } : null),
-    op: (id) => (id === "s1" ? { at: NOW - 500, chain: "solana", token: "WTH" } : id === "s2" ? { at: NOW - 9000, chain: "base", token: "BOAR" } : null),
-  });
+  const d = data({ extra: (c, t) => (t === "NEAIR" ? { mark: "held" } : t === "BOAR" ? { mark: "reverted" } : null) });
   const rows = portfolio(snap({ ...STATE, ops }), d, NOW).rows;
   const by = Object.fromEntries(rows.map((r) => [r.token, r]));
   assert.equal(by.NEAIR!.mark, "held");
@@ -223,31 +219,44 @@ test("the value line keeps the range's points, in cents", () => {
   assert.equal(line(series, "All", NOW).length, 3);
 });
 
+// the ops as the signing page sends them (card kit-portfolio-reads, kit OpDetail): each its time; a deposit its USD at
+// done; a buy its chain, token and USD spend; a sell its chain, token and units; a withdrawal from before them none
 const OPS: Operation[] = [
-  { id: "d1", kind: "deposit", stage: "done", txs: [{ chain: "near", hash: "h1" }] },
-  { id: "b1", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "h2" }] },
-  { id: "h1", kind: "hop", stage: "arrived", txs: [] },
-  { id: "s1", kind: "sell", stage: "filled", txs: [] },
+  { id: "d1", kind: "deposit", stage: "done", txs: [{ chain: "near", hash: "h1" }], created_ms: NOW - 20 * H, amount_usd: "100" },
+  { id: "b1", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "h2" }], created_ms: NOW - 2 * H, chain: "solana", token: "WTH", amount_usd: "25" },
+  { id: "h1", kind: "hop", stage: "arrived", txs: [], created_ms: NOW - 3 * H },
+  { id: "s1", kind: "sell", stage: "filled", txs: [], created_ms: NOW - H, chain: "base", token: "BOAR", units: "28.86" },
   { id: "w1", kind: "withdraw", stage: "sent", txs: [] },
   { id: "r1", kind: "return", stage: "done", txs: [] },
 ];
-const DETAIL: Record<string, { at: number; usd?: string; chain?: "solana" | "base"; token?: string; units?: string }> = {
-  d1: { at: NOW - 20 * H, usd: "100" },
-  b1: { at: NOW - 2 * H, usd: "25", chain: "solana", token: "WTH", units: "891500" },
-  s1: { at: NOW - H, usd: "14.43", chain: "base", token: "BOAR" },
-};
 
 test("S14.1 empty; S14.2 rows: deposits, withdrawals, buys and sells newest first, hops and returns left out, no time last", () => {
   assert.deepEqual(activity([], data()), []);
   assert.deepEqual(activity(null, data()), []);
-  const rows = activity(OPS, data({ op: (id) => DETAIL[id] ?? null }));
+  const rows = activity(OPS, data());
   assert.deepEqual(rows.map((r) => r.id), ["s1", "b1", "d1", "w1"]);
   assert.equal(rows[1]!.usd, 2500n);
   assert.equal(rows[3]!.at, null);
 });
 
+test("a trade that never moved in full (refused, not_landed, part_filled) draws no amount: its USD and units are only the ask (review P2-1)", () => {
+  for (const stage of ["refused", "not_landed", "part_filled"] as const) {
+    const ops: Operation[] = [
+      { id: "b", kind: "buy", stage, txs: [], created_ms: NOW - H, chain: "solana", token: "WTH", amount_usd: "25" },
+      { id: "s", kind: "sell", stage, txs: [], created_ms: NOW - 2 * H, chain: "solana", token: "WTH", units: "28.86" },
+    ];
+    const [b, s] = activity(ops, data());
+    assert.deepEqual([b!.usd, b!.units, s!.usd, s!.units], [null, null, null, null], stage);
+    assert.deepEqual([b!.at, b!.token, s!.chain], [NOW - H, "WTH", "solana"], `${stage}: the row keeps its time, chain and token`);
+  }
+  for (const stage of ["filled", "sent", "signed"] as const) {
+    const [b] = activity([{ id: "b", kind: "buy", stage, txs: [], created_ms: NOW, amount_usd: "25" }], data());
+    assert.equal(b!.usd, 2500n, stage);
+  }
+});
+
 test("S14.4 an exported key is a row with its address", () => {
-  const rows = activity(OPS, data({ op: (id) => DETAIL[id] ?? null, exported: [{ id: "x1", at: NOW - 3 * H, chain: "solana", token: "WTH", address: "5Ftu" }] }));
+  const rows = activity(OPS, data({ exported: [{ id: "x1", at: NOW - 3 * H, chain: "solana", token: "WTH", address: "5Ftu" }] }));
   const x = rows.find((r) => r.id === "x1")!;
   assert.equal(x.kind, "export");
   assert.equal(x.stage, "key_exported");
@@ -255,7 +264,7 @@ test("S14.4 an exported key is a row with its address", () => {
 });
 
 test("S14.5 type chips, min size and the token search", () => {
-  const d = data({ op: (id) => DETAIL[id] ?? null });
+  const d = data();
   const rows = activity(OPS, d);
   assert.equal(filterActivity(rows, NO_FILTER, d).length, 4);
   assert.deepEqual(filterActivity(rows, { ...NO_FILTER, kinds: ["buy", "sell"] }, d).map((r) => r.id), ["s1", "b1"]);
@@ -264,13 +273,29 @@ test("S14.5 type chips, min size and the token search", () => {
 });
 
 test("day headers: Today, Yesterday, then the date, in the viewer's zone; rows with no time get no header", () => {
-  const rows = activity(OPS, data({ op: (id) => DETAIL[id] ?? null }));
+  const rows = activity(OPS, data());
   const g = groupByDay(rows, NOW, 0);
   assert.deepEqual(g.map((x) => [x.label, x.rows.length]), [["today", 2], ["yesterday", 1], [null, 1]]);
   // at UTC+7 it is 10:00 on 2 Nov; 20 h back is 1 Nov 14:00 local: yesterday
   assert.deepEqual(groupByDay(rows, NOW, 420).map((x) => x.label), ["today", "yesterday", null]);
   // at UTC-5 it is 22:00 on 1 Nov; three days back is 29 Oct 22:00 local: a date
   assert.deepEqual(groupByDay([{ ...rows[0]!, at: NOW - 3 * D }], NOW, -300).map((x) => x.label), ["Oct 29"]);
+});
+
+// card kit-portfolio-reads: Activity draws every field the kit's op carries, with no local data at all (the live source
+// passes NO_DATA): its time, USD size, units, chain and token, a deposit's USD from its done fact. Red before this card:
+// each read the local op() alone, so the live screen drew a dash for every one while the kit held it.
+test("kit-portfolio-reads: Activity draws each op's time, USD size, units, chain and token from the kit alone", () => {
+  const rows = activity(OPS, NO_DATA);
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert.deepEqual([by.d1!.at, by.d1!.usd, by.d1!.chain, by.d1!.token, by.d1!.units], [NOW - 20 * H, 10000n, null, null, null]);
+  assert.deepEqual([by.b1!.at, by.b1!.usd, by.b1!.chain, by.b1!.token, by.b1!.units], [NOW - 2 * H, 2500n, "solana", "WTH", null]);
+  assert.deepEqual([by.s1!.at, by.s1!.usd, by.s1!.chain, by.s1!.token, by.s1!.units], [NOW - H, null, "base", "BOAR", "28.86"]);
+  assert.deepEqual([by.w1!.at, by.w1!.usd, by.w1!.chain, by.w1!.token, by.w1!.units], [null, null, null, null, null], "an op from before them: dashes");
+  // a sell on its way names its row from the kit's op alone
+  const ops: Operation[] = [{ id: "s9", kind: "sell", stage: "signed", txs: [], created_ms: NOW - 1500, chain: "solana", token: "WTH", units: "5" }];
+  const row = portfolio(snap({ ...STATE, ops }), NO_DATA, NOW).rows.find((r) => r.token === "WTH")!;
+  assert.deepEqual(row.selling, { stage: "sending", ms: 1500 });
 });
 
 test("S14.3 after a restore: the kit's restore op done", () => {
