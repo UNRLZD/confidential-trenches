@@ -327,6 +327,21 @@ export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: s
   return { ok: true, kind: "pool.buy", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } };
 }
 
+/**
+ * The presets row (owner 8 Nov 07:55Z, kept): on Base and Robinhood a private buy spends one whole chunk, so the row is
+ * one button holding the chunk's USD, the pool's `tapMax` (poolView: the page's tap_max at the device's price, the one
+ * amount poolBuyAsk takes there), null while that is unknown (no proof ready, no price, no pool in the state); the four
+ * presets everywhere else.
+ */
+export function presetsOf(chain: Chain, pool: PoolView | null): readonly (Cents | null)[] {
+  if (!isPoolChain(chain) || chain === "solana") return PRESETS;
+  const c = pool?.tapMax ?? null;
+  return [c !== null && c > 0n ? c : null];
+}
+
+/** Cents as the amount box takes them: "25" for whole dollars, "3.50" otherwise. */
+export const amountText = (c: Cents): string => (c % 100n === 0n ? String(c / 100n) : centsToDecimal(c));
+
 /** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. */
 export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, amount: string, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
   const p = poolOf(pools, chain);
