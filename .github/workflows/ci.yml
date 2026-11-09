@@ -88,6 +88,14 @@ jobs:
         with:
           node-version: 24
       - run: pnpm install --frozen-lockfile
+      # card signpage-generated-merge-free (review P3-1): SIGN_HOST's bundle is build output, so the tree scan above meets
+      # it only once it is built; this builds it from the checkout's sources and scans the package with main's rules (the
+      # bundle's `TOKEN:` Circle USDC id passes by main's .gitleaks.toml rule for that exact value, as before)
+      - name: scan the signing page's built bundle with main's rules
+        run: |
+          node packages/signpage/scripts/build-app.mjs
+          "$RUNNER_TEMP/gitleaks" dir packages/signpage --config "$RUNNER_TEMP/rules/.gitleaks.toml" \
+            --gitleaks-ignore-path "$RUNNER_TEMP/rules/.gitleaksignore" --redact --no-banner
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 

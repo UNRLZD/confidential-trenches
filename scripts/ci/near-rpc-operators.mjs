@@ -23,8 +23,9 @@
 //
 //   node scripts/ci/near-rpc-operators.mjs   every NEAR RPC URL in the tree is in the map, and no line pairs one operator
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 /** host -> { operator, network } */
 export const NEAR_RPC_OPERATORS = Object.freeze({
@@ -237,15 +238,24 @@ export const SKIP = {
 // Built files whose pairs the scan judges in the sources they are built from: minifying drops comments, so the allow
 // marker a source line carries is gone from the bundle. Every host in them must still be in the map.
 export const BUNDLES = {
-  "packages/signpage/public/app.js": "the signing page's bundle, made by packages/signpage/scripts/build-app.mjs from sources this scan reads (build output, ignored and never committed, card signpage-generated-merge-free, so the scan meets it only if it is ever tracked); minifying drops the allow marker",
+  "packages/signpage/public/app.js": "the signing page's bundle, made by packages/signpage/scripts/build-app.mjs from sources this scan reads (build output, ignored and never committed, card signpage-generated-merge-free: scanTree reads it itself, after signBuilt()); minifying drops the allow marker",
 };
 export const fileProblems = (text, f) => {
   const p = lineProblems(text, f);
   return Object.hasOwn(BUNDLES, f) ? p.filter((x) => !/ are one operator \(/.test(x)) : p;
 };
+/** The files the scan reads: every file git lists (tracked, and untracked but not ignored), and each of BUNDLES, which
+ *  is build output git ignores (card signpage-generated-merge-free, review P3-1). */
+export function scanFiles(cwd) {
+  const listed = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { cwd, encoding: "utf8" }).split("\n").filter(Boolean);
+  return [...new Set([...listed, ...Object.keys(BUNDLES)])];
+}
 export function scanTree(cwd) {
-  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { cwd, encoding: "utf8" }).split("\n").filter(Boolean);
+  const files = scanFiles(cwd);
   const problems = [];
+  for (const f of Object.keys(BUNDLES)) {
+    if (!existsSync(`${cwd}/${f}`)) problems.push(`${f} is not built: the scan reads the bundle SIGN_HOST serves; run node packages/signpage/scripts/build-app.mjs`);
+  }
   for (const f of files) {
     if (Object.hasOwn(SKIP, f)) continue;
     let text;
@@ -261,6 +271,7 @@ export function scanTree(cwd) {
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  signBuilt(); // the served bundle is build output: built from this checkout's sources first
   const problems = scanTree(process.cwd());
   for (const p of problems) console.error(`near-rpc-operators: REFUSED: ${p}`);
   if (problems.length) process.exit(1);
