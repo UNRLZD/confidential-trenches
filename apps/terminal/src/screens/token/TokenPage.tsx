@@ -166,9 +166,9 @@ function Links({ v }: { v: TokenView }) {
 const TF_LEGEND: Record<ChartTf, string> = { "1s": "1s", "1m": "1", "5m": "5", "15m": "15", "1H": "1H", "4H": "4H", "1D": "1D" };
 
 /** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
- *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Bars of the
- *  helper's own reads are then followed live (candles.ts followCandles, card app-chart-live) until the page, the token
- *  or the timeframe changes. */
+ *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Every chart the
+ *  helper holds is then followed live (candles.ts followFrom, cards app-chart-live and app-chart-live-stall) until the
+ *  page, the token or the timeframe changes. */
 function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf): { data: CandleData; retry: () => void } {
   const [data, setData] = useState<CandleData>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);

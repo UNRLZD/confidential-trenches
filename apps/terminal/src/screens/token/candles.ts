@@ -143,9 +143,10 @@ export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf
 // (apps/helper/src/data/candles.ts) and keeps its bars in memory from its own chain reads (Solana:
 // apps/helper/src/data/solana/trades.ts, folded every second; Base and Robinhood: apps/helper/src/data/evm/swaps.ts,
 // read every second), so the page never prices a trade itself and a read of the newest bars costs the helper no call to
-// anyone. Only a chart whose first answer names `own_from_s` (the helper's own bars) is followed: GeckoTerminal's bars
-// alone are drawn once and never read again, since its 5 calls per 75 s are shared by every page; a followed chart
-// whose helper loses its own bars for a while (a restart) is read once a minute until they are back.
+// anyone. Every chart the helper holds is followed (followFrom, card app-chart-live-stall). While an answer names none
+// of the helper's own bars (`own_from_s`: a token it opened on that very read, or lost a while, a restart) the chart is
+// read in full once a minute until they come, since bars not its own are GeckoTerminal's (5 calls per 75 s shared by
+// every page; the helper keeps the newest range a minute), then live again.
 
 /** The page's read interval: the helper's own tick (TICK_MS in apps/helper/src/data/evm/swaps.ts; createSolanaTrades
  *  tickMs, 1 s), so no read waits on bars the helper does not hold yet. */
@@ -224,7 +225,7 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
 };
 
 /**
- * Follows a ready chart of the helper's own bars: every LIVE_MS one read of the newest LIVE_LIMIT bars (a full read
+ * Follows a ready chart: every LIVE_MS one read of the newest LIVE_LIMIT bars (a full read
  * once RESYNC_MS passed since the last, or after a failed read), folded (foldBars) and handed to `onBars` when they
  * changed, with the precision of the bars now drawn and CoinGecko's label kept while any drawn bar is GeckoTerminal's.
  * One read at a time; a hidden page reads nothing, and its first read back is a full one once RESYNC_MS passed. A
@@ -232,7 +233,8 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars (a helper just restarted or deployed has
  * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
  * is a full one RESYNC_MS later, so GeckoTerminal is read at most once a minute, and live reads resume once the
- * helper's own bars are back. Returns the stop.
+ * helper's own bars are back. A chart whose first answer names none of them starts that way: its first read is a full
+ * one RESYNC_MS later. Returns the stop.
  */
 export function followCandles(chain: MarketChain, token: string, ready: ReadyCandles, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
   const now = deps.now ?? Date.now;
@@ -241,7 +243,7 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
   let cur = ready;
   let lastFull = now();
   /** The last answer had none of the helper's own bars: the next read is a full one. */
-  let away = false;
+  let away = !ready.own;
   let fails = 0;
   let stopped = false;
   let cancel: () => void = () => undefined;
@@ -271,16 +273,19 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     away = !got.own;
     next(away ? RESYNC_MS : LIVE_MS);
   }
-  next(LIVE_MS);
+  next(away ? RESYNC_MS : LIVE_MS);
   return () => {
     stopped = true;
     cancel();
   };
 }
 
-/** The follow a first read starts (card app-chart-live-stall), the one decision for every chain and timeframe: a ready
- *  chart is followed; any other state is not. Returns the stop. */
+/** The follow a first read starts (card app-chart-live-stall), the one decision for every chain and timeframe: every
+ *  chart the helper holds is followed, a ready one and an empty one it answered (200, no bars yet), whose first bars are
+ *  handed on as they come; a token it draws no candles for (404), a failed read and a loading one are not. Returns the
+ *  stop. */
 export function followFrom(chain: MarketChain, token: string, tf: ChartTf, d: CandleData, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
-  if (d.status === "ready" && d.own) return followCandles(chain, token, d, onBars, deps);
+  if (d.status === "ready") return followCandles(chain, token, d, onBars, deps);
+  if (d.status === "empty" && d.held) return followCandles(chain, token, { status: "ready", tf, bars: [], gecko: d.gecko, precision: pricePrecision([]), own: false }, onBars, deps);
   return () => undefined;
 }
