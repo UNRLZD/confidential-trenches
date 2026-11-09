@@ -40,10 +40,26 @@ test("the recorded good run passes: this card's build reads U_X with the follow'
   }
 });
 
-test("this tree's committed build gives the recorded good run's bundle facts", () => {
-  const { from: _, ...want } = A.good.bundle;
+// The build's identity (pin, sha384) is its own, never the recording's: a main merge that touches the signing page's
+// source builds another /app.js (CI run 42676212720, main 182241d7). Every other fact is the recorded good run's, and the
+// tree's index.html pins the tree's own /app.js. The check itself still judges SIGN_HOST's served /app.js against its
+// index's pin ("another script" below).
+const sameFacts = (index, js) => {
+  const { pin, sha384, ...facts } = bundleFacts(index, js);
+  const { from: _f, pin: _p, sha384: _s, ...want } = A.good.bundle;
+  assert.equal(pin, sha384, "the tree's index.html pins the tree's own /app.js");
+  assert.deepEqual(facts, want);
+};
+test("this tree's build gives the recorded good run's bundle facts, its index pinning its own /app.js", () => {
   const b = localBuild();
-  assert.deepEqual(bundleFacts(b.index, b.js), want);
+  sameFacts(b.index, b.js);
+  // planted: the tree's build with one marker gone (the carry's floor), its index pinning it, fails on that fact
+  const js = b.js.replace(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, "");
+  assert.notEqual(js, b.js);
+  const index = b.index.replace(bundleFacts(b.index, b.js).pin, bundleFacts("", js).sha384);
+  assert.throws(() => sameFacts(index, js), (e) => e instanceof assert.AssertionError && /ux_carry/.test(e.message));
+  // planted: an index that pins another /app.js than the tree's
+  assert.throws(() => sameFacts(b.index.replace(bundleFacts(b.index, b.js).pin, "sha384-x"), b.js), /pins the tree's own/);
 });
 
 test("the recorded bad runs fail: our helper relay among the restore's providers, on the provider alone; the build before the card, on the bundle alone", () => {
