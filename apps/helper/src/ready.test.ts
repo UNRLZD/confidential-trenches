@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { evmPoolVenues } from "@blindfill/kit";
 import { enableTimers, resetTimers } from "../test/mock-timers.ts";
 import * as nodeFs from "node:fs";
 import * as server from "./server.ts";
@@ -615,7 +616,7 @@ test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start 
   await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
   const urls = nodes.map((s, i) => `http://${i === 0 ? "[::1]" : "127.0.0.1"}:${(s.address() as AddressInfo).port}`);
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
-  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: "0x00000000000000000000000000000000b1f1f001", POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
+  const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
   assert.match(r.err, new RegExp(`helper: POOL_EVM_RPCS_BASE_SEPOLIA: ${new URL(urls[1]!).host.replace(/\./g, "\\.")}: no answer to 0x[0-9a-f]{8} .*historical state`));
   assert.ok(!r.err.includes(new URL(urls[0]!).host), "the first provider answered");
