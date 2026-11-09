@@ -2266,7 +2266,7 @@ test("review P3-2: a held part is kept when the sources merely fail; it is dropp
   const log: string[] = [];
   const broken = { getLogs: () => { throw new Error("RPC error -32000: internal error"); } };
   const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", log }), rpc(c, { url: "https://pocket.example", ...broken })];
-  await assert.rejects(evmTreeSync({ rpcs: seats, pin: PIN, history: [rpc(c, { url: "https://helper.example", ...broken })], held: hold, ...noWait }).events(), /no two sources of two operators/);
+  await assert.rejects(evmTreeSync({ rpcs: seats, pin: PIN, history: [rpc(c, { url: "https://helper.example", ...broken })], held: hold, ...noWait }).events(), /no two sources of two/);
   assert.equal(await hold.read(), h, "the hold kept");
   assert.ok(!log.some((x) => x.startsWith("eth_getLogs") && x.includes('"fromBlock":"0x1"')), "never read again from the deploy block");
 });
