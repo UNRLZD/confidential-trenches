@@ -2,19 +2,19 @@
  "good": {
   "key": "wallet-restore-id-reader",
   "url": "local build",
-  "at": "2026-11-09T02:54:06.118Z",
+  "at": "2026-11-09T06:31:16.605Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "integrity": "sha384-rqNGL+l78JmLTEVRj56rAAONMDbNvmW/SMUv00jTSFP+0kpsaXGgKTPax8I9KTpW",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 810182,
-   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+   "bytes": 810595,
+   "sha384": "sha384-rqNGL+l78JmLTEVRj56rAAONMDbNvmW/SMUv00jTSFP+0kpsaXGgKTPax8I9KTpW",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -39,7 +39,7 @@
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "d7b0c3474aa1b25076b1ae3d2d0bd21da75c1ef52f1777bef5685283169c276a"
+   "unused": "de72116795b7e5998ff980161beb5dbc013b9660438cf5f863004ab24456cc38"
   },
   "rpc": {
    "rpc_0": {
