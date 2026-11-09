@@ -157,3 +157,36 @@ test("the start check is off with no mainnet pool program: the routes refuse eve
   assert.equal(sent.length, 0);
   assert.match(lines.join("\n"), /POOL_SOLANA_PROGRAM_MAINNET unset/);
 });
+
+test("?keyed=only keeps both mark routes: the scan on /solana goes to A alone and /solana-marks to B alone (review P3-1)", async () => {
+  const { sent, f } = fakeFetch();
+  const r = createRpc(ENV, { fetch: f, log: () => {} });
+  const keyedOnly = (chain: string) => r.handle(chain, "application/json", JSON.stringify(scan()), undefined, false, true);
+  assert.equal((await keyedOnly("solana")).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [A]);
+  sent.length = 0;
+  assert.equal((await keyedOnly("solana-marks")).status, 200);
+  assert.deepEqual(sent.map((s) => s.url), [QN]);
+  // A down: still 503, never a keyed spare
+  const down = fakeFetch((url) => (url === A ? 503 : 200));
+  const d = createRpc(ENV, { fetch: down.f, log: () => {} });
+  assert.equal((await d.handle("solana", "application/json", JSON.stringify(scan()), undefined, false, true)).status, 503);
+  assert.deepEqual(down.sent.map((s) => s.url), [A]);
+});
+
+test("route B folds a company's other domain: dRPC's keyed lb.drpc.live is A's company when A is on drpc.org (review P3-5)", async () => {
+  const aDrpc = `https://solana.drpc.example.drpc.org/${key("a-drpc")}`;
+  const bDrpc = `https://lb.drpc.live/solana/${key("b-drpc")}`;
+  const { sent, f } = fakeFetch();
+  const r = createRpc({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, { fetch: f, log: () => {} });
+  assert.equal((await call(r, "solana-marks", scan())).status, 503);
+  assert.equal(sent.length, 0);
+  await assert.rejects(checkMarksRoute({ SOLANA_RPC_URL: aDrpc, SOLANA_RPC_URL_DRPC_1: bDrpc, POOL_SOLANA_PROGRAM_MAINNET: PROGRAM }, f), /SOLANA_RPC_URL_DRPC_1 on SOLANA_RPC_URL's company/);
+});
+
+test("the start check refuses a 200 list with no context slot, and a non-200 that carries a list (review P3-2)", async () => {
+  const answer = (status: number, result: unknown) => async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status, headers: { "content-type": "application/json" } });
+  await assert.rejects(checkMarksRoute(ENV, answer(200, { value: [] })), /SOLANA_RPC_URL size 13: HTTP 200, no list with its slot/);
+  await assert.rejects(checkMarksRoute(ENV, answer(200, { context: {}, value: [] })), /HTTP 200, no list with its slot/);
+  await assert.rejects(checkMarksRoute(ENV, answer(500, { context: { slot: 467400178 }, value: [] })), /SOLANA_RPC_URL size 13: HTTP 500$/);
+});

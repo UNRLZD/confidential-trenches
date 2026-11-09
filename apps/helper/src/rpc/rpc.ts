@@ -735,11 +735,6 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
     // review L4: the read's whole walk, every path below, ends by `by`
     const by = now() + WALK_MS;
-    // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public one
-    if (keyedOnly) {
-      const own = upstreams[c].keyed.filter((k) => !k.keyless).map((k) => k.url);
-      return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);
-    }
     // card sol-pools-mainnet-pin: the mark scan's two routes, each one company's. A: SOLANA_RPC_URL alone, never a spare
     // or the public endpoint. B: its keyed names off A's company, in order. The page requires the two to agree; a mark
     // either one forges can only delay a send, never move money (marksRoutes below)
@@ -750,6 +745,12 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     if (c === "solana-marks") {
       const b = marksB();
       return b.length === 0 ? UPSTREAM() : callList(c, b, forward, methods, client, reserved, by);
+    }
+    // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public
+    // one. After the mark routes, which ?keyed=only never widens (review P3-1)
+    if (keyedOnly) {
+      const own = upstreams[c].keyed.filter((k) => !k.keyless).map((k) => k.url);
+      return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);
     }
     if (c === "solana" && keyed && companyUrls.has(upstreams.solana.url)) return solanaRest(forward, methods, client, reserved, by, c, 0);
     if (c === "solana" && keyed && upstreams.solana.keyed.length > 1 && (!slot.useKeyed() || budget.heldFor("solana") > 0)) return solanaRest(forward, methods, client, reserved, by, SPARES_KEY);
