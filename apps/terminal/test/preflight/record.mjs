@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Records what watchPreflights (scripts/live-checks/rpc-outage.mjs) reads from a real Chrome with no route on: a JSON POST
-// from a page in a frame of another site to a local RPC whose preflight answers 503, 403 or has nothing listening. Playwright
+// from a page in a frame of another site (and, for sameSite, of its own) to a local RPC whose preflight answers 503, 403 or
+// has nothing listening. Playwright
 // shows no preflight and gives the POST the same net::ERR_FAILED for the first two, so only the CDP record tells them apart;
 // rpc-outage.test.mjs replays the record (card app-shell-rpc-outage-judge).
 //   node apps/terminal/test/preflight/record.mjs --record scripts/live-checks/rpc-outage.preflights.json
@@ -19,7 +20,9 @@ const out = process.argv.includes("--record") ? process.argv[process.argv.indexO
 const browser = await launchBrowser("chromium");
 const record = { at: new Date().toISOString(), browser: browserLabel(browser), cases: {} };
 try {
-  for (const [name, answer] of [["503", 503], ["403", 403], ["closed", null]]) {
+  // "sameSite": the frame on the page's own site (another port of 127.0.0.1) and the RPC on another origin (localhost), as the
+  // live terminal sits in the signing page (same site), so its preflights come through the page's own session
+  for (const [name, answer, sameSite] of [["503", 503, false], ["403", 403, false], ["closed", null, false], ["sameSite", 503, true]]) {
     const rpc = await listen((q, s) => {
       if (q.method === "OPTIONS") {
         s.writeHead(answer, { "access-control-allow-origin": "*", "access-control-allow-headers": "*" });
@@ -30,14 +33,15 @@ try {
       }
     });
     const port = rpc.address().port;
+    const rpcHost = sameSite ? "localhost" : "127.0.0.1";
     if (answer === null) await close(rpc);
     const frame = await listen((q, s) => {
       s.writeHead(200, { "content-type": "text/html" });
-      s.end(`<script>fetch("http://127.0.0.1:${port}/", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => {});</script>`);
+      s.end(`<script>fetch("http://${rpcHost}:${port}/", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => {});</script>`);
     });
     const top = await listen((q, s) => {
       s.writeHead(200, { "content-type": "text/html" });
-      s.end(`<iframe src="http://localhost:${frame.address().port}/"></iframe>`);
+      s.end(`<iframe src="http://${sameSite ? "127.0.0.1" : "localhost"}:${frame.address().port}/"></iframe>`);
     });
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
@@ -69,7 +73,7 @@ try {
 } finally {
   await browser.close();
 }
-const text = JSON.stringify(record, null, 1).replace(/127\.0\.0\.1:\d+/g, "127.0.0.1:PORT");
+const text = JSON.stringify(record, null, 1).replace(/(127\.0\.0\.1|localhost):\d+/g, "$1:PORT");
 if (out) writeFileSync(out, `${text}\n`);
 else console.log(text);
 process.exit(0);

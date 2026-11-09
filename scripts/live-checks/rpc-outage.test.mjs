@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/rpc-outage.test.mjs: what the shared judgment of a down RPC (rpc-outage.mjs) reads from
 // a real Chrome. rpc-outage.preflights.json is apps/terminal/test/preflight/record.mjs --record, run 9 Nov in the installed
 // Chrome (sandbox on) with no route on: a JSON POST from a page in a frame of another site to a local RPC whose preflight
-// answered 503, 403, or had nothing listening. Playwright shows no preflight, and the POST ends net::ERR_FAILED for the 503
+// answered 503, 403, or had nothing listening; and, as the live terminal sits in the signing page, from a frame on the
+// page's own site (preflights then come through the page's session) to an RPC answering 503. Playwright shows no preflight, and the POST ends net::ERR_FAILED for the 503
 // and the 403 alike, so only watchPreflights' CDP record tells a down RPC from one refusing the origin.
 // The rest of the judgment is replayed in app-shell.test.mjs, app-verify-mount.test.mjs and verify-pools.test.mjs.
 import assert from "node:assert/strict";
@@ -46,4 +47,15 @@ test("a cached good preflight does not hide a refused connection; only ERR_FAILE
 test("the reads of one open are counted from the code's own lists", () => {
   assert.deepEqual(READS_PER_OPEN, { near: 1 + VERIFY_READS.length, solana: 1, evm: 1 + EVM_READS.length });
   assert.deepEqual(READS_PER_OPEN, { near: 8, solana: 1, evm: 7 });
+});
+
+test("a real 503 preflight seen from a frame on the page's own site (the live terminal in the signing page) is read and down", () => {
+  const c = R.cases.sameSite;
+  assert.ok(c, "the record holds the same-site case");
+  const o = "http://localhost:8545";
+  assert.deepEqual(c.preflights.map((p) => [p.url, p.status]), [[`${o}/`, 503]]);
+  assert.equal(c.reads[0].failure, "net::ERR_FAILED");
+  assert.equal(readDown(c.reads[0], c.preflights), true);
+  assert.equal(readDown(c.reads[0], []), false, "without the preflight record, ERR_FAILED is not down");
+  assert.equal(confirmDown(new Set([o]), c.reads, { pre: c.preflights }).some.has(o), true);
 });

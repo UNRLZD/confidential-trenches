@@ -145,10 +145,11 @@ function judgeAllRequests(say, n, r, rec, named) {
   const footerBad = footer.filter((x) => !isFooterRead(x) || !(rec.rpcs ?? []).some((u) => sameHost(x.url, u)));
   // the footer reads each RPC at most once at its mount and once per BLOCK_EVERY_MS (the load's clock, read last), so more
   // than that of one origin is a leak of ours: the storm it draws is no RPC's outage (card app-shell-rpc-outage-judge)
-  const capped = Number.isFinite(r.dom?.footer?.ms) ? footerReadCap(r.dom.footer.ms) : Infinity;
+  // a run with no footer clock (no .ft drawn) allows no footer reads
+  const capped = Number.isFinite(r.dom?.footer?.ms) ? footerReadCap(r.dom.footer.ms) : 0;
   const perOrigin = new Map();
   for (const x of footer) perOrigin.set(originOf(x.url), (perOrigin.get(originOf(x.url)) ?? 0) + 1);
-  const leaks = [...perOrigin].filter(([, k]) => k > capped).map(([o, k]) => `${k} footer reads of ${host(o)}, the footer makes ${capped} in ${r.dom.footer.ms} ms`);
+  const leaks = [...perOrigin].filter(([, k]) => k > capped).map(([o, k]) => `${k} footer reads of ${host(o)}, the footer makes ${capped} in ${r.dom?.footer?.ms ?? "no clock"} ms`);
   const bad = [...offPair.map((x) => `${host(x.url)} (not the pair) in ${x.phase}`), ...offAccount.map((x) => `account ${x.account ?? "none"} in ${x.phase}`), ...outside.map((x) => `a Verify read in ${x.phase}`), ...leaks, ...footerBad.map((x) => `a footer-tagged ${x.rpcMethod ?? "request"} to ${host(x.url)}${x.account ? ` naming ${x.account}` : ""} in ${x.phase}, not the footer's block read on the pair`)];
   say(bad.length === 0, `${n}: ${posts.length} NEAR request(s) over the run, each to the pair, each of ${[...accounts].join(" or ")}, Verify's only while open${footer.length ? `; and ${footer.length} footer block read(s)` : ""}${bad.length ? `; not so: ${bad.join("; ")}` : ""}`);
 }

@@ -216,6 +216,7 @@ test("the footer's block read (card app-footer-bar) on the pair, in any phase, i
   // footer reads on both RPCs of the pair, before, during and after the opens, some unanswered: still PASS
   const ok = mut("good", (rec) => {
     for (const phase of ["open", "between", "reopen", "after"]) for (const u of pair) desktop(rec).requests.push(footer(u, phase, phase === "open" ? { status: null } : {}));
+    desktop(rec).dom = { ...desktop(rec).dom, footer: { conn: "on", block: "223500000", ms: 20_000 } };
     desktop(rec).rpcTiming = [...(desktop(rec).rpcTiming ?? []), ...pair.map((u) => ({ name: `${u.replace(/\/$/, "")}/?ct=footer`, start: 0, end: 0 }))];
   });
   assert.equal(ok.ok, true, ok.lines.join("\n"));
@@ -360,10 +361,10 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   const verifyDom = (code, funds) => ({ state: "read", code, funds, pools: {} });
   // `status`: every read of `origin` (a number, or null with `failure`); `only`: just the first read of it gets `status`
   // `which`: all the origin's reads, only the height read (the first, which feeds no check), or all but it
-  const down = (rec, { errors, dom, rows = "warn", status = 503, failure, only = false, origin = near, which = "all", pre } = {}) => {
-    const d = desktop(rec);
+  const down = (rec, { errors, dom, rows = "warn", status = 503, failure, only = false, origin = near, which = "all", pre, width = "desktop", footer = { conn: "on", block: "223500000", ms: 5000 } } = {}) => {
+    const d = rec.runs.find((x) => x.width === width);
     d.errors = [...d.errors, ...errors];
-    d.dom = { verify: dom, footer: { conn: "on", block: "223500000", ms: 5000 } };
+    d.dom = { verify: dom, footer };
     for (const p of [d.panel, d.footer?.panel].filter(Boolean)) Object.assign(p, { code: rows, funds: rows, checks: Object.fromEntries(Object.keys(p.checks).map((c) => [c, rows])) });
     // a read that got no answer was preflighted: the preflight's own status, as the browser saw it
     d.preflights = pre ?? (status === null ? [{ url: `${origin}/`, status: 503, failure: null, cors: false }] : []);
@@ -446,6 +447,15 @@ test("planted on the mainnet answer: amber rows and the down RPC's failed reads 
   assert.deepEqual(bad(leaked(2)), [], "two footer reads in 5 s: the footer's bound");
   assert.match(bad(leaked(200)).join("\n"), /200 footer reads of rpc\.mainnet\.fastnear\.com, the footer makes 2 in 5000 ms/, "an interval leak");
   assert.match(bad(leaked(3)).join("\n"), /3 footer reads of rpc\.mainnet\.fastnear\.com/);
+  // a run with no footer clock (a phone footer that stopped drawing, with its read loop still running) allows no footer reads
+  const noClock = (k) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)], width: "phone", footer: null });
+    const p = rec.runs.find((x) => x.width === "phone");
+    for (let i = 0; i < k; i++) p.requests.push({ url: `${near}/?ct=footer`, method: "POST", type: "fetch", status: 200, phase: "between", account: null, rpcId: "ct-footer", rpcMethod: "block", rpcParams: JSON.stringify({ finality: "final" }) });
+  });
+  assert.match(bad(noClock(200)).join("\n"), /phone \/verify: .*200 footer reads of rpc\.mainnet\.fastnear\.com, the footer makes 0 in no clock ms/, "200 footer reads, no clock");
+  assert.match(bad(noClock(1)).join("\n"), /1 footer reads of rpc\.mainnet\.fastnear\.com/, "one read with no clock");
+  assert.deepEqual(bad(noClock(0)), [], "no footer reads, no clock: the phone's own shape");
   // the footer's failed read is not a Verify outage: the panel amber with every read 200 and the footer on still fails
   const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
   assert.ok(tagged.endsWith(" [footer read]"));

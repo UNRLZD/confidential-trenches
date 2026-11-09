@@ -1,5 +1,5 @@
 {
- "at": "2026-11-09T01:23:03.588Z",
+ "at": "2026-11-09T01:42:07.566Z",
  "browser": "Chrome 157.0.8103.38, sandbox on",
  "cases": {
   "403": {
@@ -56,6 +56,25 @@
      "method": "POST",
      "status": null,
      "failure": "net::ERR_CONNECTION_REFUSED"
+    }
+   ]
+  },
+  "sameSite": {
+   "preflightAnswer": 503,
+   "preflights": [
+    {
+     "url": "http://localhost:PORT/",
+     "status": 503,
+     "failure": null,
+     "cors": false
+    }
+   ],
+   "reads": [
+    {
+     "url": "http://localhost:PORT/",
+     "method": "POST",
+     "status": null,
+     "failure": "net::ERR_FAILED"
     }
    ]
   }
