@@ -18,10 +18,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-state-holdings";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
-const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
 /** The sum's refusal, as src/vault-balance.ts writes it. */
 export const SUM = "vault balance: a counted note has no leaf value";
 /** vault_balance set from the sum of an awaited notes read, at 6 decimals: `vault_balance:f(g(await r(),s),6)`. */
@@ -45,10 +45,10 @@ export function judge(rec) {
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
-/** Answers / and /app.js from this tree's committed build, as SIGN_HOST serves them. */
+/** Answers / and /app.js from this tree's build, made from its sources (signBuilt), as SIGN_HOST serves them. */
 export const localFetch = async (url) => {
   const p = new URL(url).pathname;
-  const file = p === "/" ? path.join(SIGNPAGE, "index.html") : p === "/app.js" ? path.join(SIGNPAGE, "public/app.js") : null;
+  const file = p === "/" ? path.join(signBuilt(), "index.html") : p === "/app.js" ? path.join(signBuilt(), "public/app.js") : null;
   if (file === null) return new Response("", { status: 404 });
   return new Response(readFileSync(file), { status: 200 });
 };
