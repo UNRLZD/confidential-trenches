@@ -516,14 +516,41 @@ test("pool-deposit-op-txs: the follow writes only the txs its two-RPC read retur
     { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
     { bal: [0n, 0n], status: "SUCCESS", past: true },
   ]);
-  let fail = true;
+  let fail = true, reads = 0;
   v.deps.landed = async (_f, heard) => {
+    if (heard.length === 0) reads++;
     if (heard.length === 0 && fail) throw ((fail = false), new Error("one RPC down"));
     return [];
   };
   v.deps.txs = async () => {};
+  // inside the quote's deadline and the margin on the device's clock
+  v.deps.now = () => F.deadline_ms;
   assert.equal(await followPoolQuote(F, v.deps), "in_pool");
-  assert.equal(fail, false);
+  assert.equal(reads, 2, "read again, then the end");
+});
+
+test("review P2-b: an end whose tx read keeps failing is read again only until the quote's deadline and the margin are past on the device's clock, then ends with the txs read so far", async () => {
+  const { POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
+  const run = async (clock: number) => {
+    const w = world([
+      { bal: [FLOOR, FLOOR], status: "SUCCESS", end: "filled" },
+      { bal: [0n, 0n], status: "SUCCESS", past: true },
+    ]);
+    const written: string[] = [];
+    w.deps.deposit = async () => ({ end: "filled", txs: [sol(1)] });
+    w.deps.landed = async (_f, heard) => {
+      if (heard.length === 0) throw new Error("429");
+      return [sol(1)];
+    };
+    w.deps.txs = async (t) => void written.push(...t.map((x) => x.hash));
+    w.deps.now = () => clock;
+    const end = await followPoolQuote(F, w.deps);
+    return { end, aborted: w.deps.signal.aborted, written };
+  };
+  const inside = await run(F.deadline_ms + POOL_TX_READ_MARGIN_MS);
+  assert.equal(inside.aborted, true, "inside the margin: read again each round, never ended by itself");
+  const past = await run(F.deadline_ms + POOL_TX_READ_MARGIN_MS + 1);
+  assert.deepEqual(past, { end: "in_pool", aborted: false, written: [sig(1)] }, "past it: the end, with the txs read so far");
 });
 
 test("pool-deposit-op-txs: the page's follower merges the txs into the op once each, and the app is sent them", async () => {
@@ -574,34 +601,76 @@ function solRpc(listed: { signature: string; err: unknown }[], txs: Record<strin
   return { f, asked };
 }
 
-test("pool-deposit-op-txs: Solana's read shows a tx only when both RPCs read it finalized, paid by U_X, with no error, running the pool program", async () => {
+test("pool-deposit-op-txs: Solana's read shows a tx only when both RPCs read it finalized, paid by U_X, with no error, a deposit instruction of the pool program", async () => {
   const { solanaPoolFollowDeps } = await import("../src/pool-deposit-follow.ts");
+  const { SOLANA_POOL_TAG_DEPOSIT } = await import("../../kit/src/trade/solana/pool-deposit.ts");
   const U = b58.encode(new Uint8Array(32).fill(5)), PROGRAM = b58.encode(new Uint8Array(32).fill(7)), OTHER = b58.encode(new Uint8Array(32).fill(8));
-  const tx = (s: string, o: { payer?: string; err?: unknown; program?: string } = {}) => ({
+  const DEPOSIT_DATA = b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...new Uint8Array(8).fill(1), ...new Uint8Array(32).fill(2)));
+  const tx = (s: string, o: { payer?: string; err?: unknown; program?: string; data?: string } = {}) => ({
     slot: 9,
     meta: { err: o.err ?? null },
-    transaction: { signatures: [s], message: { header: { numRequiredSignatures: 1 }, accountKeys: [o.payer ?? U, o.program ?? PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data: "1" }] } },
+    transaction: { signatures: [s], message: { header: { numRequiredSignatures: 1 }, accountKeys: [o.payer ?? U, o.program ?? PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data: o.data ?? DEPOSIT_DATA }] } },
   });
   const good = (n: number) => [sig(n), tx(sig(n))] as const;
-  const listed: { signature: string; err: unknown }[] = [1, 3, 4, 5, 6].map((n): { signature: string; err: unknown } => ({ signature: sig(n), err: null })).concat([{ signature: sig(7), err: { InstructionError: [0, "Custom"] } }]);
-  const a = solRpc(listed, Object.fromEntries([good(1), good(2), good(3), [sig(4), tx(sig(4), { payer: OTHER })], [sig(5), tx(sig(5), { err: { InstructionError: [0, "Custom"] } })], [sig(6), tx(sig(6), { program: OTHER })], good(7)]));
-  // the second RPC: sig(3) not read yet (one RPC's word), every other as the first
-  const b = solRpc(listed.slice(0, 1), Object.fromEntries([good(1), good(2), [sig(4), tx(sig(4), { payer: OTHER })], [sig(5), tx(sig(5), { err: { InstructionError: [0, "Custom"] } })], [sig(6), tx(sig(6), { program: OTHER })], good(7)]));
+  const answers = Object.fromEntries([
+    good(1), good(2), good(3),
+    [sig(4), tx(sig(4), { payer: OTHER })],
+    [sig(5), tx(sig(5), { err: { InstructionError: [0, "Custom"] } })],
+    [sig(6), tx(sig(6), { program: OTHER })],
+    good(7),
+    // review P3 3: the pool program's other instructions (a withdraw's tag) are no deposit
+    [sig(8), tx(sig(8), { data: b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT + 1, ...new Uint8Array(40))) })],
+    [sig(9), tx(sig(9), { data: "" })],
+  ]);
+  const listed: { signature: string; err: unknown }[] = [1, 3, 4, 5, 6, 8, 9].map((n): { signature: string; err: unknown } => ({ signature: sig(n), err: null })).concat([{ signature: sig(7), err: { InstructionError: [0, "Custom"] } }]);
+  const a = solRpc(listed, answers);
+  const b = solRpc(listed.slice(0, 1), answers);
   const d = solanaPoolFollowDeps({ rpcs: [a.f, b.f], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
   const f = { ...F, u: U };
-  // sig(2) is heard only (not listed yet): read on both, shown. sig(1) listed and read on both: shown. The rest are not
-  assert.deepEqual(await d.landed!(f, [sol(2)]), [sol(2), sol(1)]);
+  // sig(2) is heard only (not listed yet): read on both, shown. sig(1) and sig(3) listed and read on both: shown
+  assert.deepEqual(await d.landed!(f, [sol(2)]), [sol(2), sol(1), sol(3)]);
   for (const [m, p] of a.asked) {
     if (m === "getSignaturesForAddress") assert.deepEqual(p, [U, { commitment: "finalized", limit: 1000 }]);
     if (m === "getTransaction") assert.deepEqual((p as unknown[])[1], { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 });
   }
-  // a hash already shown is not read again
+  // a hash already shown is not read again; review P3 2: nor one both RPCs answered as no deposit
   a.asked.length = 0;
-  assert.deepEqual(await d.landed!(f, [], new Set([sig(1)])), []);
-  assert.ok(!a.asked.some(([m, p]) => m === "getTransaction" && (p as unknown[])[0] === sig(1)));
+  b.asked.length = 0;
+  assert.deepEqual(await d.landed!(f, [], new Set([sig(1), sig(3)])), []);
+  for (const r of [a, b]) assert.deepEqual(r.asked.filter(([m]) => m === "getTransaction"), [], "nothing read again");
   // a listing that fails on one RPC is no read: it throws, read again next round
   const down = solanaPoolFollowDeps({ rpcs: [a.f, (async () => { throw new Error("down"); }) as never], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
   await assert.rejects(down.landed!(f, []));
+});
+
+test("review P2-a: a candidate whose read throws or answers null on either RPC is no answer: landed throws (read again), never a deposit with no tx", async () => {
+  const { solanaPoolFollowDeps } = await import("../src/pool-deposit-follow.ts");
+  const { SOLANA_POOL_TAG_DEPOSIT } = await import("../../kit/src/trade/solana/pool-deposit.ts");
+  const U = b58.encode(new Uint8Array(32).fill(5)), PROGRAM = b58.encode(new Uint8Array(32).fill(7)), OTHER = b58.encode(new Uint8Array(32).fill(8));
+  const data = b58.encode(Uint8Array.of(SOLANA_POOL_TAG_DEPOSIT, ...new Uint8Array(40)));
+  const tx = (s: string, payer = U) => ({ slot: 9, meta: { err: null }, transaction: { signatures: [s], message: { accountKeys: [payer, PROGRAM], instructions: [{ programIdIndex: 1, accounts: [0], data }] } } });
+  const listed = [{ signature: sig(1), err: null }];
+  const f = { ...F, u: U };
+  const throwing = (async (method: string) => {
+    if (method === "getSignaturesForAddress") return listed;
+    throw new Error("429");
+  }) as never;
+  for (const [what, other] of [
+    ["not indexed yet (null)", solRpc(listed, {}).f],
+    ["a 429", throwing],
+    ["another payer (the RPCs disagree)", solRpc(listed, { [sig(1)]: tx(sig(1), OTHER) }).f],
+  ] as const) {
+    const first = solRpc(listed, { [sig(1)]: tx(sig(1)) }).f;
+    await assert.rejects(solanaPoolFollowDeps({ rpcs: [first, other], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), what);
+    await assert.rejects(solanaPoolFollowDeps({ rpcs: [other, first], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) }).landed!(f, []), `${what}, the other way`);
+  }
+  // both answered and both agree it is no deposit: rejected, and not read again
+  const no = solRpc(listed, { [sig(1)]: tx(sig(1), OTHER) });
+  const d = solanaPoolFollowDeps({ rpcs: [no.f, no.f], program: PROGRAM, deposit: async () => ({ end: "filled", txs: [] }) });
+  assert.deepEqual(await d.landed!(f, []), []);
+  no.asked.length = 0;
+  assert.deepEqual(await d.landed!(f, []), []);
+  assert.deepEqual(no.asked.map(([m]) => m), ["getSignaturesForAddress", "getSignaturesForAddress"]);
 });
 
 test("pool-deposit-op-txs: past its deadline the follow ends only once a refund move's heard tx is settled (read final, or past the move's deadline)", async () => {

@@ -40,11 +40,12 @@ import { followRpc, type MoveRead, type OneClickStatus, readDepositStatus, type 
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { type BindRpc, RELEASE_RELAYER } from "../../wallet/src/deposit/bind.ts";
 import { solanaRentMin } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_POOL_TAG_DEPOSIT } from "../../kit/src/trade/solana/pool-deposit.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { SOL_LADDER } from "../../wallet/src/pool/solana.ts";
 import { readSolanaPoolCosts } from "./pool-deposit-address.ts";
 import { solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
-import { hex } from "@scure/base";
+import { base58, base64, hex } from "@scure/base";
 import type { OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import type { HelperSignedIntent } from "../../kit/src/helper/v1.ts";
 import { depositId } from "../../wallet/src/derive/keys.ts";
@@ -70,9 +71,17 @@ export interface PoolFollowRecord {
   move?: PoolMove;
 }
 
-/** A refund move as the op keeps it: the wallet's record, and (card pool-deposit-op-txs) its NEAR tx as the relayer
- *  answered it (`tx`, heard: never shown) and `tx_final` once the device read it final on both RPCs (shown). */
-export type PoolMove = MoveRecord & { tx?: string; tx_final?: true };
+/** A refund move's NEAR tx as the relayer answered it (card pool-deposit-op-txs), kept with the move it carried (its
+ *  nonce and deadline): heard, never shown; `final` once the device read it final on both RPCs (shown); `dropped` once
+ *  let go unread (never shown). */
+export type PoolHeardTx = { hash: string; nonce: string; deadline_ms: number; final?: true; dropped?: true };
+/** A refund move as the op keeps it: the wallet's record, and every move's heard tx so far (review P3 1: a new move
+ *  never drops an earlier move's tx before it is settled). */
+export type PoolMove = MoveRecord & { txs?: PoolHeardTx[] };
+
+/** How long past a move's (or the quote's) deadline the device keeps reading a tx that does not read final, or reads
+ *  that do not agree, before it lets them go (review P2-b): a follow always ends. */
+export const POOL_TX_READ_MARGIN_MS = 10 * 60_000;
 
 /** The pool follow's stages: kit messages.ts PoolDepositStage, the stages the app reads on the op (card pool-deposit-stages). */
 export type PoolFollowStage = PoolDepositStage;
@@ -128,6 +137,8 @@ export interface PoolFollowDeps {
   stage(s: PoolFollowStage): Promise<void>;
   /** Txs read landed, added to the op's txs (each once). */
   txs?(t: TxRef[]): Promise<void>;
+  /** The device's clock (Date.now unless given): the end's tx read is bounded by the quote's deadline and the margin. */
+  now?: () => number;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
   signal: AbortSignal;
 }
@@ -197,9 +208,11 @@ export async function followPoolQuote(f: PoolFollowRecord, deps: PoolFollowDeps,
         // nothing left under U_X to carry: read on to the quote's deadline, so a late send is carried too
         if (shown !== "in_pool") await show("in_pool");
         if (await deps.past(f)) {
-          // the end only once every landed tx is read (a failed read throws: read again next round), and a refund move's
-          // heard tx is read final or past its move's deadline
-          await carryTxs([]);
+          // the end only once every landed tx is read (a failed read: read again next round, until the quote's deadline
+          // and the margin are past on the device's clock, then the end with the txs read so far; review P2-b), and each
+          // refund move's heard tx is read final or let go (poolRefundMover's settle, bounded the same way)
+          const read = await carryTxs([]).then(() => true, () => false);
+          if (!read && (deps.now ?? Date.now)() <= f.deadline_ms + POOL_TX_READ_MARGIN_MS) throw new Error("read the txs again");
           if (!deps.refund?.settle || (await deps.refund.settle(f))) return shown;
         }
       } else {
@@ -250,11 +263,20 @@ export function withTxs(op: PoolDepositOp, t: readonly TxRef[]): PoolDepositOp {
   return add.length === 0 ? op : { ...op, txs: [...had, ...add] };
 }
 
-/** The op with its refund move `m` kept, and the move's tx added to its txs once it was read final (card
- *  pool-deposit-op-txs): a tx only heard is never shown. */
+/** The op with its refund move `m` kept, every heard tx of earlier moves kept beside `m`'s (each by its hash, its
+ *  settled flags kept), and each tx read final added to its txs (card pool-deposit-op-txs): a tx only heard, or let go,
+ *  is never shown. */
 export function withMove(op: PoolDepositOp, m: PoolMove): PoolDepositOp {
-  const next: PoolDepositOp = { ...op, follow: { ...op.follow, move: m } };
-  return m.tx_final === true && typeof m.tx === "string" ? withTxs(next, [{ chain: "near", hash: m.tx }]) : next;
+  const txs: PoolHeardTx[] = [...(op.follow.move?.txs ?? [])];
+  for (const t of m.txs ?? []) {
+    const k = txs.findIndex((x) => x.hash === t.hash);
+    if (k < 0) txs.push({ ...t });
+    else txs[k] = { ...txs[k]!, ...t };
+  }
+  const { txs: _drop, ...move } = m;
+  const next: PoolDepositOp = { ...op, follow: { ...op.follow, move: txs.length === 0 ? move : { ...move, txs } } };
+  const shown = txs.filter((t) => t.final === true && t.dropped !== true && typeof t.hash === "string").map((t) => ({ chain: "near" as const, hash: t.hash }));
+  return shown.length === 0 ? next : withTxs(next, shown);
 }
 
 /** A stage that says the money was sent: any but quote_checked and expired. */
@@ -487,19 +509,36 @@ export interface PoolRefundHost {
   /** The op's recorded move, and its write (before the send; and the move's tx as heard, then read final). */
   move(): Promise<PoolMove | undefined>;
   record(m: PoolMove): Promise<void>;
-  /** A heard move tx read FINAL with success on both of NEAR's RPCs, sent by the release's relayer (nearTxFinal on
-   *  FastNEAR and dRPC unless given). */
-  tx?(hash: string): Promise<boolean>;
+  /** A heard move tx read FINAL with success on both of NEAR's RPCs, sent by the release's relayer, carrying `intent`
+   *  alone (nearTxFinal on FastNEAR and dRPC unless given). */
+  tx?(hash: string, intent: { signer: string; nonce: string }): Promise<boolean>;
   fetch?: typeof fetch;
   now?: () => number;
+}
+
+/** `intent` (its signer and nonce) is the one intent `action` carries: the relayer carries each intent in its own tx
+ *  (apps/helper/src/intents/carry.ts: execute_intents with args {signed: [one]}). */
+function carriesIntent(action: unknown, intent: { signer: string; nonce: string }): boolean {
+  const call = action !== null && typeof action === "object" ? (action as { FunctionCall?: unknown }).FunctionCall : undefined;
+  if (call === null || typeof call !== "object") return false;
+  const { method_name, args } = call as { method_name?: unknown; args?: unknown };
+  if (method_name !== "execute_intents" || typeof args !== "string") return false;
+  const a = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(base64.decode(args))) as { signed?: unknown } | null;
+  if (a === null || typeof a !== "object" || !Array.isArray(a.signed) || a.signed.length !== 1) return false;
+  const s = a.signed[0] as { payload?: unknown } | null;
+  if (s === null || typeof s !== "object" || typeof s.payload !== "string") return false;
+  const p = JSON.parse(s.payload) as { signer_id?: unknown; nonce?: unknown } | null;
+  return p !== null && typeof p === "object" && p.signer_id === intent.signer && p.nonce === intent.nonce;
 }
 
 /**
  * True only when both RPCs read the NEAR tx `hash` FINAL (every receipt done) with a success status, the tx itself
  * (its hash) sent by the release's relayer (RELEASE_RELAYER.mainnet, which carries every id's intent from
- * bind.<ours>.near) to intents.near. Anything else, an error or no answer on either, is false (card pool-deposit-op-txs).
+ * bind.<ours>.near) to intents.near, as one execute_intents call that carries `intent` alone (its signer U_{s,i} and its
+ * nonce; review P1: never another move the same relayer carried). Anything else, an error or no answer on either, is
+ * false (card pool-deposit-op-txs).
  */
-export async function nearTxFinal(rpcs: readonly [Pick<BindRpc, "tx">, Pick<BindRpc, "tx">], hash: string): Promise<boolean> {
+export async function nearTxFinal(rpcs: readonly [Pick<BindRpc, "tx">, Pick<BindRpc, "tx">], hash: string, intent: { signer: string; nonce: string }): Promise<boolean> {
   const relayer = RELEASE_RELAYER.mainnet;
   if (relayer === null) return false;
   const one = async (rpc: Pick<BindRpc, "tx">): Promise<boolean> => {
@@ -510,7 +549,8 @@ export async function nearTxFinal(rpcs: readonly [Pick<BindRpc, "tx">, Pick<Bind
       const st = r.status as Record<string, unknown> | null;
       if (st === null || typeof st !== "object" || !Object.hasOwn(st, "SuccessValue") || Object.hasOwn(st, "Failure")) return false;
       const t = r.transaction as Record<string, unknown> | null;
-      return t !== null && typeof t === "object" && t.hash === hash && t.signer_id === relayer && t.receiver_id === "intents.near";
+      if (t === null || typeof t !== "object" || t.hash !== hash || t.signer_id !== relayer || t.receiver_id !== "intents.near") return false;
+      return Array.isArray(t.actions) && t.actions.length === 1 && carriesIntent(t.actions[0], intent);
     } catch {
       return false;
     }
@@ -524,23 +564,32 @@ export type PoolRefundMover = ((f: PoolFollowRecord, signal: AbortSignal) => Pro
 
 export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
   const now = h.now ?? Date.now;
-  const txFinal = h.tx ?? ((hash: string) => nearTxFinal([followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)], hash));
-  // a heard move tx (card pool-deposit-op-txs): final once its nonce reads used on both RPCs at one block (`r`) and the
-  // tx reads FINAL with success on both; past the move's deadline unread, it is let go, never shown. True: nothing left
-  const settleWith = async (m: PoolMove | undefined, r: MoveRead | null): Promise<boolean> => {
-    if (m === undefined || m.tx === undefined || m.tx_final === true) return true;
-    if (r === null) return false;
-    if (r.used === true && (await txFinal(m.tx).catch(() => false))) {
-      await h.record({ ...m, tx_final: true });
-      return true;
+  const txFinal = h.tx ?? ((hash: string, intent: { signer: string; nonce: string }) => nearTxFinal([followRpc(NEAR_NETWORKS.mainnet.fastnear[0]), followRpc(NEAR_NETWORKS.mainnet.drpc)], hash, intent));
+  // each heard move tx, on its own (card pool-deposit-op-txs; review P3 1): final once its move's nonce reads used on
+  // both RPCs at one block and the tx reads FINAL with success on both, carrying that move's intent alone (review P1).
+  // Let go, never shown: its nonce read unused past its deadline on the chain's clock (it can never land), or reads
+  // that do not settle it past its deadline and the margin (the chain's clock, or the device's when the reads do not
+  // agree; review P2-b). `r` is the round's read at the move `m`'s nonce. True: nothing left to read
+  const settleAll = async (f: PoolFollowRecord, m: PoolMove | undefined, r?: MoveRead | null): Promise<boolean> => {
+    const open = (m?.txs ?? []).filter((t) => t.final !== true && t.dropped !== true);
+    if (m === undefined || open.length === 0) return true;
+    const done: PoolHeardTx[] = [];
+    for (const t of open) {
+      const at = r !== undefined && t.nonce === m.nonce ? r : await h.read(f, t.nonce).catch(() => null);
+      const late = (clock: number) => clock > t.deadline_ms + POOL_TX_READ_MARGIN_MS;
+      if (at === null) {
+        if (late(now())) done.push({ ...t, dropped: true });
+      } else if (at.used === true && (await txFinal(t.hash, { signer: f.refund_id, nonce: t.nonce }).catch(() => false))) done.push({ ...t, final: true });
+      else if (at.used === true ? late(at.timeMs) : at.timeMs > t.deadline_ms) done.push({ ...t, dropped: true });
     }
-    return r.timeMs > m.deadline_ms;
+    if (done.length > 0) await h.record({ ...m, txs: done });
+    return done.length === open.length;
   };
   const mover = async (f: PoolFollowRecord, signal: AbortSignal): Promise<RefundRead> => {
     const m = await h.move();
     const r = await h.read(f, m?.nonce ?? null);
     if (r === null) return "wait";
-    await settleWith(m, r).catch(() => false);
+    await settleAll(f, m, r).catch(() => false);
     let prior: number | null = null;
     if (m !== undefined) {
       // through on its nonce: that money is on its way to U_X (the rounds carry it); anything held now is other money
@@ -591,17 +640,13 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
         ...(h.fetch ? { fetchFn: h.fetch } : {}),
       },
     ).catch(() => null);
-    // the relayer's tx as heard, kept on the move it carried (never shown until settle reads it final); a write that
+    // the relayer's tx as heard, kept with the move it carried (never shown until settle reads it final); a write that
     // fails changes nothing of the move's outcome
-    if (res !== null && res.kind === "sent" && res.tx !== null) await h.record({ ...res.move, tx: res.tx }).catch(() => {});
+    if (res !== null && res.kind === "sent" && res.tx !== null) await h.record({ ...res.move, txs: [{ hash: res.tx, nonce: res.move.nonce, deadline_ms: res.move.deadline_ms }] }).catch(() => {});
     return res !== null && res.kind === "sent" && res.status >= 200 && res.status < 300 ? "moved" : "held";
   };
   return Object.assign(mover, {
-    settle: async (f: PoolFollowRecord): Promise<boolean> => {
-      const m = await h.move();
-      if (m === undefined || m.tx === undefined || m.tx_final === true) return true;
-      return settleWith(m, await h.read(f, m.nonce));
-    },
+    settle: async (f: PoolFollowRecord): Promise<boolean> => settleAll(f, await h.move()),
   });
 }
 
@@ -616,10 +661,21 @@ const lamports = (v: unknown): bigint => {
 /** A Solana signature: base58 of 64 bytes. */
 const SOL_SIG = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
+/** A top-level instruction's data (base58 in the json encoding) that starts with the pool's deposit tag (review P3 3). */
+const isDepositData = (d: unknown): boolean => {
+  if (typeof d !== "string") return false;
+  try {
+    return base58.decode(d)[0] === SOLANA_POOL_TAG_DEPOSIT;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * A finalized getTransaction answer (json encoding) of `sig` that is a deposit from U_X into the pool: its first
  * signature is `sig`, U_X its fee payer (solanaPoolDepositTx: the depositor is its one signer and fee payer), no error,
- * and a top-level instruction of `program`. Anything else, null included, is not.
+ * and a top-level instruction of `program` whose data is the deposit's (SOLANA_POOL_TAG_DEPOSIT first). Anything else is
+ * not.
  */
 function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): boolean {
   if (t === null || typeof t !== "object") return false;
@@ -630,7 +686,9 @@ function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): b
   const msg = tx.message as { accountKeys?: unknown; instructions?: unknown } | null | undefined;
   if (msg === null || typeof msg !== "object" || !Array.isArray(msg.accountKeys) || msg.accountKeys[0] !== u || !Array.isArray(msg.instructions)) return false;
   const keys = msg.accountKeys;
-  return msg.instructions.some((ix) => ix !== null && typeof ix === "object" && Number.isSafeInteger((ix as { programIdIndex?: unknown }).programIdIndex) && keys[(ix as { programIdIndex: number }).programIdIndex] === program);
+  return msg.instructions.some(
+    (ix) => ix !== null && typeof ix === "object" && Number.isSafeInteger((ix as { programIdIndex?: unknown }).programIdIndex) && keys[(ix as { programIdIndex: number }).programIdIndex] === program && isDepositData((ix as { data?: unknown }).data),
+  );
 }
 
 /**
@@ -642,6 +700,8 @@ function isPoolDepositTx(t: unknown, sig: string, u: string, program: string): b
  */
 export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc]; program: string; deposit: PoolFollowDeps["deposit"]; refund?: PoolFollowDeps["refund"]; fetch?: typeof fetch; sleep?: PoolFollowDeps["sleep"] }): Omit<PoolFollowDeps, "stage" | "signal" | "txs"> {
   const both = <T,>(f: (r: SolanaRpc) => Promise<T>): Promise<[T, T]> => Promise.all([f(o.rpcs[0]), f(o.rpcs[1])]);
+  // U_X's signatures both RPCs answered as finalized txs that are no deposit (review P3 2): never read again
+  const notDeposit = new Set<string>();
   return {
     status: (f, signal) => readDepositStatus(f.address, f.u, o.fetch ?? fetch, signal, Date.now(), f.refund_id),
     balances: (f) => both(async (r) => lamports(await r("getBalance", [f.u, { commitment: "finalized" }]))),
@@ -671,8 +731,15 @@ export function solanaPoolFollowDeps(o: { rpcs: readonly [SolanaRpc, SolanaRpc];
       for (const l of lists) if (Array.isArray(l)) for (const x of l) if (x !== null && typeof x === "object" && (x as { err?: unknown }).err === null) add((x as { signature?: unknown }).signature);
       const out: TxRef[] = [];
       for (const sig of cands) {
-        const reads = await Promise.all(o.rpcs.map((r) => r("getTransaction", [sig, { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 }]).catch(() => null)));
-        if (reads.every((t) => isPoolDepositTx(t, sig, f.u, o.program))) out.push({ chain: "solana", hash: sig });
+        if (notDeposit.has(`${f.u}/${sig}`)) continue;
+        // review P2-a: a read that fails or answers null (not indexed yet) on either RPC is no answer, and two answers
+        // that disagree are none either: landed throws, read again. A tx is rejected only once both answered no deposit
+        const reads = await both((r) => r("getTransaction", [sig, { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 }]));
+        if (reads.some((t) => t === null || typeof t !== "object")) throw new Error("a tx not read on both RPCs");
+        const [a, b] = reads.map((t) => isPoolDepositTx(t, sig, f.u, o.program));
+        if (a !== b) throw new Error("the RPCs disagree on a tx");
+        if (a) out.push({ chain: "solana", hash: sig });
+        else notDeposit.add(`${f.u}/${sig}`);
       }
       return out;
     },

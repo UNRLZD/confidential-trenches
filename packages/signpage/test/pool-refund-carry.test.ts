@@ -147,15 +147,17 @@ test("delta review: money read under U_{s,i} on both RPCs that cannot be moved n
 
 // ------------------------------------------------------------------------------- card pool-deposit-op-txs
 
-const HASH = base58.encode(new Uint8Array(32).fill(9));
+const HASH = base58.encode(new Uint8Array(32).fill(9)), HASH2 = base58.encode(new Uint8Array(32).fill(8));
 const MOVE = { nonce: "n", deadline_ms: NOW + 60_000, asset: BASE_USDC, amount: "25000000", height: 99 };
+const heard = (hash: string, nonce = "n", deadline_ms = MOVE.deadline_ms) => ({ hash, nonce, deadline_ms });
 
-test("pool-deposit-op-txs: the relayer's tx_hash is kept on the move as heard, after its send; a malformed one is not, and the move is moved either way", async () => {
+test("pool-deposit-op-txs: the relayer's tx_hash is kept on the move as heard (with its nonce and deadline), after its send; a malformed one is not, and the move is moved either way", async () => {
   const w = world({ read: readOf(25_000_000n), intentsBody: { tx_hash: HASH } });
   assert.equal(await poolRefundMover(w.host)(F, signal), "moved");
   assert.deepEqual(w.log, ["quote", "seed", "record", "send", "record"]);
-  assert.equal((w.records[0] as { tx?: string }).tx, undefined, "recorded before the send with no tx");
-  assert.deepEqual(w.records[1], { ...(w.records[0] as object), tx: HASH }, "the same move, its tx as heard");
+  const first = w.records[0] as { nonce: string; deadline_ms: number; txs?: unknown };
+  assert.equal(first.txs, undefined, "recorded before the send with no tx");
+  assert.deepEqual(w.records[1], { ...first, txs: [heard(HASH, first.nonce, first.deadline_ms)] }, "the same move, its tx as heard");
   for (const body of [{ tx_hash: "1".repeat(44) }, { tx_hash: 7 }, {}]) {
     const m = world({ read: readOf(25_000_000n), intentsBody: body });
     assert.equal(await poolRefundMover(m.host)(F, signal), "moved", JSON.stringify(body));
@@ -163,65 +165,57 @@ test("pool-deposit-op-txs: the relayer's tx_hash is kept on the move as heard, a
   }
 });
 
-test("pool-deposit-op-txs: a heard tx is final only once the move's nonce reads used on both RPCs and the tx reads FINAL with success on both; never on one provider's word", async () => {
-  const asked: string[] = [];
-  const tx = (ok: boolean) => async (h: string) => (asked.push(h), ok);
-  // used, and the tx final on both: recorded final (the follower then shows it)
-  const yes = world({ read: readOf(0n, true), move: { ...MOVE, tx: HASH }, tx: tx(true) });
+test("pool-deposit-op-txs: a heard tx is final only once its move's nonce reads used on both RPCs and the tx reads FINAL with success on both, carrying that very intent (U_{s,i}, that nonce)", async () => {
+  const asked: unknown[] = [];
+  const tx = (ok: boolean) => async (h: string, intent: unknown) => (asked.push([h, intent]), ok);
+  // used, and the tx final on both: settled final (the follower then shows it); the read asked for this move's intent
+  const yes = world({ read: readOf(0n, true), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(true) });
   assert.equal(await poolRefundMover(yes.host).settle(F), true);
-  assert.deepEqual(yes.records, [{ ...MOVE, tx: HASH, tx_final: true }]);
+  assert.deepEqual(yes.records, [{ ...MOVE, txs: [{ ...heard(HASH), final: true }] }]);
+  assert.deepEqual(asked, [[HASH, { signer: ID, nonce: "n" }]]);
   // used, the tx not final on both yet: nothing recorded, read again (inside the move's window)
-  const not = world({ read: readOf(0n, true), move: { ...MOVE, tx: HASH }, tx: tx(false) });
+  const not = world({ read: readOf(0n, true), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
   assert.equal(await poolRefundMover(not.host).settle(F), false);
   assert.deepEqual(not.records, []);
   // the nonce not used: the tx is not even read
   asked.length = 0;
-  const unused = world({ read: readOf(0n, false), move: { ...MOVE, tx: HASH }, tx: tx(true) });
+  const unused = world({ read: readOf(0n, false), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(true) });
   assert.equal(await poolRefundMover(unused.host).settle(F), false);
   assert.deepEqual(asked, []);
-  assert.deepEqual(unused.records, []);
-  // reads that do not agree: nothing
-  const split = world({ read: null, move: { ...MOVE, tx: HASH }, tx: tx(true) });
-  assert.equal(await poolRefundMover(split.host).settle(F), false);
-  // past the move's deadline with no final read: settled, never shown
-  const late = world({ read: readOf(0n, true, MOVE.deadline_ms + 1), move: { ...MOVE, tx: HASH }, tx: tx(false) });
+  // its nonce unused past the move's deadline on the chain's clock: it can never land; let go, never shown
+  const { POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
+  const late = world({ read: readOf(0n, false, MOVE.deadline_ms + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(true) });
   assert.equal(await poolRefundMover(late.host).settle(F), true);
-  assert.deepEqual(late.records, []);
-  // nothing heard, or already final: nothing to read
+  assert.deepEqual(late.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
+  // used, the tx not final: read again past the deadline (FINAL may lag), let go past the margin on the chain's clock
+  const lag = world({ read: readOf(0n, true, MOVE.deadline_ms + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
+  assert.equal(await poolRefundMover(lag.host).settle(F), false);
+  const gone = world({ read: readOf(0n, true, MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS + 1), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(false) });
+  assert.equal(await poolRefundMover(gone.host).settle(F), true);
+  assert.deepEqual(gone.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
+  // nothing heard, or already settled: nothing to read
   assert.equal(await poolRefundMover(world({ read: readOf(0n, true), move: MOVE, tx: tx(true) }).host).settle(F), true);
-  assert.equal(await poolRefundMover(world({ read: readOf(0n, true), move: { ...MOVE, tx: HASH, tx_final: true }, tx: tx(true) }).host).settle(F), true);
+  assert.equal(await poolRefundMover(world({ read: readOf(0n, true), move: { ...MOVE, txs: [{ ...heard(HASH), final: true }] }, tx: tx(true) }).host).settle(F), true);
   // the carry itself settles a heard tx first, at every round it reads the move
-  const round = world({ read: readOf(0n, true), move: { ...MOVE, tx: HASH }, tx: tx(true) });
+  const round = world({ read: readOf(0n, true), move: { ...MOVE, txs: [heard(HASH)] }, tx: tx(true) });
   assert.equal(await poolRefundMover(round.host)(F, signal), "none");
-  assert.deepEqual(round.records, [{ ...MOVE, tx: HASH, tx_final: true }]);
+  assert.deepEqual(round.records, [{ ...MOVE, txs: [{ ...heard(HASH), final: true }] }]);
 });
 
-test("pool-deposit-op-txs: nearTxFinal reads the tx FINAL with success on both RPCs, sent by the release relayer to intents.near", async () => {
-  const { nearTxFinal } = await import("../src/pool-deposit-follow.ts");
-  const { RELEASE_RELAYER } = await import("../../wallet/src/deposit/bind.ts");
-  const relayer = RELEASE_RELAYER.mainnet!;
-  const answer = (o: { status?: unknown; signer?: string; receiver?: string; final?: string; hash?: string } = {}) => ({
-    result: { final_execution_status: o.final ?? "FINAL", status: o.status ?? { SuccessValue: "" }, transaction: { hash: o.hash ?? HASH, signer_id: o.signer ?? relayer, receiver_id: o.receiver ?? "intents.near" } },
-  });
-  const params: unknown[] = [];
-  const rpc = (a: unknown) => ({ tx: async (p: unknown) => (params.push(p), typeof a === "function" ? (a as () => unknown)() : a) }) as never;
-  assert.equal(await nearTxFinal([rpc(answer()), rpc(answer())], HASH), true);
-  assert.deepEqual(params[0], { tx_hash: HASH, sender_account_id: relayer, wait_until: "FINAL" });
-  for (const [what, b] of [
-    ["a failure", answer({ status: { Failure: { ActionError: {} } } })],
-    ["another signer", answer({ signer: "x.near" })],
-    ["another receiver", answer({ receiver: "wrap.near" })],
-    ["not final", answer({ final: "EXECUTED_OPTIMISTIC" })],
-    ["another tx", answer({ hash: base58.encode(new Uint8Array(32).fill(8)) })],
-    ["an error", { error: { name: "HANDLER_ERROR" } }],
-    ["no answer", () => { throw new Error("down"); }],
-  ] as const) {
-    assert.equal(await nearTxFinal([rpc(answer()), rpc(b)], HASH), false, `${what} on one RPC`);
-    assert.equal(await nearTxFinal([rpc(b), rpc(answer())], HASH), false, `${what} on the other`);
-  }
+test("review P2-b: reads that never agree (null) hold a heard tx only until the device's clock is past its move's deadline and the margin: then it is let go, never shown, and the follow can end", async () => {
+  const { POOL_TX_READ_MARGIN_MS } = await import("../src/pool-deposit-follow.ts");
+  const tx = async () => true;
+  const inside = world({ read: null, move: { ...MOVE, txs: [heard(HASH)] }, tx });
+  assert.equal(await poolRefundMover({ ...inside.host, now: () => MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS }).settle(F), false, "inside the margin: read again");
+  const past = world({ read: null, move: { ...MOVE, txs: [heard(HASH)] }, tx });
+  assert.equal(await poolRefundMover({ ...past.host, now: () => MOVE.deadline_ms + POOL_TX_READ_MARGIN_MS + 1 }).settle(F), true);
+  assert.deepEqual(past.records, [{ ...MOVE, txs: [{ ...heard(HASH), dropped: true }] }]);
+  // a move with deadline_ms 0 and reads that never agree: let go at once on any real clock
+  const zero = world({ read: null, move: { ...MOVE, deadline_ms: 0, txs: [heard(HASH, "n", 0)] }, tx });
+  assert.equal(await poolRefundMover({ ...zero.host, now: () => NOW }).settle(F), true);
 });
 
-test("pool-deposit-op-txs: the page's follower adds the refund move's tx to the op's txs only once it is final", async () => {
+test("review P3 1: a new move never loses an earlier move's heard tx: each is kept and settled on its own nonce", async () => {
   const { poolFollows } = await import("../src/pool-deposit-follow.ts");
   const rows = new Map<string, unknown>();
   const store = {
@@ -238,10 +232,92 @@ test("pool-deposit-op-txs: the page's follower adds the refund move's tx to the 
   const quote = { deposit_address: "DEPOSIT", origin_asset: BASE_USDC, min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
   await host.quoted("op-1", "solana", quote, { scope: 777n, index: 0, wallet: SOL_U, refundId: ID });
   await host.idle();
-  await op.record({ ...MOVE, tx: HASH } as never);
+  // the first move and its heard tx; then a second move recorded before its send, as runRefundMove writes it (no txs)
+  await op.record({ ...MOVE, txs: [heard(HASH)] } as never);
+  const MOVE2 = { ...MOVE, nonce: "m", deadline_ms: MOVE.deadline_ms + 1_000 };
+  await op.record(MOVE2 as never);
+  await op.record({ ...MOVE2, txs: [heard(HASH2, "m", MOVE2.deadline_ms)] } as never);
+  assert.deepEqual(await op.move(), { ...MOVE2, txs: [heard(HASH), heard(HASH2, "m", MOVE2.deadline_ms)] });
   assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [], "heard is not shown");
-  await op.record({ ...MOVE, tx: HASH, tx_final: true } as never);
-  await op.record({ ...MOVE, tx: HASH, tx_final: true } as never);
+  // settle reads each on its own nonce: the first move's tx final, the second's not yet
+  const reads: (string | null)[] = [];
+  const mover = poolRefundMover({
+    ...world({ read: null }).host,
+    read: async (_f, nonce) => (reads.push(nonce), readOf(0n, true)),
+    tx: async (h) => h === HASH,
+    move: op.move as never,
+    record: op.record as never,
+  });
+  assert.equal(await mover.settle(F), false, "the second is still open");
+  assert.deepEqual(reads, ["n", "m"]);
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [{ chain: "near", hash: HASH }], "the first move's tx shown once final");
+  await op.record({ ...MOVE2, txs: [{ ...heard(HASH2, "m", MOVE2.deadline_ms), final: true }] } as never);
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [{ chain: "near", hash: HASH }, { chain: "near", hash: HASH2 }]);
+});
+
+test("review P1: nearTxFinal reads the tx FINAL with success on both RPCs, sent by the release relayer to intents.near, carrying exactly one execute_intents of exactly one intent: this move's own (U_{s,i}, its nonce)", async () => {
+  const { nearTxFinal } = await import("../src/pool-deposit-follow.ts");
+  const { RELEASE_RELAYER } = await import("../../wallet/src/deposit/bind.ts");
+  const relayer = RELEASE_RELAYER.mainnet!;
+  const intent = { signer: ID, nonce: "bm9uY2U=" };
+  const signedOf = (signer = ID, nonce = intent.nonce) => ({ standard: "raw_ed25519", payload: JSON.stringify({ signer_id: signer, verifying_contract: "intents.near", deadline: "2026-11-08T06:00:00.000Z", nonce, intents: [] }), public_key: "ed25519:x", signature: "ed25519:y" });
+  const args = (signed: unknown[]) => Buffer.from(JSON.stringify({ signed })).toString("base64");
+  const call = (o: { method?: string; signed?: unknown[] } = {}) => ({ FunctionCall: { method_name: o.method ?? "execute_intents", args: args(o.signed ?? [signedOf()]), gas: 300_000_000_000_000, deposit: "0" } });
+  const answer = (o: { status?: unknown; signer?: string; receiver?: string; final?: string; hash?: string; actions?: unknown[] } = {}) => ({
+    result: { final_execution_status: o.final ?? "FINAL", status: o.status ?? { SuccessValue: "" }, transaction: { hash: o.hash ?? HASH, signer_id: o.signer ?? relayer, receiver_id: o.receiver ?? "intents.near", actions: o.actions ?? [call()] } },
+  });
+  const params: unknown[] = [];
+  const rpc = (a: unknown) => ({ tx: async (p: unknown) => (params.push(p), typeof a === "function" ? (a as () => unknown)() : a) }) as never;
+  assert.equal(await nearTxFinal([rpc(answer()), rpc(answer())], HASH, intent), true);
+  assert.deepEqual(params[0], { tx_hash: HASH, sender_account_id: relayer, wait_until: "FINAL" });
+  for (const [what, b] of [
+    ["a failure", answer({ status: { Failure: { ActionError: {} } } })],
+    ["another signer", answer({ signer: "x.near" })],
+    ["another receiver", answer({ receiver: "wrap.near" })],
+    ["not final", answer({ final: "EXECUTED_OPTIMISTIC" })],
+    ["another tx", answer({ hash: HASH2 })],
+    // review P1: a tx of the same relayer that carries another move
+    ["another signer's intent", answer({ actions: [call({ signed: [signedOf("cd".repeat(32))] })] })],
+    ["another nonce's intent", answer({ actions: [call({ signed: [signedOf(ID, "b3RoZXI=")] })] })],
+    ["two intents", answer({ actions: [call({ signed: [signedOf(), signedOf()] })] })],
+    ["no intent", answer({ actions: [call({ signed: [] })] })],
+    ["another method", answer({ actions: [call({ method: "ft_transfer" })] })],
+    ["two actions", answer({ actions: [call(), call()] })],
+    ["no actions", answer({ actions: [] })],
+    ["args not base64 JSON", answer({ actions: [{ FunctionCall: { method_name: "execute_intents", args: "!!", gas: 1, deposit: "0" } }] })],
+    ["a payload not JSON", answer({ actions: [call({ signed: [{ ...signedOf(), payload: "{" }] })] })],
+    ["an error", { error: { name: "HANDLER_ERROR" } }],
+    ["no answer", () => { throw new Error("down"); }],
+  ] as const) {
+    assert.equal(await nearTxFinal([rpc(answer()), rpc(b)], HASH, intent), false, `${what} on one RPC`);
+    assert.equal(await nearTxFinal([rpc(b), rpc(answer())], HASH, intent), false, `${what} on the other`);
+  }
+});
+
+test("pool-deposit-op-txs: the page's follower adds a refund move's tx to the op's txs only once it is final", async () => {
+  const { poolFollows } = await import("../src/pool-deposit-follow.ts");
+  const rows = new Map<string, unknown>();
+  const store = {
+    get: async (_s: "ops", k: string) => rows.get(k),
+    keys: async () => [...rows.keys()],
+    update: async (_s: "ops", k: string, change: (v: unknown) => unknown) => {
+      const v = change(rows.get(k));
+      if (v !== undefined) rows.set(k, v);
+      return rows.get(k);
+    },
+  };
+  let op!: { move(): Promise<unknown>; record(m: never): Promise<void> };
+  const host = poolFollows({ store: async () => store, deps: (_f, o) => ((op = o as never), null), decimals: () => 9, locks: () => null, now: () => 5 });
+  const quote = { deposit_address: "DEPOSIT", origin_asset: BASE_USDC, min_amount_out: "0.02", deadline: "2026-11-08T06:00:00.000Z" };
+  await host.quoted("op-1", "solana", quote, { scope: 777n, index: 0, wallet: SOL_U, refundId: ID });
+  await host.idle();
+  await op.record({ ...MOVE, txs: [heard(HASH)] } as never);
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [], "heard is not shown");
+  await op.record({ ...MOVE, txs: [{ ...heard(HASH2), dropped: true }] } as never);
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [], "let go is not shown");
+  await op.record({ ...MOVE, txs: [{ ...heard(HASH2), final: true }] } as never);
+  assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [], "let go stays let go");
+  await op.record({ ...MOVE, txs: [{ ...heard(HASH), final: true }] } as never);
+  await op.record({ ...MOVE, txs: [{ ...heard(HASH), final: true }] } as never);
   assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [{ chain: "near", hash: HASH }], "final: shown, once");
-  assert.deepEqual(await op.move(), { ...MOVE, tx: HASH, tx_final: true });
 });
