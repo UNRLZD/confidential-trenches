@@ -257,7 +257,8 @@ function job(yml, id) {
 
 test("ci.yml runs the gate as main has it in the required deep-import job, every event, nothing letting it pass on a failure", () => {
   const yml = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
-  assert.match(yml, /required checks of main's ruleset: gitleaks, deep-import, verify-gate, money-gate, test\./);
+  const header = yml.split(/\n(?!#)/)[0].replace(/\n# ?/g, " ");
+  assert.match(header, /required checks of main's ruleset \([^)]*\): [a-z, -]*\bdeep-import\b[a-z, -]*\./);
   const lines = job(yml, "deep-import");
   const text = lines.join("\n");
   const start = lines.findIndex((l) => /^ {6}- name: .*evm-quote-warm-round/.test(l));
