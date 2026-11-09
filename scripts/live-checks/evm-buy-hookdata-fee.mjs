@@ -11,10 +11,12 @@
 //     number on both providers, one hash on both;
 //   - at that hash, on each provider alone: every chain fee read (the kit's evmPoolChainFeeReads) and, where the chain
 //     pins a pool, the pool's currentTreeDepth(), each answered with a word.
-// Any error, a missing answer or two hashes fails it.
+// Any error (a state the provider does not hold among them), a missing answer or two hashes fails it. A provider that
+// answers nothing usable (provider-answer.mjs: an empty body, not JSON, a 429 or a rate limit, read again once) makes its
+// chain INCONCLUSIVE, named, never a pass (card live-checks-provider-no-answer).
 // After: helper
 //   node scripts/live-checks/evm-buy-hookdata-fee.mjs [--record <file>]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // The block 600 s back is the oldest epoch's first block a proof's fee is read at, so a provider that keeps it keeps
 // every one. A fee pair that gains a provider without that state fails here after the deploy.
 // --record writes the run as the good run of evm-buy-hookdata-fee.answers.json, and as its bad run a real run with
@@ -25,6 +27,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolChainFeeReads, evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "evm-buy-hookdata-fee";
 /** The oldest block a proof's fee is read at, s: the helper's POOL_LIFE_MAX_MS (apps/helper/src/pool/evm.ts). */
@@ -35,29 +38,14 @@ const TREE_DEPTH = "0x4a2b75c8";
  *  2026-11-05 01:15Z). */
 export const QUOTE_ONLY_RH = "https://robinhood-rpc.publicnode.com";
 
-const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** One JSON-RPC call over the network: { result } or { error }; a 429, a 5xx or a failed fetch is tried 4 times. */
+/** One JSON-RPC call over the network through the shared rule (provider-answer.mjs, card live-checks-provider-no-answer):
+ *  { result }, { error } or { noAnswer } (an empty body, not JSON, a 429, a rate limit, read again once). A block or
+ *  state the provider does not hold is an error here, judged: that the fee providers keep it is this check's subject. */
 export async function post(url, method, params) {
-  for (let t = 1; ; t++) {
-    try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(20_000) });
-      if ((r.status === 429 || r.status >= 500) && t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      const j = await r.json();
-      if (j?.error) return { error: `RPC error ${j.error.code}: ${j.error.message}` };
-      if (!r.ok) return { error: `HTTP ${r.status}` };
-      return { result: j.result };
-    } catch (e) {
-      if (t < 4) {
-        await pause(1000 * t);
-        continue;
-      }
-      return { error: `fetch failed: ${e?.message ?? e}` };
-    }
-  }
+  const a = await rpcAnswer(url, method, params, { timeoutMs: 20_000, judgeStateMiss: true });
+  if (a.noAnswer !== undefined) return a;
+  if (a.error !== undefined) return { error: `RPC error ${a.error?.code}: ${a.error?.message}` };
+  return a;
 }
 
 /** A live transport that keeps every answer, in order. */
@@ -80,7 +68,7 @@ export function replayer(log) {
   return async (url, method, params) => {
     const e = answers.get(JSON.stringify([url, method, params]));
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
+    return "noAnswer" in e ? { noAnswer: e.noAnswer } : "error" in e ? { error: e.error } : { result: e.result };
   };
 }
 
@@ -96,16 +84,22 @@ export function pinned(over = {}) {
   });
 }
 
+/** A provider's no-answer: the chain is INCONCLUSIVE, never judged on it */
+class NoAnswer extends Error {}
+
 async function call(transport, url, method, params) {
   const a = await transport(url, method, params);
+  if ("noAnswer" in a) throw new NoAnswer(`${host(url)}: ${method}: no answer: ${a.noAnswer}`);
   if ("error" in a) throw new Error(`${host(url)}: ${method}: ${a.error}`);
   return a.result;
 }
 
-/** The check: { ok, lines }, every chain read; `chains` is pinned()'s list. */
+/** The check: { verdict, ok, lines }, every chain read; `chains` is pinned()'s list. A chain whose provider did not answer
+ *  (provider-answer.mjs) is INCONCLUSIVE, named; any wrong answer on any chain FAILs. */
 export async function check(transport, chains = pinned()) {
   const lines = [];
   let ok = true;
+  let quiet = false;
   for (const { chain, providers, reads } of chains) {
     try {
       if (!Array.isArray(providers) || providers.length < 2) throw new Error("fewer than two fee providers");
@@ -147,11 +141,13 @@ export async function check(transport, chains = pinned()) {
       }
       lines.push(`${chain}: block ${at.n} (${at.hash}), ${top.t - at.t} s older than the newest (${top.n}): ${providers.map(host).join(" and ")} each answered its ${reads.length} fee reads (${reads.map((r) => r.data.slice(0, 10)).join(", ")}) there`);
     } catch (e) {
-      ok = false;
-      lines.push(`${chain}: ${e?.message ?? e}`);
+      if (e instanceof NoAnswer) quiet = true;
+      else ok = false;
+      lines.push(`${e instanceof NoAnswer ? "INCONCLUSIVE " : ""}${chain}: ${e?.message ?? e}`);
     }
   }
-  return { ok, lines };
+  const verdict = verdictOf(!ok, quiet);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 async function main(argv) {
@@ -159,7 +155,7 @@ async function main(argv) {
   const record = at("--record");
   const rec = recorder();
   const r = await check(rec.transport);
-  for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
+  for (const l of r.lines) console.log(`${r.verdict} ${l}`);
   if (record) {
     const bad = recorder();
     const rh = evmPoolVenues().robinhood.feeProviders;
@@ -168,8 +164,8 @@ async function main(argv) {
     writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: rec.log, bad: bad.log }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
-  console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return r.ok ? 0 : 1;
+  console.log(`${r.verdict} ${KEY}`);
+  return EXIT[r.verdict];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))

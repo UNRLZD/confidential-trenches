@@ -27,6 +27,8 @@ import { APP_ORIGIN, startApi } from "../src/api.ts";
 import * as restoreKind from "../src/pool-restore.ts";
 import { idsUndone, lanesOf, pagePools, POOL_CHAIN_UNREAD, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { MAINNET_POOL_RPCS, pageEvmPoolUrls } from "../src/pool-testnet.ts";
 import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 
 const SOL_SCOPE = 11n;
@@ -654,5 +656,30 @@ test("the run's signal reaches the reader: a sign out ends a view a provider nev
     const stage = await Promise.race([run, new Promise((ok) => setTimeout(() => ok("still running 2 s after the sign out"), 2_000))]);
     assert.equal(stage, "stalled", how);
     assert.ok(performance.now() - t < 2_000, how);
+  }
+});
+
+// card evm-pool-lists-mainnet: the page's mainnet pool lists are the kit's (evmPoolProvidersOf), seats first, and the
+// restore and the deposit read them; copied so SIGN_HOST's build carries no testnet provider (build-network.test.mjs)
+test("the page's mainnet EVM pool lists are the kit's pool lists, on both chains, and the mainnet page reads them", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    assert.deepEqual(MAINNET_POOL_RPCS[chain], evmPoolProvidersOf(evmPoolVenues()[chain]), chain);
+    assert.ok(Object.isFrozen(MAINNET_POOL_RPCS[chain]), `${chain}: frozen`);
+    assert.equal(pageEvmPoolUrls(chain), MAINNET_POOL_RPCS[chain], `${chain}: the mainnet page reads it`);
+  }
+});
+
+// review P3-3 of evm-pool-lists-mainnet: with a mainnet pin planted on each chain (EVM_POOLS is empty today, so
+// pagePools() skips EVM on mainnet), the restore's pool reads on MAINNET_POOL_RPCS, end to end through pagePools
+test("planted (review P3-3): a mainnet pin on each chain is read on MAINNET_POOL_RPCS, seats first, through pagePools", () => {
+  const pin = (network: "base" | "robinhood", b: string) => ({ network, pool: `0x${b.repeat(20)}`, feeRecipient: `0x${"22".repeat(20)}`, fromBlock: 1n });
+  const pools = pagePools({ base: pin("base", "aa"), robinhood: pin("robinhood", "bb") });
+  const evm = pools.filter((p) => p.chain === "evm");
+  assert.deepEqual(evm.map((p) => p.chain === "evm" && p.pin.network), ["base", "robinhood"]);
+  for (const p of evm) {
+    if (p.chain !== "evm") continue;
+    const chain = p.pin.network as "base" | "robinhood";
+    assert.ok(p.rpcs !== null, `${chain}: read by the page`);
+    assert.deepEqual(p.rpcs().map((r) => r.url), MAINNET_POOL_RPCS[chain].map((u) => new URL(u).href), `${chain}: the kit's pool list`);
   }
 });

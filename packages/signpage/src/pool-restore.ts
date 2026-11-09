@@ -77,7 +77,7 @@ import { idReadKeep, keptIdReader, type IdReaderOpts, type IdReadKeep, type Pass
 import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import type { Deferred, KindContext } from "./api.ts";
-import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
+import { PAGE_SOL_PIN, pageEvmPoolRpcs, pageSolanaRpcs } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
@@ -170,22 +170,21 @@ async function readDepositIds(seed: SeedUse, walked: readonly { label: string; s
 
 const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNET ? { base: "base-sepolia", robinhood: "robinhood-testnet" } : { base: "base", robinhood: "robinhood" };
 
-/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads. */
-export function pagePools(): RestorePool[] {
+/** Every pool the page's network pins (PAGE_SOL_PIN, EVM_POOLS on the page's networks), each with the page's reads.
+ *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
+export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
   const out: RestorePool[] = [];
   if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaRpcs });
   for (const chain of ["base", "robinhood"] as const) {
-    const pin = EVM_POOLS[EVM_PAGE[chain]];
+    const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
     const net = pin.network;
     // the pool's scope as src/pools.ts names it (evmPoolScopeOf on the pool's lowercased address and chain id)
     const scope = evmPoolScopeOf(pin.pool.toLowerCase(), EVM_CHAIN_IDS[net]);
-    // the testnet lists sit behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them
-    if (POOL_TESTNET && (net === "base-sepolia" || net === "robinhood-testnet"))
-      out.push({ chain: "evm", pin, scope, rpcs: () => TESTNET_RPCS[chain].map((u) => testnetRpc(u)) });
-    // mainnet: the page has no EVM pool list yet (src/pool-testnet.ts testnetPoolDeps answers null), so a pin there is
-    // read by no one until its list lands, and the run says so (stalled), never done
-    else out.push({ chain: "evm", pin, scope, rpcs: null });
+    // the page's pool list (pageEvmPoolRpcs, the deposit's too): the testnet pair on the testnet build, folded at build
+    // time, so SIGN_HOST's bundle carries none of it; on mainnet the kit's pool list (card evm-pool-lists-mainnet). A
+    // chain with no list is read by no one, and the run says so (stalled), never done
+    out.push({ chain: "evm", pin, scope, rpcs: pageEvmPoolRpcs(chain) === null ? null : () => pageEvmPoolRpcs(chain)! });
   }
   return out;
 }
