@@ -42,11 +42,18 @@ export const SOLANA_JITO_BLOCK_ENGINES: readonly string[] = Object.freeze(
 export const JITO_PACE_MARGIN_MS = 50;
 /** One region's pace: Jito's keyless 1 request a second plus JITO_PACE_MARGIN_MS. */
 export const JITO_REGION_INTERVAL_MS = SOLANA_KEYLESS_PATH_INTERVAL_MS + JITO_PACE_MARGIN_MS;
+/** What a pacer that drives rebroadcast() adds over the region's interval: the kit's (packages/kit send.ts paceArm)
+ *  counts whole Date.now() ms from its tick, the gate here performance.now() from the request's hand-off, so at an
+ *  equal interval a tick lands a fraction of a ms early and is refused unsent (review of 48c11e3c: 5-10% of ticks, one
+ *  gap 2,100.8 ms) [design: 2 ms, two of the kit clock's whole-ms steps]. */
+export const JITO_TICK_SLACK_MS = 2;
 /** How long one region gets before its try counts as a transport failure [design: a block engine answers in well under 1 s]. */
 export const JITO_TIMEOUT_MS = 2_000;
 /** The longest a first send waits for a region's second [design: past it every region is booked, so the answer is busy
- * rather than a wait that eats the release's send margin]. */
-export const JITO_QUEUE_MAX_MS = 2_000;
+ * rather than a wait that eats the release's send margin; two region intervals, so a burst of three first sends a
+ * region all go (card helper-jito-pace-margin: at 2,000 ms the margin put the third second at 2,100 ms, and a burst of
+ * 24 answered 8 busy)]. */
+export const JITO_QUEUE_MAX_MS = 2 * JITO_REGION_INTERVAL_MS;
 const ANSWER_MAX = 16_384;
 
 /** One whole first send: accepted by a region, every region busy or refusing, or every region failing on transport. */
