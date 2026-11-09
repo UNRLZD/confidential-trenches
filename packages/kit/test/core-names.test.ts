@@ -13,7 +13,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const CORE_FILE = path.join(SRC, "core.ts");
 const WALLET = fileURLToPath(new URL("../../wallet/", import.meta.url));
 
-/** The values core exports, and its types: 44 names in all. */
+/** The values core exports, and its types: 45 names in all. */
 const VALUES = [
   "RESTORE_GAP", "RESTORE_LANES", "entropyToWords", "noteCommitment", "noteSecrets", "refKey", "restoreNotes", "restorePages", "typedSeed", "walkLane", "wordsToSeed64",
   // card exit-ids-out: the ids' keys and their moves out
@@ -23,7 +23,7 @@ const VALUES = [
   // and the token's storage minimum, an unregistered typed account's registration
   "readTokenStorageMin",
   // card exit-withdraw: the change index of a spent note, A's own withdrawal and A's DeleteAccount (step 6)
-  "changeIndex", "buildVaultWithdrawOut", "buildDeleteOut", "SETTLE_BLOCKS",
+  "changeIndex", "buildVaultWithdrawOut", "buildDeleteOut", "SETTLE_BLOCKS", "closeRefundsRan",
 ];
 const TYPES = ["LaneWalk", "NoteRef", "NoteRestore", "RestoredNote", "RestoredSpend", "BuiltMove", "MoveOutReadFor", "MoveOutRpc", "OwnKey", "RegisterOutReadFor", "WithdrawOutReadFor", "SettleReadFor", "DeleteReadFor"];
 

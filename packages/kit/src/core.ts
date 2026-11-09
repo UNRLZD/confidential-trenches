@@ -48,6 +48,7 @@ export {
   buildVaultWithdrawOut,
   buildDeleteOut,
   SETTLE_BLOCKS,
+  closeRefundsRan,
   type DeleteReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
 // the token's storage minimum on both RPCs of the release pair: an unregistered typed account's registration deposit

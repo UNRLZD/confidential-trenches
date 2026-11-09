@@ -808,18 +808,20 @@ const timeOk = (t: unknown): t is number => typeof t === "number" && Number.isSa
 /**
  * The withdraw payload rule for a withdrawal A sends itself: exactly one withdraw on a release's vault, its arguments
  * exactly withdrawal, proof and public_signals; the withdrawal's seven fields with relay_fee "0" and recipient and
- * fee_recipient both the typed account (checkTypedAccount for the vault's token), register_deposit exactly the token's
- * storage minimum (the relayer's own rule: anything above it is lost to the keyless vault), every field as the vault
+ * fee_recipient both the typed account (checkTypedAccount for the vault's token), register_deposit 0 when the typed
+ * account is registered on the token and exactly the token's storage minimum when it is not (anything else is lost to
+ * the keyless vault: NEP-145 refunds a registered account's deposit to its caller), every field as the vault
  * parses it at the vault's block time `nowMs` (vaultWithdrawalProblems: a deadline passed is refused); the proof's
  * points canonical below q; the 8 public signals canonical below p, withdrawn above 0, and the context the one the vault
  * recomputes for this request; the kit's gas and attachment.
  */
-export function checkVaultWithdrawCalls(a: string, vault: string, to: string, given: readonly VaultWithdrawCall[], storageMin: bigint, nowMs: number): SealedMove<VaultWithdrawCall> {
+export function checkVaultWithdrawCalls(a: string, vault: string, to: string, given: readonly VaultWithdrawCall[], storageMin: bigint, registered: boolean, nowMs: number): SealedMove<VaultWithdrawCall> {
   if (typeof a !== "string" || typeof vault !== "string" || !IMPLICIT.test(a)) throw new MoveOutRefused("the withdrawal's signer is a 64-hex implicit account and the vault a string");
   const net = Object.values(NEAR_NETWORKS).find((n) => n.vault === vault);
   if (net === undefined || net.vault === null) throw new MoveOutRefused("the vault is no release's vault");
   checkTypedAccount(a, to, net.usdc);
   if (typeof storageMin !== "bigint" || storageMin <= 0n || storageMin >= U128_LIMIT) throw new MoveOutRefused("the token's storage minimum is not read");
+  if (typeof registered !== "boolean") throw new MoveOutRefused("the typed account's registration on the token is not read");
   if (!timeOk(nowMs)) throw new MoveOutRefused("the vault's block time is not read");
   let calls: VaultWithdrawCall[];
   try {
@@ -835,7 +837,8 @@ export function checkVaultWithdrawCalls(a: string, vault: string, to: string, gi
   if (w.recipient !== to || w.fee_recipient !== to) throw new MoveOutRefused("the recipient and the fee recipient are the typed account");
   if (w.relay_fee !== "0") throw new MoveOutRefused("the fee is 0: A sends the withdrawal itself");
   const reg = decBelow(w.register_deposit, U128_LIMIT);
-  if (reg === null || reg !== storageMin) throw new MoveOutRefused("register_deposit is not the token's storage minimum");
+  // NEP-145: a registered account's storage_deposit is refunded to its caller, the keyless vault, where no one can take it
+  if (reg === null || reg !== (registered ? 0n : storageMin)) throw new MoveOutRefused("register_deposit is not 0 for a registered typed account, or the token's storage minimum for one that is not");
   if (!isObj(p) || Object.keys(p).sort().join() !== "a,b,c" || !pair(p.a) || !pair(p.c) || !Array.isArray(p.b) || p.b.length !== 2 || !p.b.every(pair)) throw new MoveOutRefused("the proof is three points, every coordinate a canonical decimal below q");
   if (!Array.isArray(sig) || sig.length !== 8 || !sig.every((s) => decBelow(s, VAULT_FIELD_P) !== null)) throw new MoveOutRefused("8 public signals, each a canonical decimal below p");
   const withdrawn = BigInt(sig[2] as string);
@@ -849,21 +852,21 @@ export function checkVaultWithdrawCalls(a: string, vault: string, to: string, gi
 /**
  * withdraw(withdrawal, proof, public_signals) on `vault`, sent by the note's own arming account A (key: A's own, as
  * armAccount derives it) at A's nonce + 1 on the read's block (readSettle's read of A), with fee 0 to the typed account
- * `to`, register_deposit the token's storage minimum `storageMin`, checked at the vault's block time `nowMs`. The call
+ * `to`, register_deposit 0 when `registered`, else the token's storage minimum `storageMin`, checked at the vault's block time `nowMs`. The call
  * is checked and sealed by checkVaultWithdrawCalls before the private signer runs; the key's copy is zeroed whichever
  * way. `amount` is the withdrawn value the typed account receives.
  */
-export function buildVaultWithdrawOut(x: { read: SettleReadFor; key: OwnKey; vault: string; to: string; withdrawal: VaultWithdrawal; proof: Obj; publicSignals: readonly string[]; storageMin: bigint; nowMs: number }): BuiltMove<VaultWithdrawCall> {
-  const { vault, to, withdrawal, proof, publicSignals, storageMin, nowMs } = x;
+export function buildVaultWithdrawOut(x: { read: SettleReadFor; key: OwnKey; vault: string; to: string; withdrawal: VaultWithdrawal; proof: Obj; publicSignals: readonly string[]; storageMin: bigint; registered: boolean; nowMs: number }): BuiltMove<VaultWithdrawCall> {
+  const { vault, to, withdrawal, proof, publicSignals, storageMin, registered, nowMs } = x;
   namesOk(to, vault);
   const key = ownKeyCopy(x.key);
   try {
     const r = { ...x.read };
     if (r.a !== key.id || typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash32(r.blockHash) === null) throw new MoveOutRefused("the read is not A's, or its nonce or block hash is not one");
     const reg = isObj(withdrawal) ? decBelow(withdrawal.register_deposit, U128_LIMIT) : null;
-    if (reg === null) throw new MoveOutRefused("register_deposit is not the token's storage minimum");
+    if (reg === null) throw new MoveOutRefused("register_deposit is not a u128 decimal");
     const calls: VaultWithdrawCall[] = [{ method: "withdraw", args: { withdrawal, proof, public_signals: publicSignals }, gas: BigInt(VAULT_WITHDRAW.gas_tgas) * TGAS, deposit: vaultWithdrawYocto(reg, 0n, true) }];
-    const move = checkVaultWithdrawCalls(key.id, vault, to, calls, storageMin, nowMs);
+    const move = checkVaultWithdrawCalls(key.id, vault, to, calls, storageMin, registered, nowMs);
     const nonce = r.nonce + 1n;
     const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);
     const signals = move.calls[0]!.args.public_signals as string[];
@@ -911,15 +914,28 @@ export type DeleteReadFor = {
   spend: { nullifierHash: bigint; status: "in_flight" | "paid" | "refund_pending" | "settled"; reserve: bigint };
   usdc: { state: "held"; amount: bigint } | { state: "halted" };
   intents: "no-intents" | "empty" | "holds";
-  /** the withdraw tx read FINAL on both RPCs: every receipt of it ran, its refunds to A included */
+  /** the withdraw tx read FINAL on both RPCs (every receipt of it ran, its refunds to A included), or unread: not FINAL, or its hash not kept */
   withdrawTx: "final" | "unread";
-  /** A's own settle tx, read FINAL on both RPCs; or another's settle, the spend read settled with reserve 0 at block `back` too */
-  settle: { by: "self"; tx: "final" | "unread" } | { by: "other"; back: number | null };
+  /** A's own settle tx read FINAL on both RPCs, unread, or none: another settled the spend, or its hash was not kept */
+  settleTx: "final" | "unread" | "none";
+  /** a block SETTLE_BLOCKS below `height` at which the spend read settled with reserve 0 on both RPCs too, or null */
+  settledBack: number | null;
 };
+/**
+ * Whether every receipt that can still pay A has run, so a DeleteAccount cannot be followed by a refund that has no
+ * account to land on: the spend read settled with reserve 0 SETTLE_BLOCKS back (the withdraw comes before the settle, so
+ * both txs' receipts ran long before), or the withdraw tx and A's own settle tx both read FINAL. The close's one rule:
+ * buildDeleteOut refuses without it, and the exit waits on it (card exit-withdraw, delta review P1-S).
+ */
+export function closeRefundsRan(r: Pick<DeleteReadFor, "height" | "withdrawTx" | "settleTx" | "settledBack">): boolean {
+  const back = r.settledBack;
+  if (typeof back === "number" && Number.isSafeInteger(back) && back > 0 && Number.isSafeInteger(r.height) && r.height - back >= SETTLE_BLOCKS) return true;
+  return r.withdrawTx === "final" && r.settleTx === "final";
+}
 /**
  * A's DeleteAccount, its NEAR to the typed account `to` on `network`, signed by A at the read's nonce + 1. Refused
  * unless the read is A's for this network, typed account and token (the network's USDC), the typed account exists, the
- * spend of `nullifierHash` reads settled with reserve 0 and its settle can no longer pay A, the withdraw tx read FINAL,
+ * spend of `nullifierHash` reads settled with reserve 0, every receipt that can pay A has run (closeRefundsRan),
  * A's USDC reads held at 0 and intents.near holds nothing under A (or the pair has no intents.near).
  */
 export function buildDeleteOut(x: { read: DeleteReadFor; key: OwnKey; network: NearNetwork; to: string; token: string; nullifierHash: bigint }): BuiltMove<DeleteCall> {
@@ -939,10 +955,7 @@ export function buildDeleteOut(x: { read: DeleteReadFor; key: OwnKey; network: N
     const spend = isObj(r.spend) ? { ...r.spend } : null;
     if (spend === null || typeof nullifierHash !== "bigint" || spend.nullifierHash !== nullifierHash) throw new MoveOutRefused("the spend read is not this withdrawal's");
     if (spend.status !== "settled" || spend.reserve !== 0n) throw new MoveOutRefused("A closes only after its spend reads settled with reserve 0: settle pays the reserve to A");
-    if (r.withdrawTx !== "final") throw new MoveOutRefused("the withdraw tx is not read FINAL on both RPCs: a refund to A may still run");
-    const s = isObj(r.settle) ? { ...r.settle } : null;
-    const settledFor = s !== null && (s.by === "self" ? s.tx === "final" : s.by === "other" && Number.isSafeInteger(s.back) && (s.back as number) > 0 && r.height - (s.back as number) >= SETTLE_BLOCKS);
-    if (!settledFor) throw new MoveOutRefused(`the settle is not read past its refunds: A's own settle FINAL on both RPCs, or another's settled ${SETTLE_BLOCKS} blocks back`);
+    if (!closeRefundsRan(r)) throw new MoveOutRefused(`the withdraw and settle are not read past their refunds: the spend settled ${SETTLE_BLOCKS} blocks back, or the withdraw tx and A's own settle tx FINAL on both RPCs`);
     const usdc = isObj(r.usdc) ? { ...r.usdc } : null;
     if (usdc === null || usdc.state !== "held" || usdc.amount !== 0n) throw new MoveOutRefused("A's USDC is not read at zero (a halted read is not a zero)");
     if (r.intents !== "empty" && r.intents !== "no-intents") throw new MoveOutRefused("intents.near holds a token under A, or is not read: it would be stranded behind a deleted account");

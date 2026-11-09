@@ -42,7 +42,7 @@ function request(vault: string, token: string, o: Partial<VaultWithdrawal> = {})
   const publicSignals = ["11", NH.toString(), WITHDRAWN.toString(), "13", "2", "14", "1", context.toString()];
   return { withdrawal, proof, publicSignals };
 }
-const wd = (o: Partial<Parameters<typeof moveout.buildVaultWithdrawOut>[0]> = {}) => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault!, to: TO, ...request(NET.vault!, NET.usdc), storageMin: REG, nowMs: NOW, ...o });
+const wd = (o: Partial<Parameters<typeof moveout.buildVaultWithdrawOut>[0]> = {}) => moveout.buildVaultWithdrawOut({ read, key: key(), vault: NET.vault!, to: TO, ...request(NET.vault!, NET.usdc), storageMin: REG, registered: false, nowMs: NOW, ...o });
 
 test("buildVaultWithdrawOut: A signs one withdraw on the release vault, relay_fee 0, recipient and fee recipient the typed account, the token's minimum as register_deposit, 300 Tgas and the vault's attachment, at A's nonce + 1", () => {
   const r = request(NET.vault!, NET.usdc);
@@ -79,8 +79,10 @@ test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () 
     ["the token as vault", () => wd({ vault: NET.usdc, ...request(NET.usdc, NET.usdc) }), /no release's vault/],
     ["a context of another vault", () => wd(request(MAIN.vault, MAIN.usdc)), /context is not this request's/],
     ["a context of another request", () => wd({ withdrawal: { ...ok.withdrawal, salt: "cd".repeat(16) } }), /context is not this request's/],
-    ["1000 N as register_deposit", () => wd(request(NET.vault!, NET.usdc, { register_deposit: (1000n * 10n ** 24n).toString() })), /not the token's storage minimum/],
-    ["register_deposit 0", () => wd(request(NET.vault!, NET.usdc, { register_deposit: "0" })), /not the token's storage minimum/],
+    ["1000 N as register_deposit", () => wd(request(NET.vault!, NET.usdc, { register_deposit: (1000n * 10n ** 24n).toString() })), /not 0 for a registered typed account, or the token's storage minimum/],
+    ["register_deposit 0 for a typed account not registered", () => wd(request(NET.vault!, NET.usdc, { register_deposit: "0" })), /not 0 for a registered typed account, or the token's storage minimum/],
+    ["the storage minimum for a registered typed account (NEP-145 refunds it to the keyless vault)", () => wd({ registered: true }), /not 0 for a registered typed account/],
+    ["the registration not read", () => wd({ registered: undefined as never }), /registration on the token is not read/],
     ["no storage minimum read", () => wd({ storageMin: 0n }), /storage minimum is not read/],
     ["a deadline passed at the vault's block time", () => wd({ nowMs: NOW + 500_001 }), /deadline_ms: passed/],
     ["no block time", () => wd({ nowMs: -1 }), /block time is not read/],
@@ -96,11 +98,16 @@ test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () 
     ["another key", () => wd({ key: { ...key(), secretKey: new Uint8Array(32).fill(1) } }), /moving account's own/],
   ];
   for (const [why, f, re] of bad) assert.throws(f, (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
+  // a registered typed account: register_deposit 0, so the vault makes no storage_deposit and attaches no NEAR for one
+  const r0 = request(NET.vault!, NET.usdc, { register_deposit: "0" });
+  const m0 = wd({ ...r0, registered: true });
+  assert.equal((m0.calls[0]!.args.withdrawal as VaultWithdrawal).register_deposit, "0");
+  assert.equal(m0.calls[0]!.deposit, vaultWithdrawYocto(0n, 0n, true));
   // q - 1 is a coordinate the vault parses
   wd({ proof: { ...ok.proof, a: [(VAULT_FIELD_Q - 1n).toString(), "2"] } });
   // the calls the check seals: another gas, another attachment, another method, two calls
   const call = (o: Record<string, unknown> = {}) => [{ method: "withdraw" as const, args: { withdrawal: ok.withdrawal, proof: ok.proof, public_signals: ok.publicSignals }, gas: 300n * TGAS, deposit: vaultWithdrawYocto(REG, 0n, true), ...o }];
-  moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, call(), REG, NOW);
+  moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, call(), REG, false, NOW);
   for (const [why, c, re] of [
     ["more gas", call({ gas: 301n * TGAS }), /gas and attachment/],
     ["less attachment", call({ deposit: vaultWithdrawYocto(REG, 0n, true) - 1n }), /gas and attachment/],
@@ -108,7 +115,7 @@ test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () 
     ["two calls", [...call(), ...call()], /one withdraw call/],
     ["an extra arg", call({ args: { withdrawal: ok.withdrawal, proof: ok.proof, public_signals: ok.publicSignals, x: 1 } }), /alone/],
   ] as const)
-    assert.throws(() => moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, c as never, REG, NOW), (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
+    assert.throws(() => moveout.checkVaultWithdrawCalls(A, NET.vault!, TO, c as never, REG, false, NOW), (e: unknown) => e instanceof moveout.MoveOutRefused && re.test(e.message), why);
   // the caller's key is the caller's; the builder's copy is zeroed
   const own = SK.slice();
   wd({ key: { ...key(), secretKey: own } });
@@ -118,7 +125,7 @@ test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () 
 const settled = { nullifierHash: NH, status: "settled" as const, reserve: 0n };
 const del = (o: Partial<moveout.DeleteReadFor> = {}): moveout.DeleteReadFor => ({
   network: "testnet", a: A, to: TO, token: NET.usdc, height: 1000, blockHash: BH, nonce: 43n, beneficiary: "exists", spend: settled,
-  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settle: { by: "self", tx: "final" }, ...o,
+  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, ...o,
 });
 const close = (r: moveout.DeleteReadFor, o: { to?: string; token?: string; network?: "testnet" | "mainnet"; k?: ReturnType<typeof key> } = {}) =>
   moveout.buildDeleteOut({ read: r, key: o.k ?? key(), network: o.network ?? "testnet", to: o.to ?? TO, token: o.token ?? NET.usdc, nullifierHash: NH });
@@ -135,8 +142,9 @@ test("buildDeleteOut: on a read with nothing left behind, A signs one DeleteAcco
   // nearcore's Transaction V0: signer, key, nonce, receiver, block hash, then one action: tag 7 and the beneficiary
   const tail = Buffer.concat([Buffer.from([1, 0, 0, 0, 7]), Buffer.from(new Uint32Array([TO.length]).buffer), Buffer.from(TO)]);
   assert.ok(Buffer.from(bytes).subarray(bytes.length - tail.length).equals(tail), "the one action is DeleteAccount(the typed account)");
-  // mainnet: intents.near read with no token under A; another's settle read settled SETTLE_BLOCKS back
-  close(del({ network: "mainnet", token: MAIN.usdc, to: "x-typed.near", intents: "empty", settle: { by: "other", back: 1000 - moveout.SETTLE_BLOCKS } }), { network: "mainnet", token: MAIN.usdc, to: "x-typed.near" });
+  // mainnet: intents.near read with no token under A; the spend read settled SETTLE_BLOCKS back, so neither tx hash is
+  // needed (a reload lost them, or another settled it: the withdraw comes before the settle)
+  close(del({ network: "mainnet", token: MAIN.usdc, to: "x-typed.near", intents: "empty", withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS }), { network: "mainnet", token: MAIN.usdc, to: "x-typed.near" });
 });
 
 test("buildDeleteOut refuses, each at its own guard: a missing typed account, a delete before settle or its refunds, a halted or nonzero USDC, anything under A in intents.near, another network, token or spend", () => {
@@ -147,10 +155,12 @@ test("buildDeleteOut refuses, each at its own guard: a missing typed account, a 
     ["paid, not settled", () => close(del({ spend: { ...settled, status: "paid" } })), /settled with reserve 0/],
     ["refund_pending, not settled", () => close(del({ spend: { ...settled, status: "refund_pending" } })), /settled with reserve 0/],
     ["settled with reserve above 0", () => close(del({ spend: { ...settled, reserve: 1n } })), /settled with reserve 0/],
-    ["the withdraw tx not FINAL (its refunds may still run)", () => close(del({ withdrawTx: "unread" })), /withdraw tx is not read FINAL/],
-    ["A's settle not FINAL", () => close(del({ settle: { by: "self", tx: "unread" } })), /settle is not read past its refunds/],
-    ["another's settle read only now", () => close(del({ settle: { by: "other", back: null } })), /settle is not read past its refunds/],
-    ["another's settle too recent", () => close(del({ settle: { by: "other", back: 1000 - moveout.SETTLE_BLOCKS + 1 } })), /settle is not read past its refunds/],
+    ["the withdraw tx not FINAL (its refunds may still run), no lookback", () => close(del({ withdrawTx: "unread" })), /not read past their refunds/],
+    ["A's settle not FINAL, no lookback", () => close(del({ settleTx: "unread" })), /not read past their refunds/],
+    ["another's settle, no lookback", () => close(del({ settleTx: "none" })), /not read past their refunds/],
+    ["settled too recently, no tx read", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS + 1 })), /not read past their refunds/],
+    ["a lookback at block 0", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 0, height: moveout.SETTLE_BLOCKS })), /not read past their refunds/],
+    ["a lookback not a block", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1.5 })), /not read past their refunds/],
     ["USDC halted (a view that fails is not a zero)", () => close(del({ usdc: { state: "halted" } })), /USDC is not read at zero/],
     ["USDC halted, with a zero beside it", () => close(del({ usdc: { state: "halted", amount: 0n } as never })), /USDC is not read at zero/],
     ["USDC left in A", () => close(del({ usdc: { state: "held", amount: 1n } })), /USDC is not read at zero/],

@@ -66,6 +66,7 @@ test("moveout.ts exports exactly these, and no signer", () => {
     "checkSettleCalls",
     "checkVaultWithdrawCalls",
     "checkWithdrawCalls",
+    "closeRefundsRan",
     "heldOpOf",
     "moveCalls",
     "moveOutHeld",
