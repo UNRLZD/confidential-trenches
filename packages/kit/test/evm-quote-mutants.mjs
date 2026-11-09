@@ -388,7 +388,9 @@ export const MUTANTS = [
   // card evm-quote-gas-used: each read's gas used, agreed by two providers, picks the read kept apart: the read that used
   // more than its call's even share (not every read before), kept alone; a read that needs more than that share kept at
   // the size it was read again at; the gas used agreed, and read from the code's answer
-  [QUOTE, "const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);", "const users = part.slice(0, k);", R, "GS18 "],
+  // every read before the starved one counted as a user: since the review of e9b54f71's fold keeps a light one at 6, not
+  // alone, GS18's warm quotes no longer tell it (sweep of ad945b7f); GS22 (a) keeps the starved read itself
+  [QUOTE, "const users = part.slice(0, k).filter((j) => firstUsed[j]! > S);", "const users = part.slice(0, k);", R, "GS22 "],
   [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      }", R, "GS18 "],
   [QUOTE, "      } else for (const j of users) keepAt(j, firstUsed[j]! > share(READ_AGAIN_PER_CALL) ? 1 : READ_AGAIN_PER_CALL);", "      }", R, "GS19 "],
   // review of e9b54f71, P2: the reads that used the gas kept alone, not at 6 where they used no more than a share of 6
