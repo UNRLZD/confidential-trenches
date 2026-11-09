@@ -80,4 +80,16 @@ test("planted: a fee payer that is not the helper's, in the pin or in the answer
   has(pinProblems(pin, v((x) => (x.program.getAccountInfo[0]!.json.result.value.executable = false))), /^program .* on https:\/\/api\.mainnet-beta/);
   has(pinProblems({ ...pin, program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8" }, V), /is not the deploy record's/);
   has(pinProblems({ ...pin, feePayer: solanaPoolOf(pin.program).pool }, V), /the fee payer is the pool or the program/);
+  // each read's own rule bites: the pool's owner, the fee payer's owner and lamports, the program's loader
+  has(pinProblems(pin, v((x) => (x.pool.getAccountInfo[0]!.json.result.value.owner = SYSTEM))), /^pool /);
+  has(pinProblems(pin, v((x) => (x.fee_payer.getAccountInfo[0]!.json.result.value.owner = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"))), /^fee payer .* on https:\/\/api\.mainnet-beta/);
+  has(pinProblems(pin, v((x) => (x.fee_payer.getAccountInfo[0]!.json.result.value.lamports = 0))), /^fee payer .* on https:\/\/api\.mainnet-beta/);
+  has(pinProblems(pin, v((x) => (x.program.getAccountInfo[0]!.json.result.value.owner = "BPFLoader2111111111111111111111111111111111"))), /^program .* on https:\/\/api\.mainnet-beta/);
+  // a throwaway key is refused even when the helper names it too
+  has(pinProblems({ ...pin, feePayer: THROWAWAY[0]! }, v((x) => (x.helper.fee.body.fee_payer = THROWAWAY[0]))), /throwaway key/);
+  // the helper's answer is judged for this chain's cluster, program and pool, each on its own
+  has(pinProblems(pin, v((x) => (x.helper.fee.body.chain = "near"))), /not this pool's/);
+  has(pinProblems(pin, v((x) => (x.helper.fee.body.cluster = "devnet"))), /not this pool's/);
+  has(pinProblems(pin, v((x) => (x.helper.fee.body.program = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8"))), /not this pool's/);
+  has(pinProblems(pin, v((x) => (x.helper.fee.body.pool = "92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr"))), /not this pool's/);
 });
