@@ -128,12 +128,12 @@ function groupClone() {
 }
 
 // runs the lines as GitHub runs a step's run block (bash -e), in the checkout, with a fresh RUNNER_TEMP
-function replay(pr, lines, env, event = "pull_request") {
+function replay(pr, lines, env, event = "pull_request", extra = {}) {
   const runnerTemp = mkdtempSync(path.join(pr.dir, "runner-temp-"));
   const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", lines.join("\n")], {
     cwd: pr.repo,
     encoding: "utf8",
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, ...prEnv(env, pr.base, pr.head, event) },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, RUNNER_TEMP: runnerTemp, ...prEnv(env, pr.base, pr.head, event), ...extra },
   });
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
@@ -174,11 +174,44 @@ test("a job that runs only on pull_request is read as skipped on merge_group, an
   assert.throws(() => jobRuns("needs.plan.outputs.run == 'true'", "merge_group"));
 });
 
-// the required checks of main's ruleset (ci.yml's header names them): GitHub reads a skipped job as passed, so each
-// must run on a merge queue group as on a pull request
-const REQUIRED = ["gitleaks", "deep-import", "verify-gate", "money-gate", "test", "vault-sandbox"];
+// planted (review P1): git reads a rev "origin/main" as refs/tags/origin/main before refs/remotes/origin/main, and the
+// checkout fetches every tag, so a pushed tag of that name on the pull request's own commit would pick its tampered gates
+test("planted: a tag named origin/main on the pull request's own commit never picks the gate that judges its group", (t) => {
+  const pr = groupClone();
+  t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
+  git(pr.repo, ["tag", "origin/main", `${pr.head}^2`]);
+  for (const step of baseGateSteps(readFileSync(CI, "utf8"))) {
+    const { status, out } = replay(pr, step.run, step.env, "merge_group");
+    const what = `merge_group ${step.job}: ${step.run.join(" / ")}\n${out}`;
+    assert.doesNotMatch(out, /TAMPERED/, `the tag picked the pull request's own gate: ${what}`);
+    assert.match(out, EXPECT[step.gate], what);
+    assert.equal(status, 0, what);
+  }
+});
+
+test("planted: a group into a branch other than main runs no gate and fails", (t) => {
+  const pr = groupClone();
+  t.after(() => rmSync(pr.dir, { recursive: true, force: true }));
+  git(pr.repo, ["update-ref", "refs/remotes/origin/other", `${pr.head}^2`]);
+  for (const step of baseGateSteps(readFileSync(CI, "utf8"))) {
+    const { status, out } = replay(pr, step.run, step.env, "merge_group", { MQ_BASE_REF: "refs/heads/other" });
+    const what = `merge_group ${step.job}: ${step.run.join(" / ")}\n${out}`;
+    assert.doesNotMatch(out, /TAMPERED|PASS|run=/, what);
+    assert.notEqual(status, 0, what);
+  }
+});
+
+// the required checks of main's ruleset, as ci.yml's header names them (the one list in the repo; the ruleset itself
+// is GitHub's, read only with a token): GitHub reads a skipped job as passed, so each must run on a merge queue group
+export function requiredChecks(yml) {
+  const header = yml.split(/\n(?!#)/)[0].replace(/\n# ?/g, " ");
+  const m = /required checks of main's ruleset \([^)]*\): ([a-z0-9, -]+)\./.exec(header);
+  return m ? m[1].split(/,\s*/) : [];
+}
 test("ci.yml runs on merge_group, and every required check's job runs on it", () => {
   const yml = readFileSync(CI, "utf8");
+  const REQUIRED = requiredChecks(yml);
+  assert.deepEqual(REQUIRED, ["gitleaks", "deep-import", "verify-gate", "money-gate", "test", "vault-sandbox"]);
   assert.match(yml, /^on:\n(?: {2}.*\n|#.*\n)*? {2}merge_group:\n {4}types: \[checks_requested\]\n/m);
   for (const job of REQUIRED) {
     const body = yml.split(new RegExp(`\n  ${job}:\n`))[1];
