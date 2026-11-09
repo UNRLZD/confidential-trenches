@@ -632,8 +632,8 @@ test("R1: record waits out a 429 only while the host could add a second operator
   // one operator, so it is refused, never counted as two
   const noProof = (h: string, m: string, text: string) => (h.includes("fastnear") && m === "EXPERIMENTAL_light_client_proof" ? "{}" : text);
   await assert.rejects(
-    run(replay(noProof), () => null),
-    (e: Error) => /ok on https:\/\/archival-rpc\.mainnet\.fastnear\.com/.test(e.message) && /ok on https:\/\/archival-rpc\.mainnet\.near\.org/.test(e.message) && /read by one operator and not proven/.test(e.message),
+    run(replay(noProof), () => null, "testnet"),
+    (e: Error) => /ok on https:\/\/archival-rpc\.testnet\.fastnear\.com/.test(e.message) && /ok on https:\/\/archival-rpc\.testnet\.near\.org/.test(e.message) && /read by one operator and not proven/.test(e.message), // near-rpc-operators: one operator (the plant names FastNEAR's two hosts to show they count as one)
   );
 });
 
