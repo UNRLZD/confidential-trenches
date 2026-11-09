@@ -38,6 +38,7 @@ import { POOL_USD_FEEDS, poolUsdPrice, SOLANA_RPC_RETRY, solanaHelperRpc, solana
 import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute } from "./app-in-shell.mjs";
 import { POOL } from "./trade-box-pool.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-pool-price";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -57,7 +58,8 @@ export const WIDTHS = [
 const READY_MS = 20_000;
 const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
 /** This checkout's signing page bundle, as build-app.mjs writes it. */
-const TREE_BUNDLE = path.join(REPO, "packages/signpage/public/app.js");
+/** This tree's bundle, built from its sources at the read (card signpage-generated-merge-free). */
+const treeBundlePath = () => path.join(signBuilt(), "public/app.js");
 const MAX_AGE_S = POOL_USD_FEEDS.solana.maxAgeS;
 
 /** The pool entry the stand-in sends for `which`, from the page's read `p`, at the run's clock `nowMs`. */
@@ -219,7 +221,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
   // SIGN_HOST's own policy as served: the page's pair must be in its connect-src
   const signCsp = (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
   // SIGN_HOST's bundle as served (the harness: this checkout's, served as SIGN_HOST's), against this checkout's
-  const treeBundle = sha384(readFileSync(TREE_BUNDLE));
+  const treeBundle = sha384(readFileSync(treeBundlePath()));
   let signBundle;
   if (build) signBundle = { status: 200, sha384: treeBundle };
   else {

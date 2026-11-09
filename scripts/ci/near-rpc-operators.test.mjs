@@ -3,8 +3,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanTree } from "./near-rpc-operators.mjs";
+import { ALLOW, BUNDLES, NEAR_RPC_OPERATORS, SKIP, fileProblems, isNearRpc, lineProblems, networkOf, operatorOf, scanFiles, scanTree } from "./near-rpc-operators.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 import { RPCS, operatorOf as gateOperatorOf } from "./money-gate.mjs";
 import { RPC_OPERATORS } from "./rpc-operators.mjs";
 import { WATCH_RPCS } from "../../apps/helper/src/token-status/status.ts";
@@ -165,5 +169,20 @@ test("the helper's two token-status defaults are two operators, mainnet both", (
 });
 
 test("the real tree: every NEAR RPC host is in the map and no unit pairs one operator", () => {
+  signBuilt(); // the served bundle is build output: built first, then scanned (review P3-1)
   assert.deepEqual(scanTree(ROOT), []);
+});
+
+// review P3-1: the bundle SIGN_HOST serves is build output, ignored, so git ls-files never lists it; the scan reads each
+// of BUNDLES itself, and a bundle that is not built is a refusal, never a pass
+test("the scan reads every listed bundle though git ignores it, and refuses one that is not built", () => {
+  signBuilt();
+  for (const f of Object.keys(BUNDLES)) assert.ok(scanFiles(ROOT).includes(f), f);
+  const d = mkdtempSync(path.join(tmpdir(), "ct-rpc-scan-"));
+  try {
+    execFileSync("git", ["-C", d, "init", "-q"]);
+    assert.deepEqual(scanTree(d), Object.keys(BUNDLES).map((f) => `${f} is not built: the scan reads the bundle SIGN_HOST serves; run node packages/signpage/scripts/build-app.mjs`));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });

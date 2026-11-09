@@ -13,6 +13,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { APP_WORDS, appFinal, found, judge, KEPT, MARKERS, NOT_SHIPPED, scriptsOf, signMarks } from "./words-nov8-final.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "words-nov8-final.answers.json"), "utf8"));
@@ -64,7 +65,7 @@ test("planted: a script the host did not answer, a page naming no script, an unk
 });
 
 test("the signing page's own bundle: every marker, and a draft mark written for a fixed word is not one", () => {
-  const js = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
+  const js = readFileSync(path.join(signBuilt(), "public/app.js"), "utf8");
   assert.deepEqual(new Set(found("sign", js)), new Set(MARKERS.sign));
   // the build before this card: a fixed word, a choice between words, a bare name in an element's own write
   for (const old of ["c.dataset.draftCopy=`withdraw`,t.handoff||0", "t.dataset.refusal=n,t.dataset.draftCopy=n===`unread`?`busy`:`invalid-address`;", "u.dataset.draftCopy=`gas`;let n"]) {

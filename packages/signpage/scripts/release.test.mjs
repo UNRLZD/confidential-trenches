@@ -9,14 +9,15 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
+import { bundle, SERVED, SIGN_BUILD_INPUTS } from "./build-app.mjs";
+import { SIGN_BUILD_CONFIG, SIGN_BUILD_OUTPUTS } from "../../../scripts/ci/sign-build-inputs.mjs";
 import { build as buildSign } from "./deploy.mjs";
 import { judge, namesOf, onlyHost, read, readList, WEBAUTHN } from "./check-signpage.mjs";
-import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, parseRules, publishedPath, RELEASED, unreleasedProblems } from "./release-list.mjs";
+import { diffLists, headersFor, HOSTS, ledgerProblems, listDir, main as listMain, makeList, matches, newestRelease, newestReleaseOnHead, parseRules, publishedPath, RELEASED, releaseTreeProblems, unreleasedProblems } from "./release-list.mjs";
 import { ZK_SETUP_FILES } from "../../kit/src/zk/setup-files.ts";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const ZK = "a".repeat(64);
 const SIGN_HEADERS = `# a comment
 /*
@@ -477,11 +478,27 @@ test("--print --host builds and lists only the host asked; a bad argument is a u
   for (const args of [["--print", "--host", "helper"], ["--check"], ["v1"], ["--print", "x"]]) assert.equal(gen(args).status, 2, args.join(" "));
 });
 
-test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate compares a list's tree on, and each of them", () => {
+test("SIGN_HOST's build reads only SIGN_BUILD_INPUTS, the paths the verify gate compares a list's tree on, and each of them", async () => {
   const repo = dirname(dirname(PKG));
-  const reads = ["packages/signpage/index.html", "packages/signpage/public", ...SERVED.map((e) => relative(repo, e.from).split(sep).join("/"))];
+  // card signpage-generated-merge-free: the bundle is built at the deploy, so what it reads is every module it carries
+  // (outside node_modules, which the lockfile pins: SIGN_BUILD_CONFIG), the tracked public/ files, and SERVED
+  const { modules } = await bundle();
+  const rel = (abs) => relative(repo, abs.split("?")[0]).split(sep).join("/");
+  const own = modules.filter((id) => !id.startsWith("\0") && !/[\\/]node_modules[\\/]/.test(id)).map(rel);
+  assert.ok(own.some((p) => p.startsWith("packages/wallet/src/")) && own.some((p) => p.startsWith("packages/kit/src/")), own.join("\n"));
+  // the bundler applies the nearest tsconfig.json above each module it transforms (review P2: one in packages/signpage,
+  // packages/wallet or the root changes app.js), so every folder from a module's own up to the repository root may hold
+  // one that the build reads, whether or not it exists today; above the root bundle() refuses one (outsideTsconfigs)
+  const tsconfigs = new Set();
+  for (const p of own) {
+    const parts = p.split("/").slice(0, -1);
+    for (let i = parts.length; i >= 0; i--) tsconfigs.add([...parts.slice(0, i), "tsconfig.json"].join("/"));
+  }
+  const reads = [...own, ...tsconfigs, "packages/signpage/public/_headers", "packages/kit/src/prover/build.mjs", ...SERVED.map((e) => rel(e.from)), ...SIGN_BUILD_CONFIG];
   for (const p of reads) assert.ok(SIGN_BUILD_INPUTS.some((i) => p === i || p.startsWith(`${i}/`)), `${p} is read by the build, not in SIGN_BUILD_INPUTS`);
   for (const i of SIGN_BUILD_INPUTS) assert.ok(reads.some((p) => p === i || p.startsWith(`${i}/`)), `${i} is in SIGN_BUILD_INPUTS, read by no build step`);
+  // no build output is an input: a list's tree is compared on sources only
+  for (const o of SIGN_BUILD_OUTPUTS) assert.ok(!SIGN_BUILD_INPUTS.includes(o), o);
   // deploy.mjs build() copies exactly index.html, public/ and SERVED: its built folder holds nothing else
   const built = buildSign();
   try {
@@ -499,4 +516,84 @@ test("APP_HOST's part of a list is built by the terminal deploy's own build(), s
   const src = readFileSync(join(PKG, "scripts", "release-list.mjs"), "utf8");
   assert.match(src, /import \{ build as buildTerminal \} from "\.\.\/\.\.\/\.\.\/apps\/terminal\/scripts\/deploy\.mjs";/);
   assert.doesNotMatch(src, /vite\.js/, "release-list.mjs runs no vite build of its own");
+});
+
+// delta review P3-2: the prover's two built files are named by the kit (PROVER_WORKER_FILE, PROVER_THREAD_FILE).
+// SIGN_BUILD_OUTPUTS, which .gitignore and the build-output gate are held to, sits in scripts/ci, which may not read a kit
+// internal (check:imports' kit-reach refuses even the path), so this test holds its two prover entries to those names
+test("SIGN_BUILD_OUTPUTS names the prover's files by the kit's PROVER_WORKER_FILE and PROVER_THREAD_FILE, and .gitignore ignores each", async () => {
+  const { PROVER_THREAD_FILE, PROVER_WORKER_FILE } = await import("../../kit/src/prover/build.mjs");
+  assert.deepEqual(SIGN_BUILD_OUTPUTS.slice(2), [`packages/signpage/public/${PROVER_WORKER_FILE}`, `packages/signpage/public/${PROVER_THREAD_FILE}`]);
+  const ignore = readFileSync(join(PKG, "..", "..", ".gitignore"), "utf8").split("\n");
+  for (const f of SIGN_BUILD_OUTPUTS) assert.ok(ignore.includes(`/${f}`), `.gitignore names /${f}`);
+});
+
+// review P1(a): the bundle is built on the release machine, so CI rebuilds it on its own clean install and holds the
+// newest list to it whenever that list's tree has HEAD's SIGN_BUILD_INPUTS (a release merge, or a release branch): a list
+// cut from a machine whose bytes are not the sources' build (a tsconfig above the repo, an edited node_modules) fails here
+test("the newest release list is this runner's clean build whenever its tree has HEAD's SIGN_BUILD_INPUTS", (t) => {
+  const r = newestReleaseOnHead();
+  // the remote test machine (its job runner sets HEAVY_JOB, as release-list.mjs's header says) gets a checkout with no
+  // history, so the list's tree is not there: CI's test-packages job (fetch-depth: 0) holds this test; anywhere else a
+  // missing tree fails it
+  if (r.missing && process.env.HEAVY_JOB) return t.skip(`${r.problems[0]}: held by CI's test-packages job, which checks out the whole history`);
+  assert.deepEqual(r.problems, [], r.problems.join("\n"));
+  if (!r.applies) assert.ok(r.newest, "a newest list to compare");
+});
+
+test("planted: a newest list naming HEAD's tree passes as this build, and fails with one byte of its /app.js changed", () => {
+  const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+  const tag = `release-${n + 1}`;
+  const tree = spawnSync("git", ["-C", PKG, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).stdout.trim();
+  const list = JSON.parse(listText(tag));
+  const plant = (edit) => {
+    const dir = releasesCopy();
+    const text = `${JSON.stringify(edit({ ...structuredClone(list), tree }), null, 1)}\n`;
+    writeFileSync(join(dir, `${tag}.json`), text);
+    try {
+      return newestReleaseOnHead(dir, { ...RELEASED, [tag]: sha256(text) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const same = plant((l) => l);
+  assert.equal(same.applies, true);
+  assert.deepEqual(same.problems, []);
+  const byte = plant((l) => {
+    const app = l.hosts.SIGN_HOST.files.find((f) => f.path === "/app.js");
+    app.sha256 = `${app.sha256.slice(0, -1)}${app.sha256.at(-1) === "0" ? "1" : "0"}`;
+    return l;
+  });
+  assert.equal(byte.applies, true);
+  assert.ok(byte.problems.some((l) => l.includes(`${tag}, the newest release, is not this SIGN_HOST build (SIGN_HOST /app.js`)), byte.problems.join("\n"));
+  // a list whose tree's inputs are not HEAD's (here: the empty tree) is not held to this build
+  const other = plant((l) => ({ ...l, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }));
+  assert.equal(other.applies, false);
+  // a list naming a tree this clone does not hold is missing, never a pass (review P3-1: the box has no history)
+  const gone = plant((l) => ({ ...l, tree: "1".repeat(40) }));
+  assert.equal(gone.missing, true);
+  assert.match(gone.problems.join("\n"), /does not hold: check out the whole history \(fetch-depth: 0\)/);
+});
+
+// review P1: the deploy is held to the newest list's tree too. Bytes equal to the list are not enough: a list cut from
+// other inputs (a tainted release machine, then a lockfile bump on main) was never compared to a clean build of HEAD
+test("planted: a newest list whose tree has other SIGN_HOST build inputs than HEAD is refused for the deploy, whatever bytes it names", () => {
+  const n = Math.max(...Object.keys(RELEASED).map((t) => Number(t.slice("release-".length))));
+  const tag = `release-${n + 1}`;
+  const head = spawnSync("git", ["-C", PKG, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).stdout.trim();
+  const list = JSON.parse(listText(tag));
+  const at = (tree) => {
+    const dir = releasesCopy();
+    writeFileSync(join(dir, `${tag}.json`), `${JSON.stringify({ ...structuredClone(list), tree }, null, 1)}\n`);
+    try {
+      return releaseTreeProblems(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  assert.deepEqual(at(head), []);
+  const differ = at("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+  assert.match(differ.join("\n"), new RegExp(`${tag} was cut from other SIGN_HOST build inputs than HEAD's \\(LICENSE, package\\.json, .*, \\.\\.\\.\\), so no clean build of HEAD was compared to it: cut release-${n + 2}`));
+  assert.match(at("1".repeat(40)).join("\n"), /which this clone does not hold/);
+  assert.match(at(undefined).join("\n"), /names tree undefined, which this clone does not hold/);
 });
