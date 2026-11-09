@@ -494,6 +494,52 @@ const verifyAnswer = (origin, body) => {
   return VERIFY_READ.answers.find((a) => new URL(a.url).origin === origin && JSON.stringify(a.params) === params) ?? null;
 };
 
+/** Verify's pool reads on mainnet (card verify-pools): each pool's pair as the release names it
+ *  (apps/terminal/src/screens/verify/release.ts), answered from the recorded real reads
+ *  (apps/terminal/test/verify/pool-reads.json, made by its record-pools.ts) by RPC, method and params, so /verify's pool
+ *  rows draw their true mainnet state. The requests are the page's own: readPool (src/screens/verify/pools.ts) replayed
+ *  on the recording, each EVM head answered at the recorded height. A recording whose pairs are not the release's, or
+ *  that holds a failed call, throws here (re-record with record-pools.ts); a request it does not hold is aborted. */
+let poolTable = null;
+const poolKey = (origin, method, params) => `${origin} ${method} ${JSON.stringify(params)}`;
+function poolAnswers() {
+  poolTable ??= (async () => {
+    const { VERIFY_RELEASES } = await import("../../apps/terminal/src/screens/verify/release.ts");
+    const { EIP1967, POOL_CHAINS, readPool } = await import("../../apps/terminal/src/screens/verify/pools.ts");
+    const rec = RECORDED("verify/pool-reads.json");
+    const readId = (method, params) =>
+      ({ getMultipleAccounts: "accounts", eth_getBlockByNumber: "block", eth_getCode: "code", eth_call: "owner" })[method] ??
+      (method === "eth_getStorageAt" ? Object.keys(EIP1967).find((k) => EIP1967[k] === params[1]) : undefined);
+    const table = new Map();
+    for (const c of POOL_CHAINS) {
+      const p = VERIFY_RELEASES.mainnet.pools[c];
+      if (!p) continue;
+      const r = rec[c];
+      const names = r?.rpcs?.map((x) => x.name);
+      if (JSON.stringify(names) !== JSON.stringify(p.rpcs)) throw new Error(`${KEY}: pool-reads.json's ${c} pair ${names} is not the release's ${p.rpcs}; re-record`);
+      await readPool(p, async (url, method, params) => {
+        const answer =
+          method === "eth_blockNumber" && Number.isSafeInteger(r.height)
+            ? { jsonrpc: "2.0", id: "verify", result: `0x${r.height.toString(16)}` }
+            : r.rpcs.find((x) => x.name === url).answers[readId(method, params)];
+        if (answer?.jsonrpc !== "2.0") throw new Error(`${KEY}: pool-reads.json holds no answer for ${c} ${method} on ${url}; re-record`);
+        table.set(poolKey(new URL(url).origin, method, params), answer);
+        return answer;
+      });
+    }
+    return table;
+  })();
+  return poolTable;
+}
+const poolAnswer = (table, origin, body) => {
+  try {
+    const b = JSON.parse(body ?? "");
+    return table.get(poolKey(origin, b.method, b.params)) ?? null;
+  } catch {
+    return null;
+  }
+};
+
 /** A local NEAR chain for the footer's block read (card app-footer-bar): its final block grows one per 600 ms, NEAR's
  *  pace, from a mainnet-sized height. */
 export function nearChain(start = 223_500_000, now = () => Date.now()) {
@@ -525,6 +571,7 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
   const appRules = rulesOf(readFileSync(path.join(appBuild, "_headers"), "utf8"));
   const signRules = rulesOf(shellHeaders(readFileSync(path.join(REPO, "packages/signpage/public/_headers"), "utf8")));
   const js = shellJs(kind, state, opens, answers);
+  const pools = await poolAnswers();
   const shellFiles = { "/shell.js": js, "/shell.css": SHELL_CSS };
   const headers = (rules, p, type) => ({ ...Object.fromEntries(headersFor(rules, p)), "content-type": type });
   return async (route) => {
@@ -554,6 +601,8 @@ export async function harnessRoute(appBuild, kind = "signed", { state = null, op
       const hit = verifyAnswer(u.origin, route.request().postData?.());
       if (hit) return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(hit.answer) });
     }
+    const pool = poolAnswer(pools, u.origin, route.request().postData?.());
+    if (pool) return route.fulfill({ status: 200, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(pool) });
     if (u.origin === APP_HOST) {
       let file = path.join(appBuild, decodeURIComponent(u.pathname));
       if (!file.startsWith(appBuild + path.sep) || !existsSync(file) || statSync(file).isDirectory()) file = path.join(appBuild, "index.html");

@@ -17,10 +17,24 @@
 // rev-parse HEAD^{tree}) beside `commit`. On the remote test machine (its job runner sets HEAVY_JOB) the checkout's commit is made
 // up for the job, so a list cut there names its tree only (commit null); the tree is the Mac's, byte for byte, and the
 // verify gate (scripts/ci/verify-gate.mjs) holds every new list's tree to a commit of the pull request.
-// RELEASED is the ledger of every written list's sha256: releaseProblems() fails an old list edited after it was
-// written, a list missing from the ledger, and a newest list whose SIGN_HOST part is not a fresh deploy.mjs build of
-// this checkout (every file, every header, the _headers file), so a page change lands with its own release-<N+1>,
-// written here and added to RELEASED by hand; the verify gate refuses a change to a list or a ledger entry on main.
+// RELEASED is the ledger of every written list's sha256: ledgerProblems() fails an old list edited after it was
+// written, a list missing from the ledger and a ledger entry whose list is gone, on every branch (release.test.mjs);
+// the verify gate refuses a change to a list or a ledger entry on main. A card cuts no release (card
+// signpage-release-at-deploy): a release is cut once per sign deploy, and the sign deploy (deploy.mjs) serves only
+// origin/main's head with a passed ci.yml push run, and only a build the newest committed list names (unreleasedProblems:
+// every SIGN_HOST file, every header, the _headers file), so every build SIGN_HOST serves is a release on main. The flow:
+//   1. cut release-<N> on a branch from origin/main's head (git worktree add -b card/<key> ... origin/main, a clean
+//      tree, pnpm install --frozen-lockfile): node packages/signpage/scripts/release-list.mjs release-<N>, N exactly one
+//      past the newest list (it refuses any other N), then add the row it prints (add to RELEASED: "release-<N>":
+//      "<sha256 of the list>",) at the end of RELEASED below, run node --test packages/signpage/scripts/release.test.mjs,
+//      and commit both: git commit -m "Card <key>: signing page release-<N>" -- packages/signpage/releases/release-<N>.json packages/signpage/scripts/release-list.mjs
+//   2. push it with push-card (the team's push script, card/<key>);
+//   3. merge it (the verify gate holds the new list's tree to the base's or the pull request's, with the head's
+//      SIGN_HOST build inputs, and refuses a name main already holds with other bytes);
+//   4. deploy main at that merge, once its ci.yml push run passed: scripts/deploy/pages.sh node
+//      packages/signpage/scripts/deploy.mjs, then its live run; signpage-release-at-deploy reads SIGN_HOST against the
+//      newest committed list. A change that lands on main after the cut and touches SIGN_HOST's build inputs makes the
+//      deploy refuse: cut release-<N+1> the same way.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -175,7 +189,7 @@ export function diffLists(fresh, listed) {
 
 export const listPath = (tag, releases = RELEASES) => join(releases, `${tag}.json`);
 
-/** Every written release list's sha256, as written: a list is never edited after (releaseProblems). */
+/** Every written release list's sha256, as written: a list is never edited after (ledgerProblems). */
 export const RELEASED = Object.freeze({
   "release-1": "c8ffda0045fc1a814abea60ee8f0815cfd995e6c670b98e68b0c1e2f144ac3bc",
   "release-2": "05b618a384bbbb799ee9274611eaae07fbf8ebad3dedcba9ffc1100ec3c7073f",
@@ -261,32 +275,43 @@ export const RELEASED = Object.freeze({
   "release-103": "21c78ac91122b3401d562b526385aaca7c4d3009fb8e3e019ac152b83d228c6a",
   "release-104": "603128f74f7d96eef98414906eb17b097fcfa239b770a078a3d46f6985b51d10",
   "release-105": "5c158057197ad95e678548dd4c05640a83e502e932906d4bf8b6c96616fba394",
+  "release-106": "4552656d207f9b63f2c8a32b21ec91257b685786990d11212524ca11c5e79a33",
+  "release-107": "ec841a86f0ea1e13dbbddf5faeae92bc4d435b4a3deb2bb79df538e414b4616c",
 });
 
+const tagsIn = (dir) => readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);
+/** The newest release list's tag in `dir`, by N (release-1000 after release-999), or null when there is none. */
+export const newestRelease = (dir = RELEASES) => tagsIn(dir).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8))).at(-1) ?? null;
+
 /**
- * Problems with the release lists in `dir` against `ledger` and SIGN_HOST's build from the package folder `pkg`: an
- * old list edited, a list not in the ledger or a ledger entry with no list, and a newest list whose SIGN_HOST part is
- * not a fresh deploy.mjs build() of `pkg` (empty = none).
+ * Problems with the release lists in `dir` against `ledger` (empty = none): an old list edited after it was written, a
+ * list not in the ledger, a ledger entry whose list is gone, no list at all. What every branch is held to.
  */
-export function releaseProblems(dir = RELEASES, ledger = RELEASED, pkg = PKG) {
+export function ledgerProblems(dir = RELEASES, ledger = RELEASED) {
   const p = [];
-  const tags = readdirSync(dir).map((f) => /^(release-[1-9][0-9]*)\.json$/.exec(f)?.[1]).filter(Boolean);
+  const tags = tagsIn(dir);
   for (const tag of tags) {
     const sha = hash("sha256", readFileSync(join(dir, `${tag}.json`)), "hex");
     if (!Object.hasOwn(ledger, tag)) p.push(`${tag} is not in RELEASED: add its sha256 ${sha}`);
     else if (ledger[tag] !== sha) p.push(`${tag} was edited after it was written (sha256 ${sha}, written ${ledger[tag]})`);
   }
   for (const tag of Object.keys(ledger)) if (!tags.includes(tag)) p.push(`${tag} is in RELEASED but its list is gone`);
-  if (!tags.length) return [...p, "no release list"];
-  const newest = tags.sort((a, b) => Number(a.slice(8)) - Number(b.slice(8))).at(-1);
+  if (!tags.length) p.push("no release list");
+  return p;
+}
+
+/**
+ * Problems with serving the SIGN_HOST build folder `built` (deploy.mjs build()) as a release (empty = none): the
+ * ledger's, and every way the newest list's SIGN_HOST part is not that build. What the sign deploy is held to.
+ */
+export function unreleasedProblems(built, dir = RELEASES, ledger = RELEASED) {
+  const p = ledgerProblems(dir, ledger);
+  const newest = newestRelease(dir);
+  if (!newest) return p;
+  const next = `release-${Number(newest.slice(8)) + 1}`;
   const listed = JSON.parse(readFileSync(join(dir, `${newest}.json`), "utf8"));
-  const built = buildSign(pkg);
-  try {
-    for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
-      p.push(`${newest} is not this checkout's SIGN_HOST build (${l}): write release-${Number(newest.slice(8)) + 1}`);
-  } finally {
-    rmSync(built, { recursive: true, force: true });
-  }
+  for (const l of diffLists(makeList(newest, { SIGN_HOST: built }, null), listed))
+    p.push(`${newest}, the newest release, is not this SIGN_HOST build (${l}): cut ${next} on a branch from origin/main's head (node packages/signpage/scripts/release-list.mjs ${next}, its row in RELEASED), push and merge it, then deploy main at that merge`);
   return p;
 }
 
@@ -333,12 +358,17 @@ export function main(a, releases = RELEASES) {
   }
   if (a.length !== 1 || !TAG.test(a[0])) return usage;
   if (existsSync(listPath(a[0], releases))) return { code: 1, err: [`${a[0]} is already written: a release is never written again`] };
+  const newest = newestRelease(releases);
+  const want = `release-${newest ? Number(newest.slice(8)) + 1 : 1}`;
+  if (a[0] !== want) return { code: 1, err: [`${a[0]} is not the next release: the newest list is ${newest ?? "none"}, so the next is ${want}`] };
   const dirty = uncommitted();
   if (dirty) return { code: 1, err: [`uncommitted changes, so the list could not name its tree:\n${dirty}`] };
   const list = headList();
   list.release = a[0];
-  writeFileSync(listPath(a[0], releases), `${JSON.stringify(list, null, 1)}\n`);
-  return { code: 0, out: Object.entries(list.hosts).map(([name, h]) => `${a[0]} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`) };
+  const text = `${JSON.stringify(list, null, 1)}\n`;
+  writeFileSync(listPath(a[0], releases), text);
+  const row = `"${a[0]}": "${hash("sha256", text, "hex")}",`;
+  return { code: 0, out: [...Object.entries(list.hosts).map(([name, h]) => `${a[0]} ${name} ${h.files.length} files, _headers ${h.headers_file.sha256}`), `add to RELEASED: ${row}`] };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

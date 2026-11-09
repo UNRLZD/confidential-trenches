@@ -9,14 +9,19 @@ import { after, test } from "node:test";
 
 type Call = { seed: Uint8Array; out: { secretKey: Uint8Array } };
 const calls: Call[] = [];
-Object.assign(globalThis, { __ctFresh: calls });
+// the arm ids' keys (returnId, refundId, armAccount), recorded the same way (review F7)
+const ids: { fn: string; out: { secretKey: Uint8Array } }[] = [];
+Object.assign(globalThis, { __ctFresh: calls, __ctIds: ids });
 registerHooks({
   load(url, context, next) {
     if (!/\/src\/derive\/keys\.ts$/.test(url)) return next(url, context);
     const real = JSON.stringify(`${url}?real`);
     const source = `export * from ${real};
 import * as m from ${real};
-export function freshWallet(...a) { const out = m.freshWallet(...a); globalThis.__ctFresh.push({ seed: a[0], out }); return out; }`;
+export function freshWallet(...a) { const out = m.freshWallet(...a); globalThis.__ctFresh.push({ seed: a[0], out }); return out; }
+export function returnId(...a) { const out = m.returnId(...a); globalThis.__ctIds.push({ fn: "returnId", out }); return out; }
+export function refundId(...a) { const out = m.refundId(...a); globalThis.__ctIds.push({ fn: "refundId", out }); return out; }
+export function armAccount(...a) { const out = m.armAccount(...a); globalThis.__ctIds.push({ fn: "armAccount", out }); return out; }`;
     return { format: "module", source, shortCircuit: true };
   },
 });
@@ -28,6 +33,9 @@ const { solanaRestore, solanaMarkOf } = await import("../src/pool/solana-restore
 const { buyWallets, solanaSpentNotes } = await import("../src/pool/buy-wallets.ts");
 const { evmRestore } = await import("../src/pool/evm-restore.ts");
 const { restoreWallets } = await import("../src/restore/wallets.ts");
+const { quietArms, restoreArmAccounts } = await import("../src/restore/arms.ts");
+const d = await import("../src/derive/keys.ts");
+const { armAccount } = d;
 const { noteSecrets, noteCommitment } = await import("../src/notes/secrets.ts");
 const { vaultLabelOf } = await import("@blindfill/kit");
 const { keccak_256 } = await import("@noble/hashes/sha3.js");
@@ -132,5 +140,40 @@ test("restoreWallets zeroes every W secret key it derives, on all six chain tags
   assert.equal(r.wallets.length, 12);
   assert.equal(calls.length - at, 12, "one W derived per arm and tag");
   for (const c of calls.slice(at)) assert.ok(zero(c.out.secretKey), "W's secret key is left in memory");
+  assert.ok(!zero(SEED), "never the caller's seed");
+});
+
+test("quietArms zeroes every W secret key it derives once it has the address (card wallet-restore-id-reader)", () => {
+  const a = armAccount(SEED, 33n, 1);
+  a.secretKey.fill(0);
+  const row = { index: 0, nullifierHash: 1n, withdrawn: 10n, newLeafIndex: 1n, refundPrecommitment: 2n, refundValue: 0n, refundLabel: 0n, refundLeafIndex: 0n, status: "paid", payer: "relayer.testnet", reserve: 0n, recipient: a.id, fee: 0n, context: 1n };
+  const spends = [{ l: 33n, j: 1, note: "c", spend: row }] as unknown as Parameters<typeof quietArms>[1]["spends"];
+  const arms = { accounts: [{ kind: "V" as const, l: 33n, j: 1, account: "", holds: [] }, { kind: "A" as const, l: 33n, j: 1, account: a.id, holds: [] }], unread: [] };
+  // quietArms matches A and V by account: give V's own id
+  const { refundId } = d;
+  const v = refundId(SEED, 33n, 1);
+  v.secretKey.fill(0);
+  arms.accounts[0]!.account = v.id;
+  const at = calls.length;
+  const atIds = ids.length;
+  const q = quietArms(SEED, { spends }, arms, { wallets: [], unread: [] });
+  assert.equal(q.length, 1);
+  assert.equal(calls.length - at, 3, "the arm's own three W derived");
+  for (const c of calls.slice(at)) assert.ok(zero(c.out.secretKey), "W's secret key is left in memory");
+  assert.deepEqual(ids.slice(atIds).map((x) => x.fn), ["armAccount", "refundId"]);
+  for (const x of ids.slice(atIds)) assert.ok(zero(x.out.secretKey), `${x.fn}'s secret key is left in memory`);
+  assert.ok(!zero(SEED), "never the caller's seed");
+});
+
+// review F7: step 5 derives R, V and A only for their account ids, so each key is zeroed as soon as it has the id
+test("restoreArmAccounts zeroes every R, V and A secret key it derives once it has the id (card wallet-restore-id-reader)", async () => {
+  const at = ids.length;
+  const wallet = { c: "sol" as const, l: 33n, j: 1, note: "c", path: "", address: "x", history: ["solana" as const], returnNote: null };
+  const unread = { c: "evm" as const, l: 44n, j: 2, address: "y", chain: "base" as const, error: "down" };
+  const spends = [{ l: 33n, j: 1 }] as unknown as Parameters<typeof restoreArmAccounts>[1]["spends"];
+  const got = await restoreArmAccounts(SEED, { spends }, { wallets: [wallet], unread: [unread] }, async () => 0n);
+  assert.equal(got.accounts.length, 4);
+  assert.deepEqual(ids.slice(at).map((x) => x.fn), ["returnId", "returnId", "refundId", "armAccount"]);
+  for (const x of ids.slice(at)) assert.ok(zero(x.out.secretKey), `${x.fn}'s secret key is left in memory`);
   assert.ok(!zero(SEED), "never the caller's seed");
 });

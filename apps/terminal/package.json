@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@blindfill/kit": "workspace:*",
+    "@noble/hashes": "2.4.0",
     "klinecharts": "10.0.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

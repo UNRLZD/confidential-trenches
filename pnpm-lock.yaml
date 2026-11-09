@@ -36,6 +36,9 @@ importers:
       '@blindfill/kit':
         specifier: workspace:*
         version: link:../../packages/kit
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
       klinecharts:
         specifier: 10.0.3
         version: 10.0.3

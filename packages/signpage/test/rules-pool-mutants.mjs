@@ -89,7 +89,7 @@ export const MUTANTS = [
   ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', 'if (x.accounts.length !== 8) return refuse("deposit_accounts");', SELL],
   ['if (x.accounts.length !== 8 && !(six && x.accounts.length === 6)) return refuse("deposit_accounts");', "", NEXT],
   ['if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads) !== ask.amount)', "if (depositOf(d.ixs[n]!, pin, ctx.wallet, ctx.precommitment, reads, true) !== ask.amount)", NEXT],
-  ["const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads, true);", "const back = depositOf(dep, pin, ctx.wallet, ctx.precommitment, reads);", SELL],
+  ["const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads, true);", "const back = depositOf(last, pin, ctx.wallet, ctx.precommitment, reads);", SELL],
   ["const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads);", "const value = depositOf(d.ixs[0]!, pin, ctx.wallet, ctx.precommitment, reads, true);", SWEEP, SELLT],
   ['if (x.accounts.length === 8 && !same(nextState, solanaPoolNextPage(pin.program, 0, reads.stateSize), false, true)) return refuse("state_page");', "", NEXT],
   ['if (x.accounts.length === 8 && !same(nextLabel, solanaPoolNextPage(pin.program, 1, reads.labelSize), false, true)) return refuse("label_page");', "", NEXT],
@@ -136,10 +136,18 @@ export const MUTANTS = [
   ['if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");', "", SELL],
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
   ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
-  // card sol-w-sweep: the reserve's bound on every path (the cap, less what the sweep carries on, and the pool's least
-  // deposit), the line that replaced the one these two planted
-  ['if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || minOut - reserve < SOLANA_POOL_MIN_DEPOSIT) return refuse("reserve");', "", SELL],
-  ["reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX || ", "", SELL],
+  // card sol-w-sweep: the reserve's bound on every path (the cap, less what the sweep carries on), the line that
+  // replaced the one these two planted
+  ['if (reserve - swept > SOLANA_POOL_SELL_RESERVE_MAX) return refuse("reserve");', "", SELL],
+  // card sol-sell-deposit-back-floor: the deposit back's floor, the kit's at the rent read, refused by name; under it the
+  // venue's sell alone, drawn with no deposit, to W
+  ["const kept = minOut - reserve < solanaPoolNoteFloor(rent);", "const kept = minOut - reserve < SOLANA_POOL_MIN_DEPOSIT;", SELL],
+  ['if (kept && last.program === pin.program) return refuse("deposit_floor");', "", SELL],
+  ["const sell = kept ? body : body.slice(0, -1);", "const sell = body.slice(0, -1);", SELL],
+  ['  if (rent === undefined || typeof rent.lamportsPerByte !== "bigint" || rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n', "", SELL],
+  ["rent.lamportsPerByte < 1n || rent.lamportsPerByte > 1_000_000n || (rent.factor", "(rent.factor", SELL],
+  ['(rent.factor !== 1n && rent.factor !== 2n)) return refuse("reserve");\n  const kept', 'false) return refuse("reserve");\n  const kept', SELL],
+  ["feeCap: 0n, pool: pin.pool, to: ctx.wallet, decimals: ask.decimals, back: null };", "feeCap: 0n, pool: pin.pool, to: pin.pool, decimals: ask.decimals, back: null };", SELL],
   ["+ 2n * (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", "+ (128n + 16n + 72n) * SOLANA_RENT_PER_BYTE_MAX;", SELL],
   ["export const SOLANA_RENT_PER_BYTE_MAX = 6_960n;", "export const SOLANA_RENT_PER_BYTE_MAX = 6_961n;", SELL],
   // the EVM relay data

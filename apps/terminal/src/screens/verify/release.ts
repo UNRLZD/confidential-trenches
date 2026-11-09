@@ -4,7 +4,20 @@
 // deploy record, contracts/vault/deployments/<network>-v1.json (vault = account_id, asset = asset, release =
 // code_hash), and null exactly while that record does not exist; scripts/live-checks/app-verify-mount.test.mjs holds
 // them to it, and test/verify-mount.test.ts holds each pair to the kit's rule.
+//
+// Each network's pools (card verify-pools): the pool program and the EVM pools as their deploy records name them, null
+// exactly while a network names none. Mainnet: contracts/pool-solana/deployments/mainnet.json (program = program_id,
+// programdata, codeLen = so_len, codeSha256 = so_sha256) and contracts/pool-evm/deployments/<chain>.json (address =
+// contracts.PrivacyPoolSimple.address); each EVM code hash is the keccak256 of that address's eth_getCode in
+// scripts/live-checks/pool-evm-deploy-mainnet.answers.json (the deploy's read-back), the same on both of its RPCs.
+// scripts/live-checks/verify-pools.test.mjs holds every pin to those files. Each pair is two operators, each answering a
+// browser on the app's origin: Solana's publicnode (the signing page's SOLANA_PROVIDER_A, a side of the pool deploy
+// check's pair) and Pocket's gateway (whose Base and Robinhood gateways are in the kit's lists); Solana's own
+// api.mainnet-beta.solana.com answers any request with an Origin header 403 "Access forbidden" (read 2026-11-08 20:10Z
+// from the app's origin and in the harness), so a page cannot read it. Each EVM chain's pair is its feeProviders
+// (evmPoolVenues()), which keep state back.
 import { VAULT_TOKEN_CODE_HASH, type NearNetwork } from "@blindfill/kit";
+import type { PoolPins } from "./pools.ts";
 import type { VerifyPins } from "./read.ts";
 
 export type VerifyRelease = {
@@ -13,6 +26,8 @@ export type VerifyRelease = {
   rpcs: readonly [string, string];
   /** null until the release names a vault on this network: nothing is read and every check is Unverified. */
   pins: VerifyPins | null;
+  /** Each pool the network names, or null on a chain where it names none (its row is Unverified, nothing read). */
+  pools: PoolPins;
 };
 
 export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
@@ -30,6 +45,34 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       assetSymbol: "USDC",
       assetDecimals: 6,
     },
+    pools: {
+      solana: {
+        chain: "solana",
+        rpcs: ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"],
+        pin: {
+          program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // gitleaks:allow (a public program id)
+          programdata: "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM", // gitleaks:allow (a public account id)
+          codeLen: 79088,
+          codeSha256: "c86fc7fc1b442851c660c5ec0c4f3c4ad8648a5965b5a0da59189fbf0fdb5162", // gitleaks:allow (a public code hash)
+        },
+      },
+      base: {
+        chain: "base",
+        rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+        pin: {
+          address: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf", // gitleaks:allow (a public contract address)
+          codeHash: "0xcac5a62a0ac95b9dd1323c57a2561fe3eb56292c82c5d3a5390c95e522ff786d", // gitleaks:allow (a public code hash)
+        },
+      },
+      robinhood: {
+        chain: "robinhood",
+        rpcs: ["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"],
+        pin: {
+          address: "0x9306359433127c4f3be426f6faeb00a3c41f66db", // gitleaks:allow (a public contract address)
+          codeHash: "0x4052383ebda1543cc4e9d8f51a03cdc631f4562d763c60508ef870189f8747c7", // gitleaks:allow (a public code hash)
+        },
+      },
+    },
   },
   testnet: {
     network: "testnet",
@@ -42,12 +85,21 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       assetSymbol: "USDC",
       assetDecimals: 6,
     },
+    // the testnet build names no pool yet: each row is Unverified and reads nothing
+    pools: { solana: null, base: null, robinhood: null },
   },
 };
 // Frozen all the way down (as the kit's NEAR_NETWORKS), so no code on the page can point Verify at another vault or RPC.
 for (const r of Object.values(VERIFY_RELEASES)) {
   Object.freeze(r.rpcs);
   if (r.pins) Object.freeze(r.pins);
+  for (const p of Object.values(r.pools)) {
+    if (!p) continue;
+    Object.freeze(p.rpcs);
+    Object.freeze(p.pin);
+    Object.freeze(p);
+  }
+  Object.freeze(r.pools);
   Object.freeze(r);
 }
 Object.freeze(VERIFY_RELEASES);

@@ -91,13 +91,18 @@ jobs:
       - name: every gate refuses its planted cases
         run: GITLEAKS="$RUNNER_TEMP/gitleaks" pnpm run test:gates
 
+  # 15 minutes: the quote-speed step's two tries, each killed at 300 s (quote-speed.mjs TRY_MS; evm-quote-warm-round's
+  # own runner jobs took 98 to 128 s with setup, live runs 42500836732 to 42522703562), so at most 10 minutes, on top
+  # of the 17 s the rest of the job takes (run 42532277117), with the rest as margin for the install and the clone.
   deep-import:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      # the full history: the quote-speed step reads the change base..head and the base's scripts/
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -110,6 +115,37 @@ jobs:
         run: node --test scripts/perf-table.test.mjs
       - name: the README and docs/performance.md match the run records
         run: node scripts/perf-table.mjs --check
+      # Card quote-speed-before-merge: a change to the EVM quote's code (scripts/ci/quote-speed.mjs PATHS) runs the live
+      # check evm-quote-warm-round on this runner against this checkout's kit, and is refused when its warm p95 misses a
+      # second on two tries (public RPCs are noisy, so one rerun); a run that writes no record is refused. On a pull
+      # request the gate and the check run as main has them, from the base's whole scripts/ tree (see verify-gate), and
+      # measure the checkout's kit; scripts/ci/quote-speed.test.mjs and base-gate.test.mjs replay these lines. While main
+      # has no copy of the gate, this pull request's own copy decides on the same change; that line goes once main has
+      # the gate. The shell is bash with pipefail, so a failed git archive stops the step instead of falling through to
+      # the pull request's own copy.
+      - name: a change to the EVM quote keeps its warm p95 under a second (evm-quote-warm-round on this kit)
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request)
+              mkdir -p "$RUNNER_TEMP/base"
+              git archive "$PR_BASE" scripts | tar -x -f - -C "$RUNNER_TEMP/base"
+              [ -e "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" ] || { echo "main has no scripts/ci/quote-speed.mjs yet, so this pull request's own copy decides"; node scripts/ci/quote-speed.mjs "$PR_BASE" "$PR_HEAD"; exit; }
+              node "$RUNNER_TEMP/base/scripts/ci/quote-speed.mjs" "$PR_BASE" "$PR_HEAD" ;;
+            push)
+              if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+                node scripts/ci/quote-speed.mjs --all
+              else
+                node scripts/ci/quote-speed.mjs "$BEFORE" "$AFTER"
+              fi ;;
+            *) node scripts/ci/quote-speed.mjs --all ;;
+          esac
 
   verify-gate:
     if: github.event_name == 'pull_request'
@@ -270,6 +306,10 @@ jobs:
   # Eight parts (card sol-rent-back-dust-burn): the signing page's rent back sweep grew to 66 plants, ran 643 s unsplit
   # and was cancelled at the job's limit on pull request #482 (job 128793441224); it runs as three commands of 22
   # plants, each planned at 240 s, and eight plan the heaviest part at 505 s (seven would plan 584 s).
+  # Nine parts (card sol-sell-deposit-back-floor): the rent back's sweep grew to 86 plants, each running the card's
+  # added tests; part 1 of 3 ran 480 s on pull request #501 (job 128896591277) and that job, with part 3 after it, hit
+  # its limit. It runs as six commands of 14 or 15 plants, each planned at CI's 16.6 s a plant, and nine plan the
+  # heaviest part at 536 s (eight would plan 616 s).
   # scripts/ci/test-shards.test.mjs fails when any ci.yml line but a comment names test:mutants, in any runner's form.
   test-mutants:
     if: github.event_name != 'schedule'
@@ -278,7 +318,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6, 7, 8]
+        part: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

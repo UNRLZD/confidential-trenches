@@ -1,13 +1,16 @@
 {
   "_note": {
-    "good": "this card's SIGN_HOST build (mainnet) on card/sol-rent-back-dust-burn: packages/signpage/index.html and public/app.js as build-app.mjs wrote them on the card's branch: PASS",
+    "good": "card/sol-sell-deposit-back-floor's build (mainnet) with the fold of fcd67b72's review (main 383b1ffe merged): packages/signpage/index.html and public/app.js as build-app.mjs wrote them on that branch: PASS",
     "bad": "card/sol-w-sweep ca2d252a's build (mainnet), the committed packages/signpage/index.html and public/app.js there, the rent back before this card (a balance on W's token account after its full sell ends the pass holds): FAIL",
     "liveBefore": "SIGN_HOST read 2026-11-08T14:34:45Z, before this card's deploy: FAIL",
-    "beforeFix": "b9fc0c5b's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before the review of bf467ae7's fold (a balance a full sell left held as W's own; the sell read at confirmed, after W's accounts): FAIL on the stranger's-balance rule alone"
+    "beforeFix": "b9fc0c5b's build (mainnet), the committed packages/signpage/index.html and public/app.js there, before the review of bf467ae7's fold (a balance a full sell left held as W's own; the sell read at confirmed, after W's accounts): FAIL on the stranger's-balance rule alone",
+    "plantedSlot": "this build with goneOnBoth's slot check taken out (a status read at any slot counts), built by build-app.mjs from that planted pool-sell.ts: FAIL on the stranger's-balance rule alone",
+    "plantedHeight": "this build with goneOnBoth on the height alone (no status read of the sell's signature), built by build-app.mjs from that planted pool-sell.ts: FAIL on the stranger's-balance rule alone",
+    "plantedPastAt": "this build with pastAt past at any height (the last valid one not read), built by build-app.mjs from that planted pool-sell.ts: FAIL on the stranger's-balance rule alone"
   },
   "good": {
-    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI\"></script>\n  </head>\n  <body></body>\n</html>\n",
-    "sha384": "sha384-T7C6S8614jkWvftSPBGJsUvWepXbfuaYNRBqEHeqFNCZlDVr/WrtOTKFGN8hRmxI",
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-z9zckDL8HiR9HJRYf3425LOT9do16Eyopu0e6jSdSdl0bXiH1gLKvM294urmj+Uc\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-z9zckDL8HiR9HJRYf3425LOT9do16Eyopu0e6jSdSdl0bXiH1gLKvM294urmj+Uc",
     "carries": {
       "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
       "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": true,
@@ -41,6 +44,39 @@
   "beforeFix": {
     "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-lbMlIBl0ZgS4wbilJT8LWjMtU/lubRIWFtOugxS6yo4QzmON32wkJ7fzVXTexzPB\"></script>\n  </head>\n  <body></body>\n</html>\n",
     "sha384": "sha384-lbMlIBl0ZgS4wbilJT8LWjMtU/lubRIWFtOugxS6yo4QzmON32wkJ7fzVXTexzPB",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
+      "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": true,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": true,
+      "each planned burn exactly once before its close, and none unplanned": true
+    }
+  },
+  "plantedSlot": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5dLNORXjeVP46a0eDBMsXcwZAA1t/vSgPQGieMILNTlA0X/LaDrP7DTxDBMLMOQG\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-5dLNORXjeVP46a0eDBMsXcwZAA1t/vSgPQGieMILNTlA0X/LaDrP7DTxDBMLMOQG",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
+      "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": true,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": true,
+      "each planned burn exactly once before its close, and none unplanned": true
+    }
+  },
+  "plantedHeight": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-IusT6r7FC8P0iq6n2Cc6d2KX7i3RUaFZ7u8U/5lcifO6yWwaH1AkGOh2evAO0cEX\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-IusT6r7FC8P0iq6n2Cc6d2KX7i3RUaFZ7u8U/5lcifO6yWwaH1AkGOh2evAO0cEX",
+    "carries": {
+      "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
+      "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,
+      "the plan burns a named balance only on an account it would close but for it: not native, no claim's destination, no extension but ImmutableOwner": true,
+      "the check passes a Burn only of exactly the plan's amount, of the account's own mint and program, the wallet signing, right before its close": true,
+      "each planned burn exactly once before its close, and none unplanned": true
+    }
+  },
+  "plantedPastAt": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-86sV1sWYrGybyLSYVihZu8or7g8BtbmwTOEgWaW2+i9+ZpyUNh+P2E+NMb+mzC2h\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-86sV1sWYrGybyLSYVihZu8or7g8BtbmwTOEgWaW2+i9+ZpyUNh+P2E+NMb+mzC2h",
     "carries": {
       "the owed record keeps the full sell's signed bytes and last height by mint, before the send": true,
       "a balance is a stranger's only when the sell itself, read ok and final on both RPCs before W's accounts, says plainly what W's account held after it; W's own otherwise, unsure while it may land; burned only then, the plan and the check handed the same list": false,

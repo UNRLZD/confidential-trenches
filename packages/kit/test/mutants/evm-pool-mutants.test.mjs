@@ -1,4 +1,5 @@
-// The EVM pool buy's and sell's mutant sweeps (test/evm-pool-buy-mutants.mjs, test/evm-pool-sell-mutants.mjs) as tests
+// The EVM pool buy's, sell's and pool index's mutant sweeps (test/evm-pool-buy-mutants.mjs, test/evm-pool-sell-mutants.mjs,
+// test/evm-pool-index-mutants.mjs) as tests
 // of the kit: every check, removed or weakened one at a time, fails the test named for it. A sweep that no command runs
 // holds nothing; the kit's test:mutants script runs this file (card fresh-run-margin: CI's test jobs run it after the
 // tests, and the README's fresh run leaves it out). Each sweep works in its own copy of the kit (test/mutant-copy.mjs),
@@ -14,6 +15,7 @@ import { runSync } from "../../../../scripts/group-run.mjs";
 for (const [name, done] of [
   ["evm-pool-buy-mutants.mjs", /^every one of \d+ mutants fails its named test$/m],
   ["evm-pool-sell-mutants.mjs", /^every one of \d+ mutants fails its named test$/m],
+  ["evm-pool-index-mutants.mjs", /^every one of \d+ mutants fails its named test$/m],
 ]) {
   test(`${name}: every mutant fails its named test`, { timeout: 1_800_000 }, (t) => {
     const r = runSync(process.execPath, [fileURLToPath(new URL(`../${name}`, import.meta.url))], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeoutMs: 1_800_000, killSignal: "SIGTERM" });

@@ -24,6 +24,8 @@ export const HELPER_HOST = "ct-api.unrealized.trade";
 export const RPCS = ["https://rpc.mainnet.fastnear.com", "https://rpc.mainnet.near.org", "https://near.drpc.org"];
 // the origin of every provider in the kit's EVM venue lists, read from the kit (card page-evm-rpc-csp)
 export const EVM_RPCS: string[] = evmOrigins();
+// the Solana pair Verify reads the pool program on, from the device (card verify-pools; release.ts mainnet pools.solana)
+export const SOLANA_RPCS = ["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"];
 
 const HELPER = [`https://${HELPER_HOST}`, `wss://${HELPER_HOST}`];
 
@@ -34,7 +36,7 @@ const ALLOWED: Record<string, string[]> = {
   "style-src": ["'self'"],
   "img-src": ["'self'", "data:", HELPER[0]!],
   "font-src": ["'self'"],
-  "connect-src": ["'self'", ...HELPER, SIGN_HOST, ...EVM_RPCS, ...RPCS],
+  "connect-src": ["'self'", ...HELPER, SIGN_HOST, ...EVM_RPCS, ...SOLANA_RPCS, ...RPCS],
   "manifest-src": ["'self'"],
   "worker-src": ["'none'"],
   "frame-src": ["'none'"],
