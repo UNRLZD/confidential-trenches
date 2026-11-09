@@ -1418,8 +1418,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   async function heldProven(h: string, signal?: AbortSignal): Promise<boolean> {
     const labels = held.filter((e) => e.label !== null);
     if (labels.length === 0) return false;
-    const st = await agreed(VIEWS.stateRootTimes + hex(word(new VaultTree(held.map((e) => e.state)).root!)), h, "stateRootTimes(held root)", signal);
-    const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(labels.map((e) => e.label!)).root!)), h, "labelRootTimes(held label root)", signal);
+    const st = await agreed(VIEWS.stateRootTimes + hex(word(new VaultTree(held.map((e) => e.state)).root!)), h, "stateRootTimes of the held root", signal);
+    const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(labels.map((e) => e.label!)).root!)), h, "labelRootTimes of the held label root", signal);
     if (st === 0n || lt === 0n) return false;
     const last = held[held.length - 1]!, lastLabel = labels[labels.length - 1]!;
     if (st !== (await timeOf(last.blockHash, last.block, signal)) || lt !== (await timeOf(lastLabel.blockHash, lastLabel.block, signal))) return false;
