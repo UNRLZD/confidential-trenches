@@ -32,10 +32,11 @@
 //     pools can hold a trace on NEAR.
 //   - A pool deposit's money can also wait at its one-time account U_X on the pool's own chain (1Click's delivery there,
 //     or a refund carry moved back there; card wallet-restore-reads-ux). On a chain whose pool follow has reads on this
-//     page (the host's `ux`: the follow's own balances, costs, ladder and deposit, src/main.ts; today Solana's), step 5
-//     reads each id's U_X (uxOf: on Solana the base58 of the id's own 32 bytes, on Base and Robinhood U^evm_{s,i})
-//     beside the id, at finalized on the pool's two RPCs, one U_X per request, so no request names two of the user's
-//     wallets: both RPCs must give the same balance, else the id is unread and the run ends stalled by name. A U_X
+//     page (the host's `ux`, restoreUxOf: the follow's own reader on two public operators, never our helper relay, and
+//     the follow's own deposit; today Solana's on mainnet), step 5 reads each id's U_X (uxOf: on Solana the base58 of
+//     the id's own 32 bytes, on Base and Robinhood U^evm_{s,i}) beside the id's NEAR read, at finalized on both, one U_X
+//     per request, paced per provider, so no request names two of the user's wallets and the reads spread over the
+//     minutes step 5 takes: both must give the same balance, else the id is unread and the run ends stalled by name. A U_X
 //     holding any balance is history (the id reads "money"), so its lane is read DEPOSIT_ID_MARGIN past it.
 //     Once a scope's ids are read, each U_X that covers one deposit (the follow's floor) and whose index has a deposit
 //     note in the store (the page's pool.deposit pays from U_{s,i} only on one; a U_X with none on this device, as a
@@ -45,6 +46,12 @@
 //     ends the run stalled with the U_X named. Less than one deposit's floor (the rent a carried U_X keeps) is left, as
 //     the follow leaves it. A pool on a chain with no U_X reads here (Base and Robinhood until the EVM follow's reads
 //     land) is never "done" (POOL_CHAIN_UNREAD): the run ends stalled by name, so no run says done while a U_X is unread.
+//     The testnet build reads no deposit id nor any U_X (devnet has no two public operators), so a run there that walked
+//     a pool ends stalled by name (POOL_UX_UNREAD_TESTNET), never done.
+//   - Each id NEAR reads as money (a refund 1Click left under U_{s,i} inside intents.near, or the token) is read again by
+//     asset on both NEAR providers at the same block (the wallet's nearIdHeldReader): an asset above the base unit a move
+//     out keeps (ID_KEEP, the way out's own), or one the two read apart, is named and the run ends stalled; only the kept
+//     unit is a moved-out id. No restore carries that money yet (card restore-carries-pool-refund).
 //   - Every deposit note the walk gave for a pool is of that pool's scope; one of another scope is a drift that stalls
 //     the run by name, and that pool's ids are not read on it.
 //   - Each reason a run ends stalled is named (the host's `ended`, told once however the run ends: an abort and a throw
@@ -81,12 +88,15 @@ import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, type EvmNetwork, type EvmPool
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { solanaRestoreNotes } from "../../wallet/src/pool/solana-restore.ts";
-import { nearIdReader, openRestorePass, type IdReaderOpts, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { nearIdHeldReader, nearIdReader, openRestorePass, type IdHeld, type IdReaderOpts, type PassOpts } from "../../wallet/src/restore/id-reader.ts";
+import { ID_KEEP } from "../../wallet/src/deposit/moveout.ts";
 import { restoreDepositIds, type DepositIds, type IdReader } from "../../wallet/src/restore/wallets.ts";
 import { relayRpc } from "../../wallet/src/withdraw/relay.ts";
 import { base58, hex } from "@scure/base";
 import type { Deferred, KindContext } from "./api.ts";
-import { askOf, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
+import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
+import { pageRpc } from "./page-rpc.ts";
+import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { PAGE_SOL_PIN, TESTNET_RPCS, pageSolanaRpcs, testnetRpc } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
@@ -125,6 +135,15 @@ export function pageIdReads(): IdReads | null {
  */
 export const POOL_CHAIN_UNREAD = "the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done";
 
+/**
+ * Why the testnet build's restore is never done once it walked a pool (review P3 of card wallet-restore-reads-ux): its
+ * pool.address answers a devnet pool's same-chain U_X with no quote (src/pool-deposit-address.ts, the `!quoted` answer
+ * comes before the network check), so a devnet send can wait there, and this build reads no deposit id nor any U_X:
+ * devnet has no two public operators to read it on (9 Nov 04:55Z: api.devnet.solana.com 200; PublicNode's and Pocket's
+ * devnet hosts 404; the page's other devnet RPC is our helper's relay), so it never says done before it has looked.
+ */
+export const POOL_UX_UNREAD_TESTNET = "this build reads no deposit id nor its one-time wallet on the pool's own chain (devnet has no two public operators for it), so the restore is not done";
+
 /** Why step 5 on one scope is not done (empty: every id read and every lane at its margin), each reason named. */
 export function idsUndone(r: DepositIds): string[] {
   const why: string[] = [];
@@ -156,6 +175,9 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
   const rpcs = ids.rpcs();
   const pass = await openRestorePass(POOL_DEPOSIT_NETWORK, rpcs, ids.opts ?? {});
   const reader = await nearIdReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
+  // what an id read as money holds, by asset on both providers at the same pass (opened only once one is)
+  let heldOn: Promise<(u: string) => Promise<IdHeld[]>> | null = null;
+  const heldOf = async (u: string): Promise<IdHeld[]> => (await (heldOn ??= nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {})))(u);
   let stop: unknown;
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
@@ -185,11 +207,15 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
     // each id's U_X on the pool's own chain read beside it, on both of its RPCs; any balance there is history of the id
     const chain = w.chain;
     const held = new Map<number, PoolUx>();
+    // each id NEAR reads as holding money (a refund 1Click left under U_{s,i} inside intents.near, or the token), by index
+    const nearMoney = new Map<number, string>();
+    // the id's NEAR read and its U_X read side by side, each paced by its own providers, so the U_X reads spread over
+    // the minutes the NEAR reads take and add no wall time (CO fold 04:33Z)
     const both: IdReader = async (id, i) => {
       if (i === undefined) throw new Error("no deposit index for its U_X");
-      const near = await holds(id, i);
       const u = await uxOf(seed, chain, w.scope, i, id);
-      const [a, b] = await ux.balances({ u });
+      const [near, [a, b]] = await Promise.all([holds(id, i), ux.balances({ u })]);
+      if (near === "money") nearMoney.set(i, id);
       if (a !== b) throw new Error(`its U_X reads ${String(a)} and ${String(b)} on the pool chain's two RPCs`);
       if (a === 0n) return near;
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
@@ -208,7 +234,35 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
       const named = await carryUx(ux, f, has.has(f.i), signal);
       if (named !== null) why.push(`${w.label}: deposit index ${f.i}'s one-time wallet ${f.u} ${named}`);
     }
+    // each id NEAR reads as holding money, in index order: what it holds above the base unit a move out keeps
+    // (ID_KEEP, the way out's own) is named and the scope never done, since no restore carries it yet (card
+    // restore-carries-pool-refund); only the kept unit, read alike on both providers, is a moved-out id
+    for (const [i, id] of [...nearMoney].sort((x, y) => x[0] - y[0])) {
+      signal.throwIfAborted();
+      const named = await nearHeldNamed(heldOf, id);
+      for (const y of named) why.push(`${w.label}: deposit index ${i}'s id ${id} ${y}`);
+    }
   }
+}
+
+/**
+ * Why a deposit id NEAR read as holding money keeps its scope from done (review P1 of card wallet-restore-reads-ux): each
+ * asset it holds above ID_KEEP on NEAR at the pass's block, both providers agreeing, or an asset the two read apart, or
+ * its holdings unread; empty when it holds at most the kept unit of each asset on both.
+ */
+async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: string): Promise<string[]> {
+  let assets: IdHeld[];
+  try {
+    assets = await heldOf(id);
+  } catch (e) {
+    return [`holds money on NEAR whose amount is unread (${e instanceof Error ? e.message : String(e)}): restore again to read it`];
+  }
+  const out: string[] = [];
+  for (const { asset, amounts: [a, b] } of assets) {
+    if (a !== b) out.push(`holds ${String(a)} and ${String(b)} of ${asset} on NEAR's two RPCs: read again`);
+    else if (a > ID_KEEP) out.push(`holds ${String(a)} of ${asset} on NEAR, above the ${String(ID_KEEP)} a move out keeps; a restore does not carry it yet, and it stays under the 12 words`);
+  }
+  return out;
 }
 
 /**
@@ -248,6 +302,38 @@ async function carryUx(ux: PoolUxReads, f: PoolUx, noted: boolean, signal: Abort
     if (end !== "filled" && end !== "part_filled") return `holds ${String(a)}; its carry into the pool ended ${end}: restore again to carry it`;
     before = a;
   }
+}
+
+/**
+ * The restore's U_X pair on Solana (CO fold 04:33Z, the pair CO 04:46Z): two public operators, never our helper relay,
+ * since one restore asks for every one of a user's U_X in a row and our server is not the RPC provider wallet.md §2.3
+ * step 5 lets see some ids (one per request, spread over both providers and over minutes). PublicNode and Pocket's
+ * gateway, the pair Verify reads the Solana pool on (d8657094): Solana's own api.mainnet-beta.solana.com answers any
+ * request with an Origin header 403 "Access forbidden" (read 2026-11-08 20:10Z from the app's origin, and 9 Nov 04:41Z
+ * and 04:42Z from SIGN_HOST's), so a page cannot read it. Each on its URL's own queue at the kit's keyless limit
+ * (SOLANA_KEYLESS_RPC_LIMIT, for a keyless provider that publishes none), so every page read of one operator shares one
+ * budget. Mainnet only: 1Click pays a pool deposit out there alone (POOL_DEPOSIT_NETWORK), and devnet has no keyless
+ * second operator (probes 9 Nov about 04:37Z: PublicNode 404, dRPC paid plan only, Helius and Ankr a key), so the
+ * testnet build reads no U_X, as it reads no deposit id.
+ */
+export const RESTORE_UX_SOLANA = Object.freeze(["https://solana-rpc.publicnode.com", "https://solana.api.pocket.network"] as const);
+export function restoreUxSolanaRpcs(): readonly [SolanaRpc, SolanaRpc] | null {
+  if (POOL_TESTNET) return null;
+  return [solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[0])), solanaPacedRpc(pageRpc(RESTORE_UX_SOLANA[1]))];
+}
+
+/**
+ * A pool chain's U_X reads for the restore: the follow's own reader (solanaPoolFollowDeps' balances, costs and ladder)
+ * on the restore's public pair (restoreUxSolanaRpcs), and the follow's own deposit (`follow`: the page's pool.deposit
+ * from U_{s,i}, which reads and sends on the pool kinds' pair as a live deposit does). null on a chain with no pair or
+ * no follow here (Base and Robinhood until the EVM follow and their public pairs land).
+ */
+export function restoreUxOf(chain: PoolChain, follow: PoolUxReads | null, program: string | undefined, rpcs: (() => readonly [SolanaRpc, SolanaRpc] | null) = restoreUxSolanaRpcs): PoolUxReads | null {
+  if (chain !== "solana" || follow === null || program === undefined) return null;
+  const pair = rpcs();
+  if (pair === null) return null;
+  const r = solanaPoolFollowDeps({ rpcs: pair, program, deposit: follow.deposit });
+  return { balances: r.balances, costs: r.costs, ladder: r.ladder, deposit: follow.deposit };
 }
 
 /** A pool walked: its label, chain, scope, notes, and its U_X reads on its own chain (null: none on this page). */
@@ -411,6 +497,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
             notes.close();
           }
         };
+        if (ids === null && POOL_TESTNET) for (const w of walked) why.push(`${w.label}: ${POOL_UX_UNREAD_TESTNET}`);
         if (ids !== null && walked.length > 0) await readDepositIds(seed, walked, ids, signal, why, noted).catch((e: unknown) => void why.push(`step 5 did not finish: ${e instanceof Error ? e.message : "it threw"}`));
         signal.throwIfAborted();
         return end(why.length > 0 ? "stalled" : "done");

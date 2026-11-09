@@ -1,36 +1,38 @@
 {
  "key": "wallet-restore-reads-ux",
- "recorded": "2026-11-09T04:28Z from the Mac, three runs in a row: good --local (this card build, providers asked live from SIGN_HOST's origin); bad_origin --local --origin https://evil.example; bad_live_before: live SIGN_HOST before this card's release",
+ "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts)",
  "good": {
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-uEA0ZgUpHYprqJP4L4dQrFK2bdxAVTT8mMbiIXt0C2/rh0cZr3wWIjzS/9JBiCPT",
-   "sha384": "sha384-uEA0ZgUpHYprqJP4L4dQrFK2bdxAVTT8mMbiIXt0C2/rh0cZr3wWIjzS/9JBiCPT",
+   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
    "ux_read": true,
    "ux_carry": true,
+   "id_held": true,
+   "ux_pair": true,
    "ux_wired": true
   },
   "clusters": {
-   "devnet": {
-    "held": "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
     "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
     "providers": [
      {
-      "url": "https://api.devnet.solana.com",
+      "url": "https://solana-rpc.publicnode.com",
       "held": {
        "status": 200,
-       "acao": "https://confidential.unrealized.trade",
+       "acao": "*",
        "value": 402645880
       },
       "empty": {
        "status": 200,
-       "acao": "https://confidential.unrealized.trade",
+       "acao": "*",
        "value": 0
       }
      },
      {
-      "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
+      "url": "https://solana.api.pocket.network",
       "held": {
        "status": 200,
        "acao": "https://confidential.unrealized.trade",
@@ -43,7 +45,22 @@
       }
      }
     ]
-   },
+   }
+  }
+ },
+ "bad_helper": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "local build",
+   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "ux_read": true,
+   "ux_carry": true,
+   "id_held": true,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
    "mainnet": {
     "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
     "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
@@ -78,49 +95,19 @@
    }
   }
  },
- "bad_origin": {
-  "origin": "https://evil.example",
+ "bad_refuses_page": {
+  "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-uEA0ZgUpHYprqJP4L4dQrFK2bdxAVTT8mMbiIXt0C2/rh0cZr3wWIjzS/9JBiCPT",
-   "sha384": "sha384-uEA0ZgUpHYprqJP4L4dQrFK2bdxAVTT8mMbiIXt0C2/rh0cZr3wWIjzS/9JBiCPT",
+   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
    "ux_read": true,
    "ux_carry": true,
+   "id_held": true,
+   "ux_pair": true,
    "ux_wired": true
   },
   "clusters": {
-   "devnet": {
-    "held": "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
-    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
-    "providers": [
-     {
-      "url": "https://api.devnet.solana.com",
-      "held": {
-       "status": 200,
-       "acao": "https://evil.example",
-       "value": 402645880
-      },
-      "empty": {
-       "status": 200,
-       "acao": "https://evil.example",
-       "value": 0
-      }
-     },
-     {
-      "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
-      "held": {
-       "status": 200,
-       "acao": null,
-       "value": 402645880
-      },
-      "empty": {
-       "status": 200,
-       "acao": null,
-       "value": 0
-      }
-     }
-    ]
-   },
    "mainnet": {
     "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
     "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
@@ -139,16 +126,16 @@
       }
      },
      {
-      "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+      "url": "https://api.mainnet-beta.solana.com",
       "held": {
-       "status": 200,
-       "acao": null,
-       "value": 402645880
+       "status": 403,
+       "acao": "*",
+       "value": null
       },
       "empty": {
-       "status": 200,
-       "acao": null,
-       "value": 0
+       "status": 403,
+       "acao": "*",
+       "value": null
       }
      }
     ]
@@ -163,41 +150,11 @@
    "sha384": "sha384-Dg13s3k8tUXWx53u2OYtQUnyhSMU6cwrsYL2FaJkRJtLgDSz+YY30fmhKMxJNQNE",
    "ux_read": false,
    "ux_carry": false,
+   "id_held": false,
+   "ux_pair": false,
    "ux_wired": false
   },
   "clusters": {
-   "devnet": {
-    "held": "AVGA2PJ9cQGGtvDbHupfxoMBz2fqRKZToB61egkAT3Xt",
-    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
-    "providers": [
-     {
-      "url": "https://api.devnet.solana.com",
-      "held": {
-       "status": 200,
-       "acao": "https://confidential.unrealized.trade",
-       "value": 402645880
-      },
-      "empty": {
-       "status": 200,
-       "acao": "https://confidential.unrealized.trade",
-       "value": 0
-      }
-     },
-     {
-      "url": "https://ct-api.unrealized.trade/v1/rpc/solana-devnet",
-      "held": {
-       "status": 200,
-       "acao": "https://confidential.unrealized.trade",
-       "value": 402645880
-      },
-      "empty": {
-       "status": 200,
-       "acao": "https://confidential.unrealized.trade",
-       "value": 0
-      }
-     }
-    ]
-   },
    "mainnet": {
     "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
     "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
@@ -216,7 +173,101 @@
       }
      },
      {
-      "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_dead_copy": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "the review's plant-ux.mjs on this card's build: the real reader's two-balance guard dropped and a dead same-shaped copy of the reader appended",
+   "pin": "sha384-cyN3ucBPMQPSwUWeuAqM90maAeOIs8F33QZRkzdWALDowgprKhbaIQgIKcBup/1P",
+   "sha384": "sha384-cyN3ucBPMQPSwUWeuAqM90maAeOIs8F33QZRkzdWALDowgprKhbaIQgIKcBup/1P",
+   "ux_read": false,
+   "ux_carry": false,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_reader_not_handed": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "the review's plant-ux2.mjs on this card's build: the scope's restoreDepositIds handed the NEAR-only reader (l), not the U_X reader",
+   "pin": "sha384-HBfIPQQuhLh6pahzPfrpIlnSOeVS0oG97irB4h2kqPvlIbb5T0jKY4WeOU/Wv2pB",
+   "sha384": "sha384-HBfIPQQuhLh6pahzPfrpIlnSOeVS0oG97irB4h2kqPvlIbb5T0jKY4WeOU/Wv2pB",
+   "ux_read": false,
+   "ux_carry": false,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
       "held": {
        "status": 200,
        "acao": "https://confidential.unrealized.trade",

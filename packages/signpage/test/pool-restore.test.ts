@@ -30,6 +30,7 @@ import { base58, hex } from "@scure/base";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { depositIdEvm } from "../../wallet/src/derive/keys.ts";
 import { askOf, solanaPoolFollowDeps, type PoolDepositEnd, type PoolUxReads } from "../src/pool-deposit-follow.ts";
+import { TRADE_HELPER } from "../src/trade.ts";
 
 const SOL_SCOPE = 11n;
 const EVM_SCOPE = 22n;
@@ -753,4 +754,129 @@ test("planted: the U_X reads are keyed by the pool's chain from its pin: an EVM 
   const want = new Set(read.map((i) => depositIdEvm(SEED(), EVM_SCOPE, i).address));
   assert.ok(want.size > 8 * 21);
   assert.deepEqual(new Set(ux.asked.map((a) => a.params[0])), want);
+});
+
+// ---------- CO fold 04:33Z: the restore's U_X reads on two public operators, never our helper relay ----------
+
+test("planted (fold 04:33Z): every restore U_X read, balances and costs alike, goes to the two public operators and never names our helper relay", async () => {
+  const urls: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    urls.push(String(u instanceof Request ? u.url : u));
+    const id = (JSON.parse(String(init?.body ?? "{}")) as { id?: unknown }).id ?? 1;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const follow = { ...uxOf(new Map()).reads };
+    const ux = restoreKind.restoreUxOf("solana", follow, "Prog111");
+    assert.ok(ux !== null);
+    assert.deepEqual(await ux.balances({ u: solUx(idOf(SOL_SCOPE, 0)) }), [0n, 0n]);
+    await ux.costs({ chain: "solana", s: "1", i: 0, u: solUx(idOf(SOL_SCOPE, 0)), refund_id: idOf(SOL_SCOPE, 0) }).catch(() => {});
+  } finally {
+    globalThis.fetch = real;
+  }
+  const hosts = new Set(urls.map((u) => new URL(u).origin));
+  assert.ok(urls.length >= 2);
+  assert.ok(![...hosts].some((h) => h === TRADE_HELPER), [...hosts].join(", "));
+  assert.deepEqual([...hosts].sort(), [...restoreKind.RESTORE_UX_SOLANA].sort());
+  // the deposit is the follow's own, and a chain with no follow or no pin has no U_X reads
+  const f = uxOf(new Map()).reads;
+  assert.equal(restoreKind.restoreUxOf("solana", f, "Prog111")!.deposit, f.deposit);
+  assert.equal(restoreKind.restoreUxOf("solana", null, "Prog111"), null);
+  assert.equal(restoreKind.restoreUxOf("solana", f, undefined), null);
+  assert.equal(restoreKind.restoreUxOf("base", f, "Prog111"), null);
+});
+
+test("measured (fold 04:33Z): each id's U_X read runs beside its NEAR read, so step 5 on a planted scope takes about as long with the U_X reads as without them", async () => {
+  const slow = (r: NearRpc): NearRpc => ({ name: r.name, query: async (p) => (await new Promise((x) => setTimeout(x, 2)), r.query(p)) });
+  const time = async (ux: PoolRestoreHost["ux"]) => {
+    const n = nearOf();
+    const ids = { ...n.ids, rpcs: () => n.ids.rpcs().map(slow) as unknown as readonly [NearRpc, NearRpc] };
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids, ...(ux ? { ux } : {}) });
+    const t0 = performance.now();
+    await w.r.auto();
+    return performance.now() - t0;
+  };
+  // the U_X pair answers 4 ms after it is asked, each provider on its own
+  const u = uxOf(new Map());
+  const paced: PoolUxReads = { ...u.reads, balances: async (f) => (await new Promise((x) => setTimeout(x, 4)), u.reads.balances(f)) };
+  const without = await time(undefined);
+  const withUx = await time(() => paced);
+  const sequential = without + 176 * 4;
+  console.log(`step 5 on a planted scope (176 ids): ${Math.round(without)} ms without U_X reads, ${Math.round(withUx)} ms with them beside the NEAR reads (one after the other: about ${Math.round(sequential)} ms)`);
+  assert.ok(withUx < without * 1.3 + 100, `${withUx} vs ${without}`);
+});
+
+// ---------- review P1 of 4cdfd37d: money NEAR reads under a deposit id U_{s,i} keeps the scope from done ----------
+/** The replayed pair with U's token balance planted per provider (ft_balance_of answered at the pass's block): `plant`
+ *  maps an id to [FastNEAR's, dRPC's] amounts; the id answers as "money_usdc" otherwise (registered on the token). */
+function nearPlanted(plant: ReadonlyMap<string, readonly [bigint, bigint]>, as: Map<string, As> = new Map()) {
+  for (const id of plant.keys()) if (!as.has(id)) as.set(id, "money_usdc");
+  const n = nearOf(as);
+  const rpcs = n.ids.rpcs;
+  const wrap = (rpc: NearRpc, k: 0 | 1): NearRpc => ({
+    name: rpc.name,
+    query: async (params) => {
+      const u = argsOf(params).account_id as string;
+      const at = (x: unknown) => ({ jsonrpc: "2.0", id: "dontcare", result: { result: [...new TextEncoder().encode(JSON.stringify(x))], logs: [], block_height: REC.pass.h, block_hash: REC.pass.hash } });
+      if (!plant.has(u)) return rpc.query(params);
+      // nothing of it inside intents.near: what the money_usdc id's record never needed read
+      if (params.method_name === "mt_tokens_for_owner") return at([]);
+      if (params.method_name === "ft_balance_of") return at(plant.get(u)![k].toString());
+      return rpc.query(params);
+    },
+  });
+  n.ids.rpcs = () => {
+    const [a, b] = rpcs();
+    return [wrap(a, 0), wrap(b, 1)];
+  };
+  return n;
+}
+const KEEP = (await import("../../wallet/src/deposit/moveout.ts")).ID_KEEP;
+
+test("review P1: a refund left under U_{s,i} inside intents.near, every U_X empty, ends stalled with that money named by asset, never done", async () => {
+  const id = idOf(SOL_SCOPE, 3);
+  const n = nearOf(new Map<string, As>([[id, "intents"]]));
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes[3]!.money, [3]);
+  const why = w.ends[0]!.why;
+  assert.ok(why.length > 0 && why.every((y) => y.startsWith(`solana: deposit index 3's id ${id} holds `) && y.includes(" on NEAR, above the 1 a move out keeps")), JSON.stringify(why));
+});
+
+test("review P1: an id holding only the kept unit a move out leaves (ID_KEEP, on both providers) is a moved-out id: done", async () => {
+  assert.equal(KEEP, 1n);
+  const id = idOf(SOL_SCOPE, 2);
+  const n = nearPlanted(new Map([[id, [KEEP, KEEP] as const]]));
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "done", JSON.stringify(w.ends));
+  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes[2]!.money, [2]);
+});
+
+test("review P1: the kept unit plus 1 ends stalled with the amount named", async () => {
+  const id = idOf(SOL_SCOPE, 2);
+  const n = nearPlanted(new Map([[id, [KEEP + 1n, KEEP + 1n] as const]]));
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "stalled");
+  const usdc = NEAR_NETWORKS.mainnet.usdc;
+  assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 2's id ${id} holds ${KEEP + 1n} of ${usdc} on NEAR, above the 1 a move out keeps; a restore does not carry it yet, and it stays under the 12 words`]);
+});
+
+test("review P1: two NEAR RPCs that read an id's holding apart stall it, whichever reads the kept unit", async () => {
+  const id = idOf(SOL_SCOPE, 2);
+  const usdc = NEAR_NETWORKS.mainnet.usdc;
+  for (const pair of [[KEEP, 5n], [5n, KEEP]] as const) {
+    const n = nearPlanted(new Map([[id, pair]]));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await w.r.auto(), "stalled", String(pair));
+    assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 2's id ${id} holds ${pair[0]} and ${pair[1]} of ${usdc} on NEAR's two RPCs: read again`]);
+  }
+});
+
+test("review: a U_X holding exactly the floor is carried, one rung, and the restore ends done", async () => {
+  const id = idOf(SOL_SCOPE, 0);
+  const ux = uxOf(new Map([[solUx(id), "held"]]), { costs: { floor: HELD, perRung: HELD - 10_000_000n - 890_880n, keep: 890_880n } });
+  const w = await world({ pools: () => SOL_ONLY, ids: nearOf().ids, ux: () => ux.reads });
+  assert.equal(await w.r.auto(), "done", JSON.stringify(w.ends));
+  assert.deepEqual(ux.deposits.map((d) => [d.i, d.amount]), [[0, 10_000_000n]]);
 });

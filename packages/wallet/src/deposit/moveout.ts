@@ -97,6 +97,9 @@ export class MoveOutRefused extends Error {
 
 /** nearcore's transaction_validity_period on mainnet and testnet: a block hash older than this many heights is refused. */
 export const TX_VALIDITY_BLOCKS = 86_400n;
+/** What an id's move out leaves of each asset it holds: one base unit, so restore still finds the id by its balance
+ *  (W:929; vault paper 2.12 step 5, l.988-990). The restore's pool scopes read an id holding no more as moved out. */
+export const ID_KEEP = 1n;
 const TGAS = 1_000_000_000_000n;
 /** ft_transfer's and storage_deposit's gas (the kit's), and the transaction's own send cost on top. */
 export const MOVE_GAS = { ft_transfer: BigInt(VAULT_CONSTANTS.GAS_FT_TRANSFER_TGAS) * TGAS, storage_deposit: BigInt(VAULT_CONSTANTS.GAS_STORAGE_DEPOSIT_TGAS) * TGAS, send: 5n * TGAS };
@@ -344,7 +347,7 @@ export function checkMoveCalls(u: string, to: string, token: string, given: read
   if (calls.length < 1 || calls.length > 2 || !last || last.method !== "ft_transfer" || last.deposit !== 1n || last.gas !== MOVE_GAS.ft_transfer) throw new MoveOutRefused("one ft_transfer with 1 yocto, last");
   if (Object.keys(last.args).join() !== "receiver_id,amount" || last.args.receiver_id !== to) throw new MoveOutRefused("ft_transfer names the typed account and an amount, no memo");
   const amount = typeof last.args.amount === "string" ? big(last.args.amount) : null; // a string, as NEP-141 reads it: never a JSON number
-  if (amount === null || amount < 1n || amount > usdc - 1n) throw new MoveOutRefused("the amount is above U's USDC less one base unit");
+  if (amount === null || amount < 1n || amount > usdc - ID_KEEP) throw new MoveOutRefused("the amount is above U's USDC less one base unit");
   if (calls.length === 2) {
     const r = calls[0]!;
     if (r.method !== "storage_deposit" || r.args.account_id !== to || r.args.registration_only !== true || Object.keys(r.args).length !== 2 || r.deposit !== storageMin || r.gas !== MOVE_GAS.storage_deposit)
@@ -817,7 +820,7 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
     if (read === null || read.nonce >= U64_MAX) return { outcome: { kind: "unread" } };
     if (read.usdc <= 1n) return { outcome: { kind: "empty" } };
     const storageMin = read.registered ? 0n : await readTokenStorageMin(network, rpcs);
-    const calls = moveCalls(typed, read.usdc - 1n, !read.registered, storageMin);
+    const calls = moveCalls(typed, read.usdc - ID_KEEP, !read.registered, storageMin);
     const move = checkMoveCalls(U, typed, token, calls, read.usdc, storageMin);
     const gas = move.calls.reduce((a, c) => a + c.gas, MOVE_GAS.send);
     const need = gas * read.gasPrice * GAS_PRICE_MARGIN + move.calls.reduce((a, c) => a + c.deposit, 0n);
@@ -839,7 +842,7 @@ async function moveOut(opId: string, to: string | null, deps: MoveOutDeps, again
         seed.fill(0);
       }
     });
-    const record: MoveOutRecord = { to: typed, amount: (read.usdc - 1n).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed, ...(op.follow.why === "moved_out" ? { later: true as const } : {}) };
+    const record: MoveOutRecord = { to: typed, amount: (read.usdc - ID_KEEP).toString(), nonce: nonce.toString(), height: read.height, register: !read.registered, hash: tx.hash, signed: tx.signed, ...(op.follow.why === "moved_out" ? { later: true as const } : {}) };
     // written before it is sent; of two writers only the first sends, the other follows it
     await ops.update("ops", opId, (v) => {
       const o = v as DepositOp | undefined;

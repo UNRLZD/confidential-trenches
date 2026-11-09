@@ -978,3 +978,25 @@ test("a kept list read that always fails: the same state read still settles a de
     k.w.close();
   }
 });
+
+test("card wallet-restore-reads-ux review P3: the testnet build's restore reads no deposit id nor any U_X, so a walked pool ends it stalled by name, never done", async () => {
+  const { poolRestore, POOL_UX_UNREAD_TESTNET, pageIdReads, restoreUxSolanaRpcs } = await import("../src/pool-restore.ts");
+  assert.equal(pageIdReads(), null);
+  assert.equal(restoreUxSolanaRpcs(), null);
+  const ends: { stage: string; why: readonly string[] }[] = [];
+  const store = await openWalletStore({ name: "restore-testnet", indexedDB: new IDBFactory() });
+  const r = poolRestore({
+    store: async () => store,
+    seed64: async () => new Uint8Array(64).fill(7),
+    signedIn: async () => true,
+    pools: () => [{ chain: "solana", program: SOL_POOLS.devnet!.program, scope: 1n, rpcs: () => [null as never, null as never] }],
+    solana: (async () => ({ notes: [], spends: [] })) as never,
+    ended: (stage, why) => void ends.push({ stage, why }),
+  });
+  try {
+    assert.equal(await r.auto(), "stalled");
+    assert.deepEqual(ends, [{ stage: "stalled", why: [`solana: ${POOL_UX_UNREAD_TESTNET}`] }]);
+  } finally {
+    store.close();
+  }
+});

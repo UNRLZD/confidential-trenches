@@ -346,6 +346,46 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
   });
 }
 
+/** One asset an id holds: the network's token on its own (`token`, ft_balance_of) or a token inside intents.near (its
+ *  token id), with each provider's amount at the pass's block, in the pair's order (0 where one lists none). */
+export type IdHeld = { readonly asset: string; readonly amounts: readonly [bigint, bigint] };
+
+/**
+ * What a deposit id holds, by asset, on both providers at the pass's block (card wallet-restore-reads-ux, review P1):
+ * the network's token (ft_balance_of, read only when U is registered on it, NEP-145) and each token intents.near lists
+ * for it (mt_tokens_for_owner, then mt_batch_balance_of). Both providers must answer, and each one's amount is given:
+ * the caller holds the two to agree, so one provider's word never decides what an id holds. Assets at 0 on both are left out.
+ */
+export function nearIdHeldReader(network: NearNetwork, rpcs: readonly [NearRpc, NearRpc], pass: RestorePass, opts: Omit<IdReaderOpts, "indexer" | "first"> = {}): Promise<(u: string) => Promise<IdHeld[]>> {
+  const { token, retried, blockOf } = setup(network, rpcs, opts);
+  const at = pinOf(pass, network, rpcs);
+  const readOn = async (rpc: NearRpc, u: string): Promise<Map<string, bigint>> => {
+    const out = new Map<string, bigint>();
+    const storage = (await retried(rpc, call(token, "storage_balance_of", { account_id: u }), "storage_balance_of", at)).v;
+    if (storage !== null && !(isObj(storage) && typeof storage.total === "string" && DIGITS.test(storage.total))) throw new Error(`${rpc.name}: storage_balance_of: neither null nor a balance`);
+    if (storage !== null) out.set(token, amount((await retried(rpc, call(token, "ft_balance_of", { account_id: u }), "ft_balance_of", at)).v, `${rpc.name}: ft_balance_of`));
+    for (const [id, v] of await intentsHeld(retried, rpc, u, at)) out.set(id, (out.get(id) ?? 0n) + v);
+    return out;
+  };
+  return fresh(pass, rpcs, blockOf).then(() => async (u: string): Promise<IdHeld[]> => {
+    if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
+    const [a, b] = await Promise.all([readOn(rpcs[0], u), readOn(rpcs[1], u)]);
+    const assets = [...new Set([...a.keys(), ...b.keys()])].sort();
+    return assets.map((asset) => ({ asset, amounts: [a.get(asset) ?? 0n, b.get(asset) ?? 0n] as const })).filter((x) => x.amounts[0] !== 0n || x.amounts[1] !== 0n);
+  });
+}
+
+/** What intents.near holds for an account at the pass's block, by token id (none when none is listed). */
+async function intentsHeld(retried: Retried, rpc: NearRpc, a: string, at: Block): Promise<[string, bigint][]> {
+  const listed = (await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: a }), "mt_tokens_for_owner", at)).v;
+  if (!Array.isArray(listed) || !listed.every((t) => isObj(t) && typeof t.token_id === "string" && t.token_id !== "")) throw new Error(`${rpc.name}: mt_tokens_for_owner: not a token list`);
+  if (listed.length === 0) return [];
+  const ids = listed.map((t) => (t as { token_id: string }).token_id);
+  const held = (await retried(rpc, call(INTENTS, "mt_batch_balance_of", { account_id: a, token_ids: ids }), "mt_batch_balance_of", at)).v;
+  if (!Array.isArray(held) || held.length !== ids.length) throw new Error(`${rpc.name}: mt_batch_balance_of: not one balance per token`);
+  return ids.map((id, k) => [id, amount(held[k], `${rpc.name}: mt_batch_balance_of`)]);
+}
+
 /** What intents.near holds for an account at the pass's block: the sum of its listed tokens (0 when none is listed). */
 async function intentsSum(retried: Retried, rpc: NearRpc, a: string, at: Block): Promise<bigint> {
   const listed = (await retried(rpc, call(INTENTS, "mt_tokens_for_owner", { account_id: a }), "mt_tokens_for_owner", at)).v;

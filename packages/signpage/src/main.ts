@@ -93,7 +93,7 @@ import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { poolKinds } from "./pool-kinds.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
-import { poolRestore } from "./pool-restore.ts";
+import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
 
 type State =
@@ -151,13 +151,11 @@ const restore = !framed
         return s !== undefined;
       },
       written: () => void testnet?.proofs().catch(() => {}),
-      // a pool's U_X reads and carry on its chain: the follow's own (poolFollowDeps below: its balances, costs, ladder
-      // and deposit, card wallet-restore-reads-ux), so a restore and a live pool deposit read U_X and carry it the same
-      // way; null on a chain the follow has no reads for (the restore then names U_X unread there)
-      ux: (chain) => {
-        const d = poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY);
-        return d === null ? null : { balances: d.balances, costs: d.costs, ladder: d.ladder, deposit: d.deposit };
-      },
+      // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
+      // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
+      // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain
+      // the follow has no reads for (the restore then names U_X unread there)
+      ux: (chain) => restoreUxOf(chain, poolFollowDeps({ chain, s: "", i: 0, u: "", refund_id: "", address: "", deadline_ms: 0, origin: "", min_out: "" }, UX_ONLY), PAGE_SOL_PIN?.program),
       // each reason a run ends stalled, on this device's console only: lanes, indices, providers, scopes and the user's own
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words
