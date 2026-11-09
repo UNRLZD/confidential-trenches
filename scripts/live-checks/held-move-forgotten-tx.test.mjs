@@ -25,6 +25,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ARCHIVAL, HOSTS, judge, localFetch, MARK, MARKERS, OLD_TX, probe, SIGN_ORIGIN } from "./held-move-forgotten-tx.mjs";
+import { COPY_CHANGE, dropRule, plantedFetch, replaceOnce } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "held-move-forgotten-tx.answers.json"), "utf8"));
@@ -172,11 +173,26 @@ test("the good record with another script's integrity, one marker gone, one arch
   });
 });
 
-test("the committed build in this tree passes as the recorded good answer did (both archival hosts' answers replayed)", async () => {
-  const rec = await probe(SIGN_ORIGIN, localFetch, archivalOk);
+// card held-move-replay-any-build: the tree's build is read with the check's own reader (probe over localFetch) and
+// judged with the live rule; of the recorded good answer only the archival hosts' reads are kept, so any build of this
+// tree that keeps the rule passes with no re-record, and one that drops a rule fails
+const treeRecord = async (fetchFn = localFetch) => ({ ...(await probe(SIGN_ORIGIN, fetchFn, archivalOk)), archival: answers.good.archival });
+
+test("the committed build in this tree passes the live rule, with the recorded archival hosts' reads", async () => {
+  const rec = await treeRecord();
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
-  assert.equal(rec.connect_src, answers.good.connect_src, "the CSP as recorded");
-  assert.equal(rec.app.sha384, answers.good.app.sha384, "the bundle as recorded");
+  assert.equal(judge(await probe(SIGN_ORIGIN, localFetch, archivalOk)).pass, true, "and with the archival hosts' answers replayed");
+});
+
+test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
+  const copy = await treeRecord(plantedFetch(localFetch, (js) => replaceOnce(js, COPY_CHANGE.from, COPY_CHANGE.to)));
+  assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
+  assert.notEqual(copy.app.sha384, (await treeRecord()).app.sha384, "another bundle than the tree's");
+  for (const m of MARKERS) {
+    const rec = await treeRecord(plantedFetch(localFetch, (js) => dropRule(js, MARK[m])));
+    assert.equal(rec.app.markers[m], 0, m);
+    assert.deepEqual(BAD(rec), [MARKS], m);
+  }
 });
 
 test("a 429 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks a 429 is the answer", async () => {
