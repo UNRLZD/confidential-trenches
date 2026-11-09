@@ -484,7 +484,7 @@ test("review 3 of exit-ids-out: a storage minimum at or past 2^128 is refused by
  * secretKey or sk is pinned here. A new copy site fails this test until it is reviewed and the pin is changed with it.
  */
 const SECRET_LINES = [
-  "function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {",
+  "function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove<AnyCall>): { hash: string; signed: string } {",
   "const signature = ed25519.sign(digest, secretKey);",
   "secretKey: Uint8Array;",
   "const id = k.id, pk = k.publicKey, sk = k.secretKey;",
@@ -502,6 +502,11 @@ const SECRET_LINES = [
   "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
   "key.secretKey.fill(0);",
   "k.secretKey.fill(0);",
+  // card exit-withdraw: buildVaultWithdrawOut and buildDeleteOut, each signing its sealed move and zeroing its copy
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
+  "const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);",
+  "key.secretKey.fill(0);",
 ];
 test("moveout.ts touches a secret key only in the pinned expressions (review 4, L1)", () => {
   const src = readFileSync(new URL("../src/deposit/moveout.ts", import.meta.url), "utf8");

@@ -40,9 +40,25 @@
 // - U's key: depositId(seed, s, i), the derivation the refund move opens (follow.ts openKey), under deps.seedLock, checked
 //   to be U and zeroed at once. Nothing here logs. Each read names U, the token or the typed account; the send carries
 //   the signed bytes alone.
-import { HELPER_RPC_METHODS, VAULT_CONSTANTS, VAULT_FIELD_P, VAULT_SETTLE_GAS, VAULT_SETTLE_REFUND_ATTACH, VAULT_TOKEN_CODE_HASH } from "@blindfill/kit";
+import {
+  HELPER_RPC_METHODS,
+  VAULT_CONSTANTS,
+  VAULT_FIELD_P,
+  VAULT_FIELD_Q,
+  VAULT_SETTLE_GAS,
+  VAULT_SETTLE_REFUND_ATTACH,
+  VAULT_TOKEN_CODE_HASH,
+  VAULT_WITHDRAW,
+  vaultContextInput,
+  vaultContextOf,
+  vaultScopeOf,
+  vaultWithdrawalProblems,
+  vaultWithdrawYocto,
+  type VaultWithdrawal,
+} from "@blindfill/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58, base64 } from "@scure/base";
 import { readTokenStorageMin } from "../arming/accounts.ts";
 import { depositId } from "../derive/keys.ts";
@@ -383,7 +399,10 @@ function plainCalls<C extends MoveCall | WithdrawCall>(given: readonly C[]): C[]
 
 /** A move a check passed (card signers-own-bytes): U, the receiver and the calls, deep-frozen, the only thing signMoveTx
  *  signs. Only a check of this module makes one (seal, module private); a copy, a look-alike or a changed one is not. */
-export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly (MoveCall | WithdrawCall | SettleCall)[] };
+/** The function calls a check seals (tag 2), and every sealed action: those and A's DeleteAccount (tag 7, card exit-withdraw). */
+type FnCall = MoveCall | WithdrawCall | SettleCall | VaultWithdrawCall;
+type AnyCall = FnCall | DeleteCall;
+export type SealedMove<C extends AnyCall = FnCall> = { readonly signer: string; readonly receiver: string; readonly calls: readonly C[] };
 const SEALED = new WeakSet<object>();
 const frozen = <T>(v: T): T => {
   if (typeof v === "object" && v !== null) {
@@ -392,7 +411,7 @@ const frozen = <T>(v: T): T => {
   }
   return v;
 };
-function seal(move: SealedMove): SealedMove {
+function seal<C extends AnyCall>(move: SealedMove<C>): SealedMove<C> {
   const v = frozen({ signer: move.signer, receiver: move.receiver, calls: move.calls });
   SEALED.add(v);
   return v;
@@ -400,7 +419,7 @@ function seal(move: SealedMove): SealedMove {
 
 /** The transaction's bytes, its hash and the signed bytes, U's key given. Module private (card signers-own-bytes): it signs
  *  only a move a check of this module sealed, as that move holds it (U, the receiver, the calls), with U's own key. */
-function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove): { hash: string; signed: string } {
+function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint, blockHash: string, move: SealedMove<AnyCall>): { hash: string; signed: string } {
   if (!SEALED.has(move)) throw new MoveOutRefused("the move is not one a check of this module passed");
   const { signer: u, receiver: token, calls } = move;
   // the block hash is exactly 32 bytes: one of another length moves every field after it in the bytes nearcore reads
@@ -408,7 +427,14 @@ function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint,
   if (blockHash32 === null) throw new MoveOutRefused("the block hash is not 32 bytes of base58");
   if (Array.from(publicKey, (b) => b.toString(16).padStart(2, "0")).join("") !== u) throw new MoveOutRefused("the key is not the move's U");
   const tx = new Borsh().string(u).u8(0).fixed(publicKey).u64(nonce).string(token).fixed(blockHash32).u32(calls.length);
-  for (const c of calls) tx.u8(2).string(c.method).bytes(new TextEncoder().encode(JSON.stringify(c.args))).u64(c.gas).u128(c.deposit);
+  for (const c of calls) {
+    // DeleteAccount (tag 7) only as checkDeleteCalls seals it: the one action, on the signer's own account (card
+    // exit-withdraw); no function-call check seals a call of that name, so every other sealed call is a FunctionCall (tag 2)
+    if (c.method === "DeleteAccount") {
+      if (calls.length !== 1 || token !== u) throw new MoveOutRefused("a DeleteAccount is the one action, on the signer's own account");
+      tx.u8(7).string(c.beneficiary_id);
+    } else tx.u8(2).string(c.method).bytes(new TextEncoder().encode(JSON.stringify(c.args))).u64(c.gas).u128(c.deposit);
+  }
   const bytes = tx.done();
   const digest = sha256(bytes);
   const signature = ed25519.sign(digest, secretKey);
@@ -429,9 +455,9 @@ export interface OwnKey {
   secretKey: Uint8Array;
 }
 /** What the move signs: its calls, the signed bytes and their hash, the nonce, and the amount the typed account gets. */
-export interface BuiltMove {
+export interface BuiltMove<C extends AnyCall = FnCall> {
   receiver: string;
-  calls: readonly (MoveCall | WithdrawCall | SettleCall)[];
+  calls: readonly C[];
   amount: bigint;
   nonce: bigint;
   hash: string;
@@ -737,6 +763,145 @@ export function buildSettleOut(x: { read: SettleReadFor; key: OwnKey; vault: str
     if (typeof nullifierHash !== "bigint") throw new MoveOutRefused("the nullifier hash is a bigint");
     const calls: SettleCall[] = [{ method: "settle", args: { nullifier_hash: nullifierHash.toString() }, gas: VAULT_SETTLE_GAS, deposit: status === "refund_pending" ? VAULT_SETTLE_REFUND_ATTACH : 0n }];
     const move = checkSettleCalls(key.id, vault, calls, status);
+    const nonce = r.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);
+    return { receiver: move.receiver, calls: move.calls, amount: 0n, nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+// ---------- the exit tool's withdrawal and A's close (card exit-withdraw; vault paper 2.12 step 6, SB-04's WM-10 vault leg) ----------
+// With no relayer, the note's own arming account A_{l,j} sends the vault's withdraw itself: fee 0, its recipient and fee
+// recipient the account the user typed, A paying its own gas and the vault's attachment. Then A is closed by its own
+// DeleteAccount to the typed account, only once its spend reads settled with reserve 0 (settle sends the reserve to the
+// payer, A, so a DeleteAccount before it would see A made again by that Transfer, V:951-955), A's USDC reads held at 0
+// (a halted read is not a zero) and nothing is under A inside intents.near. Both go through the one sealed signer above.
+/** The vault's withdraw(withdrawal, proof, public_signals): VAULT_WITHDRAW's 300 Tgas and vaultWithdrawYocto's attachment for fee 0, a tree that may grow counted (settle returns the rest). */
+export type VaultWithdrawCall = { method: "withdraw"; args: Obj; gas: bigint; deposit: bigint };
+/** A's DeleteAccount, its NEAR to the beneficiary (nearcore's action tag 7). */
+export type DeleteCall = { method: "DeleteAccount"; beneficiary_id: string };
+const WITHDRAW_KEYS = "deadline_ms,fee_recipient,recipient,refund_precommitment,register_deposit,relay_fee,salt";
+/** A canonical decimal string below `limit`, or null. */
+const decBelow = (x: unknown, limit: bigint): bigint | null => (typeof x === "string" && DIGITS.test(x) && BigInt(x) < limit ? BigInt(x) : null);
+const pair = (x: unknown): boolean => Array.isArray(x) && x.length === 2 && x.every((v) => decBelow(v, VAULT_FIELD_Q) !== null);
+/**
+ * The withdraw payload rule for a withdrawal A sends itself: exactly one withdraw on a release's vault, its arguments
+ * exactly withdrawal, proof and public_signals; the withdrawal's seven fields with relay_fee "0" and recipient and
+ * fee_recipient both the typed account (checkTypedAccount for the vault's token: never A, the token, a vault or
+ * intents.near), every field as the vault parses it (vaultWithdrawalProblems); the proof's points canonical below q; the
+ * 8 public signals canonical below p, withdrawn above 0, and the context the one the vault recomputes for this request;
+ * the kit's gas and attachment.
+ */
+export function checkVaultWithdrawCalls(a: string, vault: string, to: string, given: readonly VaultWithdrawCall[]): SealedMove {
+  if (typeof a !== "string" || typeof vault !== "string" || !IMPLICIT.test(a)) throw new MoveOutRefused("the withdrawal's signer is a 64-hex implicit account and the vault a string");
+  const net = Object.values(NEAR_NETWORKS).find((n) => n.vault === vault);
+  if (net === undefined || net.vault === null) throw new MoveOutRefused("the vault is no release's vault");
+  checkTypedAccount(a, to, net.usdc);
+  let calls: VaultWithdrawCall[];
+  try {
+    calls = structuredClone([...given]);
+  } catch {
+    throw new MoveOutRefused("the calls are not plain data");
+  }
+  const c = calls[0];
+  if (calls.length !== 1 || !isObj(c) || Object.keys(c).sort().join() !== "args,deposit,gas,method" || c.method !== "withdraw" || !isObj(c.args)) throw new MoveOutRefused("one withdraw call, method, args, gas and deposit");
+  if (Object.keys(c.args).sort().join() !== "proof,public_signals,withdrawal") throw new MoveOutRefused("withdraw names the withdrawal, the proof and the public signals alone");
+  const { withdrawal: w, proof: p, public_signals: sig } = c.args;
+  if (!isObj(w) || Object.keys(w).sort().join() !== WITHDRAW_KEYS) throw new MoveOutRefused("the withdrawal is exactly its seven fields");
+  if (w.recipient !== to || w.fee_recipient !== to) throw new MoveOutRefused("the recipient and the fee recipient are the typed account");
+  if (w.relay_fee !== "0") throw new MoveOutRefused("the fee is 0: A sends the withdrawal itself");
+  const reg = decBelow(w.register_deposit, U128_LIMIT);
+  if (reg === null) throw new MoveOutRefused("register_deposit is not a canonical decimal below 2^128");
+  if (!isObj(p) || Object.keys(p).sort().join() !== "a,b,c" || !pair(p.a) || !pair(p.c) || !Array.isArray(p.b) || p.b.length !== 2 || !p.b.every(pair)) throw new MoveOutRefused("the proof is three points, every coordinate a canonical decimal below q");
+  if (!Array.isArray(sig) || sig.length !== 8 || !sig.every((s) => decBelow(s, VAULT_FIELD_P) !== null)) throw new MoveOutRefused("8 public signals, each a canonical decimal below p");
+  const withdrawn = BigInt(sig[2] as string);
+  const problems = vaultWithdrawalProblems(w as VaultWithdrawal, withdrawn, vault, 0);
+  if (problems.length > 0) throw new MoveOutRefused(`the withdrawal: ${problems.join("; ")}`);
+  const context = vaultContextOf(keccak_256, vaultContextInput(vault, w as VaultWithdrawal), vaultScopeOf(keccak_256, vault, net.usdc));
+  if (sig[7] !== context.toString()) throw new MoveOutRefused("the proof's context is not this request's");
+  if (c.gas !== BigInt(VAULT_WITHDRAW.gas_tgas) * TGAS || c.deposit !== vaultWithdrawYocto(reg, 0n, true)) throw new MoveOutRefused("withdraw's gas and attachment are the kit's");
+  return seal({ signer: a, receiver: vault, calls });
+}
+/**
+ * withdraw(withdrawal, proof, public_signals) on `vault`, sent by the note's own arming account A (key: A's own, as
+ * armAccount derives it) at A's nonce + 1 on the read's block (readSettle's read of A), with fee 0 to the typed account
+ * `to`. The call is checked and sealed by checkVaultWithdrawCalls before the private signer runs; the key's copy is
+ * zeroed whichever way. `amount` is the withdrawn value the typed account receives.
+ */
+export function buildVaultWithdrawOut(x: { read: SettleReadFor; key: OwnKey; vault: string; to: string; withdrawal: VaultWithdrawal; proof: Obj; publicSignals: readonly string[] }): BuiltMove {
+  const { vault, to, withdrawal, proof, publicSignals } = x;
+  namesOk(to, vault);
+  const key = ownKeyCopy(x.key);
+  try {
+    const r = { ...x.read };
+    if (r.a !== key.id || typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash32(r.blockHash) === null) throw new MoveOutRefused("the read is not A's, or its nonce or block hash is not one");
+    const reg = isObj(withdrawal) ? decBelow(withdrawal.register_deposit, U128_LIMIT) : null;
+    if (reg === null) throw new MoveOutRefused("register_deposit is not a canonical decimal below 2^128");
+    const calls: VaultWithdrawCall[] = [{ method: "withdraw", args: { withdrawal, proof, public_signals: publicSignals }, gas: BigInt(VAULT_WITHDRAW.gas_tgas) * TGAS, deposit: vaultWithdrawYocto(reg, 0n, true) }];
+    const move = checkVaultWithdrawCalls(key.id, vault, to, calls);
+    const nonce = r.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);
+    const signals = (move.calls[0] as VaultWithdrawCall).args.public_signals as string[];
+    return { receiver: move.receiver, calls: move.calls, amount: BigInt(signals[2]!), nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+/** The DeleteAccount payload rule: exactly one DeleteAccount on A itself, its beneficiary the typed account (checkTypedAccount for the token). */
+export function checkDeleteCalls(a: string, to: string, token: string, given: readonly DeleteCall[]): SealedMove<DeleteCall> {
+  if (typeof a !== "string") throw new MoveOutRefused("A, the typed account and the token are strings");
+  checkTypedAccount(a, to, token);
+  let calls: DeleteCall[];
+  try {
+    calls = structuredClone([...given]);
+  } catch {
+    throw new MoveOutRefused("the calls are not plain data");
+  }
+  const c = calls[0];
+  if (calls.length !== 1 || !isObj(c) || Object.keys(c).sort().join() !== "beneficiary_id,method" || c.method !== "DeleteAccount" || typeof c.beneficiary_id !== "string" || c.beneficiary_id !== to)
+    throw new MoveOutRefused("one DeleteAccount, its beneficiary the typed account");
+  return seal({ signer: a, receiver: a, calls });
+}
+/**
+ * What A's close needs read, each fact at one block on both RPCs, equal (the exit tool's reads): A's key nonce and the
+ * block; the spend's row in the vault's spends; A's USDC on the token (halted when the view fails with the halt
+ * message, never a zero); what A holds inside intents.near, null only where there is none (testnet).
+ */
+export type DeleteReadFor = {
+  a: string;
+  to: string;
+  token: string;
+  height: number;
+  blockHash: string;
+  nonce: bigint;
+  spend: { nullifierHash: bigint; status: "in_flight" | "paid" | "refund_pending" | "settled"; reserve: bigint };
+  usdc: { state: "held"; amount: bigint } | { state: "halted" };
+  intents: bigint | null;
+};
+/**
+ * A's DeleteAccount, its NEAR to the typed account `to`, signed by A at the read's nonce + 1. Refused unless the read
+ * is A's for this typed account and token, its spend row is the spend of `nullifierHash` and reads settled with reserve
+ * 0, A's USDC reads held at 0, and A holds nothing inside intents.near (read at 0; unread only on a network with none).
+ */
+export function buildDeleteOut(x: { read: DeleteReadFor; key: OwnKey; to: string; token: string; nullifierHash: bigint }): BuiltMove<DeleteCall> {
+  const { to, token, nullifierHash } = x;
+  namesOk(to, token);
+  const key = ownKeyCopy(x.key);
+  try {
+    const r = { ...x.read };
+    if (r.a !== key.id || r.to !== to || r.token !== token) throw new MoveOutRefused("the read is not of A, this typed account and this token");
+    if (typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash32(r.blockHash) === null) throw new MoveOutRefused("the read's nonce or block hash is not one");
+    const spend = isObj(r.spend) ? { ...r.spend } : null;
+    if (spend === null || typeof nullifierHash !== "bigint" || spend.nullifierHash !== nullifierHash) throw new MoveOutRefused("the spend read is not this withdrawal's");
+    if (spend.status !== "settled" || spend.reserve !== 0n) throw new MoveOutRefused("A closes only after its spend reads settled with reserve 0: settle pays the reserve to A");
+    const usdc = isObj(r.usdc) ? { ...r.usdc } : null;
+    if (usdc === null || usdc.state !== "held" || usdc.amount !== 0n) throw new MoveOutRefused("A's USDC is not read at zero (a halted read is not a zero)");
+    const net = Object.entries(NEAR_NETWORKS).find(([, n]) => n.usdc === token)?.[0];
+    const intentsOk = r.intents === 0n || (r.intents === null && net === "testnet");
+    if (!intentsOk) throw new MoveOutRefused("what A holds inside intents.near is not read at zero");
+    const move = checkDeleteCalls(key.id, to, token, [{ method: "DeleteAccount", beneficiary_id: to }]);
     const nonce = r.nonce + 1n;
     const tx = signMoveTx(key.publicKey, key.secretKey, nonce, r.blockHash, move);
     return { receiver: move.receiver, calls: move.calls, amount: 0n, nonce, ...tx };

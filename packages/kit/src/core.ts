@@ -21,7 +21,7 @@ export {
 export { noteSecrets, noteCommitment, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 export { refKey } from "../../wallet/src/notes/store.ts";
 export { typedSeed } from "../../wallet/src/signin/words.ts";
-export { armAccount, depositId, entropyToWords, refundId, returnId, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
+export { armAccount, changeIndex, depositId, entropyToWords, refundId, returnId, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 // card exit-ids-out: the moves out of a one-time id or an arming account, each built and checked by the wallet's own
 // payload rule before its private signer runs, and the reads they are built from (vault paper 2.12 step 5); and the
 // settle of a spend of ours, signed by its own arming account (step 4)
@@ -43,6 +43,11 @@ export {
   type RegisterOutReadFor,
   type SettleReadFor,
   type WithdrawOutReadFor,
+  // card exit-withdraw: the withdrawal A sends itself (fee 0, to the typed account) and A's DeleteAccount to the typed
+  // account once its spend reads settled with reserve 0 (vault paper 2.12 step 6), both through the same sealed signer
+  buildVaultWithdrawOut,
+  buildDeleteOut,
+  type DeleteReadFor,
 } from "../../wallet/src/deposit/moveout.ts";
 // the token's storage minimum on both RPCs of the release pair: an unregistered typed account's registration deposit
 export { readTokenStorageMin } from "../../wallet/src/arming/accounts.ts";
