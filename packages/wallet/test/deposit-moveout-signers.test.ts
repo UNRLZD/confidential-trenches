@@ -46,6 +46,7 @@ test("moveout.ts exports exactly these, and no signer", () => {
     "ARCHIVAL_WAIT_MAX_MS",
     "FINAL_TRIES",
     "GAS_PRICE_MARGIN",
+    "ID_KEEP",
     "MOVE_GAS",
     "MoveOutRefused",
     "SETTLE_BLOCKS",
