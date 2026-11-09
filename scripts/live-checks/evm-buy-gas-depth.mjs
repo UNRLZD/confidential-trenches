@@ -59,7 +59,7 @@ export async function collect(feeOf, fetchFn = fetch, pools = evmPools()) {
         const host = new URL(url).host;
         const b = await rpcAnswer(url, "eth_getBlockByNumber", [block, false], { fetchFn, nullNoAnswer: true });
         if (b.noAnswer !== undefined) {
-          reads.push({ host, noAnswer: b.noAnswer });
+          reads.push({ host, noAnswer: b.noAnswer, ...(b.nullResult ? { noBlock: true } : {}) });
           continue;
         }
         if (b.error !== undefined) {
@@ -98,6 +98,12 @@ export function judge(runs) {
     // a provider's no-answer is named and left out; the pool is judged on the providers that answered
     const reads = all.filter((x) => x?.noAnswer === undefined);
     for (const x of all.filter((y) => y?.noAnswer !== undefined)) lines.push(`--- ${n} ${x.host}: no answer: ${x.noAnswer}`);
+    // the helper named a block that every provider that answered says it does not hold: the helper's answer is wrong,
+    // and no read again clears it (review of 6cfd2778, P2-1)
+    if (reads.length === 0 && all.some((x) => x?.noBlock === true)) {
+      say(false, `${n}: no provider holds block ${b.block} (${all.filter((x) => x?.noBlock === true).map((x) => x.host).join(", ")} answered none)`);
+      continue;
+    }
     const word = (x) => (typeof x === "string" && /^0x[0-9a-f]{64}$/.test(x) ? BigInt(x) : null);
     const one = all.length >= 2 && reads.every((x) => x.error === undefined && typeof x.hash === "string" && x.hash === reads[0].hash && typeof x.baseFeePerGas === "string" && HEX.test(x.baseFeePerGas) && x.baseFeePerGas === reads[0].baseFeePerGas && word(x.depth) !== null && x.depth === reads[0].depth);
     if (!one) {

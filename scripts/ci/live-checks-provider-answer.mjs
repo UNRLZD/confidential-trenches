@@ -11,19 +11,23 @@
 // a provider's answer itself dies on one provider's bad answer (evm-buy-gas-depth exit 2 on drpc's code 27 "Unknown
 // state", helper live run 42556116812, 9 Nov 03:54Z).
 import { execFileSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 export const SHARED = new Set(["scripts/live-checks/provider-answer.mjs", "scripts/live-checks/provider-answer.plants.mjs"]);
-// a JSON-RPC 2.0 request or answer in code: jsonrpc: "2.0", "jsonrpc": '2.0', `"jsonrpc":"2.0"` inside a string
-const RPC = /["'`]?\bjsonrpc\\?["'`]?\s*:\s*\\?["'`]2\.0\\?["'`]/;
+// Files that answer a page's JSON-RPC with planted answers and read no provider, and why: neither they nor a check that
+// imports from them counts as building JSON-RPC
+export const MOCKS = Object.freeze({
+  "scripts/live-checks/app-in-shell.mjs": "harnessRoute answers the page's RPC calls from recorded answers (route.fulfill); it reads no provider",
+});
 const IMPORTS_SHARED = /from\s+["']\.\/provider-answer\.mjs["']/;
 
 // The checks that still build a JSON-RPC request themselves, each to move onto the shared module (card
 // live-checks-provider-no-answer's follow-ups); the list only shrinks.
 export const NOT_MOVED = Object.freeze([
   "app-footer-bar.mjs",
-  "app-in-shell.mjs",
   "base-200ms-blocks.mjs",
   "delete-refund-readback.sweep.mjs",
   "evm-buy-gas-floor.mjs",
@@ -68,24 +72,117 @@ export const NOT_MOVED = Object.freeze([
   "wallet-refund-move.mjs",
   "wallet-restore-id-reader.mjs",
   "wallet-rpc-hex-case.mjs",
+  // reading a provider through an imported rpc (scripts/ci/rpc-wait.mjs, pool-evm-deploy.mjs, pool-sol-deploy.mjs)
+  "evm-fee-collector.mjs",
+  "evm-mainnet-senders.mjs",
+  "evm-sell-v4.mjs",
+  "evm-testnet-delegate-review3.mjs",
+  "evm-venues-pin.mjs",
+  "pool-evm-buy-pays-revert.mjs",
+  "pool-evm-deploy-resume-safe.mjs",
+  "pool-sol-deploy-after-run.mjs",
+  "pool-sol-deploy-sweep.mjs",
+  "precommit-taken-recover.mjs",
+  "signpage-pool-flow.mjs",
+  "signpage-pool-notes.mjs",
+  "signpage-pool-withdraw-form.mjs",
+  "vault-kit-settle.mjs",
+  "vault-mainnet.mjs",
+  "vault-skeleton.mjs",
 ].map((f) => `scripts/live-checks/${f}`));
 
-/** True when the code (comments taken out) holds a JSON-RPC request or answer */
-export function buildsRpc(src) {
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
-  return RPC.test(code);
+const CODE = /\.(mjs|cjs|js|mts|cts|ts)$/;
+const TEST = /\.test\.(mjs|cjs|js|mts|cts|ts)$/;
+const kindOf = (f) => (/\.(mts|cts|ts)$/.test(f) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
+// a string's text, or a + of strings' (["json" + "rpc"]), else null
+const strOf = (n) => (ts.isStringLiteralLike(n) ? n.text : ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken ? ((l, r) => (l === null || r === null ? null : l + r))(strOf(n.left), strOf(n.right)) : ts.isParenthesizedExpression(n) ? strOf(n.expression) : null);
+
+/** Whether a node holds JSON-RPC of its own, read by the TypeScript parser (a comment is never code, a "//" in a string
+ *  never a comment): an object with a `jsonrpc` key with any value (jsonrpc: V, { jsonrpc }, "jsonrpc": ...,
+ *  ["json" + "rpc"]: ...), an element set or read by the key "jsonrpc", or a string holding a JSON "jsonrpc" key */
+function holds(node) {
+  let found = false;
+  const name = (n) => (ts.isIdentifier(n) || ts.isStringLiteralLike(n) ? n.text : ts.isComputedPropertyName(n) ? strOf(n.expression) : null);
+  const walk = (n) => {
+    if (found) return;
+    if ((ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n)) && name(n.name) === "jsonrpc") found = true;
+    else if (ts.isElementAccessExpression(n) && strOf(n.argumentExpression) === "jsonrpc") found = true;
+    else if ((ts.isStringLiteralLike(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) && /\\?"jsonrpc\\?"\s*:/.test(n.text)) found = true;
+    else ts.forEachChild(n, walk);
+  };
+  walk(node);
+  return found;
 }
 
-/** The refusals for a set of files: `read(path)` gives each one's text */
+/** A file's code: `builds` (it holds JSON-RPC anywhere), `names` (each top-level declaration's name to whether it holds
+ *  JSON-RPC: what an import of that name takes), and `imports` (each relative import or re-export: its specifier and the
+ *  names it takes, "*" for a namespace, a default or an import()) */
+export function readCode(file, src) {
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ESNext, true, kindOf(file));
+  const names = new Map();
+  const imports = [];
+  for (const st of sf.statements) {
+    if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name) names.set(st.name.text, holds(st));
+    if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) names.set(d.name.text, holds(d));
+    const spec = (ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && st.moduleSpecifier && ts.isStringLiteralLike(st.moduleSpecifier) ? st.moduleSpecifier.text : null;
+    if (spec === null || !spec.startsWith(".")) continue;
+    if (ts.isImportDeclaration(st)) {
+      const c = st.importClause;
+      const nb = c?.namedBindings;
+      if (c === undefined) continue; // a bare import "./x.mjs" takes no name (net-window.mjs)
+      imports.push({ spec, names: c.name || (nb && ts.isNamespaceImport(nb)) ? "*" : nb ? nb.elements.map((e) => (e.propertyName ?? e.name).text) : [] });
+    } else {
+      const ec = st.exportClause;
+      imports.push({ spec, names: ec && ts.isNamedExports(ec) ? ec.elements.map((e) => (e.propertyName ?? e.name).text) : "*" });
+    }
+  }
+  const dyn = (n) => {
+    if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) && n.arguments[0].text.startsWith(".")) imports.push({ spec: n.arguments[0].text, names: "*" });
+    ts.forEachChild(n, dyn);
+  };
+  dyn(sf);
+  return { builds: holds(sf), names, imports };
+}
+
+/** True when the code holds a JSON-RPC request or answer of its own */
+export function buildsRpc(src, file = "x.mjs") {
+  return readCode(file, src).builds;
+}
+
+/** The refusals for a set of files under scripts/live-checks/: `read(path)` gives a repo file's text, or null when it is
+ *  not there. A check counts as building JSON-RPC when its own code does, or when it imports, by a relative path, a
+ *  name whose declaration does (scripts/ci/rpc-wait.mjs's rpc, pool-evm-deploy.mjs's rpc) or a whole file that does
+ *  (a namespace, a default, an import()); the shared module and its plants never count. */
 export function refusalsOf(files, read, notMoved = NOT_MOVED) {
   const out = [];
   const listed = new Set(notMoved);
+  const memo = new Map();
+  const code = (f) => {
+    if (!memo.has(f)) {
+      const src = CODE.test(f) && f.startsWith("scripts/") ? read(f) : null;
+      memo.set(f, src === null ? null : { src, ...readCode(f, src) });
+    }
+    return memo.get(f);
+  };
+  const through = (f, c) =>
+    c.imports.flatMap(({ spec, names }) => {
+      const g = posix.normalize(posix.join(posix.dirname(f), spec));
+      if (SHARED.has(g) || g in MOCKS || !g.startsWith("scripts/") || !CODE.test(g)) return [];
+      const t = code(g);
+      // a file under scripts/ it imports that is not there cannot be read, so it is refused as building
+      if (t === null) return [`${g} (not there)`];
+      // a name it does not declare (a re-export, a name it lacks) is read as the whole file
+      return (names === "*" ? t.builds : names.some((n) => (t.names.has(n) ? t.names.get(n) : t.builds))) ? [g] : [];
+    });
   for (const f of files) {
-    if (SHARED.has(f) || !/^scripts\/live-checks\/[^/]+\.mjs$/.test(f) || /\.test\.mjs$/.test(f)) continue;
-    const src = read(f);
-    const builds = buildsRpc(src);
-    if (builds && IMPORTS_SHARED.test(src)) out.push(`${f}: imports provider-answer.mjs and builds a JSON-RPC request itself too: read every provider through rpcAnswer`);
-    else if (builds && !listed.has(f)) out.push(`${f}: builds a JSON-RPC request outside provider-answer.mjs: read it through rpcAnswer, which names a provider's no-answer`);
+    if (SHARED.has(f) || f in MOCKS || !f.startsWith("scripts/live-checks/") || !CODE.test(f) || TEST.test(f)) continue;
+    const c = code(f);
+    if (c === null) continue;
+    const by = through(f, c);
+    const builds = c.builds || by.length > 0;
+    const via = c.builds ? "" : ` (through ${by.join(", ")})`;
+    if (c.builds && IMPORTS_SHARED.test(c.src)) out.push(`${f}: imports provider-answer.mjs and builds a JSON-RPC request itself too: read every provider through rpcAnswer`);
+    else if (builds && !listed.has(f)) out.push(`${f}: builds a JSON-RPC request outside provider-answer.mjs${via}: read it through rpcAnswer, which names a provider's no-answer`);
     else if (!builds && listed.has(f)) out.push(`${f}: NOT_MOVED names it but it builds no JSON-RPC request: take it off the list`);
   }
   const seen = new Set(files);
@@ -94,11 +191,12 @@ export function refusalsOf(files, read, notMoved = NOT_MOVED) {
 }
 
 export function liveChecksProviderAnswer(root) {
-  const files = execFileSync("git", ["ls-files", "-z", "-c", "-o", "--exclude-standard", "--", "scripts/live-checks/*.mjs"], { cwd: root, encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "-z", "-c", "-o", "--exclude-standard", "--", "scripts/live-checks"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter(Boolean);
   const all = [...new Set(files)];
-  return { refusals: refusalsOf(all, (f) => readFileSync(`${root}/${f}`, "utf8")), read: all.length };
+  const read = (f) => (existsSync(`${root}/${f}`) ? readFileSync(`${root}/${f}`, "utf8") : null);
+  return { refusals: refusalsOf(all, read), read: all.filter((f) => CODE.test(f) && !TEST.test(f)).length };
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

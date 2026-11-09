@@ -51,6 +51,15 @@ test("judgeStateMiss: a block or state the provider does not hold is judged; eve
   for (const [name, status, body] of NO_ANSWERS.filter((x) => !state.includes(x))) assert.equal(typeof classify("p", status, body, { judgeStateMiss: true }).noAnswer, "string", name);
 });
 
+// review of 6cfd2778, P3-4: a state miss whose words also name a limit is judged when the check judges state misses
+test("judgeStateMiss: the state words are read before the limit words", () => {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "historical state 0xabc is not available: request limit reached" } });
+  assert.deepEqual(classify("p", 200, body, { judgeStateMiss: true }), { error: { code: -32000, message: "historical state 0xabc is not available: request limit reached" } });
+  assert.equal(typeof classify("p", 200, body).noAnswer, "string");
+  // a null block is marked, for a check that tells a block no provider holds from a provider that lags
+  assert.equal(classify("p", 200, JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { nullNoAnswer: true }).nullResult, true);
+});
+
 test("rpcAnswer pauses RETRY.ms before it reads again", async () => {
   RETRY.ms = 300;
   try {

@@ -68,7 +68,7 @@ export function replayer(log) {
   return async (url, method, params) => {
     const e = answers.get(JSON.stringify([url, method, params]));
     if (e === undefined) return { error: `no recorded answer to ${method} ${JSON.stringify(params)} on ${url}` };
-    return "error" in e ? { error: e.error } : { result: e.result };
+    return "noAnswer" in e ? { noAnswer: e.noAnswer } : "error" in e ? { error: e.error } : { result: e.result };
   };
 }
 

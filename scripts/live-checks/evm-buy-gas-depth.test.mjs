@@ -137,3 +137,28 @@ test("planted: a wrong answer beside a no-answer still FAILs; a 403 that carries
     assert.equal(r.verdict, "FAIL", `${read}: ${r.lines.join("\n")}`);
   }
 });
+
+// review of 6cfd2778, P2-1: a block the helper names that every provider answers null for is the helper's wrong
+// answer, a FAIL, never INCONCLUSIVE (no read again clears it)
+test("planted: every provider that answered holds no such block: BAD, the helper named a block none holds", async () => {
+  const none = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    return method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : honest(url, { method });
+  };
+  const r = judge(await collect(feeOf, none, ONE_POOL));
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`BAD base-sepolia ${POOLS[0]}: no provider holds block 0x10 (`)), r.lines.join("\n"));
+  // one null and the rest rate-limited: still the helper's block nobody holds among those that answered
+  const mixed = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    if (method !== "eth_getBlockByNumber") return honest(url, { method });
+    return new URL(url).host === HOSTS[0] ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : new Response("", { status: 429 });
+  };
+  assert.equal(judge(await collect(feeOf, mixed, ONE_POOL)).verdict, "FAIL");
+  // one null beside two that hold it: that provider lags, the pool is judged on the two
+  const lag = async (url, init) => {
+    const { method } = JSON.parse(init.body);
+    return new URL(url).host === HOSTS[2] && method === "eth_getBlockByNumber" ? new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 }) : honest(url, { method });
+  };
+  assert.equal(judge(await collect(feeOf, lag, ONE_POOL)).verdict, "PASS");
+});

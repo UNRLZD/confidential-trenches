@@ -30,7 +30,8 @@ const reverted = (e) => e?.code === 3 || (typeof e?.message === "string" && /^ex
 const cut = (s, n = 80) => String(s).slice(0, n).replace(/\s+/g, " ");
 
 /** One HTTP answer, read: `{ result }` or `{ error }` (a JSON-RPC error, judged by the check), or `{ noAnswer }` (why, with
- *  the host and status). `nullNoAnswer`: a null result is the provider not holding the thing yet (a block by number).
+ *  the host and status). `nullNoAnswer`: a null result is the provider not holding the thing yet (a block by number),
+ *  marked `nullResult`.
  *  `judgeStateMiss`: a block or state the provider does not hold is judged, for a check whose subject is that the
  *  provider keeps it (evm-buy-hookdata-fee: every fee provider answers a block 600 s old). */
 export function classify(host, status, text, { nullNoAnswer = false, judgeStateMiss = false } = {}) {
@@ -47,12 +48,14 @@ export function classify(host, status, text, { nullNoAnswer = false, judgeStateM
   const e = j.error;
   if (e !== undefined && e !== null) {
     const m = typeof e?.message === "string" ? e.message : "";
+    // a check that judges state misses judges one whatever else its words say ("... not available: rate limit tier")
+    if (judgeStateMiss && !reverted(e) && (NOT_YET.test(m) || STATELESS.test(m))) return { error: e };
     if (!reverted(e) && (LIMIT_CODES.has(e?.code) || RATE_LIMIT.test(m))) return no(`rate limit ${cut(JSON.stringify(e))}`);
     if (!judgeStateMiss && !reverted(e) && (NOT_YET.test(m) || STATELESS.test(m))) return no(`no state for the read ${cut(JSON.stringify(e))}`);
     return { error: e };
   }
   if (status < 200 || status > 299) return no("not a success");
-  if (j.result === null && nullNoAnswer) return no("null result (not held yet)");
+  if (j.result === null && nullNoAnswer) return { ...no("null result (not held yet)"), nullResult: true };
   return { result: j.result };
 }
 

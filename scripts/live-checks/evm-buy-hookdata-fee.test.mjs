@@ -136,3 +136,12 @@ test("planted: a wrong answer beside a no-answer still FAILs; a 403 that carries
   assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
   assert.ok(r.lines.some((l) => /^robinhood: robinhood\.drpc\.org: eth_call: RPC error -32601: /.test(l)), r.lines.join("\n"));
 });
+
+// review of 6cfd2778, P3-5: a recorded no-answer replays as a no-answer, never as an answer with no result
+test("planted: a recorded no-answer replays as INCONCLUSIVE", async () => {
+  const k = A.good.findIndex((e) => e.method === "eth_call" && e.url === "https://robinhood.drpc.org");
+  const log = A.good.map((e, i) => (i === k ? { url: e.url, method: e.method, params: e.params, noAnswer: "robinhood.drpc.org HTTP 200: empty body" } : e));
+  const r = await check(replayer(log));
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("INCONCLUSIVE robinhood: robinhood.drpc.org: eth_call: no answer: robinhood.drpc.org HTTP 200: empty body")), r.lines.join("\n"));
+});
