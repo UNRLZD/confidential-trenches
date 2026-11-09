@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { READ, rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
 import { edgy, solana } from "./snapshots.ts";
 import { COLUMNS, columnRows } from "../../src/screens/discover/model.ts";
@@ -263,7 +264,7 @@ let BASE = "";
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {

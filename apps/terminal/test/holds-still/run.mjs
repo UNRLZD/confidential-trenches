@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -74,7 +75,7 @@ const fails = [];
 const dir = await build();
 const server = await serve(dir);
 const BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, reducedMotion: "reduce" });

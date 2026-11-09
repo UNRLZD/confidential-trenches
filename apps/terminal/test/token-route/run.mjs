@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 
 const HELPER = "https://ct-api.unrealized.trade";
@@ -64,7 +65,7 @@ async function build() {
 
 const dir = await build();
 const route = await harnessRoute(dir, "signed");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 
 async function context(w, scheme, reads, broken, errors) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: scheme, reducedMotion: "reduce" });

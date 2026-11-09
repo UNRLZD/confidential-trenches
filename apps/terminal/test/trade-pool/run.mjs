@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -143,7 +144,7 @@ const boxServer = await serve(boxDir);
 const sellServer = await serve(sellDir);
 const BOX = `http://127.0.0.1:${boxServer.address().port}`;
 const SELL = `http://127.0.0.1:${sellServer.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let shots = 0;
 try {
   for (const w of WIDTHS) {

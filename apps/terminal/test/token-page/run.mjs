@@ -27,6 +27,7 @@ import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.
 import { LIST_CHAINS } from "../../src/screens/discover/data.ts";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser, pushSockets } from "../../../../scripts/harness-sockets.mjs";
 
 const HELPER = "https://ct-api.unrealized.trade";
 
@@ -237,10 +238,6 @@ async function openAt(browser, route, w, s, calls) {
     if (u.origin !== APP_HOST && u.origin !== SIGN_HOST) refused.add(`${u.origin}${u.origin === HELPER ? u.pathname : ""}`);
     return route(r);
   });
-  // the helper's push socket (card market-data-push): held by the run, mocked, sending only what a state sends on it
-  await ctx.routeWebSocket(/^wss:\/\/ct-api\.unrealized\.trade\/v1\/market\/push\?/, (ws) => {
-    calls.push = ws;
-  });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -259,7 +256,7 @@ async function openAt(browser, route, w, s, calls) {
 
 const dir = await build();
 const route = await harnessRoute(dir, SIGNED_OUT ? "tap" : "signed");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {
@@ -268,7 +265,7 @@ try {
       if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0, chains: [], live: 0, plant: null, edged: false, push: null };
+      const calls = { lists: 0, chains: [], live: 0, plant: null, edged: false };
       const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
@@ -438,7 +435,8 @@ try {
             console.log(`${tag}: planted close ${calls.plant} drawn on the last bar in ${ms} ms; legend close ${before.close} -> ${after.close}; ${calls.live} live reads`);
             // card market-data-push: a trade pushed on the socket is on the tape (its mark on the last bar) and wakes the
             // chart, whose last bar takes the trade's close at once, not at its next LIVE_MS read; no reload
-            const ws = calls.push;
+            // the helper's push socket, mocked by the harness's browser (scripts/harness-sockets.mjs): the page's newest
+            const ws = pushSockets(ctx).at(-1) ?? null;
             check(ws !== null, `${tag}: the page opened no push socket`);
             if (ws !== null) {
               const marks = () => f.locator(`${box} [data-testid="trade-mark"]`).count();
