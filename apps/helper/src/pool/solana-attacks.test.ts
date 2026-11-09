@@ -624,21 +624,27 @@ test("the kit's ticks at the path's minIntervalMs are never refused by the regio
   const engine = blockEngine(() => "ok");
   let path: SolanaSendPath | undefined;
   let b64 = "";
-  const s = mainnet({ engine, intervalMs: 20, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
-  assert.equal(code(await s.carry(body(tipped()))), "ok");
-  const min = path!.minIntervalMs!;
+  let fill = () => {};
+  // the send stays open while its ticks go, as the kit's pacer ticks only for a send not yet ended
+  const s = mainnet({ engine, intervalMs: 20, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  while (!path) await sleep(1); // the first send went, the kit's send started
+  const min = path.minIntervalMs!;
   let last = Date.now();
   let refused = 0;
+  const why = new Set<string>();
   for (let n = 0; n < 200; ) {
     // paceArm: a timer for the rest of the interval; paceFire only once Date.now() - last reaches it
     await sleep(Math.max(0, last + min - Date.now()));
     if (Date.now() - last < min) continue;
     last = Date.now();
     n++;
-    await path!.send(b64).catch(() => refused++);
+    await path.send(b64).catch((e: Error) => (refused++, why.add(e.message)));
   }
-  assert.equal(refused, 0, `${refused} of 200 ticks refused`);
+  assert.equal(refused, 0, `${refused} of 200 ticks refused: ${[...why].join("; ")}`);
   assert.equal(engine.seen.length, 201);
+  fill();
+  assert.equal(code(await a), "ok");
 });
 
 // The review's capacity run, on the helper: the keyless limit is one request a second per region from the helper's
