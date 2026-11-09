@@ -1,0 +1,161 @@
+{
+ "read": "GET https://ct-api.unrealized.trade/v1/market/token?chain=robinhood for 0xc9675fe679c7d4e1b94416f66d61c96127eb964a (the top of that recording's Trending list), Origin APP_HOST, 2026-11-09T18:38:33Z, HTTP 200, X-Helper-Commit a5ffb026; the row kept as a field list and its values",
+ "fields": [
+  "chain",
+  "token",
+  "symbol",
+  "name",
+  "icon",
+  "venue",
+  "label",
+  "created_s",
+  "price_usd",
+  "mc_usd",
+  "vol_24h_usd",
+  "chg_5m_bps",
+  "chg_1h_bps",
+  "chg_24h_bps",
+  "liq_usd",
+  "holders",
+  "top10_bps",
+  "src",
+  "as_of_ms",
+  "creator",
+  "creator_sold_bps",
+  "dev_bps",
+  "snipers_bps",
+  "mint_auth",
+  "freeze_auth",
+  "vol_5m_usd",
+  "buys_5m",
+  "sells_5m",
+  "net_5m_usd",
+  "risk_src",
+  "launchpad",
+  "curve_bps",
+  "vol_1h_usd",
+  "chg_4h_bps",
+  "buys_24h",
+  "sells_24h",
+  "buys_1h",
+  "sells_1h"
+ ],
+ "row": [
+  "robinhood",
+  "0xc9675fe679c7d4e1b94416f66d61c96127eb964a",
+  "GIGATENEV",
+  "Giga Tenev",
+  false,
+  null,
+  null,
+  1791568900,
+  "0.00114941566763",
+  "1147459.772",
+  "458612.691446",
+  -11,
+  500,
+  -1424,
+  "76329.2158",
+  15677,
+  1322,
+  "geckoterminal",
+  1794249282646,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  "127.19123537",
+  4,
+  1,
+  null,
+  null,
+  null,
+  null,
+  "19362.566639",
+  null,
+  4476,
+  4233,
+  166,
+  189
+ ],
+ "rest": {
+  "decimals": 18,
+  "pool": "0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448",
+  "risk": {
+   "mint_auth": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "freeze_auth": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "lp": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "top10_bps": {
+    "v": 1322,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249403000
+   },
+   "dev_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "snipers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "holders": {
+    "v": 15677,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249403000
+   },
+   "liq_usd": {
+    "v": "76329.2158",
+    "src": "geckoterminal",
+    "as_of_ms": 1794249282646
+   },
+   "age_s": {
+    "v": 2680382,
+    "src": "geckoterminal",
+    "as_of_ms": 1794249282646
+   },
+   "tax": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "honeypot": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "insiders_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "bundlers_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   },
+   "fresh_bps": {
+    "v": null,
+    "src": "none",
+    "as_of_ms": 1794249282646
+   }
+  },
+  "route": "unknown",
+  "filling": false
+ }
+}

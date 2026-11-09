@@ -13,7 +13,10 @@
 //   node scripts/live-checks/app-list-age.mjs [--shots <dir>] [--record <file>]
 //     the deployed APP_HOST (its bytes and headers as served, the helper live), framed by the stand-in shell
 //   node scripts/live-checks/app-list-age.mjs --harness [--build <dir>] [--shots <dir>] [--record <file>]
-//     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, every helper read recorded
+//     a local build (apps/terminal/dist, or --build <dir>) at APP_HOST's name, every helper read recorded; with
+//     --helper-live the served run's helper reads are the live helper's
+// Discover reads Solana's, Base's and Robinhood's lists (card app-chains-evm) and dates them by the oldest read it drew,
+// so a run's lists date is the oldest as_of_ms of the last answer of each chain that was that chain's own snapshot.
 //     PASS exit 0, FAIL exit 1, error exit 2
 // --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
@@ -98,11 +101,11 @@ async function runOne(browser, w, kind, shots, route) {
   try {
     await ctx.route("**/*", route);
     const page = await ctx.newPage();
-    // the last lists answer the page read, with its read time
-    let last = null;
+    // the last lists answer of each chain the page read
+    const last = new Map();
     page.on("response", (r) => {
       const u = new URL(r.url());
-      if (u.origin === HELPER_HOST && u.pathname === LISTS_PATH) last = r;
+      if (u.origin === HELPER_HOST && u.pathname === LISTS_PATH) last.set(u.searchParams.get("chain"), r);
     });
     await page.goto(`${APP_HOST}/discover`, { waitUntil: "load" });
     const f = await terminal(page);
@@ -119,9 +122,16 @@ async function runOne(browser, w, kind, shots, route) {
       }),
     );
     run.readAtMs = Date.now();
-    if (last) {
-      const body = await last.json().catch(() => null);
-      run.lists = { status: last.status(), asOfMs: typeof body?.as_of_ms === "number" ? body.as_of_ms : null };
+    if (last.size) {
+      // Discover draws a chain's lists only from a 200 that is that chain's snapshot (data.ts readChainLists); the
+      // status kept is Solana's, the date the oldest drawn chain's
+      const dates = [];
+      for (const [chain, r] of last) {
+        const body = r.status() === 200 ? await r.json().catch(() => null) : null;
+        if (body?.chain === chain && typeof body.as_of_ms === "number") dates.push(body.as_of_ms);
+      }
+      const sol = last.get("solana") ?? [...last.values()][0];
+      run.lists = { status: sol.status(), asOfMs: dates.length ? Math.min(...dates) : null };
     }
     run.shot = `${w.name}-${kind}.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });
@@ -137,7 +147,7 @@ async function entryOf(build) {
   return html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/)?.[1] ?? null;
 }
 
-export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source }) {
+export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source, helperLive = false }) {
   mkdirSync(shots, { recursive: true });
   const entry = await entryOf(build);
   const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed");
@@ -150,6 +160,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
       const route = (r) => {
         const u = new URL(r.request().url());
         if (kind === "dated" && u.origin === HELPER_HOST && u.pathname === LISTS_PATH) return shell(r);
+        if (build && helperLive && u.origin === HELPER_HOST) return r.continue();
         if (build) return shell(r);
         return u.origin === APP_HOST || u.origin === HELPER_HOST ? r.continue() : shell(r);
       };
@@ -171,9 +182,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     if (a.includes("--harness")) {
       build = path.resolve(opt("--build", path.join(REPO, "apps/terminal/dist")));
       const rel = path.relative(REPO, build);
-      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : "<build>"}, the stand-in shell, every helper read recorded`;
+      source = `harness, terminal build ${rel && !rel.startsWith("..") ? rel : "<build>"}, the stand-in shell, ${a.includes("--helper-live") ? "the helper live (dated: the recorded 1 Nov lists)" : "every helper read recorded"}`;
     }
-    const rec = await collect({ shots: opt("--shots", undefined), build, source });
+    const rec = await collect({ shots: opt("--shots", undefined), build, source, helperLive: a.includes("--helper-live") });
     const file = opt("--record", null);
     // the record leaves out where this machine kept the shots
     if (file) writeFileSync(file, `${JSON.stringify({ ...rec, shots: undefined }, null, 1)}\n`);
