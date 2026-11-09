@@ -930,9 +930,10 @@ export function evmPoolLogPager(): EvmLogPager {
  * cap lifted, a refusal under the cap or a page shrunk long ago comes back. A page past the provider's head (HEAD_LAG)
  * is a lag. A page of one block refused is the read's failure, with the provider's own error.
  */
-async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait): Promise<E[]> {
+async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: EvmLogFilter, decode: EvmLogDecode<E>, from: bigint, to: bigint, pager: EvmLogPager, signal?: AbortSignal, sleep: (ms: number, signal?: AbortSignal) => Promise<void> = wait, progress?: { to: bigint; logs: E[] }): Promise<E[]> {
   const { max, slowHalves } = pager.rules;
-  const out: E[] = [];
+  // `progress`: the pages read so far, kept by a caller whose read may be stopped (evmTreeSync's sources)
+  const out: E[] = progress?.logs ?? [];
   let refused: bigint | null = null;
   // full pages read in a row since the ceiling was set, and how many it holds for: doubled when the size refused is the
   // last ceiling's again (its probe met the same cap), else the rules' ceilingPages (a refusal under the cap)
@@ -1017,6 +1018,7 @@ async function readLogs<E extends EvmLogRow>(rpc: EvmRpc, k: number, filter: Evm
     if (full && refused !== null && ++held >= hold) refused = null;
     if (full && same && size * 2n <= max && (refused === null || size * 2n < refused)) q.size = size * 2n;
     at = end + 1n;
+    if (progress) progress.to = end;
   }
   for (let i = 1; i < out.length; i++) {
     const a = out[i - 1]!, b = out[i]!;
@@ -1294,10 +1296,13 @@ export const EVM_SOURCE_CALLS = EVM_SOURCE_PAGES + 40;
  * one operator's word (a broken-in helper's included) is ever taken, and with no two the round is refused and nothing
  * is kept. A source can stall the sync, never steer it.
  * Bounds (review of 0b379bf4, P2-1): the sources are read all at once and the first two operators that agree end the
- * rest; a source whose page, as the sync's pager knows it, needs more than EVM_SOURCE_PAGES pages for the blocks is not
- * read, and one that makes more than EVM_SOURCE_CALLS log calls is stopped; each source's logs up to a finalized anchor
- * are kept for the sync's next round, so a lag retry reads only past them. A reorg under the read, a source behind
- * its head, or one source's logs a strict prefix of another's lacking only logs past the finalized anchor, is a lag.
+ * rest; a source whose page (its own pager's, apart from the seats') needs more than EVM_SOURCE_PAGES pages for the
+ * blocks is not read, and one that makes more than EVM_SOURCE_CALLS log calls is stopped. A source's logs up to a
+ * finalized anchor are kept for the sync's next round, so a retry reads only past them, but only from a read that made
+ * the pool's trees, one judged behind, or one stopped at its bound (its pages so far); any other's go (review of the
+ * fold, P2-A). A reorg under the read, a source behind its head, or one source's logs a strict prefix of another's that
+ * makes the pool's trees, lacking only logs past the finalized anchor, is a lag. A held part is dropped only when two
+ * operators read every block past it alike and their logs do not make the pool's trees (P2-B).
  */
 export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   const rpcs = evmPair(a.rpcs);
@@ -1312,6 +1317,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   // each source's logs from a round's first block up to its finalized anchor, by operator: a later round's read of that
   // source starts past them
   const kept = new Map<string, { from: bigint; to: bigint; logs: Ev[] }>();
+  // the sources' own pages, by URL, apart from the seats' (whose refusals, of the same providers, never shrink them)
+  const sourcePager = evmPoolLogPager();
   const pool = lower(a.pin.pool);
   addr20(pool, "pool");
   const chainId = EVM_CHAIN_IDS[a.pin.network];
@@ -1416,11 +1423,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       // a reorg under the read is a lag, read once a round (review of 0b379bf4, P3-1)
       if (!stillRead) await still();
       const from = heldTo + 1n;
-      const span = anchor.number - from + 1n;
       const whys: string[] = [];
-      const reads: { op: string; fresh: Ev[]; ok: boolean }[] = [];
+      // each finished read: its logs, and whether they make the pool's trees (ok) or were a full read that does not
+      // (wrong); a stopped read's pages up to the finalized anchor (part)
+      const reads: { op: string; fresh: Ev[]; ok: boolean; wrong: boolean }[] = [];
+      const parts = new Map<string, { to: bigint; logs: Ev[] }>();
       let lagged = false;
-      let fullWrong = false;
       let found: ReturnType<typeof build> | null = null;
       const stop = new AbortController();
       const outer = () => stop.abort(signal!.reason);
@@ -1431,7 +1439,7 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const k = kept.get(op);
         const prior = k !== undefined && k.from === from && k.to <= anchor.number ? k : null;
         const start = prior === null ? from : prior.to + 1n;
-        const page = pager.of(src, i).size;
+        const page = sourcePager.of(src, i).size;
         if (start <= anchor.number && anchor.number - start + 1n > page * BigInt(EVM_SOURCE_PAGES)) {
           whys.push(`${name}: its page of ${page} blocks is more than ${EVM_SOURCE_PAGES} pages for ${anchor.number - start + 1n} blocks`);
           return;
@@ -1450,25 +1458,29 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
           },
           typeof url === "string" ? { url } : {},
         ) as EvmRpc;
+        const progress = { to: start - 1n, logs: [] as Ev[] };
         let fresh: Ev[];
         try {
-          fresh = [...(prior?.logs ?? []), ...(start > anchor.number ? [] : await readLogs(capped, i, poolFilter, poolDecode, start, anchor.number, pager, own.signal, sleep))];
+          fresh = [...(prior?.logs ?? []), ...(start > anchor.number ? [] : await readLogs(capped, i, poolFilter, poolDecode, start, anchor.number, sourcePager, own.signal, sleep, progress))];
         } catch (e) {
           if (signal?.aborted) throw e;
           if (stop.signal.aborted && found !== null) return;
           if (e instanceof EvmLagError) lagged = true;
+          // a read stopped at its call bound keeps its pages up to the finalized anchor, so the next round reads on from
+          // them (review of the fold, P3-3)
+          const to = progress.to < fin.number ? progress.to : fin.number;
+          if (own.signal.aborted && to >= start) parts.set(op, { to, logs: [...(prior?.logs ?? []), ...progress.logs.filter((x) => x.block <= to)] });
           whys.push(`${name}: ${String(((own.signal.aborted ? own.signal.reason : e) as Error)?.message ?? e)}`);
           return;
         } finally {
           stop.signal.removeEventListener("abort", end);
         }
         if (found !== null) return;
-        if (fin.number >= from) kept.set(op, { from, to: fin.number < anchor.number ? fin.number : anchor.number, logs: fresh.filter((e) => e.block <= fin.number) });
         const off = fresh.find((e) => (e.block === fin.number && e.blockHash !== fin.hash) || (e.block === anchor.number && e.blockHash !== anchor.hash));
         const b = off === undefined ? build(fresh) : null;
-        reads.push({ op, fresh, ok: b !== null && b.wrong === null });
-        if (b === null || b.wrong !== null) {
-          if (b !== null) fullWrong = true;
+        const ok = b !== null && b.wrong === null;
+        reads.push({ op, fresh, ok, wrong: b !== null && b.wrong !== null });
+        if (!ok) {
           whys.push(`${name}: ${b === null ? `a log of block ${off!.block} is not of the anchor` : b.wrong}`);
           return;
         }
@@ -1483,10 +1495,24 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         signal?.removeEventListener("abort", outer);
       }
       signal?.throwIfAborted();
+      const same = (x: Ev[], y: Ev[]) => x.length === y.length && x.every((e, j) => e.bytes === y[j]!.bytes);
+      // one source behind another: its logs a strict prefix of another's that makes the pool's trees, lacking only logs
+      // past the finalized anchor (review of the fold, P3-1: never on a longer read that does not)
+      const behindOf = (x: (typeof reads)[number]) => !x.ok && reads.some((y) => y.ok && y.fresh.length > x.fresh.length && x.fresh.every((e, j) => e.bytes === y.fresh[j]!.bytes) && y.fresh.slice(x.fresh.length).every((e) => e.block > fin.number));
+      // what is kept for the next round (review of the fold, P2-A): a read that made the trees or was judged behind, and
+      // a stopped read's pages; any other source's kept logs go, so one bad page never stands past its round
+      const keep = (op: string, to: bigint, logs: Ev[]) => kept.set(op, { from, to, logs: logs.filter((e) => e.block <= to) });
+      const finTo = fin.number < anchor.number ? fin.number : anchor.number;
+      for (const x of reads) {
+        if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, finTo, x.fresh);
+        else kept.delete(x.op);
+      }
+      for (const [op, p] of parts) keep(op, p.to, p.logs);
       if (found !== null) return found;
-      // one source behind another: its logs a strict prefix of another's, lacking only logs past the finalized anchor
-      const behind = reads.some((x) => reads.some((y) => y.fresh.length > x.fresh.length && x.fresh.every((e, j) => e.bytes === y.fresh[j]!.bytes) && y.fresh.slice(x.fresh.length).every((e) => e.block > fin.number)));
-      if (lagged || behind) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
+      if (lagged || reads.some(behindOf)) lag(`a source's logs past block ${fin.number} are behind (${whys.join("; ")})`);
+      // a held part is dropped only when two operators read every block alike and their logs do not make the pool's
+      // trees (review of the fold, P2-B): one liar's full read never drops it
+      const fullWrong = reads.some((x) => x.wrong && reads.some((y) => y.wrong && y.op !== x.op && same(x.fresh, y.fresh)));
       throw Object.assign(new Error(`${why}; no two sources of two operators gave the same logs making the pool's trees at ${anchor.hash}${whys.length > 0 ? ` (${whys.join("; ")})` : ""}`), { fullWrong });
     };
     let why = "";

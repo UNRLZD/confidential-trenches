@@ -2280,3 +2280,72 @@ test("review P3-3: a memory hold only ever rises", async () => {
   await hold.write(at(120n));
   assert.equal((await hold.read())?.to, 120n);
 });
+
+// the independent review of the fold (2e859438): its repros, as it wrote them
+test("review of the fold, RV-A (P2-A): a source's one-off bad page is kept (kept) and poisons every later round of the same sync", async () => {
+  const c = anyChain();
+  let blip = true;
+  const helper = rpc(c, { url: "https://helper.example", cap: 10_000, logs: (l, p) => (blip && p !== undefined && p.from <= 1_200_000 && p.to >= 1_200_000 ? ((blip = false), l.filter((x) => blockOf(x) !== 1_200_000)) : l) });
+  const sync = evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helper], ...noWait });
+  await assert.rejects(sync.events(), /no two sources of two operators/);
+  assert.equal(blip, false, "the blip happened once");
+  // the helper answers honestly from now on; the same sync still refuses: its kept bad logs are reused
+  let second: unknown = null;
+  try { await sync.events(); } catch (e) { second = e; }
+  // a fresh sync on the very same providers succeeds
+  const fresh = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helper], ...noWait }).events();
+  assert.equal(fresh.events.length, 4, "a fresh sync takes the pool's leaves");
+  assert.equal(second, null, `the same sync refused again: ${String((second as Error)?.message).slice(0, 300)}`);
+});
+
+test("review of the fold, RV-B (P2-B): one source that reads every block wrong (a liar) drops a valid hold", async () => {
+  const c = longChain([...anyChain().events, { block: 1_999_995, kind: "dep", leaf: BigInt(PP.commitments[1]!), label: BigInt(PP.labels[1]!) }], ANY_HEAD);
+  const hold = evmMemoryHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: hold, ...noWait }).events();
+  assert.equal((await hold.read())?.events.length, 4);
+  const broken = { getLogs: () => { throw new Error("RPC error -32000: internal error"); } };
+  const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", ...broken }), rpc(c, { url: "https://pocket.example", ...broken })];
+  // past the hold: the helper honest; one liar forges the commitment of the one new leaf
+  const liar = rpc(c, { url: "https://liar.example", logs: (l) => l.map((x) => (blockOf(x) === 1_999_995 ? word(x, 0, 4242n) : x)) });
+  const srcLog: string[] = [];
+  const honest = rpc(c, { url: "https://helper.example", log: srcLog });
+  await assert.rejects(evmTreeSync({ rpcs: seats, pin: PIN, history: [honest, liar], held: hold, ...noWait }).events(), /no two sources/);
+  const froms = srcLog.filter((x) => x.startsWith("eth_getLogs")).map((x) => Number(BigInt(x.match(/"fromBlock":"(0x[0-9a-f]+)"/)![1]!)));
+  assert.ok(!froms.some((f) => f <= 1_000_000), `the valid hold dropped on one liar's read: the pool read again from block ${Math.min(...froms)}`);
+});
+
+test("review of the fold, RV-C (P3-1): a liar that adds a leaf past the finalized block turns a refusal into lag retries (behind needs no honest longer read)", async () => {
+  const c = anyChain();
+  const extra = (p: { from: number; to: number }) => (p.from <= 1_999_995 && p.to >= 1_999_995 ? [{ ...rawLogs(c)[0]!, blockNumber: q(1_999_995), blockHash: c.hashOf(1_999_995), logIndex: q(9) }] : []);
+  const liar = rpc(c, { url: "https://liar.example", extra });
+  const waits: number[] = [];
+  // the helper honest, publicnode honest but blipping (one page refused, internal error) every time
+  const broken = { getLogs: () => { throw new Error("RPC error -32000: internal error"); } };
+  const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", ...broken }), rpc(c, { url: "https://pocket.example", ...broken })];
+  const e = await evmTreeSync({ rpcs: seats, pin: PIN, history: [helperSrc(c), liar], sleep: async (ms) => void waits.push(ms) }).events().catch((x: unknown) => x);
+  assert.ok(!(e instanceof EvmLagError), `refused as a lag after ${waits.length} waits: ${String((e as Error)?.message).slice(0, 200)}`);
+});
+
+test("review of the fold, P3-3: a source stopped at EVM_SOURCE_CALLS keeps its pages, so the next round reads on from them and ends", async () => {
+  const c = anyChain();
+  const broken = { getLogs: () => { throw new Error("RPC error -32000: internal error"); } };
+  const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", ...broken }), rpc(c, { url: "https://pocket.example", ...broken })];
+  const slowLog: string[] = [];
+  // 5,000-block pages over 2M blocks: 400 pages, past the bound in one round, under it in the next
+  const slow = rpc(c, { url: "https://slow.example", cap: 5_000, log: slowLog });
+  const s = evmTreeSync({ rpcs: seats, pin: PIN, history: [helperSrc(c), slow], ...noWait });
+  await assert.rejects(s.events(), /slow\.example.*more than \d+ log calls/);
+  const first = slowLog.length;
+  const r = await s.events();
+  assert.equal(r.events.length, 4);
+  assert.ok(!slowLog.slice(first).some((x) => x.startsWith("eth_getLogs") && x.includes('"fromBlock":"0x1"')), "the next round never reads the slow source from the deploy block again");
+});
+
+test("review of the fold, P3-3: a seat's refusals never shrink the same provider's page as a source", async () => {
+  const c = anyChain();
+  let n = 0;
+  // publicnode refuses its first 20 log calls (the seat's read, halved to one block), then answers
+  const blip = rpc(c, { url: "https://publicnode.example", getLogs: () => { if (n++ < 20) throw new Error("RPC error -32000: internal error"); } });
+  const r = await evmTreeSync({ rpcs: [blip, rpc(c, { url: "https://pocket.example", cap: 10_000, logs: pocketPruned })], pin: PIN, history: [helperSrc(c)], ...noWait }).events();
+  assert.equal(r.events.length, 4);
+});
