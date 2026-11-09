@@ -174,6 +174,20 @@ test("a job that runs only on pull_request is read as skipped on merge_group, an
   assert.throws(() => jobRuns("needs.plan.outputs.run == 'true'", "merge_group"));
 });
 
+// the required checks of main's ruleset (ci.yml's header names them): GitHub reads a skipped job as passed, so each
+// must run on a merge queue group as on a pull request
+const REQUIRED = ["gitleaks", "deep-import", "verify-gate", "money-gate", "test", "vault-sandbox"];
+test("ci.yml runs on merge_group, and every required check's job runs on it", () => {
+  const yml = readFileSync(CI, "utf8");
+  assert.match(yml, /^on:\n(?: {2}.*\n|#.*\n)*? {2}merge_group:\n {4}types: \[checks_requested\]\n/m);
+  for (const job of REQUIRED) {
+    const body = yml.split(new RegExp(`\n  ${job}:\n`))[1];
+    assert.ok(body, `ci.yml has no job ${job}`);
+    const jobIf = /^ {4}if: (.*)$/m.exec(body.split(/\n  [a-z][a-z0-9-]*:\n/)[0])?.[1] ?? "";
+    assert.ok(jobRuns(jobIf, "merge_group"), `${job} does not run on merge_group (if: ${jobIf})`);
+  }
+});
+
 // planted: a group step that runs its gate from merge_group.base_sha, the group's parent commit, which is the queue
 // entry ahead (not main) for every pull request but the first, runs that entry's copy of the gate
 test("planted: a group judged from base_sha, the queue entry ahead, runs that entry's gate, not main's", (t) => {
