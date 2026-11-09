@@ -23,6 +23,12 @@ const TESTNET_ONLY = [
   "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
   "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
 ];
+/** The mainnet pin's fee payer (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet, card sol-pools-mainnet-pin): the
+ *  testnet build must not carry it. The mainnet program EN1Wb2iW… and table BShWZ8Fb… stay in the testnet build, since
+ *  src/pool-testnet.ts's MAINNET_TABLE reads SOL_MAINNET_DEPLOY at module level, so a pure mark does not fold them out. */
+const MAINNET_ONLY = [
+  "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU", // the helper's mainnet fee payer
+];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {
   assert.deepEqual(NETWORKS, ["mainnet", "testnet"]);
@@ -44,6 +50,7 @@ test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {
   const text = (await bundle(undefined, { network: "testnet" })).js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
+  for (const s of MAINNET_ONLY) assert.ok(!text.includes(s), `the testnet bundle carries the mainnet pin's ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"));
 });
 
