@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "held-move-forgotten-tx";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade"; // SIGN_HOST by the hosts' name since hosts-main-on-top (main dfe122d2)
@@ -114,7 +115,7 @@ export function judge(rec) {
 /** Answers / and /app.js from this tree's committed build, with the CSP of its _headers' /* rule, as SIGN_HOST serves them. */
 export const localFetch = async (url) => {
   const p = new URL(url).pathname;
-  const file = p === "/" ? path.join(SIGNPAGE, "index.html") : p === "/app.js" ? path.join(SIGNPAGE, "public/app.js") : null;
+  const file = p === "/" ? path.join(signBuilt(), "index.html") : p === "/app.js" ? path.join(signBuilt(), "public/app.js") : null;
   if (file === null) return new Response("", { status: 404 });
   const csp = /^\/\*\n {2}Content-Security-Policy: (.*)$/m.exec(readFileSync(path.join(SIGNPAGE, "public/_headers"), "utf8"))?.[1] ?? "";
   return new Response(readFileSync(file), { status: 200, headers: p === "/" ? { "content-security-policy": csp } : {} });

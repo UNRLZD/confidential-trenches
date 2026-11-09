@@ -4,12 +4,12 @@
 // EVM testnets' RPCs. A network other than the two is refused.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { bundle, NETWORKS } from "./build-app.mjs";
+import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
-const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
+const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const TESTNET_ONLY = [
   "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
@@ -27,7 +27,7 @@ const TESTNET_ONLY = [
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {
   assert.deepEqual(NETWORKS, ["mainnet", "testnet"]);
   const { js } = await bundle();
-  assert.ok(js.equals(readFileSync(join(PKG, "public/app.js"))), "the mainnet bundle is the committed one");
+  assert.ok(js.equals(readFileSync(join(PKG, "public/app.js"))), "the mainnet bundle is the one built in the package");
   const text = js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(!text.includes(s), `the mainnet bundle carries ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"), "the network is folded at build time");

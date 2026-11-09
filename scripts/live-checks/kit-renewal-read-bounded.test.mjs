@@ -11,6 +11,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { judge, MARKERS, scriptsOf } from "./kit-renewal-read-bounded.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "kit-renewal-read-bounded.answers.json"), "utf8"));
@@ -105,7 +106,7 @@ test("the page's signer with its signing flag holds the kept-signatures marker; 
 });
 
 test("the committed bundle holds every marker", () => {
-  const js = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
+  const js = readFileSync(path.join(signBuilt(), "public/app.js"), "utf8");
   for (const [name, re] of Object.entries(MARKERS)) assert.match(js, re, name);
 });
 
