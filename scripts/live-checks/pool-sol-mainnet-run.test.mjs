@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { parseLive, RPCS } from "../ci/money-gate.mjs";
 import { RETRY } from "./provider-answer.mjs";
 import { check } from "./pool-sol-mainnet-run.mjs";
-import { findRun, GATE_RPCS, recordText } from "./pool-sol-mainnet-run.record.mjs";
+import { CLUSTERS, facts, findRun, GATE_RPCS, PUMP, PUMPSWAP, recordText } from "./pool-sol-mainnet-run.record.mjs";
 
 RETRY.ms = 0;
 
@@ -88,4 +88,18 @@ test("a window that ends before the exit: FAIL, no exit found", async () => {
 test("the two RPCs are the money gate's, for both clusters", () => {
   assert.deepEqual(GATE_RPCS.solana, RPCS.solana);
   assert.deepEqual(GATE_RPCS["solana-devnet"], RPCS["solana-devnet"]);
+});
+
+test("a buy whose pool call invokes PumpSwap is named a buy on PumpSwap, so the record shows which venue ran", () => {
+  // the dry run's recorded buy (tag 3 into pump's curve), its pump program key swapped for PumpSwap's
+  const sig = "4SbhuLRoDemBchGkAQ3cLhHfvaJcAcpWK4z37cVnNdcttDatmpjcsXS8jzQD6kBaUQR1xDMBQE3QXbzgyvm9YTi3";
+  const a = R.answers.find((x) => x.method === "getTransaction" && x.params[0] === sig && (x.text ?? "").includes('"result":{'));
+  const tx = JSON.parse(a.text).result;
+  assert.equal(facts(tx, CLUSTERS.devnet.program).venue, "pump.fun's curve");
+  assert.equal(facts(tx, CLUSTERS.devnet.program).tag, 3);
+  const swap = (k) => (k === PUMP ? PUMPSWAP : k);
+  const moved = structuredClone(tx);
+  moved.transaction.message.accountKeys = moved.transaction.message.accountKeys.map(swap);
+  for (const side of ["writable", "readonly"]) if (moved.meta.loadedAddresses?.[side]) moved.meta.loadedAddresses[side] = moved.meta.loadedAddresses[side].map(swap);
+  assert.equal(facts(moved, CLUSTERS.devnet.program).venue, "PumpSwap");
 });
