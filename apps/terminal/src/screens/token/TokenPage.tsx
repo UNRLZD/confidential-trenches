@@ -15,7 +15,7 @@ import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
 import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
-import { CHART_TFS, DEFAULT_TF, followCandles, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
+import { CHART_TFS, DEFAULT_TF, followFrom, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
 import type { Drawn, IndicatorId, Scale } from "./chart.ts";
@@ -181,7 +181,7 @@ function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf
     void loadCandles(ch, id, tf).then((d) => {
       if (!live) return;
       setData(d);
-      if (d.status === "ready" && d.own) stop = followCandles(ch, id, d, (r) => live && setData(r));
+      stop = followFrom(ch, id, tf, d, (r) => live && setData(r));
     });
     return () => {
       live = false;

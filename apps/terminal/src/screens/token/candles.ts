@@ -46,12 +46,12 @@ export interface Bar {
   volume: number;
 }
 
-/** `own`: the answer's newest bars are the helper's own chain reads (it names `own_from_s`), so the chart follows them
- *  live (followCandles). */
+/** `own`: the answer's newest bars are the helper's own chain reads (it names `own_from_s`). `held`: the helper
+ *  answered for the token (200, no bars yet), so its bars can still come; a 404 is a token it draws no candles for. */
 export type CandleData =
   | { status: "loading" }
   | { status: "error" }
-  | { status: "empty"; gecko: boolean }
+  | { status: "empty"; gecko: boolean; held: boolean }
   | { status: "ready"; tf: ChartTf; bars: Bar[]; gecko: boolean; precision: number; own: boolean };
 export type ReadyCandles = Extract<CandleData, { status: "ready" }>;
 
@@ -106,7 +106,7 @@ export function toCandleData(body: unknown, tf: ChartTf, headerSrc: string | nul
   }
   const gecko = isGecko(src);
   const own = Number.isSafeInteger(body.own_from_s) && (body.own_from_s as number) > 0;
-  return bars.length === 0 ? { status: "empty", gecko } : { status: "ready", tf, bars, gecko, precision: pricePrecision(bars), own };
+  return bars.length === 0 ? { status: "empty", gecko, held: true } : { status: "ready", tf, bars, gecko, precision: pricePrecision(bars), own };
 }
 
 /** Reads after a 429 (the helper's GeckoTerminal budget is shared by every page: apps/helper/src/data/gecko.ts), each
@@ -127,7 +127,7 @@ export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf
         await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
         continue;
       }
-      if (r.status === 404) return { status: "empty", gecko: false };
+      if (r.status === 404) return { status: "empty", gecko: false, held: false };
       if (r.status !== 200) return { status: "error" };
       return toCandleData(await r.json(), tf, r.headers.get(HELPER_SOURCE_HEADER)) ?? { status: "error" };
     }
@@ -276,4 +276,11 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     stopped = true;
     cancel();
   };
+}
+
+/** The follow a first read starts (card app-chart-live-stall), the one decision for every chain and timeframe: a ready
+ *  chart is followed; any other state is not. Returns the stop. */
+export function followFrom(chain: MarketChain, token: string, tf: ChartTf, d: CandleData, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
+  if (d.status === "ready" && d.own) return followCandles(chain, token, d, onBars, deps);
+  return () => undefined;
 }
