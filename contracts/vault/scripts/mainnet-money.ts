@@ -878,7 +878,11 @@ export async function recordRead(network: Network, hash: string, signer: string,
   const answers: { url: string; r: string; result?: any }[] = [];
   for (const url of list) {
     const out: { result?: any } = {};
-    answers.push({ url, r: await gate.readTx(fetchFn, url, tx, gate.FLOOR, pause, true, out), result: out.result });
+    // the gate's rule (moneyGate): a 429 is waited out only while the host could add a second operator, so a host
+    // whose operator already read it ok, or one asked after two operators have, is asked once and never waited
+    const ops = gate.okOperators(chain, answers);
+    const rateWait = ops.size < 2 && !ops.has(gate.operatorOf(chain, url));
+    answers.push({ url, r: await gate.readTx(fetchFn, url, tx, gate.FLOOR, pause, rateWait, out), result: out.result });
   }
   const said = answers.map((a) => `${a.r} on ${a.url}`).join(", ");
   if (answers.some((a) => /^(failed|old)/.test(a.r))) throw new Error(`${hash} (${signer}): ${said}`);
