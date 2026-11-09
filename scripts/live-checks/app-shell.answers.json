@@ -2494,7 +2494,7 @@
     }
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/f3/b-footer"
+  "shots": "<shots>"
  },
  "outageFooterPair": {
   "url": "https://ct-app.unrealized.trade",
@@ -3100,6 +3100,6 @@
     }
    }
   ],
-  "shots": "/private/tmp/claude-501/-Users-mackubucku-Downloads-confidential-trenches-public/ea20b68e-6f0c-4d79-a752-55d12a434757/scratchpad/rec/f3/b-pair"
+  "shots": "<shots>"
  }
 }
