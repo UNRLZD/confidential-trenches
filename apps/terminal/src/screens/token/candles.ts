@@ -34,7 +34,8 @@ export const CANDLES_LIMIT = 500;
 /** HELPER_HOST's candle read (the CSP's connect-src names the host, public/_headers). */
 export const CANDLES_URL = (chain: MarketChain, token: string, tf: ChartTf, limit = CANDLES_LIMIT) =>
   `https://ct-api.unrealized.trade/v1/market/candles?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}&tf=${TF_API[tf]}&limit=${limit}`;
-const TIMEOUT_MS = 10_000;
+/** The longest a candle read waits for its answer. */
+export const TIMEOUT_MS = 10_000;
 
 /** One bar as the chart draws it: time in ms, USD numbers. */
 export interface Bar {
@@ -145,8 +146,8 @@ export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf
 // read every second), so the page never prices a trade itself and a read of the newest bars costs the helper no call to
 // anyone. Every chart the helper holds is followed (followFrom, card app-chart-live-stall). While an answer names none
 // of the helper's own bars (`own_from_s`: a token it opened on that very read, or lost a while, a restart) the chart is
-// read in full once a minute until they come, since bars not its own are GeckoTerminal's (5 calls per 75 s shared by
-// every page; the helper keeps the newest range a minute), then live again.
+// read in full every AWAY_MS until they come, since bars not its own are GeckoTerminal's (5 calls per 75 s shared by
+// every page; the helper keeps the newest range a minute, so tabs reading it faster cost it no more), then live again.
 
 /** The page's read interval: the helper's own tick (TICK_MS in apps/helper/src/data/evm/swaps.ts; createSolanaTrades
  *  tickMs, 1 s), so no read waits on bars the helper does not hold yet. */
@@ -167,6 +168,14 @@ export const LIVE_LIMIT_1S = 16;
  *  again, a restart), and its older bars then differ from the ones drawn (two of the three recorded tapes,
  *  test/chart-live/, Base and Robinhood 2026-11-05 12:00-12:02Z). The full read folds by the same rule. */
 export const RESYNC_MS = 60_000;
+/** The wait before the next full read while the helper names none of its own bars (card app-chart-live-stall). The
+ *  helper drops a token's book no read touched for its IDLE_MS (60 s, apps/helper/src/data/solana/trades.ts and
+ *  evm/swaps.ts); two away reads are AWAY_MS plus the last one's answer time (at most TIMEOUT_MS) apart, plus their
+ *  transit and the helper's 1 s tick, so 45 s keeps the book open with 5 s to spare. At 60 s each read came just past
+ *  it and reopened a quiet token's book: on Solana a mint read, a stream subscription, a signatures read and up to
+ *  COLD_SIGS (30) transaction reads (trades.ts first and walk), with the trades between two reads missed by the
+ *  stream. 50 s would leave no room once a read takes its whole TIMEOUT_MS. */
+export const AWAY_MS = 45_000;
 
 /** Two bars alike, field for field. */
 export const sameBar = (a: Bar, b: Bar): boolean => a.timestamp === b.timestamp && a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close && a.volume === b.volume;
@@ -232,9 +241,9 @@ const laterReal = (fn: () => void, ms: number): (() => void) => {
  * failed or refused read keeps the bars drawn and waits longer each time (doubling from LIVE_MS, a 429's Retry-After,
  * at most LIVE_BACKOFF_MAX_MS). An answer with none of the helper's own bars (a helper just restarted or deployed has
  * not read the token's book yet; its newest bars would be GeckoTerminal's) is folded like any other and the next read
- * is a full one RESYNC_MS later, so GeckoTerminal is read at most once a minute, and live reads resume once the
- * helper's own bars are back. A chart whose first answer names none of them starts that way: its first read is a full
- * one RESYNC_MS later. Returns the stop.
+ * is a full one AWAY_MS later (the helper keeps GeckoTerminal's newest range a minute, so it reads GeckoTerminal at
+ * most once a minute for it), and live reads resume once the helper's own bars are back. A chart whose first answer
+ * names none of them starts that way: its first read is a full one AWAY_MS later. Returns the stop.
  */
 export function followCandles(chain: MarketChain, token: string, ready: ReadyCandles, onBars: (r: ReadyCandles) => void, deps: FollowDeps = {}): () => void {
   const now = deps.now ?? Date.now;
@@ -271,9 +280,9 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
       onBars(cur);
     }
     away = !got.own;
-    next(away ? RESYNC_MS : LIVE_MS);
+    next(away ? AWAY_MS : LIVE_MS);
   }
-  next(away ? RESYNC_MS : LIVE_MS);
+  next(away ? AWAY_MS : LIVE_MS);
   return () => {
     stopped = true;
     cancel();
