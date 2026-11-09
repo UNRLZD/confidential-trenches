@@ -56,7 +56,6 @@ import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, sett
 import { buyWallets, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
-import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -83,12 +82,17 @@ export const TESTNET_RPCS: Readonly<Record<PoolChain, readonly [string, string]>
  *  other directly; both with the page's retry. */
 export const testnetRpc = (url: string): SolanaRpc => (url.startsWith(`${TRADE_HELPER}/`) ? solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY, init: HELPER_FETCH_INIT }) : pageRpc(url));
 const EVM_TESTNET = /* @__PURE__ */ Object.freeze({ base: "base-sepolia", robinhood: "robinhood-testnet" } as const);
-/** An EVM chain's pool list as the page reads it, the pool sync's seats first and its spares after: the testnet pair in
- *  the testnet build; on mainnet the kit's pool list (evmPoolProvidersOf, card evm-pool-lists-mainnet), whose seats page
- *  the pool's logs from its deploy block, never the quote list's 10-block blastapi. SIGN_HOST's connect-src allows each
- *  (scripts/live-checks/page-evm-rpc-csp.mjs reads both). */
-export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] =>
-  POOL_TESTNET ? TESTNET_RPCS[chain] : (evmPoolProvidersOf(evmPoolVenues()[chain]) ?? []);
+/** Each EVM chain's mainnet pool list, the pool sync's seats first (card evm-pool-lists-mainnet): the kit's
+ *  evmPoolProvidersOf(evmPoolVenues()[chain]), copied, as TESTNET_RPCS copies the testnet pairs, since the venue table
+ *  carries every network's providers and SIGN_HOST's build carries no testnet one (scripts/build-network.test.mjs);
+ *  test/pool-restore.test.ts holds each equal to the kit's. Its seats page the pool's logs from its deploy block, never
+ *  the quote list's 10-block blastapi; SIGN_HOST's connect-src allows each (scripts/live-checks/page-evm-rpc-csp.mjs). */
+export const MAINNET_POOL_RPCS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
+  base: /* @__PURE__ */ Object.freeze(["https://base-rpc.publicnode.com", "https://base.api.pocket.network"]),
+  robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network"]),
+});
+/** An EVM chain's pool list as the page reads it: the testnet pair in the testnet build, MAINNET_POOL_RPCS on mainnet. */
+export const pageEvmPoolUrls = (chain: "base" | "robinhood"): readonly string[] => (POOL_TESTNET ? TESTNET_RPCS[chain] : MAINNET_POOL_RPCS[chain]);
 /** The pool list as RPCs (pageRpc each, testnetRpc on the testnet build), or null with fewer than two. */
 export const pageEvmPoolRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] | null => {
   const urls = pageEvmPoolUrls(chain);

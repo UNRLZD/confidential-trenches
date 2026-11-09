@@ -24,6 +24,8 @@ import { APP_ORIGIN, startApi } from "../src/api.ts";
 import * as restoreKind from "../src/pool-restore.ts";
 import { idsUndone, lanesOf, pagePools, POOL_CHAIN_UNREAD, poolRestore, RESTORE_BEAT_MS, RESTORE_LOCK, type PoolRestoreHost, type RestorePool } from "../src/pool-restore.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
+import { evmPoolProvidersOf, evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { MAINNET_POOL_RPCS, pageEvmPoolUrls } from "../src/pool-testnet.ts";
 import { RESTORE_GAP, walkEnd, writeRestored, type SeedUse } from "../../wallet/src/notes/restore.ts";
 
 const SOL_SCOPE = 11n;
@@ -601,4 +603,14 @@ test("planted (review P3-5): `ended` is told once on an abort and on a floor wri
   assert.equal(b.ends.length, 1);
   assert.equal(b.ends[0]!.stage, "stalled");
   assert.match(b.ends[0]!.why.join("\n"), /^the restore stopped: note .* in the store has another precommitment$/m);
+});
+
+// card evm-pool-lists-mainnet: the page's mainnet pool lists are the kit's (evmPoolProvidersOf), seats first, and the
+// restore and the deposit read them; copied so SIGN_HOST's build carries no testnet provider (build-network.test.mjs)
+test("the page's mainnet EVM pool lists are the kit's pool lists, on both chains, and the mainnet page reads them", () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    assert.deepEqual(MAINNET_POOL_RPCS[chain], evmPoolProvidersOf(evmPoolVenues()[chain]), chain);
+    assert.ok(Object.isFrozen(MAINNET_POOL_RPCS[chain]), `${chain}: frozen`);
+    assert.equal(pageEvmPoolUrls(chain), MAINNET_POOL_RPCS[chain], `${chain}: the mainnet page reads it`);
+  }
 });
