@@ -4,6 +4,8 @@ import { busy, outcome, poolSellAsk, progress, READY, tap } from "../trade/model
 import type { Phase } from "../trade/model.ts";
 import { useTradeSource } from "../trade/source.tsx";
 import type { PartCount } from "../trade/States.tsx";
+import { baseUnits, sellLocked } from "./model.ts";
+import type { Tapped } from "./model.ts";
 
 // What the sell side reads and does. The sell is the kit's own `buy` request with `side: "sell"` (messages.ts
 // SignpageParams.buy) through the trade box's source (src/screens/trade/source.tsx: the same TradeKit stub, `request`
@@ -45,18 +47,27 @@ export interface Sell {
   phase: Phase;
   /** The share the running or last sell asked for, in basis points. */
   bps: number | null;
-  /** The kit can take a sell now. */
+  /** The kit can take a sell now: no sell is open on the device and the last one's end has reached the row (sellLocked). */
   ready: boolean;
+  /** A sell's lock holds (model.ts sellLocked): the row drawn may be what was held before a sell. */
+  locked: boolean;
   /** The sell goes into the chain's pool: its proceeds land back in the pool (pool.sell). */
   pool: boolean;
   /** A part-filled sell's count of slices, when the kit gives it (TradeKit.part, not in the kit yet). */
   part: PartCount | null;
   now(): number;
-  /** Sells `amount` (token units) as `bps` of the position; nothing while a sell runs or with no amount. */
-  sell(amount: string | null, bps: number): void;
+  /** Sells `amount` (token units) as `bps` of the position; nothing while a sell runs or with no amount. `decimals` is the
+   *  token's (the token read's): the vault's sell takes whole base units, so with none it is refused here, never sent. */
+  sell(amount: string | null, bps: number, decimals?: number | null): void;
 }
 
-export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
+/** The holding each sell was tapped on (chain, token, units), by its request id, kept for the page: a box mounted again
+ *  reads them (sellLocked). A refused sell leaves it; a reload starts it empty. */
+const TAPPED = new Map<string, Tapped>();
+let refusedHere = 0;
+
+/** `units` is the row's units now (null with no row): the sell's lock reads it (model.ts sellLocked). */
+export function useSell(chain: Chain, token: string, slippageBps = 1000, units: string | null = null): Sell {
   const src = useTradeSource();
   const { kit, moneyOn } = src;
   const [phase, setPhase] = useState<Phase>(READY);
@@ -81,25 +92,44 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000): Sell {
     return () => clearInterval(t);
   }, [phase.k]);
 
-  const ready = moneyOn && kit.request !== null;
+  // a tapped sell the record has shown once is the record's from then on (sellLocked)
+  for (const o of src.snapshot.state?.ops ?? []) {
+    const t = TAPPED.get(o.id);
+    if (t && !t.seen) TAPPED.set(o.id, { ...t, seen: true });
+  }
+  const locked = sellLocked(phase, src.snapshot, { chain, token, units }, TAPPED);
+  const ready = moneyOn && kit.request !== null && !locked;
   return {
     phase,
     bps,
     ready,
+    locked,
     pool: poolSellAsk(src.snapshot.state?.pools, chain, token, "0", slippageBps) !== null,
     part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
-    sell(amount, b) {
+    sell(amount, b, decimals = null) {
       if (!ready || amount === null || busy(ref.current)) return;
       // a chain whose pool the signing page reports sells into it: the proceeds go back into the pool in the same
-      // transaction (card trade-box-pool); other chains keep the vault's sell
+      // transaction (card trade-box-pool); other chains keep the vault's sell, in whole base units (trade.ts UNITS)
       const ask = poolSellAsk(src.snapshot.state?.pools, chain, token, amount, slippageBps);
-      const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount, slippage_bps: slippageBps });
+      const base = baseUnits(amount, decimals);
+      if (!ask && base === null) {
+        // no decimals read (or a share finer than the token's): the vault would refuse it, so nothing is sent
+        const next: Phase = { k: "ended", id: `refused-here-${++refusedHere}`, at: src.now(), stage: "refused", code: "not_allowed" };
+        ref.current = next;
+        setPhase(next);
+        setBps(b);
+        return;
+      }
+      const h = ask ? kit.request!(ask.kind, ask.params) : kit.request!("buy", { chain, token, side: "sell", amount: base!, slippage_bps: slippageBps });
+      TAPPED.set(h.id, { chain, token, units });
       const next = tap(ref.current, h.id, src.now());
       ref.current = next;
       setPhase(next);
       setBps(b);
       void h.outcome.then((o) => {
+        // a refusal sold nothing: its holding is not held for it (a client timeout says nothing yet, so it stays)
+        if (!o.ok && o.error.code !== "client_timeout") TAPPED.delete(h.id);
         const at = src.now();
         setPhase((p) => outcome(p, h.id, o, at));
       });
