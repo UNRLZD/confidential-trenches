@@ -493,6 +493,108 @@ test("planted: a group judged from a main that already holds its first pull requ
   }
 });
 
+// ---------- GitHub hard-wraps a queued pull request's description at 72 characters in the group's merge commit ----------
+
+// GitHub's wrap as the group commits show it: each line of the description, greedily, at most 72 characters a line
+const wrap72 = (text) =>
+  text.split("\n").map((line) => {
+    const out = [];
+    for (const w of line.split(" ")) {
+      if (out.length && [...out.at(-1)].length + 1 + [...w].length <= 72) out[out.length - 1] += ` ${w}`;
+      else out.push(w);
+    }
+    return out.join("\n");
+  }).join("\n");
+
+test("wrap72 writes PR 540's description as GitHub wrote it in group commit 3de09186", () => {
+  const body = "Card exit-withdraw: Nov 6 · The exit tool proves on the device and sends each withdrawal itself from its own one-use account, then closes that account to the typed one\n\nLive check: exit-withdraw: none (no deploy, the exit tool runs on the user's device)";
+  assert.equal(
+    wrap72(body),
+    "Card exit-withdraw: Nov 6 · The exit tool proves on the device and sends\neach withdrawal itself from its own one-use account, then closes that\naccount to the typed one\n\nLive check: exit-withdraw: none (no deploy, the exit tool runs on the\nuser's device)",
+  );
+});
+
+const long = "A plan for every screen the terminal shows, written before a line of its code, read by people.";
+
+test("a description GitHub wrapped at 72 exempts its card, keyed or bare (PR 540's group)", () => {
+  for (const line of ["Live check: docs-plan: none (no deploy, the plan is read by people and nothing runs it)", "Live check: none (no deploy, the plan is read by people and nothing at all runs it)"]) {
+    const body = wrap72(`${long}\n\n${line}`);
+    assert.match(body, /^Live check: .*\n[^\n]+\)$/m); // wrapped across two lines
+    const q = group([shell, { ...plan, body }]);
+    try {
+      const out = verifyGroup(q.r.dir, q.main, q.head);
+      assert.deepEqual(out.refusals, []);
+      assert.deepEqual(out.cards.sort(), ["app-shell", "docs-plan"]);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
+test("planted: a wrapped exemption naming another card does not exempt this one", () => {
+  const q = group([{ ...plan, body: wrap72(`${long}\n\nLive check: app-copy: none (no deploy, the plan is read by people and nothing runs it)`) }]);
+  try {
+    assert.match(groupRefusals(q), /card docs-plan has no live check/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a wrapped exemption with an empty reason is refused; the same with a reason passes", () => {
+  const key = "docs-plan-of-every-screen-the-terminal-shows-on-a-phone";
+  const pr = (reason) => ({ n: 4, title: `Card ${key}: merge (a plan)`, body: wrap72(`Live check: ${key}: none (${reason})`), commits: [[`Card ${key}: a plan`, { "docs/plans/app.md": "# app\n" }]] });
+  for (const reason of [" ", ""]) {
+    const q = group([pr(reason)]);
+    try {
+      assert.match(q.r.g("log", "-1", "--format=%b", q.head), /^Live check: [^\n]+:\nnone \(/m); // "none (" wrapped onto its own line
+      assert.match(groupRefusals(q), new RegExp(`card ${key} has no live check`));
+    } finally {
+      q.r.done();
+    }
+  }
+  const q = group([pr("docs only")]);
+  try {
+    assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, []);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("two Live check lines one after the other, each wrapped, each exempt their own card alone", () => {
+  const two = { n: 5, title: "Card docs-plan: merge (a plan and copy)", commits: [["Card docs-plan: a plan", { "docs/plans/app.md": "# app\n" }], ["Card app-copy: copy", { "apps/terminal/src/copy.ts": "export {}\n" }]] };
+  const lines = (second) => wrap72(`${long}\n\nLive check: docs-plan: none (no deploy, the plan is read by people and nothing runs it)\nLive check: ${second}: none (the words ship with the next deploy of the terminal's screens)`);
+  const q = group([{ ...two, body: lines("app-copy") }]);
+  try {
+    assert.equal(q.r.g("log", "-1", "--format=%b", q.head).split("\n").filter((l) => l.startsWith("Live check:")).length, 2);
+    const out = verifyGroup(q.r.dir, q.main, q.head);
+    assert.deepEqual(out.refusals, []);
+    assert.deepEqual(out.cards.sort(), ["app-copy", "docs-plan"]);
+  } finally {
+    q.r.done();
+  }
+  const bad = group([{ ...two, body: lines("app-shell") }]);
+  try {
+    const out = groupRefusals(bad);
+    assert.match(out, /card app-copy has no live check/);
+    assert.doesNotMatch(out, /card docs-plan/);
+  } finally {
+    bad.r.done();
+  }
+});
+
+test("planted: a Live check quoted mid-line, which GitHub's wrap moves to a line start, is no exemption, as on the pull request", () => {
+  const prose = "The gate's hint for a pull request with nothing live, if it needs one: Live check: none (docs only)";
+  const body = wrap72(prose);
+  assert.match(body, /\nLive check: none \(docs only\)$/); // the wrap put it at a line start
+  const q = group([{ ...plan, body }]);
+  try {
+    assert.match(groupRefusals(q), /card docs-plan has no live check/);
+    assert.match(refusals(q.r, `${q.head}^1`, `${q.head}^2`, prose), /card docs-plan has no live check/); // the PR path refuses it too
+  } finally {
+    q.r.done();
+  }
+});
+
 // main's verify gate runs from scripts/ alone (ci.yml verify-gate: git archive "$BASE" scripts), so what it imports reads
 // nothing outside scripts/: sign-build-inputs.mjs loads in a folder that holds scripts/ci/ and nothing else (a read of the
 // kit's prover names there, delta review P3-2, would break main's gate; release.test.mjs holds the names instead)
