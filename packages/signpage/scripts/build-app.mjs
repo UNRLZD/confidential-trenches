@@ -226,7 +226,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   };
   const out = arg("--out");
   const pkg = arg("--pkg") ?? PKG;
-  const { js, html, worker, thread } = await bundle(pkg);
+  // --network testnet: the testnet build (Solana devnet, Base Sepolia, Robinhood testnet), for a devnet browser run
+  // into --out only (card app-a2-e2e); never the package's own public/, which SIGN_HOST's deploy reads
+  const network = arg("--network") ?? "mainnet";
+  if (network !== "mainnet" && !out) {
+    console.error("build-app: --network testnet needs --out");
+    process.exit(2);
+  }
+  const { js, html, worker, thread } = await bundle(pkg, { network });
   const files = outputFiles({ js, html, worker, thread }, Boolean(out));
   const dir = out ?? pkg;
   // each file is written beside itself and renamed into place, so a reader in another process (node --test runs test

@@ -3,7 +3,9 @@
 // testnet pin or provider; the testnet build carries the devnet pool's program and fee payer, the devnet RPCs and the
 // EVM testnets' RPCs. A network other than the two is refused.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { bundle, NETWORKS } from "./build-app.mjs";
@@ -49,4 +51,27 @@ test("the testnet build carries the devnet pool's pins and the testnet providers
 
 test("a network that is not mainnet or testnet is refused", async () => {
   await assert.rejects(bundle(undefined, { network: "devnet" }), /network: mainnet or testnet/);
+});
+
+// The CLI's --network (card app-a2-e2e, a devnet browser run in H-app): with no flag, --out holds SIGN_HOST's build byte
+// for byte; only --network testnet gives the testnet build, and only into --out, never the package's public/.
+const CLI = join(import.meta.dirname, "build-app.mjs");
+const cli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
+test("build-app's CLI builds mainnet unless --network testnet is named, and testnet only into --out", () => {
+  const plain = mkdtempSync(join(tmpdir(), "ct-build-net-"));
+  const testnet = mkdtempSync(join(tmpdir(), "ct-build-net-"));
+  try {
+    assert.equal(cli(["--out", plain]).status, 0);
+    assert.ok(readFileSync(join(plain, "app.js")).equals(readFileSync(join(PKG, "public/app.js"))), "no flag: the mainnet bundle, byte for byte");
+    assert.equal(cli(["--out", testnet, "--network", "testnet"]).status, 0);
+    const text = readFileSync(join(testnet, "app.js"), "utf8");
+    for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `--network testnet lacks ${s}`);
+    const into = cli(["--network", "testnet"]);
+    assert.equal(into.status, 2, "--network testnet with no --out is refused");
+    assert.match(into.stderr, /--network testnet needs --out/);
+    assert.ok(readFileSync(join(PKG, "public/app.js")).toString("utf8").includes(TESTNET_ONLY[0]) === false, "the package's public/app.js is still the mainnet build");
+  } finally {
+    rmSync(plain, { recursive: true, force: true });
+    rmSync(testnet, { recursive: true, force: true });
+  }
 });
