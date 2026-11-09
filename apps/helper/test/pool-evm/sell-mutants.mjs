@@ -157,7 +157,9 @@ export const MUTANTS = [
   [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector", "fee_recipient: feeRecipient, sell_sender: sender, fee_collector", T, "the fee answer names"],
   [EVM, "fee_collector: feeCollector ?? null, epoch_ms", "fee_collector: feeRecipient, epoch_ms", T, "the fee answer names"],
   // fold 1, H1: a sale that did not land frees its (W, nonce), on both providers' reads, capped per W
-  [EVM, '    if (status.includes("0x0")) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
+  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (false) return "reverted";', T, "a sale that reverted or was dropped"],
+  // card helper-judge-two-agree: reverted only on both providers' receipts in one block, never on one provider's
+  [EVM, '    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";', '    if (status.includes("0x0")) return "reverted";', T, "a sale that reverted or was dropped"],
   [EVM, '    if (status.includes("0x1")) return "waiting";', "", T, "a sale that reverted or was dropped"],
   [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "", T, "a sale that reverted or was dropped"],
   // the drop margin: a clock up to 60 s ahead of the chain's never frees (W, nonce) while the first sale can land
@@ -165,7 +167,7 @@ export const MUTANTS = [
   [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "    if (Math.floor(now()) < deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", T, "a dropped sale is freed at 61 s past"],
   [EVM, "export const EVM_SELL_DROP_MARGIN_MS = 60_000;", "export const EVM_SELL_DROP_MARGIN_MS = 58_000;", T, "a dropped sale with our clock 59 s ahead"],
   [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', '    return tx.some((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', T, "a sale that reverted or was dropped"],
-  [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const status', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const status', T, "a sale that reverted or was dropped"],
+  [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const got', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const got', T, "a sale that reverted or was dropped"],
   // fold 1, H2.1: only a route the kit's sell builder makes (the kit's own checks: packages/kit/test/evm-sell-route-of.test.ts)
   [EVM, "      evmSellRouteOf(sellChain, { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data });", "      void { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data };", T, "bad_route:"],
   // fold 1, H2.2: the unpaid-gas caps
