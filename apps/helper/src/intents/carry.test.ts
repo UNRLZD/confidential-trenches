@@ -2344,3 +2344,84 @@ test("R4-recv-claim: a receiver claim freed by another request's lookup, its own
   assert.deepEqual([b, aa], ["registration_failed", "in_flight"]);
   assert.deepEqual([rec.sent, rec.registration, regsOf(s)], [1, null, 1], "one paid slot counted, the reservation back once");
 });
+
+test("R4-settle-own: U's earlier tx read ran but U unregistered past the settle time, judged by three polls at once: one try, reported once", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), own: { receiver: u, state: "landed", tx: T, at: NOW } });
+  s.store.owe({ signer: u, tries: 0, next_ms: 0 });
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return { kind: "final", tx_hash: t.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] };
+  };
+  const polls = [0, 1, 2].map(() => s.carry.registerSeen(u));
+  await until(() => calls === 3);
+  g.open();
+  const answers = (await Promise.all(polls)).sort();
+  const owed = s.store.owed(u)!;
+  s.store.close();
+  assert.deepEqual(answers, ["in_flight", "in_flight", "registration_failed"]);
+  assert.deepEqual([owed.tries, owed.next_ms - s.clock.ms, s.r.sent.length], [1, SWEEP_MS * 2, 0]);
+});
+
+test("R4-claim-own: U's claim freed by another poll's read of its tx (final failed), the claim's own read then failed too: one try, reported once", async () => {
+  const s = setup({ outcome: (a) => (a.method === "storage_deposit" ? "held" : "ran") });
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/${u}`, "null");
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    const x = s.r.sent.find((y) => y.tx.tx_hash === t.tx_hash);
+    if (x?.action.method !== "storage_deposit") return resolve(t, o);
+    if (++calls === 1) await g.p; // A's settle read, parked
+    return failedFinal(t);
+  };
+  const a = s.carry.registerSeen(u);
+  await until(() => calls === 1);
+  assert.equal(await s.carry.registerSeen(u), "registration_failed", "B read A's tx failed and freed it");
+  g.open();
+  const aa = await a;
+  const owed = s.store.owed(u)!;
+  const own = s.store.signer(u).own;
+  s.store.close();
+  assert.equal(aa, "in_flight", "the failure is B's to report");
+  assert.deepEqual([owed.tries, own, regsOf(s)], [1, null, 1]);
+});
+
+test("R4-recv-settle: a receiver's earlier tx read ran but the receiver unregistered past the settle time, judged by two requests: one registration_failed, the reserved slot back once", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.chain.storage.set(`${USDC}/fresh.near`, "null");
+  const T = earlierTx();
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { id: "r1", receiver: "fresh.near", state: "pending", tx: T, reserved: true, at: NOW } });
+  s.clock.ms = NOW + OWN_SETTLE_MS + 1;
+  const g = gateP();
+  let calls = 0;
+  const resolve = s.r.resolve;
+  s.r.resolve = async (t: TxRef, o: { resend: boolean }) => {
+    if (t.tx_hash !== T.tx_hash) return resolve(t, o);
+    calls++;
+    await g.p;
+    return { kind: "final", tx_hash: t.tx_hash, receipts: [{ executor: USDC, ok: true, failure: "", height: 1n }] };
+  };
+  const both = [s.carry.carry(signedIntent(u, withdraw("fresh.near"))), s.carry.carry(signedIntent(u, withdraw("fresh.near")))];
+  await until(() => calls === 2);
+  g.open();
+  const codes = (await Promise.all(both)).map(code).sort();
+  const rec = s.store.signer(u);
+  s.store.close();
+  assert.deepEqual(codes, ["in_flight", "registration_failed"]);
+  assert.deepEqual([rec.sent, rec.registration, s.r.sent.length], [1, null, 0]);
+});
