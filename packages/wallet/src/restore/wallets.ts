@@ -19,7 +19,8 @@
 //   moves up to it), so a failure never ends a lane early nor lets step 7 name an index that may hold a lost store's
 //   send; once DEPOSIT_ID_MARGIN reads of a lane fail with no read showing history between them (so DEPOSIT_ID_MARGIN
 //   in a row among them), step 5 stops with an error naming the lane, so a provider that keeps failing ends the
-//   restore, to be retried, instead of reading on toward 2^32. Ids with history (or unread) past the note walk's end
+//   restore, to be retried, instead of reading on toward 2^32. The pair disagreeing on an id at its block (PairDisagrees)
+//   stops step 5 at that id, naming the provider that would read on: one liar never moves a lane. Ids with history (or unread) past the note walk's end
 //   (NoteRestore laneWalked) end that lane's reads there: the lane returns the index as its `reach`, and restoring
 //   again with it (restoreNotes `reach`) walks the notes to it and reads the ids on from there. Nothing loops on its own.
 // - Step 7, after the restore: the new store draws its own lane when it opens (../store/index.ts). Its deposit counter
@@ -33,7 +34,7 @@ import { freshWallet, type Chain } from "../derive/index.ts";
 import { depositAccount } from "../deposit/account.ts";
 import { RESTORE_LANES, type NoteRestore, type SeedUse, withSeed } from "../notes/restore.ts";
 import { refKey } from "../notes/store.ts";
-import { isRestorePass, type RestorePass } from "./id-reader.ts";
+import { isRestorePass, PairDisagrees, type RestorePass } from "./id-reader.ts";
 
 /** The tags of an arm's own wallets, and of its hop targets (wallet.md l.91-100). */
 export const ARM_TAGS = ["sol", "evm", "near"] as const satisfies readonly Chain[];
@@ -74,8 +75,10 @@ export type HistoryReader = (chain: HistoryChain, address: string) => Promise<bo
  *   never-used id has none; 1Click's delivery registers it) or view_account(U) answers an account. has_public_key is no
  *   proof (true for every implicit id, D15), nor is is_nonce_used (intents.near prunes V1 nonces past their deadline),
  *   nor a token listed at 0 (intents.near deletes a balance that falls to 0).
- * - Both providers are read and the stronger answer taken (money over used over unused), each id at one block.
- * - "unused": only when no read on either provider shows money or a trace.
+ * - Both providers are read, each id at one block. Two answers that differ there throw PairDisagrees (one of the pair
+ *   is wrong at one block): step 5 stops at once, naming the provider that would have read on (card
+ *   wallet-id-reader-paced). One provider failing while the other shows money is money.
+ * - "unused": only when both providers answer that no read shows money or a trace.
  * - An indexer is a server's word: it may say used, never unused.
  * - Throws when it cannot tell (after its retries): step 5 counts the id as failed, never as unused.
  */
@@ -250,6 +253,9 @@ export async function restoreDepositIds(
         state = await holds(id);
         if (state !== "money" && state !== "used" && state !== "unused") throw new Error("the read answered neither money, used nor unused");
       } catch (e) {
+        // the pair disagrees at one block: one of them is wrong, so nothing either says is taken and the restore stops
+        // here, naming it, never reading on at one liar's word (card wallet-id-reader-paced)
+        if (e instanceof PairDisagrees) throw new PairDisagrees(e.stronger, `lane ${lane}: at index ${i}, ${e.message}, to be retried`);
         unread.push({ i, id, error: why(e) });
         highest = Math.max(highest ?? i, i);
         if (++failed >= margin) throw new Error(`lane ${lane}: ${failed} id reads failed with none showing history between them (the last at index ${i}: ${why(e)}); the restore stops, to be retried`);
