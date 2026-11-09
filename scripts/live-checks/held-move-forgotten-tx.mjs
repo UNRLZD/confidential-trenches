@@ -38,7 +38,8 @@ export const OLD_TX = { hash: "HtFfu1gbhPxKv1QyBFBbbRRAGenYgdSVzwagQB49iiiY", si
 /** The record's key for archival host i (a place, not the host: see MARKERS). */
 export const HOSTS = ARCHIVAL.map((_, i) => `archival_${i}`);
 /** This card's strings in the bundle, as the minifier writes them: the archival hosts, the move's archival rule, the
- *  kit version the page reads in full (1.6: a deposit's moved_out fact) and the kit-v1.5 level that leaves it out. */
+ *  kit version the page reads in full (1.6: a deposit's moved_out fact; from kit-v1.7, kit-v1.6's own level) and the
+ *  kit-v1.5 level that leaves it out. */
 export const MARK = Object.freeze({
   archival_0: ARCHIVAL[0],
   archival_1: ARCHIVAL[1],
@@ -70,7 +71,9 @@ export const MARK = Object.freeze({
   // delta review 10, F1: a landed move that marked no op of U answers moved only at MIN_DEPOSIT or more (dust is nothing
   // to move); delta review 11, F1: on what U held, the move's amount + 1 (a build flooring the moved amount has none)
   dust_floor: /\.amount\)\+1n>=[\w$]+\.MIN_DEPOSIT\?\{kind:`moved`/g,
-  kit_1_6: "`1.6`.split(",
+  // card pool-deposit-stages: kit-v1.6 reads the moved_out fact in full, as the version the page reads everything at
+  // (release-94 to 107) or, once the page reads kit-v1.7 in full, as kit-v1.6's own level, which keeps moved_out
+  kit_1_6: /`1\.6`\.split\(|\(1,6\)\?`1\.6`:/g,
   level_1_5: "`1.5`",
 });
 /** The markers' names, as the record keys their counts (a name, not the host: a record naming both archival hosts in one

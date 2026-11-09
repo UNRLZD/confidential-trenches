@@ -197,3 +197,12 @@ test("a 429 is asked again after its Retry-After (10 s with none, 30 s at most),
     assert.equal(waits.length, 3 * 2 * HOSTS.length);
   }
 });
+
+test("card pool-deposit-stages: kit_1_6 counts kit-v1.6 read in full (release-94 to 107) or kit-v1.6's own level (kit-v1.7 on), never a page with neither", () => {
+  const count = (t) => [...t.matchAll(MARK.kit_1_6)].length;
+  assert.equal(count("hl=`1.6`.split(`.`).map(Number)"), 1, "release-107: 1.6 read in full");
+  assert.equal(count("return i(hl[0],hl[1])?`current`:i(1,6)?`1.6`:i(1,5)?`1.5`:`1.4`}"), 1, "kit-v1.7: kit-v1.6's own level");
+  assert.equal(count("hl=`1.5`.split(`.`).map(Number);return i(hl[0],hl[1])?`current`:`1.4`}"), 0, "kit-v1.6 read at no level of its own");
+  assert.equal(count("i(1,6)?`1.5`:"), 0, "kit-v1.6 read at kit-v1.5's level");
+  assert.equal(answers.good.app.markers.kit_1_6, 1, "this build: the level");
+});
