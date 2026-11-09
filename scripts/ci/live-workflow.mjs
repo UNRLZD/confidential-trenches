@@ -25,7 +25,8 @@
 //   - the two runner steps are held whole (SINGLE_STEP, SERIAL_STEP): the runner line is the step's only command and
 //     writes the log itself, so no `|| true`, `; exit 0`, tee without pipefail or line before it turns a red job green; no
 //     other line of the check job runs a check; no continue-on-error, shell or defaults key anywhere; the live job fails on a check job that
-//     did not succeed (review of 9eaf059a, P2-1);
+//     did not succeed (review of 9eaf059a, P2-1); no NODE_OPTIONS, GITHUB_ENV or GITHUB_PATH (a node hook or a node of its
+//     own that sets the exit), and no line but the held ones names .live-runner (delta re-check of 9b2c8b10, P3);
 //   - the runners come from the workflow's own commit (RUNNER_CHECKOUT: github.workflow_sha into .live-runner, a sparse
 //     checkout of RUNNER_FILES, the runners and every file they import), the checks from the deployed one, so a dispatch
 //     of a commit older than the runners still runs (review of 9eaf059a, P2-2);
@@ -189,6 +190,18 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   for (const [n, l] of uncommented(text)) {
     if (/^\s*-?\s*continue-on-error:/.test(l)) p.push(`${file}:${n}: continue-on-error: a job or step that may fail and still read as success (the live job reads needs.check.result)`);
     if (/^\s*-?\s*(?:shell|defaults):/.test(l)) p.push(`${file}:${n}: a shell or defaults key: a step's run is GitHub's own bash -e, never a template that could swallow its exit`);
+    // delta re-check of 9b2c8b10, P3-c: a hook node loads (--import, --require) or a node of its own first on the path
+    // could set a check's exit; nothing here needs either
+    if (/\b(?:NODE_OPTIONS|GITHUB_ENV|GITHUB_PATH)\b/.test(l)) p.push(`${file}:${n}: names NODE_OPTIONS, GITHUB_ENV or GITHUB_PATH: a hook or a node of its own could set a check's exit (${l.trim()})`);
+  }
+  // delta re-check of 9b2c8b10, P3-a and P3-b: .live-runner is written by the held runner checkout alone and read by the
+  // two runner lines alone; any other line naming it (a second checkout into it, a write, another spelling) is refused
+  const allowed = ["path: .live-runner", RUN_LINE, SERIAL_LINE];
+  const naming = uncommented(text).filter(([, l]) => l.includes(".live-runner"));
+  for (const [n, l] of naming) if (!allowed.includes(l.trim())) p.push(`${file}:${n}: names .live-runner outside the held runner checkout and runner lines (${l.trim()})`);
+  for (const a of allowed) {
+    const k = naming.filter(([, l]) => l.trim() === a).length;
+    if (k > 1) p.push(`${file}: names .live-runner outside the held runner checkout and runner lines: \`${a}\` ${k} times, want once`);
   }
   const verdict = jobText("live");
   want(/^ {10}CHECKS: \$\{\{ needs\.check\.result \}\}$/m.test(verdict) && verdict.includes('if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi'), "the live job does not fail when a check job did not succeed (CHECKS: ${{ needs.check.result }}, and exit 1 unless it is success)");

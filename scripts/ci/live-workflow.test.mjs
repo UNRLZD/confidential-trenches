@@ -641,3 +641,21 @@ test("planted (review P2-2): a runner taken from the deployed commit, or a runne
   assert.ok(has(plant("          path: .live-runner\n", "          path: runner\n"), checkout), "another folder");
   assert.ok(has(plant("          sparse-checkout-cone-mode: false\n", ""), checkout), "cone mode, which reads the patterns as folders");
 });
+
+// delta re-check of 9b2c8b10, P3-a/b/c: the runner folder is written by the held checkout alone, and nothing reaches
+// into node or the job's environment to set a check's exit
+test("planted (re-check P3-a, P3-b): a second checkout into .live-runner, or any other line naming it, is refused", () => {
+  const named = /names \.live-runner outside the held runner checkout and runner lines/;
+  const second = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ inputs.commit }}\n          path: .live-runner\n          persist-credentials: false\n";
+  assert.ok(has(plant("      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 24\n      - run: pnpm install --frozen-lockfile\n      - name: Google Chrome", `${second}      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n        with:\n          node-version: 24\n      - run: pnpm install --frozen-lockfile\n      - name: Google Chrome`), named), "a second checkout over the runners");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: printf 'process.exit(0)' > .live-runner/scripts/ci/live-rerun.mjs\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), named), "a step that writes a runner");
+  assert.ok(has(plant(`          ${RUN_LINE}`, `          ${RUN_LINE}`.replace("node .live-runner", "node ./.live-runner")), named), "the runner line spelled another way");
+});
+
+test("planted (re-check P3-c): NODE_OPTIONS, or a write to GITHUB_ENV or GITHUB_PATH, is refused", () => {
+  const env = /NODE_OPTIONS, GITHUB_ENV or GITHUB_PATH/;
+  assert.ok(has(plant("          KEY: ${{ matrix.key }}\n", "          KEY: ${{ matrix.key }}\n          NODE_OPTIONS: --import ./pass.mjs\n"), env), "NODE_OPTIONS on the step");
+  assert.ok(has(plant("  check:\n    needs: plan\n", "  check:\n    needs: plan\n    env:\n      NODE_OPTIONS: --require ./pass.cjs\n"), env), "NODE_OPTIONS on the job");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"NODE_OPTIONS=--import ./pass.mjs\" >> \"$GITHUB_ENV\"\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_ENV write");
+  assert.ok(has(plant("      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome", "      - run: echo \"$PWD/fake-node\" >> $GITHUB_PATH\n      - name: Google Chrome stable, and its sandbox comes up\n        if: matrix.chrome"), env), "a GITHUB_PATH write, a node of its own first");
+});
