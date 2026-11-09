@@ -7,7 +7,11 @@
 //   - / names exactly one module script, /app.js, with its integrity, and /app.js's sha384 is that integrity;
 //   - /app.js holds the sum's refusal of a counted note with no leaf value (a string literal, which minifying keeps);
 //   - /app.js sets vault_balance from that sum at USDC's 6 decimals over an awaited notes read (FILL, whatever names
-//     the minifier gives), where the build before it only ever wrote vault_balance:`0`.
+//     the minifier gives), where the build before it only ever wrote vault_balance:`0`;
+//   - /app.js sets positions from the device's own pass (src/positions.ts): the state step's `{...state,positions:p}`
+//     (SET, withPositions), the pass's Solana position with an amount at its decimals and a cost worked out from the
+//     buy records (PASS, positionsPass), and the buy records' meta key (COSTS, the one literal both the pool buy's
+//     record and the pass name), where the build before it only ever sent positions:[].
 // After: sign
 //   node scripts/live-checks/signpage-state-holdings.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's committed build
@@ -26,6 +30,12 @@ const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 export const SUM = "vault balance: a counted note has no leaf value";
 /** vault_balance set from the sum of an awaited notes read, at 6 decimals: `vault_balance:f(g(await r(),s),6)`. */
 export const FILL = /vault_balance:[\w$]+\([\w$]+\(await [\w$]+\(\),[\w$]+\),6\)/g;
+/** withPositions: the state with positions from the pass, `{...e,positions:t}`. */
+export const SET = /\{\.\.\.[\w$]+,positions:[\w$]+\}/g;
+/** positionsPass: `chain:"solana",token:i,amount:f(a.amount,t),cost:g(` (a backtick or quote, as the minifier writes). */
+export const PASS = /chain:[`"]solana[`"],token:[\w$]+,amount:[\w$]+\([\w$]+\.amount,[\w$]+\),cost:[\w$]+\(/g;
+/** The buy records' key in the wallet store's meta (src/positions.ts POSITION_COSTS_KEY). */
+export const COSTS = "owed/cost-sol";
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }. */
@@ -42,6 +52,9 @@ export function judge(rec) {
   const sum = Number.isSafeInteger(m.sum) && m.sum >= 1;
   const fill = Number.isSafeInteger(m.fill) && m.fill >= 1;
   say(sum && fill, `/app.js fills vault_balance from the device's own notes (sum ${m.sum ?? "?"}, fill ${m.fill ?? "?"})`);
+  const at = (k) => Number.isSafeInteger(m[k]) && m[k] >= 1;
+  say(at("set") && at("pass") && at("costs"),
+    `/app.js fills positions from the device's own pass, with its cost (set ${m.set ?? "?"}, pass ${m.pass ?? "?"}, costs ${m.costs ?? "?"})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -71,7 +84,7 @@ export async function probe(origin, fetchFn = fetch) {
     status: res.status,
     bytes: body.length,
     sha384: `sha384-${createHash("sha384").update(body).digest("base64")}`,
-    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL) },
+    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL), set: countOf(text, SET), pass: countOf(text, PASS), costs: countOf(text, COSTS) },
   };
   return rec;
 }

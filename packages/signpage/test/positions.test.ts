@@ -18,7 +18,7 @@ import { noteCommitment, noteSecrets } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import type { HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
-import { positionsCache, positionsPass, withPositions, type Position, type PositionsReads } from "../src/positions.ts";
+import { POSITION_COSTS_KEY, positionCost, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type Position, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
 
@@ -243,4 +243,134 @@ test("the page: the first signed-in read starts a pass, a sell's end reads again
   assert.equal(tp.positions()![0]!.amount, "0.000005");
   await tp.signedOut();
   assert.equal(tp.positions(), null, "sign out drops them");
+});
+
+// ---------------------------------------------------- cost, and the pool buy's records
+const PRICE = { price: "15000000000", expo: -8, published_s: 1, read_ms: 1 }; // 150 USD a SOL, the page's own read
+
+test("a pool buy's USD: its spend at the page's own price, exact; no price that reads, none", () => {
+  assert.equal(usdOf(10_000_000n, 9, PRICE), "1.5");
+  assert.equal(usdOf(12_345_678n, 9, { ...PRICE, price: "14999999999" }), "1.85185169987654322");
+  assert.equal(usdOf(1n, 9, { ...PRICE, price: "0" }), null);
+  assert.equal(usdOf(1n, 9, { ...PRICE, expo: 2 }), null);
+});
+
+test("a position's cost: each W's spend times what it holds over what it received (a sell takes it off pro rata); any W with no record of the mint: unknown", () => {
+  const costs = { [W1]: { mint: MINT, cost_usd: "1.5", received: "1000" }, [W2]: { mint: MINT, cost_usd: "3", received: "10" } };
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 1_000_000_000n }], costs), "1.5", "all of it held");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 250_000_000n }], costs), "0.375", "a quarter held after a sell");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 500_000_000n }, { address: W2, amount: 10_000_000n }], costs), "3.75");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 2_000_000_000n }], costs), "1.5", "never more than it spent");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 1n }, { address: "Wnone", amount: 1n }], costs), "0", "a W with no record");
+  assert.equal(positionCost(MINT2, 6, [{ address: W1, amount: 1n }], costs), "0", "a record of another mint");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 1n }], { [W1]: { mint: MINT, cost_usd: "x", received: "1" } }), "0");
+  assert.equal(positionCost(MINT, 6, [{ address: W1, amount: 1n }], { [W1]: { mint: MINT, cost_usd: "1", received: "0" } }), "0");
+  const third = positionCost(MINT, 6, [{ address: W1, amount: 1n }], { [W1]: { mint: MINT, cost_usd: "1", received: "0.000003" } });
+  assert.equal(third, "0.333333333333", "cut at 12 decimals");
+  const p: Position = { chain: "solana", token: MINT, amount: "0.000001", cost: third, wallets: [W1], decimals: 6 };
+  assert.deepEqual(withPositions(SIGNED_IN, [p]).positions, [p], "a cost at 12 decimals fits the kit's schema");
+});
+
+/** A wallet store's ops and meta, in memory. */
+const memStore = () => {
+  const ops = new Map<string, unknown>();
+  const meta = new Map<string, unknown>();
+  return {
+    ops,
+    meta,
+    get: async (_s: "ops", k: string) => ops.get(k),
+    put: async (_s: "ops", k: string, v: unknown) => void ops.set(k, v),
+    update: async (_s: "meta", k: string, f: (v: unknown) => unknown) => void meta.set(k, f(meta.get(k))),
+  };
+};
+const FACTS = { token: MINT, spend: 10_000_000n, spendDecimals: 9, price: PRICE, createdMs: 1_800_000_000_000, wallet: W1, out: "1081590.213565" };
+
+test("a pool buy's records: filled, its ops record (time, chain, token, USD) and W's cost; refused or not landed, its ops record and no cost; sent, id_reused or seen before, nothing", async () => {
+  const { opOf } = await import("../src/state.ts");
+  const s = memStore();
+  await recordPoolBuy(s, "b1", FACTS, { result: { stage: "filled", txs: [{ chain: "solana", hash: "Sig1" }] } });
+  assert.deepEqual(opOf("b1", s.ops.get("b1")), { id: "b1", kind: "buy", stage: "filled", txs: [{ chain: "solana", hash: "Sig1" }], created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" });
+  assert.deepEqual(s.meta.get(POSITION_COSTS_KEY), { [W1]: { mint: MINT, cost_usd: "1.5", received: "1081590.213565" } });
+  await recordPoolBuy(s, "b2", { ...FACTS, wallet: W2 }, { error: "quote_check_failed" });
+  assert.deepEqual(opOf("b2", s.ops.get("b2")), { id: "b2", kind: "buy", stage: "refused", txs: [], code: "quote_check_failed", created_ms: 1_800_000_000_000, chain: "solana", token: MINT, amount_usd: "1.5" });
+  await recordPoolBuy(s, "b3", { ...FACTS, wallet: W2 }, { result: { stage: "not_landed", txs: [] } });
+  assert.equal((s.ops.get("b3") as { stage: string }).stage, "not_landed");
+  assert.deepEqual(Object.keys(s.meta.get(POSITION_COSTS_KEY) as object), [W1], "no cost for a buy that did not fill");
+  await recordPoolBuy(s, "b4", FACTS, { result: { stage: "sent", txs: [{ chain: "solana", hash: "Sig4" }] } });
+  await recordPoolBuy(s, "b5", FACTS, { error: "id_reused" });
+  await recordPoolBuy(s, "b6", FACTS, null);
+  assert.deepEqual([...s.ops.keys()], ["b1", "b2", "b3"], "no record for an answer with no end, another tab's run or none");
+  await recordPoolBuy(s, "b1", FACTS, { error: "failed" });
+  assert.equal((s.ops.get("b1") as { stage: string }).stage, "filled", "a record already there is never written over");
+  const n = memStore();
+  await recordPoolBuy(n, "b7", { ...FACTS, price: null }, { result: { stage: "filled", txs: [] } });
+  assert.equal((n.ops.get("b7") as { amount_usd?: string }).amount_usd, undefined, "no price read: no USD");
+  assert.equal(n.meta.get(POSITION_COSTS_KEY), undefined, "and no cost: the position's cost stays unknown");
+});
+
+test("the page: a pool buy's end writes its records and reads the positions again, with its cost", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  let ended!: () => void;
+  const buy = () => (ask: { amount: bigint }, ctx: { route?: (r: unknown) => void }) => {
+    assert.equal(ask.amount, 10_000_000n);
+    // the run tells W once it is bound and the amount W received once both RPCs read it (pool-buy.ts's route facts)
+    ctx.route?.({ wallet: [...c.owners.values()][0]! });
+    ctx.route?.({ out: "1081590.213565" });
+    return { running: true as const, after: new Promise<void>((r) => (ended = r)), answer: () => ({ result: { stage: "filled", txs: [{ chain: "solana", hash: "SigB" }] } }) };
+  };
+  const routed: unknown[] = [];
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    // @ts-expect-error a stand-in buy kind: only its route facts, answer and end matter here
+    { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+  );
+  const until = async (f: () => boolean) => {
+    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(f());
+  };
+  assert.equal(tp.positions(), null);
+  await until(() => tp.positions() !== null);
+  assert.deepEqual(tp.positions(), [], "nothing bought yet");
+  const r = tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb1", sha: "00", progress: () => {}, route: (x: unknown) => routed.push(x) } as never);
+  assert.ok("running" in r);
+  c.amounts[0] = c.amounts[1] = 1_081_590_213_565n;
+  ended();
+  await until(() => (tp.positions() ?? []).length === 1);
+  assert.equal(tp.positions()![0]!.cost, "1.5", "the buy's spend at the page's price, all of it held");
+  assert.deepEqual(routed, [{ wallet: [...c.owners.values()][0] }, { out: "1081590.213565" }], "the run's route facts still reach the app");
+  const op = (await w.get("ops", "pb1")) as { stage: string; amount_usd: string; token: string };
+  assert.deepEqual([op.stage, op.amount_usd, op.token], ["filled", "1.5", MINT], "the pool buy shows in state.ops (review P3-1)");
+});
+
+test("the page: a pool buy answered early as sent (its fill read later) is recorded at the end stage its run posts, once", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  let answered!: () => void;
+  let progress!: (s: string) => void;
+  const buy = () => (_ask: unknown, ctx: { route?: (r: unknown) => void; progress: (s: string) => void }) => {
+    progress = ctx.progress;
+    ctx.route?.({ wallet: [...c.owners.values()][0]! });
+    ctx.route?.({ out: "5" });
+    return { running: true as const, after: new Promise<void>((r) => (answered = r)), answer: () => ({ result: { stage: "sent", txs: [{ chain: "solana", hash: "SigS" }] } }) };
+  };
+  const posted: string[] = [];
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    // @ts-expect-error a stand-in buy kind
+    { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+  );
+  tp.positions();
+  for (let i = 0; i < 200 && tp.positions() === null; i++) await new Promise((r) => setTimeout(r, 5));
+  tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb2", sha: "00", progress: (s: string) => posted.push(s) } as never);
+  answered();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(await w.get("ops", "pb2"), undefined, "sent is no end: nothing written yet");
+  progress("filled");
+  progress("filled");
+  for (let i = 0; i < 200 && (await w.get("ops", "pb2")) === undefined; i++) await new Promise((r) => setTimeout(r, 5));
+  const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
+  assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
+  assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
+  assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [[...c.owners.values()][0]!]: { mint: MINT, cost_usd: "1.5", received: "5" } });
 });

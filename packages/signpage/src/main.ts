@@ -72,7 +72,7 @@ import { POOL_ADDRESS_ASSET, readSolanaPoolFloor, type PoolQuotePricing } from "
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
-import { POOL_ASSET_DECIMALS } from "../../kit/src/signpage/messages.ts";
+import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -141,7 +141,9 @@ let shell: Shell | null = null;
 // the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
 // flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
 const prover = !framed ? proverHost() : null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
+// the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
+let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
@@ -196,6 +198,7 @@ else {
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
   const poolDeps = testnetPoolDeps(testnet?.flow);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
+  pagePrice = (chain) => prices.get(chain);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
   const told = new Set<() => void>();

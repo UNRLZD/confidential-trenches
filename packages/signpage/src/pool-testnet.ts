@@ -55,14 +55,14 @@ import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, tokenHeld, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { positionsCache, positionsPass, type Position } from "./positions.ts";
+import { POSITION_COSTS_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
-import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
+import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 
@@ -238,6 +238,8 @@ export type TestnetPage = {
   seed64(): Promise<Uint8Array>;
   /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
   openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
+  /** The page's own USD price of a chain's pool asset (src/pool-price.ts), for a pool buy's cost; null when none is fresh. */
+  price?(chain: PoolChain): PoolStatePrice | null;
 };
 
 /** Tests only: the pool, the prover, the RPCs, the fee's fetch and the thread count the page would use. */
@@ -645,6 +647,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           wallets: async () =>
             (await poolBuyWallets(notes, r)).map((w) => ({ address: w.address, tokens: [...w.holdings.tokens].filter(([, h]) => h.amount > 0n).map(([m]) => m) })),
           held: async (address, mint) => (await tokenHeld(r, address, mint)).amount,
+          costs: async () => ((await (await page.store()).get("meta", POSITION_COSTS_KEY)) as PositionCosts | undefined) ?? {},
           decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
         });
       } finally {
@@ -656,7 +659,42 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   positions.watch(() => {
     for (const f of watchers) f();
   });
-  // a pool buy's or sell's run, the positions read again once it ends, whatever its answer (a refusal ran nothing)
+  const BUY_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  // a pool buy, its records written once its run ends (src/positions.ts recordPoolBuy: its ops record, and W's buy record
+  // for the cost), the positions read again after them; its W and the amount W received come from the run's own route
+  // facts, the price is the page's own read at the request. The kind's `after` settles at its first answer, which may be
+  // "sent" while the run goes on (poolBuyKind): the run's end stage is the progress it always posts at its end, so the
+  // records wait for an end stage, from the answer or from that progress, whichever comes first; once.
+  const recordedBuy = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof buy> => {
+    const facts: PoolBuyFacts = { token: ask.token!, spend: ask.amount, spendDecimals: ask.decimals, price: page.price?.("solana") ?? null, createdMs: Date.now() };
+    let done = false;
+    let r: ReturnType<typeof buy> | null = null;
+    const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
+      if (done) return;
+      done = true;
+      void (async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))()
+        .catch(() => {})
+        .finally(() => positions.refresh());
+    };
+    const txsOf = (): TxRef[] => {
+      const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
+      return a?.result?.txs ?? [];
+    };
+    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
+      ctx.progress(stage);
+      if (BUY_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
+    };
+    r = buy(ask, { ...ctx, progress, route: routeInto(facts, ctx.route) });
+    const run = r;
+    if ("after" in run)
+      void run.after.then(() => {
+        const a = run.answer() as Parameters<typeof recordPoolBuy>[3];
+        if (a !== null && ("error" in a || BUY_ENDS.has(a.result.stage))) finish(a);
+        else positions.refresh();
+      });
+    return run;
+  };
+  // a pool sell's run, the positions read again once it ends, whatever its answer (a refusal ran nothing)
   const positionsAfter = <R,>(r: R): R => {
     if (typeof r === "object" && r !== null && "after" in r) void (r as { after: Promise<unknown> }).after.then(() => positions.refresh(), () => positions.refresh());
     return r;
@@ -1025,7 +1063,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         : ask.kind === "pool.deposit"
           ? deposit(ask, ctx)
           : ask.kind === "pool.buy" && table !== null
-            ? positionsAfter(buy(ask, ctx))
+            ? recordedBuy(ask, ctx)
             : ask.kind === "pool.sell"
               ? positionsAfter(sell(ask, ctx))
               : ask.kind === "pool.withdraw" && page.openWithdraw

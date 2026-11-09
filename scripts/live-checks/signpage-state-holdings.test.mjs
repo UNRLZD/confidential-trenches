@@ -1,8 +1,8 @@
 // node --test scripts/live-checks/signpage-state-holdings.test.mjs: the live check's verdict on its recorded answers,
-// with no network. Each record is a real run of the check (2026-11-09):
+// with no network. Each record is a real run of the check (2026-11-09 22:2xZ, re-recorded with the positions marks):
 // - good: this card's build (index.html and public/app.js at the card's branch, --local) served at / and /app.js: PASS;
-// - bad_live_before: the live SIGN_HOST before this card's release, whose state sends vault_balance "0" on every
-//   signed-in state (src/state.ts stateOf): FAIL on the marks alone;
+// - bad_live_before: the live SIGN_HOST before this card's release, whose state sends vault_balance "0" and
+//   positions [] on every signed-in state (src/state.ts stateOf): FAIL on the marks alone;
 // - and the good record with its integrity naming another script, and with each mark gone: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as check from "./signpage-state-holdings.mjs";
-import { FILL, judge, localFetch, probe, SIGN_ORIGIN, SUM } from "./signpage-state-holdings.mjs";
+import { COSTS, FILL, judge, localFetch, PASS, probe, SET, SIGN_ORIGIN, SUM } from "./signpage-state-holdings.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -18,17 +18,19 @@ const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-state-holdings
 const BAD = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
 const MARKS = "/app.js fills vault_balance from the device's own notes";
 const SAME = "/app.js is the script / names: its sha384 is the integrity";
+const POS = "/app.js fills positions from the device's own pass, with its cost";
 
 test("the recorded good answer (the card's build) passes", () => {
   const r = judge(answers.good);
   assert.equal(r.pass, true, r.lines.join("\n"));
-  assert.ok(answers.good.app.marks.sum >= 1 && answers.good.app.marks.fill >= 1);
+  const m = answers.good.app.marks;
+  assert.ok(m.sum >= 1 && m.fill >= 1 && m.set >= 1 && m.pass >= 1 && m.costs >= 1);
 });
 
 test("the recorded live SIGN_HOST before the release fails, on the marks alone", () => {
   assert.equal(answers.bad_live_before.url, SIGN_ORIGIN);
   assert.equal(judge(answers.bad_live_before).pass, false);
-  assert.deepEqual(BAD(answers.bad_live_before), [MARKS]);
+  assert.deepEqual(BAD(answers.bad_live_before), [MARKS, POS]);
 });
 
 test("the good script under a page whose integrity names another script fails; each mark gone fails", () => {
@@ -40,6 +42,11 @@ test("the good script under a page whose integrity names another script fails; e
     gone.app.marks[k] = 0;
     assert.deepEqual(BAD(gone), [MARKS], k);
   }
+  for (const k of ["set", "pass", "costs"]) {
+    const gone = structuredClone(answers.good);
+    gone.app.marks[k] = 0;
+    assert.deepEqual(BAD(gone), [POS], k);
+  }
 });
 
 test("the committed build in this tree passes the live rule", async () => {
@@ -48,7 +55,7 @@ test("the committed build in this tree passes the live rule", async () => {
 });
 
 test("a rebuilt bundle with an unrelated copy change passes with no re-record; one with vault_balance back at `0` fails", async () => {
-  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL])));
+  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL, SET, PASS, COSTS])));
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await probe(SIGN_ORIGIN, localFetch)).app.sha384, "another bundle than the tree's");
   // the state step's fill replaced by the fixed "0" the build before it sent
@@ -58,6 +65,13 @@ test("a rebuilt bundle with an unrelated copy change passes with no re-record; o
   const noSum = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => dropRule(js, SUM)));
   assert.equal(noSum.app.marks.sum, 0);
   assert.deepEqual(BAD(noSum), [MARKS]);
+  // the state step's positions back to the [] the build before it sent; the pass's cost back to "0"
+  const none = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(SET, "{}")));
+  assert.equal(none.app.marks.set, 0);
+  assert.deepEqual(BAD(none), [POS]);
+  const noCost = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PASS, (m) => m.replace(/cost:[\w$]+\($/, "cost:`0`,x:("))));
+  assert.equal(noCost.app.marks.pass, 0);
+  assert.deepEqual(BAD(noCost), [POS]);
 });
 
 test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on SIGN_HOST, then judge", async () => {

@@ -2,28 +2,31 @@
  "good": {
   "key": "signpage-state-holdings",
   "url": "local build",
-  "at": "2026-11-09T12:24:26.007Z",
+  "at": "2026-11-09T22:27:05.335Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "integrity": "sha384-11zECsmgOCNNHgglWNo6jMQtwwwO8QBzzHm6STeC4YlpVdBH3iXm+taMZ/lj85mt",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 812949,
-   "sha384": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "bytes": 892609,
+   "sha384": "sha384-11zECsmgOCNNHgglWNo6jMQtwwwO8QBzzHm6STeC4YlpVdBH3iXm+taMZ/lj85mt",
    "marks": {
     "sum": 1,
-    "fill": 1
+    "fill": 1,
+    "set": 1,
+    "pass": 1,
+    "costs": 2
    }
   }
  },
  "bad_live_before": {
   "key": "signpage-state-holdings",
   "url": "https://confidential.unrealized.trade",
-  "at": "2026-11-09T12:24:26.421Z",
+  "at": "2026-11-09T22:27:06.279Z",
   "index": {
    "status": 200,
    "scripts": 1,
@@ -37,7 +40,10 @@
    "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "marks": {
     "sum": 0,
-    "fill": 0
+    "fill": 0,
+    "set": 0,
+    "pass": 0,
+    "costs": 0
    }
   }
  }

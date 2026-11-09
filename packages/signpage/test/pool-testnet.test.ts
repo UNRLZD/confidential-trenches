@@ -101,7 +101,9 @@ test("the testnet build pins the devnet pool's lookup table, so its pool.buy run
   assert.equal(r.running, true, "the pinned table: the buy runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
-  assert.equal(opened, 1);
+  // the run's open; its end then writes its ops record and reads the positions again (card signpage-state-holdings),
+  // each opening the store, which cannot open here: nothing written, nothing read
+  assert.ok(opened >= 1);
 });
 
 // ---- card signpage-pool-notes-2: the next buy's proof after each deposit, and settling on the page's state reads ----
@@ -485,11 +487,15 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
   assert.equal(r.running, true, "the buy runs");
   await r.after;
   assert.deepEqual(r.answer(), { error: "failed" }, "a queue that cannot open: failed, nothing sent");
-  assert.equal(opened, 1);
+  // the run's open; its end's records and positions pass open it too (card signpage-state-holdings): nothing read
+  assert.ok(opened >= 1);
+  await new Promise((res) => setTimeout(res, 20));
   assert.deepEqual(reads, [], "no proof ready: no read");
+  const before = opened;
   const none = poolKinds(testnetPoolDeps(testnetPool(page, { table: null }).flow));
   assert.deepEqual(none["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
-  assert.equal(opened, 1, "no table: no store opened, no read");
+  await new Promise((res) => setTimeout(res, 20));
+  assert.equal(opened, before, "no table: no store opened, no read");
 });
 
 test("a pool send still pending at the kind's 10 s, and at 90 s, is not aborted: its own window is over 90 s", async () => {
