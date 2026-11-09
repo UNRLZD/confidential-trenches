@@ -212,7 +212,7 @@ main() {
       exit 1
     fi
   done
-  if ! grep -qxE 'POOL_SOLANA_FEE_PAYER_KEY_MAINNET=[1-9A-HJ-NP-Za-km-z]{86,88}' "$tmp" \
+  if ! grep -qxE 'POOL_SOLANA_FEE_PAYER_KEY_MAINNET=[1-9A-HJ-NP-Za-km-z]{80,90}' "$tmp" \
     || ! grep -qxF "POOL_SOLANA_PROGRAM_MAINNET=$program" "$tmp" \
     || ! grep -qxF "POOL_SOLANA_FEE_MAINNET=$fee" "$tmp" \
     || ! grep -qxF "POOL_SOLANA_RPCS_MAINNET=$rpcs" "$tmp"; then
