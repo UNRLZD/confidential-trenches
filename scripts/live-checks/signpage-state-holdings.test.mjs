@@ -10,7 +10,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as check from "./signpage-state-holdings.mjs";
-import { COSTS, FILL, judge, localFetch, PASS, probe, SET, SIGN_ORIGIN, SUM } from "./signpage-state-holdings.mjs";
+import { COSTS, FILL, judge, KEPT, localFetch, PASS, probe, SET, SIGN_ORIGIN, SOLD, SUM } from "./signpage-state-holdings.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +24,7 @@ test("the recorded good answer (the card's build) passes", () => {
   const r = judge(answers.good);
   assert.equal(r.pass, true, r.lines.join("\n"));
   const m = answers.good.app.marks;
-  assert.ok(m.sum >= 1 && m.fill >= 1 && m.set >= 1 && m.pass >= 1 && m.costs >= 1);
+  assert.ok(m.sum >= 1 && m.fill >= 1 && m.set >= 1 && m.pass >= 1 && m.costs >= 1 && m.kept >= 1 && m.sold >= 1);
 });
 
 test("the recorded live SIGN_HOST before the release fails, on the marks alone", () => {
@@ -42,7 +42,7 @@ test("the good script under a page whose integrity names another script fails; e
     gone.app.marks[k] = 0;
     assert.deepEqual(BAD(gone), [MARKS], k);
   }
-  for (const k of ["set", "pass", "costs"]) {
+  for (const k of ["set", "pass", "costs", "kept", "sold"]) {
     const gone = structuredClone(answers.good);
     gone.app.marks[k] = 0;
     assert.deepEqual(BAD(gone), [POS], k);
@@ -55,7 +55,7 @@ test("the committed build in this tree passes the live rule", async () => {
 });
 
 test("a rebuilt bundle with an unrelated copy change passes with no re-record; one with vault_balance back at `0` fails", async () => {
-  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL, SET, PASS, COSTS])));
+  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL, SET, PASS, COSTS, KEPT, SOLD])));
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await probe(SIGN_ORIGIN, localFetch)).app.sha384, "another bundle than the tree's");
   // the state step's fill replaced by the fixed "0" the build before it sent
@@ -72,6 +72,10 @@ test("a rebuilt bundle with an unrelated copy change passes with no re-record; o
   const noCost = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PASS, (m) => m.replace(/cost:[\w$]+\($/, "cost:`0`,x:("))));
   assert.equal(noCost.app.marks.pass, 0);
   assert.deepEqual(BAD(noCost), [POS]);
+  // no kept pass (a reload waits on the finder again): red
+  const noKept = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => dropRule(js, KEPT)));
+  assert.equal(noKept.app.marks.kept, 0);
+  assert.deepEqual(BAD(noKept), [POS]);
 });
 
 test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on SIGN_HOST, then judge", async () => {

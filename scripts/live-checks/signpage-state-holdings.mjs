@@ -10,8 +10,9 @@
 //     the minifier gives), where the build before it only ever wrote vault_balance:`0`;
 //   - /app.js sets positions from the device's own pass (src/positions.ts): the state step's `{...state,positions:p}`
 //     (SET, withPositions), the pass's Solana position with an amount at its decimals and a cost worked out from the
-//     buy records (PASS, positionsPass), and the buy records' meta key (COSTS, the one literal both the pool buy's
-//     record and the pass name), where the build before it only ever sent positions:[].
+//     buy records (PASS, positionsPass), the buy records' meta key (COSTS), the kept pass's (KEPT, the first state read
+//     after a load) and the device's full sells' (SOLD, the gone rule), where the build before it only ever sent
+//     positions:[].
 // After: sign
 //   node scripts/live-checks/signpage-state-holdings.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's committed build
@@ -36,6 +37,10 @@ export const SET = /\{\.\.\.[\w$]+,positions:[\w$]+\}/g;
 export const PASS = /chain:[`"]solana[`"],token:[\w$]+,amount:[\w$]+\([\w$]+\.amount,[\w$]+\),cost:[\w$]+\(/g;
 /** The buy records' key in the wallet store's meta (src/positions.ts POSITION_COSTS_KEY). */
 export const COSTS = "owed/cost-sol";
+/** The kept pass's key (src/positions.ts POSITIONS_KEPT_KEY). */
+export const KEPT = "owed/positions-sol";
+/** The full sells' key (src/positions.ts POSITIONS_SOLD_KEY). */
+export const SOLD = "owed/sold-sol";
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }. */
@@ -53,8 +58,8 @@ export function judge(rec) {
   const fill = Number.isSafeInteger(m.fill) && m.fill >= 1;
   say(sum && fill, `/app.js fills vault_balance from the device's own notes (sum ${m.sum ?? "?"}, fill ${m.fill ?? "?"})`);
   const at = (k) => Number.isSafeInteger(m[k]) && m[k] >= 1;
-  say(at("set") && at("pass") && at("costs"),
-    `/app.js fills positions from the device's own pass, with its cost (set ${m.set ?? "?"}, pass ${m.pass ?? "?"}, costs ${m.costs ?? "?"})`);
+  say(at("set") && at("pass") && at("costs") && at("kept") && at("sold"),
+    `/app.js fills positions from the device's own pass, with its cost (set ${m.set ?? "?"}, pass ${m.pass ?? "?"}, costs ${m.costs ?? "?"}, kept ${m.kept ?? "?"}, sold ${m.sold ?? "?"})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -84,7 +89,7 @@ export async function probe(origin, fetchFn = fetch) {
     status: res.status,
     bytes: body.length,
     sha384: `sha384-${createHash("sha384").update(body).digest("base64")}`,
-    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL), set: countOf(text, SET), pass: countOf(text, PASS), costs: countOf(text, COSTS) },
+    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL), set: countOf(text, SET), pass: countOf(text, PASS), costs: countOf(text, COSTS), kept: countOf(text, KEPT), sold: countOf(text, SOLD) },
   };
   return rec;
 }

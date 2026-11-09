@@ -53,9 +53,9 @@ import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/s
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, tokenHeld, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { POSITION_COSTS_KEY, POSITIONS_GONE_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmMemoryHold, evmPair, evmPoolScopeOf, evmTreeSync, type EvmPoolPin, type EvmRpc, type EvmSyncHold } from "../../wallet/src/pool/evm.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
@@ -362,8 +362,9 @@ export type TestnetPool = {
   settle(): Promise<void>;
   /** A signed-in state read, when no pass runs: settle the pool's INCOMING notes, then its RESERVED ones. */
   stateRead(): Promise<void>;
-  /** state.positions (src/positions.ts): the last whole pass, null before it; the first signed-in read starts one. */
-  positions(): readonly Position[] | null;
+  /** state.positions (src/positions.ts): the last pass, or the kept one before it, null before either; the first
+   *  signed-in read starts a pass. */
+  positions(): Promise<readonly Position[] | null>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -623,58 +624,86 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
-  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc]) => {
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER));
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
     const seed64 = await page.seed64();
     try {
-      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER)) }]);
+      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }]);
       if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
       return got.wallets;
     } finally {
       seed64.fill(0);
     }
   };
-  // state.positions (src/positions.ts, card signpage-state-holdings): the buy wallets' tokens, each held amount read again
-  // on both RPCs, one pass at a time, run at the first signed-in state read and again when a pool buy or sell ends
-  // the device's own records of its buys (src/positions.ts header): W's buy mint and W's buy record, gone ones left out;
-  // a record that does not read as one is left out
-  const boughtOf = async (): Promise<{ address: string; mint: string }[]> => {
-    const st = await page.store();
-    const rec = async (k: string) => {
-      const v = await st.get("meta", k);
-      return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
-    };
-    const gone = await rec(POSITIONS_GONE_KEY);
-    const out = new Map<string, { address: string; mint: string }>();
-    for (const all of [await rec("owed/buy-sol"), await rec(POSITION_COSTS_KEY)])
-      for (const [address, r] of Object.entries(all)) {
-        const mint = (r as { mint?: unknown } | null)?.mint;
-        if (typeof mint === "string" && gone[address] !== mint) out.set(`${address} ${mint}`, { address, mint });
-      }
-    return [...out.values()];
-  };
+  // state.positions (src/positions.ts, card signpage-state-holdings): display from the finder's one read of each W (the
+  // helper's keyed route on mainnet; no read here names a W to a public provider), the device's buy records beside it,
+  // a mint's decimals on both RPCs; one pass at a time, run at the sign-in's first state read and again when a pool buy
+  // or sell ends; the last pass kept in the wallet store for the first read after a load
   const positions = positionsCache(
     async (memo) => {
       if (scope === null) return { positions: [], whole: true };
       const r = rpcs();
-      const notes = await openNoteStore(await page.store());
+      const st = await page.store();
+      const meta = async (k: string): Promise<Record<string, unknown>> => {
+        const v = await st.get("meta", k);
+        return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+      };
+      const notes = await openNoteStore(st);
       try {
         return await positionsPass({
-          wallets: async () =>
-            (await poolBuyWallets(notes, r)).map((w) => ({ address: w.address, tokens: [...w.holdings.tokens].filter(([, h]) => h.amount > 0n).map(([m]) => m) })),
-          bought: boughtOf,
-          gone: async (address, mint) => void (await (await page.store()).update("meta", POSITIONS_GONE_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [address]: mint }))),
-          held: async (address, mint) => (await tokenHeld(r, address, mint)).amount,
-          costs: async () => ((await (await page.store()).get("meta", POSITION_COSTS_KEY)) as PositionCosts | undefined) ?? {},
+          // one W's failed read is that W's alone (the finder fails a whole pool on one; a sell keeps that rule)
+          wallets: async () => {
+            const inner = finderOf(r);
+            const unread = new Set<string>();
+            const reader: HoldingsReader = {
+              chain: inner.chain,
+              read: async (address, signal) => {
+                try {
+                  return await inner.read(address, signal);
+                } catch (e) {
+                  if (signal?.aborted) throw e;
+                  unread.add(address);
+                  return { native: 0n, tokens: new Map(), unreadable: [] };
+                }
+              },
+            };
+            return (await poolBuyWallets(notes, r, reader)).map((w) => ({
+              address: w.address,
+              tokens: unread.has(w.address) ? null : new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)),
+            }));
+          },
+          costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
+          sold: async () => new Set(Object.entries(await meta(POSITIONS_SOLD_KEY)).flatMap(([a, ms]) => (Array.isArray(ms) ? ms.filter((m): m is string => typeof m === "string").map((m) => `${a} ${m}`) : []))),
+          kept: async () => st.get("meta", POSITIONS_KEPT_KEY),
+          keep: async (k) => void (await st.put("meta", POSITIONS_KEPT_KEY, k)),
           decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
         }, memo);
       } finally {
         notes.close();
       }
     },
-    over.positions ?? {},
+    { ...over.positions, kept: async () => (scope === null ? null : keptPositions(await (await page.store()).get("meta", POSITIONS_KEPT_KEY))) },
   );
+  // a full sell this device signs (W's rent-back record names it, written before the sell leaves the device): noted for
+  // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell
+  const soldNoted = (owed: ReturnType<typeof owedRentBacks>): ReturnType<typeof owedRentBacks> => ({
+    ...owed,
+    put: async (rec) => {
+      await owed.put(rec);
+      const mints = Object.keys(rec.sell ?? {});
+      if (mints.length === 0) return;
+      await (await page.store())
+        .update("meta", POSITIONS_SOLD_KEY, (v) => {
+          const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) };
+          const had = Array.isArray(all[rec.address]) ? (all[rec.address] as unknown[]).filter((m): m is string => typeof m === "string") : [];
+          all[rec.address] = [...new Set([...had, ...mints])];
+          return all;
+        })
+        .catch(() => {});
+    },
+  });
   positions.watch(() => {
     for (const f of watchers) f();
   });
@@ -743,7 +772,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64: page.seed64,
       wallets: async () => poolBuyWallets(await store(), r),
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
-      owed: owedRentBacks(page.store),
+      owed: soldNoted(owedRentBacks(page.store)),
       bought: buyMints(page.store),
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
@@ -1116,7 +1145,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     host: () => host(),
     settle,
     stateRead,
-    positions: () => {
+    positions: async () => {
+      await positions.ready();
       positions.first();
       return positions.get();
     },

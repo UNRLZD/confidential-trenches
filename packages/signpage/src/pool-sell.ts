@@ -230,7 +230,7 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
 /** The token's program (the mint's owner, the same on both RPCs) and W's associated token account under it: its
  *  amount, the same on both RPCs (two that differ are read again once, then failed: neither RPC's word alone sets what
  *  the sell takes or what W keeps after it). None on either RPC holds nothing; frozen on either: not_allowed. */
-export async function tokenHeld(rpcs: Rpcs, w: string, mint: string): Promise<{ program: string; amount: bigint }> {
+async function tokenHeld(rpcs: Rpcs, w: string, mint: string): Promise<{ program: string; amount: bigint }> {
   const mints = await both(rpcs, (r) => account(r, mint, "confirmed"));
   const programs = mints.map((m) => ("none" in m ? no() : m.owner));
   const program = programs[0]!;

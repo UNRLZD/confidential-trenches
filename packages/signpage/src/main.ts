@@ -287,7 +287,7 @@ else {
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
-        return withPositions(pooled, s.signed_in && testnet ? testnet.positions() : null);
+        return withPositions(pooled, s.signed_in && testnet ? await testnet.positions() : null);
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {

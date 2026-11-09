@@ -20,7 +20,7 @@ import type { HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
-import { passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_READS_AT_ONCE, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type PassResult, type Position, type PositionsReads } from "../src/positions.ts";
+import { passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassResult, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
 
@@ -31,110 +31,98 @@ const W2 = "W2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const SIGNED_IN: SignpageState = { release: "sp-1", api: 1, signed_in: true, code_saved: true, vault_balance: "0", wallets: [], positions: [], orders: [], held: [], ops: [] };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-/** Reads over a fixed chain: `found` what the finder names, `chain` each (W, mint)'s amount both RPCs agree on. */
-const reads = (found: Record<string, string[]>, chain: Record<string, bigint>, decimals: Record<string, number> = { [MINT]: 6, [MINT2]: 9 }): PositionsReads & { asked: string[] } => {
-  const asked: string[] = [];
+/** The finder's reads: `found` each W's tokens (base units), null for a W whose read fails; `costs` the buy records. */
+const reads = (found: Record<string, Record<string, bigint> | null>, o: { costs?: PositionCosts; sold?: string[]; decimals?: Record<string, number> } = {}): PositionsReads & { saved: KeptPass[] } => {
+  const saved: KeptPass[] = [];
+  const decimals = o.decimals ?? { [MINT]: 6, [MINT2]: 9 };
   return {
-    asked,
-    wallets: async () => Object.entries(found).map(([address, tokens]) => ({ address, tokens })),
-    held: async (w, m) => {
-      asked.push(`${w}/${m}`);
-      const v = chain[`${w}/${m}`];
-      if (v === undefined) throw new Error("the two RPCs read it apart");
-      return v;
-    },
-    decimals: async (m) => decimals[m]!,
+    wallets: async () => Object.entries(found).map(([address, t]) => ({ address, tokens: t === null ? null : new Map(Object.entries(t)) })),
+    decimals: async (m) => decimals[m] ?? Promise.reject(new Error("the two RPCs read the mint apart")),
+    costs: async () => o.costs ?? {},
+    sold: async () => new Set(o.sold ?? []),
+    keep: async (k) => void saved.push(k),
+    saved,
   };
 };
 
-test("a pass: one position per token, its amount the sum over its Ws at the token's decimals, cost unknown; a token at 0 is not held", async () => {
-  const got = await positionsPass(reads({ [W1]: [MINT, MINT2], [W2]: [MINT] }, { [`${W1}/${MINT}`]: 1_500_000n, [`${W1}/${MINT2}`]: 0n, [`${W2}/${MINT}`]: 2_250_001n }));
+test("a pass: one position per token, from the finder's one read of each W, its amount the sum over its Ws at the token's decimals; a token at 0 is not held", async () => {
+  const got = await positionsPass(reads({ [W1]: { [MINT]: 1_500_000n, [MINT2]: 0n }, [W2]: { [MINT]: 2_250_001n } }));
   assert.deepEqual(got, { positions: [{ chain: "solana", token: MINT, amount: "3.750001", cost: "0", wallets: [W1, W2], decimals: 6 }], whole: true });
-  assert.deepEqual(await positionsPass(reads({}, {})), { positions: [], whole: true }, "no buy wallets: no positions");
+  assert.deepEqual(await positionsPass(reads({})), { positions: [], whole: true }, "no buy wallets: no positions");
 });
 
-test("a token whose two reads differ: never shown from one RPC, every other token still updates, it keeps its last agreed amount, and the pass runs again", async () => {
+test("one W's failed read is its own: it keeps its last entries while every other W updates, and the pass runs again; a finder that cannot list keeps them all", async () => {
   const memo = passMemo();
-  const chainNow: Record<string, bigint> = { [`${W1}/${MINT}`]: 1_000_000n, [`${W1}/${MINT2}`]: 2_000_000_000n };
-  const r = reads({ [W1]: [MINT, MINT2] }, chainNow);
-  // a fresh load: MINT2 read apart (a transfer landing between the reads, one RPC behind): MINT still shows
-  delete chainNow[`${W1}/${MINT2}`];
-  let got = await positionsPass(r, memo);
-  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "1"]], "the other token shows");
-  assert.equal(got.whole, false, "counted failed: it runs again");
-  // they agree: it shows
-  chainNow[`${W1}/${MINT2}`] = 2_000_000_000n;
-  got = await positionsPass(r, memo);
-  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "1"], [MINT2, "2"]]);
-  assert.equal(got.whole, true);
-  // apart again: MINT2 keeps its last agreed amount while MINT updates
-  delete chainNow[`${W1}/${MINT2}`];
-  chainNow[`${W1}/${MINT}`] = 500_000n;
-  got = await positionsPass(r, memo);
+  await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: { [MINT2]: 2_000_000_000n } }), memo);
+  let got = await positionsPass(reads({ [W1]: { [MINT]: 500_000n }, [W2]: null }), memo);
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "0.5"], [MINT2, "2"]], "W1 updates, W2 keeps its last");
+  assert.equal(got.whole, false);
+  got = await positionsPass({ ...reads({}), wallets: async () => Promise.reject(new Error("the helper is down")) }, memo);
   assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "0.5"], [MINT2, "2"]]);
   assert.equal(got.whole, false);
-  // the finder cannot list: what the last pass held is read again, nothing dropped for the finder's fault
-  chainNow[`${W1}/${MINT2}`] = 2_000_000_000n;
-  got = await positionsPass({ ...r, wallets: async () => Promise.reject(new Error("the helper is down")) }, memo);
-  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "0.5"], [MINT2, "2"]]);
-  assert.equal(got.whole, false);
-  // a token whose decimals do not read is left out (never shown at a guessed scale), the others stay
-  const m2 = passMemo();
-  got = await positionsPass({ ...reads({ [W1]: [MINT, MINT2] }, { [`${W1}/${MINT}`]: 1n, [`${W1}/${MINT2}`]: 1n }), decimals: async (m) => (m === MINT ? 6 : Promise.reject(new Error("apart"))) }, m2);
+  // a fresh device whose W cannot be read shows nothing for it, and the other W
+  got = await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: null }));
+  assert.deepEqual([got.positions.map((p) => p.token), got.whole], [[MINT], false]);
+  // a mint whose decimals do not read is left out (never shown at a guessed scale), the others stay
+  got = await positionsPass(reads({ [W1]: { [MINT]: 1n, [MINT2]: 1n } }, { decimals: { [MINT]: 6 } }));
   assert.deepEqual([got.positions.map((p) => p.token), got.whole], [[MINT], false]);
 });
 
-test("the device's own records name what it bought: the finder listing W without the new token hides nothing", async () => {
-  const r = { ...reads({ [W1]: [] }, { [`${W1}/${MINT}`]: 7_000_000n }), bought: async () => [{ address: W1, mint: MINT }] };
-  const got = await positionsPass(r);
+test("what this device bought: shown from its buy record while the finder lags or omits it, then the finder's amount; never hidden on a lag, gone once the finder listed it and lists it no more", async () => {
+  const costs = { [W1]: { mint: MINT, received: "7" } };
+  const memo = passMemo();
+  // the finder read W whole, not listing the token yet: the record's amount
+  let got = await positionsPass(reads({ [W1]: {} }, { costs }), memo);
   assert.deepEqual([got.positions.map((p) => [p.token, p.amount, p.wallets]), got.whole], [[[MINT, "7", [W1]]], true]);
-  // nor a finder that does not list W at all
-  const r2 = { ...reads({}, { [`${W1}/${MINT}`]: 7_000_000n }), bought: async () => [{ address: W1, mint: MINT }] };
-  assert.deepEqual((await positionsPass(r2)).positions.map((p) => p.token), [MINT]);
-});
-
-test("a record's W read 0 on both RPCs after a pass saw it held, with the finder naming no such token: marked gone once; never on a first 0, a finder fault, or a token the finder still names", async () => {
-  const memo = passMemo();
-  const chainNow: Record<string, bigint> = { [`${W1}/${MINT}`]: 7n, [`${W2}/${MINT}`]: 0n };
-  const marked: string[] = [];
-  const r = { ...reads({ [W1]: [], [W2]: [] }, chainNow), bought: async () => [{ address: W1, mint: MINT }, { address: W2, mint: MINT }], gone: async (a: string, m: string) => void marked.push(`${a}/${m}`) };
-  await positionsPass(r, memo);
-  assert.deepEqual(marked, [], "W2's first 0 (a buy not landed yet) is no proof of a sale");
-  chainNow[`${W1}/${MINT}`] = 0n;
-  await positionsPass({ ...r, wallets: async () => Promise.reject(new Error("down")) }, memo);
-  assert.deepEqual(marked, [], "the finder unread: not marked");
-  await positionsPass({ ...r, wallets: async () => [{ address: W1, tokens: [MINT] }, { address: W2, tokens: [] }] }, memo);
-  assert.deepEqual(marked, [], "the finder still names it: not marked");
-  chainNow[`${W1}/${MINT}`] = 7n;
-  await positionsPass(r, memo);
-  chainNow[`${W1}/${MINT}`] = 0n;
-  const got = await positionsPass(r, memo);
-  assert.deepEqual(marked, [`${W1}/${MINT}`]);
+  // the finder does not know W yet (its note not read as spent): the record's amount, and the pass runs again
+  got = await positionsPass(reads({}, { costs }), passMemo());
+  assert.deepEqual([got.positions.map((p) => p.amount), got.whole], [["7"], false]);
+  // still not listed many passes on: never hidden for a lag
+  for (let i = 0; i < 3; i++) got = await positionsPass(reads({ [W1]: {} }, { costs }), memo);
+  assert.deepEqual(got.positions.map((p) => p.amount), ["7"]);
+  // listed: the finder's amount stands (a part sold)
+  got = await positionsPass(reads({ [W1]: { [MINT]: 3_000_000n } }, { costs }), memo);
+  assert.deepEqual(got.positions.map((p) => p.amount), ["3"]);
+  // listed before, read whole, listed no more: gone, though the record stays
+  got = await positionsPass(reads({ [W1]: {} }, { costs }), memo);
   assert.deepEqual(got.positions, []);
+  // but W unread: its last stays
+  const m2 = passMemo();
+  await positionsPass(reads({ [W1]: { [MINT]: 3_000_000n } }, { costs }), m2);
+  got = await positionsPass(reads({ [W1]: null }, { costs }), m2);
+  assert.deepEqual(got.positions.map((p) => p.amount), ["3"]);
 });
 
-test("a pass reads at most POSITIONS_READS_AT_ONCE at once, and each mint's decimals once", async () => {
-  let now = 0;
-  let most = 0;
+test("a full sell this device signed, with the finder never listing the token: gone though the record stays; without the sell it stays", async () => {
+  const costs = { [W1]: { mint: MINT, received: "7" } };
+  assert.deepEqual((await positionsPass(reads({ [W1]: {} }, { costs, sold: [`${W1} ${MINT}`] }))).positions, [], "sold all, read whole, not listed: gone");
+  assert.deepEqual((await positionsPass(reads({ [W1]: {} }, { costs }))).positions.length, 1, "not sold: stays");
+  // a full sell that did not land: the finder still lists the token, so it stays
+  assert.deepEqual((await positionsPass(reads({ [W1]: { [MINT]: 7_000_000n } }, { costs, sold: [`${W1} ${MINT}`] }))).positions.map((p) => p.amount), ["7"]);
+  // sold, W unread: its record is not shown again
+  assert.deepEqual((await positionsPass(reads({ [W1]: null }, { costs, sold: [`${W1} ${MINT}`] }))).positions, []);
+});
+
+test("a pass keeps itself and reads what was kept: each W's amounts and what the finder listed carry over a reload; a mint's decimals are read once", async () => {
   let decimalsRead = 0;
-  const found = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`W${i}`, [MINT]]));
-  const r: PositionsReads = {
-    wallets: async () => Object.entries(found).map(([address, tokens]) => ({ address, tokens })),
-    held: async () => {
-      most = Math.max(most, ++now);
-      await new Promise((res) => setTimeout(res, 2));
-      now--;
-      return 1n;
-    },
-    decimals: async () => (decimalsRead++, 6),
-  };
+  const r = reads({ [W1]: { [MINT]: 3_000_000n } });
   const memo = passMemo();
-  const got = await positionsPass(r, memo);
-  assert.equal(got.positions[0]!.amount, "0.00001");
-  assert.equal(most, POSITIONS_READS_AT_ONCE);
-  assert.equal(POSITIONS_READS_AT_ONCE, 4);
-  await positionsPass(r, memo);
+  await positionsPass({ ...r, decimals: async (m) => (decimalsRead++, r.decimals(m)) }, memo);
+  await positionsPass({ ...r, decimals: async (m) => (decimalsRead++, r.decimals(m)) }, memo);
   assert.equal(decimalsRead, 1, "a mint's decimals never change: read once");
+  const kept = r.saved.at(-1)!;
+  assert.deepEqual(kept, { positions: [{ chain: "solana", token: MINT, amount: "3", cost: "0", wallets: [W1], decimals: 6 }], held: { [`${W1} ${MINT}`]: "3000000" }, listed: [`${W1} ${MINT}`] });
+  // a reload: W unread, its kept amount stands; the token listed before and no longer: gone
+  const after = { ...reads({ [W1]: null }), kept: async () => kept } as PositionsReads;
+  assert.deepEqual((await positionsPass(after, passMemo())).positions.map((p) => p.amount), ["3"]);
+  const sold = { ...reads({ [W1]: {} }, { costs: { [W1]: { mint: MINT, received: "3" } } }), kept: async () => kept } as PositionsReads;
+  assert.deepEqual((await positionsPass(sold, passMemo())).positions, []);
+  // a pass a sign out overtook keeps nothing
+  const stale = passMemo();
+  stale.stale = true;
+  const r2 = reads({ [W1]: { [MINT]: 1n } });
+  await positionsPass(r2, stale);
+  assert.deepEqual(r2.saved, []);
 });
 
 test("the cache: one pass at a time, a refresh while one runs runs once more after it; a failed pass keeps the last and is tried again", async () => {
@@ -256,37 +244,39 @@ function solanaWallet(): string {
   return fw.address;
 }
 
-/** A fake chain both RPCs read: the mint (6 decimals) and each W's associated token account of it, `amounts[k]` per RPC. */
+/** A fake chain: the mint (6 decimals) on both RPCs, which the pass may read and nothing else (no read names a W to
+ *  them); the finder's one read of each W, `amounts[0]` of the mint, failing while `fail`. */
 function chain() {
   const mintData = new Uint8Array(82);
   mintData[44] = 6;
   mintData[45] = 1;
   const amounts: [bigint, bigint] = [0n, 0n];
   const owners = new Map<string, string>(); // ATA -> W
-  const rpc = (k: 0 | 1) => async (method: string, params: readonly unknown[]) => {
+  const calls = { rpc: 0, finder: 0 };
+  const state = { fail: false };
+  const rpc = () => async (method: string, params: readonly unknown[]) => {
+    calls.rpc++;
     assert.equal(method, "getAccountInfo");
-    const address = params[0] as string;
-    if (address === MINT) return { context: { slot: 10 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } };
-    const w = owners.get(address);
-    if (w === undefined || amounts[k] === 0n) return { context: { slot: 10 }, value: null };
-    const d = new Uint8Array(165);
-    d.set(base58.decode(MINT), 0);
-    d.set(base58.decode(w), 32);
-    new DataView(d.buffer).setBigUint64(64, amounts[k], true);
-    d[108] = 1;
-    return { context: { slot: 10 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(d), "base64"] } };
+    assert.equal(params[0], MINT, "the page's RPCs read a mint only, never a wallet's account");
+    return { context: { slot: 10 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } };
   };
   const finder: HoldingsReader = {
     chain: "sol",
     read: async (address) => {
+      calls.finder++;
       owners.set(solanaAta(address, MINT, SOLANA_TOKEN_PROGRAM), address);
+      if (state.fail) throw new Error("the helper did not answer");
       return { native: 0n, tokens: new Map(amounts[0] > 0n ? [[MINT, { amount: amounts[0], frozen: false }]] : []), unreadable: [] };
     },
   };
-  return { amounts, rpcs: [rpc(0), rpc(1)] as const, finder, owners };
+  return { amounts, rpcs: [rpc(), rpc()] as const, finder, owners, calls, state };
 }
+const until = async (f: () => boolean | Promise<boolean>) => {
+  for (let i = 0; i < 200 && !(await f()); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(await f());
+};
 
-test("the page: the first signed-in read starts a pass, a sell's end reads again, a full sell's position is gone, sign out drops them", async () => {
+test("the page: the first signed-in read starts a pass from the finder's read, a sell's end reads again, a full sell's position is gone, a W the finder cannot read keeps its last, sign out drops them", async () => {
   const w = await spentWallet();
   const c = chain();
   c.amounts[0] = c.amounts[1] = 1_081_590_213_565n;
@@ -304,43 +294,67 @@ test("the page: the first signed-in read starts a pass, a sell's end reads again
   );
   let told = 0;
   tp.watch(() => told++);
-  assert.equal(tp.positions(), null, "no pass yet: the state keeps its []");
-  const until = async (f: () => boolean) => {
-    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
-    assert.ok(f());
-  };
-  await until(() => tp.positions() !== null);
-  const [p] = tp.positions()!;
+  assert.equal(await tp.positions(), null, "no pass yet, none kept: the state keeps its []");
+  await until(async () => (await tp.positions()) !== null);
+  const [p] = (await tp.positions())!;
   assert.deepEqual({ ...p, wallets: p!.wallets.length }, { chain: "solana", token: MINT, amount: "1081590.213565", cost: "0", wallets: 1, decimals: 6 });
   assert.equal(p!.wallets[0], [...c.owners.values()][0], "W, the spent note's buy wallet");
   assert.ok(told >= 1, "the page's state is read again when the positions change");
   // what SIGN_HOST then sends the app: the terminal's sell test reads this very state (apps/terminal/test/sell-live.test.ts)
-  const sent = withPositions(SIGNED_IN, tp.positions());
+  const sent = withPositions(SIGNED_IN, await tp.positions());
   if (process.env.RECORD_LIVE_STATE === "1") writeFileSync(LIVE_STATE, `${JSON.stringify(sent, null, 2)}\n`);
   assert.deepEqual(sent, JSON.parse(readFileSync(LIVE_STATE, "utf8")), "the terminal's recorded state is the page's own");
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(sent), true);
   assert.equal(V1_8_SCHEMAS.state(stateFor("1.8", sent)), true);
-  // a full sell: its run ends, both RPCs read 0, the position is gone with no reload
+  // a full sell: its run ends, the finder reads none, the position is gone with no reload
   c.amounts[0] = c.amounts[1] = 0n;
   const r = tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s1", sha: "00", progress: () => {} } as never);
   assert.ok("running" in r);
   assert.deepEqual(ran, ["s1"]);
-  assert.equal(tp.positions()!.length, 1, "nothing read again before the run ends");
+  assert.equal((await tp.positions())!.length, 1, "nothing read again before the run ends");
   ended();
-  await until(() => tp.positions()!.length === 0);
-  // one RPC reads tokens the other does not: not shown, the last whole pass stays, tried again
+  await until(async () => (await tp.positions())!.length === 0);
+  // tokens again; then the finder cannot read W: its last stays, the pass tried again
   c.amounts[0] = 5n;
-  const s2 = tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s2", sha: "00", progress: () => {} } as never);
-  assert.ok("running" in s2);
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s2", sha: "00", progress: () => {} } as never);
+  ended();
+  await until(async () => (await tp.positions())!.length === 1);
+  c.state.fail = true;
+  c.amounts[0] = 0n;
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s3", sha: "00", progress: () => {} } as never);
   ended();
   await until(() => timers.length > 0);
-  assert.deepEqual(tp.positions(), [], "a balance one RPC alone reports is not shown");
-  c.amounts[1] = 5n;
+  assert.equal((await tp.positions())![0]!.amount, "0.000005", "W unread: its last amount stays");
+  c.state.fail = false;
   timers.shift()!();
-  await until(() => tp.positions()!.length === 1);
-  assert.equal(tp.positions()![0]!.amount, "0.000005");
+  await until(async () => (await tp.positions())!.length === 0);
+  // sign out: the store's database goes (its kept pass with it), the page's positions with it
+  await w.signOut();
   await tp.signedOut();
-  assert.equal(tp.positions(), null, "sign out drops them");
+  assert.equal(await tp.positions(), null, "sign out drops them");
+});
+
+test("the page: a reload with a kept pass answers the first state read with no chain read, and the first pass replaces it", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  c.amounts[0] = 2_000_000n;
+  const kept: KeptPass = { positions: [{ chain: "solana", token: MINT, amount: "9", cost: "0", wallets: [solanaWallet()], decimals: 6 }], held: { [`${solanaWallet()} ${MINT}`]: "9000000" }, listed: [`${solanaWallet()} ${MINT}`] };
+  await w.put("meta", POSITIONS_KEPT_KEY, kept);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const slow: HoldingsReader = { chain: "sol", read: async (a, s) => (await gate, c.finder.read(a, s)) };
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice() },
+    { pin: PIN, rpcs: c.rpcs as never, holdings: () => slow, positions: { setTimer: () => {}, clearTimer: () => {} } } as never,
+  );
+  assert.deepEqual(await tp.positions(), kept.positions, "the kept pass, at the first state read");
+  assert.deepEqual([c.calls.rpc, c.calls.finder], [0, 0], "no chain read for it");
+  release();
+  await until(async () => (await tp.positions())![0]?.amount === "2");
+  assert.deepEqual(((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass).positions.map((p) => p.amount), ["2"], "the pass is kept in its place");
+  await w.signOut();
+  await tp.signedOut();
+  assert.equal(await tp.positions(), null, "sign out: the kept pass went with the store");
 });
 
 // ---------------------------------------------------- cost, and the pool buy's records
@@ -403,7 +417,10 @@ test("a pool buy's records: filled, its ops record (time, chain, token, USD) and
   const n = memStore();
   await recordPoolBuy(n, "b7", { ...FACTS, price: null }, { result: { stage: "filled", txs: [] } });
   assert.equal((n.ops.get("b7") as { amount_usd?: string }).amount_usd, undefined, "no price read: no USD");
-  assert.equal(n.meta.get(POSITION_COSTS_KEY), undefined, "and no cost: the position's cost stays unknown");
+  assert.deepEqual(n.meta.get(POSITION_COSTS_KEY), { [W1]: { mint: MINT, received: "1081590.213565" } }, "W's buy record with no cost: the position's cost stays unknown, its amount known");
+  const m = memStore();
+  await recordPoolBuy(m, "b8", { ...FACTS, out: undefined }, { result: { stage: "filled", txs: [] } });
+  assert.equal(m.meta.get(POSITION_COSTS_KEY), undefined, "no amount told: no buy record");
 });
 
 test("the page: a pool buy's end writes its records and reads the positions again, with its cost", async () => {
@@ -423,19 +440,15 @@ test("the page: a pool buy's end writes its records and reads the positions agai
     // @ts-expect-error a stand-in buy kind: only its route facts, answer and end matter here
     { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
   );
-  const until = async (f: () => boolean) => {
-    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
-    assert.ok(f());
-  };
-  assert.equal(tp.positions(), null);
-  await until(() => tp.positions() !== null);
-  assert.deepEqual(tp.positions(), [], "nothing bought yet");
+  assert.equal(await tp.positions(), null);
+  await until(async () => (await tp.positions()) !== null);
+  assert.deepEqual(await tp.positions(), [], "nothing bought yet");
   const r = tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb1", sha: "00", progress: () => {}, route: (x: unknown) => routed.push(x) } as never);
   assert.ok("running" in r);
   c.amounts[0] = c.amounts[1] = 1_081_590_213_565n;
   ended();
-  await until(() => (tp.positions() ?? []).length === 1);
-  assert.equal(tp.positions()![0]!.cost, "1.5", "the buy's spend at the page's price, all of it held");
+  await until(async () => ((await tp.positions()) ?? []).length === 1);
+  assert.equal((await tp.positions())![0]!.cost, "1.5", "the buy's spend at the page's price, all of it held");
   assert.deepEqual(routed, [{ wallet: [...c.owners.values()][0] }, { out: "1081590.213565" }], "the run's route facts still reach the app");
   const op = (await w.get("ops", "pb1")) as { stage: string; amount_usd: string; token: string };
   assert.deepEqual([op.stage, op.amount_usd, op.token], ["filled", "1.5", MINT], "the pool buy shows in state.ops (review P3-1)");
@@ -458,8 +471,7 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
     // @ts-expect-error a stand-in buy kind
     { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
   );
-  tp.positions();
-  for (let i = 0; i < 200 && tp.positions() === null; i++) await new Promise((r) => setTimeout(r, 5));
+  await until(async () => (await tp.positions()) !== null);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb2", sha: "00", progress: (s: string) => posted.push(s) } as never);
   answered();
   await new Promise((r) => setTimeout(r, 20));
@@ -470,7 +482,7 @@ test("the page: a pool buy answered early as sent (its fill read later) is recor
   const op = (await w.get("ops", "pb2")) as { stage: string; txs: unknown[] };
   assert.deepEqual([op.stage, op.txs], ["filled", [{ chain: "solana", hash: "SigS" }]]);
   assert.deepEqual(posted, ["filled", "filled"], "the app still gets every progress the run posts");
-  assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [[...c.owners.values()][0]!]: { mint: MINT, cost_usd: "1.5", received: "5" } });
+  assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [[...c.owners.values()][0]!]: { mint: MINT, received: "5", cost_usd: "1.5" } });
 });
 
 test("the page: a sell answered at its send (sent) and ended later: its position is gone at the end, with no reload", async () => {
@@ -489,34 +501,39 @@ test("the page: a sell answered at its send (sent) and ended later: its position
     // @ts-expect-error a stand-in sell kind
     { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: () => {}, clearTimer: () => {} } },
   );
-  const until = async (f: () => boolean) => {
-    for (let i = 0; i < 200 && !f(); i++) await new Promise((r) => setTimeout(r, 5));
-    assert.ok(f());
-  };
-  tp.positions();
-  await until(() => (tp.positions() ?? []).length === 1);
+  await until(async () => ((await tp.positions()) ?? []).length === 1);
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 5_000_000n, slippageBps: 100, decimals: 6 }, { id: "sx", sha: "00", progress: (s: string) => posted.push(s) } as never);
   answered();
   await new Promise((r) => setTimeout(r, 30));
-  assert.equal(tp.positions()!.length, 1, "sent: the tokens are still W's, nothing to read yet");
+  assert.equal((await tp.positions())!.length, 1, "sent: the tokens are still W's, nothing to read yet");
   c.amounts[0] = c.amounts[1] = 0n;
   progress("filled");
-  await until(() => tp.positions()!.length === 0);
+  await until(async () => (await tp.positions())!.length === 0);
   assert.deepEqual(posted, ["filled"], "the app still gets the run's progress");
 });
 
-test("the page: the finder lists W with none of the token yet, the device's own buy record names it: shown at the first pass", async () => {
+test("the page: the finder lists W with none of the token yet, the device's own buy record names it: shown at the first pass; a full sell this device signs notes it, so a finder that never lists it shows it gone", async () => {
   const w = await spentWallet();
   const c = chain();
-  c.amounts[0] = c.amounts[1] = 3_000_000n;
   const W = solanaWallet();
-  await w.update("meta", "owed/buy-sol", () => ({ [W]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } }));
+  await w.update("meta", POSITION_COSTS_KEY, () => ({ [W]: { mint: MINT, received: "3" } }));
   const lagging: HoldingsReader = { chain: "sol", read: async (address) => (c.finder.read(address), { native: 0n, tokens: new Map(), unreadable: [] }) };
+  let ended!: () => void;
+  // the sell's own host: a full sell writes W's rent-back record with that sell before it leaves the device
+  const sell = (host: () => { owed?: { put(r: unknown): Promise<void> } }) => (_ask: unknown, _ctx: unknown) => {
+    void host().owed!.put({ address: W, l: "77", j: 0, mints: [{ mint: MINT, program: SOLANA_TOKEN_PROGRAM }], passes: 0, sell: { [MINT]: { tx: "AA==", last: 1 } } });
+    return { running: true as const, after: new Promise<void>((r) => (ended = r)), answer: () => ({ result: { stage: "filled", txs: [] } }) };
+  };
   const tp = testnetPool(
     { store: async () => w, seed64: async () => SEED64.slice() },
-    { pin: PIN, rpcs: c.rpcs as never, holdings: () => lagging, positions: { setTimer: () => {}, clearTimer: () => {} } } as never,
+    { pin: PIN, rpcs: c.rpcs as never, holdings: () => lagging, tradeKinds: { sell }, positions: { setTimer: () => {}, clearTimer: () => {} } } as never,
   );
-  tp.positions();
-  for (let i = 0; i < 200 && tp.positions() === null; i++) await new Promise((r) => setTimeout(r, 5));
-  assert.deepEqual(tp.positions()!.map((p) => [p.token, p.amount, p.wallets]), [[MINT, "3", [W]]]);
+  await until(async () => (await tp.positions()) !== null);
+  assert.deepEqual((await tp.positions())!.map((p) => [p.token, p.amount, p.wallets]), [[MINT, "3", [W]]], "never hidden for the finder's lag");
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 3_000_000n, slippageBps: 100, decimals: 6 }, { id: "s9", sha: "00", progress: () => {} } as never);
+  await until(async () => Object.hasOwn(((await w.get("meta", POSITIONS_SOLD_KEY)) as object) ?? {}, W));
+  assert.deepEqual(await w.get("meta", POSITIONS_SOLD_KEY), { [W]: [MINT] });
+  ended();
+  await until(async () => (await tp.positions())!.length === 0);
+  assert.deepEqual(await w.get("meta", POSITION_COSTS_KEY), { [W]: { mint: MINT, received: "3" } }, "the record stays; the sold one is never kept on screen for it");
 });

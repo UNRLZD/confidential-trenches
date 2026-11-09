@@ -1,21 +1,27 @@
 // The tokens the device's pool buys hold, on SIGN_HOST's top-level page (card signpage-state-holdings; the kit's
 // SignpageState.positions, its shape unchanged).
 //
-// - Where to look: each W and token the device's own records name (W's buy mint, pool-sell.ts buyMints owed/buy-sol,
-//   and W's buy record, POSITION_COSTS_KEY), and each the finder names: the buy wallets the pool's spent notes paid
-//   (../../wallet/src/pool/buy-wallets.ts buyWallets, the one finder a restore and a sell use) with the tokens its one
-//   reader lists (the helper's keyed route on mainnet, a devnet RPC in the testnet build). The device knows what it
-//   bought, so a reader that lags, omits a token or fails hides no position this device bought; the finder adds what a
-//   restore needs. A record's W and token that a pass saw held and later reads as 0 on both RPCs, with the finder
-//   naming no such token in W, is marked gone (POSITIONS_GONE_KEY) and not read again from the records: W takes one
-//   buy only (a W is its note's, and a note spends once), so its records never name a new holding.
-// - What is held: each, read again as W's associated token account on both of the page's RPCs (pool-sell.ts tokenHeld,
-//   the read a sell gates on: the mint's program the same on both, then the account's amount the same on both, read
-//   again once), POSITIONS_READS_AT_ONCE at once on the page's own paced queues. A token's decimals are its mint's on
-//   both RPCs (rules/pool.ts tokenDecimalsOf), kept once read (a mint's decimals never change). An amount one RPC
-//   alone reports, or that the two read apart, is never shown: that one W and token keeps its last agreed amount, or
-//   none, while every other updates, and the pass counts as failed so it runs again. A token whose agreed amount is 0
-//   is not held, so after a full sell its position is gone.
+// - Display only, from one reader: positions are what the finder's one read of each W says it holds, never a read a
+//   sell signs on; a sell reads its W again on two providers before it signs (pool-sell.ts tokenHeld).
+// - The finder: the buy wallets the pool's spent notes paid (../../wallet/src/pool/buy-wallets.ts buyWallets, the one
+//   finder a restore and a sell use), each W read once by its one reader with every token it holds and the amount: the
+//   helper's keyed route on mainnet, a devnet RPC in the testnet build. No read of this pass names a W to a public
+//   provider (buy-wallets.ts header); the only chain reads it makes itself are a mint's decimals, on both of the page's
+//   RPCs (rules/pool.ts tokenDecimalsOf), which name a token and no wallet, kept once read (they never change).
+// - One W at a time: a W whose read fails keeps its last entries (or none) while every other W updates, and the pass
+//   counts as failed so it runs again; a finder that cannot list at all keeps every W's last entries.
+// - What this device bought: W's buy record (POSITION_COSTS_KEY, written when its buy filled) names the token and the
+//   amount W received, read from the buy's transaction on both RPCs. A recorded token the finder read W whole and does
+//   not list is shown at that amount, so a reader that lags or omits it hides nothing this device bought, until either
+//   the finder lists it (from then on its amount is the finder's) or it is gone. Gone: the finder read W whole and
+//   lists no such token, and either the finder listed it in W before (noted on the device) or this device signed a
+//   full sell of it from W (pool-sell.ts writes W's rent-back record with that sell before it leaves the device; noted
+//   here). A full sell that did not land leaves the token listed, so it stays. W takes one buy only (a W is its
+//   note's, and a note spends once: wallet/src/pool/queue.ts jOf and derive/keys.ts walletPath), so a record never
+//   names a second holding of W. A token at 0 is not held.
+// - Kept on the device: the last pass's positions, each W's amounts and the tokens the finder listed
+//   (POSITIONS_KEPT_KEY, in the wallet store, gone at sign out with the store), so the first state read after a load
+//   answers at once (the finder reads one W per 3 s on mainnet), and the first pass replaces it.
 // - One position per token: its amount the sum over the Ws that hold it, as an exact decimal at its decimals, and
 //   those Ws' addresses.
 // - Its cost, in USD: each W's buy record (POSITION_COSTS_KEY, written by recordPoolBuy when the buy filled) names what
@@ -30,8 +36,8 @@
 //   that answered "sent" (no end yet).
 // - When: a pass at the first signed-in state read, and again each time a pool buy or sell run ends; never inside a
 //   state read, which only takes the last whole pass. One pass at a time: a refresh asked while one runs runs once more
-//   after it. A pass with any read failed is tried again POSITIONS_RETRY_MS later, up to POSITIONS_RETRIES times, so a
-//   buy's tokens that one RPC has not shown yet still appear without a reload. Sign out drops it all.
+//   after it. A pass with any read failed is tried again POSITIONS_RETRY_MS later, up to POSITIONS_RETRIES times. Sign
+//   out drops it all.
 // - What crosses to APP_HOST: per token its chain, mint, amount, decimals and the Ws' addresses: amounts, addresses and
 //   tokens only, never a note, a key or a path.
 import type { BuyRoute, PoolStatePrice, SignpageState, TxRef } from "../../kit/src/signpage/messages.ts";
@@ -47,34 +53,35 @@ export const POSITIONS_RETRY_MS = 5_000;
  *  sign-in load runs it again. */
 export const POSITIONS_RETRIES = 12;
 
-/** Reads in flight at once in a pass: each W and token is two or three getAccountInfo rounds on both RPCs, one after
- *  another, so 4 at once fills the page's paced queues (SOLANA_KEYLESS_RPC_LIMIT: 40 calls of one method per 10 s a
- *  provider) at about a dozen calls in flight, under that budget with room for a sell's own reads on the same queues. */
-export const POSITIONS_READS_AT_ONCE = 4;
+/** One W as the finder read it: each token it holds, base units; null when that W's read failed. */
+export type FoundWallet = { address: string; tokens: ReadonlyMap<string, bigint> | null };
 
 /** What a pass reads, every read the device's own. */
 export type PositionsReads = {
-  /** Each buy wallet with the tokens the finder's read names in it (more than nothing); throws when it cannot list. */
-  wallets(): Promise<readonly { address: string; tokens: readonly string[] }[]>;
-  /** Each W and token the device's own records name (its buy mints and buy records), gone ones left out. */
-  bought?(): Promise<readonly { address: string; mint: string }[]>;
-  /** Marks a record's W and token gone (see the header). */
-  gone?(address: string, mint: string): Promise<void>;
-  /** W's amount of `mint` in base units, the same on both RPCs; throws when they differ or a read fails. */
-  held(address: string, mint: string): Promise<bigint>;
+  /** Every buy wallet the finder knows, each as it read it; throws when it cannot list at all. */
+  wallets(): Promise<readonly FoundWallet[]>;
   /** The mint's decimals, the same on both RPCs; throws otherwise. */
   decimals(mint: string): Promise<number>;
-  /** Each W's buy record (POSITION_COSTS_KEY); none: every cost "0". */
+  /** Each W's buy record (POSITION_COSTS_KEY); none: nothing recorded. */
   costs?(): Promise<PositionCosts>;
+  /** The full sells this device signed, as "W mint" (POSITIONS_SOLD_KEY). */
+  sold?(): Promise<ReadonlySet<string>>;
+  /** The kept pass (POSITIONS_KEPT_KEY), as stored; read once, before the first pass. */
+  kept?(): Promise<unknown>;
+  /** Keeps this pass (POSITIONS_KEPT_KEY). */
+  keep?(k: KeptPass): Promise<void>;
 };
 
 /** Where the buy records are, in the wallet store's meta by W's address: an owed/ key, the one meta keyspace the store
  *  lets a caller write, beside W's buy mints (pool-sell.ts buyMints, owed/buy-sol). */
 export const POSITION_COSTS_KEY = "owed/cost-sol";
-/** The records' Ws and tokens read as gone, in meta by W's address: its mint. */
-export const POSITIONS_GONE_KEY = "owed/gone-sol";
-/** One W's buy: its mint, the USD it spent (a decimal) and the token units it received (a decimal at the mint's own). */
-export type PositionCost = { mint: string; cost_usd: string; received: string };
+/** The full sells this device signed, in meta by W's address: the mints. */
+export const POSITIONS_SOLD_KEY = "owed/sold-sol";
+/** The last pass, in meta: KeptPass. */
+export const POSITIONS_KEPT_KEY = "owed/positions-sol";
+/** One W's buy: its mint, the token units it received (a decimal at the mint's own) and, with a price read, the USD it
+ *  spent (a decimal). */
+export type PositionCost = { mint: string; received: string; cost_usd?: string };
 export type PositionCosts = Readonly<Record<string, PositionCost>>;
 
 const DEC = /^\d{1,78}(\.\d{1,78})?$/;
@@ -102,87 +109,111 @@ export function positionCost(mint: string, decimals: number, held: readonly { ad
   return poolUnits(sum, COST_SCALE);
 }
 
-/** What a pass keeps for the next: each W and token's last agreed amount (by "W mint") and each mint's decimals. */
-export type PassMemo = { held: Map<string, bigint>; decimals: Map<string, number> };
-export const passMemo = (): PassMemo => ({ held: new Map(), decimals: new Map() });
+/** A pass as kept: its positions, each "W mint" amount (base units, a decimal string) and each "W mint" the finder
+ *  listed. */
+export type KeptPass = { positions: Position[]; held: Record<string, string>; listed: string[] };
+/** What a pass keeps for the next: each "W mint" last amount, what the finder listed, each mint's decimals. */
+export type PassMemo = { held: Map<string, bigint>; listed: Set<string>; decimals: Map<string, number>; loaded: boolean; stale?: boolean };
+export const passMemo = (): PassMemo => ({ held: new Map(), listed: new Set(), decimals: new Map(), loaded: false });
 /** A pass's positions, and whether every read in it held (when not, it runs again). */
 export type PassResult = { positions: Position[]; whole: boolean };
 
-async function atOnce<T>(items: readonly T[], f: (t: T) => Promise<void>): Promise<void> {
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(POSITIONS_READS_AT_ONCE, items.length) }, async () => {
-    while (i < items.length) await f(items[i++]!);
-  }));
+const KEY = (w: string, m: string): string => `${w} ${m}`;
+const BASE = /^\d{1,78}$/;
+/** A kept pass's positions, or null when it is not one (the kit's schema checks them again on the way out). */
+export function keptPositions(v: unknown): Position[] | null {
+  const k = v as Partial<KeptPass> | null;
+  return typeof k === "object" && k !== null && Array.isArray(k.positions) ? (k.positions as Position[]) : null;
+}
+function loadMemo(memo: PassMemo, v: unknown): void {
+  const k = v as Partial<KeptPass> | null;
+  if (typeof k !== "object" || k === null) return;
+  if (typeof k.held === "object" && k.held !== null) for (const [key, a] of Object.entries(k.held)) if (typeof a === "string" && BASE.test(a)) memo.held.set(key, BigInt(a));
+  if (Array.isArray(k.listed)) for (const key of k.listed) if (typeof key === "string") memo.listed.add(key);
 }
 
-/** One pass: the positions of the Solana pool's buy wallets, in the order the finder then the records name them. */
+/** One pass: the positions of the Solana pool's buy wallets, in the order the finder names them, then the records. */
 export async function positionsPass(r: PositionsReads, memo: PassMemo = passMemo()): Promise<PassResult> {
-  let whole = true;
-  const pairs = new Map<string, { address: string; mint: string; found: boolean }>();
-  const add = (address: string, mint: string, found: boolean): void => {
-    const k = `${address} ${mint}`;
-    const p = pairs.get(k);
-    if (p) p.found ||= found;
-    else pairs.set(k, { address, mint, found });
-  };
-  const listed = new Set<string>();
-  let finder = true;
-  try {
-    for (const w of await r.wallets()) {
-      listed.add(w.address);
-      for (const m of w.tokens) add(w.address, m, true);
-    }
-  } catch {
-    whole = finder = false;
+  if (!memo.loaded) {
+    memo.loaded = true;
+    loadMemo(memo, await r.kept?.().catch(() => null));
   }
+  let whole = true;
+  let found: readonly FoundWallet[] | null = null;
   try {
-    for (const b of (await r.bought?.()) ?? []) add(b.address, b.mint, false);
+    found = await r.wallets();
   } catch {
     whole = false;
   }
-  // with the finder or the records unread, every W and token the last pass held is read again
-  if (!whole) for (const k of memo.held.keys()) add(k.split(" ")[0]!, k.split(" ")[1]!, false);
-  const held = new Map<string, bigint>();
-  const gone: { address: string; mint: string }[] = [];
-  await atOnce([...pairs], async ([k, p]) => {
-    try {
-      const amount = await r.held(p.address, p.mint);
-      held.set(k, amount);
-      // seen held by a pass, now 0 on both RPCs, and the finder read W with no such token
-      if (amount === 0n && (memo.held.get(k) ?? 0n) > 0n && finder && listed.has(p.address) && !p.found) gone.push(p);
-    } catch {
+  const costs: PositionCosts = r.costs ? await r.costs().catch(() => ((whole = false), {})) : {};
+  const sold = r.sold ? await r.sold().catch(() => ((whole = false), new Set<string>())) : new Set<string>();
+  // each "W mint": its amount in base units, or the recorded amount (a decimal) until the mint's decimals are known
+  const held = new Map<string, { address: string; mint: string; amount: bigint | string }>();
+  const listed = new Set(memo.listed);
+  const read = new Map<string, ReadonlyMap<string, bigint> | null>();
+  for (const w of found ?? []) read.set(w.address, w.tokens);
+  const keepLast = (address: string): void => {
+    for (const [k, a] of memo.held) if (k.startsWith(`${address} `)) held.set(k, { address, mint: k.slice(address.length + 1), amount: a });
+  };
+  for (const w of found ?? []) {
+    if (w.tokens === null) {
       whole = false;
-      const was = memo.held.get(k);
-      if (was !== undefined) held.set(k, was);
+      keepLast(w.address);
+      continue;
     }
-  });
-  const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
-  for (const [k, p] of pairs) {
-    const amount = held.get(k);
-    if (amount === undefined || amount <= 0n) continue;
-    const q = by.get(p.mint) ?? { amount: 0n, wallets: [], held: [] };
-    q.amount += amount;
-    q.wallets.push(p.address);
-    q.held.push({ address: p.address, amount });
-    by.set(p.mint, q);
+    for (const [mint, a] of w.tokens) {
+      listed.add(KEY(w.address, mint));
+      if (a > 0n) held.set(KEY(w.address, mint), { address: w.address, mint, amount: a });
+    }
   }
-  await atOnce([...by.keys()].filter((m) => !memo.decimals.has(m)), async (m) => {
+  // the finder could not list: every W keeps its last entries
+  if (found === null) for (const k of memo.held.keys()) keepLast(k.split(" ")[0]!);
+  // what this device bought and the finder does not list
+  for (const [address, c] of Object.entries(costs)) {
+    if (typeof c?.mint !== "string" || typeof c.received !== "string" || !DEC.test(c.received)) continue;
+    const k = KEY(address, c.mint);
+    const tokens = read.get(address);
+    if (tokens && tokens.has(c.mint)) continue; // the finder's amount stands
+    if (tokens) {
+      // read whole, not listed: gone once it was listed before or this device sold it all, else the record's amount
+      if (!listed.has(k) && !sold.has(k)) held.set(k, { address, mint: c.mint, amount: c.received });
+      continue;
+    }
+    // W unread or not known to the finder yet: its last amount, else the record's
+    if (tokens === undefined) whole = false;
+    if (!held.has(k) && !sold.has(k)) held.set(k, { address, mint: c.mint, amount: memo.held.get(k) ?? c.received });
+  }
+  for (const m of new Set([...held.values()].map((h) => h.mint))) {
+    if (memo.decimals.has(m)) continue;
     try {
       memo.decimals.set(m, await r.decimals(m));
     } catch {
       whole = false;
     }
-  });
-  const costs = by.size > 0 && r.costs ? await r.costs().catch(() => ({})) : {};
+  }
+  const by = new Map<string, { amount: bigint; wallets: string[]; held: { address: string; amount: bigint }[] }>();
+  const nextHeld = new Map<string, bigint>();
+  for (const [k, h] of held) {
+    const d = memo.decimals.get(h.mint);
+    if (d === undefined) continue;
+    const amount = typeof h.amount === "bigint" ? h.amount : base(h.amount, d);
+    if (amount === null || amount <= 0n) continue;
+    nextHeld.set(k, amount);
+    const q = by.get(h.mint) ?? { amount: 0n, wallets: [], held: [] };
+    q.amount += amount;
+    q.wallets.push(h.address);
+    q.held.push({ address: h.address, amount });
+    by.set(h.mint, q);
+  }
   const out: Position[] = [];
   for (const [mint, p] of by) {
-    const decimals = memo.decimals.get(mint);
-    if (decimals === undefined) continue;
+    const decimals = memo.decimals.get(mint)!;
     out.push({ chain: "solana", token: mint, amount: poolUnits(p.amount, decimals), cost: positionCost(mint, decimals, p.held, costs), wallets: p.wallets, decimals });
   }
-  memo.held.clear();
-  for (const [k, a] of held) if (a > 0n) memo.held.set(k, a);
-  for (const g of gone) await r.gone?.(g.address, g.mint).catch(() => {});
+  memo.held = nextHeld;
+  memo.listed = listed;
+  // a pass a sign out overtook keeps nothing (its store is gone)
+  if (!memo.stale) await r.keep?.({ positions: out, held: Object.fromEntries([...nextHeld].map(([k, a]) => [k, a.toString()])), listed: [...listed] }).catch(() => {});
   return { positions: out, whole };
 }
 
@@ -212,8 +243,8 @@ export const routeInto = (facts: PoolBuyFacts, route?: (r: BuyRoute) => void) =>
 };
 
 /** A pool buy's records once its run ended (see the header): its ops record under the request's id (never over one
- *  already there, nor for an id another tab runs), and when it filled with W and its amount told and a price read, W's
- *  buy record for its cost. */
+ *  already there, nor for an id another tab runs), and when it filled with W and its amount told, W's buy record (with
+ *  the USD it spent when a price was read). */
 export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBuyFacts, answer: BuyAnswer | null): Promise<void> {
   if (answer === null || ("error" in answer && answer.error === "id_reused")) return;
   if ((await store.get("ops", id)) !== undefined) return;
@@ -225,17 +256,19 @@ export async function recordPoolBuy(store: BuyRecordStore, id: string, f: PoolBu
   if (!FINAL.has(stage)) return;
   const txs = "error" in answer ? [] : answer.result.txs.map((t) => ({ chain: t.chain, hash: t.hash }));
   await store.put("ops", id, { kind: "buy", stage, txs, ...("error" in answer ? { code: answer.error } : {}), created_ms: f.createdMs, chain: "solana", token: f.token, ...(usd === null ? {} : { amount_usd: usd }) });
-  if (stage !== "filled" || usd === null || f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return;
-  const rec: PositionCost = { mint: f.token, cost_usd: usd, received: f.out };
+  if (stage !== "filled" || f.wallet === undefined || f.out === undefined || !DEC.test(f.out)) return;
+  const rec: PositionCost = { mint: f.token, received: f.out, ...(usd === null ? {} : { cost_usd: usd }) };
   await store.update("meta", POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [f.wallet!]: rec }));
 }
 
 export type PositionsCache = {
-  /** The last whole pass, or null before the first. */
+  /** The last pass (or the kept one before it), or null before either. */
   get(): readonly Position[] | null;
+  /** Once per sign-in, before the first pass: the kept pass, if any, read into get(). */
+  ready(): Promise<void>;
   /** Run a pass now, or once more after the one running. */
   refresh(): void;
-  /** A pass when none has run or is running (a signed-in state read). */
+  /** The sign-in's first pass, once (a signed-in state read). */
   first(): void;
   /** `fn` runs when a pass changes the positions. */
   watch(fn: () => void): void;
@@ -246,7 +279,7 @@ export type PositionsCache = {
 };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
-export function positionsCache(pass: (memo: PassMemo) => Promise<PassResult>, o: { retryMs?: number; retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
+export function positionsCache(pass: (memo: PassMemo) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number; retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
   const retryMs = o.retryMs ?? POSITIONS_RETRY_MS;
   const retries = o.retries ?? POSITIONS_RETRIES;
   // a retry never holds a process open (Node's unref; a browser's timer has none)
@@ -264,7 +297,10 @@ export function positionsCache(pass: (memo: PassMemo) => Promise<PassResult>, o:
   let gen = 0;
   let tries = 0;
   let timer: unknown = null;
+  let started = false;
+  let loading: Promise<void> | null = null;
   const run = (): void => {
+    started = true;
     if (timer !== null) clearTimer(timer), (timer = null);
     if (running) return void (again = true);
     const g = gen;
@@ -293,18 +329,33 @@ export function positionsCache(pass: (memo: PassMemo) => Promise<PassResult>, o:
   };
   return {
     get: () => last,
+    ready: () => {
+      if (loading === null && o.kept) {
+        const g = gen;
+        loading = o.kept().then(
+          (k) => {
+            if (g === gen && last === null && k !== null) last = k;
+          },
+          () => {},
+        );
+      }
+      return loading ?? Promise.resolve();
+    },
     refresh: () => {
       tries = 0;
       run();
     },
     first: () => {
-      if (last === null && running === null && timer === null) run();
+      if (!started) run();
     },
     watch: (fn) => void watchers.add(fn),
     clear: () => {
       gen++;
       last = null;
+      memo.stale = true;
       memo = passMemo();
+      started = false;
+      loading = null;
       again = false;
       tries = 0;
       if (timer !== null) clearTimer(timer), (timer = null);
