@@ -9,7 +9,8 @@
 // sol-making the devnet pool's 0.01 SOL note (scripts/live-checks/signpage-pool-notes.run.json), with the most one tap can
 // spend by the kit's own rule (solanaPoolBuyMaxSpend at the worst venue, the 0.001 SOL tip cap, rent 5,080/1:
 // 1,736,080 lamports) and SOL at Pyth's 4 Nov 07:40Z read; base-ready the Base Sepolia pool's 0.001 ETH chunks
-// (scripts/live-checks/pool-evm-testnet-run.base-sepolia.json), ETH at a planted $3,500.12345678. ?amt= sets the
+// (scripts/live-checks/pool-evm-testnet-run.base-sepolia.json), base-making the same with no proof ready yet, ETH at a
+// planted $3,500.12345678. ?amt= sets the
 // amount in the box. ?sheet=1 (card app-phone-trade-sheet) draws the same box in the phone trade sheet with the safety
 // grid under it, from the recorded token read (test/token-source/helper-token-2026-11-03.json), behind an open button, as
 // the token page's phone bar opens it. ?page=1 draws the token page itself (TokenPage, both widths, one trade state) on
@@ -57,6 +58,7 @@ const POOLS: Record<string, { chain: "solana" | "base"; pools: Pool[] }> = {
   "sol-ready": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0.01", tap_max: "0.00173608" }] },
   "sol-making": { chain: "solana", pools: [{ chain: "solana", asset: "SOL", balance: "0.01", ready: "0" }] },
   "base-ready": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0.003", tap_max: "0.001" }] },
+  "base-making": { chain: "base", pools: [{ chain: "base", asset: "ETH", balance: "0.003", ready: "0" }] },
 };
 const POOL = poolMode ? POOLS[poolMode] : undefined;
 if (POOL) STATE.pools = POOL.pools;
