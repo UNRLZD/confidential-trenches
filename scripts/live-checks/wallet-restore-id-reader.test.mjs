@@ -26,6 +26,8 @@
 // counts id_keep 0 as well, since the keep is bound with readId in one pattern. Re-recorded again (9 Nov 05:47Z) by
 // its delta review 2 fold (P1: pacedFetch's deadline from the slot on, busy_wait binding it), the same way, from the fold's
 // tree; the live SIGN_HOST now carries the wired IdReader's markers, so bad_live_before fails on the card's four alone.
+// Re-recorded again (9 Nov 06:23Z) by its delta review 3 fold (P2-1: only the queue's last slot given back; P2-2:
+// busy_wait binds the five requestSignal sites and pacedNearRpc), the same way.
 // - bad_busy_guard and bad_pair_guard (card wallet-id-reader-paced): this card's build with one guard planted in the
 //   IdReader's source, built and run with --local --root <that folder>: busy_guard asks the busy wait only when more
 //   than one try is allowed (`if (b !== null && o.tries > 1)` in asked: the page's default tries would still wait, so
@@ -328,6 +330,8 @@ const planted = (key, text) => {
   return rec;
 };
 const PACED = ["busy_wait", "pair_wrong", "id_keep", "id_signout"];
+// requestSignal's minified name: `function RS(e,t,n){let r=DL(e,t);return r===null?n:...`
+const RS = /function ([\w$]+)\([\w$]+,[\w$]+,[\w$]+\)\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+\);return \2===null\?/.exec(APP)[1];
 // asked() whole, from its head to its loop's end, and readId() whole: each found by shape
 const ASKED = String.raw`async function (?<n>§)\(§,§,§\)\{let §=§\(§\.name\),§=!§\(§\),§=0,§=0,§=0;for\(;;\)\{[^]*?\.signal\)\}\}\}`;
 const READ = String.raw`async function (?<n>§)\(§\)\{let §=§\(\)===0\?0:1,[^]*?return\[§,!0\]\}\}`;
@@ -347,13 +351,22 @@ const PLANTS = [
   ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst\\}", "every:1e3/", "every:0*")],
   ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\);[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return 0}`)],
   ["busy_wait", "the busy hold holds nothing", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§),(?<c>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\+\k<c>\+\(\k<a>\.burst-1\)\*\k<a>\.every\)\}`, (_, g) => `function ${g.f}(${g.a},${g.b},${g.c}){}`)],
-  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`;let (?<w>§)=§\(§,performance\.now\(\)\);\k<w>>0&&await new Promise`, ">0&&", ">0&&!1&&")],
+  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`;let (?<w>§)=§\(§,performance\.now\(\)\),§=§\.tat;\k<w>>0&&await new Promise`, ">0&&", ">0&&!1&&")],
+  ["busy_wait", "an ended wait gives back a slot not its own (any slot, not the queue's last)", () => plant(String.raw`clearTimeout\(§\),(?<c>§\.tat===§&&)§\(§,performance\.now\(\)\)`, (s, g) => s.replace(g.c, ""))],
   // delta review 2, P1: the deadline from the slot on, the slot given back
-  ["busy_wait", "an ended wait keeps its slot (none given back)", () => plant(String.raw`clearTimeout\(§\),(?<g>§\(§,performance\.now\(\)\),)§\(§\.reason\)`, (s, g) => s.replace(g.g, ""))],
+  ["busy_wait", "an ended wait keeps its slot (none given back)", () => plant(String.raw`clearTimeout\(§\),(?<g>§\.tat===§&&§\(§,performance\.now\(\)\),)§\(§\.reason\)`, (s, g) => s.replace(g.g, ""))],
   ["busy_wait", "the slot given back takes no time back", () => swap(String.raw`\{(?<p>§)\.tat=Math\.max\(§,\k<p>\.tat-\k<p>\.every\)\}`, "-", "-0*")],
   ["busy_wait", "pacedFetch sends the caller's signal with no deadline of its own", () => swap(String.raw`return §\(§,\{\.\.\.§,signal:§\?AbortSignal\.any\(\[§,§\]\):§\}\)`, "signal:", "signal:void 0??")],
   ["busy_wait", "a reader on a pacedFetch keeps its own deadline (it runs in the queue)", () => swap(String.raw`=\(§,§\)=>§\(§\)\?null:§;function`, "?null:", "?(null,1e4):")],
   ["busy_wait", "relayRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`=(?<nr>§)\((?<u>§),(?<fx>§),§\(\k<fx>,(?<tm>§)\)\);return §\(\{name:§\.name,query:\(`, (s, g) => s.replace(/,[\w$]+\([\w$]+,[\w$]+\)\);return/, `,${g.tm});return`))],
+  // delta review 3, P2-2: each reader's request back to its own 10 s deadline (it runs in the pace queue again)
+  ...[0, 1, 2, 3, 4].map((k) => ["busy_wait", `request ${k + 1} of 5 on requestSignal back to its own 10 s deadline`, () => {
+    const sites = [...APP.matchAll(/signal:([\w$]+)\([\w$]+,[\w$]+(?:,[\w$]+)?\)/g)].filter((m) => m[1] === RS);
+    assert.equal(sites.length, 5, "five requestSignal sites");
+    const m = sites[k];
+    return APP.slice(0, m.index) + "signal:AbortSignal.timeout(1e4)" + APP.slice(m.index + m[0].length);
+  }]),
+  ["busy_wait", "pacedNearRpc hands nearRpc its own 10 s deadline", () => plant(String.raw`return §\(§\(§,§,null\),§\)\}`, (s) => s.replace(",null)", ",1e4)"))],
   ["busy_wait", "RPC_TIMEOUT_MS 10 s -> 1e9 ms", () => { const to = /function [\w$]+\([\w$]+,[\w$]+=\(\.\.\.[\w$]+\)=>fetch\(\.\.\.[\w$]+\),[\w$]+=([\w$]+)\)\{/.exec(APP)[1]; return swap(String.raw`(?<![\w$.])${to.replace(/[$]/g, "\\$&")}=1e4[,;]`, "1e4", "1e9"); }],
   ["busy_wait", "pacedRpc marks every rpc paced (none takes a slot)", () => swap(String.raw`\{return §\(§\)&&§\.add\(§\),§\}`, "return ", "return 1||")],
   ["busy_wait", "the default sleep resolves at once", () => swap(String.raw`\(\)=>\{§\?\.removeEventListener\(` + "`abort`" + String.raw`,§\),§\(\)\},§\),§=\(\)=>\{clearTimeout\(§\),§\(§\.reason\)\};§\?\.addEventListener\(` + "`abort`" + String.raw`,§,\{once:!0\}\)\}\),§=class extends Error\{retryAfterMs`, "()},", "()},0&&")],
@@ -388,7 +401,7 @@ const PLANTS = [
 ];
 
 test("busy waited out, the pair's disagreement, the keep and the sign-out drop: each planted bundle fails on its marker", () => {
-  assert.ok(PLANTS.length >= 40, `${PLANTS.length} plants`);
+  assert.ok(PLANTS.length >= 47, `${PLANTS.length} plants`);
   for (const [key, why, make] of PLANTS) {
     const text = make();
     assert.notEqual(text, APP, why);

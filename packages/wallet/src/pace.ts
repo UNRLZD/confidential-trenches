@@ -48,7 +48,7 @@ export function paceSlot(p: Pace, now: number): number {
   p.tat += p.every;
   return Math.max(0, at - now);
 }
-/** A slot taken and not used (its wait ended by its caller) given back, so the requests after it lose no time. */
+/** The queue's last slot, taken and not used (its wait ended by its caller), given back; pacedFetch gives back only that one. */
 export function paceGiveBack(p: Pace, now: number): void {
   p.tat = Math.max(now, p.tat - p.every);
 }
@@ -75,6 +75,8 @@ export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(
     const signal = init?.signal ?? undefined;
     signal?.throwIfAborted();
     const w = paceSlot(p, performance.now());
+    // the slot this request took is the queue's tail while tat still stands where it put it
+    const mine = p.tat;
     if (w > 0) {
       await new Promise<void>((res, rej) => {
         const t = setTimeout(() => {
@@ -83,7 +85,8 @@ export function pacedFetch(url: string, fetchFn: typeof fetch = (...a) => fetch(
         }, w);
         const stop = (): void => {
           clearTimeout(t);
-          paceGiveBack(p, performance.now());
+          // only the queue's tail is given back: any later slot or busy hold stands (delta review 3, P2-1)
+          if (p.tat === mine) paceGiveBack(p, performance.now());
           rej(signal!.reason);
         };
         signal?.addEventListener("abort", stop, { once: true });
