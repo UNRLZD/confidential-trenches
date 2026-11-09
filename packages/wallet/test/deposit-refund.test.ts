@@ -180,3 +180,28 @@ test("card intents-u-registered-first: U not registered on USDC on either RPC: r
     assert.deepEqual(r.log, [], String(registered));
   }
 });
+
+test("card pool-deposit-op-txs: the relayer's 200 {tx_hash} is kept as heard (tx), data only; any other answer is tx null and the move's outcome is the same", async () => {
+  const { base58 } = await import("@scure/base");
+  const hash = base58.encode(new Uint8Array(32).fill(9));
+  for (const [what, answer, status, tx] of [
+    ["carried", () => Response.json({ tx_hash: hash }, { status: 200 }), 200, hash],
+    // malformed: not base58, not 32 bytes, not a string, beside an error, or not a 200
+    ["44 ones (44 zero bytes)", () => Response.json({ tx_hash: "1".repeat(44) }, { status: 200 }), 200, null],
+    ["not base58", () => Response.json({ tx_hash: "0OIl" }, { status: 200 }), 200, null],
+    ["a number", () => Response.json({ tx_hash: 7 }, { status: 200 }), 200, null],
+    ["beside an error", () => Response.json({ tx_hash: hash, error: { code: "sender_struck" } }, { status: 200 }), 200, null],
+    ["on a 202", () => Response.json({ tx_hash: hash }, { status: 202 }), 202, null],
+    ["on a 403", () => Response.json({ tx_hash: hash }, { status: 403 }), 403, null],
+    ["missing", () => Response.json({}, { status: 200 }), 200, null],
+    ["not JSON", () => new Response("<html>", { status: 200 }), 200, null],
+    ["over the cap", () => new Response(JSON.stringify({ tx_hash: hash, pad: "x".repeat(INTENTS_ANSWER_MAX_BYTES) }), { status: 200 }), 200, null],
+    ["no answer", () => { throw new TypeError("fetch failed"); }, 0, null],
+  ] as const) {
+    const r = relayRun(answer);
+    const out = await r.p;
+    assert.equal(out.kind, "sent", what);
+    assert.deepEqual(out.kind === "sent" && [out.status, out.code, out.tx], [status, null, tx], what);
+    assert.deepEqual(r.log, ["quote", "sign", "record", "send"], what);
+  }
+});

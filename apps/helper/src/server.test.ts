@@ -19,7 +19,7 @@ import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, upstreamBudget } from "./
 import { nearRpc } from "./bind/send.ts";
 import type { BindSender } from "./bind/env.ts";
 import type { SolanaPoolSender } from "./pool/solana.ts";
-import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, WITHDRAW_BODY_MAX } from "./server.ts";
+import { BIND_BODY_MAX, CONNECT_ATTEMPT_MS, handler, start, UPSTREAM_RETRY_AFTER_S, WITHDRAW_BODY_MAX } from "./server.ts";
 import { agreedBlock, FeeReadRefused, type FeeQuoter } from "./withdraw/fee.ts";
 import type { WithdrawSender } from "./withdraw/send.ts";
 
@@ -341,6 +341,9 @@ test("GET /v1/withdraw/fee: the quoter's answer for one carried token; another t
     const u = await call("GET", "/v1/withdraw/fee?token=carried.near", { origin: APP }, undefined, to);
     assert.equal(u.status, 503);
     assert.deepEqual(JSON.parse(u.body), { error: { code: "upstream" } });
+    // card withdraw-fee-busy-waits: the 503 names its wait, so the device waits it and asks again
+    assert.equal(u.headers["retry-after"], String(UPSTREAM_RETRY_AFTER_S));
+    assert.match(String(u.headers["access-control-expose-headers"]), /Retry-After/);
     const p = await call("POST", "/v1/withdraw/fee?token=carried.near", JSON_H, "{}", to);
     assert.equal(p.status, 405);
     assert.equal(p.headers["allow"], "GET, HEAD, OPTIONS");
@@ -491,6 +494,32 @@ test("POST /v1/bind: mounted; with no network set the helper starts and a body t
     const ok = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: decodable }), (helper.address() as AddressInfo).port);
     assert.deepEqual([ok.status, JSON.parse(ok.body)], [200, { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" }]);
     assert.deepEqual(seen, [{ signed_delegate: decodable }]);
+  } finally {
+    helper.closeAllConnections();
+    await new Promise<void>((ok) => helper.close(() => ok()));
+  }
+});
+
+test("card withdraw-fee-busy-waits: POST /v1/bind's 503 upstream names Retry-After UPSTREAM_RETRY_AFTER_S, its 200 and its other codes none", async (t) => {
+  const answers = [
+    { status: 503, body: { error: { code: "upstream" } } },
+    { status: 503, body: { error: { code: "relayer_low" } } },
+    { status: 409, body: { error: { code: "prepay_open" } } },
+    { status: 200, body: { tx_hash: "4YsDRNYepeb4u16677E9WYB5DSF69EwnUuG6XLAV7eBL" } },
+  ];
+  let n = 0;
+  const bind: BindSender = { carry: async () => answers[n++]! as Awaited<ReturnType<BindSender["carry"]>>, warm: () => undefined, stop: () => undefined };
+  const helper = start(COMMIT, 0, undefined, undefined, undefined, undefined, undefined, undefined, undefined, bind);
+  t.after(() => closeServer(helper));
+  await new Promise<void>((ok) => helper.on("listening", () => ok()));
+  try {
+    const to = (helper.address() as AddressInfo).port;
+    const got: [number, string | undefined][] = [];
+    for (let i = 0; i < answers.length; i++) {
+      const r = await call("POST", "/v1/bind", JSON_H, JSON.stringify({ signed_delegate: "AAAA" }), to);
+      got.push([r.status, r.headers["retry-after"] as string | undefined]);
+    }
+    assert.deepEqual(got, [[503, String(UPSTREAM_RETRY_AFTER_S)], [503, undefined], [409, undefined], [200, undefined]]);
   } finally {
     helper.closeAllConnections();
     await new Promise<void>((ok) => helper.close(() => ok()));
@@ -701,7 +730,7 @@ test("M362 (3): a pool's failed rent read leaves the helper up with that pool 50
       await listening(a);
       assert.equal((await call("GET", "/v1/health", {}, undefined, hp)).status, 200);
       const f = await call("GET", `/v1/pool/fee?pool=${pool}`, {}, undefined, hp);
-      assert.deepEqual([f.status, JSON.parse(f.body).error.code], [503, "upstream"]);
+      assert.deepEqual([f.status, JSON.parse(f.body).error.code, f.headers["retry-after"]], [503, "upstream", String(UPSTREAM_RETRY_AFTER_S)]);
       const s = await call("POST", "/v1/pool/solana/send", { "content-type": "application/json" }, JSON.stringify({ pool, tx: "AA==" }), hp);
       assert.deepEqual([s.status, JSON.parse(s.body).error.code], [503, "upstream"], "the pool's send is down with it");
       // the RPCs back: the next ask reads, the configured fee is the kit's, and the pool answers

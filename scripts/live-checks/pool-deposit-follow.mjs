@@ -71,9 +71,10 @@ const READS =
       `balances:(${N})=>\\2\\(async (${N})=>${N}\\(await \\7\\(${Q}getBalance${Q},\\[\\6\\.u,\\{commitment:${Q}finalized${Q}\\}\\]\\)\\)\\),` +
       `costs:async (${N})=>\\{let\\{fee:(${N}),rent:(${N})\\}=await ${N}\\(\\1\\.rpcs,\\1\\.program,\\8\\.u\\),(${N})=${N}\\(\\9,\\10\\)`,
   );
-// followPoolQuote: the lower balance; at or over the floor, the deposit; filled or part_filled counts as landed.
+// followPoolQuote: the lower balance; at or over the floor, the deposit; filled or part_filled counts as landed (the run's
+// end read from its {end, txs}, card pool-deposit-op-txs).
 const LOOP = new RegExp(
-  `let\\[(${N}),(${N})\\]=await (${N})\\.balances\\((${N})\\),(${N})=\\1<\\2\\?\\1:\\2,(${N})=\\5>=\\3\\.ladder\\.min\\?await \\3\\.costs\\(\\4\\):null;if\\(\\6!==null&&\\5>=\\6\\.floor\\)\\{let (${N})=${N}\\(\\3\\.ladder,\\5,\\6\\.perRung,\\6\\.keep\\);if\\(\\7>0n\\)\\{let (${N})=await \\3\\.deposit\\(\\4,\\7,\\3\\.signal\\);\\(\\8===${Q}filled${Q}\\|\\|\\8===${Q}part_filled${Q}\\)&&`,
+  `let\\[(${N}),(${N})\\]=await (${N})\\.balances\\((${N})\\),(${N})=\\1<\\2\\?\\1:\\2,(${N})=\\5>=\\3\\.ladder\\.min\\?await \\3\\.costs\\(\\4\\):null;if\\(\\6!==null&&\\5>=\\6\\.floor\\)\\{let (${N})=${N}\\(\\3\\.ladder,\\5,\\6\\.perRung,\\6\\.keep\\);if\\(\\7>0n\\)\\{let\\{end:(${N}),txs:${N}\\}=await \\3\\.deposit\\(\\4,\\7,\\3\\.signal\\);\\(\\8===${Q}filled${Q}\\|\\|\\8===${Q}part_filled${Q}\\)&&`,
 );
 // pool-deposit.ts runPoolDeposit's fixed source (review H1): U_{s,i}'s own deposit note or its next arrival, a U the
 // store never planned refused, and the newest-used-or-planned fallback skipped; pool-testnet.ts depositFrom: the request
