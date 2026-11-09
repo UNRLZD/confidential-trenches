@@ -9,9 +9,13 @@
 //   - decimals, the holder count and the top 10 share: GeckoTerminal's keyless `networks/<net>/tokens/<address>/info`
 //     (api.geckoterminal.com/docs/index.html, "tokens/{address}/info", read 2026-11-09 01:50Z: `decimals`,
 //     `holders.count`, `holders.distribution_percentage.top_10` and `holders.last_updated` for a Base and a Robinhood
-//     token), one call a token, held INFO_FRESH_MS. It draws on the one GeckoTerminal budget (../gecko.ts) in the
-//     "refresh" lane, which leaves a cold chart its calls: the info is never what a chart waits for. The page waits for
-//     a first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read held for the next.
+//     token), one call a token, held INFO_FRESH_MS. It draws on the one GeckoTerminal budget (../gecko.ts) in the lane
+//     refreshLane names from the held read's time, as every other read of it: a first read (nothing held, or held past
+//     GT_SERVE_MS) is a page read, a held one's re-read "stale" or "refresh", which leave a cold read its calls (card
+//     evm-holders-never-starve: a first read sent to "stale" or "refresh" was refused behind the helper's own lists and
+//     ahead reads, live 14:46Z). A held count is served while under GT_SERVE_MS, the market routes' freshness bound.
+//     The page waits for a first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read
+//     held for the next.
 //   - pool and decimals on chain: the token's main pool and decimals the swap reads already found and checked on two
 //     providers (swaps.ts mainPool), when they hold them; nothing is read for the page.
 //   - holder rows: none (`holders: []`), as the Solana path answers with no holders provider. No keyless source lists
@@ -25,7 +29,7 @@
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
+import { GT_SERVE_MS, refreshLane, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
@@ -149,7 +153,7 @@ export function createEvmToken(
     return row !== undefined && row.chain === chain && (await deps.lists.listed(token)) ? row : null;
   }
 
-  async function readInfo(token: string, lane: "refresh" | "stale"): Promise<Read> {
+  async function readInfo(token: string, lane: "pages" | "stale" | "refresh"): Promise<Read> {
     if (!deps.gecko.take(lane, false, false, `${chain} info`)) return "refused";
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
@@ -174,14 +178,16 @@ export function createEvmToken(
     }
   }
 
-  /** The info held for the token (at any age) and, when it is not fresh, the read that refreshes it (one at a time). */
-  function infoOf(token: string, lane: "refresh" | "stale"): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
+  /** The info held for the token while servable (under GT_SERVE_MS) and, when it is not fresh, the read that refreshes
+   *  it (one at a time), in refreshLane's lane for the held read's time: the page and holders share it, so either one's
+   *  read serves the other. */
+  function infoOf(token: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
     const h = infos.get(token);
     if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
     let p = running.get(token);
     if (p === undefined) {
       const started = now();
-      p = readInfo(token, lane)
+      p = readInfo(token, refreshLane(h?.at ?? null, started))
         .then((x) => {
           if (x !== "refused" && x !== "failed") infos.set(token, { info: x, at: started });
           return x;
@@ -189,7 +195,7 @@ export function createEvmToken(
         .finally(() => running.delete(token));
       running.set(token, p);
     }
-    return { held: h?.info, read: p };
+    return { held: h !== undefined && now() - h.at < GT_SERVE_MS ? h.info : undefined, read: p };
   }
 
   const LATE = Symbol("late");
@@ -207,20 +213,20 @@ export function createEvmToken(
       const row = await rowOf(t);
       if (row === undefined) return UPSTREAM;
       if (row === null) return NOT_FOUND;
-      const { held, read } = infoOf(t, "refresh");
+      const { held, read } = infoOf(t);
       const info = held !== undefined ? usable(held) : read === undefined ? null : usable(await within(read, INFO_WAIT_MS));
       const page = toPage(row, info, deps.kept?.(t));
       return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
     },
     /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; 429 when the budget refuses a token nothing is held
-     *  for, 503 when GeckoTerminal fails it. */
+     *  for (or held past GT_SERVE_MS), 503 when GeckoTerminal fails it. */
     async holders(token: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
       const row = await rowOf(t);
       if (row === undefined) return UPSTREAM;
       if (row === null) return NOT_FOUND;
-      const { held, read } = infoOf(t, "stale");
+      const { held, read } = infoOf(t);
       const got: Read | undefined = read === undefined ? held : await read;
       const info: Info | "none" | undefined = got === "refused" || got === "failed" ? held : got;
       if (info === undefined) {
