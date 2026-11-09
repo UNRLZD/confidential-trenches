@@ -5,7 +5,8 @@
 //     each under the kit's paced wrapper (send.ts solanaPacedRpc), and the reference reads on the pair the kit hands
 //     it (flow.ts gives its paced providers), never on a pair of its own;
 //   - pair: the page's Solana pair (pool-testnet.ts pageSolanaRpcs, which every pool buy, sell, withdraw, settle and
-//     restore read takes) is the same two providers, each under the paced wrapper;
+//     restore read takes) is the same two providers, each under the paced wrapper, provider A's place sending the mark
+//     scan (getProgramAccounts) to the helper's solana-marks route, paced too (card sol-pools-mainnet-pin);
 //   - timed: the kit's timed reads (send.ts solanaTimedRpc) call the provider inside its turn and time that call, then
 //     pace the timed call under the limit the provider's queue already holds, so a wait for a turn never counts
 //     against the read's timeout; and the reference's reads (pool.ts readSolanaReference), the rent read (pool-buy.ts
@@ -53,9 +54,14 @@ export function facts(index, js) {
   const release =
     !!(p && a && h) &&
     new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
+  // card sol-pools-mainnet-pin: provider A's place sends the mark scan to the helper's solana-marks route, itself paced
+  const marks = h ? [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q}`, "g"))].map((x) => esc(x[1])) : [];
+  const m = marks.length ? `(?:${marks.join("|")})` : undefined;
   const pair =
-    !!(p && a && h) &&
-    new RegExp(`=\\(\\)=>\\{let\\[(${N}),(${N})\\]=\\[${N}\\(${a}\\),${N}\\(${h}\\)\\];return\\[${esc(p)}\\(\\1\\),${esc(p)}\\(\\2\\)\\]\\}`).test(js);
+    !!(p && a && h && m) &&
+    new RegExp(
+      `=\\(\\)=>\\{let (${N})=${esc(p)}\\(${N}\\(${a}\\)\\),(${N})=${esc(p)}\\(${N}\\(${m}\\)\\);return\\[${N}\\(\\1,\\((${N}),(${N})\\)=>\\(\\3===${Q}getProgramAccounts${Q}\\?\\2:\\1\\)\\(\\3,\\4\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\]\\}`,
+    ).test(js);
   const timed =
     !!t &&
     // the reference's reads, a failed one read as no answer (pool.ts readSolanaReference)

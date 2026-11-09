@@ -51,7 +51,7 @@ test("the facts read from a bundle", () => {
     "a=t=>Promise.all(e.map(e=>Promise.resolve().then(()=>wm(e,Dg)(`getMultipleAccounts`,[t,{encoding:`base64`,commitment:`confirmed`}])).then(e=>p_(e,t.length),()=>null)));" +
     "let t=(await Promise.resolve().then(()=>wm(e,Wv)(`getAccountInfo`,[dv,{encoding:`base64`,commitment:`confirmed`}])))?.value;" +
     "var GM=`https://ct-api.unrealized.trade`,KM=`https://solana-rpc.publicnode.com`;function qM(){return{helper:GM,providers:[Cm(hk(KM)),Cm(gk(GM))],reference:(e,t)=>_k(t,e),paths:Vm({helper:Rm(GM)})}}" +
-    "var pI=yE.mainnet,mI=`mainnet`,hI=()=>{let[e,t]=[hk(KM),gk(GM)];return[Cm(e),Cm(t)]}";
+    "var pI=yE.mainnet,mI=`mainnet`,BV=`${GM}/v1/rpc/solana-marks`,hI=()=>{let e=Cm(hk(KM)),t=Cm(jV(BV));return[yh(e,(n,r)=>(n===`getProgramAccounts`?t:e)(n,r)),Cm(gk(GM))]}";
   const f = facts("", js);
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, release: true, pair: true, timed: true, price: true });
   // each mark changed in place, once (a mark found twice or not at all is a broken test, never a pass)
@@ -70,9 +70,12 @@ test("the facts read from a bundle", () => {
   assert.equal(planted("providers:[Cm(hk(KM)),", "providers:[hk(KM),").release, false);
   assert.equal(planted("Cm(gk(GM))],reference", "gk(GM)],reference").release, false);
   assert.equal(planted("KM=`https://solana-rpc.publicnode.com`", "KM=`https://api.mainnet-beta.solana.com`").release, false);
-  // either provider of the page's pair unpaced: FAIL
-  assert.equal(planted("return[Cm(e),Cm(t)]", "return[e,Cm(t)]").pair, false);
-  assert.equal(planted("return[Cm(e),Cm(t)]", "return[Cm(e),t]").pair, false);
+  // either provider of the page's pair unpaced, the marks route unpaced, or the scan not sent to it: FAIL
+  assert.equal(planted("let e=Cm(hk(KM)),", "let e=hk(KM),").pair, false);
+  assert.equal(planted("Cm(gk(GM))]}", "gk(GM)]}").pair, false);
+  assert.equal(planted("t=Cm(jV(BV));", "t=jV(BV);").pair, false);
+  assert.equal(planted("(n===`getProgramAccounts`?t:e)", "(e)").pair, false);
+  assert.equal(planted("BV=`${GM}/v1/rpc/solana-marks`", "BV=`${GM}/v1/rpc/solana`").pair, false);
   // the timed read pacing the provider under it, so its wait counts against its timeout: FAIL
   assert.equal(planted("return a?Cm(r,a):r}", "return a?Cm(e,a):r}").timed, false);
   // the provider called after a turn (a microtask), not inside it, so a paced provider would queue twice: FAIL
