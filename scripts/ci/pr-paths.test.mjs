@@ -142,6 +142,30 @@ test("planted: a folder counts whole only where the unit's own code lists it; an
   assert.ok(kit2.includes("scripts/records/one.md") && kit2.includes("scripts/records/two.md"));
 });
 
+test("planted: a file a package's script starts by a path from the package's folder is read, with its imports", (t) => {
+  const r = planted();
+  t.after(() => rmSync(r.dir, { recursive: true, force: true }));
+  r.put("scripts/checks/one.mjs", 'import { two } from "./two.mjs";\nexport const one = two;\n');
+  r.put("scripts/checks/two.mjs", "export const two = 2;\n");
+  r.put("scripts/checks/other.mjs", "export const other = 3;\n");
+  r.git("add", "-A");
+  const kit = () => reads(["packages/kit/"], r.dir, r.files());
+  assert.ok(!kit().includes("scripts/checks/one.mjs"), "no script starts it yet");
+  r.put("packages/kit/package.json", JSON.stringify({ name: "@blindfill/kit", exports: { ".": "./src/index.ts" }, scripts: { "test:e2e": "vite build && node ../../scripts/checks/one.mjs --harness" } }));
+  r.git("add", "-A");
+  assert.ok(kit().includes("scripts/checks/one.mjs"), "the script's started file is read");
+  assert.ok(kit().includes("scripts/checks/two.mjs"), "and what it imports");
+  assert.ok(!kit().includes("scripts/checks/other.mjs"), "a file no script names is not read");
+  const o = decide("pull_request", ["scripts/checks/two.mjs"], { "@blindfill/kit": [] }, (s) => reads(s, r.dir, r.files()));
+  assert.equal(o.packages["@blindfill/kit"][0], true);
+});
+
+test("a change to a live check the terminal's test:e2e starts, or to what it imports, runs the browser job", () => {
+  for (const f of ["scripts/live-checks/app-sell-mount.mjs", "scripts/live-checks/app-portfolio-mount.mjs", "scripts/live-checks/app-deposit-mount.mjs"]) {
+    assert.equal(plan("pull_request", [f]).test_browser, "true", f);
+  }
+});
+
 test("planted: a fixture generator run by hand is no seed, unless a test the job runs names it", (t) => {
   const r = planted();
   t.after(() => rmSync(r.dir, { recursive: true, force: true }));
