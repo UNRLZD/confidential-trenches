@@ -2639,12 +2639,18 @@ test("review P2-2 (C2): a stranger's deposit landing between the marks and the p
   const { chain, l0, withDeposit } = restorePool();
   const after = withDeposit(big(R.deposits[1]!.precommitment), 10_000_000n, chain.slot + 1);
   const r = landingReads((w) => (w === 0 ? chain : after), 1);
+  // the lister a slot behind the pages unless asked for their slot: it lists the new deposit only when the settle asks
+  // at or past the slot the pages were read at
+  const behind: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    const min = (p[1] as { minContextSlot?: number }).minContextSlot ?? 0;
+    return min >= after.slot ? r.lister(m, p) : rpc(chain, MAINNET)(m, p);
+  }, { url: "https://l.example" });
   const b = await reservedDeposit0(l0);
-  const s = await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, lister: r.lister, rpcs: r.rpcs });
+  const s = await solanaSettleSpent({ seed64: SEED, notes: b.ns, noteId: b.id, program: PROGRAM, lister: behind, rpcs: r.rpcs });
   assert.equal(s.kind, "spent");
   assert.equal((await b.ns.get(b.id))!.state, "SPENT");
-  // two lists (spent then pre, each one bucket) twice; the pages twice; the second list reads only the new mark
-  assert.deepEqual(r.log, { lists: 4, pages: [2, 2], marks: [1 + 1 + 1, 1 + 1 + 1] });
+  // the second list (spent then pre, one bucket each) at the pages' slot; the pages twice; it reads only the new mark
+  assert.deepEqual(r.log, { lists: 2, pages: [2, 2], marks: [1 + 1 + 1, 1 + 1 + 1] });
 });
 
 test("review P2-2: a deposit landing inside every read: the settle reads on, then closes once the pool is quiet, or refuses after SOL_SETTLE_ROUNDS reads of the pages (held, never freed)", async () => {
@@ -2662,6 +2668,18 @@ test("review P2-2: a deposit landing inside every read: the settle reads on, the
   assert.deepEqual(busy.log.pages, [SOL_SETTLE_ROUNDS, SOL_SETTLE_ROUNDS]);
   assert.equal((await b.ns.get(b.id))!.state, "RESERVED");
   assert.equal((await b.ns.list()).length, 1);
+  // a quiet pool and a lister hiding one deposit: its list again gives no new mark, so the count cannot close and the
+  // settle refuses at once: one read of the pages and one list again, never reading on to the last round
+  const quiet0 = worlds(2);
+  const hidden = landingReads(() => ({ ...quiet0, marks: new Map([...quiet0.marks!].filter(([k]) => k !== solanaMarkOf(PROGRAM, "pre", FOREIGN(1)[0]))) }), 0);
+  const pagesRead = [0, 0];
+  const pair2 = ([0, 1] as const).map((k) => Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (m === "getMultipleAccounts" && (p[0] as string[]).includes(solanaPageOf(PROGRAM, 0, 0))) pagesRead[k]!++;
+    return rpc(quiet0, MAINNET)(m, p);
+  }, { url: k === 0 ? "https://a.example" : "https://b.example" })) as [SolanaRpc, SolanaRpc];
+  const c = await reservedDeposit0(l);
+  await assert.rejects(solanaSettleSpent({ seed64: SEED, notes: c.ns, noteId: c.id, program: PROGRAM, lister: hidden.lister, rpcs: pair2 }), /^Error: restore: the lister listed 4 deposits and 0 releases/);
+  assert.deepEqual([pagesRead, hidden.log.lists], [[1, 1], 4]);
 });
 
 test("review P2-2 (C1): with the page's cache a second settle makes a few reads at any pool size, and a restore after it reads no mark again", { timeout: 120_000 }, async () => {
