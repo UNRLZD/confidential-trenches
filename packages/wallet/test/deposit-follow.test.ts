@@ -1082,25 +1082,36 @@ test("C5: with bind.ts, the seed is never open (nor the seed lock held) across a
 });
 
 // card withdraw-fee-busy-waits: a busy relayer's Retry-After paces the follow's next round; any other code keeps the pace
-async function bindAsks(first: Response) {
+async function bindAsks(first: Response, readsFailAfter = 0) {
   const t = await setup(["SUCCESS"], { bind: bindDeposit });
   t.chain.credit(CREDIT);
+  // `readsFailAfter`: that many reads of the ops store after the first ask throw (U's ops, read later in the same round)
+  let failing = 0;
+  const ops = new Proxy(t.deps.ops, {
+    get: (o, k) => (k === "keys" ? async (...a: unknown[]) => (failing > 0 ? (failing--, Promise.reject(new Error("store read failed"))) : (o.keys as (...x: unknown[]) => unknown)(...a)) : Reflect.get(o, k)),
+  });
   const stopIt = new AbortController();
   const at: number[] = []; // the follow's clock (the sum of its sleeps) at each bind ask
   const fetchFn = (async (url: string, init?: RequestInit) => {
     if (url.startsWith(DEPOSIT_STATUS_URL)) return t.oc.fetchFn(url, init);
     at.push(t.sleeps.reduce((a, b) => a + b, 0));
-    if (at.length === 1) return first;
+    if (at.length === 1) return ((failing = readsFailAfter), first);
     stopIt.abort(new Error("stop"));
     throw new TypeError("fetch failed");
   }) as typeof fetch;
-  await assert.rejects(followDeposit(t.args, { ...t.deps, fetchFn, signal: AbortSignal.any([stopIt.signal, t.deps.signal!]) }), /stop/);
+  await assert.rejects(followDeposit(t.args, { ...t.deps, ops, fetchFn, signal: AbortSignal.any([stopIt.signal, t.deps.signal!]) }), /stop/);
   assert.equal(at.length, 2, "the same call asked again");
+  assert.equal(failing <= 0, true, "every planted read failure was met");
   return at[1]! - at[0]!;
 }
 
 test("busy: a bind that meets 429 rate_limited with Retry-After 2 asks again no sooner than 2 s on the follow's clock", async () => {
   const gap = await bindAsks(Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "retry-after": "2" } }));
+  assert.equal(gap, 2_000);
+});
+
+test("busy: a 429 with Retry-After 2, then a read in the same round that throws: the next ask still comes no sooner than 2 s (re-check of 45f8904c, P3)", async () => {
+  const gap = await bindAsks(Response.json({ error: { code: "rate_limited" } }, { status: 429, headers: { "retry-after": "2" } }), 1);
   assert.equal(gap, 2_000);
 });
 

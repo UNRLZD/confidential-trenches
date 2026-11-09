@@ -1161,7 +1161,8 @@ async function followU(first: FollowArgs, deps: FollowDeps, signal: AbortSignal,
     } catch (e) {
       signal.throwIfAborted();
       err = Math.min(Math.max(err * 2, pollMs), SLOW_MAX_MS);
-      await sleep(err);
+      // a busy relayer's Retry-After met earlier in this round holds here too (re-check of 45f8904c)
+      await sleep(Math.max(err, busyMs));
       continue;
     }
     // r4: a held op lifted to done in this round has no waiter: adopt it, so its final is written in this session
