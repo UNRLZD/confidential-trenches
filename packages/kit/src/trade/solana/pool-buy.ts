@@ -842,6 +842,16 @@ function pumpGlobalFeeRecipient(global: SolanaPoolAccount): string {
   return feeRecipient;
 }
 
+/** PumpSwap GlobalConfig's protocol fee recipient: the account checked as GlobalConfig (owner, discriminator, this
+ *  layout's size). */
+function ammConfigFeeRecipient(global: SolanaPoolAccount): string {
+  solanaDecodePumpSwapConfig(global); // owner and discriminator
+  if (global.data.length !== SOLANA_PUMP_AMM_CONFIG_SIZE) throw new Error(`GlobalConfig is ${global.data.length} bytes, not ${SOLANA_PUMP_AMM_CONFIG_SIZE}`);
+  const protocolFeeRecipient = base58.encode(global.data.subarray(AMM_PROTOCOL_FEE_RECIPIENTS, AMM_PROTOCOL_FEE_RECIPIENTS + 32));
+  if (protocolFeeRecipient === DEFAULT_KEY) throw new Error("GlobalConfig has no protocol fee recipient");
+  return protocolFeeRecipient;
+}
+
 export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accounts: readonly (SolanaPoolAccount | null)[], pick: (n: number) => number = () => 0): SolanaPoolBuyVenue {
   const [m, main, global] = accounts;
   if (!m || !main || !global) throw new Error("an account is missing");
@@ -871,10 +881,7 @@ export function solanaPoolBuyVenueOf(kind: SolanaPoolVenue, mint: string, accoun
   if (p.isMayhemMode) throw new Error("a Mayhem pool pays its reserved fee recipients, not built here");
   const t22 = m.owner === SOLANA_TOKEN_2022_PROGRAM;
   if (p.baseVault !== (t22 ? addr.baseVaultToken2022 : addr.baseVaultToken) || p.quoteVault !== addr.quoteVault) throw new Error("the pool's vaults are not its token accounts");
-  solanaDecodePumpSwapConfig(global); // owner and discriminator
-  if (global.data.length !== SOLANA_PUMP_AMM_CONFIG_SIZE) throw new Error(`GlobalConfig is ${global.data.length} bytes, not ${SOLANA_PUMP_AMM_CONFIG_SIZE}`);
-  const protocolFeeRecipient = keyAt(global.data, AMM_PROTOCOL_FEE_RECIPIENTS);
-  if (protocolFeeRecipient === DEFAULT_KEY) throw new Error("GlobalConfig has no protocol fee recipient");
+  const protocolFeeRecipient = ammConfigFeeRecipient(global);
   const cashback = main.data[AMM_POOL_CASHBACK];
   if (cashback !== 0 && cashback !== 1) throw new Error("the pool's cashback flag is not a bool");
   return {
@@ -899,26 +906,51 @@ export async function readSolanaPoolBuyVenue(providers: readonly [SolanaRpc, Sol
   return venues[0] as SolanaPoolBuyVenue;
 }
 
+/** Every venue the pool buy builds (solanaPoolVenueBuy): each has its own frozen lookup table, made from
+ *  readSolanaPoolTableVenue and solanaPoolBuyTableAccounts (contracts/pool-solana/scripts/venue-table.mjs). */
+export const SOLANA_POOL_BUY_VENUES: readonly SolanaPoolVenue[] = Object.freeze(Object.keys(SOLANA_POOL_BUY_CU) as SolanaPoolVenue[]);
+
+/** A venue as our lookup table needs it, from its global account alone (pump Global or PumpSwap GlobalConfig): its fee
+ *  recipient and its eight buyback recipients, with solanaPoolBuyVenueOf's own checks on that account. */
+export function solanaPoolTableVenueOf(kind: SolanaPoolVenue, global: SolanaPoolAccount): SolanaPoolTableVenue {
+  const list = (o: number): string[] => {
+    if (global.data.length < o + 256) throw new Error("account too short");
+    const l = Array.from({ length: 8 }, (_, i) => base58.encode(global.data.subarray(o + 32 * i, o + 32 * i + 32)));
+    if (l.some((k) => k === DEFAULT_KEY)) throw new Error("a buyback recipient is unset");
+    return l;
+  };
+  if (kind === "pump-curve") return { kind, feeRecipient: pumpGlobalFeeRecipient(global), buybackFeeRecipients: list(PUMP_GLOBAL_BUYBACK_RECIPIENTS) };
+  if (kind === "pumpswap") return { kind, protocolFeeRecipient: ammConfigFeeRecipient(global), buybackFeeRecipients: list(AMM_GLOBAL_BUYBACK_RECIPIENTS) };
+  throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
+}
+
 /**
- * The pump curve venue as our lookup table needs it, before any mint is named: pump Global's fee recipient and its eight
- * buyback recipients, read at finalized on two providers that must answer the same bytes (a frozen table can never be
- * changed, so it is made from finalized reads only). The checks are solanaPoolBuyVenueOf's own on Global.
+ * A venue as our lookup table needs it, before any mint is named: its global account (pump Global, PumpSwap
+ * GlobalConfig) read at finalized on two providers that must answer the same bytes (a frozen table can never be
+ * changed, so it is made from finalized reads only), then solanaPoolTableVenueOf.
  */
-export async function readSolanaPumpCurveTableVenue(providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaPoolTableVenue> {
+export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, SolanaRpc], kind: SolanaPoolVenue): Promise<SolanaPoolTableVenue> {
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
-  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[PUMP_GLOBAL], { encoding: "base64", commitment: "finalized" }]))));
+  if (!SOLANA_POOL_BUY_VENUES.includes(kind)) throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
+  const at = kind === "pump-curve" ? PUMP_GLOBAL : AMM_GLOBAL_CONFIG;
+  const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
   const globals = reads.map((r) => {
     const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
-    if (!g) throw new Error("a provider's answer is not pump Global");
+    if (!g) throw new Error(`a provider's answer is not the ${kind} venue's global account`);
     return g;
   });
-  if (globals[0]!.owner !== globals[1]!.owner || base64.encode(globals[0]!.data) !== base64.encode(globals[1]!.data)) throw new Error("the providers disagree on pump Global");
-  const g = globals[0]!;
-  const feeRecipient = pumpGlobalFeeRecipient(g);
-  const buybackFeeRecipients = Array.from({ length: 8 }, (_, i) => base58.encode(g.data.subarray(PUMP_GLOBAL_BUYBACK_RECIPIENTS + 32 * i, PUMP_GLOBAL_BUYBACK_RECIPIENTS + 32 * i + 32)));
-  if (buybackFeeRecipients.some((k) => k === DEFAULT_KEY)) throw new Error("a buyback recipient is unset");
-  return { kind: "pump-curve", feeRecipient, buybackFeeRecipients };
+  if (globals[0]!.owner !== globals[1]!.owner || base64.encode(globals[0]!.data) !== base64.encode(globals[1]!.data)) throw new Error(`the providers disagree on the ${kind} venue's global account`);
+  return solanaPoolTableVenueOf(kind, globals[0]!);
 }
+
+/** The pump curve venue as our lookup table needs it (readSolanaPoolTableVenue for "pump-curve"; the mainnet deploy's
+ *  step 6m, card pool-sol-deploy-mainnet). */
+export const readSolanaPumpCurveTableVenue = (providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaPoolTableVenue> => readSolanaPoolTableVenue(providers, "pump-curve");
+
+/** The addresses a venue's frozen table holds: the kit's solanaPoolBuyTableAccounts for that venue, the pool and its
+ *  pages up to entry 2,047 of each tree, each once in first-seen order (what the deploy scripts extend with). */
+export const solanaPoolVenueTableList = (cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue): string[] =>
+  [...new Set(solanaPoolBuyTableAccounts(cfg, venue, solanaPoolPages(cfg.program, 1024, 1024)))];
 
 // ------------------------------------------------------------------------------------------------- the check
 
