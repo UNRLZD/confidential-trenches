@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
+import { LIST_CHAINS } from "../../src/screens/discover/data.ts";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 
@@ -122,11 +123,13 @@ function live(key) {
 }
 
 /** HELPER_HOST for one state: the lists (the top token alone in Trending, with an hour's volume so the column keeps it)
- *  and the token read. Returns null for any other helper path (refused). `calls` counts the lists reads. */
+ *  and the token read. Returns null for any other helper path (refused). `calls` counts the lists reads, and lists the
+ *  chain of each (/ reads every chain's lists: card app-chains-evm-rail). */
 function helperAnswer(s, url, calls) {
   const json = (status, body) => ({ status, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
   if (url.pathname === "/v1/market/lists") {
     calls.lists++;
+    calls.chains.push(url.searchParams.get("chain"));
     if (s.lists === "hang") return "hang";
     if (typeof s.lists === "number") return json(s.lists, { error: "unavailable" });
     const top = s.lists === "empty" ? [] : [{ ...live(s.top), vol_1h_usd: live(s.top).vol_1h_usd ?? "1000" }];
@@ -261,7 +264,7 @@ try {
       if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0, live: 0, plant: null, edged: false };
+      const calls = { lists: 0, chains: [], live: 0, plant: null, edged: false };
       const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
@@ -498,7 +501,9 @@ try {
         await f.locator(".tkp-retry").click();
         const back = await f.locator(sel).waitFor({ timeout: 5_000 }).then(() => true, () => false);
         check(back, `${tag}: Retry lost the page`);
-        check(calls.lists === before + 1, `${tag}: Retry read the lists ${calls.lists - before} times, not once`);
+        // one read of the lists: each chain's once
+        const read = calls.chains.slice(before).sort().join(",");
+        check(read === [...LIST_CHAINS].sort().join(","), `${tag}: Retry read the lists of [${read}], not each of ${LIST_CHAINS.join(", ")} once`);
       }
       if (drawn && s.lower) {
         const box = phone ? ".tkp-phone" : ".tkp-desk";

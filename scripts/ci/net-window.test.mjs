@@ -25,6 +25,7 @@ export const CHANGED = [
   "scripts/ci/money-gate.mjs",
   "scripts/pages-readback.mjs",
   "scripts/live-checks/app-buy-route-strip.mjs",
+  "scripts/live-checks/app-chains-evm-rail.mjs",
   "scripts/live-checks/app-chart-controls.mjs",
   "scripts/live-checks/app-chart-live.mjs",
   "scripts/live-checks/app-console-429.mjs",

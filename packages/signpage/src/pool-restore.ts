@@ -376,6 +376,9 @@ export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPi
 /** What the restore reads on, each called when a run starts. */
 export type PoolRestoreHost = {
   store(): Promise<WalletStore>;
+  /** The wallet store while one is open, never opening one (TestnetPage.held): the pool syncs' holds; tests without it
+   *  give store(). */
+  held?(): Promise<WalletStore>;
   seed64(): Promise<Uint8Array>;
   /** Whether a seed is stored: a restore asked with none is refused not_allowed, and nothing is read. */
   signedIn(): Promise<boolean>;
@@ -479,7 +482,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           }
           // the notes only: no W is read or named to a provider for a record the page keeps none of
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)
-          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin), history: pageEvmHistory(p.pin) })).notes;
+          return (await evm({ seed64: seed, pin: p.pin, rpcs: p.rpcs(), signal, wallets: false, held: pageEvmHold(p.pin, () => h.held ? h.held() : h.store()), history: pageEvmHistory(p.pin) })).notes;
         });
         const walked: Walked[] = [];
         (await Promise.allSettled(reads)).forEach((r, k) => {

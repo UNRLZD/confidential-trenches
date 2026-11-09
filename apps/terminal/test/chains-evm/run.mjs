@@ -10,6 +10,9 @@
 //     Robinhood, and each pick leaves Discover drawing only that chain's rows;
 //   - /token/base/<id> and /token/robinhood/<id> draw the page ready, its data-token and symbol the recorded row's, its
 //     avatar's chain badge that chain;
+//   - (card app-chains-evm-rail) at 1440 those pages' left rail lists every chain's rows on All, Trending in Discover's
+//     order, and only the page's chain's rows once the filter picks it; at both widths / draws the top of every chain's
+//     Trending column on All, and the top of Base's once the filter picks Base, its chain badge Base;
 //   - no page error, no CSP violation.
 //   node apps/terminal/test/chains-evm/run.mjs [--build <dir>] [--shots <dir>]     PASS exit 0, FAIL exit 1
 // --build tests a build made elsewhere (main's, for the red run); by default this tree is built.
@@ -19,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
+import { columnRows } from "../../src/screens/discover/model.ts";
 
 const HELPER = "https://ct-api.unrealized.trade";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -46,6 +50,12 @@ const TOKENS = Object.fromEntries(
   }),
 );
 
+/** Discover's Trending order of a snapshot's rows, as the rail and / take it. */
+const trendingOf = (snaps) => columnRows({ chain: "all", as_of_ms: 0, lists: Object.fromEntries(["new", "trending", "trending_5m", "trending_1h", "graduating"].map((k) => [k, snaps.flatMap((x) => x.lists[k] ?? [])])) }, "trending");
+/** / on All: the top of every chain's Trending column; on Base: Base's top. */
+const TOP_ALL = trendingOf(Object.values(LISTS))[0];
+const TOP_BASE = trendingOf([LISTS.base])[0];
+
 const fails = [];
 const check = (ok, what) => {
   if (!ok) fails.push(what);
@@ -58,8 +68,12 @@ function helperAnswer(u) {
   if (u.pathname === "/v1/market/lists") return LISTS[chain] ? json(200, LISTS[chain]) : json(404, { error: { code: "not_found" } });
   const t = TOKENS[chain];
   if (!t) return null;
-  if (u.searchParams.get("token") !== t.id) return json(404, { error: { code: "not_found" } });
-  if (u.pathname === "/v1/market/token") return json(200, t.answer);
+  // a token of that chain's recorded lists other than the recorded one (the top / draws on a pick) answers the recorded
+  // reads, its row named as that token
+  const id = u.searchParams.get("token");
+  const listed = id === t.id ? t.answer.row : Object.values(LISTS[chain].lists).flat().find((r) => r.token === id);
+  if (!listed) return json(404, { error: { code: "not_found" } });
+  if (u.pathname === "/v1/market/token") return json(200, { ...t.answer, row: { ...t.answer.row, token: id, symbol: listed.symbol, name: listed.name } });
   if (u.pathname === "/v1/market/candles") return json(200, t.candles);
   if (u.pathname === "/v1/market/holders") return json(200, t.holders);
   return null;
@@ -92,6 +106,33 @@ const rowsOf = (f, list) =>
     els.filter((e) => e.getClientRects().length).map((e) => ({ token: e.getAttribute("data-token"), href: e.querySelector("a")?.getAttribute("href") ?? null, badges: [...e.querySelectorAll(".tok-cb")].map((b) => b.getAttribute("data-chain")) })),
   );
 const chainOfHref = (h) => /^\/token\/([a-z]+)\//.exec(h ?? "")?.[1] ?? null;
+
+/** The rail's rows in the frame once its lists are drawn: each row's token, link and whether it is the page's own. */
+const railOf = async (f) => {
+  await f.waitForSelector('[data-testid="token-rail"][data-state="ready"] [role="listitem"]', { timeout: 10_000 }).catch(() => {});
+  await f.waitForTimeout(200);
+  return f.$$eval('[data-testid="token-rail"] [role="listitem"]', (els) => els.map((e) => ({ token: e.getAttribute("data-token"), href: e.querySelector("a")?.getAttribute("href") ?? null, current: e.querySelector("a")?.getAttribute("aria-current") === "page" })));
+};
+
+/** Pick one chain on the shell's chain filter: the top bar's chain chip at 1440, the search sheet's chips at 390. */
+async function pick(f, page, phone, c) {
+  if (phone) {
+    await f.click('[data-testid="search-button-phone"]');
+    const chip = f.locator(`[data-testid="chain-chips"] [data-chain="${c}"]`);
+    const has = await chip.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+    check(has, `@390: the search sheet's chain chips offer no ${c}`);
+    if (has) await chip.click();
+    await f.click(".srch-back");
+  } else {
+    await f.click('[data-testid="chain-chip"]');
+    const item = f.locator(`[data-testid="chain-menu"] [data-chain="${c}"]`);
+    const has = await item.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+    check(has, `@1440: the chain chip's menu offers no ${c}`);
+    if (has) await item.click();
+    else await page.keyboard.press("Escape");
+  }
+  await page.waitForTimeout(300);
+}
 
 let loads = 0;
 try {
@@ -167,7 +208,7 @@ try {
         const vis = (e) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
         const p = document.querySelector("[data-token-page]");
         const sym = [...document.querySelectorAll(".tkp-sym")].find(vis);
-        // the token's own avatar badges (the head, the phone's bar), not the rail's rows (rail.ts, Solana's lists)
+        // the token's own avatar badges (the head, the phone's bar), not the rail's rows (rail.ts, every chain's lists)
         const badges = [...document.querySelectorAll("main [data-token-page] .tok-cb")].filter((b) => vis(b) && !b.closest(".tkr-row")).map((b) => b.getAttribute("data-chain"));
         return { token: p?.getAttribute("data-token") ?? null, symbol: sym?.textContent ?? null, badges, violations: window.__ctViolations ?? [] };
       });
@@ -176,6 +217,42 @@ try {
       check(m.badges.length > 0 && m.badges.every((b) => b === c), `${tag} /token/${c}: the page's chain badges [${m.badges.join(",")}], not ${c}`);
       check(m.violations.length === 0, `${tag} /token/${c}: CSP violation ${m.violations.join("; ")}`);
       await shot(page, `token-${c}-${w.name}`);
+      if (!phone) {
+        // ---- the rail on All, then on the page's chain
+        let r = await railOf(g);
+        const drawn = new Set(r.map((x) => chainOfHref(x.href)));
+        check(drawn.size > 1 && drawn.has(c), `${tag} /token/${c} rail on All: chains drawn [${[...drawn].join(",")}], not every chain's`);
+        const want = trendingOf(Object.values(LISTS)).map((x) => x.token);
+        check(r.length > 0 && r.every((x, i) => x.token === want[i]), `${tag} /token/${c} rail on All: not Discover's Trending order (${r.slice(0, 3).map((x) => x.href).join(" ")})`);
+        check(r.every((x) => x.href === `/token/${chainOfHref(x.href)}/${x.token}`), `${tag} /token/${c} rail on All: a row's link is not its own token's`);
+        await pick(g, page, false, c);
+        r = await railOf(g);
+        const other = r.filter((x) => chainOfHref(x.href) !== c);
+        check(r.length > 0 && other.length === 0, `${tag} /token/${c} rail on ${c}: ${r.length} rows, ${other.length} of another chain (${other.slice(0, 3).map((x) => x.href).join(" ")})`);
+        check(r.some((x) => x.current) === r.some((x) => x.token === t.id), `${tag} /token/${c} rail on ${c}: the page's own token not marked`);
+        await shot(page, `token-${c}-rail-${c}-${w.name}`);
+      }
+    }
+
+    // ---- / on All, then on Base
+    await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
+    loads++;
+    const h = await appFrame(page);
+    const topOf = async () => {
+      const ok = h ? await h.waitForSelector('main[data-route="token"] [data-token-page="ready"]', { timeout: 10_000 }).then(() => true, () => false) : false;
+      await page.waitForTimeout(400);
+      return ok ? h.evaluate(() => ({ token: document.querySelector("[data-token-page]")?.getAttribute("data-token") ?? null, badges: [...document.querySelectorAll("main [data-token-page] .tok-cb")].filter((b) => b.getClientRects().length && !b.closest(".tkr-row")).map((b) => b.getAttribute("data-chain")) })) : null;
+    };
+    let top = await topOf();
+    check(top?.token === TOP_ALL.token, `${tag} / on All: data-token ${top?.token ?? "none"}, not every chain's top Trending ${TOP_ALL.chain}/${TOP_ALL.token}`);
+    await shot(page, `top-all-${w.name}`);
+    if (h) {
+      await pick(h, page, phone, "base");
+      await h.waitForFunction((id) => document.querySelector('[data-token-page="ready"]')?.getAttribute("data-token") === id, TOP_BASE.token, { timeout: 10_000 }).catch(() => {});
+      top = await topOf();
+      check(top?.token === TOP_BASE.token, `${tag} / on Base: data-token ${top?.token ?? "none"}, not Base's top Trending ${TOP_BASE.token}`);
+      check(!!top && top.badges.length > 0 && top.badges.every((b) => b === "base"), `${tag} / on Base: the page's chain badges [${top?.badges.join(",") ?? ""}], not base`);
+      await shot(page, `top-base-${w.name}`);
     }
     check(errors.length === 0, `${tag}: page error ${errors.slice(0, 2).join("; ")}`);
     await ctx.close();
@@ -185,6 +262,6 @@ try {
 }
 
 for (const x of fails) console.log(`FAIL ${x}`);
-console.log(`chains-evm: ${loads} loads at 390 and 1440 (${browserLabel(browser)}); Discover on All, Base and Robinhood, /token/base and /token/robinhood`);
+console.log(`chains-evm: ${loads} loads at 390 and 1440 (${browserLabel(browser)}); Discover on All, Base and Robinhood, /token/base and /token/robinhood with their rail on All and on their chain, / on All and on Base`);
 console.log(fails.length ? `FAIL (${fails.length})` : "PASS");
 process.exit(fails.length ? 1 : 0);

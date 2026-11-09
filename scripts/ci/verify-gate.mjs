@@ -39,6 +39,25 @@ function exemptions(body) {
   return out;
 }
 
+// GitHub hard-wraps a queued pull request's description at 72 characters when it writes the group's merge commit (group
+// 3de09186: PR 540's one-line "Live check: exit-withdraw: none (...)" landed on two lines), greedily: a line breaks only
+// before a word that does not fit. So two lines are one wrapped line only when the second's first word did not fit on
+// the first; every such pair is joined, with one space, back into the line the pull request's body held. A blank line,
+// or a line whose first word fit, is a line of the body's own: a "Live check:" there starts an entry, and one the wrap
+// moved to a line start from mid-sentence is joined back to its sentence, where it exempts nothing, as on the pull request.
+const WRAP = 72;
+const chars = (s) => [...s].length;
+const wrapped = (a, b) => a.trim() !== "" && b.trim() !== "" && chars(a.trimEnd()) + 1 + chars(b.trim().split(/\s/)[0]) > WRAP;
+export function unwrap(body) {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const out = [];
+  lines.forEach((line, i) => {
+    if (i > 0 && wrapped(lines[i - 1], line)) out[out.length - 1] = `${out.at(-1).trimEnd()} ${line.trim()}`;
+    else out.push(line);
+  });
+  return out.join("\n");
+}
+
 const RELEASES = "packages/signpage/releases";
 const LEDGER = "packages/signpage/scripts/release-list.mjs";
 const LIST = /^release-[1-9][0-9]*\.json$/;
@@ -165,8 +184,8 @@ export function verifyGate(cwd, base, head, body = "") {
  * head on main with one merge commit per queued pull request, its first parent the line so far and its second the
  * pull request's head, its message the pull request's title and number, a blank line and its description (the
  * repository's "Pull request title and description" default). Walking the head's first parents down to main, each
- * merge commit C is judged as verifyGate(C^1, C, its description): that pull request's own commits, its live checks in
- * the tree it lands as, and its body's exemptions, which cover its own cards alone. A commit on that line that is not
+ * merge commit C is judged as verifyGate(C^1, C, its description, unwrapped as GitHub wrapped it): that pull request's
+ * own commits, its live checks in the tree it lands as, and its body's exemptions, which cover its own cards alone. A commit on that line that is not
  * a merge is refused, so a squash or rebase queue never lands a commit nobody judged; so is a group with no merge.
  * main: a commit on main (CI passes the merge base of main and the group's head); the walk stops at its first ancestor.
  */
@@ -190,7 +209,7 @@ export function verifyGroup(cwd, main, head) {
   if (!entries.length) return { refusals: ["the group has no queued pull request"], cards: [] };
   for (const c of entries) {
     const title = git(cwd, ["log", "-1", "--format=%s", c]);
-    const one = verifyGate(cwd, `${c}^1`, c, git(cwd, ["log", "-1", "--format=%b", c]));
+    const one = verifyGate(cwd, `${c}^1`, c, unwrap(git(cwd, ["log", "-1", "--format=%b", c])));
     for (const r of one.refusals) refusals.push(`${title}: ${r}`);
     for (const k of one.cards) cards.add(k);
   }

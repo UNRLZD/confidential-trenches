@@ -10,6 +10,7 @@
 // that never gets ready. deploy/vault-lines.sh moves the two vault lines to the deploy record's vault.
 // Card sol-pools-mainnet-pin: and the mainnet mark scan's two routes (checkMarksRoute), each asked the scan once.
 import { createHash } from "node:crypto";
+import { EVM_POOL_HISTORY, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "@blindfill/kit";
 import { bindSenderFromEnv } from "./bind/env.ts";
 import { marksRoutes, MARKS_A_ENV, operatorOf, readUpstreams, RPC_SCAN_PROGRAM_ENV, RPC_UPSTREAMS } from "./rpc/rpc.ts";
 import { evmPoolSendersFromEnv } from "./pool/evm.ts";
@@ -22,6 +23,32 @@ import { MAINNET_VAULT, withdrawSenderFromEnv } from "./withdraw/send.ts";
 export function checkPoolEnv(env: Record<string, string | undefined>): void {
   evmPoolSendersFromEnv(env);
   solanaPoolSendersFromEnv(env);
+}
+
+/**
+ * Throws when a keyed Base or Robinhood URL the helper would use (rpc/rpc.ts RPC_UPSTREAMS keyed names) is run by an
+ * operator of that chain's pool list (the kit's evmPoolProvidersOf, by its evmRpcOperator), or has no operator (not an
+ * http(s) URL): the device's EVM pool sync keeps old logs only when two operators give them alike, the helper's
+ * ?keyed=only route counted as operator "helper" (packages/wallet/src/pool/evm.ts evmSourceOperator), so a keyed URL
+ * of a pool-list operator would count one operator twice (card evm-pool-sync-holds). So would one of an operator of
+ * the chain's history list (the kit's EVM_POOL_HISTORY, which the device reads after the helper's route; review
+ * P3-2), refused the same way. Names the variable and the operator, never the URL or any part of it: a keyed URL
+ * carries its key.
+ */
+export function checkPoolRpcOperators(env: Record<string, string | undefined>): void {
+  const venues = evmPoolVenues();
+  for (const chain of ["base", "robinhood"] as const) {
+    const pool = new Set((evmPoolProvidersOf(venues[chain]) ?? []).map(evmRpcOperator));
+    const history = new Set(EVM_POOL_HISTORY[chain].map(evmRpcOperator));
+    for (const name of RPC_UPSTREAMS[chain].keyed) {
+      const url = env[name];
+      if (url === undefined || url === "") continue;
+      const op = evmRpcOperator(url);
+      if (op === null) throw new Error(`${name}: not an http(s) URL, so no operator apart from the device's pool list`);
+      if (pool.has(op)) throw new Error(`${name}: its operator ${op} runs the device's ${chain} pool list`);
+      if (history.has(op)) throw new Error(`${name}: its operator ${op} runs the device's ${chain} pool history`);
+    }
+  }
 }
 
 /**
@@ -104,11 +131,12 @@ if (import.meta.main) {
   try {
     checkPoolEnv(process.env);
     checkSenderEnv(process.env);
+    checkPoolRpcOperators(process.env);
     for (const line of await checkMarksRoute(process.env)) console.log(`helper env: ${line}`);
   } catch (e) {
     console.error(`helper env: ${(e as Error).message}`);
     process.exit(2);
   }
-  console.log("helper env: the pool senders', the withdrawal relayer's and the deposit carry's settings are whole; the mark scan's two routes answer");
+  console.log("helper env: the pool senders', the withdrawal relayer's and the deposit carry's settings are whole; no keyed Base or Robinhood URL is a pool-list or pool-history operator's; the mark scan's two routes answer");
   process.exit(0);
 }

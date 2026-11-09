@@ -368,6 +368,24 @@ test("main.ts reads its seed again on another tab's write only as walletSeedMove
   assert.match(src, /import \{[^}]*\bwalletSeedMoved\b[^}]*\} from "@blindfill\/wallet\/store";/);
 });
 
+// review of 7eb8cfb9, P3-5: the store's own events (this page's onEvent) count a move only as walletSeedMoved says, as
+// storeMoved does: a pool hold's write on another tab is none
+test("review of 7eb8cfb9, P3-5: every move main.ts counts is walletSeedMoved's", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const counts = src.split("\n").filter((l) => /\bmoved \+= 1\b/.test(l));
+  assert.ok(counts.length >= 2, "storeMoved's and the store's onEvent");
+  for (const l of counts) assert.match(l, /^\s*if \(walletSeedMoved\(e\)\) moved \+= 1;$/, l);
+});
+
+// review of 7eb8cfb9, P2-2: the pool syncs' holds go through the store only while it is open (pool-testnet-evm-deposit
+// has the behaviour, on fake-indexeddb): main.ts gives both hosts `held`, which never opens one
+test("review of 7eb8cfb9, P2-2: main.ts gives the pool flow and the restore a hold store that never opens one", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(src, /testnetPool\(\{ store: \(\) => open\(\), held: \(\) => opened\(\),/);
+  assert.match(src, /poolRestore\(\{\n      store: \(\) => open\(\),\n      held: \(\) => opened\(\),/);
+  assert.match(src, /^const opened = \(\): Promise<WalletStore> => \(store !== null \? Promise\.resolve\(store\) : Promise\.reject\(new Error\("no wallet store is open"\)\)\);$/m);
+});
+
 test("main.ts wires the deposit follows to the store's connection: a close ends them, and the next open settles them again (card wallet-deposit-follow)", async () => {
   // main.ts is booted by the first test
   const follows = ((globalThis as { __ctFollowCalls?: string[] }).__ctFollowCalls ??= []);
