@@ -2637,3 +2637,27 @@ test("review of 39a4c67a, P3-3: the record keeps its write's own time, so a new 
   assert.equal(writes, 2);
   assert.equal(box.record()?.to, BigInt(c.finalized));
 });
+
+test("review of 39a4c67a, P3-4: Tenderly's cap, named in its error's data, pages a source at 1,000 blocks through the page's client, never halved to 781", async () => {
+  const { solanaJsonRpc } = await import("@blindfill/kit");
+  // base.gateway.tenderly.co, eth_getLogs over 2,001 blocks, 2026-11-09 19:43Z
+  const DATA = "Block range too large: maximum 1000 blocks without an access key. Try [0x33cf5a7, 0x33cf98f], or use an access key for larger ranges.";
+  const c = longChain(deps(PP, [10, 20_000, 30_000]), 60_000);
+  const inner = rpc(c, { url: "https://tenderly.example" });
+  const pages: number[] = [];
+  const fetch = async (_u: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const { id, method, params } = JSON.parse(String(init!.body)) as { id: string; method: string; params: { fromBlock: string; toBlock: string }[] };
+    if (method === "eth_getLogs") {
+      const span = Number(BigInt(params[0]!.toBlock) - BigInt(params[0]!.fromBlock)) + 1;
+      if (span > 1_000) return new Response(JSON.stringify({ id, jsonrpc: "2.0", error: { code: -32602, message: "invalid params", data: DATA } }));
+      pages.push(span);
+    }
+    return new Response(JSON.stringify({ id, jsonrpc: "2.0", result: await inner(method, params) }));
+  };
+  const tenderly = Object.assign(solanaJsonRpc("https://tenderly.example", { fetch: fetch as typeof globalThis.fetch }), { url: "https://tenderly.example" }) as unknown as EvmRpc;
+  const seats: [EvmRpc, EvmRpc] = [rpc(c, { url: "https://publicnode.example", ...brokenLogs }), rpc(c, { url: "https://pocket.example", ...brokenLogs })];
+  const r = await evmTreeSync({ rpcs: seats, pin: PIN, history: [helperSrc(c), tenderly], ...noWait }).events();
+  assert.equal(r.events.length, 3);
+  assert.ok(pages.length > 0 && pages.length <= Math.ceil(60_000 / 1_000) + 1, `${pages.length} pages`);
+  assert.ok(pages.slice(0, -1).every((n) => n === 1_000), `pages: ${[...new Set(pages)].join(", ")}`);
+});

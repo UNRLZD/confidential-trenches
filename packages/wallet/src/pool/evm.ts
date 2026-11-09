@@ -116,7 +116,8 @@ export const EVM_LOG_PAGE_BLOCKS = 10_000n;
  *   (13M back at 07:44Z, 4 of 4: "block range exceeds maximum 500": its backends differ);
  *   base-rpc.publicnode.com 50,000 ("-32701: exceed maximum block range: 50000"), and 13M back HTTP 403 "Archive
  *   requests require a personal token"; base.public.blockpi.network 5,000; base.gateway.tenderly.co "-32602: invalid
- *   params" (1,000, 5 Nov); rpc.sentio.xyz HTTP 429 code 8 "public eth_getLogs is limited to 1000 blocks" (a 429: a
+ *   params" (1,000, 5 Nov; its error's data names it, "maximum 1000 blocks without an access key", which the kit's
+ *   client keeps since review of 39a4c67a, P3-4); rpc.sentio.xyz HTTP 429 code 8 "public eth_getLogs is limited to 1000 blocks" (a 429: a
  *   throttle to the pager, so never a pool provider); base-mainnet.public.blastapi.io 10 blocks; mainnet.base.org HTTP
  *   429 -32011 "request limit reached" on the first call.
  * - robinhood: rpc.mainnet.chain.robinhood.com 100,000 at the head and 13M back, "query spans 200000 blocks ..., but
