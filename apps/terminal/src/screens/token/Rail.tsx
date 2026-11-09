@@ -1,6 +1,8 @@
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { tokenHref } from "../../routes/routes.ts";
+import { usePick } from "../../shell/chain-pick.ts";
+import { pickSnapshot } from "../discover/data.ts";
 import { Ring } from "../discover/Discover.tsx";
 import type { MarketChain, MarketRow } from "../discover/fields.ts";
 import { change } from "../discover/format.ts";
@@ -12,7 +14,8 @@ import "./rail.css";
 
 // The token page's left rail (card app-token-rail), drawn after R5's trenches-1440.html rail (research repo
 // design/proto at design-lock-r5, proto.css .rail and .rr, token.css's width modes): Trending and New from Discover's
-// lists (rail.ts), each row a link to its token's page, the page's own token marked. The desktop's width modes
+// lists (rail.ts), every chain's narrowed to the shell's chain filter as Discover draws them (card app-chains-evm-rail),
+// each row a link to its token's page on its own chain, the page's own token marked. The desktop's width modes
 // (token.css .tkp-desk, rail.css): the full rail (340) from 1500 px, the slim rail (78: the rings, and the expand
 // button that draws the full rail over the chart) from 1180, none under it. Its column is sized from the first paint,
 // and its rows hold one height loading or drawn, so nothing moves when the lists land (BAR-10 CLS 0). The rows are
@@ -86,7 +89,9 @@ export function Rail({ chain, token, store = RAIL }: { chain: MarketChain | null
   const { data, nowMs } = useSyncExternalStore(sub, store.get, store.get);
   const [list, setList] = useState<List>("trending");
   const [open, setOpen] = useState(false);
-  const rows = data.status === "ready" ? columnRows(data.snapshot, list) : null;
+  const pick = usePick();
+  const snapshot = data.status === "ready" ? data.snapshot : null;
+  const rows = useMemo(() => (snapshot ? columnRows(pickSnapshot(snapshot, pick), list) : null), [snapshot, pick, list]);
   return (
     <aside className="tkr" data-testid="token-rail" data-open={open} data-list={list} data-state={data.status}>
       <button type="button" className="tkr-exp" aria-label={WORDS.expand.text} aria-expanded={open} data-testid="rail-expand" onClick={() => setOpen((o) => !o)}>
