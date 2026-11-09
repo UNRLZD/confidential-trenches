@@ -56,8 +56,8 @@ export function classify(host, status, text, { nullNoAnswer = false, judgeStateM
 }
 
 /** The pause before a no-answer is read again, ms: past a provider's per-second limit ("25/second request limit
- *  reached", mainnet.base.org). PROVIDER_RETRY_MS sets it (0 in the tests). */
-const retryMs = () => Number(process.env.PROVIDER_RETRY_MS ?? 1000);
+ *  reached", mainnet.base.org). The tests set it to 0. */
+export const RETRY = { ms: 1000 };
 
 /** One JSON-RPC read of `method` on `url`, read again once on a no-answer. */
 export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutMs = RPC_TIMEOUT_MS, nullNoAnswer = false, judgeStateMiss = false } = {}) {
@@ -74,7 +74,7 @@ export async function rpcAnswer(url, method, params, { fetchFn = fetch, timeoutM
   };
   const a = await once();
   if (a.noAnswer === undefined) return a;
-  await new Promise((r) => setTimeout(r, retryMs()));
+  await new Promise((r) => setTimeout(r, RETRY.ms));
   return once();
 }
 

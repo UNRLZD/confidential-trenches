@@ -12,10 +12,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { collect, EXIT, judge } from "./evm-quote-read-gas-starve.mjs";
+import { RETRY } from "./provider-answer.mjs";
 import { JUDGED_403, NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
-process.env.PROVIDER_RETRY_MS = "0";
+RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./evm-quote-read-gas-starve.answers.json", import.meta.url), "utf8"));
 

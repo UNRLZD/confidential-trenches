@@ -7,10 +7,11 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { AGE_S, QUOTE_ONLY_RH, check, pinned, post, replayer } from "./evm-buy-hookdata-fee.mjs";
+import { RETRY } from "./provider-answer.mjs";
 import { JUDGED_403, NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
-process.env.PROVIDER_RETRY_MS = "0";
+RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-hookdata-fee.answers.json", import.meta.url), "utf8"));
 

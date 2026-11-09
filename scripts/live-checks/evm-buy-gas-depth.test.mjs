@@ -10,11 +10,11 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { collect, judge } from "./evm-buy-gas-depth.mjs";
-import { EXIT } from "./provider-answer.mjs";
+import { EXIT, RETRY } from "./provider-answer.mjs";
 import { JUDGED_403, NO_ANSWERS, plantedFetch } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
-process.env.PROVIDER_RETRY_MS = "0";
+RETRY.ms = 0;
 
 const A = JSON.parse(readFileSync(new URL("./evm-buy-gas-depth.answers.json", import.meta.url), "utf8"));
 const POOLS = ["0xeb967dfc1b4ffb22942f833c76866ea85fc42266", "0xed9fac860e6bc5e932455232eedca8b71c44da4d"];

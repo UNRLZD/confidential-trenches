@@ -4,11 +4,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { classify, NOT_YET, RATE_LIMIT, rpcAnswer, STATELESS } from "./provider-answer.mjs";
+import { classify, NOT_YET, RATE_LIMIT, RETRY, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
 // a no-answer is read again at once here, not after provider-answer.mjs's pause
-process.env.PROVIDER_RETRY_MS = "0";
+RETRY.ms = 0;
 
 const rpcErr = (code, message) => JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code, message } });
 const ok = (result) => JSON.stringify({ jsonrpc: "2.0", id: 1, result });
@@ -50,14 +50,14 @@ test("judgeStateMiss: a block or state the provider does not hold is judged; eve
   for (const [name, status, body] of NO_ANSWERS.filter((x) => !state.includes(x))) assert.equal(typeof classify("p", status, body, { judgeStateMiss: true }).noAnswer, "string", name);
 });
 
-test("rpcAnswer pauses PROVIDER_RETRY_MS before it reads again", async () => {
-  process.env.PROVIDER_RETRY_MS = "300";
+test("rpcAnswer pauses RETRY.ms before it reads again", async () => {
+  RETRY.ms = 300;
   try {
     const t = Date.now();
     await rpcAnswer("https://p.example/rpc", "eth_chainId", [], { fetchFn: async () => new Response("", { status: 200 }) });
     assert.ok(Date.now() - t >= 290);
   } finally {
-    process.env.PROVIDER_RETRY_MS = "0";
+    RETRY.ms = 0;
   }
 });
 
