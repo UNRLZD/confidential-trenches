@@ -911,15 +911,17 @@ export function evmPoolSender(
   // a buy's keys (card helper-evm-sender-2, review a2ff5521 H1): the same W, client and token caps as a sale (one
   // caller's unpaid gas, either route), and the withdraw sender's own budget ("buys"), as the sell sender has "all"
   const buyKeys = (w: string, client: string | undefined, token: string) => ["buys", `w:${w}`, `t:${token}`, ...(client === undefined ? [] : [`c:${client}`])];
-  const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
+  // every upstream answer writes one log line (card helper-pool-fee-one-read-fails): `said`, the failed read's words, the
+  // log's alone (they name hosts), else the answer's own detail
+  const no = (status: number, code: PoolEvmCode, detail?: string, said?: unknown): PoolEvmAnswer => {
+    if (status === 503 && code === "upstream") upstreamSaid("", said ?? detail ?? "");
+    return { status, body: { error: { code, ...(detail ? { detail } : {}) } } };
+  };
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
   // upstream (card helper-abuse-limits: a 503 never means "wait")
-  // (`detail`: the answer names it too, as the chain check always has)
-  const unread = (e: unknown, detail = false): PoolEvmAnswer => {
+  const unread = (e: unknown): PoolEvmAnswer => {
     const wait = throttleOf(e, true);
-    if (wait > 0) return { ...no(429, "rate_limited"), retryAfterS: wait };
-    upstreamSaid("", e);
-    return no(503, "upstream", detail ? (e as Error).message : undefined);
+    return wait > 0 ? { ...no(429, "rate_limited"), retryAfterS: wait } : no(503, "upstream", undefined, e);
   };
   /** One log line per upstream answer (card helper-pool-fee-one-read-fails): the read, each provider's host and its
    *  answer as evmFailoverRpc words them (never a URL: a key may sit in its path or query), or why the two disagree. */
@@ -1090,7 +1092,7 @@ export function evmPoolSender(
       if (stuck !== null) return stuck;
       id = await chain();
       // the chain W signed for (M356 (6)): the providers must name the network's pinned chain id, never another
-      if (id !== releaseChainId) return unread(new Error(`the providers name chain ${id}, not ${releaseChainId}`), true);
+      if (id !== releaseChainId) return no(503, "upstream", `the providers name chain ${id}, not ${releaseChainId}`);
       // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
       const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
@@ -1610,7 +1612,7 @@ export function evmPoolSender(
       const stuck = await laneHeld(sellLane);
       if (stuck !== null) return stuck;
       id = await chain();
-      if (id !== BigInt(venue.chainId)) return unread(new Error(`the providers name chain ${id}, not ${venue.chainId}`), true);
+      if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
       // the sender's pending balance on both providers rides the same round trip; a failed balance read never stops a sale
       const balanceOf = (r: EvmRpc) => r("eth_getBalance", [from, "pending"]).then(qty).catch(() => null);
       const [ba, bb, wa, wb, n, m, ln, lm, bla, blb] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"]), b("eth_getTransactionCount", [from, "pending"]), a("eth_getTransactionCount", [from, "latest"]), b("eth_getTransactionCount", [from, "latest"]), balanceOf(a), balanceOf(b)]);
@@ -1911,10 +1913,11 @@ export function evmFailoverRpc(side: readonly EvmSideProvider[], o: { log: (line
     for (const s of secrets) m = m.split(s).join("<key>");
     return m.slice(0, 160);
   };
+  const CUT = new Error(`no answer in the read's ${budgetMs} ms`);
   const within = <T>(p: Promise<T>, ms: number): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     p.catch(() => {}); // a call answered after the cut is dropped, never an unhandled rejection
-    const cut = new Promise<never>((_, no) => (timer = setTimeout(() => no(new Error(`no answer in the read's ${budgetMs} ms`)), ms)));
+    const cut = new Promise<never>((_, no) => (timer = setTimeout(() => no(CUT), Math.ceil(ms))));
     return Promise.race([p, cut]).finally(() => clearTimeout(timer));
   };
   return async (method, params) => {
@@ -1932,6 +1935,7 @@ export function evmFailoverRpc(side: readonly EvmSideProvider[], o: { log: (line
         if (failedInExecution(e)) throw e;
         if (i === 0) first = e;
         failed.push(`${p.name}: ${said(e)}`);
+        if (e === CUT) break; // the budget is spent, whatever a timer's grain says of the clock
       }
     }
     throw new Error(`${said(first)} (${readOf(method, params)}: ${failed.join("; ")})`, { cause: first });
