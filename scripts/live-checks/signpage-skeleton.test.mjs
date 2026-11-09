@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { evmOrigins } from "./page-evm-rpc-csp.mjs";
 import { CSP, frameAllowed, judge, POOL_HISTORY, read } from "./signpage-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -92,11 +93,14 @@ test("recorded bad answer: the good build before card evm-pool-sync-holds (no Ba
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
 });
 
-test("card evm-pool-sync-holds: POOL_HISTORY is the signing page's Base history past the kit's lists", () => {
-  const src = readFileSync(path.join(HERE, "../../packages/signpage/src/pool-testnet.ts"), "utf8");
-  const m = src.match(/MAINNET_POOL_HISTORY[^=]*=[^]*?base: [^[]*\[([^\]]*)\]/);
-  assert.ok(m, "MAINNET_POOL_HISTORY's base list");
-  assert.deepEqual(m[1].split(",").map((x) => x.trim().replace(/^"|"$/g, "")).filter(Boolean), POOL_HISTORY.split(" "));
+test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in the pinned connect-src, and POOL_HISTORY is exactly those the kit's venue origins leave out", async () => {
+  const { EVM_POOL_HISTORY } = await import("../../packages/kit/src/index.ts");
+  const history = [...new Set(Object.values(EVM_POOL_HISTORY).flat().map((u) => new URL(u).origin))];
+  assert.ok(history.length >= 2, `the kit's history origins: ${history.join(" ")}`);
+  const pinned = CSP.find(([k]) => k === "connect-src")[1].split(" ");
+  for (const o of history) assert.equal(pinned.filter((x) => x === o).length, 1, `${o} once in the pinned connect-src`);
+  const venues = evmOrigins();
+  assert.deepEqual(POOL_HISTORY.split(" "), history.filter((o) => !venues.includes(o)));
 });
 
 test("frame-src other than APP_HOST alone, and Origin-Agent-Cluster gone: FAIL", () => {

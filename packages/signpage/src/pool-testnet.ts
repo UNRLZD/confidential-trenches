@@ -65,6 +65,7 @@ import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-b
 import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
+import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -96,18 +97,9 @@ export const pageEvmHold = (pin: EvmPoolPin, store: () => Promise<WalletStore>):
   if (h === undefined) EVM_HOLDS.set(key, (h = evmStoredHold(store, pin)));
   return h;
 };
-/** The deep public sources past each chain's pool list (card evm-pool-sync-holds), in SIGN_HOST's connect-src: Base's
- *  bloXroute keeps logs from block 52,500,000 ("4444: pruned history unavailable: requested 52400000, earliest available
- *  52500000", read 2026-11-09 13:03Z and 14:14Z), under the pool's deploy block 54,325,671, where publicnode keeps
- *  about 3.9M blocks and Pocket answers past its window with no logs. Not taken (read 14:17Z-14:21Z): base.drpc.org
- *  (archive, but a range over 1,000 blocks refused, code 35: about 900 calls a 900,000-block read, and the helper's
- *  keyed operator), base.llamarpc.com (HTTP 525), 1rpc.io/base ("earliest available 52000000", and its eth_getLogs
- *  "discontinued"), base.blockpi.network and rpc.ankr.com/base (a key required). Robinhood's list has none: its
- *  bloXroute answers HTTP 403 to eth_getLogs. scripts/live-checks/evm-pool-sync-holds.mjs reads each one's floor. */
-export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://base.rpc.blxrbdn.com"]),
-  robinhood: /* @__PURE__ */ Object.freeze([] as string[]),
-});
+/** The deep public sources past each chain's pool list (card evm-pool-sync-holds): the kit's EVM_POOL_HISTORY (its
+ *  reads cited there), in SIGN_HOST's connect-src; scripts/live-checks/evm-pool-sync-holds.mjs reads each one's floor. */
+export const MAINNET_POOL_HISTORY: Readonly<Record<"base" | "robinhood", readonly string[]>> = EVM_POOL_HISTORY;
 const HISTORY = new Map<string, readonly EvmRpc[]>();
 /** Where else an EVM pool's logs are read when its seats cannot give them (evm.ts EvmSyncArgs history): on mainnet the
  *  helper's route in its keyed-only mode (POST /v1/rpc/{chain}?keyed=only, its archive providers alone, never its public

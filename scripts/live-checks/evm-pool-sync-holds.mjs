@@ -3,12 +3,13 @@
 // blocks a week from now. A device keeps each pool's verified hold, so a page that synced once never needs the deploy
 // block again; a new device does, from logs two operators give alike (packages/wallet/src/pool/evm.ts evmTreeSync). A
 // keyless provider keeps logs for a window only, so for each source the signing page reads a pool's logs from (its pool
-// list, MAINNET_POOL_RPCS, the helper's keyed-only route and MAINNET_POOL_HISTORY, in packages/signpage/src/
-// pool-testnet.ts, copied here) this reads now:
-//   1. its oldest reachable block: the oldest block from which a 100-block eth_getLogs of a busy contract (Base's USDC,
-//      Robinhood's busiest log address at every block read) answers logs, by bisection up to the pool's deploy block;
-//      a provider's "earliest available N" words name it at once, and one that answers no logs, refuses, or names a
-//      later block at the deploy block does not reach it;
+// list, MAINNET_POOL_RPCS in packages/signpage/src/pool-testnet.ts, the helper's keyed-only route and the kit's
+// EVM_POOL_HISTORY, copied here) this reads now:
+//   1. its oldest reachable block: the oldest block n from which a 100-block eth_getLogs of a busy contract (Base's
+//      USDC, Robinhood's busiest log address) answers the contract's first log at n or within the chain's slack past it
+//      (CHAINS slack, measured), by bisection up to the pool's deploy block; a provider's "earliest available N" words
+//      name it at once, and one that answers no logs, refuses, names a later block, or answers logs only from past the
+//      slack (a range clamped to its floor, review P3-3) at the deploy block does not reach it;
 //   2. the chain's block rate, from the head's time and a block 100,000 back;
 //   3. the date the deploy block leaves its window, the window rolling at that rate (an archive reads as decades).
 // FAIL when fewer than two operators (the helper's route one, "helper", whatever it reads behind) reach the deploy
@@ -31,7 +32,9 @@ import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 const KEY = "evm-pool-sync-holds";
 export const HELPER = "https://ct-api.unrealized.trade";
 export const WEEK_S = 7 * 24 * 3600;
-/** Blocks a probe reads: a busy contract logs in every such range on each chain (read 2026-11-09 14:50Z). */
+/** Blocks a probe reads: a busy contract logs in every such range on each chain (read 2026-11-09 14:50Z). A source
+ *  reaches the probe's first block n only when its first log is the contract's at n + `slack` at most (review P3-3:
+ *  bloXroute answered a range from under its floor with logs from a later block, which counted as reaching n). */
 export const SPAN = 100;
 export const CHAINS = Object.freeze([
   {
@@ -40,11 +43,17 @@ export const CHAINS = Object.freeze([
     from: 54325671,
     // Base's USDC: logs in every 100-block range read
     busy: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    // not a log every block (2026-11-09 18:37Z, its eth_getLogs on base.gateway.tenderly.co, 1,000-block windows):
+    // the longest step between two blocks with one 3 at blocks 15M and 20M and 2 at the deploy block (977 of 1,000
+    // blocks with one), so 10 holds a probe from 15M up, where every pruned source's floor lies; below, where USDC was young
+    // (a gap of 35 at 5M, 226 at 2.8M), a probe can miss and an archive's floor read high: never deeper than it is
+    slack: 10,
     sources: [
       { op: "publicnode.com", url: "https://base-rpc.publicnode.com" },
       { op: "pocket.network", url: "https://base.api.pocket.network" },
       { op: "helper", url: `${HELPER}/v1/rpc/base?keyed=only` },
       { op: "blxrbdn.com", url: "https://base.rpc.blxrbdn.com" },
+      { op: "tenderly.co", url: "https://base.gateway.tenderly.co" },
     ],
   },
   {
@@ -53,6 +62,12 @@ export const CHAINS = Object.freeze([
     from: 108420674,
     // the busiest log address at blocks 1M, 20M, 60M, 100M, 108.4M and 110M (robinhood.drpc.org, 14:50Z)
     busy: "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+    // no address logs every block: unfiltered single-block eth_getLogs on robinhood.drpc.org at blocks 1M, 20M, 60M,
+    // 100M, 108,420,674, 108,420,675, 108,420,700, 110M and two near the head (2026-11-09 18:36Z) share none (the
+    // deploy block has one log, another contract's). This one's longest step between two blocks with a log: 26, over 1,000-block
+    // windows at 1M, 10M, 20M, 60M, 100M, 105M, 108M, 108.42M, 109M, 110M and the head on
+    // rpc.mainnet.chain.robinhood.com (18:36Z; 12 to 22 in most), so 50, about twice it
+    slack: 50,
     sources: [
       { op: "robinhood.com", url: "https://rpc.mainnet.chain.robinhood.com" },
       { op: "pocket.network", url: "https://robinhood.api.pocket.network" },
@@ -96,7 +111,8 @@ export function replayer(log) {
 const hex = (n) => `0x${n.toString(16)}`;
 const EARLIEST = /earliest available:? (\d+)/i;
 
-/** Whether `url` gives the busy contract's logs from block n: { yes }, { no, earliest? }, or { quiet }. */
+/** Whether `url` gives the busy contract's logs from block n (its first log the contract's, at n to n + c.slack):
+ *  { yes }, { no, earliest? }, or { quiet }. */
 async function reaches(transport, c, url, n) {
   const a = await transport(url, "eth_getLogs", [{ address: c.busy, fromBlock: hex(n), toBlock: hex(n + SPAN - 1) }]);
   if ("noAnswer" in a) return { quiet: a.noAnswer };
@@ -105,7 +121,16 @@ async function reaches(transport, c, url, n) {
     return { no: true, earliest: m ? Number(m[1]) : undefined, why: String(a.error?.message ?? JSON.stringify(a.error)).slice(0, 80) };
   }
   if (!Array.isArray(a.result)) return { no: true, why: "not a list of logs" };
-  return a.result.length > 0 ? { yes: true } : { no: true, why: "no logs" };
+  if (a.result.length === 0) return { no: true, why: "no logs" };
+  const first = a.result[0];
+  if (String(first?.address ?? "").toLowerCase() !== c.busy) return { no: true, why: "a first log not the busy contract's" };
+  let at;
+  try {
+    at = Number(BigInt(first.blockNumber));
+  } catch {
+    return { no: true, why: "a first log with no block number" };
+  }
+  return at >= n && at <= n + c.slack ? { yes: true } : { no: true, why: `the first log at block ${at}, past ${n} + ${c.slack}` };
 }
 
 /** A source's oldest reachable block up to the deploy block: { floor } (at most c.from), { above, why } (it does not

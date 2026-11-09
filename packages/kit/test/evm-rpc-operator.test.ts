@@ -124,3 +124,21 @@ test("every pool-list reader takes the list from evmPoolProvidersOf, never a ven
     assert.doesNotMatch(src, /\.poolProviders\b|\?\.providers\b|\.providers\s*\?\?/, `${f}: reads no venue list itself`);
   }
 });
+
+// card evm-pool-sync-holds (review P3-2, P2-3): the deep public sources an EVM pool's old logs are read from past its
+// pool list, one list in the kit for the signing page, the helper's start check and the live checks; apart from the
+// venue objects, so the venues' URL order (and SIGN_HOST's pinned connect-src) stays as it was.
+test("EVM_POOL_HISTORY: Base's bloXroute and Tenderly, none on Robinhood; frozen; each an operator apart from its chain's pool list", async () => {
+  const { EVM_POOL_HISTORY } = (await import("../src/index.ts")) as unknown as { EVM_POOL_HISTORY?: Readonly<Record<"base" | "robinhood", readonly string[]>> };
+  assert.ok(EVM_POOL_HISTORY, "the kit's index exports EVM_POOL_HISTORY");
+  assert.deepEqual(Object.keys(EVM_POOL_HISTORY), ["base", "robinhood"]);
+  assert.deepEqual(EVM_POOL_HISTORY.base, ["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]);
+  assert.deepEqual(EVM_POOL_HISTORY.robinhood, []);
+  assert.ok(Object.isFrozen(EVM_POOL_HISTORY) && Object.isFrozen(EVM_POOL_HISTORY.base) && Object.isFrozen(EVM_POOL_HISTORY.robinhood));
+  assert.deepEqual(EVM_POOL_HISTORY.base.map(op), ["blxrbdn.com", "tenderly.co"]);
+  for (const chain of ["base", "robinhood"] as const) {
+    const pool = new Set((evmPoolProvidersOf(evmPoolVenues()[chain]) ?? []).map(op));
+    for (const u of EVM_POOL_HISTORY[chain]) assert.ok(!pool.has(op(u)), `${u} runs ${chain}'s pool list`);
+    assert.ok(!Object.hasOwn(evmPoolVenues()[chain], "history"), "never inside the venue object");
+  }
+});
