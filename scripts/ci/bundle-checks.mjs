@@ -59,6 +59,8 @@ export const IN_PROCESS = [
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("sol-rent-back-dust-burn", () => import("../live-checks/sol-rent-back-dust-burn.mjs")),
+  // cut as a release only after its merge: the marks and the pin, not the ledger
+  { key: "sol-sell-deposit-back-floor", host: "sign", load: () => import("../live-checks/sol-sell-deposit-back-floor.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   // the bundle part only: the chain part reads the helper and two RPCs, past the build
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
