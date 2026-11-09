@@ -58,9 +58,13 @@
 //                    EVM_GAS_MAX x (2 x base + tip)), Retry-After EVM_LANE_RETRY_S; withdraws are never held by these;
 //   in_flight (429)  this client already holds EVM_IN_FLIGHT_MAX requests open (M374 (5) on this route too: one client
 //                    cannot fill the shared queue); Retry-After EVM_BUSY_RETRY_S;
-//   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error),
+//   upstream (503)   a read could not be made (a transport error, an HTTP status but 429, another JSON-RPC error) on
+//                    any provider of its side (card helper-pool-fee-one-read-fails: each of the two sides is its
+//                    configured provider, then the helper's keyed URLs for the chain of that side's company or a third,
+//                    never the other side's, evmPoolSides, each asked within EVM_READ_BUDGET_MS, evmFailoverRpc),
 //                    or the two providers name different chains, or a chain other than the network's pinned one
-//                    (M356 (6)): the send is signed only for the chain W signed for.
+//                    (M356 (6)): the send is signed only for the chain W signed for. Each such answer writes one log
+//                    line naming the read, each provider's host and its answer, never a key.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
 // reverted by the same method is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the
 // sender never pays more gas than the fee. A withdraw the helper accepts lands or fails in the simulation (the recipient
@@ -196,6 +200,7 @@ import {
 import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
+import { companyOf, KEYED_PROVIDER, readUpstreams } from "../rpc/rpc.ts";
 
 /** POST /v1/pool/evm/send's body limit, and the calldata's: a withdraw is 4 + 32 x 32 = 1,028 bytes (WITHDRAW_LEN), a buy
  *  1,220 bytes plus its swap data padded; the most a release's calldata can be is the most whose signed transaction, at
@@ -789,7 +794,7 @@ const failedInExecution = (e: unknown): boolean => {
  * each takes the next nonce; one per nullifier.
  */
 export function evmPoolSender(
-  cfg: { network: string; pool: string; senderKey: Uint8Array; sellKey?: Uint8Array; feeRecipient?: string; feeCollector?: string; memory?: number; venues?: Readonly<Partial<Record<string, EvmPoolVenue>>>; receiptPollMs?: number; log?: (line: string) => void },
+  cfg: { network: string; pool: string; senderKey: Uint8Array; sellKey?: Uint8Array; feeRecipient?: string; feeCollector?: string; memory?: number; venues?: Readonly<Partial<Record<string, EvmPoolVenue>>>; receiptPollMs?: number; log?: (line: string) => void; readyProviders?: readonly [EvmRpc, EvmRpc] },
   providers: readonly [EvmRpc, EvmRpc],
   now: () => number = Date.now,
 ): EvmPoolSender {
@@ -909,10 +914,16 @@ export function evmPoolSender(
   const no = (status: number, code: PoolEvmCode, detail?: string): PoolEvmAnswer => ({ status, body: { error: { code, ...(detail ? { detail } : {}) } } });
   // a provider call that failed: a throttle (its 429, a rate-limit error) is 429 rate_limited with its wait, else 503
   // upstream (card helper-abuse-limits: a 503 never means "wait")
-  const unread = (e: unknown): PoolEvmAnswer => {
+  // (`detail`: the answer names it too, as the chain check always has)
+  const unread = (e: unknown, detail = false): PoolEvmAnswer => {
     const wait = throttleOf(e, true);
-    return wait > 0 ? { ...no(429, "rate_limited"), retryAfterS: wait } : no(503, "upstream");
+    if (wait > 0) return { ...no(429, "rate_limited"), retryAfterS: wait };
+    upstreamSaid("", e);
+    return no(503, "upstream", detail ? (e as Error).message : undefined);
   };
+  /** One log line per upstream answer (card helper-pool-fee-one-read-fails): the read, each provider's host and its
+   *  answer as evmFailoverRpc words them (never a URL: a key may sit in its path or query), or why the two disagree. */
+  const upstreamSaid = (route: string, e: unknown) => log(`evm ${cfg.network}: ${route}upstream: ${String((e as Error | undefined)?.message ?? e).slice(0, 1_200)}`);
   const chain = (): Promise<bigint> => {
     chainId ??= Promise.all([a("eth_chainId", []), b("eth_chainId", [])]).then(([x, y]) => {
       if (qty(x) !== qty(y)) throw new Error("the providers name different chains");
@@ -1079,7 +1090,7 @@ export function evmPoolSender(
       if (stuck !== null) return stuck;
       id = await chain();
       // the chain W signed for (M356 (6)): the providers must name the network's pinned chain id, never another
-      if (id !== releaseChainId) return no(503, "upstream", `the providers name chain ${id}, not ${releaseChainId}`);
+      if (id !== releaseChainId) return unread(new Error(`the providers name chain ${id}, not ${releaseChainId}`), true);
       // a recipient with code could revert the pool's push after the simulation: refused on either provider, at
       // pending and at latest; any answer but "0x" (an EIP-7702 delegation is 0xef0100 + an address) is code
       const codes = await Promise.all([a, b].flatMap((r) => ["pending", "latest"].map((at) => r("eth_getCode", [w.recipient, at]))));
@@ -1599,7 +1610,7 @@ export function evmPoolSender(
       const stuck = await laneHeld(sellLane);
       if (stuck !== null) return stuck;
       id = await chain();
-      if (id !== BigInt(venue.chainId)) return no(503, "upstream", `the providers name chain ${id}, not ${venue.chainId}`);
+      if (id !== BigInt(venue.chainId)) return unread(new Error(`the providers name chain ${id}, not ${venue.chainId}`), true);
       // the sender's pending balance on both providers rides the same round trip; a failed balance read never stops a sale
       const balanceOf = (r: EvmRpc) => r("eth_getBalance", [from, "pending"]).then(qty).catch(() => null);
       const [ba, bb, wa, wb, n, m, ln, lm, bla, blb] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), b("eth_getBlockByNumber", ["latest", false]), a("eth_getTransactionCount", [w, "pending"]), b("eth_getTransactionCount", [w, "pending"]), a("eth_getTransactionCount", [from, "pending"]), b("eth_getTransactionCount", [from, "pending"]), a("eth_getTransactionCount", [from, "latest"]), b("eth_getTransactionCount", [from, "latest"]), balanceOf(a), balanceOf(b)]);
@@ -1682,7 +1693,11 @@ export function evmPoolSender(
       // an epoch no carry would take (older than a proof's life or later than now) is read nowhere (M356 (3))
       const t = now();
       if (epoch > t || epoch < t - POOL_LIFE_MAX_MS) return null;
-      const f = await feeOf(epoch);
+      // a read that failed answers 503 upstream (server.ts; a throttle 429): that answer's one log line is written here
+      const f = await feeOf(epoch).catch((e: unknown) => {
+        if (throttleOf(e) === 0) upstreamSaid("fee ", e);
+        throw e;
+      });
       if (f === null) return null;
       return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector: feeCollector ?? null, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
     },
@@ -1700,7 +1715,10 @@ export function evmPoolSender(
           }
         }
       };
-      const [pa, pb] = [patient(a), patient(b)];
+      // the configured pair alone (card helper-pool-fee-one-read-fails): a spare answers a moment's failure, never for a
+      // provider that cannot hold the fee's state
+      const [ra, rb] = cfg.readyProviders ?? providers;
+      const [pa, pb] = [patient(ra), patient(rb)];
       const on = <T>(k: 1 | 2, p: Promise<T>): Promise<T> => p.catch((e: Error) => Promise.reject(new Error(`rpc ${k}: ${e.message}`)));
       const block = await on(1, evmFirstBlockAtOrAfter(pa, BigInt(Math.ceil((now() - POOL_LIFE_MAX_MS) / 1000))));
       if (block === null) throw new Error(`rpc 1: no block in the last ${POOL_LIFE_MAX_MS / 1000} s`);
@@ -1815,6 +1833,118 @@ export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, slee
 }
 
 /**
+ * The most time one read of a pool sender's side spends before it fails (card helper-pool-fee-one-read-fails): its first
+ * provider's call as it is (the kit client's 5 s timeout, the pace's wait), then each next provider of the side only while
+ * the read is under this, each cut at what is left [design: one timed-out call, 5 s, still leaves a spare a second; a
+ * provider's quick refusal, dRPC's 70 ms "Unknown state", leaves the rest for every spare].
+ */
+export const EVM_READ_BUDGET_MS = 6_000;
+
+/** One provider of a sender's side: `name` is what a log line calls it (its host, or a keyed URL's company and
+ *  variable), never its URL; `skip`, true while a spare is held or out of its day's budget (limits.ts), passes it over. */
+export type EvmSideProvider = { name: string; url: string; rpc: EvmRpc; skip?: () => boolean };
+
+/**
+ * The two sides a pool sender reads (card helper-pool-fee-one-read-fails): each the configured pair's provider first,
+ * then the helper's keyed URLs for the chain (rpc.ts RPC_UPSTREAMS keyed: QuickNode, dRPC's keys), a URL of the pair
+ * dropped. A spare of one side's company joins that side; a third company's spares, all of them, join the side with fewer
+ * spares then (the first on a tie). So no company answers on both sides, and two reads of one block (every fee input,
+ * each at the epoch block's hash on both sides) stay two operators' (fold B, the kit's evmRpcOperator), whichever
+ * provider of each side answers them.
+ */
+export function evmPoolSides(pair: readonly [string, string], spares: readonly { url: string; name: string }[]): [{ url: string; name: string }[], { url: string; name: string }[]] {
+  const ops = pair.map(evmRpcOperator);
+  const own = pair.map(evmRpcUrlOf);
+  const sides = pair.map((url) => [{ url, name: new URL(url).host }]) as [{ url: string; name: string }[], { url: string; name: string }[]];
+  const groups = new Map<string, { url: string; name: string }[]>();
+  for (const s of spares) {
+    const op = evmRpcOperator(s.url);
+    if (op === null || own.includes(evmRpcUrlOf(s.url))) continue;
+    groups.set(op, [...(groups.get(op) ?? []), s]);
+  }
+  for (const [op, g] of groups) if (ops.includes(op)) sides[ops.indexOf(op)]!.push(...g);
+  for (const [op, g] of groups) if (!ops.includes(op)) sides[sides[1].length < sides[0].length ? 1 : 0].push(...g);
+  return sides;
+}
+
+/** Every form of `urls`' secret parts (rpc.ts readUpstreams': user, password, query values, path segments of 16 or
+ *  more), longest first, which a provider's words are cleared of before a log line holds them. */
+const secretsOf = (urls: readonly string[]): string[] => {
+  const out = new Set<string>();
+  for (const u of urls) {
+    let p: URL;
+    try {
+      p = new URL(u);
+    } catch {
+      continue;
+    }
+    for (const s of [u, p.href, p.username, p.password, ...p.searchParams.values(), ...p.pathname.split("/").filter((x) => x.length >= 16)]) {
+      if (s.length >= 8) for (const f of [s, encodeURIComponent(s)]) out.add(f);
+    }
+  }
+  return [...out].sort((x, y) => y.length - x.length);
+};
+/** A read as a log line names it: the method, and an eth_call's selector, target and block. */
+const readOf = (method: string, params: readonly unknown[]): string => {
+  if (method !== "eth_call") return method;
+  const [c, at] = params as [{ to?: unknown; data?: unknown } | undefined, unknown];
+  const block = typeof at === "string" ? at : typeof at === "object" && at !== null && "blockHash" in at ? String((at as { blockHash: unknown }).blockHash) : "";
+  return `eth_call ${String(c?.data ?? "").slice(0, 10)} to ${String(c?.to ?? "")}${block === "" ? "" : ` at ${block}`}`.slice(0, 200);
+};
+
+/**
+ * One side of a pool sender (card helper-pool-fee-one-read-fails): a read goes to the side's first provider, and when that
+ * fails (a transport error, an HTTP status, a throttle, any JSON-RPC error but the chain's own answer, failedInExecution)
+ * to each next one, in order, within EVM_READ_BUDGET_MS of its start; a held spare is passed over. Every provider of a
+ * side is asked the very read, its block named as the caller named it (a hash, a number or a tag), so a read at the
+ * epoch block's hash is answered at that block or not at all, by whichever provider. A read a spare saved writes one log
+ * line, the read and each provider's host and answer before it; one no provider could make throws the first provider's
+ * error words first (so a throttle stays a throttle, limits.ts throttleOf) and the read's line after, which the route's
+ * upstream answer logs. Its words never hold a URL's secret part.
+ */
+export function evmFailoverRpc(side: readonly EvmSideProvider[], o: { log: (line: string) => void; budgetMs?: number; now?: () => number }): EvmRpc {
+  const budgetMs = o.budgetMs ?? EVM_READ_BUDGET_MS;
+  const now = o.now ?? (() => performance.now());
+  const secrets = secretsOf(side.map((p) => p.url));
+  const said = (e: unknown): string => {
+    let m = String((e as Error | undefined)?.message ?? e);
+    for (const s of secrets) m = m.split(s).join("<key>");
+    return m.slice(0, 160);
+  };
+  const within = <T>(p: Promise<T>, ms: number): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    p.catch(() => {}); // a call answered after the cut is dropped, never an unhandled rejection
+    const cut = new Promise<never>((_, no) => (timer = setTimeout(() => no(new Error(`no answer in the read's ${budgetMs} ms`)), ms)));
+    return Promise.race([p, cut]).finally(() => clearTimeout(timer));
+  };
+  return async (method, params) => {
+    const start = now();
+    const failed: string[] = [];
+    let first: unknown;
+    for (const [i, p] of side.entries()) {
+      const left = start + budgetMs - now();
+      if (i > 0 && (left <= 0 || p.skip?.() === true)) continue;
+      try {
+        const v = await (i === 0 ? p.rpc(method, params) : within(p.rpc(method, params), left));
+        if (failed.length > 0) o.log(`${readOf(method, params)} failed at ${failed.join("; ")}; ${p.name} answered`);
+        return v;
+      } catch (e) {
+        if (failedInExecution(e)) throw e;
+        if (i === 0) first = e;
+        failed.push(`${p.name}: ${said(e)}`);
+      }
+    }
+    throw new Error(`${said(first)} (${readOf(method, params)}: ${failed.join("; ")})`, { cause: first });
+  };
+}
+
+/** The helper's keyed URLs for `network`'s chain (rpc.ts RPC_UPSTREAMS keyed, its new names only, as the swap reads take
+ *  them: rpc.ts keyedSpares), each named as the rpc log lines name it, its company's domain (rpc.ts companyOf), and its
+ *  variable; a test network has none. */
+const keyedOf = (env: Record<string, string | undefined>, network: string): { url: string; name: string }[] =>
+  network === "base" || network === "robinhood" ? readUpstreams(env)[network].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => ({ url: k.url, name: `${companyOf(k.host)} (${k.env})` })) : [];
+
+/**
  * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off (a
  * sell key set alone is refused). A network whose venue in the kit (`venues`, the kit's own list) pins a sell sender
  * starts only with that sell key: the device sims each sale as sent from the pin (the kit's checks/evm/quote.ts
@@ -1822,9 +1952,11 @@ export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, slee
  * pins no sell sender (the sell key is then not used), the network starts and refuses every sell (503 not_configured).
  * `holds`: the helper's one pace and hold per provider (limits.ts providerHolds), which each sender's reads draw on
  * (pacedEvmRpc); the server passes its own, shared with the swap, maker and /v1/rpc reads. `sleep`: the pace's wait
- * (setTimeout unless a test passes its clock's, card helper-pace-test-clock).
+ * (setTimeout unless a test passes its clock's, card helper-pace-test-clock). Each side reads its spares too
+ * (evmPoolSides, evmFailoverRpc: the helper's keyed URLs for Base and Robinhood, each on its own pace and hold, passed
+ * over while held or out of its day); the start's check reads the configured pair alone. `log`: the senders' log lines.
  */
-export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds, sleep?: (ms: number) => Promise<void>): Map<string, EvmPoolSender> {
+export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, venues: Readonly<Partial<Record<string, EvmPoolVenue>>> = evmPoolVenues(), holds?: ProviderHolds, sleep?: (ms: number) => Promise<void>, log?: (line: string) => void): Map<string, EvmPoolSender> {
   const out = new Map<string, EvmPoolSender>();
   for (const [network, names] of Object.entries(POOL_EVM_ENV)) {
     const [pool, key, fee, feeTo, rpcs] = names.map((n) => env[n] ?? "");
@@ -1865,14 +1997,23 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     if (ops.includes(null)) throw new Error(`${names[4]} must be two http or https URLs`);
     if (ops[0] === ops[1]) throw new Error(`${names[4]} must be two RPC URLs of two operators: both are ${ops[0]}`);
     // a plain JSON-RPC client, drawn from the helper's pace for its provider when the server gives one
-    const providers = urls.map((u) => {
+    const paced = (u: string): EvmRpc => {
       const r = solanaJsonRpc(u) as unknown as EvmRpc;
       return holds === undefined ? r : pacedEvmRpc(u, r, holds, sleep);
-    }) as [EvmRpc, EvmRpc];
+    };
+    const pairRpcs = urls.map(paced) as [EvmRpc, EvmRpc];
+    const say = log ?? ((line: string) => console.log(`helper: ${line}`));
+    // card helper-pool-fee-one-read-fails: each side, its provider of the pair, then its spares
+    const providers = evmPoolSides(urls as [string, string], keyedOf(env, network)).map((side, k) =>
+      evmFailoverRpc(
+        side.map((p, i) => ({ ...p, rpc: i === 0 ? pairRpcs[k]! : paced(p.url), ...(i > 0 && holds !== undefined ? { skip: () => holds.heldMs(p.url) > 0 || holds.dayOut(p.url, 1) } : {}) })),
+        { log: (line) => say(`evm ${network}: ${line}`) },
+      ),
+    ) as [EvmRpc, EvmRpc];
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
     // sales go only from the pin: a chain with none starts with sales off, never with an unpinned key
     const sells = sellKey !== "" && pin !== undefined;
-    const s0 = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), ...(sells ? { sellKey: unhex(sellKey.slice(2)) } : {}), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }), ...(collector === "" ? {} : { feeCollector: collector }), venues }, providers);
+    const s0 = evmPoolSender({ network, pool: pool!, senderKey: unhex(key!.slice(2)), ...(sells ? { sellKey: unhex(sellKey.slice(2)) } : {}), ...(feeTo === "" ? {} : { feeRecipient: feeTo! }), ...(collector === "" ? {} : { feeCollector: collector }), venues, readyProviders: pairRpcs, ...(log === undefined ? {} : { log }) }, providers);
     // the start's refusal names the variable and the host whose provider cannot answer the fee's reads: the host only,
     // since a provider's URL may carry its key in the path or the query (Alchemy's /v2/<key>, Infura's /v3/<key>)
     const s: EvmPoolSender = { ...s0, ready: (sleep) => s0.ready(sleep).catch((e: Error) => Promise.reject(new Error(`${names[4]}: ${e.message.replace(/^rpc ([12]):/, (_, k: string) => `${new URL(urls[Number(k) - 1]!).host}:`)}`))) };
