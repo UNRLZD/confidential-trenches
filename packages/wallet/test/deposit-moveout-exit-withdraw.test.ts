@@ -125,7 +125,7 @@ test("buildVaultWithdrawOut refuses before any seal, each at its own guard", () 
 const settled = { nullifierHash: NH, status: "settled" as const, reserve: 0n };
 const del = (o: Partial<moveout.DeleteReadFor> = {}): moveout.DeleteReadFor => ({
   network: "testnet", a: A, to: TO, token: NET.usdc, height: 1000, blockHash: BH, nonce: 43n, beneficiary: "exists", spend: settled,
-  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, ...o,
+  usdc: { state: "held", amount: 0n }, intents: "no-intents", withdrawTx: "final", settleTx: "final", settledBack: null, nonceBack: null, settleNonce: 43n, ...o,
 });
 const close = (r: moveout.DeleteReadFor, o: { to?: string; token?: string; network?: "testnet" | "mainnet"; k?: ReturnType<typeof key> } = {}) =>
   moveout.buildDeleteOut({ read: r, key: o.k ?? key(), network: o.network ?? "testnet", to: o.to ?? TO, token: o.token ?? NET.usdc, nullifierHash: NH });
@@ -144,7 +144,16 @@ test("buildDeleteOut: on a read with nothing left behind, A signs one DeleteAcco
   assert.ok(Buffer.from(bytes).subarray(bytes.length - tail.length).equals(tail), "the one action is DeleteAccount(the typed account)");
   // mainnet: intents.near read with no token under A; the spend read settled SETTLE_BLOCKS back, so neither tx hash is
   // needed (a reload lost them, or another settled it: the withdraw comes before the settle)
-  close(del({ network: "mainnet", token: MAIN.usdc, to: "x-typed.near", intents: "empty", withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS }), { network: "mainnet", token: MAIN.usdc, to: "x-typed.near" });
+  close(del({ network: "mainnet", token: MAIN.usdc, to: "x-typed.near", intents: "empty", withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS, nonceBack: 43n }), { network: "mainnet", token: MAIN.usdc, to: "x-typed.near" });
+});
+
+test("closeRefundsRan: the lookback with A's nonce unmoved, or both txs FINAL with the settle A's last; never on a nonce that is not read", () => {
+  const r = { height: 1000, nonce: 43n, withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS, nonceBack: 43n, settleNonce: null } as const;
+  assert.equal(moveout.closeRefundsRan(r), true);
+  assert.equal(moveout.closeRefundsRan({ ...r, withdrawTx: "final", settleTx: "final", settledBack: null, nonceBack: null, settleNonce: 43n }), true);
+  // a read with no nonce now: never a match, even where both sides read null
+  assert.equal(moveout.closeRefundsRan({ ...r, nonce: null as never, nonceBack: null }), false);
+  assert.equal(moveout.closeRefundsRan({ ...r, nonce: null as never, withdrawTx: "final", settleTx: "final", settledBack: null, nonceBack: null, settleNonce: null }), false);
 });
 
 test("buildDeleteOut refuses, each at its own guard: a missing typed account, a delete before settle or its refunds, a halted or nonzero USDC, anything under A in intents.near, another network, token or spend", () => {
@@ -158,9 +167,14 @@ test("buildDeleteOut refuses, each at its own guard: a missing typed account, a 
     ["the withdraw tx not FINAL (its refunds may still run), no lookback", () => close(del({ withdrawTx: "unread" })), /not read past their refunds/],
     ["A's settle not FINAL, no lookback", () => close(del({ settleTx: "unread" })), /not read past their refunds/],
     ["another's settle, no lookback", () => close(del({ settleTx: "none" })), /not read past their refunds/],
-    ["settled too recently, no tx read", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS + 1 })), /not read past their refunds/],
-    ["a lookback at block 0", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 0, height: moveout.SETTLE_BLOCKS })), /not read past their refunds/],
-    ["a lookback not a block", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1.5 })), /not read past their refunds/],
+    ["settled too recently, no tx read", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS + 1, nonceBack: 43n })), /not read past their refunds/],
+    ["a lookback at block 0", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 0, height: moveout.SETTLE_BLOCKS, nonceBack: 43n })), /not read past their refunds/],
+    ["a lookback not a block", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1.5, nonceBack: 43n })), /not read past their refunds/],
+    // P3-2: A's own settle held back, another's settle first: A's held settle landed after the lookback block
+    ["settled long ago, but A's nonce moved since the lookback", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS, nonceBack: 42n })), /not read past their refunds/],
+    ["settled long ago, A's nonce at the lookback not read", () => close(del({ withdrawTx: "unread", settleTx: "none", settledBack: 1000 - moveout.SETTLE_BLOCKS, nonceBack: null })), /not read past their refunds/],
+    ["both txs FINAL, but a later tx of A after its settle", () => close(del({ settleNonce: 42n })), /not read past their refunds/],
+    ["both txs FINAL, the settle's nonce not read", () => close(del({ settleNonce: null })), /not read past their refunds/],
     ["USDC halted (a view that fails is not a zero)", () => close(del({ usdc: { state: "halted" } })), /USDC is not read at zero/],
     ["USDC halted, with a zero beside it", () => close(del({ usdc: { state: "halted", amount: 0n } as never })), /USDC is not read at zero/],
     ["USDC left in A", () => close(del({ usdc: { state: "held", amount: 1n } })), /USDC is not read at zero/],

@@ -229,8 +229,8 @@ function keyNonce(keys: unknown, at: number, own: string): bigint | null {
   return n !== null && n <= U64_MAX ? n : null;
 }
 const U64_MAX = 2n ** 64n - 1n;
-/** U's key nonce at block `at` on both RPCs, equal, else null. */
-async function keyNonceAt(u: string, at: number, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<bigint | null> {
+/** An implicit account's own key nonce at block `at` on both RPCs, equal, else null (U's; and A's for the exit's close). */
+export async function keyNonceAt(u: string, at: number, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<bigint | null> {
   const own = ownKey(u);
   const [a, b] = await Promise.all(rpcs.map((r) => r.query({ request_type: "view_access_key_list", account_id: u, block_id: at }).then((k) => keyNonce(k, at, own), () => null)));
   return a === null || b === null || a !== b ? null : a;
@@ -920,17 +920,25 @@ export type DeleteReadFor = {
   settleTx: "final" | "unread" | "none";
   /** a block SETTLE_BLOCKS below `height` at which the spend read settled with reserve 0 on both RPCs too, or null */
   settledBack: number | null;
+  /** A's key nonce at `settledBack` on both RPCs, or null: equal to `nonce`, no tx of A was included after it */
+  nonceBack: bigint | null;
+  /** the nonce of A's own settle tx as read FINAL on both RPCs, or null: equal to `nonce`, that settle is A's last tx */
+  settleNonce: bigint | null;
 };
 /**
  * Whether every receipt that can still pay A has run, so a DeleteAccount cannot be followed by a refund that has no
- * account to land on: the spend read settled with reserve 0 SETTLE_BLOCKS back (the withdraw comes before the settle, so
- * both txs' receipts ran long before), or the withdraw tx and A's own settle tx both read FINAL. The close's one rule:
- * buildDeleteOut refuses without it, and the exit waits on it (card exit-withdraw, delta review P1-S).
+ * account to land on: the spend read settled with reserve 0 SETTLE_BLOCKS back with A's key nonce there equal to its
+ * nonce now (the withdraw comes before the settle, and no tx of A, a settle of its own held back included, was included
+ * since: every receipt of each ran long before); or the withdraw tx and A's own settle tx both read FINAL, that settle's
+ * nonce A's nonce now (no later tx of A). The close's one rule: buildDeleteOut refuses without it, and the exit waits on
+ * it (card exit-withdraw, delta reviews P1-S and P3-2).
  */
-export function closeRefundsRan(r: Pick<DeleteReadFor, "height" | "withdrawTx" | "settleTx" | "settledBack">): boolean {
+export function closeRefundsRan(r: Pick<DeleteReadFor, "height" | "nonce" | "withdrawTx" | "settleTx" | "settledBack" | "nonceBack" | "settleNonce">): boolean {
   const back = r.settledBack;
-  if (typeof back === "number" && Number.isSafeInteger(back) && back > 0 && Number.isSafeInteger(r.height) && r.height - back >= SETTLE_BLOCKS) return true;
-  return r.withdrawTx === "final" && r.settleTx === "final";
+  const now = typeof r.nonce === "bigint" ? r.nonce : null;
+  if (now === null) return false;
+  if (typeof back === "number" && Number.isSafeInteger(back) && back > 0 && Number.isSafeInteger(r.height) && r.height - back >= SETTLE_BLOCKS && r.nonceBack === now) return true;
+  return r.withdrawTx === "final" && r.settleTx === "final" && r.settleNonce === now;
 }
 /**
  * A's DeleteAccount, its NEAR to the typed account `to` on `network`, signed by A at the read's nonce + 1. Refused
