@@ -1,0 +1,160 @@
+{
+ "about": "Copied from packages/wallet/test/vectors/a8.json (the published all-zero-entropy vector set, frozen with the kit): its one-time ids of kinds in (U), return (R), refund (V) and arm (A). The exit tool may not import the wallet's files, so test/out.test.ts pins exitKey to this copy.",
+ "ids": [
+  {
+   "name": "U_{0,0}",
+   "kind": "in",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 0,
+   "info": "6f6e6574696d652f696e000000000000000000000000000000000000000000000000000000000000000000000000",
+   "id": "4894a2c02a6134842f04706db3ccaf7edd8878c39bde322570fe5427ed874f14"
+  },
+  {
+   "name": "U_{0,1}",
+   "kind": "in",
+   "s": "0000000000000000000000000000000000000000000000000000000000000000",
+   "i": 1,
+   "id": "5479e97c367d1c54715b5f19e2d52f200c5e104943b8cc5fb9a6a6de0cbb63b8"
+  },
+  {
+   "name": "U_{s,0}",
+   "kind": "in",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 0,
+   "id": "11a8cd0e0841a3274b8ad0cb2f47577b961f3c0a30ad565dac3daaffee381434"
+  },
+  {
+   "name": "U_{s,1}",
+   "kind": "in",
+   "s": "2777d0e971929c29ed6815c68a7611df53355e36aa765b2a5ad149297bec60fc",
+   "i": 1,
+   "id": "2e969538bdce27f71dba9f4653da40cd9ddfb5143380580d66c5c387ebdd90c7"
+  },
+  {
+   "name": "V_{l,0}",
+   "kind": "refund",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "f805de910e3edce183c856461e5ee5f03b50489f2dc9832f37821f21c01ca747"
+  },
+  {
+   "name": "A_{l,0}",
+   "kind": "arm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "info": "6f6e6574696d652f61726d223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b3200000000",
+   "id": "a8294c86a52be31b2e6d2a784bb35ed437997a924691ccdddc61b94b779cb417"
+  },
+  {
+   "name": "V_{l,1}",
+   "kind": "refund",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "1d8737c9344986736e7054e1289802ec2fc4dca0d850862cae58fdbaff03313a"
+  },
+  {
+   "name": "A_{l,1}",
+   "kind": "arm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "1aba0a79d8469693c585c1293d7be213e3258b53364b7411f7cc0d13ab7f1477"
+  },
+  {
+   "name": "R_{sol,l,0}",
+   "kind": "return",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "info": "6f6e6574696d652f72657475726e01223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b3200000000",
+   "id": "68c58e6ce09fa87c8991a03ad9bc70bad0ca45841ac387e8f0918badb62c050a"
+  },
+  {
+   "name": "R_{evm,l,0}",
+   "kind": "return",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "38a4d4013791932bb87fa6bb5760a516c901174cb252d69d78802a73913e2f11"
+  },
+  {
+   "name": "R_{near,l,0}",
+   "kind": "return",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "7af7e399adae3596d383e9490205025855ac49e975805275ec10e63e2567735f"
+  },
+  {
+   "name": "R_{hop-sol,l,0}",
+   "kind": "return",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "540799ecc25e46fe4720f61672aa743a4868c0751b32827e84453f1eed3f3cba"
+  },
+  {
+   "name": "R_{hop-evm,l,0}",
+   "kind": "return",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "3ff1f032ca19c8490e636af053f5d4717c23c8959d1c1ae392ad3cf5180688e2"
+  },
+  {
+   "name": "R_{hop-near,l,0}",
+   "kind": "return",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 0,
+   "id": "43ded32197aeb451ffa9635276520cbca5f6e85ecdab904224613b4641c9cb71"
+  },
+  {
+   "name": "R_{sol,l,1}",
+   "kind": "return",
+   "c": "sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "58c04f23539af6eb52a145f216c6f231f86e874c2e4b68b66d8830fe0a104704"
+  },
+  {
+   "name": "R_{evm,l,1}",
+   "kind": "return",
+   "c": "evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "dd5ba89100a45d16b72dbe8815f83f0bca65ee4d6bbd9f0f610a3e2b1e068c46"
+  },
+  {
+   "name": "R_{near,l,1}",
+   "kind": "return",
+   "c": "near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "d1e1fbe1d2d22f518cc94c8019a9e4b14195d92e0cb9f9ac5cc937f3a27018ff"
+  },
+  {
+   "name": "R_{hop-sol,l,1}",
+   "kind": "return",
+   "c": "hop-sol",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "dd7a07ae59017d961c5a1539ef31cbda6ad70e4d5d1e43ad368e2e8d5104adc4"
+  },
+  {
+   "name": "R_{hop-evm,l,1}",
+   "kind": "return",
+   "c": "hop-evm",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "fb6299b3e53d392b71ef14da85fd3b697e94ee46ceaba6cf2de5df638a10917c"
+  },
+  {
+   "name": "R_{hop-near,l,1}",
+   "kind": "return",
+   "c": "hop-near",
+   "l": "223ba5af661ac5b8dfb52a527bf1c7aaf7853d423364c2b7d347febe93436b32",
+   "j": 1,
+   "id": "c4ac248f5350c933e71fad6adfbf33bc8249ddf7ce81a47554857fe43820be5b"
+  }
+ ]
+}

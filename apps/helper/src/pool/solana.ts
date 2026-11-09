@@ -86,6 +86,9 @@ import {
   solanaPoolAccount,
   solanaPoolFee,
   solanaPoolPriorityBudget,
+  solanaPoolReleaseCost,
+  solanaRentMin,
+  SOLANA_POOL_PAGE_HEADER_LEN,
   solanaResolveKeys,
   solanaTableIsActive,
   type SolanaLookupTable,
@@ -653,6 +656,17 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       return { status: 200, body: { signature: h.signatures[0]! } };
   }
 }
+
+/** The fee payer's low mark (card helper-sol-fee-payer-mainnet): a safe floor for carrying the worst release at
+ *  `rent`, the sum of all it could front before the pool pays its relay fee back: its own rent floor (a system account
+ *  with no data must stay rent-exempt), the release's cost (the spent mark, the change entry, two signatures; M352,
+ *  M355), a state-tree page the change opens (on average once in 1,024 entries; deposits fill those pages too,
+ *  deposit.rs:28; M352 (1)) and the whole priority budget W may set (M356 (5)). A safe floor, not an exact one: the
+ *  program pays the relay fee back inside the same instruction (release.rs:263-278), so a release may still land a
+ *  little under it. 2,681,045 lamports at 5,080 a byte. deploy/sol-fee-payer-key.sh prints it and the live check holds
+ *  the fee payer's balance to it. */
+export const solanaFeePayerLowMark = (rent: SolanaRent): bigint =>
+  solanaRentMin(rent, 0) + solanaPoolReleaseCost(rent) + solanaRentMin(rent, SOLANA_POOL_PAGE_HEADER_LEN) + solanaPoolPriorityBudget(rent, solanaPoolFee(rent));
 
 /** Per cluster: the pool program, the fee payer's key, the fee (lamports) and two RPC URLs ("a,b"). Devnet's program
  *  may be a list, comma apart (solanaPoolPrograms). */

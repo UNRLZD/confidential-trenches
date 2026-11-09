@@ -32,7 +32,8 @@ export const MUTANTS = [
   // a client with no hello read as current, and a version before 1.5 read as current
   ["kit", 'export const KIT_DEFAULT: KitLevel = "1.4";', 'export const KIT_DEFAULT: KitLevel = "current";'],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 4] as [number, number];"],
-  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 7] as [number, number];"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 6] as [number, number];"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 8] as [number, number];"],
   // a refund's later leg read as a new deposit's, or a landed refund read as still moving
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', "return stage;"],
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true && stage === "in_transit" ? "refunded" : stage;'],
@@ -64,8 +65,19 @@ export const MUTANTS = [
   ["kit", 'from(1, 5) ? "1.5" : KIT_DEFAULT', 'from(1, 6) ? "1.5" : KIT_DEFAULT'],
   ["kit", "  return rest as T;\n", "  return d;\n"],
   ["kit", "const { moved_out: _m, held_id: _h, ...rest }", "const { moved_out: _m, ...rest }"],
-  ["kit", '  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', '  if (level === "1.5") return s;\n'],
-  ["kit", '  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', ""],
+  ["kit", '  if (level === "1.5") return { ...s, ops: noPoolOps(s.ops).map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', '  if (level === "1.5") return s;\n'],
+  ["kit", '  if (level === "1.5") return { ...s, ops: noPoolOps(s.ops).map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };\n', ""],
+  // card pool-deposit-stages: a pool_deposit op sent to kit-v1.6 or kit-v1.5, which have no kind for it, or kit-v1.6 read
+  // at another level
+  ["kit", '  if (level === "1.5") return { ...s, ops: noPoolOps(s.ops).map(', '  if (level === "1.5") return { ...s, ops: s.ops.map('],
+  ["kit", '  if (level === "1.6") return { ...s, ops: noPoolOps(s.ops) };\n', '  if (level === "1.6") return s;\n'],
+  ["kit", '  if (level === "1.6") return { ...s, ops: noPoolOps(s.ops) };\n', ""],
+  ["kit", 'ops.filter((o) => o.kind !== "pool_deposit")', "[...ops]"],
+  ["kit", 'from(1, 6) ? "1.6" : ', ""],
+  ["kit", 'from(1, 6) ? "1.6" : ', 'from(1, 6) ? "current" : '],
+  ["kit", 'from(1, 6) ? "1.6" : ', 'from(1, 5) ? "1.6" : '],
+  ["kit", '  if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', ""],
+  ["kit", '  if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', '  if (level === "1.6") return result;\n'],
   ["kit", 'kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;', 'result;'],
   ["kit", 'kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm"', 'kind === "deposit.confirm"'],
   ["kit", 'if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;', 'if (level === "current" || V1_4_STAGES.has(stage)) return stage;'],

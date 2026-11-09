@@ -583,6 +583,60 @@ test("LC: record reads a tx older than the release pair keeps on the money gate'
   assert.match(SRC, /async function landedOf\(network: Network,[\s\S]{0,300}mine\(await recordRead\(network, hash, signer\)\)/);
 });
 
+// R1: at 9 Nov 04:24Z archival-rpc.mainnet.near.org (FastNEAR's) answered the run's machine 429 with Retry-After 447,
+// after FastNEAR and dRPC had read the tx, and the record waited it out. T02's recorded reads, each mainnet host
+// answered by its testnet twin (a proof checks the chain its status names, so a proven read runs on the testnet list,
+// whose third host is FastNEAR's too); `limited` answers a host's n-th request 429 with that Retry-After (null: as recorded)
+const TWIN: Record<string, string> = { "archival-rpc.mainnet.fastnear.com": "archival-rpc.testnet.fastnear.com", "near.drpc.org": "near-testnet.drpc.org", "archival-rpc.mainnet.near.org": "archival-rpc.testnet.near.org" };
+function limitedOn(network: "mainnet" | "testnet", f: typeof fetch, limited: (host: string, n: number) => number | null) {
+  const asked = new Map<string, number>();
+  const fn = (async (url: string, init: { body: string }) => {
+    const host = new URL(url).host;
+    if (network === "mainnet" && !TWIN[host]) throw new Error(`not a mainnet host of the gate's list: ${host}`);
+    const n = (asked.get(host) ?? 0) + 1;
+    asked.set(host, n);
+    const after = limited(host, n);
+    if (after !== null) return new Response("", { status: 429, headers: { "retry-after": String(after) } });
+    return (f as any)(network === "mainnet" ? `https://${TWIN[host]}` : url, init);
+  }) as unknown as typeof fetch;
+  return { fn, asked };
+}
+
+test("R1: record waits out a 429 only while the host could add a second operator, the money gate's rule (money-gate.mjs moneyGate)", async () => {
+  const fastnearTx = READS.find((a) => a.url.includes("archival-rpc.testnet.fastnear.com") && a.method === "EXPERIMENTAL_tx_status")!.text;
+  const sameOnDrpc = (h: string, m: string, text: string) => (h === "near-testnet.drpc.org" && m === "EXPERIMENTAL_tx_status" ? fastnearTx : text);
+  const NEAR_ORG = "archival-rpc.mainnet.near.org";
+  const run = async (f: typeof fetch, limited: (host: string, n: number) => number | null, network: "mainnet" | "testnet" = "mainnet") => {
+    const pauses: number[] = [];
+    const m = limitedOn(network, f, limited);
+    const t = await recordRead(network, T02.hash, T02.signer, m.fn, async (ms) => void pauses.push(ms));
+    return { t, pauses, asked: m.asked };
+  };
+  // FastNEAR and dRPC read it ok: near.org's 429 Retry-After 447 is asked once and not waited
+  const two = await run(replay(sameOnDrpc), (h) => (h === NEAR_ORG ? 447 : null));
+  assert.deepEqual(relayerTxProblems("withdraw", two.t, T02_RUN), []);
+  assert.deepEqual(two.pauses.filter((ms) => ms >= 2000), [], "no rate-limit wait");
+  assert.equal(two.asked.get(NEAR_ORG), 1);
+  // FastNEAR alone reads it (dRPC no longer keeps it): near.org is FastNEAR's, so its 429 could add no second
+  // operator and is not waited; the read passes only by FastNEAR's proof against dRPC's final block
+  const TEST_ORG = "archival-rpc.testnet.near.org";
+  const one = await run(replay(), (h) => (h === TEST_ORG ? 447 : null), "testnet");
+  assert.deepEqual(relayerTxProblems("withdraw", one.t, T02_RUN), []);
+  assert.deepEqual(one.pauses.filter((ms) => ms >= 2000), [], "no rate-limit wait");
+  assert.equal(one.asked.get(TEST_ORG), 1);
+  // FastNEAR read it ok and dRPC's 429 could add the second operator: it is waited out, as the gate waits it
+  const drpc = await run(replay(sameOnDrpc), (h, n) => (h === "near.drpc.org" && n === 1 ? 447 : null));
+  assert.deepEqual(relayerTxProblems("withdraw", drpc.t, T02_RUN), []);
+  assert.deepEqual(drpc.pauses.filter((ms) => ms >= 2000), [447_000]);
+  // plant: FastNEAR's two hosts read it ok, dRPC does not, and FastNEAR's proof is broken: two hosts of one operator are
+  // one operator, so it is refused, never counted as two
+  const noProof = (h: string, m: string, text: string) => (h.includes("fastnear") && m === "EXPERIMENTAL_light_client_proof" ? "{}" : text);
+  await assert.rejects(
+    run(replay(noProof), () => null, "testnet"),
+    (e: Error) => /ok on https:\/\/archival-rpc\.testnet\.fastnear\.com/.test(e.message) && /ok on https:\/\/archival-rpc\.testnet\.near\.org/.test(e.message) && /read by one operator and not proven/.test(e.message), // near-rpc-operators: one operator (the plant names FastNEAR's two hosts to show they count as one)
+  );
+});
+
 test("L3: the fee is held to the withdrawal's own bound before any deposit: 2 * fee < the note (withdrawRequest's fee < amount, the vault's fee <= withdrawn / 2)", () => {
   const feeMax = 10_000_000n;
   assert.deepEqual(feeProblems({ relayFee: 499_999n, feeMax, note: 1_000_000n }), []);

@@ -6,14 +6,17 @@
 // stage mapped down to the kit-v1.4 stage that tells the truth about where the money is (V1_4_DEPOSIT_STAGE), an op it
 // still cannot read left out, and no route event (kit-v1.4 has no pool.buy to ask for one). A client that names kit-v1.5
 // reads everything but a deposit's moved_out fact (card held-move-forgotten-tx), which it refuses the whole state for:
-// it is sent each deposit with that fact left out, so its app still draws the moved deposit as held. A client at
+// it is sent each deposit with that fact left out, so its app still draws the moved deposit as held. A client that names
+// kit-v1.6 reads everything but a pool deposit's op (card pool-deposit-stages), which kit-v1.6 has no kind for: it is
+// sent the state with every pool_deposit op left out (kit-v1.5 too), never the op in another kind's shape. A client at
 // SIGNPAGE_KIT_VERSION or above gets every message as it is. A change to what the page may send raises the kit's
 // SIGNPAGE_KIT_VERSION and adds the version before it here.
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
 import type { DepositStage, Operation, SignpageKind, SignpageState, Stage } from "../../kit/src/signpage/messages.ts";
 
-/** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out), or everything (kit-v1.6 and above). */
-export type KitLevel = "1.4" | "1.5" | "current";
+/** The levels this page sends at: kit-v1.4's shape, kit-v1.5's (no moved_out, no pool_deposit op), kit-v1.6's (no
+ *  pool_deposit op), or everything (kit-v1.7 and above). */
+export type KitLevel = "1.4" | "1.5" | "1.6" | "current";
 /** A client that posts no hello. */
 export const KIT_DEFAULT: KitLevel = "1.4";
 /** The first kit version that names itself and reads everything this page sends: the kit's own, as [major, minor]. */
@@ -35,7 +38,7 @@ export function kitLevel(kit: string): KitLevel {
   if (!v) return KIT_DEFAULT;
   const [major, minor] = [Number(v[1]), Number(v[2])];
   const from = (m: number, n: number) => major > m || (major === m && minor >= n);
-  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 5) ? "1.5" : KIT_DEFAULT;
+  return from(CURRENT_FROM[0], CURRENT_FROM[1]) ? "current" : from(1, 6) ? "1.6" : from(1, 5) ? "1.5" : KIT_DEFAULT;
 }
 
 /** kit-v1.4's deposit stages (kit-v1.4:packages/kit/src/signpage/schema.ts DEPOSIT). */
@@ -75,7 +78,7 @@ export const V1_4_DEPOSIT_STAGE: Readonly<Record<DepositStage, V1_4Deposit>> = O
 
 /** kit-v1.4's op stages by kind (kit-v1.4 schema.ts WITHDRAW, TRADE, HOP, RETURN, RESTORE): a stage not listed is an
  *  op that client cannot read. */
-const V1_4_OP_STAGES: Readonly<Record<Exclude<Operation["kind"], "deposit">, readonly string[]>> = Object.freeze({
+const V1_4_OP_STAGES: Readonly<Record<Exclude<Operation["kind"], "deposit" | "pool_deposit">, readonly string[]>> = Object.freeze({
   withdraw: ["proving", "submitted", "in_transit", "sent", "refunded", "stopped"],
   buy: ["signed", "sent", "filled", "part_filled", "refused", "not_landed"],
   sell: ["signed", "sent", "filled", "part_filled", "refused", "not_landed"],
@@ -102,7 +105,7 @@ function opV1_4(op: Operation): Operation | null {
     const stage = depositV1_4(op);
     return stage === null ? null : { id: op.id, kind: "deposit", stage, txs: op.txs };
   }
-  if (!own(V1_4_OP_STAGES, op.kind) || !V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;
+  if (op.kind === "pool_deposit" || !own(V1_4_OP_STAGES, op.kind) || !V1_4_OP_STAGES[op.kind].includes(op.stage)) return null;
   if (op.kind === "buy" || op.kind === "sell") return op.code === undefined ? { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs } : { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs, code: op.code };
   return { id: op.id, kind: op.kind, stage: op.stage, txs: op.txs } as Operation;
 }
@@ -121,11 +124,15 @@ function factsV1_5<T extends object>(d: T): T {
   return rest as T;
 }
 
-/** The state as a client at `level` reads it: kit-v1.5's, each deposit op with no moved_out; kit-v1.4's fields only, in
- *  the state's own order, each op mapped or left out. */
+/** The ops with no pool deposit's: kit-v1.6 and before have no pool_deposit kind (card pool-deposit-stages). */
+const noPoolOps = (ops: readonly Operation[]): Operation[] => ops.filter((o) => o.kind !== "pool_deposit");
+
+/** The state as a client at `level` reads it: kit-v1.6's with no pool_deposit op; kit-v1.5's, that and each deposit op
+ *  with no moved_out; kit-v1.4's fields only, in the state's own order, each op mapped or left out. */
 export function stateFor(level: KitLevel, s: SignpageState): SignpageState {
   if (level === "current") return s;
-  if (level === "1.5") return { ...s, ops: s.ops.map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };
+  if (level === "1.6") return { ...s, ops: noPoolOps(s.ops) };
+  if (level === "1.5") return { ...s, ops: noPoolOps(s.ops).map((o) => (o.kind === "deposit" ? factsV1_5(o) : o)) };
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(s)) if (V1_4_STATE_KEYS.has(k)) out[k] = k === "ops" ? s.ops.map(opV1_4).filter((o) => o !== null) : s[k as keyof SignpageState];
   return out as unknown as SignpageState;
@@ -138,12 +145,14 @@ export function stageFor(level: KitLevel, stage: Stage): Stage | null {
 }
 
 /**
- * An answer's result of `kind` as a client at `level` reads it: for kit-v1.5 the state and deposit.confirm's facts with
+ * An answer's result of `kind` as a client at `level` reads it: for kit-v1.6 the state with no pool_deposit op; for
+ * kit-v1.5 that state and deposit.confirm's facts with
  * no moved_out; for kit-v1.4 the state mapped, deposit.confirm's stage mapped with no facts; every other kind's result
  * as it is (each reads each kind it can ask the same as now).
  */
 export function resultFor(level: KitLevel, kind: SignpageKind, result: unknown): unknown {
   if (level === "current") return result;
+  if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;
   if (level === "1.5") return kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;
   if (kind === "state") return stateFor(level, result as SignpageState);
   if (kind !== "deposit.confirm") return result;

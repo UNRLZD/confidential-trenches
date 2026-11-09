@@ -5,7 +5,7 @@
 // machine's node from apps/helper with what follows the image name, as the image's node runs from its WORKDIR
 // /app/apps/helper. With PLANT_OUT set, the stub prints that file instead: a maker gone wrong.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +60,7 @@ while [[ $# -gt 0 && "$1" != ct-helper:* ]]; do shift; done
 shift
 if [[ -n "\${PLANT_OUT:-}" ]]; then cat > /dev/null; cat "$PLANT_OUT"; exit 0; fi
 cd "${HELPER}"
+[[ -n "\${STUB_SLEEP:-}" ]] && sleep "\$STUB_SLEEP"
 exec "${process.execPath}" "$@"
 `,
     { mode: 0o755 },
@@ -314,4 +315,31 @@ test("two runs make two different keys, each from the system's randomness", () =
   assert.equal(a.run().status, 0);
   assert.equal(b.run().status, 0);
   assert.notEqual(valueOf(a.envText(), "BIND_RELAYER_KEY_MAINNET"), valueOf(b.envText(), "BIND_RELAYER_KEY_MAINNET"));
+});
+
+// card helper-sol-fee-payer-mainnet, review FIX 2 (P-twice): two runs at once both passed the "already set" check and
+// both renamed, two accounts printed and only the second key kept, so NEAR sent to the first account funded a key
+// nobody holds. The three key steps now share deploy/.env.lock from the check through the rename.
+test("two runs at once: one writes, the other refuses on the lock (exit 9); one key, one account printed, no lock left", async () => {
+  const s = server();
+  const runAsync = (extra) =>
+    new Promise((ok) => {
+      const p = spawn("bash", [path.join(s.deploy, "bind-relayer-key.sh")], { env: { ...process.env, PATH: `${path.join(s.dir, "bin")}:${process.env.PATH}`, ...extra } });
+      let stdout = "";
+      let stderr = "";
+      p.stdout.on("data", (c) => (stdout += c));
+      p.stderr.on("data", (c) => (stderr += c));
+      p.on("close", (status) => ok({ status, stdout, stderr }));
+    });
+  const first = runAsync({ STUB_SLEEP: "1.5" });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const [a, b] = await Promise.all([first, runAsync({})]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(b.status, 9, b.stderr);
+  assert.match(b.stderr, /another key step holds deploy\/\.env\.lock/);
+  const env = s.envText();
+  assert.equal(env.split("\n").filter((l) => l.startsWith("BIND_RELAYER_KEY_MAINNET=")).length, 1);
+  const printed = [a, b].flatMap((r) => [...(r.stdout + r.stderr).matchAll(/^bind-relayer-key: gas account ([0-9a-f]{64})$/gm)].map((m) => m[1]));
+  assert.deepEqual(printed, [valueOf(env, "BIND_RELAYER_MAINNET")], "one gas account printed, the kept key's");
+  assert.deepEqual(readdirSync(s.deploy).sort(), [".env", "bind-relayer-key.sh"], "no temporary file, no lock left");
 });

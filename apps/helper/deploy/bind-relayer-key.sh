@@ -34,7 +34,7 @@
 # The gas account does not exist until it is funded: a NEAR transfer to the 64-hex id creates it with this one
 # full-access key. Its NEAR pays deposit gas, one-time id creation and storage prepays only; it holds no user's money.
 # exit 0 done, 2 usage, 3 a name already set, 4 no mainnet vault record, 5 the vault not the record's, 6 no image,
-# 7 no BIND_MARGIN_K, 8 an account or key another sender uses, 1 any other failure
+# 7 no BIND_MARGIN_K, 8 an account or key another sender uses, 9 another key step holds the lock, 1 any other failure
 set -euo pipefail
 
 NAMES=(BIND_VAULT_MAINNET BIND_RELAYER_MAINNET BIND_RELAYER_KEY_MAINNET)
@@ -98,6 +98,26 @@ value_of() {
   printf '%s' "${found#"$2"=}"
 }
 
+# One run at a time on deploy/.env (review FIX 2 of card helper-sol-fee-payer-mainnet): deploy/.env.lock, the lock the
+# three key steps share (this one, withdraw-relayer-key.sh or bind-relayer-key.sh, and sol-fee-payer-key.sh, each of
+# which replaces deploy/.env whole), taken before the "already set" check and held through the rename, so two runs never
+# both pass the check and both rename (two accounts printed, one key kept); a second run refuses (exit 9). A folder
+# (mkdir is atomic; flock is not on macOS, where the tests run). The lock and the temporary file are removed at any end:
+# the script's own exits, a signal (HUP, INT, TERM end it through exit, so the EXIT trap runs), an error under set -e. A
+# run killed with SIGKILL leaves the folder, and its temporary file deploy/.env.bind.XXXXXX (mode 600, which may hold a
+# new key nobody was shown) when killed after that file was made: once no run is going, remove both.
+LOCK=""
+TMP=""
+cleanup() {
+  [[ -n "$TMP" ]] && rm -f "$TMP"
+  [[ -n "$LOCK" ]] && rmdir "$LOCK" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 main() {
   if [[ $# -ne 0 ]]; then
     echo "usage: bind-relayer-key.sh" >&2
@@ -109,6 +129,11 @@ main() {
   env="$deploy/.env"
   record="$root/contracts/vault/deployments/mainnet-v1.json"
 
+  if ! mkdir "$env.lock" 2>/dev/null; then
+    echo "bind-relayer-key: another key step holds deploy/.env.lock (a run in progress; if none is, remove the folder and any deploy/.env.bind.* file a killed run left); nothing changed" >&2
+    exit 9
+  fi
+  LOCK="$env.lock"
   for name in "${NAMES[@]}"; do
     # grep -q: the matching line is never captured, so not even bash -x prints it (review FIX 3)
     if [[ -e "$env" ]] && lines_of "$env" "$name" | grep -q .; then
@@ -136,7 +161,7 @@ main() {
 
   umask 077
   tmp="$(mktemp "$env.bind.XXXXXX")"
-  trap 'rm -f "$tmp"' EXIT
+  TMP="$tmp"
   if [[ -e "$env" ]]; then cat "$env" > "$tmp"; fi
   if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then printf '\n' >> "$tmp"; fi
   local rc=0
@@ -186,7 +211,7 @@ main() {
   fi
   chmod 600 "$tmp"
   mv -f "$tmp" "$env"
-  trap - EXIT
+  TMP=""
   echo "bind-relayer-key: wrote ${NAMES[*]} to deploy/.env (vault $vault). Next, in this order:"
   echo "bind-relayer-key: 1. apps/helper/deploy/redeploy.sh $(git -C "$root" rev-parse HEAD 2>/dev/null || echo '<this commit>'), so the helper starts with the three lines"
   echo "bind-relayer-key: 2. the owner sends 1 NEAR to $account"

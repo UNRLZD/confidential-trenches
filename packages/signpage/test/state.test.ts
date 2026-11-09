@@ -376,3 +376,46 @@ test("held-move-forgotten-tx: a held deposit whose move out landed (follow.why m
   for (const stage of ["halted", "done", "refunded", "waiting"]) assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [{ id, kind: "deposit", stage, txs: [], moved_out: true } as never])), false, stage);
   assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [{ id, kind: "deposit", stage: "held", txs: [], moved_out: false } as never])), false, "moved_out is true or absent");
 });
+
+test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, with its pool's chain and each fact on its stages only", () => {
+  const id = crypto.randomUUID();
+  const follow = { chain: "solana", s: "777", i: 3, u: "U_X", refund_id: "ab".repeat(32), address: "DEPOSIT", deadline_ms: 1, origin: "nep141:base-usdc", min_out: "20000000" };
+  // the record as the pool follow keeps it (pool-deposit-follow.ts PoolDepositOp): since_ms once a send was seen, refunded from the refund on
+  const rec = (stage: string, more: Record<string, unknown> = {}) => ({ kind: "pool_deposit", stage, txs: [], created_ms: 1, follow, ...more });
+  const want = (stage: string, more: Record<string, unknown> = {}) => ({ id, kind: "pool_deposit", stage, txs: [], chain: "solana", ...more });
+  for (const [r, w] of [
+    [rec("quote_checked"), want("quote_checked")],
+    [rec("expired"), want("expired")],
+    [rec("waiting", { since_ms: 7 }), want("waiting", { since_ms: 7 })],
+    [rec("in_transit", { since_ms: 7 }), want("in_transit", { since_ms: 7 })],
+    [rec("failed", { since_ms: 7 }), want("failed", { since_ms: 7 })],
+    [rec("short", { since_ms: 7 }), want("short", { since_ms: 7 })],
+    [rec("in_pool", { since_ms: 7, final: true }), want("in_pool", { since_ms: 7 })],
+    // the record keeps refunded from the refunded stage on; the app is sent it only on the refund's later legs
+    [rec("refunded", { since_ms: 7, refunded: true }), want("refunded", { since_ms: 7 })],
+    [rec("refund_move", { since_ms: 7, refunded: true }), want("refund_move", { since_ms: 7, refunded: true })],
+    // review P3 1: a refund_move record of release-94 to 107 (no refunded fact) is still sent as a refund's leg
+    [rec("refund_move"), want("refund_move", { refunded: true })],
+    [rec("in_pool", { since_ms: 7, refunded: true, final: true }), want("in_pool", { since_ms: 7, refunded: true })],
+    // delta review P2: a refunded record of release-94 to 107 (the helper's word alone, no refunded fact) is sent as the
+    // follow reads it again, quote_checked with no send time, on the framed page that runs no follow too
+    [rec("refunded"), want("quote_checked")],
+    [rec("refunded", { since_ms: 7 }), want("quote_checked")],
+    // a send time on a stage where nothing was sent is not sent
+    [rec("expired", { since_ms: 7 }), want("expired")],
+    [rec("in_pool", { txs: [{ chain: "solana", hash: "5sig", extra: 1 }] }), want("in_pool", { txs: [{ chain: "solana", hash: "5sig" }] })],
+  ] as const) {
+    const op = opOf(id, r);
+    assert.deepEqual(op, w, JSON.stringify(r));
+    assert.ok(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [op!])), `the kit reads ${r.stage}`);
+    for (const k of ["follow", "created_ms", "final"]) assert.ok(!(k in op!), `${k} never sent`);
+  }
+  // a record that is not one: left out, never sent
+  for (const bad of [
+    { kind: "pool_deposit", stage: "in_pool", txs: [] },
+    rec("in_pool", { follow: { ...follow, chain: "near" } }),
+    rec("done"),
+    rec("held"),
+    rec("in_pool", { since_ms: -1 }),
+  ]) assert.equal(opOf(id, bad), null, JSON.stringify(bad));
+});

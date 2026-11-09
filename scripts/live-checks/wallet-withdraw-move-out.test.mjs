@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { HANDOFF_RE, judge, localFetch, MARKERS, probe, SIGN_ORIGIN } from "./wallet-withdraw-move-out.mjs";
+import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-withdraw-move-out.answers.json"), "utf8"));
@@ -44,9 +45,24 @@ test("the good script under a page whose integrity names another script fails; o
   }
 });
 
-test("the committed build in this tree passes as the recorded good answer did", async () => {
+// card held-move-replay-any-build: the tree's build is read with the check's own reader (probe over localFetch) and
+// judged with the live rule, never compared to the recorded bundle, so any build of this tree that keeps the rule passes
+// with no re-record, and one that drops a rule fails
+test("the committed build in this tree passes the live rule", async () => {
   const rec = await probe(SIGN_ORIGIN, localFetch);
   assert.equal(judge(rec).pass, true, judge(rec).lines.join("\n"));
+});
+
+test("a rebuilt bundle of this tree with an unrelated copy change passes with no re-record; one that drops a rule fails on it alone", async () => {
+  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, MARKERS)));
+  assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
+  assert.notEqual(copy.app.sha384, (await probe(SIGN_ORIGIN, localFetch)).app.sha384, "another bundle than the tree's");
+  const ruleOf = (m) => (m === MARKERS[MARKERS.length - 1] ? HANDOFF_RE : m);
+  for (const m of MARKERS) {
+    const rec = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => dropRule(js, ruleOf(m))));
+    assert.equal(rec.app.markers[m], 0, m);
+    assert.deepEqual(BAD(rec), [MARKS], m);
+  }
 });
 
 test("a build whose hand-off no longer passes the typed account fails, on the hand-off marker alone", () => {
