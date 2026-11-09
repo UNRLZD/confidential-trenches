@@ -1234,14 +1234,16 @@ export function evmPoolSender(
     return entry;
   };
   /** How the send `hash` (a sale or a withdraw, its deadline `deadlineMs`) ended: "reverted", a receipt with status 0
-   *  on either provider; "dropped", the lane's replacement took its nonce, or no receipt and no transaction on either
-   *  once now is past the deadline plus EVM_SELL_DROP_MARGIN_MS; else "waiting" (a read that fails, a success, a send
-   *  still pending). */
+   *  on both providers in the same block (card helper-judge-two-agree: one provider's receipt never frees a nullifier or
+   *  a sale); "dropped", the lane's replacement took its nonce, or no receipt and no transaction on either once now is
+   *  past the deadline plus EVM_SELL_DROP_MARGIN_MS; else "waiting" (a read that fails, a success, the two differing, a
+   *  send still pending). */
   async function sendEnded(hash: string, deadlineMs: number): Promise<"reverted" | "dropped" | "waiting"> {
     const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);
-    const status = rc.map((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? evmRpcHex((x.value as { status?: unknown }).status) : undefined));
+    const got = rc.map((x) => (x.status === "fulfilled" && x.value !== null && typeof x.value === "object" ? (x.value as { status?: unknown; blockHash?: unknown }) : undefined));
+    const status = got.map((r) => (r === undefined ? undefined : evmRpcHex(r.status)));
     if (status.includes("0x1")) return "waiting";
-    if (status.includes("0x0")) return "reverted";
+    if (status[0] === "0x0" && status[1] === "0x0" && evmRpcHex(got[0]!.blockHash) === evmRpcHex(got[1]!.blockHash)) return "reverted";
     if (superseded.has(hash)) return "dropped";
     if (rc.some((x) => x.status === "rejected" || x.value !== null)) return "waiting";
     if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return "waiting";

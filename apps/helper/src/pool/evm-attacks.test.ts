@@ -48,6 +48,10 @@ type Opts = {
   latest?: bigint;
   spike?: bigint;
   reverted?: boolean;
+  /** eth_getTransactionReceipt answers null (no receipt yet) */
+  noReceipt?: boolean;
+  /** the receipt's blockHash */
+  receiptBlock?: string;
   code?: (tag: string) => string;
   /** eth_call reverts when the call carries fee fields (a GASPRICE-dependent revert). */
   revertWithFee?: boolean;
@@ -82,7 +86,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
       case "eth_maxPriorityFeePerGas": return "0x5f5e100";
       case "eth_getTransactionCount": return "0x7";
       case "eth_sendRawTransaction": return "0x";
-      case "eth_getTransactionReceipt": return { status: o.reverted ? "0x0" : "0x1" };
+      case "eth_getTransactionReceipt": return o.noReceipt ? null : { status: o.reverted ? "0x0" : "0x1", ...(o.receiptBlock === undefined ? {} : { blockHash: o.receiptBlock }) };
       default: throw new Error(`unexpected ${method}`);
     }
   };
@@ -112,6 +116,29 @@ test("B2 a send that reverted on chain is never sent again in its epoch: one sen
   assert.equal(code(await s.carry(req(calldata(), EPOCH + 60_000))), "ok");
   assert.equal(code(await s.carry(req())), "reverted");
   assert.equal(sends(a).length, 2);
+});
+
+test("helper-judge-two-agree: one provider's revert never frees the nullifier: a revert on one provider with no receipt on the other, or in another block, answers the first send again, nothing sent; both in the same block answer reverted", async () => {
+  const lies: [string, Opts][] = [
+    ["no receipt on the other", { noReceipt: true }],
+    ["the other's revert in another block", { reverted: true, receiptBlock: `0x${"b".repeat(64)}` }],
+  ];
+  for (const [name, other] of lies) {
+    for (const liarFirst of [true, false]) {
+      const a: Calls = [];
+      const b: Calls = [];
+      const liar: Opts = { reverted: true, receiptBlock: `0x${"a".repeat(64)}` };
+      const s = make(a, liarFirst ? liar : other, b, NOW, liarFirst ? other : liar);
+      assert.equal(code(await s.carry(req())), "ok");
+      for (let i = 0; i < 3; i++) assert.equal(code(await s.carry(req())), "ok", `${name}, liar ${liarFirst ? "a" : "b"}: the first send's answer`);
+      assert.equal(sends(a).length + sends(b).length, 2, `${name}: one send, never again on one provider's revert`);
+    }
+  }
+  const a: Calls = [];
+  const same: Opts = { reverted: true, receiptBlock: `0x${"A".repeat(64)}` };
+  const s = make(a, same, [], NOW, { reverted: true, receiptBlock: `0x${"a".repeat(64)}` });
+  assert.equal(code(await s.carry(req())), "ok");
+  assert.equal(code(await s.carry(req())), "reverted", "both reverted in the same block (hex in either case)");
 });
 
 test("a revert first seen by a later epoch's proof is held against the epoch that reverted: the new proof is sent", async () => {

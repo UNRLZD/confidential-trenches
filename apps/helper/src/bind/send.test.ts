@@ -1379,7 +1379,7 @@ function relayerSecret(): string {
   const j = privateKey.export({ format: "jwk" });
   return "ed25519:" + base58(Buffer.concat([Buffer.from(j.d as string, "base64url"), Buffer.from(j.x as string, "base64url")]));
 }
-type ParsedTx = { hash: string; nonce: bigint; blockHash: string } & ({ action: 2; precommitment: string; bytes: bigint } | { action: 8; delegate: ReturnType<typeof decodeSignedDelegate> });
+type ParsedTx = { hash: string; nonce: bigint; blockHash: string; receiver: string } & ({ action: 2; precommitment: string; bytes: bigint } | { action: 3 } | { action: 8; delegate: ReturnType<typeof decodeSignedDelegate> });
 function parseTx(b64: string): ParsedTx {
   const b = Buffer.from(b64, "base64");
   let i = 0;
@@ -1394,20 +1394,21 @@ function parseTx(b64: string): ParsedTx {
   i += 33;
   const nonce = b.readBigUInt64LE(i);
   i += 8;
-  s();
+  const receiver = s().toString();
   const blockHash = base58(b.subarray(i, i + 32));
   i += 32 + 4;
   const tag = b[i++]!;
   const hash = base58(createHash("sha256").update(b.subarray(0, b.length - 65)).digest());
+  if (tag === 3) return { hash, nonce, blockHash, receiver, action: 3 };
   if (tag === 2) {
     s();
     const args = JSON.parse(s().toString()) as { precommitment: string };
     i += 8;
     let dep = 0n;
     for (let k = 15; k >= 0; k--) dep = (dep << 8n) | BigInt(b[i + k]!);
-    return { hash, nonce, blockHash, action: 2, precommitment: args.precommitment, bytes: dep / 10n ** 19n };
+    return { hash, nonce, blockHash, receiver, action: 2, precommitment: args.precommitment, bytes: dep / 10n ** 19n };
   }
-  return { hash, nonce, blockHash, action: 8, delegate: decodeSignedDelegate(new Uint8Array(b.subarray(i, b.length - 65))) };
+  return { hash, nonce, blockHash, receiver, action: 8, delegate: decodeSignedDelegate(new Uint8Array(b.subarray(i, b.length - 65))) };
 }
 const unknownTx = () => new RpcError("tx", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_TRANSACTION" } });
 const unknownBlock = () => new RpcError("query", { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_BLOCK", info: {} } });
@@ -1490,7 +1491,7 @@ class Node {
   }
   private land(tx: ParsedTx) {
     if (this.landed.has(tx.hash)) return;
-    const kind = tx.action === 2 ? "prepay" : "delegate";
+    const kind = tx.action === 2 ? "prepay" : tx.action === 3 ? "transfer" : "delegate";
     const signedAt = this.blocks.get(tx.blockHash);
     if (signedAt === undefined || this.final - signedAt > this.validity) {
       this.log.push({ hash: tx.hash, kind, nonce: tx.nonce, dropped: "Expired" });
@@ -1513,6 +1514,12 @@ class Node {
       this.final += 1n;
       return { block_hash: this.bh(this.final), outcome: { executor_id: executor, status: ok ? { SuccessValue: "" } : { Failure: failure } } };
     };
+    if (tx.action === 3 || (tx.action === 2 && tx.receiver !== VAULT)) {
+      // a plain Transfer (create.ts) or a call on another contract (the intents carry's): its receipt on the receiver
+      this.landed.set(tx.hash, { final_execution_status: "FINAL", transaction_outcome, receipts_outcome: [r(tx.receiver, true), r(RELAYER, true)] });
+      this.log.push({ hash: tx.hash, kind: tx.action === 3 ? "transfer" : "call", nonce: tx.nonce });
+      return;
+    }
     if (tx.action === 2) {
       this.prepaid.set(tx.precommitment, (this.prepaid.get(tx.precommitment) ?? 0n) + tx.bytes);
       const id = receiptIdOf(tx.hash, this.final);
@@ -2023,18 +2030,177 @@ test("the relayer's caches keep at most CACHE_MAX entries, the oldest dropped fi
   assert.deepEqual([m.has(10), m.has(11)], [true, false]);
 });
 
-test("Low 4: a landed transaction a regular provider forgot (garbage collection) reads final from the archival one, never dropped", async () => {
+test("Low 4: a landed transaction both regular providers forgot (garbage collection) is never read final on the archival one's word alone, and never dropped", async () => {
   const node = new Node();
   const r = node.relayer();
   const tx: TxRef[] = [];
   assert.equal((await r.send(prepayAction(1n), open, keep(tx))).kind, "final");
   node.forgotten.add(tx[0]!.tx_hash);
   node.final += 200n;
-  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "final");
+  assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "one provider's word (the archival one's) is never an outcome");
   node.fail = (i) => (i === 2 ? new Error("fetch failed") : undefined);
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "no archival read: never dropped");
   node.final += 1n;
   assert.equal((await r.resolve(tx[0]!, noResend)).kind, "unknown", "no archival read: never dropped");
+});
+
+// ---- card helper-judge-two-agree: an outcome is final only when two providers agree on it ----
+
+/** A relayer on the node's providers, provider i (2: the archival one) answering through edits[i]. */
+function relayerWith(node: Node, edits: Partial<Record<0 | 1 | 2, Edit>>) {
+  const wrap = (q: Rpc, e: Edit | undefined): Rpc => (e === undefined ? q : (((m: string, p: unknown) => e(m, p as Record<string, unknown>, () => q(m, p as never))) as Rpc));
+  const rs = node.rpcs();
+  return createRelayer([wrap(rs[0], edits[0]), wrap(rs[1], edits[1])], wrap(node.archival(), edits[2]), RELAYER, node.secret, VAULT, node.validity, node.relayerStore, 50);
+}
+type TxAnswer = { transaction_outcome: { block_hash: string }; receipts_outcome: { block_hash: string; outcome: { executor_id: string; status: unknown } }[] };
+/** A `tx` answer changed by `f` (every other method as it came). */
+const onTx = (f: (a: TxAnswer) => TxAnswer): Edit => async (m, _p, real) => {
+  const a = (await real()) as TxAnswer;
+  return m === "tx" ? f(structuredClone(a)) : a;
+};
+const failedReceipt = { Failure: { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "a liar's failure" } } } } };
+/** The lie of PR4-3 and PR4-3b: the transaction named at D, as it is, with every receipt failed. */
+const failedAtD = onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: failedReceipt } })) }));
+const forgets: Edit = async (m, _p, real) => {
+  if (m === "tx") throw unknownTx();
+  return real();
+};
+/** Each relayer action a path acts on the outcome of: the bind's prepay (on the vault) and delegate, the intents
+ *  carry's storage_deposit and execute_intents (calls on intents.near; its strikes count their failures), and the
+ *  delivery's Transfer (create.ts). The withdrawal's withdraw and settle read from blocks only (below). */
+function kinds(node: Node): [string, RelayerAction][] {
+  const signedDelegate = Buffer.from(signed(node.user(), P, 101n, node.final + 100n).signed_delegate, "base64");
+  return [
+    ["the prepay", prepayAction(1n)],
+    ["the delegate", { kind: "delegate", signed: signedDelegate, receiver: "ab".repeat(32) }],
+    ["the intents carry's storage_deposit", { kind: "call", receiver: "intents.near", method: "storage_deposit", args: JSON.stringify({ account_id: "fresh.near", registration_only: true }), gas: 30_000_000_000_000n, deposit: 1_250_000_000_000_000_000_000n }],
+    ["the intents carry's execute_intents", { kind: "call", receiver: "intents.near", method: "execute_intents", args: JSON.stringify({ signed: [] }), gas: 300_000_000_000_000n, deposit: 0n }],
+    ["the delivery's Transfer", { kind: "transfer", receiver: "cd".repeat(32), amount: 10n ** 21n }],
+  ];
+}
+/** Each kind sent and read final by an honest relayer, then `check` on it. */
+async function everyKind(check: (node: Node, name: string, tx: TxRef) => Promise<void>) {
+  const node = new Node();
+  for (const [name, action] of kinds(node)) {
+    const tx: TxRef[] = [];
+    const out = await node.relayer(50).send(action, open, keep(tx));
+    assert.equal(out.kind, "final", `${name}: the honest read`);
+    assert.ok((out as { receipts: Receipt[] }).receipts.every((x) => x.ok), `${name}: landed`);
+    await check(node, name, tx[0]!);
+  }
+}
+
+test("two-agree (PR4-3, PR4-3b): one provider naming D with every receipt failed reads unknown, never final, on either provider and for every action a path acts on; both agreeing read final", async () => {
+  await everyKind(async (node, name, tx) => {
+    for (const i of [0, 1] as const) {
+      const out = await relayerWith(node, { [i]: failedAtD }).resolve(tx, noResend);
+      assert.equal(out.kind, "unknown", `${name}: the liar is provider ${i}`);
+      assert.match((out as { why: string }).why, /receipts differ/, `${name}: provider ${i}`);
+    }
+    const both = await relayerWith(node, { 0: failedAtD, 1: failedAtD }).resolve(tx, noResend);
+    assert.equal(both.kind, "final", `${name}: two providers agreeing are the outcome`);
+    assert.ok((both as { receipts: Receipt[] }).receipts.every((x) => !x.ok), name);
+    const honest = await node.relayer(50).resolve(tx, noResend);
+    assert.equal(honest.kind, "final", name);
+    assert.ok((honest as { receipts: Receipt[] }).receipts.every((x) => x.ok), name);
+  });
+});
+
+test("two-agree: one provider naming another block reads unknown (a prepay's outcome then read from blocks: the true one), and one giving another receipt list reads unknown", async () => {
+  await everyKind(async (node, name, tx) => {
+    const elsewhere = onTx((a) => ({ ...a, transaction_outcome: { ...a.transaction_outcome, block_hash: node.bh(990n) }, receipts_outcome: a.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: failedReceipt } })) }));
+    const lists: [string, Edit][] = [
+      ["one receipt fewer", onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.slice(0, -1) }))],
+      ["one receipt more", onTx((a) => ({ ...a, receipts_outcome: [...a.receipts_outcome, a.receipts_outcome[0]!] }))],
+      ["another executor", onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.map((o, k) => (k === 0 ? { ...o, outcome: { ...o.outcome, executor_id: "liar.near" } } : o)) }))],
+      ["another failure", onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: failedReceipt } })) }))],
+      ["a receipt in another block", onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.map((o, k) => (k === 0 ? { ...o, block_hash: node.bh(node.final) } : o)) }))],
+    ];
+    for (const i of [0, 1] as const) {
+      const out = await relayerWith(node, { [i]: elsewhere }).resolve(tx, noResend);
+      if (name === "the prepay") {
+        assert.equal(out.kind, "final", `${name}, provider ${i}: read from blocks (F56)`);
+        assert.deepEqual((out as { receipts: Receipt[] }).receipts.map((x) => [x.executor, x.ok]), [[VAULT, true]], `${name}: the blocks' outcome, never the liar's`);
+      } else assert.equal(out.kind, "unknown", `${name}: another block on provider ${i}`);
+      for (const [lie, edit] of lists) assert.equal((await relayerWith(node, { [i]: edit }).resolve(tx, noResend)).kind, "unknown", `${name}: ${lie} on provider ${i}`);
+      // both read it failed, one with another failure (a pause read from its text, R3): the failure is part of the outcome
+      const otherFailure = onTx((a) => ({ ...a, receipts_outcome: a.receipts_outcome.map((o) => ({ ...o, outcome: { ...o.outcome, status: { Failure: { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: "Pausable: paused" } } } } } } })) }));
+      assert.equal((await relayerWith(node, { [i]: otherFailure, [1 - i]: failedAtD }).resolve(tx, noResend)).kind, "unknown", `${name}: another failure text on provider ${i}`);
+    }
+  });
+});
+
+test("two-agree: the archival one stands in only for a provider that forgot the transaction, and counts only when it agrees with the other", async () => {
+  await everyKind(async (node, name, tx) => {
+    for (const i of [0, 1] as const) {
+      let archived = 0;
+      const counted: Edit = async (m, _p, real) => {
+        if (m === "tx") archived++;
+        return real();
+      };
+      const agrees = await relayerWith(node, { [i]: forgets, 2: counted }).resolve(tx, noResend);
+      assert.equal(agrees.kind, "final", `${name}: provider ${i} forgot, the archival one agrees with the other`);
+      assert.ok((agrees as { receipts: Receipt[] }).receipts.every((x) => x.ok), name);
+      assert.equal(archived, 1, `${name}: the archival one read once`);
+      assert.equal((await relayerWith(node, { [i]: forgets, 2: failedAtD }).resolve(tx, noResend)).kind, "unknown", `${name}: provider ${i} forgot, the archival one lies`);
+      // a provider that errs or is not FINAL yet has not forgotten it: the archival one is not asked, the round keeps
+      archived = 0;
+      const down: Edit = async (m, _p, real) => {
+        if (m === "tx") throw new Error("fetch failed");
+        return real();
+      };
+      const notFinal = onTx((a) => ({ ...a, final_execution_status: "EXECUTED_OPTIMISTIC" }) as TxAnswer);
+      for (const [why, edit] of [["errs", down], ["is not FINAL yet", notFinal]] as const) {
+        assert.equal((await relayerWith(node, { [i]: edit, 2: counted }).resolve(tx, noResend)).kind, "unknown", `${name}: provider ${i} ${why}`);
+      }
+      assert.equal(archived, 0, `${name}: the archival one not asked for a provider that did not forget`);
+    }
+    assert.equal((await relayerWith(node, { 0: forgets, 1: forgets }).resolve(tx, noResend)).kind, "unknown", `${name}: both forgot`);
+    assert.equal((await relayerWith(node, { 0: failedAtD, 1: forgets, 2: failedAtD }).resolve(tx, noResend)).kind, "final", `${name}: two agreeing (one primary and the archival one) are the outcome`);
+  });
+});
+
+test("two-agree: a receipt's height is each provider's own read: a liar's heights, read first, never stand in for the other's", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final");
+  const higher: Edit = async (m, p, real) => {
+    const a = await real();
+    if (m !== "block" || typeof p.block_id !== "string") return a;
+    const h = (a as { header: { height: number } }).header;
+    return { ...(a as object), header: { ...h, height: h.height + 7 } };
+  };
+  // the honest one answers its lookup after the liar has read every receipt's block
+  const late: Edit = async (m, _p, real) => {
+    if (m === "tx") await new Promise((res) => setTimeout(res, 30));
+    return real();
+  };
+  const out = await relayerWith(node, { 0: higher, 1: late }).resolve(tx[0]!, noResend);
+  assert.equal(out.kind, "unknown");
+  assert.match((out as { why: string }).why, /receipts differ/);
+});
+
+test("two-agree: the withdrawal's withdraw and settle read their outcome from blocks only: a liar's lookup is never read, and a liar's block reads keep the round", async () => {
+  const node = new Node();
+  const tx: TxRef[] = [];
+  assert.equal((await node.relayer(50).send(prepayAction(1n), open, keep(tx))).kind, "final");
+  const fromBlocks = { resend: false, fromBlocks: true };
+  for (const i of [0, 1] as const) {
+    let looked = 0;
+    const lies: Edit = async (m, p, real) => {
+      if (m === "tx") looked++;
+      return failedAtD(m, p, real);
+    };
+    const out = await relayerWith(node, { [i]: lies }).resolve(tx[0]!, fromBlocks);
+    assert.equal(out.kind, "final", `provider ${i}`);
+    assert.deepEqual((out as { receipts: Receipt[] }).receipts.map((x) => [x.executor, x.ok]), [[VAULT, true]]);
+    assert.equal(looked, 0, "no lookup read");
+    const empty: Edit = async (m, p, real) => {
+      const a = await real();
+      return m === "EXPERIMENTAL_changes" && p.changes_type === "account_changes" ? { ...(a as object), changes: [] } : a;
+    };
+    assert.equal((await relayerWith(node, { [i]: empty }).resolve(tx[0]!, fromBlocks)).kind, "unknown", `provider ${i}'s vault changes hide the receipt`);
+  }
 });
 
 test("M2/E: one provider cannot take the send while the other does: the outcome is read, never rolled back on one word", async () => {
@@ -2870,16 +3036,17 @@ test("a receipt that ran with SuccessReceiptId is ok, a Failure is not; each rec
     { block_hash: node.bh(1_500n), outcome: { executor_id: "u", status: { SuccessReceiptId: "r" } } },
     { block_hash: "y", outcome: { executor_id: VAULT, status: { Failure: { ActionError: {} } } } },
   ];
-  const [r0, r1] = node.rpcs();
-  const over: Rpc = async (m, p) => {
+  // both providers answer it (one provider's lookup is never an outcome: card helper-judge-two-agree)
+  const over = (q: Rpc): Rpc => async (m, p) => {
     if (m === "tx") {
       const at = node.appliedAt((p as { tx_hash: string }).tx_hash);
       if (at === undefined) throw unknownTx();
       return { final_execution_status: "FINAL", transaction_outcome: { block_hash: node.bh(at) }, receipts_outcome: outcomes };
     }
-    return m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : r0(m, p);
+    return m === "block" && (p as { block_id?: string }).block_id === "y" ? { header: { height: 7777 } } : q(m, p);
   };
-  const r = node.relayerOn([over, r1]);
+  const [r0, r1] = node.rpcs();
+  const r = node.relayerOn([over(r0), over(r1)]);
   const out = await r.send(prepayAction(1n), open, () => undefined);
   assert.equal(out.kind, "final");
   const rs = (out as { receipts: Receipt[] }).receipts;

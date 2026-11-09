@@ -731,12 +731,13 @@ const freshBody = (label: string, o: { sell?: Partial<Sell>; fee?: bigint } = {}
   return { pool: POOL, w: s.w, data: sellData(s, o.fee ?? FEE, sign65(k, digestOf(s))), authorization: authOf(k, CHAIN_ID, DELEGATE, 7n) };
 };
 
-test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt with status 0 on either provider, or no transaction on either past the deadline; a success or a sale still waiting keeps the first hash; no count of frees, only W's unpaid cap", async () => {
+test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt with status 0 on both providers in the same block, or no transaction on either past the deadline; a success, one provider's revert or a sale still waiting keeps the first hash; no count of frees, only W's unpaid cap", async () => {
+  const inBlock = (status: "0x0" | "0x1", h: string) => ({ ...receiptOf(status), blockHash: `0x${h.repeat(64)}` });
   // reverted: the repeat reads the first hash's receipt on both providers and sends a new Sell at the same nonce
   {
     const x: Calls = [];
     const y: Calls = [];
-    const s = senderOf(x, { receipt: () => null, tx: () => ({}) }, y, { receipt: () => receiptOf("0x0") });
+    const s = senderOf(x, { receipt: () => inBlock("0x0", "a") }, y, { receipt: () => inBlock("0x0", "A") });
     const first = await s.sell(body());
     assert.equal(first.status, 200, JSON.stringify(first.body));
     const again = await s.sell(body({ sell: { deadline: NOW_S + 500n, minOut: SELL.minOut / 2n } }));
@@ -749,6 +750,10 @@ test("a sale that reverted or was dropped frees its (W, Sell nonce): a receipt w
   for (const [name, oa, ob] of [
     ["landed", { receipt: () => receiptOf("0x1") }, { receipt: () => null, tx: () => ({}) }],
     ["landed on one, reverted on the other", { receipt: () => receiptOf("0x1") }, { receipt: () => receiptOf("0x0") }],
+    // card helper-judge-two-agree: one provider's revert is never the outcome (a liar would free (W, nonce) for a second send)
+    ["reverted on one, no receipt on the other", { receipt: () => null, tx: () => ({}) }, { receipt: () => receiptOf("0x0") }],
+    ["reverted on the other, no receipt on one", { receipt: () => receiptOf("0x0") }, { receipt: () => null, tx: () => ({}) }],
+    ["reverted on both in different blocks", { receipt: () => inBlock("0x0", "a") }, { receipt: () => inBlock("0x0", "b") }],
     ["waiting", { receipt: () => null, tx: () => ({}) }, { receipt: () => null, tx: () => ({}) }],
     ["no receipt, before the deadline", { receipt: () => null, tx: () => null }, { receipt: () => null, tx: () => null }],
   ] as [string, Opts, Opts][]) {
