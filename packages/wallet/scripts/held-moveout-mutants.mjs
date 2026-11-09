@@ -135,7 +135,7 @@ const M = [
   ["H5 (review 4) no cap on the wait", "await sleep(Math.min(ARCHIVAL_WAIT_MAX_MS, Math.max(after ?? 0, 1_000 * 2 ** (ask - 1))));", "await sleep(Math.max(after ?? 0, 1_000 * 2 ** (ask - 1)));"],
   ["H9 (review 4) no connection not asked again", '        if ((e as Error).name === "TimeoutError" || (e as Error).message.startsWith("HTTP ")) throw e;', "        throw e;"],
   ["H10 (review 4) a Retry-After date unread", "  const t = Date.parse(h);\n  return Number.isFinite(t) ? Math.max(0, t - now) : null;", "  return null;"],
-  ["H11 (review 4) the archival block read not asked again", 'tx: (params) => post("tx", params), block: (params) => post("block", params) };', 'tx: (params) => post("tx", params) };'],
+  ["H11 (review 4) the archival block read not asked again", 'tx: (params) => post("tx", params), block: (params) => post("block", params) }, fetchFn);', 'tx: (params) => post("tx", params) }, fetchFn);'],
   ["P1h (review 4) NONE counted running", 'new Set(["INCLUDED", "EXECUTED_OPTIMISTIC", "INCLUDED_FINAL", "EXECUTED"])', 'new Set(["NONE", "INCLUDED", "EXECUTED_OPTIMISTIC", "INCLUDED_FINAL", "EXECUTED"])'],
   ["P1i (review 4) running without the hash check only", "PENDING.has(res.final_execution_status) && isObj(res.transaction) && res.transaction.hash === hash && res.transaction.signer_id === u", "PENDING.has(res.final_execution_status) && isObj(res.transaction) && res.transaction.signer_id === u"],
   ["P5 (review 4) an archival host's running read counted as its word", '  if (st === "pending") return "unknown";\n', '  if (st === "pending") return "ok";\n'],
