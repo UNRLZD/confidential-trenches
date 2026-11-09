@@ -3146,6 +3146,18 @@ test("review P2-2: b0 and the key's nonce are read on both providers before the 
       const a = (await real()) as { nonce?: number };
       return m === "query" && p.request_type === "view_access_key" && p.block_id !== undefined && typeof a.nonce === "number" ? { ...a, nonce: a.nonce + 1 } : a;
     }],
+    ["the other provider's key at b0 not a full-access one", 1, async (m, p, real) => {
+      const a = await real();
+      return m === "query" && p.request_type === "view_access_key" && p.block_id !== undefined ? { ...(a as object), permission: { FunctionCall: { allowance: null, receiver_id: VAULT, method_names: [] } } } : a;
+    }],
+    ["the other provider with no key at b0", 1, async (m, p, real) => {
+      const a = (await real()) as Record<string, unknown>;
+      return m === "query" && p.request_type === "view_access_key" && p.block_id !== undefined ? { block_hash: a.block_hash, block_height: a.block_height, error: "access key ed25519:x does not exist while viewing" } : a;
+    }],
+    ["the other provider's key read at another height than b0", 1, async (m, p, real) => {
+      const a = (await real()) as { block_height?: number };
+      return m === "query" && p.request_type === "view_access_key" && p.block_id !== undefined && typeof a.block_height === "number" ? { ...a, block_height: a.block_height + 1 } : a;
+    }],
   ];
   for (const [name, i, lie] of lies) {
     const node = new Node();
