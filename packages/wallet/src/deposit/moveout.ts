@@ -353,9 +353,36 @@ export function checkMoveCalls(u: string, to: string, token: string, given: read
   return seal({ signer: u, receiver: token, calls });
 }
 
+/**
+ * The typed account's rule for the moves the signing page's held path does not make (the registration alone and the
+ * ft_withdraw out of intents.near): checkMoveCalls' own first lines, unchanged there so the signing page's bundle
+ * stays as built; test/deposit-moveout.test.ts holds the two to refuse the same accounts. Never the moving account,
+ * the token, the token's network's vault or intents.near (vault paper 2.12, "Nothing into the vault").
+ */
+function checkTypedAccount(u: string, to: string, token: string): void {
+  namesOk(to, token);
+  if (!IMPLICIT.test(u) || to === u || to === token) throw new MoveOutRefused("the typed account is U or the token");
+  const net = Object.values(NEAR_NETWORKS).find((n) => n.usdc === token);
+  if (net === undefined) throw new MoveOutRefused("the token is no release's USDC");
+  if (to === net.vault || to === INTENTS) throw new MoveOutRefused("the typed account is the vault or intents.near: nothing sent there is the user's");
+}
+/** checkMoveCalls' copy rule for the other two checks: a deep copy of plain data, each call exactly method, args, gas and
+ *  deposit, its account ids strings; the copy is what is checked and sealed, so a later change to `given` signs nothing. */
+function plainCalls<C extends MoveCall | WithdrawCall>(given: readonly C[]): C[] {
+  let calls: C[];
+  try {
+    calls = structuredClone([...given]);
+  } catch {
+    throw new MoveOutRefused("the calls are not plain data");
+  }
+  if (!calls.every((c) => isObj(c) && Object.keys(c).sort().join() === "args,deposit,gas,method" && isObj(c.args))) throw new MoveOutRefused("each call is method, args, gas and deposit, nothing else");
+  for (const c of calls) for (const f of ["receiver_id", "account_id", "token"]) if (c.args[f] !== undefined && typeof c.args[f] !== "string") throw new MoveOutRefused("every account id is a string");
+  return calls;
+}
+
 /** A move a check passed (card signers-own-bytes): U, the receiver and the calls, deep-frozen, the only thing signMoveTx
  *  signs. Only a check of this module makes one (seal, module private); a copy, a look-alike or a changed one is not. */
-export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly MoveCall[] };
+export type SealedMove = { readonly signer: string; readonly receiver: string; readonly calls: readonly (MoveCall | WithdrawCall)[] };
 const SEALED = new WeakSet<object>();
 const frozen = <T>(v: T): T => {
   if (typeof v === "object" && v !== null) {
@@ -386,6 +413,234 @@ function signMoveTx(publicKey: Uint8Array, secretKey: Uint8Array, nonce: bigint,
   const signature = ed25519.sign(digest, secretKey);
   const signed = new Borsh().fixed(bytes).u8(0).fixed(signature).done();
   return { hash: base58.encode(digest), signed: base64.encode(signed) };
+}
+
+// ---------- the exit tool's moves (card exit-ids-out; vault paper 2.12 step 5 and "Nothing into the vault") ----------
+// Each builder reads its arguments once, at entry, into locals (plain copies: the key's bytes into fresh arrays, zeroed
+// when it returns), checks those, and signs only those, so what is signed is what was checked (M366 (2)/(3); a getter
+// or a proxy that answers one value to the check and another to the signer has nothing left to change).
+/** A moving account's own key: the one-time id U, R or V, or the arming account A, as the wallet derives it. */
+export interface OwnKey {
+  /** the 64-hex implicit account: the public key's hex */
+  id: string;
+  publicKey: Uint8Array;
+  /** the 32-byte ed25519 seed */
+  secretKey: Uint8Array;
+}
+/** What the move signs: its calls, the signed bytes and their hash, the nonce, and the amount the typed account gets. */
+export interface BuiltMove {
+  receiver: string;
+  calls: readonly (MoveCall | WithdrawCall)[];
+  amount: bigint;
+  nonce: bigint;
+  hash: string;
+  signed: string;
+}
+/** A read for a move, naming the moving account, the typed account and the token it was read for. */
+export type MoveOutReadFor = MoveOutRead & { u: string; to: string; token: string };
+/** A move out of intents.near's read, naming the same three. */
+export type WithdrawOutReadFor = WithdrawOutRead & { u: string; to: string; token: string };
+/** The registration's read: the account's nonce, the block and the typed account's registration, with the three names. */
+export type RegisterOutReadFor = Pick<MoveOutReadFor, "nonce" | "blockHash" | "registered" | "u" | "to" | "token">;
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+/** The key, copied once: the id is its public key's hex, and the secret key makes that public key. */
+function ownKeyCopy(k: OwnKey): OwnKey {
+  const id = k.id, pk = k.publicKey, sk = k.secretKey;
+  if (!(sk instanceof Uint8Array) || !(pk instanceof Uint8Array)) throw new MoveOutRefused("the key is not a pair of 32-byte arrays");
+  const key = { id, publicKey: new Uint8Array(pk), secretKey: new Uint8Array(sk) };
+  if (key.secretKey.length !== 32 || key.publicKey.length !== 32 || typeof id !== "string" || !IMPLICIT.test(id) || hex(key.publicKey) !== id || hex(ed25519.getPublicKey(key.secretKey)) !== id) {
+    key.secretKey.fill(0);
+    throw new MoveOutRefused("the key is not the moving account's own");
+  }
+  return key;
+}
+/** The encoder's widths: a nonce is a u64 and a deposit a u128 (it would wrap a larger one silently, review 3 L1). */
+const U128_LIMIT = 1n << 128n;
+/**
+ * The typed account and the token are strings: an object (a String, or one whose toJSON names the vault) would pass
+ * the === refusals by identity while JSON.stringify signs another name (review 2, M1).
+ */
+function namesOk(to: unknown, token: unknown): void {
+  if (typeof to !== "string" || typeof token !== "string") throw new MoveOutRefused("the typed account and the token must be strings");
+}
+/**
+ * The read, copied once, for this account, typed account and token, or a refusal; its nonce a bigint at or above 0,
+ * below 2^64 - 1 (so nonce + 1 is a u64), its block hash 32 bytes in base58 and its registration true or false.
+ */
+function readFor<R extends { u: string; to: string; token: string; nonce: bigint; blockHash: string; registered: boolean }>(read: R, u: string, to: string, token: string): R {
+  const r = { ...read };
+  if (r.u !== u || r.to !== to || r.token !== token) throw new MoveOutRefused("the read is not of this account, typed account and token");
+  let hash: Uint8Array | null = null;
+  try {
+    hash = typeof r.blockHash === "string" ? base58.decode(r.blockHash) : null;
+  } catch {
+    hash = null;
+  }
+  // nonce + 1 is signed as a u64: the encoder would wrap a larger one silently (review 3, L1)
+  if (typeof r.nonce !== "bigint" || r.nonce < 0n || r.nonce >= U64_MAX || hash === null || hash.length !== 32 || (r.registered !== true && r.registered !== false)) throw new MoveOutRefused("the read's nonce, block hash or registration is not one");
+  return r;
+}
+/** How much of what the account holds stays: an id keeps one base unit (restore finds it by its balance, W:929); A moves all, so its DeleteAccount can follow. */
+function keepOf(kind: unknown): 0n | 1n {
+  if (kind === "arm") return 0n;
+  if (kind === "id") return 1n;
+  throw new MoveOutRefused(`no account kind ${JSON.stringify(kind)}`);
+}
+
+/** readMoveOut, naming the account, the typed account and the token it read. */
+export async function readMoveOutFor(u: string, to: string, token: string, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<MoveOutReadFor | null> {
+  const r = await readMoveOut(u, to, token, rpcs);
+  return r === null ? null : { ...r, u, to, token };
+}
+
+/**
+ * The move of what `key`'s account holds on the token to `to`: [storage_deposit(to)] then ft_transfer(to, amount) on
+ * the token, the amount what the read holds less the keep, checked by checkMoveCalls before the private signer runs.
+ * `read` is readMoveOutFor's for this account, `to` and the token; `kind` "id" (U, R, V: one base unit kept) or "arm"
+ * (A: all). An unregistered typed account needs the token's storage minimum (readTokenStorageMin), never 0.
+ */
+export function buildMoveOut(a: { read: MoveOutReadFor; key: OwnKey; kind: "id" | "arm"; to: string; token: string; storageMin: bigint }): BuiltMove {
+  const { to, token, kind, storageMin: min } = a;
+  namesOk(to, token);
+  const keep = keepOf(kind);
+  const key = ownKeyCopy(a.key);
+  try {
+    const read = readFor(a.read, key.id, to, token);
+    if (typeof read.usdc !== "bigint" || read.usdc <= keep) throw new MoveOutRefused("nothing to move on the token");
+    if (!read.registered && (typeof min !== "bigint" || min <= 0n || min >= U128_LIMIT)) throw new MoveOutRefused("the token's storage minimum is not read");
+    const storageMin = read.registered ? 0n : min;
+    const calls = moveCalls(to, read.usdc - keep, !read.registered, storageMin);
+    // the signing page's own rule, unchanged: it bounds the amount by its usdc argument less one base unit, so an id
+    // passes what it holds (one base unit kept) and A passes one more (all of it moves)
+    const move = checkMoveCalls(key.id, to, token, calls, read.usdc + 1n - keep, storageMin);
+    const nonce = read.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);
+    return { receiver: move.receiver, calls: move.calls, amount: read.usdc - keep, nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+/** The registration payload rule: exactly one storage_deposit(to, registration_only) with the token's minimum, to a typed account checkTypedAccount passes. */
+export function checkRegisterCalls(u: string, to: string, token: string, given: readonly MoveCall[], storageMin: bigint): SealedMove {
+  if (typeof u !== "string") throw new MoveOutRefused("U, the typed account and the token are strings");
+  checkTypedAccount(u, to, token);
+  const calls = plainCalls(given);
+  const r = calls[0];
+  if (calls.length !== 1 || !r || r.method !== "storage_deposit" || r.args.account_id !== to || r.args.registration_only !== true || Object.keys(r.args).length !== 2 || r.deposit !== storageMin || r.gas !== MOVE_GAS.storage_deposit)
+    throw new MoveOutRefused("the registration is storage_deposit(the typed account, registration_only) with the token's minimum");
+  return seal({ signer: u, receiver: token, calls });
+}
+
+/**
+ * The typed account's registration on the token alone, by the moving account (W:777: "registered by that same
+ * account ... in one of its own before the ft_withdraw"): one storage_deposit(to, registration_only) with the token's
+ * minimum. Refused when the read shows it registered already.
+ */
+export function buildRegisterOut(a: { read: RegisterOutReadFor; key: OwnKey; to: string; token: string; storageMin: bigint }): BuiltMove {
+  const { to, token, storageMin } = a;
+  namesOk(to, token);
+  const key = ownKeyCopy(a.key);
+  try {
+    const read = readFor(a.read, key.id, to, token);
+    if (read.registered !== false) throw new MoveOutRefused("the typed account is registered on the token already");
+    if (typeof storageMin !== "bigint" || storageMin <= 0n || storageMin >= U128_LIMIT) throw new MoveOutRefused("the token's storage minimum is not read");
+    const calls = moveCalls(to, 1n, true, storageMin).slice(0, 1);
+    const move = checkRegisterCalls(key.id, to, token, calls, storageMin);
+    const nonce = read.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);
+    return { receiver: move.receiver, calls: move.calls, amount: 0n, nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
+}
+
+/** intents.near's own ft_withdraw (defuse 16d04f6, contracts/defuse/src/contract/tokens/nep141/withdraw.rs l.24-49). */
+export type WithdrawCall = { method: "ft_withdraw"; args: Obj; gas: bigint; deposit: bigint };
+/**
+ * ft_withdraw's gas: intents.near gives the token's plain ft_transfer 15 Tgas when no min_gas is signed (defuse 16d04f6
+ * contracts/defuse/core/src/intents/tokens.rs l.171; 50 is ft_transfer_call's), ft_resolve_withdraw 15
+ * (withdraw.rs l.100-111) and its own work the rest (l.136-140); unused gas comes back.
+ */
+export const WITHDRAW_GAS = 100n * TGAS;
+/** The one call: ft_withdraw(token, receiver_id, amount) with 1 yocto, no memo and no msg (a msg would make it a call). */
+export function withdrawCalls(to: string, amount: bigint, token: string): WithdrawCall[] {
+  return [{ method: "ft_withdraw", args: { token, receiver_id: to, amount: amount.toString() }, gas: WITHDRAW_GAS, deposit: 1n }];
+}
+/** The ft_withdraw payload rule: exactly this one call, to the typed account (checkTypedAccount), at most what is held less the keep. */
+export function checkWithdrawCalls(u: string, to: string, token: string, given: readonly WithdrawCall[], held: bigint, keep: 0n | 1n = 1n): SealedMove {
+  if (typeof u !== "string") throw new MoveOutRefused("U, the typed account and the token are strings");
+  checkTypedAccount(u, to, token);
+  if (keep !== 0n && keep !== 1n) throw new MoveOutRefused("the keep is 0 or 1 base unit");
+  const calls = plainCalls(given);
+  const c = calls[0];
+  if (calls.length !== 1 || !c || c.method !== "ft_withdraw" || c.deposit !== 1n || c.gas !== WITHDRAW_GAS) throw new MoveOutRefused("one ft_withdraw with 1 yocto");
+  if (Object.keys(c.args).join() !== "token,receiver_id,amount" || c.args.token !== token || c.args.receiver_id !== to) throw new MoveOutRefused("ft_withdraw names the token, the typed account and an amount, no memo or msg");
+  const amount = big(c.args.amount);
+  if (typeof c.args.amount !== "string" || amount === null || amount < 1n || amount > held - keep) throw new MoveOutRefused("the amount is above what the account holds inside intents.near less the keep");
+  return seal({ signer: u, receiver: INTENTS, calls });
+}
+
+/** What a move out of intents.near needs read, at one block on both RPCs. */
+export interface WithdrawOutRead {
+  height: number;
+  blockHash: string;
+  nonce: bigint;
+  /** the account's NEAR free of its storage, yocto */
+  free: bigint;
+  /** mt_balance_of(the account, nep141:<token>) on intents.near */
+  held: bigint;
+  /** storage_balance_of(the typed account) on the token is not null */
+  registered: boolean;
+  gasPrice: bigint;
+}
+/**
+ * readMoveOut's reads, then what the account holds inside intents.near, mt_balance_of(u, nep141:<token>), at the
+ * same block on both RPCs, equal; null when any read fails or differs. readMoveOut reads the token's balance view
+ * too, so while USDC is halted this is null (unread), never a zero.
+ */
+export async function readWithdrawOut(u: string, to: string, token: string, rpcs: readonly [MoveOutRpc, MoveOutRpc]): Promise<WithdrawOutReadFor | null> {
+  const r = await readMoveOut(u, to, token, rpcs);
+  if (r === null) return null;
+  const params = { request_type: "call_function", account_id: INTENTS, method_name: "mt_balance_of", args_base64: viewArgs({ account_id: u, token_id: `nep141:${token}` }), block_id: r.height };
+  const held = await Promise.all(
+    rpcs.map(async (x) => {
+      try {
+        const v = decodeView(resultAt(await x.query(params), r.height));
+        return typeof v === "string" && DIGITS.test(v) ? BigInt(v) : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  if (held[0] === null || held[0] !== held[1]) return null;
+  const { usdc: _onToken, ...rest } = r;
+  return { ...rest, held: held[0], u, to, token };
+}
+
+/**
+ * The move of what `key`'s account holds inside intents.near to `to`, by its own ft_withdraw on intents.near. The typed
+ * account must already be registered on the token (its registration rides in a move on the token first, W:777):
+ * intents.near would refund an ft_transfer the token refuses, so an unregistered one is refused here, before signing.
+ */
+export function buildWithdrawOut(a: { read: WithdrawOutReadFor; key: OwnKey; kind: "id" | "arm"; to: string; token: string }): BuiltMove {
+  const { to, token, kind } = a;
+  namesOk(to, token);
+  const keep = keepOf(kind);
+  const key = ownKeyCopy(a.key);
+  try {
+    const read = readFor(a.read, key.id, to, token);
+    if (read.registered !== true) throw new MoveOutRefused("the typed account is not registered on the token: register it first");
+    if (typeof read.held !== "bigint" || read.held <= keep) throw new MoveOutRefused("nothing to move inside intents.near");
+    const calls = withdrawCalls(to, read.held - keep, token);
+    const move = checkWithdrawCalls(key.id, to, token, calls, read.held, keep);
+    const nonce = read.nonce + 1n;
+    const tx = signMoveTx(key.publicKey, key.secretKey, nonce, read.blockHash, move);
+    return { receiver: move.receiver, calls: move.calls, amount: read.held - keep, nonce, ...tx };
+  } finally {
+    key.secretKey.fill(0);
+  }
 }
 
 // ---------- reading the transaction back ----------

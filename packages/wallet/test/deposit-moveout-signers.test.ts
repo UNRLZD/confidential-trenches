@@ -50,14 +50,24 @@ test("moveout.ts exports exactly these, and no signer", () => {
     "MoveOutRefused",
     "SETTLE_BLOCKS",
     "TX_VALIDITY_BLOCKS",
+    "WITHDRAW_GAS",
     "archivalRpc",
+    // card exit-ids-out: each builds its own calls, checks and seals them, then signs; none signs calls it is handed
+    "buildMoveOut",
+    "buildRegisterOut",
+    "buildWithdrawOut",
     "checkMoveCalls",
+    "checkRegisterCalls",
+    "checkWithdrawCalls",
     "heldOpOf",
     "moveCalls",
     "moveOutHeld",
     "moveOutRpc",
     "readMoveOut",
+    "readMoveOutFor",
+    "readWithdrawOut",
     "signedBlockHash",
+    "withdrawCalls",
   ]);
 });
 
@@ -110,6 +120,34 @@ test("the signer signs only a move a check sealed (review 3): an unchecked list,
   assert.throws(() => m.checkMoveCalls(U, TO, TOKEN, m.moveCalls(TO, 50n, false, 0n), 10n, 0n), m.MoveOutRefused);
   // a seal of the real module is not one of the copy's, and the copy's are not the module's: one set per module
   refused(moveout.checkMoveCalls(U, TO, TOKEN, moveout.moveCalls(TO, 5n, false, 0n), 10n, 0n), "another module's seal");
+});
+
+test("card exit-ids-out: the registration and ft_withdraw checks seal their own deep copy as checkMoveCalls does; the withdraw's receiver is intents.near, never one a caller names", async () => {
+  const m = await probe();
+  const min = 1_250_000_000_000_000_000_000n;
+  const reg = [{ method: "storage_deposit" as const, args: { account_id: TO, registration_only: true }, gas: m.MOVE_GAS.storage_deposit, deposit: min }];
+  const sealedReg = m.checkRegisterCalls(U, TO, TOKEN, reg, min);
+  assert.equal(sealedReg.receiver, TOKEN);
+  const wd = m.withdrawCalls(TO, 5n, TOKEN);
+  const sealedWd = m.checkWithdrawCalls(U, TO, TOKEN, wd, 10n);
+  assert.equal(sealedWd.receiver, "intents.near");
+  for (const [sealed, given] of [[sealedReg, reg], [sealedWd, wd]] as const) {
+    const tx = m.signMoveTx(PK, SK, 1n, BH, sealed);
+    const signed = base64.decode(tx.signed);
+    const bytes = signed.subarray(0, signed.length - 65);
+    assert.ok(ed25519.verify(signed.subarray(signed.length - 64), sha256(bytes), PK));
+    assert.ok(Object.isFrozen(sealed) && Object.isFrozen(sealed.calls) && Object.isFrozen(sealed.calls[0]!.args));
+    // the list handed in, changed after the check, reaches nothing sealed
+    (given[0]!.args as Record<string, unknown>).account_id = "b".repeat(64);
+    (given[0]!.args as Record<string, unknown>).receiver_id = "b".repeat(64);
+    assert.ok(!JSON.stringify(sealed.calls.map((c) => c.args)).includes("b".repeat(64)));
+    assert.throws(() => m.signMoveTx(PK, SK, 1n, BH, { ...sealed }), /not one a check of this module passed/);
+  }
+  // an account id that is not a string, or a call with another field, is refused before any seal
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, args: { token: new String(TOKEN), receiver_id: TO, amount: "5" } }], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, extra: 1 } as never], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkWithdrawCalls(U, TO, TOKEN, [{ ...m.withdrawCalls(TO, 5n, TOKEN)[0]!, args: { token: TOKEN, receiver_id: TO, amount: 5 } } as never], 10n), m.MoveOutRefused);
+  assert.throws(() => m.checkRegisterCalls(U, TO, TOKEN, [{ ...reg[0]!, extra: 1 } as never], min), m.MoveOutRefused);
 });
 
 // ---- the source pins the run-time rule rests on
