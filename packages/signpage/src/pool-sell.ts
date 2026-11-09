@@ -74,11 +74,10 @@ import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync }
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
-import { decimal } from "./vault-balance.ts";
 
 /** What a sell run needs from the page. */
 export type PoolSellHost = {
@@ -1440,7 +1439,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
               prior = await ops.get("ops", ctx.id);
             }
             if (prior !== undefined) return void (answer ??= fromRecord(prior, ctx.sha) as HostAnswer<"pool.sell"> | HostRefusal);
-            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())), ...(ask.token === null ? {} : { chain: "solana" as const, token: ask.token, units: decimal(ask.amount, ask.decimals) }) };
+            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())), ...(ask.token === null ? {} : { chain: "solana" as const, token: ask.token, units: poolUnits(ask.amount, ask.decimals) }) };
             await ops.put("ops", ctx.id, { ...op });
             let writes: Promise<void> = Promise.resolve();
             const snap = () => ({ ...op, txs: op.txs.map((t) => ({ ...t })) });

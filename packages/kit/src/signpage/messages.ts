@@ -468,10 +468,12 @@ export type Operation = (
  * - created_ms: unix ms when the device started the op (its record's own time);
  * - chain and token: the chain a buy or sell runs on and the token it trades, as its request named them (a pool
  *   deposit's chain is its own required field);
- * - units: the token amount a sell asked to sell, in the token's whole units at its own decimals;
- * - amount_usd: the op's size in USD, a decimal string, only when the device knows it exactly (a trade-box buy's USDC
- *   spend; a deposit's is its own fact, on "done" only, DepositFacts; a pool deposit never carries one, its money is
+ * - units: the token amount a sell asked to sell, in the token's whole units at its own decimals: the request's ask;
+ * - amount_usd: the op's size in USD, a decimal string: a trade-box buy's asked USDC spend, the request's ask (a
+ *   deposit's is its own fact, on "done" only, DepositFacts; a pool deposit never carries one, its money is
  *   state.pools').
+ * units and amount_usd are what the request asked: only a done op's (filled, done) is what moved; a refused,
+ * not_landed or part_filled op's never moved in full.
  * Amounts, a chain and a token only: never a key, the 12 words, a wallet or which note is whose.
  */
 export type OpDetail = {

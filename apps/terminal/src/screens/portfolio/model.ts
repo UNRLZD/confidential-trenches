@@ -546,6 +546,9 @@ export interface ActFilter {
 export const NO_FILTER: ActFilter = { kinds: [], min: 0n, q: "" };
 
 const SHOWN = new Set(["buy", "sell", "deposit", "withdraw"]);
+/** A trade's stages where its asked amount never moved in full: its row draws no amount (the dash), since the op's
+ *  amount_usd and units are the request's ask (kit OpDetail), and only a done op's amount is what moved. */
+const NOT_MOVED = new Set(["refused", "not_landed", "part_filled"]);
 
 /** Every row Activity lists: the kit's deposits, withdrawals, buys and sells, each with what its op carries (kit OpDetail:
  *  time, USD size, units, chain, token; a deposit's USD is its amount_usd), and the exported keys. Newest first; rows
@@ -554,7 +557,8 @@ export function activity(ops: readonly Operation[] | null | undefined, d: Portfo
   const rows: ActRow[] = [];
   for (const o of ops ?? []) {
     if (!SHOWN.has(o.kind)) continue;
-    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: cents(o.amount_usd), units: o.units ?? null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null });
+    const moved = !NOT_MOVED.has(o.stage);
+    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null });
   }
   for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address });
   const timed = rows.filter((r) => r.at !== null).sort((a, b) => b.at! - a.at!);
