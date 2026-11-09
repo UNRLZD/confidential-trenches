@@ -105,7 +105,12 @@ export function judge(rec) {
     const l = w.landing ?? {};
     const dot = rec.run === "prf";
     say(l.header === "S1.3", `${at} landed header ${l.header ?? "none"} (want S1.3)`);
-    say(l.sheet === 0, `${at} the sign-in sheet closed (${l.sheet ?? "-"})`);
+    // the wallet way's "I already have one" restores an account, so the sheet may stay on its restore (S19,
+    // SigninSheet.tsx): a build that pins a pool scans it (the mainnet Solana pin, card sol-pools-mainnet-pin), and the
+    // harness reaches no RPC, so the landing reads it scanning (S19.1) or stalled (S19.5); any other open sheet, or a
+    // restore on a new account's way, is a sheet left open
+    const restore = rec.run === "wallet" && l.sheet === 1 && /^S19\.[1-5]$/.test(l.sheetState ?? "");
+    say(l.sheet === 0 || restore, restore ? `${at} the sign-in sheet shows the restore (${l.sheetState})` : `${at} the sign-in sheet closed (${l.sheet ?? "-"}${l.sheet ? `, ${l.sheetState ?? "no state"}` : ""})`);
     if (w.width === "1440") say(l.dot === dot, `${at} backup dot ${l.dot} (want ${dot})`);
     // BAR-02: same route and scroll, in the top window and the frame
     say(l.topPath === ROUTE && l.framePath === ROUTE, `${at} BAR-02 route: top ${l.topPath}, frame ${l.framePath}`);
@@ -393,6 +398,7 @@ async function oneWidth(h, runName, w, { plant, shotDir, cpu }) {
     out.landing = {
       header: await landedHdr.getAttribute("data-header"),
       sheet: await app.locator(".sgn").count(),
+      sheetState: (await app.locator(".sgn").evaluateAll((els) => els.map((e) => e.getAttribute("data-state"))))[0] ?? null,
       dot: (await app.locator(".tb [data-backup-dot]").count()) > 0,
       topPath: new URL(page.url()).pathname,
       framePath: await app.locator(":root").evaluate(() => location.pathname),

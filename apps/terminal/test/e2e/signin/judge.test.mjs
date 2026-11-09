@@ -35,3 +35,16 @@ test("a launch with no widths, or a width that broke, fails", () => {
   assert.equal(judge({ run: "prf", widths: [] }).ok, false);
   assert.equal(judge({ run: "wallet", widths: [{ width: "390", error: "boom" }] }).ok, false);
 });
+
+test("the wallet way may land on its restore (S19), never another open sheet; a new account's way lands with none", () => {
+  const wallet = answers.good.find((r) => r.run === "wallet");
+  const prf = answers.good.find((r) => r.run === "prf");
+  const withSheet = (rec, sheetState) => ({ ...rec, widths: rec.widths.map((w) => ({ ...w, landing: { ...w.landing, sheet: 1, sheetState } })) });
+  const bad = (v) => v.lines.filter((l) => l.startsWith("BAD"));
+  assert.equal(judge(withSheet(wallet, "S19.5")).ok, true, bad(judge(withSheet(wallet, "S19.5"))).join("\n"));
+  for (const [rec, state] of [[wallet, "S2.1"], [wallet, null], [prf, "S19.5"]]) {
+    const v = judge(withSheet(rec, state));
+    assert.equal(v.ok, false);
+    for (const width of ["390", "1440"]) assert.ok(bad(v).some((l) => l.startsWith(`BAD ${rec.run} @${width} the sign-in sheet closed (1`)), `${rec.run} ${state} @${width}: ${bad(v).join("\n")}`);
+  }
+});
