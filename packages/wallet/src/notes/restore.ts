@@ -53,6 +53,17 @@ import { refKey, type Leaf, type NoteRecord, type NoteState, type NoteStore } fr
 export const RESTORE_GAP = 10_000;
 /** The device lanes: a device names only deposit indices ≡ d (mod 8) (wallet.md l.249-250). */
 export const RESTORE_LANES = 8;
+
+/**
+ * The seed opened for one use only: `use` runs on it and it is zeroed after (the signing page opens it under the seed
+ * lock for that use alone, so a restore's reads never hold the lock; card wallet-restore-id-reader-wired, review P2-2).
+ * `use` is synchronous: nothing of the seed outlives it.
+ */
+export type SeedUse = <T>(use: (seed64: Uint8Array) => T) => Promise<T>;
+/** `use` on the seed: a SeedUse opens it for that use; a seed given as bytes is the caller's to hold and zero. */
+export function withSeed<T>(seed: Uint8Array | SeedUse, use: (seed64: Uint8Array) => T): Promise<T> {
+  return typeof seed === "function" ? seed(use) : Promise.resolve().then(() => use(seed));
+}
 const U32 = 0xffffffff;
 const CHAIN_TAGS = /* @__PURE__ */ Object.keys(CHAINS) as Chain[];
 
