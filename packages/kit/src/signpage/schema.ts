@@ -150,6 +150,9 @@ const trigger = obj({ kind: orderKind, pool: str, venue: str, direction: oneOf([
 /** What any op may carry beside its stage (messages.ts OpDetail; card kit-portfolio-reads, kit 1.9): each optional and
  * checked by type. */
 const OP_DETAIL = { created_ms: uint, chain, token: str, units: dec, amount_usd: dec };
+/** A pool deposit's: no amount_usd, as before kit 1.9 (the pool's balance is state.pools', never a credited amount on
+ *  the op), and its chain its own required field. */
+const { amount_usd: _poolNoUsd, chain: _poolOwnChain, ...POOL_OP_DETAIL } = OP_DETAIL;
 const op = (kind: SignpageSchema, stages: readonly string[], extra: Record<string, SignpageSchema> = {}) =>
   obj({ id: str, kind, stage: oneOf(stages), txs }, { ...OP_DETAIL, ...extra });
 const errorCode: SignpageSchema = (v) => typeof v === "string" && /^[a-z0-9_.-]{1,64}$/.test(v);
@@ -177,7 +180,7 @@ const poolDepositFactsFit = (v: unknown): boolean => {
   return true;
 };
 const poolDepositOp: SignpageSchema = (v) =>
-  obj({ id: str, kind: lit("pool_deposit"), chain: poolChain, stage: oneOf(POOL_DEPOSIT_STAGES), txs }, { ...OP_DETAIL, refunded: bool, since_ms: uint })(v) && poolDepositFactsFit(v);
+  obj({ id: str, kind: lit("pool_deposit"), chain: poolChain, stage: oneOf(POOL_DEPOSIT_STAGES), txs }, { ...POOL_OP_DETAIL, refunded: bool, since_ms: uint })(v) && poolDepositFactsFit(v);
 const depositConfirm: SignpageSchema = (v) => obj({ stage: oneOf(DEPOSIT) }, DEPOSIT_FACTS)(v) && depositFactsFit(v);
 
 /** The asset each chain's pool holds: the Solana pool wrapped SOL, the EVM pools native ETH, the NEAR vault USDC. */

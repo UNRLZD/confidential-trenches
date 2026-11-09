@@ -453,7 +453,7 @@ export type OrderState = "SIGNED" | "ARMED" | "FILLED" | "CANCELLED" | "DEAD";
  */
 export type Operation = (
   | ({ readonly id: string; readonly kind: "deposit"; readonly stage: DepositStage; readonly txs: readonly TxRef[] } & DepositFacts)
-  | ({ readonly id: string; readonly kind: "pool_deposit"; readonly chain: PoolChain; readonly stage: PoolDepositStage; readonly txs: readonly TxRef[] } & PoolDepositFacts)
+  | ({ readonly id: string; readonly kind: "pool_deposit"; readonly chain: PoolChain; readonly stage: PoolDepositStage; readonly txs: readonly TxRef[]; readonly amount_usd?: never } & PoolDepositFacts)
   | { readonly id: string; readonly kind: "withdraw"; readonly stage: WithdrawStage; readonly txs: readonly TxRef[] }
   | { readonly id: string; readonly kind: "buy" | "sell"; readonly stage: TradeStage; readonly txs: readonly TxRef[]; readonly code?: ErrorCode }
   | { readonly id: string; readonly kind: "hop"; readonly stage: HopStage; readonly txs: readonly TxRef[] }
@@ -470,7 +470,8 @@ export type Operation = (
  *   deposit's chain is its own required field);
  * - units: the token amount a sell asked to sell, in the token's whole units at its own decimals;
  * - amount_usd: the op's size in USD, a decimal string, only when the device knows it exactly (a trade-box buy's USDC
- *   spend; a deposit's is its own fact, on "done" only, DepositFacts).
+ *   spend; a deposit's is its own fact, on "done" only, DepositFacts; a pool deposit never carries one, its money is
+ *   state.pools').
  * Amounts, a chain and a token only: never a key, the 12 words, a wallet or which note is whose.
  */
 export type OpDetail = {

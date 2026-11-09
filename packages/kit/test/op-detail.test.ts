@@ -1,7 +1,8 @@
 // What an op carries beside its stage (card kit-portfolio-reads, kit 1.9): created_ms, chain, token, units and
 // amount_usd, additive and optional on every op kind, so an app draws Activity from the kit alone. Absent is still
 // valid (a page of an earlier release, a record from before them); a value of the wrong type is refused; a deposit's
-// amount_usd keeps its own rule (on "done" only), and a pool deposit's chain stays required and one of its pools'.
+// amount_usd keeps its own rule (on "done" only), a pool deposit's chain stays required and one of its pools', and a
+// pool deposit carries no amount_usd, as before 1.9 (signpage-client.test.mjs BAD_POOL: its money is state.pools').
 //   node --test test/op-detail.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -40,12 +41,16 @@ test("every op kind with no detail is still a valid state", () => {
 test("every op kind carries each detail, and all of them together", () => {
   for (const op of OPS) {
     for (const [k, v] of Object.entries(DETAIL)) {
-      // a pool deposit's chain is its own, a pool's; a deposit's amount_usd is its done fact
+      // a pool deposit's chain is its own, a pool's, and it never carries a USD amount (its money is state.pools');
+      // a deposit's amount_usd is its done fact
       if (op.kind === "pool_deposit" && k === "chain") continue;
-      assert.equal(ok({ ...op, [k]: v }), true, `${op.kind} ${k}`);
+      assert.equal(ok({ ...op, [k]: v }), !(op.kind === "pool_deposit" && k === "amount_usd"), `${op.kind} ${k}`);
     }
     const all: Record<string, unknown> = { ...op, ...DETAIL };
-    if (op.kind === "pool_deposit") all.chain = "base";
+    if (op.kind === "pool_deposit") {
+      all.chain = "base";
+      delete all.amount_usd;
+    }
     assert.equal(ok(all), true, `${op.kind} all`);
   }
   const typed: Operation = { id: "s2", kind: "sell", stage: "filled", txs: [], created_ms: 1, chain: "base", token: "0xabc", units: "1.5" };
