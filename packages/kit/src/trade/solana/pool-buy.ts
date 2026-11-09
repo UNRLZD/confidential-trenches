@@ -933,13 +933,14 @@ export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, S
   if (!Array.isArray(providers) || providers.length !== 2 || solanaSameProvider(providers[0], providers[1])) throw new Error("two different providers are needed");
   if (!SOLANA_POOL_BUY_VENUES.includes(kind)) throw new Error(`no such venue ${String(kind).slice(0, 40)}`);
   const at = kind === "pump-curve" ? PUMP_GLOBAL : AMM_GLOBAL_CONFIG;
+  const name = kind === "pump-curve" ? "pump Global" : "PumpSwap GlobalConfig";
   const reads = await Promise.all(providers.map((rpc) => Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [[at], { encoding: "base64", commitment: "finalized" }]))));
   const globals = reads.map((r) => {
     const g = solanaParseAccountsAnswer(r, 1)?.accounts[0];
-    if (!g) throw new Error(`a provider's answer is not the ${kind} venue's global account`);
+    if (!g) throw new Error(`a provider's answer is not ${name}`);
     return g;
   });
-  if (globals[0]!.owner !== globals[1]!.owner || base64.encode(globals[0]!.data) !== base64.encode(globals[1]!.data)) throw new Error(`the providers disagree on the ${kind} venue's global account`);
+  if (globals[0]!.owner !== globals[1]!.owner || base64.encode(globals[0]!.data) !== base64.encode(globals[1]!.data)) throw new Error(`the providers disagree on ${name}`);
   return solanaPoolTableVenueOf(kind, globals[0]!);
 }
 
