@@ -81,6 +81,10 @@ test("planted: a comment with a quote inside an import or export list hides noth
     put("a.ts", 'export {\n  // A\'s list, with a quote\n  x,\n} from "./b.ts";\nimport {\n  /* it\'s "here" */ y,\n} from "./c.ts";\nexport type {\n  // "z"\n  Z,\n} from "./d.ts";\n');
     for (const f of ["b.ts", "c.ts", "d.ts"]) put(f, "export const x = 1, y = 1;\nexport type Z = 1;\n");
     assert.deepEqual(closure(root, ["a.ts"], ["a.ts", "b.ts", "c.ts", "d.ts"]), ["a.ts", "b.ts", "c.ts", "d.ts"]);
+    // the raw text is read too: a template literal over lines with "/*" in it reads as a comment to withoutComments, which
+    // then loses every import after it; closure still finds them
+    put("t.ts", 'const t = `one\ntwo /* not a comment\n`;\nimport { x } from "./b.ts";\n');
+    assert.deepEqual(closure(root, ["t.ts"], ["t.ts", "b.ts"]), ["b.ts", "t.ts"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
