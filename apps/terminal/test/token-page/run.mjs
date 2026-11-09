@@ -543,7 +543,7 @@ try {
             check(rows.length === TAPE_COUNT, `${tag}: ${rows.length} trade rows, want ${TAPE_COUNT}`);
             const t0 = tape(row.price_usd)[0];
             const want0 = phone ? ["S", `$${Number(t0.usd).toFixed(2)}`] : ["Sell", `$${Number(t0.usd).toFixed(2)}`];
-            check(rows[0] && rows[0].side === t0.side && rows[0].cells[1] === want0[0] && rows[0].cells.includes(want0[1]) && rows[0].cells.at(-1) === t0.trader, `${tag}: the first trade row reads ${JSON.stringify(rows[0])}`);
+            check(rows[0] && rows[0].side === { b: "buy", s: "sell" }[t0.side] && rows[0].cells[1] === want0[0] && rows[0].cells.includes(want0[1]) && rows[0].cells.at(-1) === t0.trader, `${tag}: the first trade row reads ${JSON.stringify(rows[0])}`);
             check((await f.locator(`${lp} [data-testid="trades-heads"] [data-col="mc"]`).count()) === (phone ? 0 : 1), `${tag}: the MC column ${phone ? "drawn on the phone" : "missing"}`);
           } else {
             const empty = await f.locator(`${lp} [data-testid="lower-empty"]`).textContent({ timeout: 8_000 }).catch(() => null);
