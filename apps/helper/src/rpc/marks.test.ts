@@ -137,7 +137,9 @@ test("the start check asks A and B the exact scan, both mark sizes, and prints s
     const b = JSON.parse(s.body);
     assert.equal(b.method, "getProgramAccounts");
     assert.equal(b.params[0], PROGRAM);
-    assert.deepEqual(Object.keys(b.params[1]).sort(), ["commitment", "encoding", "filters", "withContext"]);
+    // the wallet lister's exact request: the addresses alone (solana-restore.ts solanaMarksListed)
+    assert.deepEqual(Object.keys(b.params[1]).sort(), ["commitment", "dataSlice", "encoding", "filters", "withContext"]);
+    assert.deepEqual(b.params[1].dataSlice, { offset: 0, length: 0 });
   }
   assert.ok(lines.some((l) => /SOLANA_RPC_URL_QUICKNODE size 13: HTTP 200, slot 467400178, 0 account\(s\), sha256 [0-9a-f]{16}/.test(l)), lines.join("\n"));
   assert.deepEqual(secretsIn(lines), []);

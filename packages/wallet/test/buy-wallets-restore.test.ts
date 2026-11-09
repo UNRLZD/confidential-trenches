@@ -54,8 +54,9 @@ type Chain = { accounts: Map<string, Uint8Array>; slot: number; marks: Map<strin
 function rpc(c: Chain, url: string): SolanaRpc {
   const f = async (method: string, params: readonly unknown[]): Promise<unknown> => {
     const ctx = { slot: c.slot };
+    // a page, or a listed mark read by its address (solanaMarksListed: the pair reads every mark the lister names)
     if (method === "getMultipleAccounts")
-      return { context: ctx, value: (params[0] as string[]).map((a) => (c.accounts.has(a) ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(c.accounts.get(a)!), "base64"] } : null)) };
+      return { context: ctx, value: (params[0] as string[]).map((a) => { const d = c.accounts.get(a) ?? c.marks.get(a); return d !== undefined ? { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(d), "base64"] } : null; }) };
     if (method === "getProgramAccounts") {
       const size = (params[1] as { filters: { dataSize: number }[] }).filters[0]!.dataSize;
       return { context: ctx, value: [...c.marks].filter(([, b]) => b.length === size).map(([pubkey, b]) => ({ pubkey, account: { owner: PROGRAM, lamports: 1, executable: false, rentEpoch: 0, data: [base64.encode(b), "base64"] } })) };
