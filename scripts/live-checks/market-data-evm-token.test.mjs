@@ -1,7 +1,8 @@
 // node --test scripts/live-checks/market-data-evm-token.test.mjs: the live check replays recorded answers
 // (market-data-evm-token.answers.json). good and good_cold: apps/helper at card/market-data-evm-token run on a Mac
 // against the real GeckoTerminal, each chain's lists the deployed helper's: PASS. bad_not_deployed: the deployed helper
-// before this card, 404 on the token and holders of both chains: FAIL. Made from the good answer: a page missing a
+// before this card, 404 on the token and holders of both chains: FAIL. bad_holders_429: the deployed helper at ed0f714a
+// (14:54Z), base's holders 429 behind the GeckoTerminal budget (card evm-holders-never-starve): FAIL. Made from the good answer: a page missing a
 // field, a row with an extra field, the other chain's tag, a launchpad other than the lists', a Risk field not a Field,
 // holders missing `top_bps`, an unlisted address answered 200, a stale read and no CORS echo: each FAIL.
 import assert from "node:assert/strict";
@@ -73,6 +74,13 @@ test("bad_not_deployed: the deployed helper before this card (404 on both reads)
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${chain}: GET /v1/market/token`) && l.endsWith("answers 404")), chain);
     assert.ok(bad(r).some((l) => l.startsWith(`BAD ${chain}: GET /v1/market/holders`) && l.endsWith("answers 404")), chain);
   }
+});
+
+// card evm-holders-never-starve: the deployed helper at ed0f714a, 14:54Z, answered base's holders 429 rate_limited
+test("bad_holders_429: a holders read the budget refused (429) FAILs, naming it", async () => {
+  const r = await run(A.bad_holders_429.run);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.startsWith("BAD base: GET /v1/market/holders") && l.endsWith("answers 429")), bad(r).join("\n"));
 });
 
 test("made from the good answer: each fault FAILs, naming it", async () => {
