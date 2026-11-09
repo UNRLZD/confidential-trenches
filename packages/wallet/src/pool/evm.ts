@@ -40,12 +40,12 @@
 //   cache take the leaves up to the finalized anchor. A mismatch (between the two RPCs' logs, or with the views) while
 //   the newest anchor's height holds another hash on either RPC is a reorg under the read: a retry, never an answer.
 // - trees(beforeMs), duty 2 of pool.ts: refused (a retry) until the anchor's block time reached beforeMs, so every
-//   leaf under the cut is in. The cut keeps the leaves whose block's timestamp * 1000 is below beforeMs (block times
-//   read on both RPCs, by hash). The epoch root is the root the pool recorded with that block's time: the pool keeps
+//   leaf under the cut is in. The cut keeps the leaves whose block's timestamp * 1000 is below beforeMs. The pool keeps
 //   every root with the block time it was made at (src/State.sol:63-65, 172, 188), and the tap accepts a root only if
-//   that time is set (src/State.sol:198-209), so stateRootTimes(root) and labelRootTimes(labelRoot) read at the
-//   anchor on both RPCs must equal the cut's last leaf's block time. That is the pool's own record of the epoch root,
-//   readable without the cut block's historical state.
+//   that time is set (src/State.sol:198-209), so each leaf's block time is read as stateRootTimes of the root of the
+//   leaves up to it, at the anchor on both RPCs (leafTime: head state, never an old block's header, which a keyless
+//   seat refuses past its window), and labelRootTimes(labelRoot) must equal the time of the cut's last label's leaf.
+//   That is the pool's own record of the epoch root, readable without the cut block's historical state.
 // - A lagging RPC is a retry, never an answer: a tag block below beforeMs, an anchor block one RPC does not know yet, a
 //   pool state call at a hash it does not know or no longer keeps (PRUNED), a log page past its own head (HEAD_LAG),
 //   or one RPC's logs a strict prefix of the other's lacking only logs past the finalized anchor (its log index a
@@ -1384,7 +1384,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   const pager = evmPoolLogPager();
   const poolFilter: EvmLogFilter = { address: pool, topics: [[TOPIC_DEPOSITED, TOPIC_WITHDRAWN, TOPIC_BOUGHT]] };
   const poolDecode: EvmLogDecode<Ev> = (raw, from, to, what) => decodeLog(raw, pool, from, to, what);
-  const times = new Map<string, bigint>();
+  // each root's time as the pool keeps it (leafTime), within one trees() call
+  const rootTimes = new Map<bigint, bigint>();
   let turn: Promise<unknown> = Promise.resolve();
   const serial = <T>(f: () => Promise<T>): Promise<T> => {
     const r = turn.then(f, f);
@@ -1401,30 +1402,42 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     return x;
   }
 
-  /** A block's timestamp, read by hash on both RPCs (kept: a hash's block never changes). */
-  async function timeOf(h: string, n: bigint, signal?: AbortSignal): Promise<bigint> {
-    const known = times.get(h);
+  /**
+   * The time of the block of the k-th leaf of `events` (k from 1), as the pool keeps it: stateRootTimes of the root of
+   * its first k leaves, read at the anchor `h` on both RPCs (src/State.sol:63-65, 172: every root the pool made, with
+   * its block's time). Head state, which every seat serves, never an old block's header: a keyless seat refuses a block
+   * past its window by hash (base-rpc.publicnode.com, HTTP 403 "Archive requests require a personal token" about 2.5M
+   * blocks back, read 2026-11-09 19:30Z), and both the epoch cut and a hold weeks old reach such blocks (review of
+   * 39a4c67a, P2). Zero, a root the pool never made, is refused: the round's trees are the pool's, so each of their
+   * first-k roots is one it made. `prefix` holds the roots of `events` so far, built once a call.
+   */
+  async function leafTime(events: readonly Ev[], prefix: bigint[], k: number, h: string, signal?: AbortSignal): Promise<bigint> {
+    if (prefix.length < k) {
+      const t = new VaultTree(events.slice(0, prefix.length).map((e) => e.state));
+      for (let i = prefix.length; i < k; i++) {
+        t.append([events[i]!.state]);
+        prefix.push(t.root!);
+      }
+    }
+    const root = prefix[k - 1]!;
+    const known = rootTimes.get(root);
     if (known !== undefined) return known;
-    const [x, y] = await both(rpcs, (rpc, k, sig) => poolRead(`rpc ${k} block ${h}`, async () => blockOf(await rpc("eth_getBlockByHash", [h, false]), `rpc ${k} block ${h}`), sig, sleep), signal);
-    if (x === null || y === null) return lag(`rpc ${x === null ? 0 : 1} does not know block ${h} yet`);
-    if (x.hash !== h || y.hash !== h || x.number !== n || y.number !== n) throw new Error(`block ${h}: not block ${n}`);
-    if (x.timestamp !== y.timestamp) throw new Error(`block ${h}: the two RPCs differ on its time`);
-    times.set(h, x.timestamp);
-    return x.timestamp;
+    const t = await agreed(VIEWS.stateRootTimes + hex(word(root)), h, "stateRootTimes(root)", signal);
+    if (t !== 0n) rootTimes.set(root, t);
+    if (t === 0n) throw new Error(`the state root of the pool's first ${k} leaves (to block ${events[k - 1]!.block}) is not one the pool made`);
+    return t;
   }
 
-  /** Whether the held leaves are the pool's first ones (review of 7eb8cfb9, P2-1): their state root's and label root's
-   *  times at the anchor, on both RPCs, are those of the blocks of the last held leaf and label. */
-  async function heldProven(h: string, signal?: AbortSignal): Promise<boolean> {
+  /** Whether the held leaves are the pool's first ones (review of 7eb8cfb9, P2-1; of 39a4c67a, P2): the roots of the
+   *  held leaves and of their labels are roots the pool made, on both RPCs at the anchor (a root binds every leaf and
+   *  its order), with no block header read. A hold with no leaf is the pool's only while the pool has none. */
+  async function heldProven(h: string, size: bigint, signal?: AbortSignal): Promise<boolean> {
+    if (held.length === 0) return size === 0n;
     const labels = held.filter((e) => e.label !== null);
     if (labels.length === 0) return false;
     const st = await agreed(VIEWS.stateRootTimes + hex(word(new VaultTree(held.map((e) => e.state)).root!)), h, "stateRootTimes of the held root", signal);
     const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(labels.map((e) => e.label!)).root!)), h, "labelRootTimes of the held label root", signal);
-    if (st === 0n || lt === 0n) return false;
-    const last = held[held.length - 1]!, lastLabel = labels[labels.length - 1]!;
-    if (st !== (await timeOf(last.blockHash, last.block, signal)) || lt !== (await timeOf(lastLabel.blockHash, lastLabel.block, signal))) return false;
-    writtenAt = st;
-    return true;
+    return st !== 0n && lt !== 0n;
   }
 
   /**
@@ -1465,12 +1478,14 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     const labelRoot = await agreed(VIEWS.currentLabelRoot, anchor.hash, "currentLabelRoot()", signal);
     const labelSize = await agreed(VIEWS.currentLabelTreeSize, anchor.hash, "currentLabelTreeSize()", signal);
     if (fromHold) {
-      // the held part proven, never judged by its size (review of 7eb8cfb9, P2-1): the pool keeps the time of every
+      // the held part proven, never judged by its size (review of 7eb8cfb9, P2-1): the pool keeps a time for every
       // root it made (State.sol:63-65, 172, 188), head state that is never pruned, so the roots of the held leaves and
-      // labels have the time of the last one's block only if the held part is the pool's own first leaves. One that is
-      // not (a leaf missing, added, changed or moved) is dropped, its record cleared, and the pool read from its deploy
-      // block. A hold with no label proves nothing and goes the same way (a pool's first leaf is a deposit).
-      if (!(await heldProven(anchor.hash, signal))) {
+      // labels have one only if the held leaves are the pool's own first ones, in order. A hold whose leaves are not
+      // (one missing, added, changed or moved among them) is dropped, its record cleared, and the pool read from its
+      // deploy block; so is one with leaves and no label (a pool's first leaf is a deposit). It does not prove that no
+      // leaf is missing after the last held one and up to the hold's `to`: such a hold is kept and its rounds refuse,
+      // and only a round whose trees were the pool's ever writes one.
+      if (!(await heldProven(anchor.hash, size, signal))) {
         const bad = heldTo;
         held = [];
         heldTo = writtenTo = a.pin.fromBlock - 1n;
@@ -1633,13 +1648,12 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
     return { fin, anchor, events, stateTree, labelTree };
   }
 
-  /** The number of events whose block's timestamp * 1000 is below beforeMs: times never go back, so a search. */
-  async function cutOf(events: Ev[], beforeMs: bigint, signal?: AbortSignal): Promise<number> {
+  /** The number of events whose block's time * 1000 (leafTime) is below beforeMs: times never go back, so a search. */
+  async function cutOf(events: Ev[], prefix: bigint[], beforeMs: bigint, h: string, signal?: AbortSignal): Promise<number> {
     let lo = 0, hi = events.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      const e = events[mid]!;
-      if ((await timeOf(e.blockHash, e.block, signal)) * 1000n < beforeMs) lo = mid + 1;
+      if ((await leafTime(events, prefix, mid + 1, h, signal)) * 1000n < beforeMs) lo = mid + 1;
       else hi = mid;
     }
     return lo;
@@ -1653,18 +1667,22 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const r = await round(signal);
         // every leaf under the cut is in only once the anchor's time reached beforeMs; later blocks' times are too
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
-        const n = await cutOf(r.events, beforeMs, signal);
+        // a root's time is read again each call: a reorg may make the same leaves' roots in another block
+        rootTimes.clear();
+        const prefix: bigint[] = [];
+        const n = await cutOf(r.events, prefix, beforeMs, r.anchor.hash, signal);
         const cut = r.events.slice(0, n);
         const labels = cut.flatMap((e) => (e.label === null ? [] : [e]));
         if (n === 0 || labels.length === 0) throw new Error(`no leaf before ${beforeMs}`);
         const stateTree = n === r.events.length ? r.stateTree : new VaultTree(cut.map((e) => e.state));
         const labelTree = labels.length === r.labelTree.size ? r.labelTree : new VaultTree(labels.map((e) => e.label!));
-        // the pool's own record of each epoch root: the time of the block that made it (State.sol:63-65, 172, 188)
-        const last = cut[n - 1]!, lastLabel = labels[labels.length - 1]!;
-        const st = await agreed(VIEWS.stateRootTimes + hex(word(stateTree.root!)), r.anchor.hash, "stateRootTimes(root)", signal);
-        if (st !== (await timeOf(last.blockHash, last.block, signal))) throw new Error(`the state root built from the cut is not the pool's root of block ${last.block}`);
+        // the pool's own record of each epoch root: the time of the block that made it (State.sol:63-65, 172, 188); the
+        // cut's state root is its n-th leaf's (read by the search, leafTime), its label root the last label's leaf's
+        const lastLabel = labels[labels.length - 1]!;
+        const st = await leafTime(r.events, prefix, n, r.anchor.hash, signal);
         const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), r.anchor.hash, "labelRootTimes(root)", signal);
-        if (lt !== (await timeOf(lastLabel.blockHash, lastLabel.block, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
+        const labelAt = cut.lastIndexOf(lastLabel) + 1;
+        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, r.anchor.hash, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },

@@ -118,7 +118,11 @@ type Over = {
   hashOf?: (n: number) => string;
   ts?: (n: number) => bigint;
   log?: string[];
+  /** a keyless seat's window: a block below it, by number or by hash, refused as base-rpc.publicnode.com refuses it
+   *  (HTTP 403 "Archive requests require a personal token", read 2026-11-09 19:30Z) */
+  windowFrom?: number;
 };
+const ARCHIVE_403 = "HTTP 403: RPC error -32602: Archive requests require a personal token";
 /** A block hash that is its number + 1 (a long chain's hashOf), as that number; -1 for any other. */
 const numberIn = (h: string): number => (/^0x0{40}[0-9a-f]{24}$/.test(h) ? Number(BigInt(h) - 1n) : -1);
 function rpc(c: Chain, o: Over = {}): EvmRpc {
@@ -136,11 +140,13 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
         if (at === "finalized") return block(o.finalized ? o.finalized(fin++) : c.finalized);
         if (at === "latest") return o.latestBlock ? o.latestBlock() : block(o.latest ? o.latest(lat++) : c.head);
         const n = Number(BigInt(at));
+        if (o.windowFrom !== undefined && n < o.windowFrom) throw new Error(ARCHIVE_403);
         if (o.unknown?.(n, byNum++)) return null;
         return block(n);
       }
       case "eth_getBlockByHash": {
         const guess = numberIn(params[0] as string);
+        if (o.windowFrom !== undefined && guess >= 0 && guess < o.windowFrom) throw new Error(ARCHIVE_403);
         if (guess >= 0 && guess <= c.head && hashOf(guess) === params[0]) return block(guess);
         for (let n = 0; n <= c.head; n++) if (hashOf(n) === params[0]) return block(n);
         return null;
@@ -276,10 +282,12 @@ test("another root on one RPC, or a root the pool never recorded at the cut's ti
   await assert.rejects(sync(pair(c, c, off("currentLabelRoot"), {})).trees(after(25)), /differ on currentLabelRoot\(\)/);
   await assert.rejects(sync(pair(c, c, off("currentTreeSize"), off("currentTreeSize"))).trees(after(25)), /state tree from the logs/);
   await assert.rejects(sync(pair(c, c, off("currentLabelRoot"), off("currentLabelRoot"))).trees(after(25)), /label tree from the logs/);
-  await assert.rejects(sync(pair(c, c, off("stateRootTimes"), off("stateRootTimes"))).trees(after(25)), /the state root built from the cut is not the pool's root of block 20/);
+  // a leaf's time is the pool's own root time (review of 39a4c67a, P2): a root it never made (time 0) is refused, a
+  // label root whose time is not its leaf's is refused, and one RPC's root time apart from the other's is refused
+  const unmade = { view: (n: string, v: bigint) => (n === "stateRootTimes" ? 0n : v) };
+  await assert.rejects(sync(pair(c, c, unmade, unmade)).trees(after(25)), /the state root of the pool's first \d+ leaves \(to block \d+\) is not one the pool made/);
   await assert.rejects(sync(pair(c, c, off("labelRootTimes"), off("labelRootTimes"))).trees(after(25)), /the label root built from the cut is not the pool's root of block 15/);
-  // one RPC's time of a leaf's block differs
-  await assert.rejects(sync(pair(c, c, {}, { ts: (n) => T0 + 2n * BigInt(n) + (n === 15 ? 1n : 0n) })).trees(after(25)), /differ on its time|hold different blocks/);
+  await assert.rejects(sync(pair(c, c, {}, off("stateRootTimes"))).trees(after(25)), /the two RPCs differ on stateRootTimes\(root\)/);
 });
 
 test("a lagging RPC is a retry, then the answer; one that stays behind is refused", async () => {
@@ -1049,7 +1057,7 @@ test("card evm-pool-sync-wide-pages: a refusal halves only that provider's page;
   assert.ok(p3.every((s) => s >= 100_000), `the lottery's pages: ${p3}`);
 });
 
-test("card evm-pool-sync-wide-pages: a held sync reads only the blocks after its last one; a held part the pool's views refuse is dropped and read again from the deploy block", async () => {
+test("card evm-pool-sync-wide-pages: a held sync reads only the blocks after its last one; a held part the pool's root times do not prove is dropped and read again from the deploy block", async () => {
   // the hold inline, as the device's store would keep it
   const hold = () => {
     let h: unknown = null;
@@ -1182,11 +1190,10 @@ test("X2 a block that is gone at the anchor's height when a mismatch is checked 
   assert.deepEqual(waits, [2000]);
 });
 
-test("X3-X5 an anchor or a leaf's block answered with another time or another number is refused", async () => {
+test("X3-X5 an anchor answered with another time or another number is refused (a leaf's block is never read: its time is the pool's root time, review of 39a4c67a, P2)", async () => {
   const c = C3();
   await assert.rejects(sync(pair(c, c, {}, { ts: (n) => T0 + 2n * BigInt(n) + (n === 90 ? 1n : 0n) })).trees(after(25)), /hold different blocks at 90/);
   await assert.rejects(sync(pair(c, c, {}, { numberOf: (n) => (n === 90 ? 91 : n) })).trees(after(25)), /hold different blocks at 90/);
-  await assert.rejects(sync(pair(c, c, { numberOf: (n) => (n === 15 ? 16 : n) }, { numberOf: (n) => (n === 15 ? 16 : n) })).trees(after(25)), /not block 15/);
 });
 
 test("X6, X7, X14, X22 a log outside its page, two hashes in one block, three topics, a leaf at p: refused", async () => {
@@ -1352,9 +1359,10 @@ test("hex in either case: a case-only difference never fails agreement, any othe
   const flip = (l: Record<string, unknown>[]) => l.map((x, i) => (i === 2 ? { ...x, data: `${(x.data as string).slice(0, 65)}${(x.data as string)[65] === "1" ? "2" : "1"}${(x.data as string).slice(66)}` } : x));
   const [a2, b2] = pair(c, c, rh, { ...rh, logs: flip });
   await assert.rejects(s([drpc(a2), b2]), /the two RPCs differ at log 2/);
-  // a hash that differs by more than its case is another block: refused as in lower case, word for word
-  const [a3, b3] = pair(c, c, rh, { ...rh, hashOf: (n) => (n === 15 ? h32("other 15") : c.hashOf(n)) });
-  const lowerWhy = await s([a3, b3]).then(() => assert.fail("another block 15 read"), (e: Error) => e.message);
+  // a hash that differs by more than its case is another block: refused as in lower case, word for word (the newest
+  // block: a leaf's block is never read, review of 39a4c67a, P2)
+  const [a3, b3] = pair(c, c, rh, { ...rh, hashOf: (n) => (n === 100 ? h32("other 100") : c.hashOf(n)) });
+  const lowerWhy = await s([a3, b3]).then(() => assert.fail("another block 100 read"), (e: Error) => e.message);
   await assert.rejects(s([drpc(a3), b3]), (e: Error) => e.message === lowerWhy);
 });
 
@@ -1445,7 +1453,6 @@ const READS: Read[] = [
   { name: "the tree sync's finalized anchor", side: 1, hit: byNumber("finalized"), what: /^rpc 1 finalized block: /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's view (currentRoot)", side: 1, hit: viewCall("currentRoot()"), what: /^rpc 1 currentRoot\(\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's root time view (stateRootTimes)", side: 1, hit: viewCall("stateRootTimes(uint256)"), what: /^rpc 1 stateRootTimes\(root\): /, run: (r, s) => syncOn(r, s).trees(after(25)) },
-  { name: "the tree sync's block time by hash", side: 1, hit: (m) => m === "eth_getBlockByHash", what: /^rpc 1 block 0x[0-9a-f]{64}: /, run: (r, s) => syncOn(r, s).trees(after(25)) },
   { name: "the tree sync's depthAt block on its own chain", side: 1, hit: byNumber(q(30)), what: /^rpc 1 block 30: /, run: (r, s) => syncOn(r, s).depthAt(30n, undefined, c3.hashOf(30)) },
   { name: "evmEpochBlock's search on rpc 0", side: 0, hit: byNumber(q(99)), what: /^rpc 0 block 99: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
   { name: "evmEpochBlock's read of the first block on both", side: 1, hit: byNumber(q(41)), what: /^rpc 1 block 41: /, run: (r, s) => evmEpochBlock(r, START, undefined, s) },
@@ -2265,7 +2272,7 @@ test("review P3-1: a source one block behind (its logs a strict prefix, short on
   assert.deepEqual(waits, [2000]);
 });
 
-test("review P3-2: a held part is kept when the sources merely fail; it is dropped only when a source read every block and did not make the pool's trees", async () => {
+test("review P3-2: a proven held part is kept when the sources fail, never read again from the deploy block", async () => {
   const c = anyChain();
   const hold = evmMemoryHold();
   await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: hold, ...noWait }).events();
@@ -2563,4 +2570,51 @@ test("review of 7eb8cfb9, P3-4: the hold's record is rewritten with new leaves o
   await s.events();
   assert.equal(writes, 3);
   assert.equal(box.record()?.to, BigInt(c.finalized));
+});
+
+// the delta review of 39a4c67a, P2: a keyless seat refuses a block past its window by hash; no path reads one
+const windowedSeats = (c: Chain, log: string[] = []): [EvmRpc, EvmRpc] => [
+  rpc(c, { url: "https://publicnode.example", cap: 50_000, log, windowFrom: ANY_HEAD - 5_000 }),
+  rpc(c, { url: "https://pocket.example", cap: 10_000, logs: pocketPruned }),
+];
+test("review of 39a4c67a, P2: a whole hold whose leaves are older than a seat's window is proven by the pool's roots alone, never an old block's header", async () => {
+  const c = anyChain();
+  const box = storedHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  const full = box.record()!;
+  const log: string[] = [];
+  const r = await evmTreeSync({ rpcs: windowedSeats(c, log), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  assert.ok(!log.some((l) => l.startsWith("eth_getBlockByHash")), "no block read by hash");
+  assert.ok(!log.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), "the hold kept, never read again from the deploy block");
+  assert.deepEqual(box.record()!.events.map((e) => e.bytes), full.events.map((e) => e.bytes));
+});
+
+test("review of 39a4c67a, P2: an epoch cut over leaves older than a seat's window reads their times from the pool's roots, for a device with no hold too", async () => {
+  const c = anyChain();
+  const log: string[] = [];
+  const want = await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], ...noWait }).trees(after(ANY_HEAD - 20));
+  // a cut between two old leaves (blocks 1,100,000 and 1,200,000) and one after every leaf
+  for (const at of [1_150_000, ANY_HEAD - 20]) {
+    const got = await evmTreeSync({ rpcs: windowedSeats(c, log), pin: PIN, history: [helperSrc(c)], ...noWait }).trees(after(at));
+    if (at === ANY_HEAD - 20) assert.equal(got.stateRoot, want.stateRoot);
+    else assert.equal(got.stateTree.size, 2);
+  }
+  assert.ok(!log.some((l) => l.startsWith("eth_getBlockByHash")), "no block read by hash");
+});
+
+test("review of 39a4c67a, P3-5: a hold of a pool with no leaf yet is proven by the pool's size (0), never read again from the deploy block; once the pool has a leaf, an empty hold is not proven", async () => {
+  const c = longChain([], ANY_HEAD);
+  const box = storedHold();
+  await evmTreeSync({ rpcs: anySeats(c), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.equal(box.record()?.events.length, 0);
+  const log: string[] = [];
+  await evmTreeSync({ rpcs: anySeats(c, log), pin: PIN, history: [helperSrc(c)], held: box, ...noWait }).events();
+  assert.ok(!log.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), "an empty pool's hold kept");
+  // the same empty record on a pool that has leaves: not the pool's, dropped, the pool read from its deploy block
+  const d = anyChain();
+  const log2: string[] = [];
+  const r = await evmTreeSync({ rpcs: anySeats(d, log2), pin: PIN, history: [helperSrc(d)], held: box, ...noWait }).events();
+  assert.equal(r.events.length, 4);
+  assert.ok(log2.some((l) => l.startsWith("eth_getLogs") && l.includes('"fromBlock":"0x1"')), "an empty hold of a pool with leaves dropped");
 });
