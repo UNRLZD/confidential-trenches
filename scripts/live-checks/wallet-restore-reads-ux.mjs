@@ -27,8 +27,9 @@
 //     address and balance, never carried (card notes-plan-at-restored-index makes that note); the carry called is this
 //     one, on the scope's own U_X reads and held map;
 //   - id_held: each id NEAR read as money is read again by asset on both providers at once (the wallet's
-//     nearIdHeldReader), and named while one asset is above the kept unit a move out leaves (ID_KEEP, 1n) or the two
-//     read it apart (review P1; card restore-carries-pool-refund carries it);
+//     nearIdHeldReader: the token and what intents.near holds, on each, an asset dropped only at 0 on both), and named
+//     into step 5's own list while one asset is above the kept unit a move out leaves (ID_KEEP, 1n) or the two read it
+//     apart (review P1; card restore-carries-pool-refund carries it);
 //   - ux_pair: the restore's pair is PublicNode and Pocket's Solana gateway, each on its URL's own queue at the kit's
 //     keyless limit (10 s: 100 calls, 40 of one method), read through the follow's own reader, the deposit the follow's own;
 //   - ux_wired: the restore host's U_X reads are built from the follows' own deps (the very function their `deps` calls),
@@ -93,27 +94,48 @@ const UX_CARRY = new RegExp(
 // `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them
 const UX_NOTED = (held, ux, carry) =>
   new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\(${N}\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\1,${N}\\.has\\(\\1\\.i\\),${N}\\)`);
-// each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader
-const ID_HELD_LOOP = (d) =>
-  new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);let (${N})=await (${N})\\((${N}),\\2\\);for\\(let (${N}) of \\5\\)${N}\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\8\\}${Q}\\)\\}`);
+// each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader, into
+// step 5's own `why` (delta review 2 P3-1: a push into any other list names nothing)
+const ID_HELD_LOOP = (d, why) =>
+  new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);let (${N})=await (${N})\\((${N}),\\2\\);for\\(let (${N}) of \\5\\)${esc(why)}\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\8\\}${Q}\\)\\}`);
 // the held rule: an asset the two providers read apart, any amount of one that is not a fungible token (the token on its
 // own `T`, or a nep141 one), or one above the kept unit (the way out's ID_KEEP, 1n), is named
 const ID_HELD_RULE = (h) =>
   new RegExp(`async function ${esc(h)}\\((${N}),(${N})\\)\\{let (${N});try\\{\\3=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q}\\]\\}let (${N})=\\[\\];` +
     `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\6!==(${N})&&!\\6\\.startsWith\\(${Q}nep141:${Q}\\)\\?\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, not a fungible token [^${Q}]*${Q}\\):` +
     `\\7>1n&&\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q}\\):\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q}\\);return \\5\\}`);
-// `T`: the pool deposit network's release USDC (NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc, the network `mainnet`)
-const ID_HELD_TOKEN = (t) => new RegExp(`[,; ]${esc(t)}=(${N})\\[(${N})\\]\\.usdc;`);
+// `T`: the pool deposit network's release USDC, NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc, the table bound to the bundle's
+// NEAR_NETWORKS (its mainnet USDC its first entry; delta review 2 P3-2) and the network `mainnet`
+const NEAR_NETS = new RegExp(`[,; ](${N})=\\{mainnet:\\{usdc:${Q}17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1${Q},vault:${Q}vault\\.confidential\\.unrlzd\\.near${Q},`);
+const ID_HELD_TOKEN = (t, nets) => new RegExp(`[,; ]${esc(t)}=${esc(nets)}\\[(${N})\\]\\.usdc;`);
+// `T` given a value once in the whole bundle, so a dead `T=NEAR_NETWORKS[mainnet].usdc` beside a real one reading
+// another network is not the one the rule compares with
+const ASSIGNED = (v) => new RegExp(`[^\\w$.]${esc(v)}=(?!=)`);
 const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // step 5's head (review P2-2 of 39c5fdd7): the pass, the id reader and the held reader `H` opened on it together, so the
-// held loop's reader is this very binding, never a name looked up across the bundle; `R` the held reader's builder
+// held loop's reader is this very binding, never a name looked up across the bundle; `R` the held reader's builder;
+// groups: 1 ids, 2 why (readDepositIds' fifth parameter), 3 the pair, 4 the pass, 5 the network, 6 `H`, 7 `R`
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(${N}),${N},${N},${N}\\)\\{let (${N})=\\1\\.rpcs\\(\\),(${N})=await ${N}\\((${N}),\\2,\\1\\.opts\\?\\?\\{\\}\\),${N}=await ${N}\\(\\4,\\2,\\3,\\1\\.opts\\?\\?\\{\\}\\),(${N})=await (${N})\\(\\4,\\2,\\3,\\1\\.opts\\?\\?\\{\\}\\),`,
+  `async function ${N}\\(${N},${N},(${N}),${N},(${N}),${N}\\)\\{let (${N})=\\1\\.rpcs\\(\\),(${N})=await ${N}\\((${N}),\\3,\\1\\.opts\\?\\?\\{\\}\\),${N}=await ${N}\\(\\5,\\3,\\4,\\1\\.opts\\?\\?\\{\\}\\),(${N})=await (${N})\\(\\5,\\3,\\4,\\1\\.opts\\?\\?\\{\\}\\),`,
 );
-// the held reader: every id read on both providers at once, and each asset's two amounts taken one from each provider's map
+// the held reader: each provider's reader (`readOn`) reads the token (ft_balance_of, once U is registered on it) and adds
+// what intents.near holds (`I`), every id read on both providers at once, each asset's two amounts taken one from each
+// provider's map, and an asset left out only at 0 on both (delta review 2: P2-A the filter, P3-1 readOn's two reads)
 const ID_HELD_BOTH = (f) =>
-  new RegExp(`function ${esc(f)}\\((${N}),(${N}),(${N}),(${N})=\\{\\}\\)\\{[^]{0,1200}?let\\[(${N}),(${N})\\]=await Promise\\.all\\(\\[(${N})\\(\\2\\[0\\],(${N})\\),\\7\\(\\2\\[1\\],\\8\\)\\]\\);` +
-    `return\\[\\.\\.\\.new Set\\(\\[\\.\\.\\.\\5\\.keys\\(\\),\\.\\.\\.\\6\\.keys\\(\\)\\]\\)\\]\\.sort\\(\\)\\.map\\((${N})=>\\(\\{asset:\\9,amounts:\\[\\5\\.get\\(\\9\\)\\?\\?0n,\\6\\.get\\(\\9\\)\\?\\?0n\\]\\}\\)\\)\\.filter\\(`);
+  new RegExp(`function ${esc(f)}\\((${N}),(${N}),(${N}),(${N})=\\{\\}\\)\\{let\\{token:(${N}),retried:(${N}),blockOf:(${N})\\}=${N}\\(\\1,\\2,\\4\\),(${N})=${N}\\(\\3,\\1,\\2\\),` +
+    `(${N})=async\\((${N}),(${N})\\)=>\\{let (${N})=new Map,(${N})=\\(await \\6\\(\\10,${N}\\(\\5,${Q}storage_balance_of${Q},\\{account_id:\\11\\}\\),${Q}storage_balance_of${Q},\\8\\)\\)\\.v;` +
+    `if\\(\\13!==null&&!\\(${N}\\(\\13\\)&&typeof \\13\\.total==${Q}string${Q}&&${N}\\.test\\(\\13\\.total\\)\\)\\)throw Error\\(${Q}[^${Q}]*${Q}\\);` +
+    `\\13!==null&&\\12\\.set\\(\\5,${N}\\(\\(await \\6\\(\\10,${N}\\(\\5,${Q}ft_balance_of${Q},\\{account_id:\\11\\}\\),${Q}ft_balance_of${Q},\\8\\)\\)\\.v,${Q}[^${Q}]*${Q}\\)\\);` +
+    `for\\(let\\[(${N}),(${N})\\]of await (${N})\\(\\6,\\10,\\11,\\8\\)\\)\\12\\.set\\(\\14,\\(\\12\\.get\\(\\14\\)\\?\\?0n\\)\\+\\15\\);return \\12\\};` +
+    `return ${N}\\(\\3,\\2,\\7\\)\\.then\\(\\(\\)=>async (${N})=>\\{[^]{0,200}?let\\[(${N}),(${N})\\]=await Promise\\.all\\(\\[\\9\\(\\2\\[0\\],\\17\\),\\9\\(\\2\\[1\\],\\17\\)\\]\\);` +
+    `return\\[\\.\\.\\.new Set\\(\\[\\.\\.\\.\\18\\.keys\\(\\),\\.\\.\\.\\19\\.keys\\(\\)\\]\\)\\]\\.sort\\(\\)\\.map\\((${N})=>\\(\\{asset:\\20,amounts:\\[\\18\\.get\\(\\20\\)\\?\\?0n,\\19\\.get\\(\\20\\)\\?\\?0n\\]\\}\\)\\)` +
+    `\\.filter\\((${N})=>\\21\\.amounts\\[0\\]!==0n\\|\\|\\21\\.amounts\\[1\\]!==0n\\)\\}\\)\\}`);
+// `I`, intentsHeld: intents.near's (`X`) token list for the account, then one balance per token, each token with its own
+const INTENTS_HELD = (i) =>
+  new RegExp(`async function ${esc(i)}\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=\\(await \\1\\(\\2,(${N})\\((${N}),${Q}mt_tokens_for_owner${Q},\\{account_id:\\3\\}\\),${Q}mt_tokens_for_owner${Q},\\4\\)\\)\\.v;[^]{0,300}?` +
+    `if\\(\\5\\.length===0\\)return\\[\\];let (${N})=\\5\\.map\\((${N})=>\\9\\.token_id\\),(${N})=\\(await \\1\\(\\2,\\6\\(\\7,${Q}mt_batch_balance_of${Q},\\{account_id:\\3,token_ids:\\8\\}\\),${Q}mt_batch_balance_of${Q},\\4\\)\\)\\.v;` +
+    `if\\(!Array\\.isArray\\(\\10\\)\\|\\|\\10\\.length!==\\8\\.length\\)throw Error\\(${Q}[^${Q}]*${Q}\\);return \\8\\.map\\(\\((${N}),(${N})\\)=>\\[\\11,${N}\\(\\10\\[\\12\\],${Q}[^${Q}]*${Q}\\)\\]\\)\\}`);
+const INTENTS = (x) => new RegExp(`[,; ]${esc(x)}=${Q}intents\\.near${Q}[,;]`);
 const UX_PAIR = new RegExp(
   `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\]\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\)\\)\\]\\}` +
     `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2\\)\\{if\\(\\6!==${Q}solana${Q}\\|\\|\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\10===null\\)return null;` +
@@ -144,12 +166,15 @@ const inside = (js, head, loop) => loop.index > head.index && !js.slice(head.ind
 export function bundleFacts(index, js) {
   const read = once(UX_READ, js) ? UX_READ.exec(js) : null;
   const carry = once(UX_CARRY, js) ? UX_CARRY.exec(js) : null;
-  const loop = read ? ID_HELD_LOOP(read[10]) : null;
-  const held = loop && once(loop, js) ? loop.exec(js) : null;
   const head = once(STEP5_HEAD, js) ? STEP5_HEAD.exec(js) : null;
+  const loop = read && head ? ID_HELD_LOOP(read[10], head[2]) : null;
+  const held = loop && once(loop, js) ? loop.exec(js) : null;
   const rule = held ? ID_HELD_RULE(held[6]) : null;
   const ruled = rule && once(rule, js) ? rule.exec(js) : null;
-  const token = ruled ? ID_HELD_TOKEN(ruled[9]).exec(js) : null;
+  const nets = once(NEAR_NETS, js) ? NEAR_NETS.exec(js) : null;
+  const token = ruled && nets && once(ASSIGNED(ruled[9]), js) && once(ID_HELD_TOKEN(ruled[9], nets[1]), js) ? ID_HELD_TOKEN(ruled[9], nets[1]).exec(js) : null;
+  const both = head && once(ID_HELD_BOTH(head[7]), js) ? ID_HELD_BOTH(head[7]).exec(js) : null;
+  const intents = both && once(INTENTS_HELD(both[16]), js) ? INTENTS_HELD(both[16]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;
   const paced = pair ? PACED(pair[3]).exec(js) : null;
   const wired = pair && once(UX_ANY(pair[5]), js) && once(UX_WIRED(pair[5]), js) ? UX_WIRED(pair[5]).exec(js) : null;
@@ -158,7 +183,7 @@ export function bundleFacts(index, js) {
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
-    id_held: !!held && !!head && held[7] === head[5] && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[2]), js) && once(ID_HELD_BOTH(head[6]), js) && once(WORDS.id_held, js),
+    id_held: !!held && !!head && held[7] === head[6] && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[1]), js) && !!both && !!intents && once(INTENTS(intents[7]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };

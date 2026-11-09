@@ -873,6 +873,17 @@ test("review P1: two NEAR RPCs that read an id's holding apart stall it, whichev
   }
 });
 
+test("delta review 2 P2-A: one NEAR RPC reading 0 and the other 5 USDC stalls the id, whichever reads 0 (the held reader drops an asset only at 0 on both)", async () => {
+  const id = idOf(SOL_SCOPE, 2);
+  const usdc = NEAR_NETWORKS.mainnet.usdc;
+  for (const pair of [[0n, 5_000_000n], [5_000_000n, 0n]] as const) {
+    const n = nearPlanted(new Map([[id, pair]]));
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+    assert.equal(await w.r.auto(), "stalled", `${String(pair)}: ${JSON.stringify(w.ends)}`);
+    assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 2's id ${id} holds ${pair[0]} and ${pair[1]} of ${usdc} on NEAR's two RPCs: read again`]);
+  }
+});
+
 test("review: a U_X holding exactly the floor is carried, one rung, and the restore ends done", async () => {
   const id = idOf(SOL_SCOPE, 0);
   const ux = uxOf(new Map([[solUx(id), "held"]]), { costs: { floor: HELD, perRung: HELD - 10_000_000n - 890_880n, keep: 890_880n } });

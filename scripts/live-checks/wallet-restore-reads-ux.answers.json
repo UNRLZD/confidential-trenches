@@ -1,6 +1,6 @@
 {
  "key": "wallet-restore-reads-ux",
- "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build",
+ "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build; bad_filter_one_amount and bad_filter_both_nonzero (9 Nov 10:22Z): delta review 2 P2-A plants A5 and A6 built with packages/signpage/scripts/build-app.mjs on this card's build (each sha384 equal to the review's own plant build), judged by this check's own bundleFacts, the providers' reads those of good",
  "good": {
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
@@ -336,6 +336,100 @@
    "from": "review P2-2's plant 2 on this card's build: step 5's held reader made `async e=>[]`, a dead live-looking copy of step 5's head appended",
    "pin": "sha384-t4WldghXmqgBRBUs5XZvJjeOxUBEX16Jn1XzLSuZFLrajnliscCDVybCVwfSQZwH",
    "sha384": "sha384-t4WldghXmqgBRBUs5XZvJjeOxUBEX16Jn1XzLSuZFLrajnliscCDVybCVwfSQZwH",
+   "ux_read": true,
+   "ux_carry": true,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_filter_one_amount": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "delta review 2 P2-A plant A5 on this card's build: the held reader keeps an asset only when provider 0 reads it above 0",
+   "pin": "sha384-T0stMKK0pAGaEiloMU2LOIPPUno/hxu/87ZpcJlO7BbKCvT3HlJxGcHmf0LwgRMz",
+   "sha384": "sha384-T0stMKK0pAGaEiloMU2LOIPPUno/hxu/87ZpcJlO7BbKCvT3HlJxGcHmf0LwgRMz",
+   "ux_read": true,
+   "ux_carry": true,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_filter_both_nonzero": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "delta review 2 P2-A plant A6 on this card's build: the held reader keeps an asset only when both providers read it above 0",
+   "pin": "sha384-rVghx8zFpu3VOTYd5Y1xPXY+QLg2yS/iECZUdlxS4hePMc2b3jWHkgjAgAbslrTQ",
+   "sha384": "sha384-rVghx8zFpu3VOTYd5Y1xPXY+QLg2yS/iECZUdlxS4hePMc2b3jWHkgjAgAbslrTQ",
    "ux_read": true,
    "ux_carry": true,
    "id_held": false,

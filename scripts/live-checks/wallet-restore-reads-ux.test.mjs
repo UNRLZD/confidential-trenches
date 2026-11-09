@@ -12,7 +12,9 @@
 // - bad_one_provider and bad_dead_held_binding: the delta review's P2-2 plants on this card's build (the held reader's two
 //   amounts from one provider's map; step 5's held reader returning nothing beside a dead live-looking copy of the head);
 // - bad_dead_copy and bad_reader_not_handed: review P2's plant-ux.mjs (the real reader broken, a dead same-shaped copy
-//   beside it) and plant-ux2.mjs (restoreDepositIds handed the NEAR-only reader) on this card's build: FAIL on the bundle.
+//   beside it) and plant-ux2.mjs (restoreDepositIds handed the NEAR-only reader) on this card's build: FAIL on the bundle;
+// - bad_filter_one_amount and bad_filter_both_nonzero: delta review 2's P2-A plants A5 and A6 (the held reader drops an
+//   asset one provider reads at 0, so 0 there and 5 USDC on the other ends done): FAIL on the bundle alone.
 // The recorded getBalance answers are also the restore tests' U_X reads (packages/signpage/test/pool-restore.test.ts).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -97,6 +99,19 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/,([\w$]+)=await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\.opts\?\?\{\}\),([\w$]+),([\w$]+)=async\(/, ",$1=async e=>[],$7,$8=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
   assert.equal(mut(/(for\(let\{asset:([\w$]+),amounts:\[([\w$]+),([\w$]+)\]\}of [\w$]+\))\3===\4\?/, "$1!0?").id_held, false, "two providers read apart taken");
   assert.equal(mut(/let\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[([\w$]+)\(([\w$]+)\[0\],([\w$]+)\),\3\(\4\[1\],\5\)\]\);return\[\.\.\.new Set/, "let[$1,$2]=await Promise.all([$3($4[0],$5),$3($4[0],$5)]);return[...new Set").id_held, false, "one provider read twice");
+  // delta review 2: the held reader's filter (P2-A plants A5, A6), readOn's intents.near and token reads and step 5's
+  // `why` (P3-1 plants A9, B9), and the token's table and its one binding (P3-2)
+  const filter = /\.filter\(([\w$]+)=>\1\.amounts\[0\]!==0n\|\|\1\.amounts\[1\]!==0n\)/;
+  assert.equal(mut(filter, ".filter($1=>$1.amounts[0]!==0n)").id_held, false, "A5: an asset kept only when provider 0 reads it");
+  assert.equal(mut(filter, ".filter($1=>$1.amounts[0]!==0n&&$1.amounts[1]!==0n)").id_held, false, "A6: an asset kept only when both read it");
+  assert.equal(mut(filter, ".filter($1=>$1.amounts[1]!==0n)").id_held, false, "an asset kept only when provider 1 reads it");
+  assert.equal(mut(/;for\(let\[([\w$]+),([\w$]+)\]of await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\)([\w$]+)\.set\(\1,\(\8\.get\(\1\)\?\?0n\)\+\2\);return \8\}/, ";return $8}").id_held, false, "A9: intents.near not read");
+  assert.equal(mut(/if\(([\w$]+)\.length===0\)return\[\];let ([\w$]+)=\1\.map/, "if(!0)return[];let $2=$1.map").id_held, false, "intents.near's list read as empty");
+  assert.equal(mut(/([\w$]+)!==null&&([\w$]+)\.set\(([\w$]+),([\w$]+)\(\(await ([\w$]+)\(([\w$]+),([\w$]+)\(\3,`ft_balance_of`/, "!1&&$2.set($3,$4((await $5($6,$7($3,`ft_balance_of`").id_held, false, "the token's own balance not read");
+  assert.equal(mut(/for\(let ([\w$]+) of ([\w$]+)\)([\w$]+)\.push\(`\$\{([\w$]+)\.label\}: deposit index \$\{([\w$]+)\}'s id/, "for(let $1 of $2)__junk.push(`${$4.label}: deposit index ${$5}'s id").id_held, false, "B9: the held names pushed to another list");
+  const tok = / ([\w$]+)=([\w$]+)\[([\w$]+)\]\.usdc;async function/;
+  assert.equal(f(`${js.replace(tok, " $1=__nets[$3].usdc;async function")};var __nets=0;`).id_held, false, "the token read from another table");
+  assert.equal(f(`${js};var __dead=0,${tok.exec(js)[1]}=0;`).id_held, false, "the token given a second value");
   // review P2: a dead same-shaped copy beside a broken real one, and the U_X reader not handed to the id read
   const read = /,([\w$]+)=async\(([\w$]+),([\w$]+)\)=>\{if\(\3===void 0\)throw Error\(`no deposit index for its U_X`\);[^]*?`money`\)\}/.exec(js)[0];
   const carry = /async function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\)\{let ([\w$]+)=null;for\(;;\)\{[^]*?\6=[\w$]+\}\}/.exec(js)[0];
@@ -118,7 +133,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
 });
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {
-  for (const k of ["bad_dead_copy", "bad_reader_not_handed", "bad_one_provider", "bad_dead_held_binding"]) {
+  for (const k of ["bad_dead_copy", "bad_reader_not_handed", "bad_one_provider", "bad_dead_held_binding", "bad_filter_one_amount", "bad_filter_both_nonzero"]) {
     const v = judge(A[k]);
     assert.equal(v.ok, false, k);
     assert.ok(v.lines.length > 0 && v.lines.every((l) => Object.values(BUNDLE_WHY).some((w) => l === `BAD ${w}`) || l.includes("index.html pins")), `${k}: ${v.lines.join("\n")}`);
