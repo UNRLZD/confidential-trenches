@@ -2,19 +2,19 @@
  "good": {
   "key": "wallet-restore-id-reader",
   "url": "local build",
-  "at": "2026-11-09T05:09:01.764Z",
+  "at": "2026-11-09T06:05:33.834Z",
   "connect_src": "'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "integrity": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 814864,
-   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "bytes": 815049,
+   "sha384": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
    "markers": {
     "reach_error": 1,
     "reach_floor": 1,
@@ -39,7 +39,7 @@
   },
   "ids": {
    "registered": "9c484fa5d2d069569ba063fc555c34e621ccd88fdbb0295fc79bad232621c5c1",
-   "unused": "3dc78400ea06117907a9416043c5b17cde1fd1098a63c9694f0f0e9607ab880e"
+   "unused": "c5327999df22aaa829c0636bcdd9d1430cc92fc5dcaecd4037ec3e367b00421b"
   },
   "rpc": {
    "rpc_0": {

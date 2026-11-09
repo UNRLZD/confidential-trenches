@@ -175,9 +175,9 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
   const rpcs = ids.rpcs();
   const pass = await openRestorePass(POOL_DEPOSIT_NETWORK, rpcs, ids.opts ?? {});
   const reader = await nearIdReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
-  // what an id read as money holds, by asset on both providers at the same pass (opened only once one is)
-  let heldOn: Promise<(u: string) => Promise<IdHeld[]>> | null = null;
-  const heldOf = async (u: string): Promise<IdHeld[]> => (await (heldOn ??= nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {})))(u);
+  // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader: the
+  // pass is fresh only now (nearIdHeldReader refuses one VAULT_SYNC_LAG_MAX blocks old), and step 5 takes minutes
+  const heldOf = await nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, ids.opts ?? {});
   let stop: unknown;
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
@@ -245,10 +245,13 @@ async function readDepositIds(seed: SeedUse, walked: readonly Walked[], ids: IdR
   }
 }
 
+/** The token a deposit id holds on its own on NEAR (ft_balance_of): the pool deposit network's release USDC. */
+const POOL_TOKEN = NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc;
+
 /**
  * Why a deposit id NEAR read as holding money keeps its scope from done (review P1 of card wallet-restore-reads-ux): each
- * asset it holds above ID_KEEP on NEAR at the pass's block, both providers agreeing, or an asset the two read apart, or
- * its holdings unread; empty when it holds at most the kept unit of each asset on both.
+ * asset it holds above ID_KEEP on NEAR at the pass's block, both providers agreeing, any amount of one that is not a
+ * fungible token (review P3-4), or an asset the two read apart, or its holdings unread; empty when it holds at most the kept unit of each asset on both.
  */
 async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: string): Promise<string[]> {
   let assets: IdHeld[];
@@ -260,6 +263,9 @@ async function nearHeldNamed(heldOf: (u: string) => Promise<IdHeld[]>, id: strin
   const out: string[] = [];
   for (const { asset, amounts: [a, b] } of assets) {
     if (a !== b) out.push(`holds ${String(a)} and ${String(b)} of ${asset} on NEAR's two RPCs: read again`);
+    // the kept unit is a fungible token's (the token on its own, or a nep141 one inside intents.near): one of an NFT
+    // (nep171) or a multi-token (nep245) is never moved-out dust
+    else if (asset !== POOL_TOKEN && !asset.startsWith("nep141:")) out.push(`holds ${String(a)} of ${asset} on NEAR, not a fungible token a move out keeps a unit of; a restore does not carry it yet, and it stays under the 12 words`);
     else if (a > ID_KEEP) out.push(`holds ${String(a)} of ${asset} on NEAR, above the ${String(ID_KEEP)} a move out keeps; a restore does not carry it yet, and it stays under the 12 words`);
   }
   return out;

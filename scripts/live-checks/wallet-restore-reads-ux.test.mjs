@@ -9,6 +9,8 @@
 // - bad_refuses_page: `--local --with https://api.mainnet-beta.solana.com`, the fold's first pick, which answers a
 //   request with an Origin header 403: FAIL;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose step 5 reads no U_X: FAIL on the bundle alone;
+// - bad_one_provider and bad_dead_held_binding: the delta review's P2-2 plants on this card's build (the held reader's two
+//   amounts from one provider's map; step 5's held reader returning nothing beside a dead live-looking copy of the head);
 // - bad_dead_copy and bad_reader_not_handed: review P2's plant-ux.mjs (the real reader broken, a dead same-shaped copy
 //   beside it) and plant-ux2.mjs (restoreDepositIds handed the NEAR-only reader) on this card's build: FAIL on the bundle.
 // The recorded getBalance answers are also the restore tests' U_X reads (packages/signpage/test/pool-restore.test.ts).
@@ -88,8 +90,11 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/,([\w$]+)\.has\(([\w$]+)\.i\),/, ",!0,").ux_carry, false, "the store's word on the index not asked");
   // review P1: the held rule
   assert.equal(mut(/if\(([\w$]+)===`money`&&([\w$]+)\.set\(/, "if($1===`used`&&$2.set(").ux_read, false, "an id NEAR reads as money not noted");
-  assert.equal(mut(/\?([\w$]+)>1n&&([\w$]+)\.push\(`holds/, "?$1>2n&&$2.push(`holds").id_held, false, "the kept unit read as 2");
-  assert.equal(mut(/\?([\w$]+)>1n&&([\w$]+)\.push\(`holds/, "?!1&&$2.push(`holds").id_held, false, "money above the kept unit not named");
+  assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(`holds/, ":$1>2n&&$2.push(`holds").id_held, false, "the kept unit read as 2");
+  assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(`holds/, ":!1&&$2.push(`holds").id_held, false, "money above the kept unit not named");
+  assert.equal(mut(/&&!([\w$]+)\.startsWith\(`nep141:`\)\?/, "&&!1?").id_held, false, "an NFT or multi-token read as moved-out dust (review P3-4)");
+  assert.equal(mut(/amounts:\[([\w$]+)\.get\(([\w$]+)\)\?\?0n,([\w$]+)\.get\(\2\)\?\?0n\]/, "amounts:[$1.get($2)??0n,$1.get($2)??0n]").id_held, false, "one provider's map gives both amounts (review P2-2)");
+  assert.equal(mut(/,([\w$]+)=await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)\.opts\?\?\{\}\),([\w$]+),([\w$]+)=async\(/, ",$1=async e=>[],$7,$8=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
   assert.equal(mut(/(for\(let\{asset:([\w$]+),amounts:\[([\w$]+),([\w$]+)\]\}of [\w$]+\))\3===\4\?/, "$1!0?").id_held, false, "two providers read apart taken");
   assert.equal(mut(/let\[([\w$]+),([\w$]+)\]=await Promise\.all\(\[([\w$]+)\(([\w$]+)\[0\],([\w$]+)\),\3\(\4\[1\],\5\)\]\);return\[\.\.\.new Set/, "let[$1,$2]=await Promise.all([$3($4[0],$5),$3($4[0],$5)]);return[...new Set").id_held, false, "one provider read twice");
   // review P2: a dead same-shaped copy beside a broken real one, and the U_X reader not handed to the id read
@@ -105,7 +110,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   const dead = (text, copy) => f(`${text};var __dead=0${copy};`);
   assert.equal(dead(broken(/,([\w$]+)!==([\w$]+)\)throw Error\(`its U_X reads/, ",!1)throw Error(`its U_X reads"), read).ux_read, false, "dead copy: read (real guard dropped)");
   assert.equal(dead(broken(/if\(([\w$]+)<([\w$]+)\.floor\)return null;/, ""), `;${carry.replace(/^async function ([\w$]+)/, "async function __dead_c")}`).ux_carry, false, "dead copy: carry (real floor dropped)");
-  assert.equal(dead(broken(/\?([\w$]+)>1n&&/, "?!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
+  assert.equal(dead(broken(/:([\w$]+)>1n&&/, ":!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
   assert.equal(dead(broken(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
   const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+)\)/;
@@ -113,7 +118,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
 });
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {
-  for (const k of ["bad_dead_copy", "bad_reader_not_handed"]) {
+  for (const k of ["bad_dead_copy", "bad_reader_not_handed", "bad_one_provider", "bad_dead_held_binding"]) {
     const v = judge(A[k]);
     assert.equal(v.ok, false, k);
     assert.ok(v.lines.length > 0 && v.lines.every((l) => Object.values(BUNDLE_WHY).some((w) => l === `BAD ${w}`) || l.includes("index.html pins")), `${k}: ${v.lines.join("\n")}`);

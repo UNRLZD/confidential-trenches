@@ -96,13 +96,24 @@ const UX_NOTED = (held, ux, carry) =>
 // each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader
 const ID_HELD_LOOP = (d) =>
   new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);let (${N})=await (${N})\\((${N}),\\2\\);for\\(let (${N}) of \\5\\)${N}\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\8\\}${Q}\\)\\}`);
-// the held rule: an asset the two providers read apart, or one above the kept unit (the way out's ID_KEEP, 1n), is named
+// the held rule: an asset the two providers read apart, any amount of one that is not a fungible token (the token on its
+// own `T`, or a nep141 one), or one above the kept unit (the way out's ID_KEEP, 1n), is named
 const ID_HELD_RULE = (h) =>
   new RegExp(`async function ${esc(h)}\\((${N}),(${N})\\)\\{let (${N});try\\{\\3=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q}\\]\\}let (${N})=\\[\\];` +
-    `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\7>1n&&\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q}\\):\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q}\\);return \\5\\}`);
-// the held reader the loop is handed (`O`): the wallet's nearIdHeldReader on the pass, every id read on both providers at once
-const ID_HELD_READER = (o) => new RegExp(`[,; ]${esc(o)}=async (${N})=>\\(await\\(${N}\\?\\?=(${N})\\(${N},(${N}),(${N}),${N}\\.opts\\?\\?\\{\\}\\)\\)\\)\\(\\1\\)`);
-const ID_HELD_BOTH = (f) => new RegExp(`function ${esc(f)}\\((${N}),(${N}),(${N}),(${N})=\\{\\}\\)\\{[^]{0,1200}?let\\[(${N}),(${N})\\]=await Promise\\.all\\(\\[(${N})\\(\\2\\[0\\],(${N})\\),\\7\\(\\2\\[1\\],\\8\\)\\]\\);`);
+    `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\6!==(${N})&&!\\6\\.startsWith\\(${Q}nep141:${Q}\\)\\?\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, not a fungible token [^${Q}]*${Q}\\):` +
+    `\\7>1n&&\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q}\\):\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q}\\);return \\5\\}`);
+// `T`: the pool deposit network's release USDC (NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc, the network `mainnet`)
+const ID_HELD_TOKEN = (t) => new RegExp(`[,; ]${esc(t)}=(${N})\\[(${N})\\]\\.usdc;`);
+const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
+// step 5's head (review P2-2 of 39c5fdd7): the pass, the id reader and the held reader `H` opened on it together, so the
+// held loop's reader is this very binding, never a name looked up across the bundle; `R` the held reader's builder
+const STEP5_HEAD = new RegExp(
+  `async function ${N}\\(${N},${N},(${N}),${N},${N},${N}\\)\\{let (${N})=\\1\\.rpcs\\(\\),(${N})=await ${N}\\((${N}),\\2,\\1\\.opts\\?\\?\\{\\}\\),${N}=await ${N}\\(\\4,\\2,\\3,\\1\\.opts\\?\\?\\{\\}\\),(${N})=await (${N})\\(\\4,\\2,\\3,\\1\\.opts\\?\\?\\{\\}\\),`,
+);
+// the held reader: every id read on both providers at once, and each asset's two amounts taken one from each provider's map
+const ID_HELD_BOTH = (f) =>
+  new RegExp(`function ${esc(f)}\\((${N}),(${N}),(${N}),(${N})=\\{\\}\\)\\{[^]{0,1200}?let\\[(${N}),(${N})\\]=await Promise\\.all\\(\\[(${N})\\(\\2\\[0\\],(${N})\\),\\7\\(\\2\\[1\\],\\8\\)\\]\\);` +
+    `return\\[\\.\\.\\.new Set\\(\\[\\.\\.\\.\\5\\.keys\\(\\),\\.\\.\\.\\6\\.keys\\(\\)\\]\\)\\]\\.sort\\(\\)\\.map\\((${N})=>\\(\\{asset:\\9,amounts:\\[\\5\\.get\\(\\9\\)\\?\\?0n,\\6\\.get\\(\\9\\)\\?\\?0n\\]\\}\\)\\)\\.filter\\(`);
 const UX_PAIR = new RegExp(
   `var (${N})=Object\\.freeze\\(\\[${Q}https://solana-rpc\\.publicnode\\.com${Q},${Q}https://solana\\.api\\.pocket\\.network${Q}\\]\\);function (${N})\\(\\)\\{return\\[(${N})\\((${N})\\(\\1\\[0\\]\\)\\),\\3\\(\\4\\(\\1\\[1\\]\\)\\)\\]\\}` +
     `function (${N})\\((${N}),(${N}),(${N}),(${N})=\\2\\)\\{if\\(\\6!==${Q}solana${Q}\\|\\|\\7===null\\|\\|\\8===void 0\\)return null;let (${N})=\\9\\(\\);if\\(\\10===null\\)return null;` +
@@ -126,14 +137,19 @@ const WORDS = Object.freeze({
 });
 const FOLLOW_DEPS = (d) => new RegExp(`deps:\\((${N}),(${N})\\)=>${esc(d)}\\(\\1,\\2\\)`);
 
+// the held loop is in step 5's own function: after its head, with no function begun between the two
+const inside = (js, head, loop) => loop.index > head.index && !js.slice(head.index + head[0].length, loop.index).includes("function");
+
 /** The bundle's facts, from SIGN_HOST's index.html and /app.js (or this tree's build). */
 export function bundleFacts(index, js) {
   const read = once(UX_READ, js) ? UX_READ.exec(js) : null;
   const carry = once(UX_CARRY, js) ? UX_CARRY.exec(js) : null;
   const loop = read ? ID_HELD_LOOP(read[10]) : null;
   const held = loop && once(loop, js) ? loop.exec(js) : null;
-  const heldOf = held ? ID_HELD_READER(held[7]) : null;
-  const heldReader = heldOf && once(heldOf, js) ? heldOf.exec(js) : null;
+  const head = once(STEP5_HEAD, js) ? STEP5_HEAD.exec(js) : null;
+  const rule = held ? ID_HELD_RULE(held[6]) : null;
+  const ruled = rule && once(rule, js) ? rule.exec(js) : null;
+  const token = ruled ? ID_HELD_TOKEN(ruled[9]).exec(js) : null;
   const pair = once(UX_PAIR, js) ? UX_PAIR.exec(js) : null;
   const paced = pair ? PACED(pair[3]).exec(js) : null;
   const wired = pair && once(UX_ANY(pair[5]), js) && once(UX_WIRED(pair[5]), js) ? UX_WIRED(pair[5]).exec(js) : null;
@@ -142,7 +158,7 @@ export function bundleFacts(index, js) {
     sha384: `sha384-${createHash("sha384").update(js).digest("base64")}`,
     ux_read: !!read && once(WORDS.ux_read, js),
     ux_carry: !!read && !!carry && once(UX_NOTED(read[11], read[9], carry[1]), js) && once(WORDS.ux_carry, js),
-    id_held: !!held && once(ID_HELD_RULE(held[6]), js) && !!heldReader && once(ID_HELD_BOTH(heldReader[2]), js) && once(WORDS.id_held, js),
+    id_held: !!held && !!head && held[7] === head[5] && inside(js, head, held) && !!ruled && !!token && once(MAINNET(token[2]), js) && once(ID_HELD_BOTH(head[6]), js) && once(WORDS.id_held, js),
     ux_pair: !!pair && !!paced && once(KEYLESS(paced[3]), js) && once(FOLLOW_READER(pair[12]), js) && once(WORDS.ux_pair, js),
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };

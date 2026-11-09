@@ -880,3 +880,49 @@ test("review: a U_X holding exactly the floor is carried, one rung, and the rest
   assert.equal(await w.r.auto(), "done", JSON.stringify(w.ends));
   assert.deepEqual(ux.deposits.map((d) => [d.i, d.amount]), [[0, 10_000_000n]]);
 });
+
+test("delta review P2-1: the chain's finals move 121 blocks on while step 5 reads its ids, and an id holds only the kept unit on both: done, its held read on the pass opened with it", async () => {
+  const id = idOf(SOL_SCOPE, 2);
+  const n = nearPlanted(new Map([[id, [KEEP, KEEP] as const]]));
+  const inner = n.ids.rpcs;
+  let reading = false;
+  const late = (rpc: NearRpc): NearRpc => ({
+    name: rpc.name,
+    query: async (params) => {
+      if (params.method_name === "storage_balance_of") reading = true;
+      const a = (await rpc.query(params)) as { result?: { block_height?: number } };
+      // once the ids are being read, every final block reads VAULT_SYNC_LAG_MAX + 1 past the pass's
+      if (reading && params.finality === "final" && a?.result?.block_height !== undefined) return { ...a, result: { ...a.result, block_height: REC.pass.h + 121 } };
+      return a;
+    },
+  });
+  n.ids.rpcs = () => {
+    const [a, b] = inner();
+    return [late(a), late(b)];
+  };
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "done", JSON.stringify(w.ends));
+});
+
+test("delta review P3-4: an asset that is not a fungible token (nep171, nep245) inside intents.near is named at any amount, the kept unit's 1 included", async () => {
+  const id = idOf(SOL_SCOPE, 3);
+  const n = nearPlanted(new Map([[id, [0n, 0n] as const]]));
+  const inner = n.ids.rpcs;
+  const nft = "nep171:nft.example.near:7";
+  const at = (x: unknown) => ({ jsonrpc: "2.0", id: "dontcare", result: { result: [...new TextEncoder().encode(JSON.stringify(x))], logs: [], block_height: REC.pass.h, block_hash: REC.pass.hash } });
+  const withNft = (rpc: NearRpc): NearRpc => ({
+    name: rpc.name,
+    query: async (params) => {
+      if (argsOf(params).account_id === id && params.method_name === "mt_tokens_for_owner") return at([{ token_id: nft }]);
+      if (argsOf(params).account_id === id && params.method_name === "mt_batch_balance_of") return at(["1"]);
+      return rpc.query(params);
+    },
+  });
+  n.ids.rpcs = () => {
+    const [a, b] = inner();
+    return [withNft(a), withNft(b)];
+  };
+  const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
+  assert.equal(await w.r.auto(), "stalled");
+  assert.deepEqual(w.ends[0]!.why, [`solana: deposit index 3's id ${id} holds 1 of ${nft} on NEAR, not a fungible token a move out keeps a unit of; a restore does not carry it yet, and it stays under the 12 words`]);
+});

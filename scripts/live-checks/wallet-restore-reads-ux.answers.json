@@ -1,12 +1,12 @@
 {
  "key": "wallet-restore-reads-ux",
- "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts)",
+ "recorded": "2026-11-09T05:03:11Z to 05:03:31Z, the Mac, node scripts/live-checks/wallet-restore-reads-ux.mjs --record; the two plants from scripts/live-checks reading planted copies of this build (scratchpad mk-plants.mjs, the check's own bundleFacts); good re-recorded 2026-11-09T06:0xZ on the review P2 fold build",
  "good": {
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "local build",
-   "pin": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
-   "sha384": "sha384-8gHygal2uLAcAwvtaNTUHf0gBin/4PoBhkfQJRqNf/Xsg+XD8feMqZLC/EOfXh6R",
+   "pin": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
+   "sha384": "sha384-cwOhNZWjMJdSlrf+gPMJ87So0gbKHriCVfSeb5nWOLIRIGdJwT2/ibLbDL3y9CLe",
    "ux_read": true,
    "ux_carry": true,
    "id_held": true,
@@ -193,8 +193,8 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "the review's plant-ux.mjs on this card's build: the real reader's two-balance guard dropped and a dead same-shaped copy of the reader appended",
-   "pin": "sha384-cyN3ucBPMQPSwUWeuAqM90maAeOIs8F33QZRkzdWALDowgprKhbaIQgIKcBup/1P",
-   "sha384": "sha384-cyN3ucBPMQPSwUWeuAqM90maAeOIs8F33QZRkzdWALDowgprKhbaIQgIKcBup/1P",
+   "pin": "sha384-lfVVJ6M5DmMOuNJepLm/m7dt8zzgXkiF8GdjEocbSgC+2mYnhMz6jR8bHOy3JnSy",
+   "sha384": "sha384-lfVVJ6M5DmMOuNJepLm/m7dt8zzgXkiF8GdjEocbSgC+2mYnhMz6jR8bHOy3JnSy",
    "ux_read": false,
    "ux_carry": false,
    "id_held": false,
@@ -240,10 +240,104 @@
   "origin": "https://confidential.unrealized.trade",
   "bundle": {
    "from": "the review's plant-ux2.mjs on this card's build: the scope's restoreDepositIds handed the NEAR-only reader (l), not the U_X reader",
-   "pin": "sha384-HBfIPQQuhLh6pahzPfrpIlnSOeVS0oG97irB4h2kqPvlIbb5T0jKY4WeOU/Wv2pB",
-   "sha384": "sha384-HBfIPQQuhLh6pahzPfrpIlnSOeVS0oG97irB4h2kqPvlIbb5T0jKY4WeOU/Wv2pB",
+   "pin": "sha384-XdAZ0/XnrzrHuN+XWKZqPumAq2Quek/AAA2fEMN8qal+d+4+g7U+hkBXOsliRN7A",
+   "sha384": "sha384-XdAZ0/XnrzrHuN+XWKZqPumAq2Quek/AAA2fEMN8qal+d+4+g7U+hkBXOsliRN7A",
    "ux_read": false,
    "ux_carry": false,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_one_provider": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "review P2-2's plant 1 on this card's build: the held reader's two amounts both from provider 0's map",
+   "pin": "sha384-16xyGT3zw0ELDCteMXEeSE1YtFMygUeGepuVzx6PPuU986BgzxzYO1hBATi6puAO",
+   "sha384": "sha384-16xyGT3zw0ELDCteMXEeSE1YtFMygUeGepuVzx6PPuU986BgzxzYO1hBATi6puAO",
+   "ux_read": true,
+   "ux_carry": true,
+   "id_held": false,
+   "ux_pair": true,
+   "ux_wired": true
+  },
+  "clusters": {
+   "mainnet": {
+    "held": "EuoumSLYMugNL6TsEKRby4bYXH4EcEgwASFdWhWNBQxM",
+    "empty": "BYunzyubYtdCj5RHjuqJreLbwcQdhcpFjSVYMnT68Uww",
+    "providers": [
+     {
+      "url": "https://solana-rpc.publicnode.com",
+      "held": {
+       "status": 200,
+       "acao": "*",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "*",
+       "value": 0
+      }
+     },
+     {
+      "url": "https://solana.api.pocket.network",
+      "held": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 402645880
+      },
+      "empty": {
+       "status": 200,
+       "acao": "https://confidential.unrealized.trade",
+       "value": 0
+      }
+     }
+    ]
+   }
+  }
+ },
+ "bad_dead_held_binding": {
+  "origin": "https://confidential.unrealized.trade",
+  "bundle": {
+   "from": "review P2-2's plant 2 on this card's build: step 5's held reader made `async e=>[]`, a dead live-looking copy of step 5's head appended",
+   "pin": "sha384-t4WldghXmqgBRBUs5XZvJjeOxUBEX16Jn1XzLSuZFLrajnliscCDVybCVwfSQZwH",
+   "sha384": "sha384-t4WldghXmqgBRBUs5XZvJjeOxUBEX16Jn1XzLSuZFLrajnliscCDVybCVwfSQZwH",
+   "ux_read": true,
+   "ux_carry": true,
    "id_held": false,
    "ux_pair": true,
    "ux_wired": true
