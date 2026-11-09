@@ -91,7 +91,9 @@ test("the decision: a pull request or push runs the suite only when it touches w
   assert.equal(decide("schedule", [])[0], true);
   assert.equal(decide("workflow_dispatch", [])[0], true);
   assert.equal(matches("packages/kit/src/index.ts"), true);
-  assert.equal(matches("packages/wallet/src/index.ts"), false);
+  // exit_out.rs drives the exit tool, which runs the wallet's moves through the kit's ./core; the signing page it never reads
+  assert.equal(matches("packages/wallet/src/index.ts"), true);
+  assert.equal(matches("packages/signpage/src/main.ts"), false);
 });
 
 test("on a pull request the plan step runs main's rule, never the head's", () => {
