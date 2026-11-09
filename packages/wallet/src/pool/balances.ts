@@ -7,7 +7,8 @@
 //   device: the buy's op shows it), SPENT and TAKEN.
 // - ready: the chunks of the proof queue's ready proofs for the pool whose note is still in the store, HELD by the same
 //   attempt (a proof whose note moved is not ready), each note counted once. Absent from every entry when no ready list
-//   is given (no queue runs), never "0" in its place.
+//   is given (no queue runs), never "0" in its place; with `open` (the pool ids whose queue runs), absent from each chain
+//   none of whose pools is in it, so a chain whose queue is not open never reads ready "0".
 // - tap_max: the most one tap can spend on the chain. A tap spends one ready proof, one note's chunk (./queue.ts
 //   header, ./ladder.ts chunkOf), less what comes out of it before the spend: so it is the largest spendOf(chunk, the
 //   proof's fee cap, its tip cap) among the proofs `ready` counts, across the chain's pools, never their sum and never
@@ -132,11 +133,11 @@ function decimal(units: bigint, d: number): string {
   return frac === "" ? int : `${int}.${frac}`;
 }
 
-export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[]): PoolBalance[] {
+export function poolBalances(notes: readonly NoteRecord[], pools: readonly BalancePool[], ready?: readonly BalanceProof[], open?: ReadonlySet<string>): PoolBalance[] {
   const ids = new Set<string>();
   const scopes = new Set<bigint>();
   // per chain, in table order: its asset's decimals, then the sums in base units
-  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint; tapMax: bigint; spends: boolean }>();
+  const chains = new Map<Chain, { asset: PoolAsset; d: number; balance: bigint; ready: bigint; tapMax: bigint; spends: boolean; open: boolean }>();
   for (const p of pools) {
     if (typeof p.id !== "string" || p.id.length === 0) throw new Error("pool: no id");
     if (!(CHAINS as readonly unknown[]).includes(p.chain)) throw new Error(`pool ${p.id}: unknown chain ${String(p.chain)}`);
@@ -148,9 +149,13 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     scopes.add(p.scope);
     const c = chains.get(p.chain);
     if (p.spendOf !== undefined && typeof p.spendOf !== "function") throw new Error(`pool ${p.id}: spendOf is not a function`);
-    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n, tapMax: 0n, spends: p.spendOf !== undefined });
+    const runs = open === undefined || open.has(p.id);
+    if (c === undefined) chains.set(p.chain, { asset: p.asset, d, balance: 0n, ready: 0n, tapMax: 0n, spends: p.spendOf !== undefined, open: runs });
     else if (c.asset !== p.asset) throw new Error(`pool ${p.id}: chain ${p.chain} holds asset ${c.asset}, not ${p.asset}: one asset per chain`);
-    else if (p.spendOf === undefined) c.spends = false;
+    else {
+      if (p.spendOf === undefined) c.spends = false;
+      if (runs) c.open = true;
+    }
   }
   const byId = new Map(notes.map((n) => [n.id, n]));
   const counted = new Set<string>(); // a note's proof counts once
@@ -184,6 +189,6 @@ export function poolBalances(notes: readonly NoteRecord[], pools: readonly Balan
     chain,
     asset: c.asset,
     balance: decimal(c.balance, c.d),
-    ...(ready === undefined ? {} : { ready: decimal(c.ready, c.d), ...(c.spends ? { tap_max: decimal(c.tapMax, c.d) } : {}) }),
+    ...(ready === undefined || !c.open ? {} : { ready: decimal(c.ready, c.d), ...(c.spends ? { tap_max: decimal(c.tapMax, c.d) } : {}) }),
   }));
 }

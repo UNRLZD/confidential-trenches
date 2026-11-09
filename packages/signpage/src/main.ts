@@ -280,7 +280,7 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
+        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open);
         prices.refresh((out.pools ?? []).map((p) => p.chain));
         return out;
       }),
@@ -895,6 +895,8 @@ async function signOut(): Promise<void> {
   follows?.signedOut();
   poolFollow?.stop();
   withdrawsSignedOut();
+  // an EVM pool's RESERVED settle holds the seed lock shared, which the sign out waits for: it stops first
+  testnet?.signingOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
