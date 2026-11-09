@@ -463,7 +463,7 @@ jobs:
       # deployment record's commitment is Poseidon(value, label, precommitment); the owner's mainnet paste refuses before
       # deploy.mjs runs (card pool-sol-deploy-mainnet)
       - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
-        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs contracts/pool-solana/scripts/mainnet-deploy.test.mjs
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs contracts/pool-solana/scripts/mainnet-deploy.test.mjs contracts/pool-solana/scripts/venue-table.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08; its sha256 as the header reads it), solc 0.8.28 as
       # its foundry.toml pins. The forge tests run the kit's real proofs through the verifiers the pool deploys;
