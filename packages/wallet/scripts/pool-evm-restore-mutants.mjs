@@ -74,12 +74,12 @@ const M = [
   // the one pager and the one two-RPC compare, now shared by the pool's events and W's Transfers
   // any refusal of a page over one block halves it, in whatever words: dRPC's (HTTP 400 through the kit's client), a
   // results cap, and the caps read live 5 Nov in words never read before (card wallet-restore-transfer-rpcs)
-  [S, "      if (end > at) {\n        refused = end - at + 1n;", "      if (false) {\n        refused = end - at + 1n;", T, "paging past|^D1 |^R1 |^R2 "],
+  [S, "      if (end > at) {\n        again = 0;", "      if (false) {\n        again = 0;", T, "paging past|^D1 |^R1 |^R2 "],
   // a throttle is no cap: the same page again, bounded (the review of card wallet-restore-transfer-rpcs, MEDIUM); a
   // -32005 naming a cap halves; the read the other RPC stopped never shrinks this one's page (LOW)
-  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (false) {", T, "^T1 |^T2 "],
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at || !slowHalves)) {", "      if (false) {", T, "^T1 |^T2 "],
   // no answer in time halves a page over one block (Pocket's under the device's 3.5 s client)
-  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at)) {", "      if (t !== null) {", T, "^T4 "],
+  [S, "      if (t !== null && (t.kind === \"throttle\" || end === at || !slowHalves)) {", "      if (t !== null) {", T, "^T4 "],
   [S, "      if (t === null) throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", "      throw e;\n      const ms = throttleWaitMs(n, t.afterMs);", T, "^T6 "],
   // card evm-pool-reads-throttle: a pool read is tried again within its bound, and its failure is never tried again around it
   [S, "evmAnswered(f, signal, sleep, { tries: EVM_POOL_READ_TRIES, waitMs: EVM_POOL_READ_WAIT_MS, what })", "f()", TE, "a 429 with no Retry-After"],

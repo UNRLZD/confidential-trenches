@@ -327,6 +327,9 @@ export type EvmRestoreNotesArgs = {
   /** Where the device holds the pool's sync between syncs (evm.ts EvmSyncArgs held): a restore after it reads only the
    * blocks past it. */
   held?: EvmSyncHold;
+  /** Where else the pool's events may be read (evm.ts EvmSyncArgs history), before the providers of `rpcs`: never one
+   * operator's word, two operators' same logs making the pool's trees at the head. */
+  history?: readonly EvmRpc[];
   /** tests only: RESTORE_GAP, the wait between lag retries, and the Ws' order (a random index below n) */
   gap?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -364,7 +367,7 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     reads = { holds: () => evmHoldsAnchor(walletRpcs, chainId, r.anchor, a.signal, sleep), tokens: (w, from) => evmTokensSentTo(walletRpcs, w, from, r, page, a.signal, sleep), name: "the Transfer RPCs" };
   }
   const scope = evmPoolScopeOf(a.pin.pool, chainId);
-  const sync = evmTreeSync({ rpcs, pin: a.pin, ...(a.held ? { held: a.held } : {}), ...(sleep ? { sleep } : {}) });
+  const sync = evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(sleep ? { sleep } : {}) });
   const pick = a.pick ?? randomIndex;
   const r = await evmRetryLag(async () => {
     const r = await sync.events(a.signal, true);
