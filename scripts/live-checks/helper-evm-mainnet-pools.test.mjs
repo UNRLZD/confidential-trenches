@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, MAINNETS, pinsOf } from "./helper-evm-mainnet-pools.mjs";
+import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { judge, MAINNETS, pinsOf, read } from "./helper-evm-mainnet-pools.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-evm-mainnet-pools.answers.json"), "utf8"));
@@ -76,4 +77,49 @@ test("made from the good run: each break of the end state FAILs, naming its chai
     assert.equal(r.ok, false);
     assert.ok(bad(r).includes(`BAD [${chain}] not read`), bad(r).join("\n"));
   }
+});
+
+// review P3-2: the helper answers 404 for the pin's fee while the minute's epoch has no first block yet on its providers
+// (a read at the minute's edge); the check asks the previous minute's epoch then, so the edge never fails a good helper.
+// A helper that answers 404 for both epochs (it serves no such pool) still fails.
+test("a fee read at the minute's edge: a 404 for the current epoch is asked again at the previous minute's epoch, and a helper that serves the pool PASSes", async () => {
+  const pins = pinsOf();
+  const HOST = "http://helper.test";
+  const asked = [];
+  const fake = (edgeOnly) => async (url, init) => {
+    const u = new URL(String(url));
+    if (u.origin === HOST) {
+      asked.push(u.search);
+      const pool = u.searchParams.get("pool");
+      const c = A.good.chains.find((x) => pins[x.chain].pool === pool);
+      const headers = { "x-helper-commit": "a".repeat(40) };
+      if (c === undefined) return new Response(JSON.stringify({ error: { code: "not_found" } }), { status: 404, headers });
+      const epoch = u.searchParams.get("epoch");
+      if (epoch === null || !edgeOnly) return new Response(JSON.stringify({ error: { code: "not_found" } }), { status: 404, headers });
+      return new Response(c.fee.body, { status: 200, headers });
+    }
+    const { method } = JSON.parse(init.body);
+    const result = method === "eth_getCode" ? "0x6080" : { hash: "0x" + "ab".repeat(32) };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+  };
+  const now = Date.now();
+  const r = judge(await read(HOST, fake(true), pins));
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  const epochs = asked.map((q) => new URLSearchParams(q).get("epoch")).filter((e) => e !== null).map(Number);
+  assert.equal(epochs.length, MAINNETS.length, asked.join(" "));
+  for (const e of epochs) {
+    assert.equal(e % 60_000, 0, "a whole minute");
+    assert.ok(e <= now && e >= now - 2 * 60_000 - 60_000, `the previous minute's epoch: ${e} at ${now}`);
+  }
+  const never = judge(await read(HOST, fake(false), pins));
+  assert.equal(never.verdict, "FAIL");
+  for (const chain of MAINNETS) assert.ok(bad(never).some((l) => l.startsWith(`BAD [${chain} fee]`) && l.includes("answers 404")), bad(never).join("\n"));
+});
+
+// review P3-3 (mutant "pins not lowercased"): the kit's pins are judged in lower case whatever case the kit writes them in
+test("pins the kit writes in upper case are judged as the same addresses", () => {
+  const kit = evmPoolVenues();
+  const up = (a) => "0x" + a.slice(2).toUpperCase();
+  const upper = Object.fromEntries(MAINNETS.map((c) => [c, { ...kit[c], pool: up(kit[c].pool), feeCollector: up(kit[c].feeCollector), sellSender: up(kit[c].sellSender), sellDelegate: up(kit[c].sellDelegate) }]));
+  assert.equal(judge(A.good, pinsOf({ ...kit, ...upper })).verdict, "PASS");
 });

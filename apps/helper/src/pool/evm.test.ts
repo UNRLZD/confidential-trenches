@@ -478,7 +478,9 @@ test("a pool address that is not the kit's pinned pool for its network is refuse
     const pin = v.pool!;
     assert.match(String(pin), /^0x[0-9a-f]{40}$/, `the kit pins ${network}'s pool`);
     const envOf = (pool: string) => ({ [addressName]: pool, [keyName]: hexOf(KEY) });
-    const others = [POOL, v.sellDelegate!, v.feeCollector!, ...nets.filter((n) => n !== network).map((n) => kit[n].pool!)];
+    // review P3-3 (mutant "only the first 39 hex compared"): the pin with only its last hex digit changed is another address
+    const lastOff = pin.slice(0, -1) + (pin.endsWith("0") ? "1" : "0");
+    const others = [POOL, lastOff, v.sellDelegate!, v.feeCollector!, ...nets.filter((n) => n !== network).map((n) => kit[n].pool!)];
     for (const other of others) {
       assert.throws(
         () => evmPoolSendersFromEnv(envOf(other)),

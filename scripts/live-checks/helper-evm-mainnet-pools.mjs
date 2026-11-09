@@ -3,7 +3,8 @@
 // Robinhood at the pool the kit pins for each (evmPoolVenues() pool, set from contracts/pool-evm/deployments/<chain>.json
 // by card pool-evm-deploy-mainnet), and the helper's start refuses any other pool address (apps/helper/src/pool/evm.ts
 // evmPoolSendersFromEnv). Per mainnet, with no key and no transaction:
-//   - GET <helper>/v1/pool/fee?pool=<the kit's pool pin>: 200, network the chain, pool the pin, fee_collector and
+//   - GET <helper>/v1/pool/fee?pool=<the kit's pool pin> (on a 404, again with &epoch= the previous minute's, as a read
+//     at the minute's edge finds no first block yet): 200, network the chain, pool the pin, fee_collector and
 //     sell_sender the kit's pins, a block and a fee in wei, and a full-sha X-Helper-Commit: the helper carries the pin;
 //   - GET <helper>/v1/pool/fee?pool=<the chain's pinned SellDelegate> (a contract the kit pins, never a pool): 404
 //     not_found, so no sender of the helper is keyed on it;
@@ -18,6 +19,7 @@
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { POOL_EPOCH_MS } from "../../apps/helper/src/pool/fee.ts";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
@@ -49,12 +51,12 @@ export async function read(base = BASE, fetchFn = fetch, pins = pinsOf()) {
     const p = pins[chain];
     // the helper's own provider read can miss once (503 upstream, 429): asked again up to HELPER_TRIES times,
     // HELPER_PAUSE_MS apart, and the last answer judged (a helper that cannot answer the fee serves no withdraw)
-    const get = async (pool) => {
+    const get = async (pool, epoch) => {
       let a;
       for (let i = 0; i < HELPER_TRIES; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, HELPER_PAUSE_MS));
         try {
-          const r = await fetchFn(`${base}/v1/pool/fee?pool=${pool}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+          const r = await fetchFn(`${base}/v1/pool/fee?pool=${pool}${epoch === undefined ? "" : `&epoch=${epoch}`}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
           a = { pool, status: r.status, commit: r.headers.get("x-helper-commit"), body: await r.text() };
         } catch (e) {
           a = { pool, error: String(e?.message ?? e).slice(0, 200) };
@@ -63,7 +65,11 @@ export async function read(base = BASE, fetchFn = fetch, pins = pinsOf()) {
       }
       return a;
     };
-    const fee = await get(p.pool);
+    // at the minute's edge the current epoch's first block may not be on the helper's providers yet (fee() null, 404):
+    // the previous minute's epoch, whose first block is, is asked then (review P3-2); a helper that serves no such pool
+    // answers 404 to both
+    let fee = await get(p.pool);
+    if (fee.status === 404) fee = await get(p.pool, Math.floor(Date.now() / POOL_EPOCH_MS) * POOL_EPOCH_MS - POOL_EPOCH_MS);
     const foreign = await get(p.sellDelegate);
     let block;
     try {
