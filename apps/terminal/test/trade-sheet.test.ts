@@ -56,7 +56,10 @@ test("the token page opens the one sheet with the box and the safety grid in it,
   // (its fill toast is the page's TradeToast, card app-quick-buy-one-tap)
   assert.match(s, /<TradeSheet[\s\S]*?<Ticket r=\{r\} t=\{t\} toast=\{false\} \/>[\s\S]*?<\/TradeSheet>/);
   const bar = s.slice(s.indexOf('className="tkp-bottom"'));
-  assert.equal((bar.match(/onClick=\{sheet\.open\}/g) ?? []).length, 2, "Sell and Buy open the sheet");
+  // Sell and Buy open the sheet, Sell on the sell side with a position held, Buy on the buy side (card app-sell-mount)
+  assert.equal((bar.match(/sheet\.open\(\); \}\}/g) ?? []).length, 2, "Sell and Buy open the sheet");
+  assert.match(bar, /className="tkp-sell" onClick=\{\(\) => \{ if \(t\.heldNow\) t\.setSide\("sell"\); sheet\.open\(\); \}\}/);
+  assert.match(bar, /className="tkp-buy" onClick=\{\(\) => \{ t\.setSide\("buy"\); sheet\.open\(\); \}\}/);
   // the old sheet that unmounted on close is gone
   assert.doesNotMatch(s, /\{sheet && v && r && <TradeSheet/);
 });
