@@ -23,8 +23,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
 import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
+import { consoleLine } from "./console-errors.mjs";
 import * as check from "./app-verify-mount.mjs";
+import { READS_PER_OPEN } from "./rpc-outage.mjs";
 import { APP_HOST, CHECKS, judge, pinsOf, pinsProblems, recorded, releaseRecord, WIDTHS } from "./app-verify-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -213,6 +216,7 @@ test("the footer's block read (card app-footer-bar) on the pair, in any phase, i
   // footer reads on both RPCs of the pair, before, during and after the opens, some unanswered: still PASS
   const ok = mut("good", (rec) => {
     for (const phase of ["open", "between", "reopen", "after"]) for (const u of pair) desktop(rec).requests.push(footer(u, phase, phase === "open" ? { status: null } : {}));
+    desktop(rec).dom = { ...desktop(rec).dom, footer: { conn: "on", block: "223500000", ms: 20_000 } };
     desktop(rec).rpcTiming = [...(desktop(rec).rpcTiming ?? []), ...pair.map((u) => ({ name: `${u.replace(/\/$/, "")}/?ct=footer`, start: 0, end: 0 }))];
   });
   assert.equal(ok.ok, true, ok.lines.join("\n"));
@@ -329,4 +333,147 @@ test("planted on the good answer: an error with no location (a console error, a 
   const r = mut("good", (rec) => rec.runs[1].errors.push(...kept));
   assert.equal(r.ok, false);
   for (const k of kept) assert.ok(bad(r).some((l) => l.includes(`console ${k}`)), `${k}: ${r.lines.join("\n")}`);
+});
+
+test("planted on the mainnet answer: a down NEAR RPC's preflight error is let through when the page shows it, never when it shows ok (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const cors = (url) => consoleLine(`Access to fetch at '${url}' from origin '${APP_HOST}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`, `${APP_HOST}/verify`);
+  const line = (r) => r.lines.find((l) => l.includes("desktop /verify: ") && /no console error|console /.test(l));
+  const plant = (errors, dom) => line(mut("goodMainnet", (rec) => Object.assign(desktop(rec), { errors: [...desktop(rec).errors, ...errors], dom })));
+  const amber = { verify: { state: "read", code: "warn", funds: "warn", pools: {} }, footer: { conn: "on", block: "223500000", ms: 5000 } };
+  // a Verify read: shown amber passes the line, shown ok or not drawn fails it
+  assert.equal(plant([cors(`${near}/`)], amber), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
+  assert.match(plant([cors(`${near}/`)], { ...amber, verify: { ...amber.verify, code: "ok" } }), /^BAD desktop \/verify: console Access to fetch .*\[.* is a release RPC, not shown Unverified: code ok, funds warn\]$/);
+  assert.match(plant([cors(`${near}/`)], undefined), /not shown Unverified: code not drawn, funds not drawn\]$/);
+  // a footer read: the footer on with its block passes, anything else fails
+  const tagged = cors(footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  assert.ok(tagged.endsWith(" [footer read]"));
+  assert.equal(plant([tagged], { ...amber, verify: { state: "read", code: "ok", funds: "ok", pools: {} } }), `ok  desktop /verify: no CSP violation, no console error; RPC down, shown: ${near.replace("https://", "")}`);
+  assert.match(plant([tagged], { ...amber, footer: { conn: "off", block: "223500000", ms: 5000 } }), /a footer read, and the footer shows off, block 223500000, not the pair answered\]$/);
+  // any other error beside it still fails
+  assert.match(plant([cors(`${near}/`), "Uncaught boom"], amber), /^BAD desktop \/verify: console Uncaught boom$/);
+});
+
+test("planted on the mainnet answer: amber rows and the down RPC's failed reads pass only beside a shown outage that this open's own reads bear out (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const other = new URL(VERIFY_RELEASES.mainnet.rpcs[1]).origin;
+  const load = (origin, status) => consoleLine(`Failed to load resource: the server responded with a status of ${status} ()`, `${origin}/`);
+  const verifyDom = (code, funds) => ({ state: "read", code, funds, pools: {} });
+  // `status`: every read of `origin` (a number, or null with `failure`); `only`: just the first read of it gets `status`
+  // `which`: all the origin's reads, only the height read (the first, which feeds no check), or all but it
+  const down = (rec, { errors, dom, rows = "warn", status = 503, failure, only = false, origin = near, which = "all", pre, width = "desktop", footer = { conn: "on", block: "223500000", ms: 5000 } } = {}) => {
+    const d = rec.runs.find((x) => x.width === width);
+    d.errors = [...d.errors, ...errors];
+    d.dom = { verify: dom, footer };
+    for (const p of [d.panel, d.footer?.panel].filter(Boolean)) Object.assign(p, { code: rows, funds: rows, checks: Object.fromEntries(Object.keys(p.checks).map((c) => [c, rows])) });
+    // a read that got no answer was preflighted: the preflight's own status, as the browser saw it
+    d.preflights = pre ?? (status === null ? [{ url: `${origin}/`, status: 503, failure: null, cors: false }] : []);
+    const isH = (x) => /"finality":"final"/.test(x.rpcParams ?? "");
+    const reads = d.requests.filter((x) => x.method === "POST" && x.url.startsWith(origin) && x.phase !== "between" && (which === "all" || (which === "height") === isH(x)));
+    for (const x of only ? reads.slice(0, 1) : reads) {
+      x.status = status;
+      if (failure) x.failure = failure;
+    }
+    return rec;
+  };
+  const run = (o) => mut("goodMainnet", (rec) => down(rec, o));
+  const good = { errors: [load(near, 503)], dom: verifyDom("warn", "warn") };
+  // the shown outage: every read of the origin failed, the panel amber: every desktop line passes
+  const ok = run(good);
+  assert.deepEqual(bad(ok), [], ok.lines.join("\n"));
+  assert.deepEqual(bad(run({ ...good, status: 429, errors: [load(near, 429)] })), []);
+  // no answer: down only beside a preflight that answered 5xx or 429 or was unreachable; a 4xx preflight is the RPC refusing the origin
+  const noAnswer = { status: null, failure: "net::ERR_FAILED" };
+  const pf = (status, extra = {}) => [{ url: `${near}/`, status, failure: null, cors: false, ...extra }];
+  assert.deepEqual(bad(run({ ...good, ...noAnswer })), [], "preflight 503");
+  assert.deepEqual(bad(run({ ...good, ...noAnswer, pre: pf(429) })), [], "preflight 429");
+  assert.deepEqual(bad(run({ ...good, ...noAnswer, pre: pf(null, { failure: "net::ERR_CONNECTION_REFUSED" }) })), [], "preflight unreachable");
+  for (const status of [403, 404, 401]) assert.ok(bad(run({ ...good, ...noAnswer, pre: pf(status) })).length > 0, `a ${status} preflight is no outage`);
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: [...pf(503), ...pf(403)] })).length > 0, "one 4xx preflight among them");
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: pf(null, { failure: "net::ERR_FAILED", cors: true }) })).length > 0, "a CORS refusal of the preflight");
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: [] })).length > 0, "no preflight recorded");
+  assert.ok(bad(run({ ...good, status: null })).length > 0 && bad(run({ ...good, status: null, failure: "net::ERR_ABORTED" })).length > 0, "no failure text, or a read the page aborted");
+  // a failure text wins over the status: a read answered 200 whose body failed is a failed read; a blocked one is not the RPC's
+  assert.deepEqual(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET" })), [], "every read 200 then reset");
+  assert.ok(bad(run({ ...good, status: 200, failure: "net::ERR_CONNECTION_RESET", only: true })).length > 0, "only the first read reset, the rest 200");
+  assert.ok(bad(run({ ...good, status: null, failure: "net::ERR_BLOCKED_BY_CLIENT" })).length > 0, "blocked by the browser");
+  // a network error text is down by itself, beside a cached good preflight (200); only net::ERR_FAILED needs the preflight's own word
+  const good200 = pf(200);
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_CONNECTION_REFUSED", pre: good200 })), [], "refused after a cached 200 preflight");
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_CONNECTION_RESET", pre: [] })), [], "reset, no preflight at all");
+  assert.deepEqual(bad(run({ ...good, status: null, failure: "net::ERR_TIMED_OUT", pre: good200 })), []);
+  assert.ok(bad(run({ ...good, ...noAnswer, pre: good200 })).length > 0, "ERR_FAILED beside only a 200 preflight is a CORS refusal of the POST, not an outage");
+  // the height read feeds no check: it failing alone is no outage the panel shows (a), and the checks' reads failing after a
+  // height read that answered is (b)
+  assert.ok(bad(run({ ...good, which: "height" })).some((l) => /panel read, code warn/.test(l)), "(a) only the height read failed, every check amber");
+  assert.deepEqual(bad(run({ ...good, which: "rest" })), [], "(b) the height read answered 200, every check's read failed");
+  // a read storm (more reads of the RPC in one open than the page makes, from any frame) is our own 429, never the RPC's outage
+  const storm = (rec, n, phase = "open") => (desktop(rec).otherReads = Array.from({ length: n }, () => ({ url: `${near}/`, method: "POST", status: 429, phase })));
+  const stormed = (n) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)] });
+    storm(rec, n);
+  });
+  assert.deepEqual(bad(stormed(0)), [], "no other frame's reads");
+  assert.ok(bad(stormed(1)).length > 0, "one read too many from another frame (the cap is the page's own 8)");
+  // (a) the panel and every check amber with every read of the RPC answering 200, one failed load of it in the console
+  assert.ok(bad(run({ ...good, status: 200 })).some((l) => /panel read, code warn/.test(l)), "(a) a decode bug beside an unrelated failed load");
+  // (b) one read of eight failed and the rest answered 200: the amber on every check is not that read's
+  assert.ok(bad(run({ ...good, only: true })).some((l) => /panel read, code warn/.test(l)), "(b) one failed read, the rest 200");
+  // the same amber rows with no failed load of that origin, or with the page's DOM showing them ok, are unexplained warns
+  assert.ok(bad(run({ ...good, errors: [] })).some((l) => /panel read, code warn/.test(l)), "amber rows with no failed load");
+  assert.ok(bad(run({ ...good, dom: verifyDom("ok", "ok") })).some((l) => /console Failed to load resource/.test(l)), "failed load of an RPC the DOM shows ok");
+  assert.ok(bad(run({ ...good, dom: verifyDom("warn", "ok") })).length > 0);
+  assert.ok(bad(run({ ...good, rows: "ok", dom: verifyDom("warn", "warn") })).some((l) => /panel read, code ok/.test(l)), "outage shown by the DOM but the panel record says ok");
+  // a 4xx other than 429 on the down RPC's reads is no outage
+  assert.ok(bad(run({ ...good, status: 404 })).some((l) => /not all 200/.test(l)), "404 beside the outage");
+  // the other RPC of the pair answering 500 while only the first is shown down fails
+  assert.ok(bad(run({ ...good, origin: other, status: 500 })).some((l) => /not all 200/.test(l)), "a read of the RPC that is not shown down");
+  // a page error beside the outage still fails
+  assert.ok(bad(run({ ...good, errors: [...good.errors, "Uncaught boom"] })).some((l) => l.endsWith("console Uncaught boom")));
+  // an app script printing Chrome's preflight words is no preflight line: it is located at the script, not at the page
+  const words = `Access to fetch at '${near}/' from origin '${APP_HOST}' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: It does not have HTTP ok status.`;
+  const faked = consoleLine(words, `${APP_HOST}/assets/index-abc.js`);
+  assert.ok(bad(run({ ...good, errors: [faked] })).some((l) => l.includes("console Access to fetch")), "a faked preflight line from a script");
+  assert.deepEqual(bad(run({ ...good, errors: [consoleLine(words, `${APP_HOST}/verify`)] })), [], "Chrome's own, located at the page");
+  // the terminal's own footer reads count against the footer's bound: 200 of them, every Verify read 429, is our storm
+  const footerReads = (rec, k) => {
+    const d = desktop(rec);
+    for (let i = 0; i < k; i++) d.requests.push({ url: `${near}/?ct=footer`, method: "POST", type: "fetch", status: 200, phase: "between", account: null, rpcId: "ct-footer", rpcMethod: "block", rpcParams: JSON.stringify({ finality: "final" }) });
+  };
+  const leaked = (k) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)] });
+    footerReads(rec, k);
+  });
+  assert.deepEqual(bad(leaked(2)), [], "two footer reads in 5 s: the footer's bound");
+  assert.match(bad(leaked(200)).join("\n"), /200 footer reads of rpc\.mainnet\.fastnear\.com, the footer makes 2 in 5000 ms/, "an interval leak");
+  assert.match(bad(leaked(3)).join("\n"), /3 footer reads of rpc\.mainnet\.fastnear\.com/);
+  // a run with no footer clock (a phone footer that stopped drawing, with its read loop still running) allows no footer reads
+  const noClock = (k) => mut("goodMainnet", (rec) => {
+    down(rec, { ...good, status: 429, errors: [load(near, 429)], width: "phone", footer: null });
+    const p = rec.runs.find((x) => x.width === "phone");
+    for (let i = 0; i < k; i++) p.requests.push({ url: `${near}/?ct=footer`, method: "POST", type: "fetch", status: 200, phase: "between", account: null, rpcId: "ct-footer", rpcMethod: "block", rpcParams: JSON.stringify({ finality: "final" }) });
+  });
+  assert.match(bad(noClock(200)).join("\n"), /phone \/verify: .*200 footer reads of rpc\.mainnet\.fastnear\.com, the footer makes 0 in no clock ms/, "200 footer reads, no clock");
+  assert.match(bad(noClock(1)).join("\n"), /1 footer reads of rpc\.mainnet\.fastnear\.com/, "one read with no clock");
+  assert.deepEqual(bad(noClock(0)), [], "no footer reads, no clock: the phone's own shape");
+  // the footer's failed read is not a Verify outage: the panel amber with every read 200 and the footer on still fails
+  const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  assert.ok(tagged.endsWith(" [footer read]"));
+  assert.ok(bad(run({ errors: [tagged], dom: verifyDom("warn", "warn"), status: 200 })).some((l) => /panel read, code warn/.test(l)), "a footer outage never excuses amber rows");
+  // nor with the Verify reads failed too: only a failed Verify load of the origin is the panel's evidence, never the footer's
+  assert.ok(bad(run({ errors: [tagged], dom: verifyDom("warn", "warn") })).some((l) => /panel read, code warn/.test(l)), "footer line only, Verify reads failed");
+});
+
+test("planted on the mainnet answer: the footer's read cap counts the time of the load up to the end of the run, so a failed footer read after the first DOM read is not a storm (card app-shell-rpc-outage-judge)", () => {
+  const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  const at = (ms) => bad(mut("goodMainnet", (rec) => Object.assign(desktop(rec), { errors: [...desktop(rec).errors, tagged, tagged], dom: { verify: { state: "read", code: "ok", funds: "ok", pools: {} }, footer: { conn: "on", block: "223500000", ms } } })));
+  assert.match(at(2000).join("\n"), /2 of them in 2000 ms is more than the footer makes \(1\)/, "the clock read before the second read");
+  assert.deepEqual(at(3000), [], "the clock read as the run ends: reads at 0 and 3 s");
+});
+
+test("the most reads one open makes of an RPC is counted from the code and is what the recorded good run made (card app-shell-rpc-outage-judge)", () => {
+  assert.deepEqual(READS_PER_OPEN, { near: 8, solana: 1, evm: 7 });
+  const reads = (run, u, phase) => run.requests.filter((x) => x.method === "POST" && x.phase === phase && x.url.startsWith(new URL(u).origin) && !/ct=footer/.test(x.url)).length;
+  const d = desktop(ANSWERS.goodMainnet);
+  for (const u of VERIFY_RELEASES.mainnet.rpcs) assert.equal(reads(d, u, "open"), READS_PER_OPEN.near, u);
 });

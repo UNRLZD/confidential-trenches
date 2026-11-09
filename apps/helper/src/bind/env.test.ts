@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { base58 } from "./checks.ts";
-import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV } from "./env.ts";
+import { BIND_ENV, bindSenderFromEnv, createLine, MARGIN_K_ENV, registerLine } from "./env.ts";
 import { MAINNET_VAULT } from "../withdraw/send.ts";
 
 const keyOf = (fill: number) => {
@@ -156,7 +156,14 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   syncBuiltinESMExports();
   t.after(() => (t.mock.restoreAll(), syncBuiltinESMExports()));
   await s.quoted!(JSON.stringify(q)); // the quote record is written off the event loop
-  s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  // card intents-u-registered-first: the status that makes U seen also starts U's registration on USDC, which reads
+  // the chain first (here every read answers 500: nothing is sent, the hook logs upstream and resolves)
+  const errors: string[] = [];
+  t.mock.method(console, "error", (line: string) => void errors.push(line));
+  await s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  const seenReads = fetched;
+  assert.ok(seenReads > 0, "the seen id's registration read storage_balance_of");
+  assert.deepEqual(errors, ["helper: intents register upstream"]);
   const v = await s.intents!(body(MAINNET_VAULT));
   assert.deepEqual([v.status, code(v)], [403, "receiver_is_vault"]);
   // the gate's second path: a mainnet withdrawal landed to an arming account A (withdraw/send.ts onLanded)
@@ -165,7 +172,7 @@ test("POST /v1/intents with mainnet carried (card helper-id-intents): the gate a
   assert.equal(code(await s.intents!(bodyA)), "id_not_ours");
   s.armed!(armedA);
   assert.equal(code(await s.intents!(bodyA)), "receiver_is_vault");
-  assert.equal(fetched, 0, "no chain read and no relayer start");
+  assert.equal(fetched, seenReads, "no chain read and no relayer start by /v1/intents");
   s.stop();
 });
 
@@ -181,5 +188,77 @@ test("card helper-intents-test-race: a quote record whose write fails resolves t
   const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
   assert.equal(await s.quoted!(JSON.stringify(q)), undefined);
   assert.deepEqual(logged, ["helper: intents quote_record_failed"]);
+  s.stop();
+});
+
+test("card intents-u-registered-first: a seen id's registration logs its code only: never the id, an account or any text the code is not", () => {
+  const u = "c".repeat(64);
+  assert.equal(registerLine("registered"), null);
+  assert.equal(registerLine("in_flight"), null);
+  for (const c of ["relayer_low", "registration_failed", "sender_struck", "upstream", "id_not_ours"]) assert.equal(registerLine(c), `helper: intents register ${c}`);
+  for (const t of [u, `upstream ${u}`, "alice.near", `relayer_low ${u}`]) assert.equal(registerLine(t), "helper: intents register upstream", t);
+  // env.ts logs a registration only through registerLine, on its answer and on a rejection alike
+  const src = readFileSync(new URL("./env.ts", import.meta.url), "utf8");
+  const lines = src.split("\n").filter((l) => l.includes("intents register") || (l.includes("console.") && l.includes("register")));
+  assert.ok(lines.length >= 2 && lines.every((l) => /registerLine\(/.test(l) || /return `helper: intents register \$\{listed \? code : "upstream"\}`/.test(l)), lines.join("\n"));
+});
+
+test("card intents-u-registered-first (review F1, F2): mainnet's token watch holds a seen U's registration (no relayer start, nothing logged) and warm starts the owed registrations' sweep", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "benv-iu-"));
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  const hash = base58(Buffer.alloc(32, 9));
+  const asked: string[] = [];
+  const fetchFn = (async (_url: string, init?: RequestInit) => {
+    const { method, params } = JSON.parse(String(init?.body)) as { method: string; params: Record<string, unknown> };
+    const what = method === "query" ? String(params.method_name ?? params.request_type) : method;
+    asked.push(what);
+    if (method === "block") return Response.json({ result: { header: { height: 100, hash, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } } });
+    if (what === "storage_balance_of") return Response.json({ result: { block_height: 100, block_hash: hash, logs: [], result: [...Buffer.from("null")] } });
+    return new Response("{}", { status: 500 });
+  }) as unknown as typeof fetch;
+  // USDC halted: the watch's status at the higher block holds the token
+  const halted = { token: "usdc", caught_up: true, halted: true, vault_blocked: false, code_hash_ok: true, code_hash: "", block_height: 100, last_event: null };
+  const watch = { statusAt: async () => halted, pausedAt: async () => true } as unknown as NonNullable<NonNullable<Parameters<typeof bindSenderFromEnv>[1]>["mainnet"]>;
+  const s = bindSenderFromEnv(env, { mainnet: watch }, fetchFn);
+  const u = "c".repeat(64);
+  const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
+  const errors: string[] = [];
+  t.mock.method(console, "error", (line: string) => void errors.push(line));
+  await s.quoted!(JSON.stringify(q));
+  await s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  assert.ok(asked.includes("storage_balance_of"), "U's registration read");
+  assert.deepEqual([...new Set(asked)].sort(), ["block", "storage_balance_of"], "held: no balance read, no relayer start");
+  assert.deepEqual(errors, [], "held is in flight: nothing logged");
+  // warm: the sweep tries the owed U again on its own, with no device poll
+  const before = asked.filter((x) => x === "storage_balance_of").length;
+  s.warm();
+  for (let i = 0; i < 200 && asked.filter((x) => x === "storage_balance_of").length === before; i++) await new Promise((ok) => setTimeout(ok, 10));
+  assert.ok(asked.filter((x) => x === "storage_balance_of").length > before, "warm's sweep read the owed U again");
+  s.stop();
+});
+
+test("card intents-u-registered-first (delta review F2): with no mainnet token watch a seen U's registration is held: no balance read, no relayer start, nothing logged", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "benv-iu-"));
+  const env = { BIND_VAULT_MAINNET: MAINNET_VAULT, BIND_RELAYER_MAINNET: "bind.test.near", BIND_RELAYER_KEY_MAINNET: key, BIND_MARGIN_K: "20", HELPER_RELEASE: "1", HELPER_STORE_DIR: dir };
+  const hash = base58(Buffer.alloc(32, 9));
+  const asked: string[] = [];
+  const fetchFn = (async (_url: string, init?: RequestInit) => {
+    const { method, params } = JSON.parse(String(init?.body)) as { method: string; params: Record<string, unknown> };
+    const what = method === "query" ? String(params.method_name ?? params.request_type) : method;
+    asked.push(what);
+    if (method === "block") return Response.json({ result: { header: { height: 100, hash, gas_price: "100000000", timestamp_nanosec: (BigInt(Date.now()) * 1_000_000n).toString() } } });
+    if (what === "storage_balance_of") return Response.json({ result: { block_height: 100, block_hash: hash, logs: [], result: [...Buffer.from("null")] } });
+    return new Response("{}", { status: 500 });
+  }) as unknown as typeof fetch;
+  const s = bindSenderFromEnv(env, {}, fetchFn);
+  const u = "c".repeat(64);
+  const q = { timestamp: "2026-11-07T18:00:00Z", quoteRequest: { dry: false, recipient: u, recipientType: "DESTINATION_CHAIN", refundTo: u, refundType: "INTENTS", depositType: "ORIGIN_CHAIN" }, quote: { depositAddress: "d".repeat(64), deadline: "2026-11-07T18:30:00.000Z" } };
+  const errors: string[] = [];
+  t.mock.method(console, "error", (line: string) => void errors.push(line));
+  await s.quoted!(JSON.stringify(q));
+  await s.delivered!(JSON.stringify({ status: "REFUNDED", quoteResponse: q, swapDetails: {} }));
+  assert.ok(asked.includes("storage_balance_of"), "U's registration read");
+  assert.deepEqual([...new Set(asked)].sort(), ["block", "storage_balance_of"], "no watch holds: no balance read, no relayer start");
+  assert.deepEqual(errors, [], "held is in flight: nothing logged");
   s.stop();
 });

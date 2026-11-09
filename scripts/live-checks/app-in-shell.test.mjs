@@ -10,6 +10,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, ENGINES, frameErrors, judge, KINDS, MOVE_TO, PATH, SIGN_HOST, WIDTHS } from "./app-in-shell.mjs";
+import { consoleLine } from "./console-errors.mjs";
+import { footerUrl } from "../../apps/terminal/src/shell/footer.ts";
+import { VERIFY_RELEASES } from "../../apps/terminal/src/screens/verify/release.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "app-in-shell.answers.json"), "utf8"));
@@ -271,4 +274,28 @@ test("planted on the good answer: a recorded 429 names its resource's origin and
     assert.ok(r.lines.some((l) => /^BAD \w+ \w+: /.test(l) && want(l)), r.lines.join("\n"));
     assert.ok(!r.lines.some((l) => l.includes("mint=")), "no query in a line");
   }
+});
+
+test("planted on the good answer: a failed footer read of a release NEAR RPC passes only on a desktop footer showing the pair answered, any other failed load of a release RPC fails (card app-shell-rpc-outage-judge)", () => {
+  const near = new URL(VERIFY_RELEASES.mainnet.rpcs[0]).origin;
+  const tagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", footerUrl(VERIFY_RELEASES.mainnet.rpcs[0]));
+  assert.ok(tagged.endsWith(" [footer read]"));
+  const untagged = consoleLine("Failed to load resource: the server responded with a status of 503 ()", `${near}/`);
+  const on = { conn: "on", block: "223500000", ms: 5000 };
+  const plant = (errors, footer, width = "desktop") => {
+    const rec = structuredClone(ANSWERS.good);
+    const run = rec.runs.find((x) => x.kind === "signed" && x.width === width && x.engine === "chromium");
+    run.app.errors.push(...errors);
+    run.app.dom = { verify: null, footer };
+    return judge(rec).lines.filter((l) => l.startsWith("BAD"));
+  };
+  assert.deepEqual(plant([tagged], on), []);
+  assert.match(plant([tagged], { ...on, conn: "off" }).join("\n"), /a footer read, and the footer shows off/);
+  assert.match(plant([tagged], { ...on, block: "" }).join("\n"), /a footer read, and the footer shows on, block not drawn/);
+  assert.match(plant([tagged], null).join("\n"), /\[https:\/\/\S+ is a release RPC, a footer read, and /);
+  assert.match(plant([tagged], { conn: "wait", block: "", ms: 5000 }, "phone").join("\n"), /a footer read, and the footer shows wait/);
+  // the same origin, not a footer read: a Verify rule that this page cannot satisfy, so it fails
+  assert.match(plant([untagged], on).join("\n"), /is a release RPC, not shown Unverified: code not drawn/);
+  // beside the footer outage, a page error still fails
+  assert.match(plant([tagged, "Uncaught boom"], on).join("\n"), /: Uncaught boom$/);
 });

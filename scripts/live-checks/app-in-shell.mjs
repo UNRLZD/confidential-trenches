@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { consoleLine } from "./console-errors.mjs";
+import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-in-shell";
@@ -119,8 +120,11 @@ export function judge(rec) {
       say(hop, `${n}: ${hop ? "no hop: the top window navigated twice, APP_HOST then SIGN_HOST, and the terminal frames nothing" : `top navigations ${JSON.stringify(navs)}, iframes in the terminal ${r.app.iframes}`}`);
       const tReady = firstAt(r.app.timeline, "ready");
       say(tReady !== null && tReady <= HANDSHAKE_MS, `${n}: READY ${tReady === null ? "never" : `at ${Math.round(tReady)} ms`} of the terminal's start, limit ${HANDSHAKE_MS} ms`);
-      const errs = [...(r.app.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.app.errors ?? [])];
-      say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error in the terminal's frame"}`);
+      // a footer read of a release NEAR RPC that failed, the footer showing the pair answered, is no error; any other failed load
+      // of a release RPC needs a Verify panel to show it, and this page draws none (rpc-outage.mjs, card app-shell-rpc-outage-judge)
+      const { kept, down } = outages(r.app.errors ?? [], null, rec.network, r.app.dom?.footer);
+      const errs = [...(r.app.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept];
+      say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error in the terminal's frame${downNote(down)}`}`);
       const mv = r.moved ?? null;
       say(mv?.top === SIGN_HOST + MOVE_TO && mv?.frame === APP_HOST + MOVE_TO, `${n}: after a tap on ${MOVE_TO}, ${mv ? `the top window's address is ${mv.top}, the terminal at ${mv.frame}` : "no move read"}`);
       const rl = r.afterReload ?? null;
@@ -339,6 +343,8 @@ async function runOne({ browser, engine, w, shots, route, kind = "signed" }) {
       run.app = await f.evaluate(READ_APP);
       if (kind === "late" || kind === "silent") run.reloaded = run.app.doc === null || run.app.doc !== run.docAt;
       run.app.errors = frameErrors(errors);
+      // what the footer shows, for judge()'s outages(): the pair answered or not
+      run.app.dom = { verify: null, footer: await footerEvidence(f) };
     } else if (originOf(page.url()) === APP_HOST) {
       // today's layout: the terminal top-level; read it the same way, so the record shows what it drew
       run.app = null;

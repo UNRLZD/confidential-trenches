@@ -327,8 +327,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify(liveList()));
     process.exit(0);
   }
-  const r = await deploy(process.argv.slice(2));
-  for (const l of r.out ?? []) console.log(`deploy: ${l}`);
-  for (const l of r.err ?? []) console.error(`deploy: ${l}`);
-  process.exit(r.code);
+  // no top-level await: release-list.mjs, loaded late by deploy(), imports this file back, and a module whose top-level
+  // await is pending never finishes evaluating, so that import would wait on it forever (Node exits 13, card
+  // signpage-deploy-runs); this module finishes evaluating first, then the import and the deploy settle
+  deploy(process.argv.slice(2)).then((r) => {
+    for (const l of r.out ?? []) console.log(`deploy: ${l}`);
+    for (const l of r.err ?? []) console.error(`deploy: ${l}`);
+    process.exit(r.code);
+  });
 }

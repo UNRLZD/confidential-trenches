@@ -31,6 +31,7 @@ import { POOL_ASSET_DECIMALS } from "../../packages/kit/src/index.ts";
 import { APP_HOST, harnessRoute, shellHeaders, SIGN_HOST } from "./app-in-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { watchErrors } from "./console-errors.mjs";
+import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "balances-per-chain";
@@ -94,8 +95,11 @@ export function judge(rec) {
         say(x.ready === rd && x.pending === pd && /^<?[0-9]/.test(x.text[2] ?? "") && /^<?[0-9]/.test(x.text[3] ?? ""), `${n}: ${p.chain} ready ${x.ready} and pending ${x.pending} drawn ${JSON.stringify(x.text[2])} and ${JSON.stringify(x.text[3])}, want ${rd} and ${pd} as numbers`);
       }
     }
-    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...(r.errors ?? []).map((e) => `console ${e}`)];
-    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : "no CSP violation, no console error"}`);
+    // a footer read of a release NEAR RPC that failed (its preflight line is the page's own), the footer showing the pair
+    // answered, is no error; any other failed load of a release RPC needs a Verify panel, and /portfolio draws none
+    const { kept, down } = outages(r.errors ?? [], null, "mainnet", r.footer);
+    const errs = [...(r.violations ?? []).map((v) => `CSP ${v.directive} ${v.blocked}`), ...kept.map((e) => `console ${e}`)];
+    say(errs.length === 0, `${n}: ${errs.length ? errs.join("; ") : `no CSP violation, no console error${downNote(down)}`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok")), lines };
 }
@@ -181,6 +185,8 @@ async function runOne(browser, w, shots, handler) {
     Object.assign(run, await f.evaluate(READ, w.isMobile));
     run.violations = await f.evaluate(() => window.__ctViolations ?? []);
     await page.screenshot({ path: path.join(shots, `${KEY}-${w.name}.png`) });
+    // the footer's clock for outages()'s read cap is read last, as the error list closes
+    run.footer = await footerEvidence(f);
   } finally {
     await ctx.close();
   }
