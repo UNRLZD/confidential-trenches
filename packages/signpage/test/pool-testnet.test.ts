@@ -456,6 +456,48 @@ test("fold 2 (2): the RESERVED pass runs under the seed's shared lock: a sign ou
   assert.equal(reads, before);
 });
 
+test("review P2-1 of a34c1626: a sign out stops the Solana RESERVED pass's settle at its next read: no read after it, the note held; the pass runs on the page's cache", async () => {
+  const { w, ns } = await wallet();
+  // the lister's first answer held until the test lets it go; the pair answers the time and nothing else
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    await gate;
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const cache: { marks?: unknown; pages?: unknown } = {};
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (!calls.includes("lister getProgramAccounts")) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(cache.pages !== undefined, "the pass's settle runs on the page's cache");
+  const before = calls.length;
+  t.signingOut();
+  release();
+  await pass;
+  // the listed address is never read: the settle stopped at its next read
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
+test("review P2-1 and P2-2 of a34c1626: every Solana settle on the page passes the sign-out stop and the page's cache, in every path (buy, reserved pass, owed finish, withdraw)", () => {
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
+  assert.equal(calls.length, 4);
+  for (const c of calls) assert.match(c, /, signal: solanaStop\.signal, cache \}\)$/, c);
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];

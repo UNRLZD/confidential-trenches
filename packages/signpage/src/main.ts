@@ -898,6 +898,8 @@ async function signOut(): Promise<void> {
   follows?.signedOut();
   poolFollow?.stop();
   withdrawsSignedOut();
+  // a Solana pool settle holds the seed lock shared, which the sign out waits for: it stops first
+  testnet?.signingOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;

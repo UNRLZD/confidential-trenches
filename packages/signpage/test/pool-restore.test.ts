@@ -288,9 +288,11 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
 
 test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
   const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
-  const { pageSolanaLister, pageSolanaRpcs } = await import("../src/pool-testnet.ts");
+  const { PAGE_SOL_CACHE, pageSolanaLister, pageSolanaRpcs } = await import("../src/pool-testnet.ts");
   const pin = SOL_POOLS.mainnet!;
-  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaRpcs, lister: pageSolanaLister }]);
+  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE }]);
+  // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
+  assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so

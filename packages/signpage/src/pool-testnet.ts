@@ -49,7 +49,7 @@ import { poolDepositKind, type PoolDepositFrom, type PoolDepositHost } from "./p
 import { proverHost } from "./prover-host.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER } from "./trade.ts";
 import { SOL_MAINNET_DEPLOY, SOL_POOLS, solanaPool, solanaPoolOf, type SolanaFeeAnswer, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
-import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/solana-restore.ts";
+import { solanaSettleReserved, solanaSettleSpent, type SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
@@ -156,6 +156,12 @@ export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
 /** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
  *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
 export const pageSolanaLister = (): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE)));
+/** The page's marks and pages of PAGE_SOL_PIN's pool on pageSolanaRpcs' pair (the wallet's SolanaPoolCache): every settle
+ *  of the page and its restore read only the marks and pages none of them has read yet, so a settle after the first
+ *  reads the newest page of each tree and the newest bucket of each mark size, at any pool size (review P2-2 of
+ *  a34c1626: 510 getMultipleAccounts per seat at 5,000 marks on every settle before). Public chain data only: every
+ *  mark of the pool, never which are the user's, so it is kept across a sign out. */
+export const PAGE_SOL_CACHE: SolanaPoolCache = {};
 
 /** A withdraw stage's order: a write never moves an op back (review #232b LOW 1). A stale finish's stopped never
  *  overwrites sent, nor a later part's proving its earlier part's in_transit. */
@@ -279,6 +285,8 @@ export type TestnetOver = {
   rpcs?: readonly [SolanaRpc, SolanaRpc];
   /** The marks' lister (the pair's first RPC when `rpcs` is planted, pageSolanaLister otherwise). */
   lister?: SolanaRpc;
+  /** The Solana pool's cache (PAGE_SOL_CACHE on the page's own pin and pair, a new one when `rpcs` or `pin` is planted). */
+  cache?: SolanaPoolCache;
   fetch?: typeof fetch;
   hardwareConcurrency?: number;
   /** The lookup table pool.buy loads (the network's, PAGE_TABLE, otherwise). */
@@ -400,6 +408,9 @@ export type TestnetPool = {
   /** `fn` runs after each pass that made or remade a proof: a proof made changes no store record (its note was HELD
    * before it began), so the page's state is read again on this. */
   watch(fn: () => void): void;
+  /** A sign out is starting: every Solana pool settle stops (each holds the seed lock shared, which the sign out waits
+   *  for), its reads end and it writes nothing after. */
+  signingOut(): void;
   /** Sign out: the queue closed (its notes freed, its seed copy zeroed), its note store closed, the worker ended. */
   signedOut(): Promise<void>;
   /** The pool withdraw screen's reads and run (src/withdraw/pool-form.ts) for the request's op id. */
@@ -414,6 +425,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const rpcs = (): readonly [SolanaRpc, SolanaRpc] => over.rpcs ?? pageSolanaRpcs();
   // the marks' lister: a test's planted pair lists on its own first RPC unless it plants a lister
   const lister = (): SolanaRpc | undefined => over.lister ?? (over.rpcs === undefined ? pageSolanaLister() : undefined);
+  // one cache for every Solana settle on this page (and its restore, src/pool-restore.ts pagePools), on one pair
+  const cache: SolanaPoolCache = over.cache ?? (over.rpcs === undefined && over.pin === undefined ? PAGE_SOL_CACHE : {});
+  // every Solana settle's stop: a sign out (this tab's, signingOut, or another's, signedOut) aborts it, so a settle on a
+  // lister that stalls or names marks without end never holds the seed lock the sign out waits for (review P2-1)
+  let solanaStop = new AbortController();
+  const stopSolana = (): void => {
+    solanaStop.abort();
+    solanaStop = new AbortController();
+  };
   const prover = over.prover ?? proverHost();
   const solanaDepositKind = over.depositKinds?.solana ?? poolDepositKind;
   const evmDepositKind = over.depositKinds?.evm ?? poolDepositEvmKind;
@@ -466,6 +486,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const signedOut = async (): Promise<void> => {
     follows.abort();
     follows = new AbortController();
+    stopSolana();
     const p = open;
     open = null;
     prover.stop();
@@ -619,7 +640,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         const seed64 = await page.seed64();
         try {
           notes ??= await openNoteStore(await page.store());
-          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, rpcs: rpcs(), lister: lister() });
+          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, rpcs: rpcs(), lister: lister(), signal: solanaStop.signal, cache });
         } finally {
           seed64.fill(0);
         }
@@ -722,7 +743,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       let seed64: Uint8Array | null = null;
       try {
         seed64 = await page.seed64();
-        const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs(), lister: lister() });
+        const pass = await solanaSettleReserved({ seed64, notes, program: pin!.program, rpcs: rpcs(), lister: lister(), signal: solanaStop.signal, cache });
         // a freed note's release never landed: an op owing its send is settled stopped, nothing sent, before the note
         // can be spent again
         if (pass.freed.length > 0) await settleFreedOps(await page.store(), pass.freed);
@@ -796,7 +817,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             withSeed,
             places: placesOf(k),
             notes: async () => notes,
-            settle: (noteId) => withSeed((seed64) => solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs(), lister: lister() })),
+            settle: (noteId) => withSeed((seed64) => solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs(), lister: lister(), signal: solanaStop.signal, cache })),
           },
           pending,
         );
@@ -945,7 +966,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             settle: async (noteId) => {
               const seed64 = await page.seed64();
               try {
-                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs(), lister: lister() });
+                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: rpcs(), lister: lister(), signal: solanaStop.signal, cache });
               } finally {
                 seed64.fill(0);
               }
@@ -1050,6 +1071,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       return q ? q.readyWith(read) : { ready: undefined, value: await read() };
     },
     watch: (fn) => void watchers.add(fn),
+    signingOut: stopSolana,
     signedOut,
     withdrawDeps,
     withdraw,
