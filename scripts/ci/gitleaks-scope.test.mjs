@@ -163,6 +163,16 @@ test('a pull request that adds its own allowlist to .gitleaks.toml for its own s
   })));
 });
 
+// planted (review P2): git reads a rev "origin/main" as refs/tags/origin/main before refs/remotes/origin/main, and the
+// checkout fetches every tag: a tag of that name on the pull request's own commit must not pick the rules
+test('a tag named origin/main on a pull request commit that allowlists its own secret still fails', () => {
+  const co = checkout({
+    pr: [{ 'leak.txt': leak(), '.gitleaks.toml': `${RULES}\n[[allowlists]]\ndescription = "planted"\npaths = ['''^leak\\.txt$''']\n` }],
+  });
+  git(co.repo, ['tag', 'origin/main', 'refs/remotes/origin/pr']);
+  fails(scan(co));
+});
+
 test("a pull request whose secret main's ignore covers passes", () => {
   passes(scan(checkout({
     pr: [{ 'leak.txt': leak() }, { 'leak.txt': null }],
@@ -192,7 +202,7 @@ test("the gitleaks job builds the signing page's bundle, then scans it with main
   const [step] = scanSteps(yml).filter(BUNDLE_SCAN);
   assert.equal(scanSteps(yml).filter(BUNDLE_SCAN).length, 1);
   assert.match(step, /^echo "\$GITLEAKS_SHA256  \$RUNNER_TEMP\/gitleaks" \| sha256sum --strict -c -$/m, 'the binary is checked first');
-  assert.match(step, /git show origin\/main:\.gitleaks\.toml > "\$rules\/\.gitleaks\.toml"/, "main's rules, read again");
+  assert.match(step, /git show refs\/remotes\/origin\/main:\.gitleaks\.toml > "\$rules\/\.gitleaks\.toml"/, "main's rules, read again");
   assert.match(job, /GITLEAKS_SHA256: \$\{\{ steps\.gitleaks-bin\.outputs\.sha256 \}\}/);
 });
 

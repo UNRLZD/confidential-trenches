@@ -16,6 +16,7 @@
 // A card is proven by its own live check, run after every deploy. A release is never written again.
 // No token and no network: it reads the git history checked out by CI (fetch-depth 0) and the body CI passes in.
 //   PR_BODY="<pull request body>" node scripts/ci/verify-gate.mjs <base sha> <head sha>
+//   node scripts/ci/verify-gate.mjs --group <main sha> <group head sha>   a merge queue group (verifyGroup below)
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
@@ -159,13 +160,52 @@ export function verifyGate(cwd, base, head, body = "") {
   return { refusals, cards: [...cards] };
 }
 
+/**
+ * A merge queue group, judged as each of its pull requests is: GitHub's queue (merge method MERGE) builds the group's
+ * head on main with one merge commit per queued pull request, its first parent the line so far and its second the
+ * pull request's head, its message the pull request's title and number, a blank line and its description (the
+ * repository's "Pull request title and description" default). Walking the head's first parents down to main, each
+ * merge commit C is judged as verifyGate(C^1, C, its description): that pull request's own commits, its live checks in
+ * the tree it lands as, and its body's exemptions, which cover its own cards alone. A commit on that line that is not
+ * a merge is refused, so a squash or rebase queue never lands a commit nobody judged; so is a group with no merge.
+ * main: a commit on main (CI passes the merge base of main and the group's head); the walk stops at its first ancestor.
+ */
+export function verifyGroup(cwd, main, head) {
+  const refusals = [];
+  const cards = new Set();
+  const entries = [];
+  for (let c = head; ; ) {
+    try {
+      git(cwd, ["merge-base", "--is-ancestor", c, main]);
+      break;
+    } catch {}
+    const parents = git(cwd, ["rev-list", "--parents", "-n", "1", c]).split(" ").slice(1);
+    if (parents.length !== 2) {
+      refusals.push(`commit ${c.slice(0, 12)} on the group's line is not a merge commit of one pull request (the queue merges with MERGE): ${git(cwd, ["log", "-1", "--format=%s", c])}`);
+      return { refusals, cards: [] };
+    }
+    entries.unshift(c);
+    c = parents[0];
+  }
+  if (!entries.length) return { refusals: ["the group has no queued pull request"], cards: [] };
+  for (const c of entries) {
+    const title = git(cwd, ["log", "-1", "--format=%s", c]);
+    const one = verifyGate(cwd, `${c}^1`, c, git(cwd, ["log", "-1", "--format=%b", c]));
+    for (const r of one.refusals) refusals.push(`${title}: ${r}`);
+    for (const k of one.cards) cards.add(k);
+  }
+  return { refusals, cards: [...cards] };
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [base, head] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const group = args[0] === "--group";
+  const [base, head] = group ? args.slice(1) : args;
   if (!base || !head) {
-    console.error("usage: PR_BODY=<body> verify-gate.mjs <base sha> <head sha>");
+    console.error("usage: PR_BODY=<body> verify-gate.mjs <base sha> <head sha> | verify-gate.mjs --group <main sha> <group head sha>");
     process.exit(2);
   }
-  const { refusals, cards } = verifyGate(process.cwd(), base, head, process.env.PR_BODY ?? "");
+  const { refusals, cards } = group ? verifyGroup(process.cwd(), base, head) : verifyGate(process.cwd(), base, head, process.env.PR_BODY ?? "");
   if (refusals.length) {
     for (const r of refusals) console.error(`verify-gate: REFUSED: ${r}`);
     process.exit(1);

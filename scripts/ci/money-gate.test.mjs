@@ -628,6 +628,79 @@ test("money code in a commit that names no card, or added in a merge commit, is 
   }
 });
 
+// A merge queue group: CI runs the gate on main (the merge base of main and the group's head) to the group's head, so
+// every queued card's own commits are read, and the queue's merge commits (one per pull request) are merges.
+// prs: [[branch, [[msg, files], ...]], ...]; the queue merges each with --no-ff, as GitHub's queue does with MERGE.
+function queued(r, prs) {
+  for (const [name, commits] of prs) {
+    r.git("checkout", "-q", "-b", name, r.base);
+    for (const [msg, files] of commits) r.commit(msg, files);
+  }
+  r.git("checkout", "-q", "-b", "gh-readonly-queue/main/pr", r.base);
+  prs.forEach(([name], i) => r.git("merge", "-q", "--no-ff", "-m", `Card ${name}: merge (#${i + 1})`, name));
+  return r.git("rev-parse", "HEAD");
+}
+const armRec = { "contracts/vault/src/lib.rs": "// code\n", "scripts/live-checks/arm.md": liveRec("arm", `Money path: yes\nTx: base ${BASE_TX}\n`) };
+const docs = ["docs-plan", [["Card docs-plan: a plan", { "docs/plans/app.md": "# app\n" }]]];
+
+test("a clean two-card merge queue group passes, its money card's Tx lines read", async () => {
+  const r = moneyRepo();
+  try {
+    const head = queued(r, [["arm", [["Card arm: the vault call", armRec]]], docs]);
+    const out = await gate(r, r.base, head);
+    assert.deepEqual(out.refusals, []);
+    assert.deepEqual(out.read, [`base ${BASE_TX} ok on b1`, `base ${BASE_TX} ok on b2`]);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: a merge queue group whose money commit names no card is refused", async () => {
+  const r = moneyRepo();
+  try {
+    const head = queued(r, [docs, ["arm", [["tweak the vault", { "contracts/vault/src/lib.rs": "// code\n" }]]]]);
+    assert.match((await gate(r, r.base, head)).refusals.join("\n"), /commit [0-9a-f]{12} changes money code \(contracts\/vault\/src\/lib\.rs\) and names no card/);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: a two-card merge queue group with one bad money card is refused for that card alone", async () => {
+  for (const [bad, why] of [
+    [liveRec("arm", "Money path: no\n"), /scripts\/live-checks\/arm\.md: "Money path: no", but card arm changes money code/],
+    [`CARD arm / live: FAIL\nMoney path: yes\nTx: base ${BASE_TX}\n`, /scripts\/live-checks\/arm\.md: the last live verdict is FAIL, and card arm changes money code/],
+    ["Money path: yes\n", /scripts\/live-checks\/arm\.md holds no live record, and card arm changes money code/],
+  ]) {
+    const r = moneyRepo();
+    try {
+      const head = queued(r, [docs, ["arm", [["Card arm: the vault call", { ...armRec, "scripts/live-checks/arm.md": bad }]]]]);
+      const out = (await gate(r, r.base, head)).refusals.join("\n");
+      assert.match(out, why);
+      assert.doesNotMatch(out, /docs-plan/);
+    } finally {
+      r.done();
+    }
+  }
+});
+
+test("planted: money code the queue's merge commit adds, outside any card's commit, is refused", async () => {
+  const r = moneyRepo();
+  try {
+    r.git("checkout", "-q", "-b", "docs-plan", r.base);
+    r.commit("Card docs-plan: a plan", { "docs/plans/app.md": "# app\n" });
+    r.git("checkout", "-q", "-b", "gh-readonly-queue/main/pr", r.base);
+    r.git("merge", "-q", "--no-ff", "--no-commit", "docs-plan");
+    mkdirSync(join(r.dir, "packages/kit"), { recursive: true });
+    writeFileSync(join(r.dir, "packages/kit/evil.ts"), "export {}\n");
+    r.git("add", "--", "packages/kit/evil.ts");
+    r.git("commit", "-q", "-m", "Card docs-plan: merge (#1)");
+    const head = r.git("rev-parse", "HEAD");
+    assert.match((await gate(r, r.base, head)).refusals.join("\n"), /packages\/kit\/evil\.ts changes money code in a merge commit, outside any card's commit/);
+  } finally {
+    r.done();
+  }
+});
+
 test("the folder's README is not a record", () => {
   const r = moneyRepo();
   try {
