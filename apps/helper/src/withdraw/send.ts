@@ -650,7 +650,9 @@ export function withdrawSenderFromEnv(
     try {
       const store = createWithdrawSendStore(join(storeDir, `withdraw-send-${net.network}`), { release: Number(release), keys: nonces });
       opened.push(store);
-      const relayers = await Promise.all(net.keys.map((k) => startRelayer(rpcs, rpcs[0], relayerOf[net.network], k, net.vault, nonces)));
+      // no archival provider of a third operator (the kit's archival hosts are one operator): none stands in for a
+      // provider that forgot a transaction, so an outcome is always both providers' word (card helper-judge-two-agree)
+      const relayers = await Promise.all(net.keys.map((k) => startRelayer(rpcs, null, relayerOf[net.network], k, net.vault, nonces)));
       const watch = status[net.network];
       const deps: WithdrawSendDeps = {
         cfg: { vault: net.vault, token: TOKENS[net.network], scope, feeRecipient: feeTo[net.network] },
