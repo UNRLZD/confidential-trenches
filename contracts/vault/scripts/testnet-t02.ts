@@ -443,7 +443,8 @@ async function withdraw(argv: string[]) {
     const outDir = `${stateFile}.page`;
     await vite.build({ root: path.join(HERE, "t02-page"), configFile: false, logLevel: "warn", build: { outDir, emptyOutDir: true, target: "es2022", modulePreload: false } });
     const { ZK_SETUP_FILES } = await import(pathToFileURL(path.join(ROOT, "packages/kit/src/zk/setup-files.ts")).href);
-    const files: Record<string, string> = { "/prover-worker.js": path.join(ROOT, "packages/signpage/public/prover-worker.js") };
+    const { signBuilt } = await import(pathToFileURL(path.join(ROOT, "scripts/signpage-built.mjs")).href); // the worker is build output (card signpage-generated-merge-free)
+    const files: Record<string, string> = { "/prover-worker.js": path.join(signBuilt(), "public/prover-worker.js") };
     for (const name of ["withdraw.wasm", "withdraw.zkey", "commitment.wasm", "commitment.zkey"]) files[`/assets/zk/${ZK_SETUP_FILES[name].sha256}.${name.split(".").pop()}`] = path.join(ROOT, "packages/kit/zk", name);
     const http = await import("node:http");
     const fs = await import("node:fs");

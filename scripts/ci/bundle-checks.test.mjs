@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { readerFilter } from "../live-checks/signpage-withdraw-own-spend.mjs";
 import { buildFetch, CHILD_RUNS, IN_PROCESS, OUT, ROOT, run, SIGN, SIGN_DIR } from "./bundle-checks.mjs";
 import { listOf } from "./live-plan.mjs";
+import { signBuilt } from "../signpage-built.mjs";
 
 const SIGN_ONLY = IN_PROCESS.filter((c) => c.host === "sign");
 const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}`;
@@ -21,6 +22,7 @@ const sha384 = (b) => `sha384-${createHash("sha384").update(b).digest("base64")}
 function signCopy(edit = (js) => js, repin = true) {
   const dir = mkdtempSync(path.join(tmpdir(), "bundle-checks-"));
   mkdirSync(path.join(dir, "public"));
+  signBuilt(); // this checkout's build, made from its sources (card signpage-generated-merge-free)
   const js = edit(readFileSync(path.join(SIGN_DIR, "public/app.js"), "utf8"));
   writeFileSync(path.join(dir, "public/app.js"), js);
   const index = readFileSync(path.join(SIGN_DIR, "index.html"), "utf8");
