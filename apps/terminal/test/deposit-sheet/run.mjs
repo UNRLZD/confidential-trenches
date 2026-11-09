@@ -88,6 +88,7 @@ const STATES = [
   ["pool-refund-move", true, "refund-move", "solana"],
   ["pool-in", true, "pool-in", "solana"],
   ["pool-in-proving", true, "pool-in", "solana"],
+  ["pool-in-noentry", true, "pool-in", "solana"],
   ["pool-expired", true, "S4.20", "solana"],
 ];
 const DESTS = ["near", "solana", "base", "robinhood"];
@@ -185,7 +186,10 @@ try {
       // BAR-12: the done screen only at the kit's done
       // a pool's done screen (pool-in) only at the kit's in_pool, with what its pool holds ready to buy
       check(["S4.16", "pool-in"].includes(want) === ((await page.locator(".ddone").count()) === 1), `${tag}: done screen ${want}`);
-      if (want === "pool-in") {
+      if (want === "pool-in" && f === "pool-in-noentry") {
+        const n = await page.locator("[data-ready], [data-pending]").count();
+        check(n === 0 && !(await page.locator(".ddone").innerText()).includes("Ready"), `${tag}: no state.pools entry, yet a Ready or Pending line`);
+      } else if (want === "pool-in") {
         const ready = await page.locator("[data-ready]").first().getAttribute("data-ready");
         check(ready === (f === "pool-in" ? "0.4" : "none"), `${tag}: Ready ${ready}`);
         const pend = await page.locator("[data-pending]").first().getAttribute("data-pending").catch(() => null);
@@ -275,6 +279,23 @@ try {
       await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
       const q = (await page.evaluate(() => window.__calls)).filter((c) => c.kind === "deposit.quote");
       check(q.length === 1 && q[0].params.amount === "15" && (await page.locator(".dep").getAttribute("data-state")) === "S4.13", `@${w.name}: the vault picked back: ${JSON.stringify(q)}`);
+      await ctx.close();
+    }
+    // card deposit-to-pool-pools (review P1): while a checked quote is pending the asset, chain and amount are held still,
+    // and the address block draws the asset and amount asked, never a pick made after; the vault's and the pool's alike
+    for (const dest of ["near", "solana"]) {
+      const { ctx, page } = await open(browser, w, "hold", { dest: dest === "near" ? null : dest });
+      await page.waitForSelector('.dep[data-state="S4.3"]');
+      await page.locator('[data-control="deposit-get"]').click();
+      await page.waitForSelector('.dep[data-state="S4.2"]');
+      const off = await Promise.all(['[data-control="deposit-asset"]', '[data-control="deposit-chain"]', '[data-field="amount"]'].map((sel) => page.locator(sel).isDisabled()));
+      await page.locator('[data-control="deposit-asset"]').selectOption("SOL", { force: true, timeout: 1_000 }).catch(() => {});
+      await page.locator('[data-field="amount"]').fill("99", { force: true, timeout: 1_000 }).catch(() => {});
+      await page.evaluate(() => window.__release?.());
+      await page.waitForSelector('.dep[data-state="S4.13"]', { timeout: 5_000 }).catch(() => {});
+      const head = (await page.locator(".addrb .ca").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      const kv = (await page.locator(".addrb .kv").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      check(off.every(Boolean) && head === "NEAR" && kv.includes("15 NEAR") && kv.includes("NEAR"), `@${w.name} ${dest}: pending pickers off ${JSON.stringify(off)}, address block ${JSON.stringify([head, kv])}, want NEAR and 15 NEAR as asked`);
       await ctx.close();
     }
     {

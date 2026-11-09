@@ -4,8 +4,8 @@
 // the kit can land it. The vault takes deposit.quote; a pool takes money once the signing page's pool.address answers its
 // chain (kit-v1.7: the pool's one-time address with no asset, the checked quote to it with the asset and amount, then the
 // pool_deposit op's stages under that request's id). The stand-in answers Solana's pool.address and refuses Base's and
-// Robinhood's, as the page does before pool-deposit-follow-evm, so Solana must take a deposit through every pool stage
-// and Base and Robinhood must ask nothing and show no address. APP_HOST's terminal is framed by the
+// Robinhood's, standing for a page whose network pins only Solana's pool (no EVM follow yet, card pool-deposit-follow-evm),
+// so Solana must take a deposit through every pool stage and Base and Robinhood must ask nothing and show no address. APP_HOST's terminal is framed by the
 // stand-in shell of app-deposit-mount.mjs (routeFor: one signed-in account, backup saved, nothing in the vault, the
 // deposit reads answered as the real page answers them after its 1Click reads), which posts the deposit's stages under
 // the quote's request id as the real page does; no check can sign a real account in or send a real deposit. Headless
@@ -24,8 +24,8 @@
 //     the done state, whose vault_balance the stand-in sets to the credited 73.18 as the real page does once the note
 //     reads on two RPCs;
 //   - Done closes the sheet, and Portfolio's total reads $73.18;
-//   - the sheet opened again, Solana picked: the form with Get address on, no deposit.dry; typing 15 and Get address
-//     sends pool.address with Solana, the asset and 15 only, and the pool quote's own address draws (S4.13); every pool
+//   - the sheet opened again, Solana picked: the form with Get address on, no deposit.dry; USDC on Base picked (the page
+//     prices only USDC into a pool), typing 20 and Get address sends pool.address with Solana, USDC and 20 only, and the pool quote's own address draws (S4.13); every pool
 //     stage draws its own state, posted in turn on that one pool_deposit op (waiting, in transit, failed, short,
 //     refunded, the refund move, expired, then in the pool); Ready only at in_pool, with what state.pools holds ready
 //     for Solana, which the stand-in sets in that same state as the real page does once the notes read on two RPCs;
@@ -60,7 +60,12 @@ export const OPEN = "solana";
 /** The stand-in's pool.address answers (kit messages.ts PoolAddress): Solana's U_X, base58 of 32 bytes, its pool's
  *  asset, and the checked quote to it (min out in SOL); Base and Robinhood refused not_allowed. */
 export const U_SOL = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
-export const POOL_ANSWERS = { solana: { address: U_SOL, asset: "SOL", quote: { deposit_address: ADDRESS, origin_asset: NEAR.origin_asset, amount_in: AMOUNT, min_amount_out: "0.4", time_estimate_s: 37 } } };
+/** The pool flow's origin: USDC on Base as deposit.assets lists it (app-deposit-mount.mjs), the asset the page prices
+ *  into a pool, and its amount. The quote's deposit address is a 1Click EVM one, for USDC on Base. */
+export const POOL_ORIGIN = { origin_asset: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", symbol: "USDC" };
+export const POOL_AMOUNT = "20";
+export const POOL_DEPOSIT_ADDRESS = "0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0bE";
+export const POOL_ANSWERS = { solana: { address: U_SOL, asset: "SOL", quote: { deposit_address: POOL_DEPOSIT_ADDRESS, origin_asset: POOL_ORIGIN.origin_asset, amount_in: POOL_AMOUNT, min_amount_out: "0.1", time_estimate_s: 37 } } };
 /** state.pools once the notes read on two RPCs: 0.41 SOL, 0.4 of it ready to buy (base units as Portfolio's row keeps them). */
 export const SOL_POOL = { chain: "solana", asset: "SOL", balance: "0.41", ready: "0.4" };
 export const SOL_ROW = { balance: "410000000", ready: "400000000" };
@@ -136,9 +141,10 @@ export function judge(rec) {
     const o = r.open ?? {};
     say(o.opened === 1, `${n}: the sheet ${o.opened === 1 ? "opens again" : "does not open again"}`);
     say(o.state === "S4.3" && o.getOn === true && o.pressed === OPEN, `${n}: ${OPEN} picked draws ${o.state ?? "nothing"}, Get address ${o.getOn === true ? "on" : o.getOn === false ? "OFF" : "unread"}, pressed ${o.pressed ?? "none"}`);
-    const wantAsk = { chain: OPEN, origin_asset: NEAR.origin_asset, amount: AMOUNT };
+    const wantAsk = { chain: OPEN, origin_asset: POOL_ORIGIN.origin_asset, amount: POOL_AMOUNT };
     say(same(o.asked, [wantAsk]), `${n}: ${OPEN}'s Get address sends ${JSON.stringify(o.asked ?? null)}, want one pool.address ${JSON.stringify(wantAsk)} and no vault quote`);
-    say(o.addressState === "S4.13" && o.address === ADDRESS, `${n}: ${OPEN}'s address state ${o.addressState ?? "none"} draws ${o.address === ADDRESS ? "the pool quote's own address" : (o.address ?? "no address")}`);
+    say(o.addressState === "S4.13" && o.address === POOL_DEPOSIT_ADDRESS, `${n}: ${OPEN}'s address state ${o.addressState ?? "none"} draws ${o.address === POOL_DEPOSIT_ADDRESS ? "the pool quote's own address" : (o.address ?? "no address")}`);
+    say(o.heading === "USDC Base" && o.amountLine === `${POOL_AMOUNT} USDC`, `${n}: ${OPEN}'s address block names ${JSON.stringify([o.heading ?? null, o.amountLine ?? null])}, want the asset and amount asked ["USDC Base","${POOL_AMOUNT} USDC"]`);
     const ps = POOL_STAGES.map(([, s]) => s);
     say(same(o.stages, ps), `${n}: ${OPEN}'s pool stages draw ${JSON.stringify(o.stages ?? [])}, want ${JSON.stringify(ps)}`);
     const readies = o.readies ?? [];
@@ -319,7 +325,8 @@ async function runOne(browser, w, scheme, shots, route) {
     const n0 = (await asked(page)).length;
     o.tapError = await press(page, f.locator(`${SHEET} .dtiles [data-dest='${OPEN}']`), w.hasTouch);
     await f.waitForSelector(`${SHEET}[data-dest='${OPEN}'] [data-field='amount']:not([disabled])`, { timeout: 5_000 }).catch(() => {});
-    await f.locator("[data-field='amount']").filter({ visible: true }).first().pressSequentially(AMOUNT, { delay: 60, timeout: 3_000 }).catch(() => {});
+    await f.locator(`${SHEET} [data-control='deposit-asset']`).filter({ visible: true }).first().selectOption(POOL_ORIGIN.symbol, { timeout: 3_000 }).catch(() => {});
+    await f.locator("[data-field='amount']").filter({ visible: true }).first().pressSequentially(POOL_AMOUNT, { delay: 60, timeout: 3_000 }).catch(() => {});
     await page.waitForTimeout(600);
     o.state = await sheetState(f);
     o.pressed = await f.locator(`${SHEET} .dtiles [aria-pressed='true']`).first().getAttribute("data-dest", { timeout: 1_000 }).catch(() => null);
@@ -331,6 +338,8 @@ async function runOne(browser, w, scheme, shots, route) {
     o.asked = (await asked(page)).slice(n0).filter((m) => m.type === "deposit.dry" || m.type === "deposit.quote" || (m.type === "pool.address" && m.amount !== undefined)).map((m) => (m.type === "pool.address" ? fieldsOf(m) : { type: m.type }));
     o.addressState = await sheetState(f);
     o.address = await f.locator(`${SHEET} [data-address]`).first().getAttribute("data-address", { timeout: 1_000 }).catch(() => null);
+    o.heading = await f.locator(`${SHEET} .addrb .ca`).first().innerText({ timeout: 1_000 }).then((t) => t.replace(/\s+/g, " ").trim(), () => null);
+    o.amountLine = await f.locator(`${SHEET} .addrb .kv .v`).first().innerText({ timeout: 1_000 }).then((t) => t.replace(/\s+/g, " ").trim(), () => null);
     await shot(page, "pool-address");
     o.stages = [];
     o.readies = [];

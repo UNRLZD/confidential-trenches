@@ -45,10 +45,12 @@ export type Dest = "near" | PoolChain;
 export const DESTS: readonly Dest[] = Object.freeze(["near", ...POOL_CHAINS]);
 
 /**
- * What the signing page answered for each pool's chain (card deposit-to-pool-pools): true once pool.address answered the
- * chain's one-time address, false when it refused, absent while not asked or not back. The page answers a chain only
- * when its network pins that pool and a follow carries money sent there on into it (packages/signpage
- * pool-deposit-address.ts), so a chain turns fundable with no app change once the page does.
+ * What the signing page answered for each pool's chain (card deposit-to-pool-pools): true once pool.address with no
+ * asset answered the chain's one-time address, false when it refused, absent while not asked or not back. Today the
+ * page answers that ask whenever its network pins the chain's pool and the account is signed in with its words saved
+ * (packages/signpage pool-deposit-address.ts): it answers before the gates only a quote meets (a follow to carry the
+ * money on, the mainnet network, the device's price of the origin, the pool's floor), so a tile can read fundable while
+ * every quote for it is refused, which the sheet draws as Not available at Get address.
  */
 export type PoolOpen = Partial<Record<PoolChain, boolean>>;
 
@@ -89,6 +91,16 @@ export function poolStatusOf(op: Extract<Operation, { kind: "pool_deposit" }>): 
 export function poolStatusFor(ops: readonly Operation[] | undefined, id: string, chain: PoolChain): PoolDepositStatus | null {
   const op = ops?.find((o) => o.id === id);
   return op && op.kind === "pool_deposit" && op.chain === chain ? poolStatusOf(op) : null;
+}
+
+/**
+ * Whether a checked quote is the one asked for (review P1, the vault's and a pool's alike): its origin asset the asset
+ * asked and its amount in the amount asked, exactly. An answer for anything else draws no address, so money is never
+ * sent from one asset to an address quoted for another.
+ */
+export function quoteFits(q: Pick<SignpageResults["deposit.quote"], "origin_asset" | "amount_in">, asked: { asset: Asset; amount: string }): boolean {
+  const a = parseAmount(q.amount_in), b = parseAmount(asked.amount);
+  return q.origin_asset === asked.asset.id && a !== null && b !== null && !lessThan(a, b) && !lessThan(b, a);
 }
 
 /** pool.address's checked quote, only when the answer names the chain asked: an answer for another chain, or an address

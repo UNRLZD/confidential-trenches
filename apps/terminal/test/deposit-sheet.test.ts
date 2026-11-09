@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { POOL_DEPOSIT_STAGES } from "@blindfill/kit";
 import type { DepositAsset, Operation, SignpageResults } from "@blindfill/kit";
-import { POOL_ASK_TRIES, poolAskAgainIn, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
+import { POOL_ASK_TRIES, poolAskAgainIn, quoteFits, addressHeading, ADDRESS_STATES, assetOf, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, lessThan, parseAmount, pickAsset, poolQuote, poolReady, poolStatusFor, poolStatusOf, recentRows, sheetState, statusOf, statusState, symbolsOf, usd } from "../src/screens/deposit/model.ts";
 import { qrOf } from "../src/screens/deposit/qr.ts";
 import type { Asset, DepositStatus, PoolDepositStatus, SheetInput } from "../src/screens/deposit/model.ts";
 import { DRAFTS, WORDS } from "../src/screens/deposit/words.ts";
@@ -355,4 +355,13 @@ test("the pools' opening pool.address: busy or down asked again on a capped back
   assert.equal(poolAskAgainIn("busy", POOL_ASK_TRIES), null, "past the bound: Not available");
   assert.equal(poolAskAgainIn("down", 99), null);
   for (const code of ["not_available", "quote_check_failed", "below_min", "above_max"] as const) assert.equal(poolAskAgainIn(code, 0), null, `${code}: never asked again`);
+});
+
+test("a checked quote stands only for the asset and amount it was asked for, the vault's and a pool's alike", () => {
+  const usdcBase: Asset = { id: "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", chain: "Base", symbol: "USDC", min: "1", max_usd: "1000" };
+  assert.equal(quoteFits(checked, { asset: near, amount: "15" }), true);
+  assert.equal(quoteFits(checked, { asset: near, amount: "15.0" }), true, "the same amount written another way");
+  assert.equal(quoteFits(checked, { asset: usdcBase, amount: "15" }), false, "another origin asset: its address is not this asset's");
+  assert.equal(quoteFits(checked, { asset: near, amount: "20" }), false, "another amount");
+  assert.equal(quoteFits({ ...checked, amount_in: "1e3" }, { asset: near, amount: "15" }), false, "an amount that is not a decimal");
 });

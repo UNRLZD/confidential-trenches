@@ -17,6 +17,8 @@ import "../../src/shell/shell.css";
 const NOW = Date.parse("2026-11-01T18:00:00Z");
 // R5's example (09-design-brief S4: 15 NEAR in, $73.18 out); the address is a 1Click NEAR deposit address shape
 const NEAR: Asset = { id: "nep141:wrap.near", chain: "NEAR", symbol: "NEAR", min: "2.1", max_usd: "1000" };
+// card deposit-to-pool-pools (review P1): a second asset to switch to while a quote is pending
+const SOL_A: Asset = { id: "nep141:sol.omft.near", chain: "Solana", symbol: "SOL", min: "0.01", max_usd: "1000" };
 const DRY: DryQuote = { amount_out_usd: "73.18", min_amount_out_usd: "72.45", fee_usd: "0.62", time_estimate_s: 37 };
 const CHECKED: SignpageResults["deposit.quote"] = {
   deposit_address: "8b0c4e2f61a94d7cb35e0f1a7d29c6e48f5a3b1d07e9c2a64f8d1b5e3a7c9f20",
@@ -49,6 +51,8 @@ interface Fx {
   flaky?: Partial<Record<PoolChain, QuoteRefusal[]>>;
   /** pool.address with the asset and amount. Default: Solana's checked quote. */
   poolQuote?: Reply<SignpageResults["pool.address"]>;
+  /** The checked quote (vault or pool) answers only on window.__release(), echoing the asset and amount asked. */
+  hold?: true;
   /** The pool_deposit op under that request's id, on Solana. */
   poolStatus?: PoolDepositStatus | null;
 }
@@ -94,17 +98,22 @@ export const FIXTURES: Record<string, Fx> = {
   "pool-refund-move": { poolStatus: { pool: "solana", stage: "refund_move", refunded: true, since_ms: since(8) } },
   "pool-in": { poolStatus: { pool: "solana", stage: "in_pool", since_ms: since(40) }, state: SOL_IN_POOL("0.4") },
   "pool-in-proving": { poolStatus: { pool: "solana", stage: "in_pool", since_ms: since(40) }, state: SOL_IN_POOL() },
+  // review P3: in_pool before state.pools names the pool: no Ready line
+  "pool-in-noentry": { poolStatus: { pool: "solana", stage: "in_pool", since_ms: since(40) }, state: { ops: SOL_IN_POOL().ops } },
   "pool-expired": { poolStatus: { pool: "solana", stage: "expired" } },
   "pool-refused": { poolQuote: refused("not_available") },
   // the opening ask answered busy then down, then the address: asked again, Solana fundable; down past the bound: Not available
   "pool-flaky": { flaky: { solana: ["busy", "down"] } },
   "pool-down": { flaky: { solana: ["down", "down", "down", "down", "down", "down"] } },
+  // review P1: the quote held until __release(), NEAR and SOL to pick from
+  hold: { hold: true, assets: [NEAR, SOL_A] },
   "pool-other-chain": { poolQuote: { ok: true, value: { ...POOL_ANSWER, chain: "base", asset: "ETH" } } },
 };
 
 declare global {
   interface Window {
     __calls: unknown[];
+    __release?: () => void;
   }
 }
 window.__calls = [];
@@ -123,11 +132,15 @@ const src: DepositSource = {
   },
   quote: async (asset, amount) => {
     window.__calls.push({ kind: "deposit.quote", params: { origin_asset: asset.id, amount } });
+    if (fx.hold) await new Promise<void>((r) => (window.__release = r));
+    if (fx.hold) return { id: "q1", reply: { ok: true, value: { ...CHECKED, origin_asset: asset.id, amount_in: amount } } };
     return { id: "q1", reply: fx.quote ?? { ok: true, value: CHECKED } };
   },
   status: (id) => (id === "q1" ? (fx.status ?? null) : null),
   poolAddress: async (chain: PoolChain, q) => {
     window.__calls.push({ kind: "pool.address", params: q ? { chain, origin_asset: q.asset.id, amount: q.amount } : { chain } });
+    if (q && fx.hold) await new Promise<void>((r) => (window.__release = r));
+    if (q && fx.hold) return { id: "p1", reply: { ok: true, value: { ...POOL_ANSWER, quote: { ...POOL_ANSWER.quote!, origin_asset: q.asset.id, amount_in: q.amount } } } };
     if (q) return { id: "p1", reply: fx.poolQuote ?? { ok: true, value: POOL_ANSWER } };
     const next = fx.flaky?.[chain]?.shift();
     if (next) return { id: `a-${chain}`, reply: refused(next) };

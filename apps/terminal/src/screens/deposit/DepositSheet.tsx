@@ -8,8 +8,8 @@ import { Icon } from "../signin/Icon.tsx";
 import { useBalance } from "../portfolio/source.tsx";
 import { CHAINS } from "../market/pads.ts";
 import { usd as usdCents } from "../signin/model.ts";
-import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, poolAskAgainIn, poolQuote, poolReady, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
-import type { Answer, Asset, Dest, DryQuote, PoolOpen, RecentRow, SheetState } from "./model.ts";
+import { addressHeading, ADDRESS_STATES, chainsOf, countdown, DESTS, destFundable, elapsed, getAddressOn, HELD_STATES, parseAmount, pickAsset, poolAskAgainIn, poolQuote, poolReady, quoteFits, recentRows, sheetState, symbolsOf, usd } from "./model.ts";
+import type { Answer, Asset, Dest, DryQuote, PoolOpen, QuoteRefusal, RecentRow, SheetState } from "./model.ts";
 import { qrOf } from "./qr.ts";
 import { useDepositSource, useNow } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -78,8 +78,9 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
   // no asset list (refused, or none to take) is the sheet's answer before any amount: S4.6, S4.7 or S4.8, never a skeleton
   const dry: Answer<DryQuote> = src.assetsRefused ? { kind: "refused", code: src.assetsRefused } : src.assets?.length === 0 ? { kind: "refused", code: "not_available" } : typedDry;
   const [checked, setChecked] = useState<Answer<SignpageResults["deposit.quote"]>>({ kind: "idle" });
-  // the request the address came from, with the destination it was asked for: its status is that place's op only
-  const [req, setReq] = useState<{ id: string | null; dest: Dest } | null>(null);
+  // the request the address came from: the place, asset and amount it was asked for. Its status is that place's op
+  // only, and the address block draws its asset and amount, never a pick made after (review P1)
+  const [req, setReq] = useState<{ id: string | null; dest: Dest; asset: Asset; amount: string } | null>(null);
   const [tries, setTries] = useState(0);
   const seq = useRef(0);
   const { dryQuote } = src;
@@ -107,18 +108,26 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     const amt = parseAmount(amount);
     const d = dest;
     if (!asset || !amt || !fundable) return;
+    const asked = { asset, amount: amt };
     setChecked({ kind: "pending" });
+    // the vault's quote, or a pool's only when the answer names the pool asked (model.ts poolQuote); either only when it
+    // is for the asset and amount asked (quoteFits): no other chain's or asset's address draws
+    let id: string | null;
+    let q: SignpageResults["deposit.quote"] | null;
+    let code: QuoteRefusal = "quote_check_failed";
     if (d === "near") {
-      const { id, reply } = await src.quote(asset, amt);
-      setReq({ id, dest: d });
-      setChecked(reply.ok ? { kind: "ok", value: reply.value } : { kind: "refused", code: reply.code });
-      return;
+      const r = await src.quote(asset, amt);
+      id = r.id;
+      q = r.reply.ok ? r.reply.value : null;
+      if (!r.reply.ok) code = r.reply.code;
+    } else {
+      const r = await src.poolAddress(d, asked);
+      id = r.id;
+      q = r.reply.ok ? poolQuote(d, r.reply.value) : null;
+      if (!r.reply.ok) code = r.reply.code;
     }
-    // a pool: the quote only when the answer names the pool asked (model.ts poolQuote), so no other chain's address draws
-    const { id, reply } = await src.poolAddress(d, { asset, amount: amt });
-    const q = reply.ok ? poolQuote(d, reply.value) : null;
-    setReq({ id, dest: d });
-    setChecked(q ? { kind: "ok", value: q } : { kind: "refused", code: reply.ok ? "quote_check_failed" : reply.code });
+    setReq({ id, dest: d, ...asked });
+    setChecked(q && quoteFits(q, asked) ? { kind: "ok", value: q } : { kind: "refused", code });
   }
   // another place picked: a refusal belongs to the place it was asked for, so the new place starts unasked
   function pickDest(d: Dest) {
@@ -147,10 +156,14 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
       <>
         <div className="ddone" data-pool={req.dest}>
           <Ring />
-          <div className="dsub"><W id="ready" /></div>
-          <div className="damt-done num" data-ready={p?.ready ?? "none"}>{p?.ready ?? "0"} {p?.asset}</div>
+          {p && (
+            <>
+              <div className="dsub"><W id="ready" /></div>
+              <div className="damt-done num" data-ready={p.ready ?? "none"}>{p.ready ?? "0"} {p.asset}</div>
+            </>
+          )}
           <div className="dsub">
-            <W id="deposited" /> <span className="num">{checked.kind === "ok" ? checked.value.amount_in : ""}</span> {asset?.symbol}
+            <W id="deposited" /> <span className="num">{checked.kind === "ok" ? checked.value.amount_in : ""}</span> {req?.asset.symbol}
           </div>
           {p?.pending != null && (
             <div className="dsub" data-pending={p.pending}>
@@ -168,7 +181,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         <Ring />
         <div className="damt-done num" data-amount={vault?.amount_usd}>{usd(vault?.amount_usd ?? "0")}</div>
         <div className="dsub">
-          <W id="deposited" /> <span className="num">{checked.kind === "ok" ? checked.value.amount_in : ""}</span> {asset?.symbol}
+          <W id="deposited" /> <span className="num">{checked.kind === "ok" ? checked.value.amount_in : ""}</span> {req?.asset.symbol}
         </div>
       </div>
     );
@@ -219,8 +232,8 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
         <div className="addrb">
           <Qr text={q.deposit_address} />
           <div className="ca">
-            {asset &&
-              addressHeading(asset).map((t, i) => (
+            {req &&
+              addressHeading(req.asset).map((t, i) => (
                 <span key={i} className={i ? "c" : undefined}>
                   {t}
                 </span>
@@ -230,9 +243,9 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
             {(q.deposit_address.match(/.{1,4}/g) ?? []).join(" ")}
           </div>
           <div className="kv">
-            <div><div className="k"><W id="amount" /></div><div className="v num">{q.amount_in} {asset?.symbol}</div></div>
+            <div><div className="k"><W id="amount" /></div><div className="v num">{q.amount_in} {req?.asset.symbol}</div></div>
             <div><div className="k"><W id="expiresIn" /></div><div className="v num">{countdown(q.deadline, now)}</div></div>
-            <div className="r"><div className="k"><W id="chain" /></div><div className="v">{asset?.chain}</div></div>
+            <div className="r"><div className="k"><W id="chain" /></div><div className="v">{req?.asset.chain}</div></div>
           </div>
         </div>
       </>
@@ -254,7 +267,7 @@ export function DepositSheet({ onClose }: { onClose(): void }) {
     body = (
       <>
         <Dests dest={dest} open={open} locked={checked.kind === "pending"} pick={pickDest} />
-        <Form s={s} lines={dest === "near"} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
+        <Form s={s} frozen={checked.kind === "pending"} lines={dest === "near"} amount={amount} setAmount={setAmount} dry={dry} asset={asset} assets={src.assets ?? []} pick={setPicked} retry={() => (checked.kind === "refused" ? again() : src.assetsRefused ? src.retryAssets() : setTries((t) => t + 1))} />
         <Recent rows={recentRows(state?.ops)} />
       </>
     );
@@ -310,8 +323,10 @@ function Stat({ tone, label, counter = null }: { tone: "warn" | "blue"; label: R
   );
 }
 
-function Form({ s, lines, amount, setAmount, dry, asset, assets, pick, retry }: { s: SheetState; lines: boolean; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: Asset | null; assets: readonly Asset[]; pick(p: { symbol: string; chain: string }): void; retry(): void }) {
+function Form({ s, frozen, lines, amount, setAmount, dry, asset, assets, pick, retry }: { s: SheetState; frozen: boolean; lines: boolean; amount: string; setAmount(a: string): void; dry: Answer<DryQuote>; asset: Asset | null; assets: readonly Asset[]; pick(p: { symbol: string; chain: string }): void; retry(): void }) {
   const loading = s === "S4.1";
+  // a checked quote pending: the asset, chain and amount it was asked for are held still until it answers (review P1)
+  const still = loading || frozen;
   const q = dry.kind === "ok" && !["S4.4", "S4.5"].includes(s) ? dry.value : null;
   const cell = (v: string | null) => (s === "S4.2" ? <span className="sk" /> : <span className={v ? "num" : "num t3"}>{v ?? "—"}</span>);
   // the quote lines come from the vault's dry quote; a pool has none (its one quote is the checked one, with the address)
@@ -340,13 +355,13 @@ function Form({ s, lines, amount, setAmount, dry, asset, assets, pick, retry }: 
   return (
     <>
       <div className="dpicks">
-        <Pick label="asset" loading={loading} value={asset?.symbol} rows={symbolsOf(assets)} control="deposit-asset" onPick={(symbol) => pick({ symbol, chain: chainsOf(assets, symbol)[0] ?? "" })} />
-        <Pick label="chain" loading={loading} value={asset?.chain} rows={asset ? chainsOf(assets, asset.symbol) : []} control="deposit-chain" onPick={(chain) => asset && pick({ symbol: asset.symbol, chain })} />
+        <Pick label="asset" loading={loading} frozen={frozen} value={asset?.symbol} rows={symbolsOf(assets)} control="deposit-asset" onPick={(symbol) => pick({ symbol, chain: chainsOf(assets, symbol)[0] ?? "" })} />
+        <Pick label="chain" loading={loading} frozen={frozen} value={asset?.chain} rows={asset ? chainsOf(assets, asset.symbol) : []} control="deposit-chain" onPick={(chain) => asset && pick({ symbol: asset.symbol, chain })} />
       </div>
       <label className={s === "S4.4" || s === "S4.5" ? "damt bad" : "damt"}>
         <span className="lb"><W id="amount" /></span>
         <span className="row">
-          <input className="v num" inputMode="decimal" autoComplete="off" value={amount} disabled={loading} onChange={(e) => setAmount(e.target.value)} data-field="amount" />
+          <input className="v num" inputMode="decimal" autoComplete="off" value={amount} disabled={still} onChange={(e) => setAmount(e.target.value)} data-field="amount" />
           <span className="u">{asset?.symbol}</span>
         </span>
       </label>
@@ -388,7 +403,7 @@ function Dests({ dest, open, locked = false, pick }: { dest: Dest; open: PoolOpe
  * One picker (R5's dpick: the label, then the row with the chevron): a native select over the row, so the phone opens its
  * own list and the keyboard works; its rows are data (symbols, chain names) from the kit's asset list.
  */
-function Pick({ label, loading, value, rows, control, onPick }: { label: "asset" | "chain"; loading: boolean; value: string | undefined; rows: string[]; control: string; onPick(v: string): void }) {
+function Pick({ label, loading, frozen, value, rows, control, onPick }: { label: "asset" | "chain"; loading: boolean; frozen: boolean; value: string | undefined; rows: string[]; control: string; onPick(v: string): void }) {
   return (
     <div className="dpick">
       <div className="lb"><W id={label} /></div>
@@ -397,7 +412,7 @@ function Pick({ label, loading, value, rows, control, onPick }: { label: "asset"
           <span className="sk" />
         ) : (
           <>
-            <select className="nm" aria-label={WORDS[label].text} value={value ?? ""} disabled={rows.length < 2} data-control={control} onChange={(e) => onPick(e.target.value)}>
+            <select className="nm" aria-label={WORDS[label].text} value={value ?? ""} disabled={frozen || rows.length < 2} data-control={control} onChange={(e) => onPick(e.target.value)}>
               {rows.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
