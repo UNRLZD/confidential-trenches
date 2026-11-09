@@ -2425,3 +2425,44 @@ test("R4-recv-settle: a receiver's earlier tx read ran but the receiver unregist
   assert.deepEqual(codes, ["in_flight", "registration_failed"]);
   assert.deepEqual([rec.sent, rec.registration, s.r.sent.length], [1, null, 0]);
 });
+
+test("R4-PROBE-1b: a registerSeen waiting in its hold read while a second one reads U registered by someone else (no tx of ours): the claim reads the read record and pays nothing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "intents-"));
+  const store = createIntentsStore(dir, undefined, () => NOW);
+  const chain: Chain = { refuseSimulateOn: null, storage: new Map(), finalMs: NOW };
+  const r = relayer(registersOn(() => chain));
+  const g = gateP();
+  let heldCalls = 0;
+  const carry = createIntentsCarry({ vault: VAULT, usdc: USDC, store, reads: intentsReads(providers(chain), () => NOW), relayer: r, held: async () => (++heldCalls === 1 && (await g.p), false), now: () => NOW, resolveEveryMs: 1 });
+  const u = hex();
+  await seeSigner(store, u);
+  chain.storage.set(`${USDC}/${u}`, "null");
+  const b = carry.registerSeen(u);
+  await until(() => heldCalls === 1);
+  chain.storage.set(`${USDC}/${u}`, "registered"); // its owner registered it
+  assert.equal(await carry.registerSeen(u), "registered");
+  assert.equal(store.signer(u).own?.tx, null, "the read record holds no tx of ours");
+  g.open();
+  assert.equal(await b, "registered");
+  const regs = r.sent.filter((x) => x.action.method === "storage_deposit").length;
+  store.close();
+  assert.equal(regs, 0, "paid for a U read registered");
+});
+
+
+test("R4-N8: an intent that spent no reservation and whose send throws before its signing gets its own slot back and gives a landed registration no new reservation", async () => {
+  const s = setup();
+  const u = hex();
+  await seeSigner(s.store, u);
+  s.store.putSigner({ ...s.store.signer(u), sent: 2, registration: { id: "r1", receiver: "fresh.near", state: "landed", tx: earlierTx(), reserved: false } });
+  const before = s.store.signer(u);
+  const send = s.r.send;
+  s.r.send = (async (...a: Parameters<typeof send>) => {
+    if (a[0].kind === "call" && a[0].method === "execute_intents") throw new Error("an RPC error before the signing");
+    return send(...a);
+  }) as typeof send;
+  assert.equal(code(await s.carry.carry(signedIntent(u, withdraw("alice.near")))), "upstream");
+  const after = s.store.signer(u);
+  s.store.close();
+  assert.deepEqual([after.sent, after.taking, after.registration], [before.sent, [], before.registration]);
+});
