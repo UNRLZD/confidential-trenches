@@ -46,6 +46,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { readTokenStorageMin } from "../arming/accounts.ts";
 import { depositId } from "../derive/keys.ts";
+import { pacedFetch, pacedRpc } from "../pace.ts";
 import type { WalletStore } from "../store/index.ts";
 import { heightSpreadOver, NEAR_NETWORKS, nearPairNetwork, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
 import { DEPOSIT_STATUS_TIMEOUT_MS, type FollowRpc, followRpc, type DepositOp, readDepositStatus, statusFacts } from "./follow.ts";
@@ -117,15 +118,15 @@ export interface MoveOutRpc extends FollowRpc {
   call(method: string, params: unknown): Promise<unknown>;
 }
 for (const m of ["gas_price", "send_tx"]) if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(m)) throw new Error(`"${m}" is not on the kit's NEAR method list`);
-export function moveOutRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): MoveOutRpc {
-  return {
+export function moveOutRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), timeoutMs = RPC_TIMEOUT_MS): MoveOutRpc {
+  return pacedRpc({
     ...followRpc(url, fetchFn, timeoutMs),
     async call(method, params) {
       const res = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "blindfill", method, params }), signal: AbortSignal.timeout(timeoutMs) });
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     },
-  };
+  }, fetchFn);
 }
 
 /** How many times an archival host is asked one read in all, and the longest wait between two asks (ms). */
@@ -147,7 +148,7 @@ function retryAfterMs(h: string | null, now: number): number | null {
  * quick reads with HTTP 429, read 8 Nov 2026), then its failure. A read that times out is not asked again. Delta review
  * 3 of held-move-forgotten-tx (F4): one throttled ask no longer leaves a landed forgotten move unread.
  */
-export function archivalRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS, sleep: (ms: number) => Promise<void> = (ms) => new Promise((ok) => setTimeout(ok, ms))): MoveOutRpc {
+export function archivalRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), timeoutMs = RPC_TIMEOUT_MS, sleep: (ms: number) => Promise<void> = (ms) => new Promise((ok) => setTimeout(ok, ms))): MoveOutRpc {
   const post = async (method: string, params: unknown): Promise<unknown> => {
     for (let ask = 1; ; ask++) {
       let after: number | null = null;
@@ -169,7 +170,7 @@ export function archivalRpc(url: string, fetchFn: typeof fetch = fetch, timeoutM
       await sleep(Math.min(ARCHIVAL_WAIT_MAX_MS, Math.max(after ?? 0, 1_000 * 2 ** (ask - 1))));
     }
   };
-  return { ...moveOutRpc(url, fetchFn, timeoutMs), tx: (params) => post("tx", params), block: (params) => post("block", params) };
+  return pacedRpc({ ...moveOutRpc(url, fetchFn, timeoutMs), tx: (params) => post("tx", params), block: (params) => post("block", params) }, fetchFn);
 }
 
 type Obj = Record<string, unknown>;

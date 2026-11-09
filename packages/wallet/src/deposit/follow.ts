@@ -95,6 +95,7 @@
 import { DEPOSIT_REFUNDED_STAGES, type DepositFacts, type DepositStage, HELPER_FETCH_INIT, HELPER_RPC_METHODS, VAULT_CONSTANTS } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { noteCommitment, type NoteRef, noteSecrets } from "../notes/secrets.ts";
+import { pacedFetch, pacedRpc } from "../pace.ts";
 import type { BindCall, NoteRecord, NoteStore } from "../notes/store.ts";
 import type { WalletStore } from "../store/index.ts";
 import { DepositAccountRefused, depositAccount, heightSpreadOver, NEAR_NETWORKS, type NearNetwork, RPC_TIMEOUT_MS } from "./account.ts";
@@ -221,9 +222,9 @@ export interface FollowRpc extends BindRpc {
 const BLOCK_METHOD = "block";
 if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(BLOCK_METHOD)) throw new Error(`"${BLOCK_METHOD}" is not on the kit's NEAR method list`);
 /** A provider by URL for query, tx and block. */
-export function followRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): FollowRpc {
+export function followRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), timeoutMs = RPC_TIMEOUT_MS): FollowRpc {
   const b = bindRpc(url, fetchFn, timeoutMs);
-  return {
+  return pacedRpc({
     ...b,
     async block(params) {
       const res = await fetchFn(url, {
@@ -235,7 +236,7 @@ export function followRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs 
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     },
-  };
+  }, fetchFn);
 }
 
 /** Both RPCs' final block time is past `deadlineMs` (each read on its own; either unread: not past). */

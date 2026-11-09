@@ -68,6 +68,7 @@ import {
 import { base58 } from "@scure/base";
 import { NEAR_NETWORKS, type NearNetwork, nearPairNetwork, nearPairRule, nearRpc, RPC_TIMEOUT_MS, rpcHttpError } from "../deposit/account.ts";
 import { noteCommitment, noteSecrets } from "../notes/secrets.ts";
+import { pacedFetch, pacedRpc } from "../pace.ts";
 import { FeeMaxRefused, type FeeRpc, readWithdrawFeeMax } from "./feemax.ts";
 import { type NoteRecord, type NoteStore, refKey } from "../notes/store.ts";
 import { blockTimeMsOf, WITHDRAW_SEND_MARGIN_MS, type WithdrawRequest } from "./request.ts";
@@ -226,9 +227,9 @@ const BLOCK_METHOD = "block";
 if (!(HELPER_RPC_METHODS.near as readonly string[]).includes(BLOCK_METHOD)) throw new Error(`"${BLOCK_METHOD}" is not on the kit's NEAR method list`);
 
 /** A provider by URL, for both `query` (nearRpc) and `block`. A status other than 200 throws rpcHttpError; so does no answer in time. */
-export function relayRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs = RPC_TIMEOUT_MS): RelayRpc {
+export function relayRpc(url: string, fetchFn: typeof fetch = pacedFetch(url), timeoutMs = RPC_TIMEOUT_MS): RelayRpc {
   const q = nearRpc(url, fetchFn, timeoutMs);
-  return {
+  return pacedRpc({
     name: q.name,
     query: (params, signal) => q.query(params, signal),
     async block(params, signal) {
@@ -241,7 +242,7 @@ export function relayRpc(url: string, fetchFn: typeof fetch = fetch, timeoutMs =
       if (res.status !== 200) throw rpcHttpError(res);
       return await res.json();
     },
-  };
+  }, fetchFn);
 }
 
 export type RelayDeps = {

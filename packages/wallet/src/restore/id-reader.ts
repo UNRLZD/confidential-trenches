@@ -63,13 +63,15 @@
 // taken on one provider's word. A view that fails with "FiatToken: paused" is a halt, never a zero: it fails the read,
 // to be read again. The caller's signal aborts every request in flight and every wait (a sign out). A restore's Retry
 // goes on where the last run stopped (IdReadKeep, keptIdReader): an answer at one block never changes, so the ids
-// answered at a still-fresh pass are not asked again.
+// answered at a still-fresh pass are not asked again; and an id both providers answered used stays used at every block
+// after, so that answer is kept across any pass age (review P2-2).
 //
 // Each request names U or the token and nothing else (§2.9 row 8); both operators are asked of each id at once, the one
 // asked first drawn at random (l.322-324). Nothing here logs.
 import { VAULT_SYNC_LAG_MAX } from "@blindfill/kit";
 import { base64 } from "@scure/base";
 import { NEAR_NETWORKS, nearPairNetwork, nearPairRule, type NearNetwork, type NearRpc } from "../deposit/account.ts";
+import { isPacedRpc, paceHold, paceOf, paceSlot } from "../pace.ts";
 import { blockTimeMsOf } from "../withdraw/request.ts";
 import type { IdReader, IdState } from "./wallets.ts";
 
@@ -91,19 +93,13 @@ export const BUSY_BACKOFF_MS = 500;
 export const BUSY_BACKOFF_CAP_MS = 8_000;
 export const BUSY_WAIT_MAX_MS = 60_000;
 /**
- * Each provider's pace, a token bucket per provider object (GCRA): `perSec` views a second, `burst` at once. FastNEAR's
- * is its sustained rate, read 9 Nov 02:59-03:20Z (scratchpad wirp-probe sustain.mjs and hold.mjs: the IdReader's three
- * views of fresh random ids, one at a time on the clock). Offered 2.5 a second for 360 s it answered 75 of the first 75,
- * then about 1.6 a second for 90 s, then stopped answering at all for about 3 minutes (460 failed fetches, 32
- * timeouts): 0.389 a second answered over the last 270 s. After a drain (its first 429 at view 101), held at 0.66 a
- * second for 600 s it answered every view for 7 minutes, then 60 of 99 over the last 150 s (0.40 a second). So 0.39 a
- * second is what it holds over time, and asking faster earns its block, which no wait outlasts. Its 429 carries
- * access-control-allow-origin: * (read 03:20Z with the page's Origin), so the page sees the status and waits it out.
- * dRPC answered 181 of 181 at 3 a second, 151 of 151 asked at 5 a second (3.8 a second answered, p50 253 ms) and 300 of
- * 300 flat out, with no 429 (9 Nov 01:27-01:38Z). A 429 that still comes is waited out as above, and holds that
- * provider's bucket.
+ * The most busy answers one view takes (review P2-1): each busy answer counts at least BUSY_BACKOFF_MS, or the
+ * provider's pace interval when longer, toward BUSY_WAIT_MAX_MS, so a Retry-After of 0 (rpcHttpError keeps it) or a
+ * provider that answers busy at once is bounded too; and never more than this many in all.
  */
-export const PACE: Readonly<Record<"fastnear" | "drpc", { perSec: number; burst: number }>> = Object.freeze({ fastnear: Object.freeze({ perSec: 0.39, burst: 8 }), drpc: Object.freeze({ perSec: 3.5, burst: 10 }) });
+export const BUSY_TRIES_MAX = Math.ceil(BUSY_WAIT_MAX_MS / BUSY_BACKOFF_MS);
+/** Each provider's pace (../pace.ts PACE, one per provider URL for the whole page). */
+export { PACE } from "../pace.ts";
 const HALT = "FiatToken: paused";
 const HEX64 = /^[0-9a-f]{64}$/;
 const DIGITS = /^(0|[1-9][0-9]*)$/;
@@ -147,30 +143,6 @@ function busyOf(e: unknown): { retryAfterMs: number | undefined } | null {
 // a JSON-RPC error that says busy: FastNEAR's -429 ("Rate limits exceeded"), dRPC's free-plan timeout (code 30)
 const busyAnswer = (err: unknown): boolean => isObj(err) && (err.code === -429 || err.code === 429 || (err.code === 30 && /timeout/i.test(String(err.message))));
 
-/** A provider's pace (PACE): the theoretical arrival time of its next view, and the gap one view takes. */
-type Pace = { tat: number; every: number; burst: number };
-const PACES = new WeakMap<object, Pace>();
-function paceOf(rpc: NearRpc): Pace {
-  let p = PACES.get(rpc);
-  if (p === undefined) {
-    const net = Object.values(NEAR_NETWORKS).find((n) => (n.fastnear as readonly string[]).includes(rpc.name) || n.drpc === rpc.name);
-    const pace = net === undefined ? null : PACE[(net.fastnear as readonly string[]).includes(rpc.name) ? "fastnear" : "drpc"];
-    p = pace === null ? { tat: 0, every: 0, burst: 1 } : { tat: 0, every: 1000 / pace.perSec, burst: pace.burst };
-    PACES.set(rpc, p);
-  }
-  return p;
-}
-// the wait before this provider's next view (and the slot taken): GCRA, `burst` at once, then one every `every` ms
-function slot(p: Pace, now: number): number {
-  p.tat = Math.max(p.tat, now);
-  const at = p.tat - (p.burst - 1) * p.every;
-  p.tat += p.every;
-  return Math.max(0, at - now);
-}
-// a busy answer holds the provider's every view for `ms`, its burst spent
-function hold(p: Pace, now: number, ms: number): void {
-  p.tat = Math.max(p.tat, now + ms + (p.burst - 1) * p.every);
-}
 const randomBit = (): number => globalThis.crypto.getRandomValues(new Uint8Array(1))[0]! & 1;
 
 /** A server's word that an id was used: true says used; false or a throw says nothing. */
@@ -194,11 +166,14 @@ export type IdReaderOpts = {
 /**
  * What a restore keeps across its runs, so a Retry goes on where the last run stopped (review P2-1: each Retry began
  * again at lane 0): the two providers, the pass and every id's answer at that pass. An answer at one block hash never
- * changes, so it is reused for as long as the pass is fresh (VAULT_SYNC_LAG_MAX); a stale pass starts a new one and
- * drops them all. Failed reads are never kept.
+ * changes, so it is reused for as long as the pass is fresh (VAULT_SYNC_LAG_MAX). A pass goes stale in about 68 s (120
+ * blocks of 565 ms) while one id costs about 7.7 s at FastNEAR's pace, so a new pass keeps the answers that cannot
+ * change by age (review P2-2): `lasting`, the ids both providers answered used (registered on the token, an account,
+ * a token listed: an id once used was used). Every other answer is asked again at the new pass: unused (a late send can
+ * land on any id), money (it can move out) and used on the indexer's word alone. Failed reads are never kept.
  */
-export type IdReadKeep = { rpcs?: readonly [NearRpc, NearRpc]; pass?: RestorePass; readonly answers: Map<string, IdState> };
-export const idReadKeep = (): IdReadKeep => ({ answers: new Map() });
+export type IdReadKeep = { rpcs?: readonly [NearRpc, NearRpc]; pass?: RestorePass; readonly answers: Map<string, IdState>; readonly lasting: Set<string> };
+export const idReadKeep = (): IdReadKeep => ({ answers: new Map(), lasting: new Set() });
 /** A pass too far below the providers' finals now (fresh): open a new one. */
 export class StalePass extends Error {
   constructor(message: string) {
@@ -294,27 +269,35 @@ function askOpts(o: Pick<IdReaderOpts, "tries" | "backoffMs" | "sleep" | "signal
 }
 
 /**
- * One request to one provider at its pace (PACE): a busy answer is waited out and asked again (BUSY_WAIT_MAX_MS in
- * all), any other failure tried `tries` times with doubling backoff; the signal aborts the request and every wait.
+ * One request to one provider at its pace (PACE, one per provider URL: ../pace.ts): a busy answer is waited out and
+ * asked again, any other failure tried `tries` times with doubling backoff; the signal aborts the request and every
+ * wait. One view's bound is wall-clock (review P3-4): the time its requests took and its busy waits, the pace's own
+ * queue apart, stay within busyMax (BUSY_WAIT_MAX_MS), and a busy answer past it fails the read by name. Each busy wait
+ * counts at least BUSY_BACKOFF_MS or the pace interval (review P2-1: a Retry-After of 0 counted nothing), and a view
+ * takes BUSY_TRIES_MAX busy answers at most. A provider paced at its transport (pacedFetch) takes its slot there; any
+ * other here, on the clock given.
  */
 async function asked<T>(rpc: NearRpc, once: (signal: AbortSignal | undefined) => Promise<T>, o: Asking): Promise<T> {
-  const pace = paceOf(rpc);
-  let fails = 0, busy = 0, waited = 0;
+  const pace = paceOf(rpc.name);
+  const here = !isPacedRpc(rpc);
+  let fails = 0, busy = 0, spent = 0;
   for (;;) {
     o.signal?.throwIfAborted();
-    const w = slot(pace, o.now());
+    const w = here ? paceSlot(pace, o.now()) : 0;
     if (w > 0) await o.sleep(w, o.signal);
+    const t0 = o.now();
     try {
       return await once(o.signal);
     } catch (e) {
       if (o.signal?.aborted) throw o.signal.reason;
+      spent += o.now() - t0;
       const b = busyOf(e);
       if (b !== null) {
-        const wait = b.retryAfterMs ?? Math.min(BUSY_BACKOFF_CAP_MS, BUSY_BACKOFF_MS * 2 ** busy);
-        busy++;
-        if (waited + wait > o.busyMax) throw new Error(`${rpc.name}: busy past ${o.busyMax} ms of waits (${e instanceof Error ? e.message : "busy"})`.slice(0, 200));
-        waited += wait;
-        hold(pace, o.now(), wait);
+        const wait = Math.max(b.retryAfterMs ?? Math.min(BUSY_BACKOFF_CAP_MS, BUSY_BACKOFF_MS * 2 ** busy), BUSY_BACKOFF_MS, pace.every);
+        if (++busy > BUSY_TRIES_MAX || spent + wait > o.busyMax) throw new Error(`${rpc.name}: busy past ${o.busyMax} ms of waits (${e instanceof Error ? e.message : "busy"})`.slice(0, 200));
+        spent += wait;
+        paceHold(pace, o.now(), wait);
+        await o.sleep(wait, o.signal);
         continue;
       }
       if (++fails >= o.tries) throw e;
@@ -488,9 +471,9 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
 
   const keep = opts.keep;
   return fresh(pass, rpcs, blockOf).then(() => {
-    // answers kept from another pass are not this one's
+    // answers kept from another pass are not this one's, but for those that last: used on both providers
     if (keep !== undefined && keep.pass !== pass) {
-      keep.answers.clear();
+      for (const u of [...keep.answers.keys()]) if (!keep.lasting.has(u)) keep.answers.delete(u);
       keep.pass = pass;
       keep.rpcs = rpcs;
     }
@@ -498,14 +481,16 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
       if (typeof u !== "string" || !HEX64.test(u)) throw new Error("an id is a 64-hex implicit account id");
       const had = keep?.answers.get(u);
       if (had !== undefined) return had;
-      const x = await readId(u);
+      const [x, both] = await readId(u);
       keep?.answers.set(u, x);
+      if (both && x === "used") keep?.lasting.add(u);
       return x;
     };
     return read;
   });
 
-  async function readId(u: string): Promise<IdState> {
+  // the id's state, and whether it is both providers' own answer (not the indexer's)
+  async function readId(u: string): Promise<[IdState, boolean]> {
     const a = first() === 0 ? 0 : 1;
     const order = [a, 1 - a];
     // both providers at once (each at its own pace)
@@ -525,18 +510,19 @@ export function nearIdReader(network: NearNetwork, rpcs: readonly [NearRpc, Near
     const state = ok[0]!.x;
     if (state === "unused" && opts.indexer) {
       try {
-        if ((await opts.indexer(u)) === true) return "used";
+        if ((await opts.indexer(u)) === true) return ["used", false];
       } catch {
         // a server's silence proves nothing
       }
     }
-    return state;
+    return [state, true];
   }
 }
 
 /**
  * Step 5's reader on the restore's kept pass while it is fresh (a Retry reads on from the answers kept), else on a new
- * pass opened now on `make()`'s providers, with nothing kept. Every other refusal of the kept pass is thrown.
+ * pass opened now on `make()`'s providers, with only the lasting answers kept (IdReadKeep). Every other refusal of the
+ * kept pass is thrown.
  */
 export async function keptIdReader(network: NearNetwork, make: () => readonly [NearRpc, NearRpc], keep: IdReadKeep, opts: PassOpts & IdReaderOpts = {}): Promise<{ rpcs: readonly [NearRpc, NearRpc]; pass: RestorePass; reader: IdReader }> {
   if (keep.rpcs !== undefined && keep.pass !== undefined) {

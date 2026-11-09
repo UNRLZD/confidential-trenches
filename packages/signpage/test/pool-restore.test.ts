@@ -12,7 +12,10 @@
 import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { after, test } from "node:test";
+import { after, beforeEach, test } from "node:test";
+import { resetPaces } from "../../wallet/src/pace.ts";
+// each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
+beforeEach(() => resetPaces());
 import { IDBFactory } from "fake-indexeddb";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { noteCommitment } from "../../wallet/src/notes/secrets.ts";

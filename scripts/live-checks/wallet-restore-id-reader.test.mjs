@@ -114,7 +114,9 @@ test("this card's build with a guard planted on the busy wait, or on the pair's 
   for (const [key, marker] of [["bad_busy_guard", "busy_wait"], ["bad_pair_guard", "pair_wrong"]]) {
     assert.equal(answers[key].url, `local build of ${key.slice(4).replace("_", "-")}`, key);
     assert.deepEqual(BAD(answers[key]), [MARKS], key);
-    for (const m of MARKERS) assert.equal(answers[key].app.markers[m], m === marker ? 0 : 1, `${key} ${m}`);
+    // the pair's guard sits in readId, which the IdReader's keep is bound with (id_keep shares its pattern)
+    const zero = key === "bad_pair_guard" ? [marker, "id_keep"] : [marker];
+    for (const m of MARKERS) assert.equal(answers[key].app.markers[m], zero.includes(m) ? 0 : 1, `${key} ${m}`);
   }
 });
 
@@ -300,100 +302,84 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(lock(good[0], good[1], good[2], "f=e=>e(S)"), "seed_per_use_lock"), 0, "a run-long seed");
 });
 
-// card wallet-id-reader-paced: busy_wait and pair_wrong, each a build's own text (packages/signpage/public/app.js at
-// the card's branch, the pieces each marker binds, verbatim, in the bundle's order with other code between them as
-// there; the minifier's names move from build to build, the shapes do not) and each planted bundle
-// below that text with one change: a guard, an always-true or never-true compare, a step dropped, another name. Each
-// plant counts 0, and the good record with that count fails on the markers alone.
-const BUSY = {
-  head: "XB=class extends Error{retryAfterMs;constructor(e,t){super(e),this.name=`ProviderBusy`,this.retryAfterMs=t}};function ZB(e){if(e instanceof XB)return{retryAfterMs:e.retryAfterMs};if(!JB(e))return null;let t=e.status;return typeof t==`number`&&(t===429||t>=500&&t<=599)?{retryAfterMs:typeof e.retryAfterMs==`number`?e.retryAfterMs:void 0}:e.name===`TimeoutError`?{retryAfterMs:void 0}:null}var QB=e=>JB(e)&&(e.code===-429||e.code===429||e.code===30&&/timeout/i.test(String(e.message))),",
-  hold: "function nV(e,t,n){e.tat=Math.max(e.tat,t+n+(e.burst-1)*e.every)}",
-  json: "if(QB(i.error))throw new XB(`${e.name}: ${n}: busy`);",
-  asked: "async function pV(e,t,n){let r=eV(e),i=0,a=0,o=0;for(;;){n.signal?.throwIfAborted();let s=tV(r,n.now());s>0&&await n.sleep(s,n.signal);try{return await t(n.signal)}catch(t){if(n.signal?.aborted)throw n.signal.reason;let s=ZB(t);if(s!==null){let i=s.retryAfterMs??Math.min(8e3,500*2**a);if(a++,o+i>n.busyMax)throw Error(`${e.name}: busy past ${n.busyMax} ms of waits (${t instanceof Error?t.message:`busy`})`.slice(0,200));o+=i,nV(r,n.now(),i);continue}if(++i>=n.tries)throw t;await n.sleep(n.backoff*2**(i-1),n.signal)}}}",
+// card wallet-id-reader-paced (review of 31be751d, P2-3): busy_wait, pair_wrong, id_keep and id_signout on the
+// committed build itself (packages/signpage/public/app.js), each planted bundle that build with one change: a number,
+// a guard, an always-true or never-true compare, a step dropped, a same-shaped dead copy beside a broken real one. The
+// plants find their place by shape, `§` for any name the minifier gave, so they hold from build to build. Each plant
+// counts its marker 0, and the good record with that count fails on the markers alone.
+const APP = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
+const rx = (src) => new RegExp(src.replaceAll("§", String.raw`[\w$]+`), "g");
+// the build with the one place `src` finds (exactly one) rewritten by `to` (its match, its groups)
+const plant = (src, to, text = APP) => {
+  const m = [...text.matchAll(rx(src))];
+  assert.equal(m.length, 1, `${m.length} places of ${src.slice(0, 90)}`);
+  return text.slice(0, m[0].index) + to(m[0][0], m[0].groups ?? {}) + text.slice(m[0].index + m[0][0].length);
 };
-const PAIRS = {
-  cls: "oV=class extends Error{stronger;constructor(e,t){super(t),this.name=`PairDisagrees`,this.stronger=e}}",
-  read: "async function f(e){let n=o()===0?0:1,i=[n,1-n],a=await Promise.allSettled(i.map(n=>l(t[n],e)));r.signal?.throwIfAborted();let s=a.flatMap((e,t)=>e.status===`fulfilled`?[{p:i[t],x:e.value}]:[]);if(s.length===2&&s[0].x!==s[1].x){let[e,n]=u[s[0].x]>u[s[1].x]?[s[1],s[0]]:[s[0],s[1]];throw new oV(t[n.p].name,`${t[n.p].name} answered ${n.x} where ${t[e.p].name} answered ${e.x} at block ${c.h}: one of the pair is wrong at one block, so the restore stops`)}let d=a.find(e=>e.status===`rejected`);if(d)throw d.reason instanceof Error?d.reason:Error(`the read failed`);",
-  stop: "}catch(e){if(e instanceof oV)throw new oV(e.stronger,`lane ${i}: at index ${n}, ${e.message}, to be retried`);if(m.push({i:n,id:o,error:EV(e)}),",
-};
-// the minifier's names in the recorded text: ProviderBusy, busyOf, hold, asked; PairDisagrees, StalePass's stand-in
-const NAME = (text, re) => re.exec(text)[1];
-const [PB, BUSY_OF, HOLD] = [NAME(BUSY.head, /^([\w$]+)=/), NAME(BUSY.head, /function ([\w$]+)\(/), NAME(BUSY.hold, /^function ([\w$]+)\(/)];
-const PD = NAME(PAIRS.cls, /^([\w$]+)=/);
-const busyText = (o = {}) => { const x = { ...BUSY, ...o }; return `var a=1;${x.head}SG=new WeakMap;${x.hold}var b=2;async function zZ1(e,t,n,r,i){let a=1;${x.json}return a}${x.asked}var c=3;`; };
-const pairText = (o = {}) => { const x = { ...PAIRS, ...o }; return `var a=1,${x.cls},b=2;function zZ2(){${x.read}return 1}async function zZ3(){try{1${x.stop}0}finally{}}`; };
+const swap = (src, from, into) => plant(src, (s) => (assert.ok(s.includes(from), `${s.slice(0, 60)} holds ${from}`), s.replace(from, () => into)));
 const planted = (key, text) => {
   const rec = structuredClone(answers.good);
   rec.app.markers[key] = countOf(text, MARK[key]);
   return rec;
 };
+const PACED = ["busy_wait", "pair_wrong", "id_keep", "id_signout"];
+// asked() whole, from its head to its loop's end, and readId() whole: each found by shape
+const ASKED = String.raw`async function (?<n>§)\(§,§,§\)\{let §=§\(§\.name\),§=!§\(§\),§=0,§=0,§=0;for\(;;\)\{[^]*?\.signal\)\}\}\}`;
+const READ = String.raw`async function (?<n>§)\(§\)\{let §=§\(\)===0\?0:1,[^]*?return\[§,!0\]\}\}`;
 
-test("busy_wait and pair_wrong: this build's bundle holds each once, and so does the recorded build's text", () => {
-  const app = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
-  assert.equal(countOf(app, MARK.busy_wait), 1);
-  assert.equal(countOf(app, MARK.pair_wrong), 1);
-  assert.equal(countOf(busyText(), MARK.busy_wait), 1);
-  assert.equal(countOf(pairText(), MARK.pair_wrong), 1);
-  assert.equal(judge(planted("busy_wait", busyText())).pass, true);
-  assert.equal(judge(planted("pair_wrong", pairText())).pass, true);
+test("busy_wait, pair_wrong, id_keep and id_signout: this build's bundle holds each once, and the recorded good answer counts each", () => {
+  for (const k of PACED) {
+    assert.equal(countOf(APP, MARK[k]), 1, k);
+    assert.equal(answers.good.app.markers[k], 1, k);
+  }
 });
 
-test("busy waited out: each planted bundle (a guard, a bound never or always met, a step dropped, another name) fails", () => {
-  const swap = (k, from, to) => {
-    assert.ok(BUSY[k].includes(from), `${k} holds ${from}`);
-    return busyText({ [k]: BUSY[k].replace(from, to) });
-  };
-  for (const [why, text] of [
-    ["a guard before the busy branch", swap("asked", "if(s!==null){", "if(s!==null&&n.tries>1){")],
-    ["the busy branch never taken", swap("asked", "if(s!==null){", "if(s===null){")],
-    ["the bound never met (waits for ever)", swap("asked", "if(a++,o+i>n.busyMax)", "if(a++,!1)")],
-    ["the bound always met (no wait)", swap("asked", "if(a++,o+i>n.busyMax)", "if(a++,o+i>=0)")],
-    ["the waits not summed", swap("asked", `o+=i,${HOLD}(`, `${HOLD}(`)],
-    ["Retry-After ignored", swap("asked", "s.retryAfterMs??Math.min(8e3,500*2**a)", "Math.min(8e3,500*2**a)")],
-    ["no backoff growth", swap("asked", "if(a++,", "if(")],
-    ["the wait not held on the pace", swap("asked", `o+=i,${HOLD}(r,n.now(),i);continue}`, "o+=i;continue}")],
-    ["busy failed at once", swap("asked", `${HOLD}(r,n.now(),i);continue}`, `${HOLD}(r,n.now(),i);throw t}`)],
-    ["the pace's slot not waited", swap("asked", "s>0&&await n.sleep(s,n.signal);", "")],
-    ["the signal not checked", swap("asked", "if(n.signal?.aborted)throw n.signal.reason;", "")],
-    ["another classifier in the catch", swap("asked", `=${BUSY_OF}(`, "=zZ(")],
-    ["another hold in the catch", swap("asked", `${HOLD}(`, "zZ(")],
-    ["HTTP 429 not busy", swap("head", "t===429||", "t===428||")],
-    ["5xx not busy", swap("head", "t>=500&&t<=599", "t>=500&&t<=500")],
-    ["a timeout not busy", swap("head", "e.name===`TimeoutError`?", "e.name===`AbortError`?")],
-    ["the JSON -429 not busy", swap("head", "e.code===-429||", "")],
-    ["dRPC's code 30 not busy", swap("head", "e.code===30&&", "e.code===31&&")],
-    ["a JSON busy answer not thrown busy", swap("json", `throw new ${PB}(`, "throw Error(")],
-    ["the hold not holding the burst", swap("hold", "+(e.burst-1)*e.every", "")],
-  ]) {
-    assert.equal(countOf(text, MARK.busy_wait), 0, why);
-    assert.deepEqual(BAD(planted("busy_wait", text)), [MARKS], why);
-  }
-  // the pieces are each found once: a second ProviderBusy or hold (one guarded, one not) counts 0
-  assert.equal(countOf(busyText() + BUSY.head, MARK.busy_wait), 0, "two classifiers");
-  assert.equal(countOf(busyText() + BUSY.hold, MARK.busy_wait), 0, "two holds");
-});
+const PLANTS = [
+  // the pace by value
+  ["busy_wait", "PACE: FastNEAR at 2.5 a second (the rate that earned its 3-minute block)", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "perSec:.39", "perSec:2.5")],
+  ["busy_wait", "PACE: FastNEAR's burst 8 -> 1000", () => swap("fastnear:Object\\.freeze\\(\\{perSec:\\.39,burst:8\\}\\)", "burst:8", "burst:1000")],
+  ["busy_wait", "PACE: dRPC at 35 a second", () => swap("drpc:Object\\.freeze\\(\\{perSec:3\\.5,burst:10\\}\\)", "3.5", "35")],
+  ["busy_wait", "paceOf: no pace for any provider", () => swap("\\?\\{tat:0,every:0,burst:1\\}:\\{tat:0,every:1e3/§\\.perSec,burst:§\\.burst\\}", "every:1e3/", "every:0*")],
+  ["busy_wait", "the slot never waits", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\);[^}]*\}`, (_, g) => `function ${g.f}(${g.a},${g.b}){return 0}`)],
+  ["busy_wait", "the busy hold holds nothing", () => plant(String.raw`function (?<f>§)\((?<a>§),(?<b>§),(?<c>§)\)\{\k<a>\.tat=Math\.max\(\k<a>\.tat,\k<b>\+\k<c>\+\(\k<a>\.burst-1\)\*\k<a>\.every\)\}`, (_, g) => `function ${g.f}(${g.a},${g.b},${g.c}){}`)],
+  ["busy_wait", "pacedFetch never waits its slot", () => swap(String.raw`=async\(§,§\)=>\{let (?<w>§)=§\(§,performance\.now\(\)\);if\(\k<w>>0\)`, ">0)", ">0&&!1)")],
+  ["busy_wait", "pacedRpc marks every rpc paced (none takes a slot)", () => swap(String.raw`\{return §\(§\)&&§\.add\(§\),§\}`, "return ", "return 1||")],
+  ["busy_wait", "the default sleep resolves at once", () => swap(String.raw`\(\)=>\{§\?\.removeEventListener\(` + "`abort`" + String.raw`,§\),§\(\)\},§\),§=\(\)=>\{clearTimeout\(§\),§\(§\.reason\)\};§\?\.addEventListener\(` + "`abort`" + String.raw`,§,\{once:!0\}\)\}\),§=class extends Error\{retryAfterMs`, "()},", "()},0&&")],
+  ["busy_wait", "busyMax by default 60 s -> 6e9 ms (69 days: never met)", () => swap("busyMaxMs\\?\\?6e4", "6e4", "6e9")],
+  ["busy_wait", "tries by default 4 -> 1", () => swap("=§\\.tries\\?\\?4,", "??4", "??1")],
+  ["busy_wait", "the view's JSON busy check dropped", () => plant(String.raw`is halted \(\$\{§\}\)` + "`" + String.raw`\);(?<c>if\(§\(§\.error\)\)throw new §\(` + "`" + String.raw`\$\{§\.name\}: \$\{§\}: busy` + "`" + String.raw`\);)`, (s, g) => s.replace(g.c, ""))],
+  ["busy_wait", "blockHeader's JSON busy check moved into dead code (still two in the build)", () => plant(String.raw`(?<c>if\(§\(§\.error\)\)throw new §\(` + "`" + String.raw`\$\{§\.name\}: \$\{§\}: busy` + "`" + String.raw`\);)let §=§\(§\.error\)&&§\(§\.error\.cause\)\?§\.error\.cause\.name:void 0;if\(` + "`block_id`", (s, g) => s.replace(g.c, "") ).replace("var ", () => `function zzJ(e,n,i){${/if\([\w$]+\([\w$]+\.error\)\)throw new [\w$]+\(`\$\{[\w$]+\.name\}: \$\{[\w$]+\}: busy`\);/.exec(APP)[0]}}var `)],
+  ["busy_wait", "a Retry-After of 0 waits 0 (no 500 ms or pace floor)", () => swap(String.raw`Math\.max\(§\.retryAfterMs\?\?Math\.min\(8e3,500\*2\*\*§\),500,§\.every\)`, ",500,", ",0*")],
+  ["busy_wait", "busy tries not capped", () => swap(String.raw`if\(\+\+§>120\|\|`, ">120||", ",")],
+  ["busy_wait", "the request's own time not counted toward the bound", () => plant(String.raw`throw §\.signal\.reason;(?<c>§\+=§\.now\(\)-§;)`, (s, g) => s.replace(g.c, ""))],
+  ["busy_wait", "another function: real asked() busy-blind, a same-shaped dead copy beside it", () => plant(ASKED, (s, g) => s.replace(/if\(([\w$]+)!==null\)\{/, "if($1!==null&&!1){") + s.replace(`async function ${g.n}(`, "async function zzA("))],
+  ["busy_wait", "the setup's views bypass asked()", () => plant(String.raw`=\((?<a>§),(?<b>§),(?<c>§),(?<d>§)\)=>§\(\k<a>,(?<s>§)=>(?<v>§)\(\k<a>,\k<b>,\k<c>,\k<d>,\k<s>\),§\);return\{token:`, (s, g) => `=(${g.a},${g.b},${g.c},${g.d})=>${g.v}(${g.a},${g.b},${g.c},${g.d});return{token:`)],
+  ["busy_wait", "a third caller of asked() with no busy wait", () => plant(ASKED, (s, g) => `${s}var zzC=(e,t,n)=>${g.n}(e,t,{...n,busyMax:0});`)],
+  // one of the pair is wrong at one block
+  ["pair_wrong", "another function: real readId() takes one provider's word, a same-shaped dead copy beside it", () => plant(READ, (s, g) => s.replace(/if\(([\w$]+)\.length===2&&/, "if(!1&&$1.length===2&&").replace(/if\(([\w$]+)\)throw \1\.reason/, "if(!1)throw $1.reason") + s.replace(`async function ${g.n}(`, "async function zzR("))],
+  ["pair_wrong", "the state taken after the checks: every id read unused", () => plant(String.raw`let (?<f>§)=§\[0\]\.x;if\(\k<f>===` + "`unused`", (s, g) => s.replace(/=[\w$]+\[0\]\.x;/, "=`unused`;"))],
+  ["pair_wrong", "readId reads rpcs[0] for both (one provider's word as the pair's)", () => plant(String.raw`=await Promise\.allSettled\(§\.map\((?<p>§)=>§\(§\[\k<p>\],§\)\)\)`, (s, g) => s.replace(`[${g.p}]`, "[0]"))],
+  ["pair_wrong", "RANK inverted (the weaker named the liar)", () => swap("\\{unused:0,used:1,money:2\\}", "{unused:0,used:1,money:2}", "{unused:2,used:1,money:0}")],
+  ["pair_wrong", "readId ranks by another table than RANK", () => plant(String.raw`=(?<r>§)\[(?<o>§)\[0\]\.x\]>\k<r>\[\k<o>\[1\]\.x\]`, (s, g) => s.replaceAll(`${g.r}[`, "({unused:0,used:1,money:2})["))],
+  ["pair_wrong", "step 5's catch lets a disagreement read on", () => swap(String.raw`\}catch\((?<e>§)\)\{if\(\k<e> instanceof §\)throw new §\(\k<e>\.stronger,`, "if(", "if(!1&&")],
+  // what a Retry keeps
+  ["id_keep", "a kept answer of unused for every id", () => plant(String.raw`let (?<h>§)=(?<k>§)\?\.answers\.get\((?<u>§)\);if\(\k<h>!==void 0\)return \k<h>;`, (s, g) => `let ${g.h}=${g.k}?.answers.get(${g.u});if(${g.k})return\`unused\`;`)],
+  ["id_keep", "every answer kept across passes (lasting on any state)", () => plant(String.raw`,(?<b>§)&&(?<x>§)===` + "`used`" + String.raw`&&(?<k>§)\?\.lasting\.add\((?<u>§)\)`, (s, g) => `,${g.k}?.lasting.add(${g.u})`)],
+  ["id_keep", "the indexer's used made lasting", () => swap("return\\[`used`,!1\\]", "!1", "!0")],
+  ["id_keep", "a new pass drops nothing", () => swap(String.raw`§\.lasting\.has\(§\)\|\|§\.answers\.delete\(§\);`, "||", "||1||")],
+  ["id_keep", "a new pass drops everything (31be751d's rule)", () => plant(String.raw`for\(let (?<x>§) of\[\.\.\.(?<k>§)\.answers\.keys\(\)\]\)\k<k>\.lasting\.has\(\k<x>\)\|\|\k<k>\.answers\.delete\(\k<x>\);`, (s, g) => `${g.k}.answers.clear();`)],
+  ["id_keep", "keptIdReader opens a new pass on any refusal", () => swap(String.raw`catch\((?<e>§)\)\{if\(!\(\k<e> instanceof §\)\)throw \k<e>\}let`, "if(!(", "if(!1&&!(")],
+  ["id_keep", "step 5 reads with a new keep each run", () => plant(String.raw`let\{reader:§\}=await §\(§,§\.rpcs,(?<k>§),\{`, (s, g) => s.replace(`,${g.k},{`, ",{answers:new Map,lasting:new Set},{"))],
+  // signing out drops it
+  ["id_signout", "sign out keeps what the restore kept", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),§=§\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort()}`)],
+  ["id_signout", "sign out makes a new keep nobody reads", () => plant(String.raw`signedOut:\(\)=>\{(?<a>§)\?\.abort\(\),(?<o>§)=(?<f>§)\(\)\}`, (s, g) => `signedOut:()=>{${g.a}?.abort(),zzK=${g.f}()}`)],
+];
 
-test("one of the pair is wrong at one block: each planted bundle (a guard, a compare never true, a step dropped, another name) fails", () => {
-  const swap = (k, from, to) => {
-    assert.ok(PAIRS[k].includes(from), `${k} holds ${from}`);
-    return pairText({ [k]: PAIRS[k].replace(from, to) });
-  };
-  for (const [why, text] of [
-    ["a guard before the disagreement", swap("read", "if(s.length===2&&s[0].x!==s[1].x)", "if(s.length===2&&s[0].x!==s[1].x&&r.strict)")],
-    ["a compare never true", swap("read", "s[0].x!==s[1].x", "s[0].x!==s[0].x")],
-    ["one answer taken (no pair)", swap("read", "s.length===2&&", "s.length===3&&")],
-    ["one provider asked", swap("read", "i=[n,1-n]", "i=[n]")],
-    ["not both at once", swap("read", "await Promise.allSettled(", "await Promise.any(")],
-    ["the weaker named", swap("read", `throw new ${PD}(t[n.p].name,`, `throw new ${PD}(t[e.p].name,`)],
-    ["a failed read taken", swap("read", "if(d)throw d.reason instanceof Error?d.reason:Error(`the read failed`);", "")],
-    ["another error thrown", swap("read", `throw new ${PD}(t[n.p]`, "throw new Error(t[n.p]")],
-    ["the class's name another", swap("cls", "`PairDisagrees`", "`Error`")],
-    ["step 5 reads on (counted unread)", swap("stop", `if(e instanceof ${PD})throw`, `if(e instanceof ${PD}&&!1)throw`)],
-    ["step 5 catches another class", swap("stop", `e instanceof ${PD}`, "e instanceof zZ")],
-    ["step 5 counts it before the throw", swap("stop", "}catch(e){if(", "}catch(e){h++;if(")],
-  ]) {
-    assert.equal(countOf(text, MARK.pair_wrong), 0, why);
-    assert.deepEqual(BAD(planted("pair_wrong", text)), [MARKS], why);
+test("busy waited out, the pair's disagreement, the keep and the sign-out drop: each planted bundle fails on its marker", () => {
+  assert.ok(PLANTS.length >= 30, `${PLANTS.length} plants`);
+  for (const [key, why, make] of PLANTS) {
+    const text = make();
+    assert.notEqual(text, APP, why);
+    assert.equal(countOf(text, MARK[key]), 0, `${key}: ${why}`);
+    assert.deepEqual(BAD(planted(key, text)), [MARKS], why);
   }
-  assert.equal(countOf(pairText() + "," + PAIRS.cls, MARK.pair_wrong), 0, "two PairDisagrees classes");
 });

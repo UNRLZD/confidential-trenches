@@ -5,7 +5,11 @@
 // Test secrets: the all-zero BIP-39 entropy (test/vectors/a8.json), never money.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
+import { resetPaces } from "../src/pace.ts";
+import * as P from "../src/pace.ts";
+// each test's clock starts at its own zero: one pace per provider URL is shared by every reader (card wallet-id-reader-paced)
+beforeEach(() => resetPaces());
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { VAULT_CONSTANTS, vaultScopeOf } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
@@ -317,6 +321,8 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
   // a liar's high final (1050) the honest one never reaches: refused after PASS_TRIES re-reads, PASS_WAIT_MS apart
   assert.equal(PASS_TRIES, 10);
   assert.equal(PASS_WAIT_MS, 1_000);
+  // (each part of this test on its own clock: the pace is one per provider URL)
+  resetPaces();
   waits.length = 0;
   await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1050]), chain(DRPC, [1000], { reads: { n: 0 } })], { sleep, tries: 1 }), /^Error: the RPCs' finals did not meet; the restore does not start \(https:\/\/near\.drpc\.org at 1000, the other at 1050\)$/);
   assert.deepEqual(waits, Array(10).fill(1_000), "about 10 s in all");
@@ -325,10 +331,12 @@ test("the pass: a liar's low final, a high one, a fake hash, heads over 120 apar
   // the two hashes of the floor block disagreeing: refused
   await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000], { fake: 1000 }), chain(DRPC, [1000])], { sleep: noSleep, tries: 1 }), new RegExp(`the RPCs' blocks at 1000 differ \\(${"F".padEnd(44, "a")}, ${hashOf(1000)}\\); the restore does not start`));
   // heads over 120 apart: refused at once, with no wait
+  resetPaces();
   waits.length = 0;
   await assert.rejects(openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [1121])], { sleep, tries: 1 }), /the RPCs' final heights 1000 and 1121 are over 120 blocks apart; the restore does not start/);
   assert.deepEqual(waits, []);
   // a lagging honest provider that catches up within the bound: opens at the higher final
+  resetPaces();
   waits.length = 0;
   const lag = await openRestorePass("mainnet", [chain(FAST, [1000]), chain(DRPC, [995, 996, 998, 1000])], { sleep, tries: 1 });
   assert.deepEqual([lag.h, lag.hash, waits.length], [1000, hashOf(1000), 3]);
@@ -764,14 +772,64 @@ test("the busy waits are bounded: a provider busy for good fails its read after 
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), () => ((t0 ??= v.now()), http(429))), provider(DRPC, W({}))], { first: () => 0, sleep: v.sleep, now: v.now })(U1), /^Error: https:\/\/rpc\.mainnet\.fastnear\.com: busy past 60000 ms of waits \(HTTP 429\)$/);
   // from its first busy answer it waited out twenty and more of FastNEAR's longest runs, and no more than the bound
   assert.ok(v.now() - t0! >= 50_000 && v.now() - t0! <= 61_000, `gave up ${v.now() - t0!} ms after the first 429`);
+  resetPaces();
   const w = vclock();
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), () => http(429, 600_000)), provider(DRPC, W({}))], { first: () => 0, sleep: w.sleep, now: w.now })(U1), /busy past 60000 ms of waits/);
   // (the pace's own slots for the pass's reads aside: no wait near the Retry-After's)
   // (card wallet-id-reader-paced: the pace's slots at 0.39 a second add up to more, each a few seconds at most)
   assert.ok(w.now() < 60_000 && w.c.waits.every((x) => x < 10_000), `waited ${w.now()} ms on a Retry-After of 600 s: ${w.c.waits.join(", ")}`);
+  resetPaces();
   const x = vclock();
   await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), () => FAST_429), provider(DRPC, W({}))], { first: () => 0, sleep: x.sleep, now: x.now, busyMaxMs: 5_000 })(U1), /busy past 5000 ms of waits/);
   assert.equal(IDR.BUSY_WAIT_MAX_MS, 60_000);
+});
+
+// card wallet-id-reader-paced, review P2-1: a busy answer with Retry-After: 0 counts at least the pace's gap toward the
+// bound, and busy tries are capped, so a provider answering it on every view ends the read named (before: asked forever)
+test("Retry-After: 0 on every view ends the read named, within the bound", async () => {
+  const v = vclock();
+  let asks = 0;
+  const c = new AbortController();
+  const busy = () => (++asks >= 5_000 && c.abort(new Error("still asking after 5000 asks")), http(429, 0));
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), busy), provider(DRPC, W({}))], { first: () => 0, sleep: v.sleep, now: v.now, signal: c.signal })(U1), /^Error: https:\/\/rpc\.mainnet\.fastnear\.com: busy past 60000 ms of waits \(HTTP 429\)$/);
+  assert.ok(asks <= IDR.BUSY_TRIES_MAX + 2, `${asks} asks`);
+  assert.ok(v.now() <= 61_000 + 8 * 2_565, `read ended at ${v.now()} ms`);
+});
+
+// card wallet-id-reader-paced, review P3-4: the bound is one wall-clock bound per view, request time included, so a
+// provider that never answers (each request timing out at nearRpc's 10 s) ends the read near BUSY_WAIT_MAX_MS (before:
+// about 165 s, the request time not counted)
+test("a provider that never answers ends the read within BUSY_WAIT_MAX_MS of request time and waits", async () => {
+  const v = vclock();
+  let t0: number | undefined;
+  const hangs = (p: Record<string, unknown>) => (isIdView(p) ? ((t0 ??= v.now()), (v.c.t += 10_000), new DOMException("The operation timed out.", "TimeoutError")) : undefined);
+  await assert.rejects(nearIdReader("mainnet", [provider(FAST, W({}), hangs), provider(DRPC, W({}))], { first: () => 0, sleep: v.sleep, now: v.now })(U1), /busy past 60000 ms of waits/);
+  assert.ok(v.now() - t0! <= 70_000, `one view took ${v.now() - t0!} ms`);
+});
+
+// card wallet-id-reader-paced, review P3-5: one pace per provider URL for the whole page, whichever reader object asks
+// (before: each NearRpc object had its own bucket, so a second object got a fresh burst)
+test("two readers of one provider URL share its one pace; pacedFetch paces at the transport", async () => {
+  const v = vclock();
+  const hdr = { jsonrpc: "2.0", result: { header: { height: 5, hash: "H".padEnd(44, "z"), timestamp_nanosec: "1" } } };
+  const mk = () => ({ name: FAST, query: async () => ({}), block: async () => hdr });
+  for (const r of [mk(), mk()]) for (let k = 0; k < 8; k++) await IDR.headerRetried(r, { finality: "final" }, "test", v);
+  // FastNEAR's burst is 8: the second object's 8 reads each wait one gap
+  assert.equal(v.c.waits.length, 8);
+  assert.ok(v.c.waits.every((w) => Math.abs(w - 1000 / IDR.PACE.fastnear.perSec) < 1), v.c.waits.join(", "));
+  // at the transport: two pacedFetch of one URL share it, on the real clock; the ninth request waits and its signal ends it
+  resetPaces();
+  let sent = 0;
+  const f = async () => (sent++, new Response("{}"));
+  const [a, b] = [P.pacedFetch(FAST, f), P.pacedFetch(FAST, f)];
+  for (let k = 0; k < 8; k++) await (k % 2 ? a : b)(FAST);
+  const c = new AbortController();
+  setTimeout(() => c.abort(new Error("signed out")), 30);
+  const t = performance.now();
+  await assert.rejects(a(FAST, { signal: c.signal }), /^Error: signed out$/);
+  assert.equal(sent, 8);
+  assert.ok(performance.now() - t < 1_000);
+  assert.ok(P.isPacedFetch(a) && !P.isPacedFetch(f));
 });
 
 test("the two providers of an id are read at once", async () => {
@@ -840,8 +898,11 @@ const tipped = (url: string, world: Map<string, Id>, tip: { h: number }, fail: (
   },
 });
 
-test("a Retry goes on where the last run stopped: every id answered at the kept pass is not asked again; a stale pass drops them", async () => {
+// card wallet-id-reader-paced, review P2-2: a stale pass keeps only the ids both providers answered used (an id once
+// used stays used); every kept unused and money answer is asked again at the new pass
+test("a Retry goes on where the last run stopped: every id answered at the kept pass is not asked again; a stale pass keeps only the agreed used", async () => {
   const tip = { h: 1000 };
+  const WORLD = W({ [id(at(0, 3))]: { storage: true }, [id(at(1, 7))]: { account: true }, [id(at(0, 9))]: { usdc: 2n }, [id(at(2, 14))]: { usdc: 9n }, [id(at(5, 20))]: { storage: true }, [id(at(5, 39))]: { tokens: { "nep141:wrap.near": 4n } } });
   const calm = shape(await restoreDepositIds(SEED, SCOPE, R, nearIdReader("mainnet", [provider(FAST, WORLD), provider(DRPC, WORLD)], { sleep: noSleep })));
   let broken = true;
   const seen = new Set<string>();
@@ -862,14 +923,35 @@ test("a Retry goes on where the last run stopped: every id answered at the kept 
   assert.equal(again.pass, first.pass);
   assert.deepEqual(shape(await restoreDepositIds(SEED, SCOPE, R, again.reader)), calm);
   assert.deepEqual(asked.filter((u) => kept.has(u)), [], "a kept id asked again");
-  // past VAULT_SYNC_LAG_MAX the pass is stale: a new one, and every id asked at it
+  // past VAULT_SYNC_LAG_MAX the pass is stale: a new one, keeping only the agreed used; every other id asked at it
+  const used = [...keep.answers].filter(([, x]) => x === "used").map(([u]) => u);
+  const other = [...keep.answers].filter(([, x]) => x !== "used").map(([u]) => u);
+  assert.ok(used.length >= 2 && other.some((u) => keep.answers.get(u) === "money") && other.length >= 30, `${used.length} used, ${other.length} other`);
   tip.h = 1121;
   asked.length = 0;
   const later = await IDR.keptIdReader("mainnet", () => rpcs, keep, o);
   assert.equal(later.pass.h, 1121);
-  assert.equal(keep.answers.size, 0);
+  assert.deepEqual([...keep.answers.keys()].sort(), [...used].sort());
   assert.deepEqual(shape(await restoreDepositIds(SEED, SCOPE, R, later.reader)), calm);
-  assert.ok(asked.some((u) => kept.has(u)));
+  assert.deepEqual(asked.filter((u) => used.includes(u)), [], "an agreed used id asked again");
+  assert.deepEqual(other.filter((u) => !asked.includes(u)), [], "a kept unused or money id not asked again");
+});
+
+// a used answer on the indexer's word alone is not both providers' answer: a stale pass asks it again
+test("a stale pass asks again an id kept used on the indexer's word", async () => {
+  const tip = { h: 1000 };
+  const u = id(at(0, 0));
+  const asked: string[] = [];
+  const rpcs = [tipped(FAST, WORLD, tip, undefined, asked), tipped(DRPC, WORLD, tip)] as const;
+  const keep = IDR.idReadKeep();
+  const o = { sleep: noSleep, first: () => 0, indexer: async (x: string) => x === u };
+  assert.equal(await (await IDR.keptIdReader("mainnet", () => rpcs, keep, o)).reader(u), "used");
+  tip.h = 1121;
+  asked.length = 0;
+  const later = await IDR.keptIdReader("mainnet", () => rpcs, keep, o);
+  assert.equal(keep.answers.size, 0);
+  assert.equal(await later.reader(u), "used");
+  assert.ok(asked.includes(u));
 });
 
 // virtual time for many waiters at once: each sleep resolves when the clock reaches its end, and the clock jumps to the

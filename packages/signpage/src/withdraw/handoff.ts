@@ -40,6 +40,7 @@ import { changeIndex } from "../../../wallet/src/derive/index.ts";
 import { readNotes, type NoteRecord, type NoteStore } from "../../../wallet/src/notes/store.ts";
 import { POOL_TESTNET } from "../../../wallet/src/pool/network.ts";
 import { readWithdrawFeeMax } from "../../../wallet/src/withdraw/feemax.ts";
+import { pacedFetch } from "../../../wallet/src/pace.ts";
 import { askWithdrawFee, RELEASE_WITHDRAW_RELAYER, type RelayDeps, type RelayOutcome, relayRpc, type RelayRpc, relayWithdraw } from "../../../wallet/src/withdraw/relay.ts";
 import { WITHDRAW_DEADLINE_MAX_MS, withdrawDeadlineMs, withdrawRequest, type WithdrawRequest } from "../../../wallet/src/withdraw/request.ts";
 import type { WalletStore } from "../../../wallet/src/store/index.ts";
@@ -144,7 +145,8 @@ export function withdrawFormDeps(page: HandoffPage, over: HandoffOver = {}): Wit
   return {
     ...(handoff === null ? {} : { handoff }),
     network,
-    rpcs: over.rpcs ?? [nearRpc(net.fastnear[0]), nearRpc(net.drpc)],
+    // each read at its provider's one pace (card wallet-id-reader-paced, review P3-5)
+    rpcs: over.rpcs ?? [nearRpc(net.fastnear[0], pacedFetch(net.fastnear[0])), nearRpc(net.drpc, pacedFetch(net.drpc))],
     available,
     async fee() {
       ownPair(n);
