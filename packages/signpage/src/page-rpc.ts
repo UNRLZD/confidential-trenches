@@ -10,6 +10,16 @@ export const pageRpc = (url: string): SolanaRpc => solanaJsonRpc(url, { retry: S
 /** The helper's POST /v1/rpc/solana, `origin` the helper's origin only; the page's retry unless a read names its own
  *  (a pool settle's and restore's, SOLANA_RPC_WINDOW_RETRY: src/pool-testnet.ts pageSolanaSettleRpcs). */
 export const pageHelperRpc = (origin: string, retry: SolanaRpcRetry = SOLANA_RPC_RETRY): SolanaRpc => solanaHelperRpc(origin, { retry });
+/** pageHelperRpc with `signal` in its every fetch: a call the stop came before (one that waited its turn in a queue, or
+ *  a try again after a throttle) is never sent, and one in flight is aborted. */
+export const pageHelperRpcStopped = (origin: string, signal: AbortSignal): SolanaRpc =>
+  solanaHelperRpc(origin, {
+    retry: SOLANA_RPC_RETRY,
+    fetch: (url, init) => {
+      signal.throwIfAborted();
+      return globalThis.fetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal });
+    },
+  });
 
 /**
  * The kit's readSolanaReference on the page's two providers, where a provider whose read still failed after the page's

@@ -808,6 +808,38 @@ test("the amount W received is not told when the two RPCs differ on it or it is 
   assert.deepEqual(told, [{ wallet: W.address }, { venue: "pump-curve", pool: w.curve }, { tx: SIG }]);
 });
 
+test("the decimals of the token W received, read with that amount on both RPCs, are told with W just before the amount (card signpage-state-holdings: W's buy record); none when the amount is not told; a listener that throws never stops a buy", async () => {
+  const w0 = await world();
+  const ok = await world({ received: [w0.E, w0.E] });
+  const told: unknown[] = [];
+  const a = await runPoolBuy({ ...ok.host, route: (x) => void told.push(x), outDecimals: (wallet, d) => void told.push({ decimals: [wallet, d] }) }, ASK);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(told.slice(-2), [{ decimals: [W.address, 6] }, { out: whole6(w0.E) }]);
+  const apart = await world({ received: [w0.E, w0.E - 1n] });
+  const none: unknown[] = [];
+  await runPoolBuy({ ...apart.host, outDecimals: (wallet, d) => void none.push([wallet, d]) }, ASK);
+  assert.deepEqual(none, [], "the two RPCs differ on the amount: no decimals told");
+  const loud = await world({ received: [w0.E, w0.E] });
+  const b = await runPoolBuy({ ...loud.host, outDecimals: () => { throw new Error("the record"); } }, ASK);
+  assert.deepEqual(b, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+});
+
+test("P3-8: an async decimals listener that rejects never stops a buy, and its rejection is caught (none left unhandled)", async () => {
+  const w0 = await world();
+  const w = await world({ received: [w0.E, w0.E] });
+  const loose: unknown[] = [];
+  const seen = (e: unknown) => void loose.push(e);
+  process.on("unhandledRejection", seen);
+  try {
+    const a = await runPoolBuy({ ...w.host, outDecimals: async () => { throw new Error("the record's store"); } }, ASK);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    process.off("unhandledRejection", seen);
+  }
+  assert.deepEqual(loose, []);
+});
+
 test("a buy refused before its check passes tells no route; a route listener that throws never stops a buy", async () => {
   const w = await world({ venueOff: "reserves" });
   const told: unknown[] = [];

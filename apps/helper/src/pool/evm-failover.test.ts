@@ -10,8 +10,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
-import { throttleOf } from "../limits/limits.ts";
+import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { providerHolds, throttleOf } from "../limits/limits.ts";
 import * as evm from "./evm.ts";
 
 const KEY = "0x" + createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest("hex");
@@ -91,18 +91,23 @@ test("one failed read on dRPC's public endpoint: the fee is read again on that s
   assert.ok(lines[0]!.includes(DEPTH), lines[0]);
 });
 
-test("a side whose every provider fails the read: the fee route still fails (503 upstream, no throttle), and that answer writes one log line naming the read, each host and its status, never a key", async (t) => {
+test("a read only one operator can answer: the fee route still fails (503 upstream, no throttle), and that answer writes one log line naming the read, each host and its status, never a key", async (t) => {
   let down = true;
-  const calls = stub(t, (host, method) => (down && (host === "robinhood.drpc.org" || host === "lb.drpc.live") && method === "eth_call" ? UNKNOWN_STATE : null));
+  stub(t, (host, method) => (down && host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
+  let at = NOW_MS;
+  Date.now = () => at;
   const lines: string[] = [];
   const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l)).get(PIN)!;
   await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
   assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27/);
+  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+  assert.ok(!lines[0]!.includes("rpc.mainnet.chain.robinhood.com"), "the other side's operator is never asked for the first side");
   assert.ok(!lines[0]!.includes(FAKE), lines[0]);
-  assert.ok(!calls.some((c) => c.host.endsWith("quiknode.pro")), "a spare of side B's never answers for side A");
-  // the failed read is not held: the next caller reads again, and once the provider answers, gets the fee
+  // the failed read answers its period's callers for EVM_FEE_MISS_MS (review of d190f62f, A-4), then the next caller
+  // reads again, and once the provider answers, gets the fee
   down = false;
+  await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
+  at += evm.EVM_FEE_MISS_MS;
   assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
 });
 
@@ -111,22 +116,41 @@ test("the start's check reads the configured pair alone: a first provider that c
   await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async () => {}), (e: Error) => /^POOL_EVM_RPCS_ROBINHOOD: robinhood\.drpc\.org: no answer to 0x4a2b75c8 .*RPC error 27/.test(e.message));
 });
 
-test("the two sides never share an operator: a spare of a side's operator stays on that side, another company's goes to the side with fewer, the pair's own URL is not a spare", () => {
-  const sides = (pair: [string, string], spares: string[]) => evm.evmPoolSides(pair, spares.map((url, i) => ({ url, name: `s${i}` }))).map((side) => side.map((p) => p.url));
+test("one list of seats, each with its operator: the pair, the keyed URLs, the kit's quote providers, a URL listed before dropped; dRPC's keyed seats are dRPC's", () => {
+  const seats = (pair: [string, string], keyed: string[], listed: readonly string[]) => evm.evmPoolSeats(pair, keyed.map((url, i) => ({ url, name: `s${i}` })), listed).map((p) => `${new URL(p.url).host} ${p.operator}`);
   const drpc = [1, 2, 3].map((k) => `https://lb.drpc.live/robinhood/${FAKE}${k}`);
-  // Robinhood: dRPC's keys go with dRPC's public endpoint, QuickNode with Robinhood's own
-  assert.deepEqual(sides([DRPC!, OWN!], [SPARE_QN, ...drpc]), [[DRPC, ...drpc], [OWN, SPARE_QN]]);
-  // Base: neither of the kit's pair has a keyed spare of its company; QuickNode first, to the first side, then dRPC's three to the second
-  const [baseA, baseB] = evmPoolVenues().base.feeProviders!;
-  const baseDrpc = drpc.map((u) => u.replace("robinhood", "base"));
-  const baseQn = SPARE_QN.replace("robinhood", "base");
-  assert.deepEqual(sides([baseA!, baseB!], [baseQn, ...baseDrpc]), [[baseA, baseQn], [baseB, ...baseDrpc]]);
-  // the pair's own URL set again as a key is no second provider
-  assert.deepEqual(sides([DRPC!, OWN!], [`${DRPC}/`, OWN!]), [[DRPC], [OWN]]);
-  for (const [a, b] of [sides([DRPC!, OWN!], [SPARE_QN, ...drpc]), sides([baseA!, baseB!], [baseQn, ...baseDrpc])]) {
-    const ops = (side: string[]) => new Set(side.map((u) => new URL(u).hostname.split(".").slice(-2).join(".").replace("drpc.live", "drpc.org")));
-    assert.equal([...ops(a!)].filter((o) => ops(b!).has(o)).length, 0);
-  }
+  assert.deepEqual(seats([DRPC!, OWN!], [SPARE_QN, ...drpc], evmPoolVenues().robinhood.providers!), [
+    "robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com", "made-up.robinhood-mainnet.quiknode.pro quiknode.pro",
+    "lb.drpc.live drpc.org", "lb.drpc.live drpc.org", "lb.drpc.live drpc.org",
+    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com", "rpc-robinhood.globalstake.io globalstake.io",
+  ]);
+  // the pair's own URL set again as a key is no second seat
+  assert.deepEqual(seats([DRPC!, OWN!], [`${DRPC}/`, OWN!], []), ["robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com"]);
+});
+
+test("a read on both sides never asks one operator for both: each side claims an operator before it asks it, and a side with none left fails", async () => {
+  const seat = (name: string, operator: string, answer: () => Promise<unknown>): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator, rpc: async () => answer() });
+  const run = async (fails: ReadonlySet<string>) => {
+    const seats = ["x", "y", "z"].map((op) => seat(op, op, async () => {
+      if (fails.has(op)) throw new Error("HTTP 502");
+      return `0x${op.charCodeAt(0).toString(16)}`;
+    }));
+    const pair = evm.evmReadPair(seats, ["x", "y"], { log: () => {} });
+    return pair.both("eth_blockNumber", []);
+  };
+  // x fails: side 0 goes past y (side 1's) to z
+  let [p, q] = await run(new Set(["x"]));
+  assert.deepEqual([p.ok && p.operator, q.ok && q.operator], ["z", "y"]);
+  // x and y fail: both go for z, one gets it, the other has none left
+  [p, q] = await run(new Set(["x", "y"]));
+  assert.equal([p, q].filter((r) => r.ok).length, 1);
+  assert.equal([p, q].filter((r) => r.ok && r.operator === "z").length, 1);
+  // a side's own read goes past its operator to the list's next, the other side's first last: x failing, z answers;
+  // z failing too, y (side 1's) answers, as no claim of the other side's holds a read one side makes alone
+  const down = (op: string, fails: ReadonlySet<string>) => seat(op, op, async () => (fails.has(op) ? Promise.reject(new Error("HTTP 502")) : `0x${op.charCodeAt(0).toString(16)}`));
+  const alone = (fails: ReadonlySet<string>) => evm.evmReadPair(["x", "y", "z"].map((op) => down(op, fails)), ["x", "y"], { log: () => {} }).one(0, "eth_blockNumber", []);
+  assert.equal(await alone(new Set(["x"])), "0x7a");
+  assert.equal(await alone(new Set(["x", "z"])), "0x79");
 });
 
 // A read past its budget would wait on the hung spare forever: the test's own timeout is the bound, and the refusal names
@@ -134,25 +158,424 @@ test("the two sides never share an operator: a spare of a side's operator stays 
 test("a read tries its side's next provider only within its budget, never on the chain's own answer, never on a held spare; all failed, it throws the first provider's words first", { timeout: 10_000 }, async () => {
   const lines: string[] = [];
   const asked: string[] = [];
-  const p = (name: string, answer: () => Promise<unknown>, skip?: () => boolean) => ({ name, url: `https://${name}.example/${FAKE}`, rpc: async () => (asked.push(name), answer()), ...(skip ? { skip } : {}) });
+  const p = (name: string, answer: () => Promise<unknown>, skip?: () => boolean) => ({ name, url: `https://${name}.example/${FAKE}`, operator: name, rpc: async () => (asked.push(name), answer()), ...(skip ? { skip } : {}) });
+  const side = (seats: evm.EvmSeat[], o: { log: (l: string) => void; budgetMs?: number }): evm.EvmRpc => (method, params) => evm.evmReadPair(seats, [seats[0]!.operator, "none"], o).one(0, method, params);
   const fail = (m: string) => () => Promise.reject(new Error(m));
   const never = () => new Promise<never>(() => {});
   // a spare that hangs: the read ends at its budget, and the spare after it is not asked
-  const r1 = evm.evmFailoverRpc([p("a", fail("HTTP 503")), p("hang", never), p("late", async () => "0x1")], { log: (l) => void lines.push(l), budgetMs: 50 });
+  const r1 = side([p("a", fail("HTTP 503")), p("hang", never), p("late", async () => "0x1")], { log: (l) => void lines.push(l), budgetMs: 50 });
   await assert.rejects(r1("eth_blockNumber", []), (e: Error) => /^HTTP 503 \(eth_blockNumber/.test(e.message) && e.message.includes("hang: no answer in the read's 50 ms"));
   assert.deepEqual(asked, ["a", "hang"]);
   // the chain's own answer (a revert) is the same on any provider: thrown at once
   asked.length = 0;
-  const r2 = evm.evmFailoverRpc([p("a", fail("RPC error 3: execution reverted")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
+  const r2 = side([p("a", fail("RPC error 3: execution reverted")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
   await assert.rejects(r2("eth_estimateGas", [{}, "pending"]), (e: Error) => e.message === "RPC error 3: execution reverted");
+  assert.deepEqual(asked, ["a"]);
+  // a -32000 revert stays the chain's answer whatever its reason says (a contract's words may name a missing block)
+  asked.length = 0;
+  const r2b = side([p("a", fail("RPC error -32000: execution reverted: header not found")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
+  await assert.rejects(r2b("eth_call", [{}, "pending"]), (e: Error) => /^RPC error -32000: execution reverted/.test(e.message));
   assert.deepEqual(asked, ["a"]);
   // a held spare is passed over
   asked.length = 0;
-  const r3 = evm.evmFailoverRpc([p("a", fail("HTTP 502")), p("held", async () => "0x2", () => true), p("c", async () => "0x3")], { log: (l) => void lines.push(l) });
+  const r3 = side([p("a", fail("HTTP 502")), p("held", async () => "0x2", () => true), p("c", async () => "0x3")], { log: (l) => void lines.push(l) });
   assert.equal(await r3("eth_blockNumber", []), "0x3");
   assert.deepEqual(asked, ["a", "c"]);
   // a throttled first provider whose spares fail too stays a throttle (429 with its wait), as it was with no spare
-  const r4 = evm.evmFailoverRpc([p("a", fail("HTTP 429")), p("b", fail("HTTP 502"))], { log: () => {} });
+  const r4 = side([p("a", fail("HTTP 429")), p("b", fail("HTTP 502"))], { log: () => {} });
   await assert.rejects(r4("eth_blockNumber", []), (e: Error) => throttleOf(e, true) > 0);
   assert.ok(lines.every((l) => !l.includes(FAKE)), lines.join("\n"));
+});
+
+// card helper-evm-read-two-operators: a pool read needs two different operators that agree, taken from the network's
+// whole provider list (the kit's fee pair, the helper's keyed URLs, the kit's quote providers). On 10 Nov 04:2xZ the live
+// helper answered GET /v1/pool/fee for the Robinhood mainnet pool 503 upstream for about 40 s on end: its first side was
+// dRPC alone (robinhood.drpc.org and its three keyed lb.drpc.live seats), every seat refusing the same state, while
+// QuickNode sat on the other side unasked. Each test below plants an operator's answers by host.
+type Plant = { status: number; body: object } | { result: unknown } | null;
+/** Stubs fetch: every host answers a 1 s chain as `block` makes it, unless `plant` answers for it. */
+function chainStub(t: TestContext, plant: (host: string, method: string, params: unknown[]) => Plant): Call[] {
+  const calls: Call[] = [];
+  const real = globalThis.fetch;
+  const realNow = Date.now;
+  t.after(() => {
+    globalThis.fetch = real;
+    Date.now = realNow;
+  });
+  Date.now = () => NOW_MS;
+  globalThis.fetch = (async (u: string | URL, init?: RequestInit) => {
+    const host = new URL(String(u)).host;
+    const { id, method, params } = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    calls.push({ host, method, params });
+    const answer = (status: number, o: object) => new Response(JSON.stringify({ jsonrpc: "2.0", id, ...o }), { status, headers: { "content-type": "application/json" } });
+    const p = plant(host, method, params);
+    if (p !== null) return "result" in p ? answer(200, { result: p.result }) : answer(p.status, { error: p.body });
+    if (method === "eth_getBlockByNumber") return answer(200, { result: block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))) });
+    if (method === "eth_call") {
+      const [{ to, data }] = params as [{ to: string; data: string }];
+      return answer(200, { result: word(to.toLowerCase() === PIN || to.toLowerCase() === BASE_PIN || to.toLowerCase() === SEPOLIA_PIN ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
+    }
+    if (method === "eth_chainId") return answer(200, { result: "0x1237" });
+    return answer(200, { error: { code: -32601, message: "no" } });
+  }) as typeof fetch;
+  return calls;
+}
+const BASE_PIN = evmPoolVenues().base.pool!.toLowerCase();
+const SEPOLIA_PIN = evmPoolVenues()["base-sepolia"].pool!.toLowerCase();
+const DRPC_HOSTS = new Set(["robinhood.drpc.org", "lb.drpc.live"]);
+const ENV3 = { ...ENV, ROBINHOOD_RPC_URL_DRPC_2: `https://lb.drpc.live/robinhood/${FAKE}2`, ROBINHOOD_RPC_URL_DRPC_3: `https://lb.drpc.live/robinhood/${FAKE}3` };
+const opFee = (network: string) => evmPoolFee({ gas: evmPoolGas(2), gasPrice: GWEI, chainFee: evmPoolChainFee(network, EVM_POOL_TX_BYTES, evmPoolChainFeeReads(network, evmPoolGas(2)).map((r) => (r.data === ARB_L1 ? 3n : 0n))) });
+const stateReads = (calls: Call[], host: string) => calls.filter((c) => c.host === host && c.method === "eth_call").length;
+const sendersOf = (env: Record<string, string>, lines: string[]) => evm.evmPoolSendersFromEnv(env, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l));
+
+test("every seat of one operator refuses the state at the epoch block's hash: the read goes on to another operator the other side has not used, and the fee is answered by two operators, Robinhood's own and QuickNode, each named", async (t) => {
+  const calls = chainStub(t, (host, method) => (DRPC_HOSTS.has(host) && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const f = await sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.ok(stateReads(calls, "rpc.mainnet.chain.robinhood.com") > 0 && calls.some((c) => c.host.endsWith("quiknode.pro") && c.method === "eth_call"), "Robinhood's own and QuickNode answered the state reads");
+  assert.deepEqual([...hashesOf(calls)], [block(FIRST).hash]);
+  assert.equal(lines.length, 2, lines.join("\n"));
+  for (const l of lines) {
+    assert.match(l, /^evm robinhood: eth_call 0x[0-9a-f]{8} .*failed at robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_2\): HTTP 400[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_3\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\) answered$/);
+    assert.ok(!l.includes(FAKE), l);
+  }
+});
+
+test("one operator answers a block by number null (its node behind): the first-block search and the block's check go on to another operator, and the fee is answered", async (t) => {
+  const calls = chainStub(t, (host, method, params) => (DRPC_HOSTS.has(host) && method === "eth_getBlockByNumber" && params[0] !== "latest" ? { result: null } : null));
+  const lines: string[] = [];
+  const f = await sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+  assert.ok(calls.some((c) => c.host.endsWith("quiknode.pro") && c.method === "eth_getBlockByNumber"), "the block's check on the first side went on to QuickNode");
+  assert.ok(lines.length > 0 && lines.every((l) => /^evm robinhood: eth_getBlockByNumber failed at robinhood\.drpc\.org: [^;]*null[^;]*;.* answered$/.test(l)), lines.join("\n"));
+});
+
+test("two operators that both answered and differ on the block's hash are a refusal, never settled by a third that agrees with one", async (t) => {
+  // dRPC and QuickNode name one hash for every block, Robinhood's own another
+  const other = (n: number) => ({ ...block(n), hash: `0x${(n + 7).toString(16).padStart(64, "0")}` });
+  chainStub(t, (host, method, params) => (host === "rpc.mainnet.chain.robinhood.com" && method === "eth_getBlockByNumber" ? { result: other(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))) } : null));
+  const lines: string[] = [];
+  await assert.rejects(sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1), (e: Error) => /different blocks/.test(e.message) && throttleOf(e) === 0);
+});
+
+test("two operators that both answered and differ on a state word at the block's hash are a refusal: dRPC refusing the state, QuickNode reads the depth 3 where Robinhood's own reads 2", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (DRPC_HOSTS.has(host) && method === "eth_call") return UNKNOWN_STATE;
+    const [c] = params as [{ data?: string }];
+    return host.endsWith("quiknode.pro") && method === "eth_call" && c?.data === DEPTH ? { result: word(3n) } : null;
+  });
+  await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => /differ on 0x4a2b75c8/.test(e.message) && throttleOf(e) === 0);
+});
+
+test("only one operator alive: every read is refused 503 upstream (no throttle), never answered on that operator's word alone", async (t) => {
+  const down = { status: 503, body: { code: -32603, message: "down" } };
+  const calls = chainStub(t, (host) => (host === "rpc.mainnet.chain.robinhood.com" ? null : down));
+  const lines: string[] = [];
+  await assert.rejects(sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
+  const up = lines.filter((l) => /^evm robinhood: fee upstream: /.test(l));
+  assert.equal(up.length, 1, lines.join("\n"));
+  assert.ok(lines.every((l) => l === up[0] || / answered$/.test(l)), lines.join("\n"));
+  assert.ok(!up[0]!.includes(FAKE), up[0]);
+  assert.ok(!calls.some((c) => c.method === "eth_call"), "no state read once the block could not be read on two operators");
+});
+
+test("Base: a provider's -32000 'historical state … is not available' is that provider's miss, not the chain's answer: the side goes on to another operator", async (t) => {
+  const pruned = { status: 200, body: { code: -32000, message: "historical state 39472d03baeb94e12253378cd8b493da681edf67f51e92bf826e24fec1b0a137 is not available" } };
+  const calls = chainStub(t, (host, method) => (host === "base-rpc.publicnode.com" && method === "eth_call" ? pruned : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: KEY, BASE_RPC_URL_DRPC_1: `https://lb.drpc.live/base/${FAKE}` };
+  const f = await sendersOf(env, lines).get(BASE_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base").toString());
+  assert.ok(stateReads(calls, "lb.drpc.live") > 0, "another operator answered the state reads");
+  assert.ok(lines.length > 0 && lines.every((l) => /failed at base-rpc\.publicnode\.com: RPC error -32000: historical state [0-9a-f]+ is not available.* answered$/.test(l)), lines.join("\n"));
+});
+
+test("a test network reads past its pair too: Base Sepolia's first provider refusing the state, the fee is answered by publicnode and Pocket", async (t) => {
+  const calls = chainStub(t, (host, method) => (host === "sepolia.base.org" && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: KEY };
+  const f = await sendersOf(env, lines).get(SEPOLIA_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base-sepolia").toString());
+  assert.ok(stateReads(calls, "base-sepolia-rpc.publicnode.com") > 0 && stateReads(calls, "base-testnet.api.pocket.network") > 0, "publicnode and Pocket answered");
+});
+
+test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
+  chainStub(t, (host, method) => (method !== "eth_call" ? null : host === "rpc.mainnet.chain.robinhood.com" ? { status: 429, body: { code: -32005, message: "too many requests" } } : { status: 502, body: { code: -32603, message: "bad gateway" } }));
+  await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) > 0);
+});
+
+// review of 686dda50 (F1): which block is the period's first, and its base fee, are never one operator's word. Each
+// plant answers through a public quote seat (publicnode) while dRPC's node is behind (its block reads null), so the
+// search walks to publicnode
+const PUBLIC = { POOL_EVM_ADDRESS_ROBINHOOD: PIN, POOL_EVM_SENDER_KEY_ROBINHOOD: KEY }; // no keyed seat: the public operators alone
+// dRPC's node behind: its newest block 20 blocks before the period's first, every block after it unknown (null)
+const DRPC_HEAD = FIRST - 20;
+const DRPC_BEHIND = (host: string, method: string, params: unknown[]): Plant => {
+  if (!DRPC_HOSTS.has(host) || method !== "eth_getBlockByNumber") return null;
+  if (params[0] === "latest") return { result: block(DRPC_HEAD) };
+  return Number(BigInt(params[0] as string)) > DRPC_HEAD ? { result: null } : null;
+};
+test("F1: a seat naming the period's first block's true hash with a base fee 1000 times the chain's is refused (two operators agree on the hash, number, time and base fee), never published", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") return { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), baseFeePerGas: `0x${(1000n * GWEI).toString(16)}` } };
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+test("F1b: a seat naming an earlier real block with a time 7 s late is refused: the block before the one named must be before the period on two operators", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") {
+      const n = params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string));
+      return { result: { ...block(n), timestamp: `0x${(S + n + 7).toString(16)}` } };
+    }
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+test("F1c: every operator honest, the fee reads the period's first block on two operators, the one before it on two as well", async (t) => {
+  const calls = chainStub(t, () => null);
+  const f = await sendersOf(ENV, []).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+  for (const n of [FIRST, FIRST - 1]) {
+    const by = new Set(calls.filter((c) => c.method === "eth_getBlockByNumber" && c.params[0] === `0x${n.toString(16)}`).map((c) => c.host));
+    assert.ok(by.size >= 2, `block ${n} on ${[...by].join(",")}`);
+  }
+});
+
+// review of 686dda50 (F2): a revert is the chain's answer whatever its reason says: never a walk, never a hold
+test("F2: a code-3 revert or a -32000 'execution reverted' whose reason names a limit or a rate is the chain's answer: asked on one seat, no provider held; a real throttle still holds", async () => {
+  const holds = providerHolds(() => 0, {});
+  for (const err of ["RPC error 3: execution reverted: Max wallet limit exceeded", "RPC error 3: execution reverted: rate limit", "RPC error -32000: execution reverted: too many requests"]) {
+    const asked: string[] = [];
+    const names = [["a1", "a"], ["b1", "b"], ["c1", "c"], ["a2", "a"], ["d1", "d"]] as const;
+    const seats: evm.EvmSeat[] = names.map(([name, operator]) => {
+      const url = `https://${name}-${err.length}.example`;
+      return { name, url, operator, rpc: evm.pacedEvmRpc(url, async () => (asked.push(name), Promise.reject(new Error(err))), holds, async () => {}) };
+    });
+    const e = await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_call", [{}, "pending"]).then(() => null, (x: Error) => x);
+    assert.equal(e?.message, err);
+    assert.deepEqual(asked, ["a1"], err);
+    assert.deepEqual(seats.filter((s) => holds.heldMs(s.url) > 0).map((s) => s.name), [], err);
+  }
+  // a provider's throttle, HTTP 429 or -32005 with no revert: held, and the walk goes on
+  for (const err of ["HTTP 429: Too Many Requests", "RPC error -32005: project ID request rate exceeded"]) {
+    const asked: string[] = [];
+    const url = `https://t-${err.length}.example`;
+    const seats: evm.EvmSeat[] = [
+      { name: "t", url, operator: "a", rpc: evm.pacedEvmRpc(url, async () => (asked.push("t"), Promise.reject(new Error(err))), holds, async () => {}) },
+      { name: "u", url: "https://u.example", operator: "c", rpc: async () => (asked.push("u"), "0x1") },
+    ];
+    assert.equal(await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_blockNumber", []), "0x1");
+    assert.deepEqual(asked, ["t", "u"]);
+    assert.ok(holds.heldMs(url) > 0, err);
+  }
+});
+test("F2 at the route: a sale's simulation reverting 'Max wallet limit exceeded' is the chain's answer, failedInExecution, never the provider's", () => {
+  assert.equal(evm.evmChainAnswered(new Error("RPC error 3: execution reverted: Max wallet limit exceeded")), true);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: execution reverted: rate limit")), true);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: header not found")), false);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32005: limit exceeded")), false);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: rate limit exceeded")), false);
+});
+
+// review of 686dda50 (F3): a held seat, the first included, is passed over while another unclaimed operator can answer
+test("F3: a first seat held 8 s is passed over: the side asks the next operator at once, and asks the held seat only when no other answered", async () => {
+  let t = 0;
+  const now = () => t;
+  const holds = providerHolds(now, {});
+  const PAIR = "https://pair.example";
+  holds.hold(PAIR, 8);
+  const asked: string[] = [];
+  const skip = () => holds.heldMs(PAIR) > 0;
+  const pairRpc = evm.pacedEvmRpc(PAIR, async () => (asked.push("pair"), "0x9"), holds, async (ms) => void (t += ms));
+  const seats = (third: boolean): evm.EvmSeat[] => [
+    { name: "pair", url: PAIR, operator: "x", rpc: pairRpc, skip },
+    { name: "other", url: "https://other.example", operator: "y", rpc: async () => "0x0" },
+    ...(third ? [{ name: "keyed", url: "https://keyed.example", operator: "z", rpc: async () => (asked.push("keyed"), "0x1") }] : []),
+  ];
+  const [p, q] = await evm.evmReadPair(seats(true), ["x", "y"], { log: () => {}, now }).both("eth_blockNumber", []);
+  assert.ok(p.ok && p.operator === "z" && q.ok && q.operator === "y");
+  assert.deepEqual(asked, ["keyed"]);
+  assert.equal(t, 0, "no hold waited out");
+  // no other operator: the held seat is asked last, its hold waited out
+  asked.length = 0;
+  const [p2] = await evm.evmReadPair(seats(false), ["x", "y"], { log: () => {}, now }).both("eth_blockNumber", []);
+  assert.ok(p2.ok && p2.operator === "x", p2.ok ? p2.operator : String(p2.error));
+  assert.deepEqual(asked, ["pair"]);
+});
+test("F3: a side's read is bounded at EVM_READ_BUDGET_MS from its start, checked before each next seat; the first seat is never cut", async () => {
+  let t = 0;
+  const now = () => t;
+  const slow = (name: string, ms: number, asked: string[]): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator: name, rpc: async () => (asked.push(name), (t += ms), Promise.reject(new Error("HTTP 502"))) });
+  // each seat fails 4 s in: the first (0-4 s) and the second (4-8 s, started inside the 6 s) are asked, never the third
+  const asked: string[] = [];
+  const pair = evm.evmReadPair([slow("a", 4_000, asked), slow("c", 4_000, asked), slow("d", 4_000, asked), slow("b", 0, [])], ["a", "b"], { log: () => {}, now });
+  await assert.rejects(pair.one(0, "eth_blockNumber", []));
+  assert.deepEqual(asked, ["a", "c"]);
+  // the first seat answering after the budget's time is never cut: its answer stands
+  const late: evm.EvmSeat = { name: "l", url: "https://l.example", operator: "l", rpc: () => new Promise((ok) => setTimeout(() => ok("0x5"), 40)) };
+  assert.equal(await evm.evmReadPair([late, slow("m", 0, [])], ["l", "m"], { log: () => {}, budgetMs: 5 }).one(0, "eth_blockNumber", []), "0x5");
+});
+
+// review of 686dda50: "already known" on a send is the send accepted (the node holds the transaction: a first seat that
+// timed out after it passed it on, or the other side's), never a refusal
+test("a send every seat answers 'already known' is the send accepted: the caller gets 200 and its hash", async () => {
+  const send = (await import("./evm.ts")).evmSendAccepted;
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32000: already known") }), true);
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32010: Transaction with the same hash was already imported.") }), true);
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32000: nonce too low") }), false);
+  assert.equal(send({ status: "rejected", reason: new Error("HTTP 502") }), false);
+  assert.equal(send({ status: "fulfilled", value: "0xab" }), true);
+});
+test("F1d: the confirm reads both sides: a seat that names the true block to the search and another base fee when the block is read again is refused", async (t) => {
+  let asked = 0;
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber" && params[0] === `0x${FIRST.toString(16)}` && asked++ > 0) return { result: { ...block(FIRST), baseFeePerGas: `0x${(7n * GWEI).toString(16)}` } };
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+
+// review of 686dda50, the survivors: each wording of a missing block or state walks on (geth's "header not found" is
+// Robinhood's live wording); a revert never does, in any case of its words; in code 3 or -32003 nothing is a miss
+test("each wording of a block or state the node lacks walks to the next operator; the same words in a revert, a code 3 or a -32003 answer are the chain's", async () => {
+  const run = async (err: string) => {
+    const asked: string[] = [];
+    const seats: evm.EvmSeat[] = [
+      { name: "a1", url: "https://a1.example", operator: "a", rpc: async () => (asked.push("a1"), Promise.reject(new Error(err))) },
+      { name: "c1", url: "https://c1.example", operator: "c", rpc: async () => (asked.push("c1"), "0x1") },
+    ];
+    const v = await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_call", [{}, { blockHash: "0x01" }]).then((x) => x, () => "thrown");
+    return { v, asked };
+  };
+  for (const words of ["header not found", "missing trie node 0b1e (path )", "unknown block", "unknown state", "archive requests require a paid plan", "block 0x5 not found", "historical state ab is not available"]) {
+    assert.deepEqual(await run(`RPC error -32000: ${words}`), { v: "0x1", asked: ["a1", "c1"] }, words);
+  }
+  for (const err of ["RPC error -32000: execution reverted: header not found", "RPC error -32000: Execution reverted: unknown block", "RPC error 3: header not found", "RPC error -32003: missing trie node"]) {
+    assert.deepEqual(await run(err), { v: "thrown", asked: ["a1"] }, err);
+  }
+});
+
+test("a null receipt or transaction is an answer (not mined, not known), never a walk; a block read answered null or not an object walks on; a side with no operator left says so", async () => {
+  const asked: string[] = [];
+  const seat = (name: string, op: string, v: unknown): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator: op, rpc: async () => (asked.push(name), v) });
+  const pair = evm.evmReadPair([seat("a1", "a", null), seat("c1", "c", { hash: "0x" })], ["a", "b"], { log: () => {} });
+  for (const m of ["eth_getTransactionReceipt", "eth_getTransactionByHash"]) {
+    asked.length = 0;
+    assert.equal(await pair.one(0, m, ["0x01"]), null, m);
+    assert.deepEqual(asked, ["a1"], m);
+  }
+  for (const v of [null, "0x5", 7]) {
+    asked.length = 0;
+    const p2 = evm.evmReadPair([seat("a1", "a", v), seat("c1", "c", { hash: "0x" })], ["a", "b"], { log: () => {} });
+    assert.deepEqual(await p2.one(0, "eth_getBlockByNumber", ["0x1", false]), { hash: "0x" }, String(v));
+    assert.deepEqual(asked, ["a1", "c1"]);
+  }
+  const lone = evm.evmReadPair([seat("b1", "b", "0x1")], ["a", "b"], { log: () => {} });
+  const [x] = await lone.both("eth_blockNumber", []);
+  assert.ok(!x.ok && /no operator left apart from the other side's/.test(String((x.error as Error).message)));
+});
+
+test("the env's seats: the pair and the keyed URLs draw on the sender's reserve, the kit's quote providers do not; every seat, the pair's included, is passed over while held", async (t) => {
+  chainStub(t, () => null);
+  const real = providerHolds(() => 0, {});
+  const reserved: string[] = [];
+  const holds = { ...real, reserve: (u: string) => (reserved.push(u), real.reserve(u)) };
+  const waits: number[] = [];
+  const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), holds, async (ms) => void waits.push(ms), () => {}).get(PIN)!;
+  assert.deepEqual(reserved.map((u) => new URL(u).host).sort(), ["lb.drpc.live", "made-up.robinhood-mainnet.quiknode.pro", "robinhood.drpc.org", "rpc.mainnet.chain.robinhood.com"]);
+  real.hold(DRPC!, 30);
+  assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.deepEqual(waits.filter((w) => w >= 1_000), [], "no hold waited out");
+});
+
+test("a seat's words are cleared of every URL's secret part before a log line or an error holds them, though the provider echoes its URL", async (t) => {
+  chainStub(t, (host, method) => (method === "eth_call" && DRPC_HOSTS.has(host) ? { status: 400, body: { code: -32602, message: `bad request to ${SPARE_DRPC} (key ${FAKE})` } } : null));
+  const lines: string[] = [];
+  assert.equal((await sendersOf(ENV, lines).get(PIN)!.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.ok(lines.length > 0);
+  for (const l of lines) {
+    assert.ok(!l.includes(FAKE) && l.includes("<key>"), l);
+  }
+});
+test("F1e: a search that lands past the period's first block (a seat naming the three blocks before it with a time before the period, their true hashes) is refused: the block before the one named is in the period on the other operator", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber" && params[0] !== "latest") {
+      const n = Number(BigInt(params[0] as string));
+      if (n >= FIRST && n <= FIRST + 2) return { result: { ...block(n), timestamp: `0x${(S + FIRST - 1).toString(16)}` } };
+    }
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+
+// review of d190f62f (A-1): the search starts from the newer of two operators' newest blocks. On the live chain
+// robinhood.drpc.org, side a's first seat, ran up to 20 s behind; its "latest" alone put the period's first block in the
+// future, and the fee was answered "no fee yet" though every other operator held it
+test("A-1: dRPC 20 s behind (its newest block 10 s before the period's start) and every other operator at the head: the fee is read on the first try", async (t) => {
+  const CUR = EPOCH + 60_000; // the period now running, its first block HEAD - 40
+  const top = HEAD - 30; // the chain's head, 10 s into the period
+  const lag = top - 20;
+  chainStub(t, (host, method, params) => {
+    if (method !== "eth_getBlockByNumber") return null;
+    const head = DRPC_HOSTS.has(host) ? lag : top;
+    if (params[0] === "latest") return { result: block(head) };
+    return Number(BigInt(params[0] as string)) > head ? { result: null } : null;
+  });
+  const f = await sendersOf(PUBLIC, []).get(PIN)!.fee(CUR + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${(CUR / 1000 - S).toString(16)}`);
+});
+
+// review of d190f62f (A-3): "known transaction" is a node's word for one it holds; "unknown transaction type" is a refusal
+test("A-3: a send refused 'unknown transaction type' is a refusal, never the send accepted; 'known transaction' is", async () => {
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: unknown transaction type") }), false);
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: Unknown Transaction Type 0x7f") }), false);
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: known transaction: 0xab") }), true);
+});
+
+// review of d190f62f (A-2): a search on side a that names a block the two operators do not agree on (a node of dRPC's
+// balancer on a short fork, once) runs once more on side b, whose block the two then agree on: the fee is answered
+test("A-2: the first search names a block of a fork dRPC answered once; the search runs again on the other side and the fee is answered", async (t) => {
+  const seen = new Set<number>();
+  chainStub(t, (host, method, params) => {
+    if (host !== "robinhood.drpc.org" || method !== "eth_getBlockByNumber" || params[0] === "latest") return null;
+    const n = Number(BigInt(params[0] as string));
+    if (n < FIRST || seen.has(n)) return null;
+    seen.add(n);
+    return { result: { ...block(n), hash: `0x${(n + 7).toString(16).padStart(64, "f")}` } };
+  });
+  const f = await sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+});
+test("A-2: the search on the other side meets the same disagreement: refused; the newest blocks read once, on two operators", async (t) => {
+  const calls = chainStub(t, (host, method, params) => (host === "rpc.mainnet.chain.robinhood.com" && method === "eth_getBlockByNumber" ? { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), hash: `0x${"e".repeat(64)}` } } : null));
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+  assert.equal(calls.filter((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest").length, 2, "the newest block read once, on two operators");
+});
+
+// review of d190f62f (A-4): a fee read that failed is kept EVM_FEE_MISS_MS before it is read again, so one caller asking
+// for every unreadable period of a proof's life over and over makes one read per period, not one per request
+test("A-4: 30 requests for 10 unreadable periods within 2 s read each period once; 2 s later a request reads again", async (t) => {
+  const calls = chainStub(t, (_host, method) => (method === "eth_call" ? UNKNOWN_STATE : null));
+  let at = NOW_MS;
+  Date.now = () => at;
+  const s = sendersOf(PUBLIC, []).get(PIN)!;
+  await assert.rejects(s.fee(EPOCH + 1));
+  const one = calls.length;
+  assert.ok(one > 0);
+  calls.length = 0;
+  for (let i = 0; i < 30; i++) {
+    at = NOW_MS + i * 60;
+    await assert.rejects(s.fee(EPOCH + 60_000 - (i % 10) * 60_000 + 1));
+  }
+  assert.ok(calls.length <= 10 * one, `${calls.length} provider calls for 30 requests (one read: ${one})`);
+  calls.length = 0;
+  at = NOW_MS + 30 * 60 + evm.EVM_FEE_MISS_MS;
+  await assert.rejects(s.fee(EPOCH + 1));
+  assert.ok(calls.length > 0, "read again once the miss is 2 s old");
 });

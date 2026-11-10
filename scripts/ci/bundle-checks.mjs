@@ -40,7 +40,8 @@ export const IN_PROCESS = [
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
-  viaRead("signpage-state-holdings", () => import("../live-checks/signpage-state-holdings.mjs")),
+  // cut as a release only after its merge: the marks and the pin, not the ledger
+  { key: "signpage-state-holdings", host: "sign", load: () => import("../live-checks/signpage-state-holdings.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
   viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),
@@ -70,6 +71,8 @@ export const IN_PROCESS = [
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
   { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (no state read at an old block's tag, every pool seat named): the providers' answers are past the build
+  { key: "evm-deposit-note-stays-incoming", host: "sign", load: () => import("../live-checks/evm-deposit-note-stays-incoming.mjs"), run: async (m, f) => m.judgeBundleOnly(await m.readBundle(f)) },
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
@@ -127,6 +130,7 @@ export const OUT = {
   "kit-deposit-assets-dry": "a browser",
   "app-shell": "a browser",
   "app-shell-rpc-outage-judge": "a browser",
+  "app-phone-token-taps-and-rows": "a browser",
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",

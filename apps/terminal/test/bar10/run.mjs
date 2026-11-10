@@ -43,7 +43,6 @@ const OUTAGE = outageAt >= 0 ? args[outageAt + 1] : undefined;
 const LISTS_URL = "https://ct-api.unrealized.trade/v1/market/lists?chain=solana";
 const isTokenRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/token";
 const isCandleRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/candles";
-const isTradesRead = (u) => u.origin === "https://ct-api.unrealized.trade" && u.pathname === "/v1/market/trades";
 
 /** The helper's answer: every list of the fixtures, edge rows after the recorded ones; New also holds the rows on a
  *  curve, as the live one does, so the percent pills are on its first screen. */
@@ -170,12 +169,8 @@ try {
       });
       await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST, "access-control-expose-headers": "X-Helper-Source", "x-helper-source": "chain" }, body: JSON.stringify({ tf, candles, src: "chain", as_of_ms: Date.now() }) }).catch(() => {});
     });
-    // and its tape (card app-chart-controls, the chart's trade marks): a token whose book holds no trades yet, so the
-    // chart draws no marks and the page makes no failed load
-    await ctx.route(isTradesRead, async (r) => {
-      if (late) await wait(LATE.helperMs);
-      await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": APP_HOST }, body: JSON.stringify({ trades: [], src: "chain", as_of_ms: Date.now() }) }).catch(() => {});
-    });
+    // its tape (the chart's marks, the Trades rows) is collect()'s own on every run, live or here (app-shell.mjs
+    // plantTape): trades inside these candles, more pushed while each load settles
   };
   const prepare = answering(false);
   let ok = true;

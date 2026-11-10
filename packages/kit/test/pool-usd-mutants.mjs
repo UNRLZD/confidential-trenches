@@ -16,6 +16,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 import { KIT, kitCopy } from "./mutant-copy.mjs";
 
 // the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
@@ -208,6 +209,8 @@ export const MUTANTS = [
   [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d[body + 32] !== 0", "S6 refused: a hook program whose first byte is 0", S6_TEST],
   [S6, "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n    }", "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n      return null;\n    }", "S6 refused: a zero fee config followed by a hook program", S6_TEST],
 ];
+// every mutant's name, in the order the parts take them
+export const NAMES = MUTANTS.map(([, find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
 
 // a child test run must not inherit this process's own node --test context
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
@@ -222,8 +225,10 @@ function run(name, file = TEST) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // <k>/<n>: part k of n only, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs); test:mutants runs the parts
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
   let bad = 0;
-  for (const [t, f] of new Map(MUTANTS.map((m) => [m[3], m[4]]))) {
+  for (const [t, f] of new Map(MUTANTS.filter((_, i) => part.pick(i)).map((m) => [m[3], m[4]]))) {
     const r = run(t, f);
     if (r !== "pass") {
       console.log(`FAIL "${t}" ${r === "none" ? "names no test" : "fails on the code as it is"}`);
@@ -232,6 +237,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (bad > 0) process.exit(1);
   MUTANTS.forEach(([file, find, repl, t, testFile], i) => {
+    if (!part.pick(i)) return;
     const src = readFileSync(file, "utf8");
     if (src.split(find).length !== 2) {
       console.log(`FAIL mutant ${i + 1}: its text is not in ${path.basename(file)} exactly once`);
@@ -249,6 +255,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
     if (r !== "fail") bad++;
   });
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${part.at.length} mutants fails its named test` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }
