@@ -23,10 +23,12 @@
 // RESTORE_LANES x DEPOSIT_ID_MARGIN ids at the providers' pace, minutes on mainnet, so the check stays red on the live
 // page until card restore-first-sign-in-under-two-minutes sets the restore's time and this wait from its measure.
 // Since that card a restore is done at the walk's end and step 5 reads on after it, so on the live page the check also
-// sees step 5 go on: after the run with no tap is done, id reads (NEAR `query` requests) reach both NEAR operators the
-// page reads ids on (NEAR_OPS) within WAIT_MS. A local build serves no pinned host, so there that line is not judged.
-// The page's `restore ids unread:` lines (a step 5 read asked again, or left to the next load) are printed with it and
-// fail nothing: a read that did not answer is retried by the page itself, never shown to the user.
+// sees step 5 go on: after the run with no tap is done, id reads (idReadOf: a NEAR `query` naming a 64-hex implicit id,
+// never the pass's own view of intents.near) reach both NEAR operators the page reads ids on (NEAR_OPS) within WAIT_MS,
+// or a try of step 5 ends and is told (its `restore ids unread:` or `restore stalled:` line after done), so a first try
+// that ends on a read to retry and pauses past WAIT_MS still shows step 5 going on (review P3-7 of 53f5e92f); a deploy
+// with no step 5 shows neither. A local build serves no pinned host, so there that line is not judged. The page's
+// lines are printed with it.
 // After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
@@ -51,6 +53,28 @@ const WAIT_MS = 20_000;
 const PROTECT_MS = 500; // the page's activation guard (packages/signpage/src/guard.ts)
 // the NEAR operators step 5 reads deposit ids on (src/pool-restore.ts pageIdReads on mainnet), both pinned hosts
 export const NEAR_OPS = Object.freeze(["rpc.mainnet.fastnear.com", "near.drpc.org"]);
+const IMPLICIT = /^[0-9a-f]{64}$/;
+/** Whether a NEAR JSON-RPC POST body is a step 5 id read: a `query` whose account (view_account) or call argument
+ * (call_function's args_base64 `account_id`) is a 64-hex implicit id. */
+export function idReadOf(post) {
+  let b;
+  try {
+    b = JSON.parse(post ?? "");
+  } catch {
+    return false;
+  }
+  const p = b?.method === "query" && isObj(b.params) ? b.params : null;
+  if (p === null) return false;
+  if (p.request_type === "view_account") return IMPLICIT.test(String(p.account_id ?? ""));
+  if (p.request_type !== "call_function") return false;
+  try {
+    return IMPLICIT.test(String(JSON.parse(Buffer.from(String(p.args_base64 ?? ""), "base64").toString("utf8"))?.account_id ?? ""));
+  } catch {
+    return false;
+  }
+}
+/** A console line of a step 5 try's end (main.ts's step5 hook). */
+const STEP5_TOLD = /restore ids unread: try \d+|restore stalled: /;
 if (!NEAR_OPS.every((h) => PINNED_HOSTS.includes(h))) throw new Error("a NEAR operator is not a pinned host");
 
 const A8 = JSON.parse(readFileSync(path.join(REPO, "packages/wallet/test/vectors/a8.json"), "utf8"));
@@ -90,8 +114,10 @@ export function judge(rec) {
   // step 5 goes on after done (card restore-first-sign-in-under-two-minutes): judged on the live page only
   if (String(rec?.source ?? "").startsWith("live")) {
     const after = isObj(rec?.afterDone) ? rec.afterDone : {};
+    const told = Number.isInteger(rec?.toldAfterDone) ? rec.toldAfterDone : 0;
     const unread = (rec?.console ?? []).filter((c) => typeof c === "string" && c.includes("restore ids unread:"));
-    say(NEAR_OPS.every((h) => Number.isInteger(after[h]) && after[h] > 0), `after done, step 5 reads on: id reads to both NEAR operators (${NEAR_OPS.map((h) => `${h} ${after[h] ?? 0}`).join(", ")})${unread.length ? `; ${unread.join(" | ")}` : ""}`);
+    const reads = NEAR_OPS.every((h) => Number.isInteger(after[h]) && after[h] > 0);
+    say(reads || told > 0, `after done, step 5 reads on: id reads to both NEAR operators (${NEAR_OPS.map((h) => `${h} ${after[h] ?? 0}`).join(", ")}), ${told} tr${told === 1 ? "y" : "ies"} told${unread.length ? `; ${unread.join(" | ")}` : ""}`);
   }
   if (rec?.errors?.length) say(false, `the run had no error (${rec.errors.join(" | ")})`);
   return { ok: lines.every((l) => l.startsWith("OK")), lines };
@@ -144,7 +170,7 @@ async function until(f, ms = WAIT_MS) {
 }
 
 export async function collect({ local }) {
-  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], errors: [] };
+  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), toldAfterDone: 0, stray: [], console: [], errors: [] };
   // set once the run with no tap is seen done: each NEAR `query` after it is step 5 reading on
   let done = false;
   let built = null;
@@ -169,7 +195,7 @@ export async function collect({ local }) {
     await ctx.route("**/*", async (r) => {
       const u = new URL(r.request().url());
       rec.hosts[u.host] = (rec.hosts[u.host] ?? 0) + 1;
-      if (done && NEAR_OPS.includes(u.host) && /"method"\s*:\s*"query"/.test(r.request().postData() ?? "")) rec.afterDone[u.host] += 1;
+      if (done && NEAR_OPS.includes(u.host) && idReadOf(r.request().postData())) rec.afterDone[u.host] += 1;
       if (u.host === SIGN_HOST) return local ? r.fulfill(sign(decodeURIComponent(u.pathname))) : r.continue();
       if (u.host === APP_HOST) return r.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: APP_PAGE });
       // the pinned pool's hosts: the live network's (the local build serves none, so they are refused there and its run
@@ -181,6 +207,7 @@ export async function collect({ local }) {
     const page = await ctx.newPage();
     page.on("console", (m) => {
       if ((m.type() === "warning" || m.type() === "error") && rec.console.length < 50) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
+      if (done && STEP5_TOLD.test(m.text())) rec.toldAfterDone += 1;
     });
     page.on("response", (res) => {
       if (res.request().isNavigationRequest() && res.frame() === page.mainFrame() && rec.connect === null) rec.connect = connectHosts(res.headers()["content-security-policy"] ?? "");
@@ -222,7 +249,7 @@ export async function collect({ local }) {
     await until(async () => stagesOf().some((x) => x === "done" || x === "stalled"));
     rec.steps.asked = { answer, stages: stagesOf() };
     // step 5 after done: id reads on both NEAR operators, within the window (the live page only)
-    if (!local && done) await until(async () => NEAR_OPS.every((h) => rec.afterDone[h] > 0));
+    if (!local && done) await until(async () => NEAR_OPS.every((h) => rec.afterDone[h] > 0) || rec.toldAfterDone > 0);
   } catch (e) {
     rec.errors.push(String(e?.message ?? e).slice(0, 300));
   } finally {

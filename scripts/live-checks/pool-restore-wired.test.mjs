@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge } from "./pool-restore-wired.mjs";
+import { idReadOf, judge } from "./pool-restore-wired.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "pool-restore-wired.answers.json"), "utf8"));
@@ -100,7 +100,7 @@ test("planted: a live run done with step 5's id reads after it on both NEAR oper
   };
   const ok = judge(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 }));
   assert.equal(ok.ok, true, ok.lines.join("\n"));
-  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11)"), ok.lines.join("\n"));
+  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11), 0 tries told"), ok.lines.join("\n"));
   const fail = (rec, re) => {
     const r = judge(rec);
     assert.equal(r.ok, false, r.lines.join("\n"));
@@ -119,4 +119,35 @@ test("planted: a live run done with step 5's id reads after it on both NEAR oper
   assert.ok(a.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), a.lines.join("\n"));
   // a local build serves no pinned host: not judged there
   assert.ok(!judge(ANSWERS.good).lines.some((l) => l.includes("after done")));
+  // review P3-7 of 53f5e92f: a first try that ends on a read to retry, then pauses past WAIT_MS, is told: step 5 goes
+  // on with no id read in the window on one operator (or none): PASS; a deploy with no step 5 has neither: FAIL
+  const paused = live({ "rpc.mainnet.fastnear.com": 3, "near.drpc.org": 0 });
+  paused.toldAfterDone = 1;
+  paused.console = ["warning: restore ids unread: try 1, asked again: step 5 did not finish: HTTP 503"];
+  const p = judge(paused);
+  assert.equal(p.ok, true, p.lines.join("\n"));
+  assert.ok(p.lines.some((l) => l.startsWith("OK  after done") && l.includes("1 try told")), p.lines.join("\n"));
+  const none = live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 0 });
+  none.toldAfterDone = 0;
+  fail(none, /0 tries told/);
+  const notInt = live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 0 });
+  notInt.toldAfterDone = "1";
+  fail(notInt, /0 tries told/);
+});
+
+// review P3-7 of 53f5e92f: only a step 5 id read counts: a `query` naming a 64-hex implicit id, in view_account or in a
+// call's args, never the pass's own view of intents.near, a block read or any other body
+test("idReadOf counts a step 5 id read alone", () => {
+  const ID = "ab".repeat(32);
+  const q = (params) => JSON.stringify({ jsonrpc: "2.0", id: "1", method: "query", params });
+  const call = (method_name, args) => q({ request_type: "call_function", finality: "final", account_id: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") });
+  assert.equal(idReadOf(q({ request_type: "view_account", block_id: 1, account_id: ID })), true);
+  assert.equal(idReadOf(call("storage_balance_of", { account_id: ID })), true);
+  assert.equal(idReadOf(call("mt_tokens_for_owner", { account_id: ID })), true);
+  assert.equal(idReadOf(q({ request_type: "view_account", finality: "final", account_id: "intents.near" })), false, "the pass's own view");
+  assert.equal(idReadOf(q({ request_type: "view_account", account_id: ID.toUpperCase() })), false);
+  assert.equal(idReadOf(call("ft_metadata", {})), false);
+  assert.equal(idReadOf(JSON.stringify({ jsonrpc: "2.0", id: "1", method: "block", params: { finality: "final" } })), false);
+  assert.equal(idReadOf("not json"), false);
+  assert.equal(idReadOf(undefined), false);
 });

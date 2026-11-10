@@ -166,12 +166,12 @@ const restore = !framed
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words
       ended: (stage, why) => void (stage === "stalled" && console.warn(`restore stalled: ${why.join("; ")}`)),
-      // step 5's tries after the walk's end, the same reasons: a finding the user is told of in the `restore stalled:`
-      // shape; a read asked again, or one left to the next load, as `restore ids unread:`
+      // step 5's tries after the walk's end, the same reasons: a finding the user is told of (on the last try, what is
+      // still unread too) in the `restore stalled:` shape; a read asked again as `restore ids unread:`
       step5: (e) => {
         if (e.named.length > 0) console.warn(`restore stalled: ${e.named.join("; ")}`);
         const unread = [...e.held, ...e.retry];
-        if (unread.length > 0) console.warn(`restore ids unread: ${e.last ? "left to the next load" : `try ${e.tries}, asked again`}: ${unread.join("; ")}`);
+        if (unread.length > 0) console.warn(`restore ids unread: try ${e.tries}, asked again: ${unread.join("; ")}`);
       },
     })
   : null;
