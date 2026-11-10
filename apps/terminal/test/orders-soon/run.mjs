@@ -195,9 +195,13 @@ try {
       check(JSON.stringify(tabs) === JSON.stringify(want), `${w.name} token-orders: the tabs read ${JSON.stringify(tabs)}, want ${JSON.stringify(want)}`);
       await p.page.click(`${lp} [data-testid="lower-tab-orders"]`, { timeout: 3_000 }).catch(() => {});
       judge(`${w.name} token-orders`, await p.page.evaluate(READ_PLACE, ["token-orders", lp]));
-      // the phone's bottom bar sits over the page's foot: the shot is scrolled to the end, the words clear of the bar
-      await p.page.evaluate((sel) => document.querySelector(sel)?.scrollIntoView({ block: "center" }), `${lp} [data-testid="orders-soon"]`);
-      if (w.isMobile) await p.page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+      // the phone's bottom bar sits 68 px up, over the shell's tab bar (token.css .tkp-bottom), and the shell's own 68 px
+      // under the page (shell.css .shell) keeps the page's foot clear of it: this fixture page has no shell, so the shot
+      // adds that room and scrolls to the end
+      if (w.isMobile) {
+        await p.page.addStyleTag({ content: "body { padding-bottom: 68px; }" });
+        await p.page.evaluate(() => window.scrollTo(0, document.scrollingElement.scrollHeight));
+      } else await p.page.evaluate((sel) => document.querySelector(sel)?.scrollIntoView({ block: "center" }), `${lp} [data-testid="orders-soon"]`);
       await shot(p.page, `${w.name}-token-orders`);
       await done(`${w.name} token-orders`, p);
     }
