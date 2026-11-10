@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
-import { pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -200,4 +200,39 @@ test("pageHelperRpcStopped: a call the stop came before is never sent, whether i
   } finally {
     globalThis.fetch = real;
   }
+});
+
+// card sol-pools-mainnet-pin: no keyless mainnet provider answers the mark list (publicnode 403 "Indexed requests
+// require a personal token", api.mainnet-beta 403, read 9 Nov 17:23Z), so on the mainnet build the page's lister is the
+// helper's marks route (/v1/rpc/solana-marks). The pair reads each listed mark by address, and provider A's reads go to
+// provider A alone, never through the helper: a mark the helper makes up is no account there (review of 369a87a8, P1).
+test("the mainnet build's Solana reads: the lister is the helper's marks route; the pair's reads go to provider A directly and to the helper's solana route", async () => {
+  const real = globalThis.fetch;
+  const sent: [string, string][] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const b = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push([String(u), b.method]);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: 42 }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const [a, b] = pageSolanaRpcs();
+    const lister = pageSolanaLister();
+    assert.ok(lister !== undefined, "the mainnet build names a lister");
+    const scanParams = ["EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
+    const byAddress = [["11111111111111111111111111111111"], { commitment: "finalized", encoding: "base64" }];
+    await lister("getProgramAccounts", scanParams);
+    for (const r of [a, b]) {
+      await r("getProgramAccounts", scanParams);
+      await r("getMultipleAccounts", byAddress);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual(sent, [
+    [`${TRADE_HELPER}/v1/rpc/solana-marks`, "getProgramAccounts"],
+    [SOLANA_PROVIDER_A, "getProgramAccounts"],
+    [SOLANA_PROVIDER_A, "getMultipleAccounts"],
+    [`${TRADE_HELPER}/v1/rpc/solana`, "getProgramAccounts"],
+    [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
+  ]);
 });

@@ -6,7 +6,7 @@
 // share of the call's gas, and a read that may have run out of it answers 2, which the kit reads again (6 a call, then
 // alone); after the answer the code writes a marker word, which every answer here must end in. What it
 // proves, and only that: on every provider the kit pins for a mainnet quote (evmPoolVenues: Base and Robinhood, at
-// least two each), at its latest block, the kit's own code and gas (its exports, not copied here) answer six planted
+// least two each), all of a chain at one block (the lowest of their latest), the kit's own code and gas (its exports, not copied here) answer six planted
 // reads (eth_call code overrides at addresses no one holds, read only) as
 //   [returns 7, loops forever, returns 7, reverts 0xaa, calls the loop with all its gas then reverts 0xee, returns 7]
 //   -> [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7]
@@ -19,8 +19,9 @@
 // reads that each take 1,500,000 gas and return 7 answer [2, then five of 1 7]: each read behind the loop is still given
 // a quarter share, 1.66M (a code that kept nothing for the reads after the one it runs answered all six 2; review of
 // baac0ecb, P3-1); and each read's gas used beside its answer (card evm-quote-gas-used: the 14M revert's 14M, the 1.5M
-// reads' 1.5M, a return of 7 under 10,000, the loop's more than 30M first in a call of 6), the same on every provider of a
-// chain, as the kit requires of the two it agrees on. That
+// reads' 1.5M, a return of 7 under 10,000, the loop's more than 30M first in a call of 6), the same to the gas on every provider of
+// a chain at that block, as the kit requires of the two it agrees on (at another block a read that uses all its gas can
+// differ on Robinhood: Nitro cuts a call's gas by its L1 data cost, which moves with the block's prices; collect). That
 // the kit reads a 2 again alone, agrees on it and prices nothing on one answered alone is its test
 // (test/evm-quote-attacks.test.ts GS1-GS20, test/evm-sell-quote.test.ts GS9-GS10 and their mutants in
 // test/evm-quote-mutants.mjs).
@@ -122,27 +123,37 @@ async function rpc(url, method, params, nullNoAnswer = false) {
   return a.noAnswer !== undefined ? a : a.error !== undefined ? { error: a.error } : a.result;
 }
 
-/** Each mainnet chain's providers' answers at their latest block; `own`: Multicall3's own code (the bad answer) */
+/** Each mainnet chain's providers' answers, all of a chain at one block; `own`: Multicall3's own code (the bad answer) */
 export async function collect(own = false) {
   const out = [];
   const state = { ...Object.fromEntries(Object.entries(PLANTED).map(([a, code]) => [a, { code }])), ...(own ? {} : { [MULTICALL3]: { code: EVM_READ_GAS_CODE } }) };
   const gas = "0x" + EVM_READ_CALL_GAS.toString(16);
   for (const [chain, v] of Object.entries(evmPoolVenues())) {
     if (!["base", "robinhood"].includes(chain)) continue;
-    const reads = [];
+    // Every provider of a chain is read at one block, the lowest of their latest, as the kit reads the two it agrees on
+    // at one block hash (readBoth). A read's gas used is the same on every provider only at one block: on Robinhood, an
+    // Arbitrum Nitro chain, the call's gas is cut before it runs by its L1 data cost in gas (Nitro's GasChargingHook:
+    // the L1 price per unit times the calldata's units, over the block's base fee), so a read that uses all it is given
+    // (the loop) differs by block, by one gas or more (live run 42755053001: publicnode's loop 31,046,540 against
+    // 31,046,541 on the four others, each at its own latest block; 2026-11-10 04:3xZ, read at one block hash on all
+    // five, 31,046,213 on each, and 31,046,213 to 31,046,215 over blocks 110,617,647 to 110,617,732 on one)
+    const heads = [];
     for (const url of v.providers ?? []) {
       const provider = new URL(url).host;
       const block = await rpc(url, "eth_getBlockByNumber", ["latest", false], true);
-      if (block?.noAnswer !== undefined) {
-        reads.push({ provider, noAnswer: block.noAnswer });
+      if (block?.noAnswer !== undefined) heads.push({ provider, noAnswer: block.noAnswer });
+      else if (typeof block?.hash !== "string" || typeof block?.number !== "string" || !/^0x[0-9a-f]{1,16}$/i.test(block.number)) heads.push({ provider, noAnswer: `${provider}: no latest block (${cut(block)})` });
+      else heads.push({ url, provider, hash: block.hash, number: BigInt(block.number) });
+    }
+    const low = heads.filter((h) => h.noAnswer === undefined).reduce((m, h) => (m === undefined || h.number < m.number ? h : m), undefined);
+    const reads = [];
+    for (const { url, provider, noAnswer, number } of heads) {
+      if (noAnswer !== undefined) {
+        reads.push({ provider, noAnswer });
         continue;
       }
-      if (typeof block?.hash !== "string") {
-        reads.push({ provider, noAnswer: `${provider}: no latest block (${cut(block)})` });
-        continue;
-      }
-      const at = { blockHash: block.hash };
-      const r = { provider, block: block.hash };
+      const at = { blockHash: low.hash };
+      const r = { provider, head: "0x" + number.toString(16), block: low.hash };
       for (const [k, calls] of [["six", SIX], ["sixtyFour", SIXTY_FOUR], ["heavy", HEAVY_SIX], ["floor", FLOOR_SIX]]) {
         r[k] = await rpc(url, "eth_call", [{ to: MULTICALL3, data: aggregate(calls), gas }, at, state]);
         if (r[k]?.noAnswer !== undefined) {
@@ -202,9 +213,12 @@ export function judge(a) {
       const near = (u, g) => u >= g && u < g + 10_000;
       line(near(hv[0], 14_000_000) && hv.slice(1).every((u) => u < 10_000) && fl.slice(1).every((u) => near(u, 1_500_000)) && sx[1] > 30_000_000 && [0, 2, 5].every((k) => sx[k] < 10_000), `${chain} ${r.provider}: each read's gas used ${JSON.stringify({ heavy: hv, floor: fl, six: sx })}`);
     }
-    // every provider of the chain answers each read's gas used alike, which the kit requires of the two it agrees on
+    // every provider of the chain read at one block, and each read's gas used alike there, to the gas, which the kit
+    // requires of the two it agrees on (agreed in readBoth); gas used is compared at one block only (collect)
+    const blocks = [...new Set(reads.map((r) => r.block))];
+    if (reads.length > 0) line(blocks.length === 1, `${chain}: every provider read at one block: ${blocks.length === 1 ? blocks[0] : `${blocks.length} blocks, gas used not compared`}`);
     const all = (r) => ["six", "sixtyFour", "heavy", "floor"].map((k) => gasOf(r[k])?.map((y) => y[1]) ?? null);
-    if (reads.length > 0) line(reads.every((r) => JSON.stringify(all(r)) === JSON.stringify(all(reads[0]))), `${chain}: every provider answers the same gas used for each read`);
+    if (reads.length > 0 && blocks.length === 1) line(reads.every((r) => JSON.stringify(all(r)) === JSON.stringify(all(reads[0]))), `${chain}: every provider answers the same gas used for each read`);
   }
   const verdict = verdictOf(bad, quiet);
   return { verdict, ok: verdict === "PASS", lines };

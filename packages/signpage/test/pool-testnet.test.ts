@@ -19,13 +19,15 @@ import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
+import type { SolanaPoolCache } from "../../wallet/src/pool/solana-restore.ts";
+import { SOLANA_PROVIDER_A } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -465,6 +467,86 @@ test("fold 2 (2): the RESERVED pass runs under the seed's shared lock: a sign ou
   assert.equal(reads, before);
 });
 
+test("review P2-1 of a34c1626: a sign out stops the Solana RESERVED pass's settle at its next read: no read after it, the note held; the pass runs on the page's cache", async () => {
+  const { w, ns } = await wallet();
+  // the lister's first answer held until the test lets it go; the pair answers the time and nothing else
+  let release!: () => void;
+  const gate = new Promise<void>((ok) => (release = ok));
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    await gate;
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const cache: SolanaPoolCache = {};
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (!calls.includes("lister getProgramAccounts")) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(cache.pages !== undefined, "the pass's settle runs on the page's cache");
+  const before = calls.length;
+  t.signingOut();
+  release();
+  await pass;
+  // the listed address is never read: the settle stopped at its next read
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
+test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana settle on the page reads on the settle pair with the page's batches, and passes the sign-out stop's signal taken before its first wait and the page's cache, in every path (buy, reserved pass, owed finish, withdraw)", () => {
+  const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
+  const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
+  assert.equal(calls.length, 4);
+  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\(\), lister: lister\(\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  // each site's signal is the stop's when the call began: four takes, and the stop read nowhere else
+  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 4);
+  // the settle pair: the page's two seats, the helper's with the window-long retry
+  assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY\)\)\]/);
+  assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY\)\)\]/);
+  assert.deepEqual(PAGE_SOL_MARK_BATCHES, [10, 100]);
+});
+
+test("review P3-3 of e3489b3b: a sign out that comes while the RESERVED pass reads its seed stops the pass before any read", async () => {
+  const { w, ns } = await wallet();
+  let letSeed!: () => void;
+  const seedGate = new Promise<void>((ok) => (letSeed = ok));
+  let seedAsked = 0;
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => (seedAsked++, await seedGate, SEED64.slice()) }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (seedAsked === 0) await new Promise((r) => setTimeout(r, 1));
+  const before = calls.length;
+  t.signingOut();
+  letSeed();
+  await pass;
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];
@@ -876,6 +958,36 @@ test("another tab settled the op while the release was out, the run ending in_tr
   assert.equal(((await wd.w.get("ops", "op-w")) as { owed?: unknown }).owed, undefined, "the op still owes nothing");
 });
 
+// Card sol-settle-failed-is-not-unspent: the page's own withdraw, the helper answering 502 after it sent the release,
+// the release landed on W, and every settle on the page failing (its lister down) while both RPCs read the blockhash
+// past. The run stopped and the op dropped its owed send, the part left on W with nothing owed. A settle that throws is
+// not known yet: the op stays in_transit, its send kept, and the settle is asked at the past read's slots.
+test("a withdraw on the page, the helper's 502 after the release landed, every settle failing: the op stays in_transit, its owed send kept; the settle asked at the past read's slots", async () => {
+  const { world, TO, COST, FINAL_SLOT } = WORLD;
+  const wd = await world([30_000_000n]);
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    await wd.host.send(pool, base64.decode(tx));
+    return new Response("{}", { status: 502 });
+  }) as unknown as typeof fetch;
+  const asked: unknown[] = [];
+  const lister = (async (_m: string, p: readonly unknown[]) => {
+    asked.push((p[1] as { minContextSlot?: unknown }).minContextSlot);
+    throw new Error("HTTP 503");
+  }) as never;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, lister, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  await testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over).withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  const id = wd.ids[0]!;
+  assert.equal(wd.releases.length, 1, "the release went out");
+  assert.equal(wd.balance.get(wd.binds[0]!.recipient), 5_000_000n + WORLD.W_FEE, "the part on W");
+  const op = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
+  assert.equal(op.stage, "in_transit");
+  assert.equal(op.owed, id, "the op still owes the part's send");
+  assert.ok(Object.keys(((await wd.w.get("meta", "owed/op-w")) as Record<string, unknown> | undefined) ?? {}).includes(id), "its send kept");
+  assert.equal((await wd.ns.get(id))!.state, "RESERVED");
+  assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
+});
+
 test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
   const { wd, over, page, TO, end } = await hungWithdraw();
   const id = wd.ids[0]!;
@@ -902,6 +1014,36 @@ test("an owed send with no release signature under 2,500 newer entries of W's hi
   assert.equal(wd.balance.get(TO), 5_000_000n);
   assert.equal(((await wd.w.get("ops", "op-w")) as { stage: string }).stage, "sent");
   await end();
+});
+
+// Card sol-settle-failed-is-not-unspent (C3): the buy's settle that decides not_landed is held to the slots of the read
+// that saw the blockhash past; the page's buy host hands them to solanaSettleSpent, so its lister and seats are asked at
+// or past them
+test("the page's buy host asks its settle at the slots the buy hands it: the lister at or past the higher", async () => {
+  const { w, ns } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: unknown[] = [];
+  const lister = (async (_m: string, p: readonly unknown[]) => {
+    asked.push((p[1] as { minContextSlot?: unknown }).minContextSlot);
+    throw new Error("HTTP 503");
+  }) as never;
+  const rpc = async (m: string) => {
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} }, tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const { land } = fakePool();
+  const n = await land(ns, await incoming(ns, null, 7));
+  const b = buyHost!();
+  try {
+    await assert.rejects(b.settle(n.id, [700, 710]));
+    assert.deepEqual(asked, [710]);
+    asked.length = 0;
+    await assert.rejects(b.settle(n.id));
+    assert.deepEqual(asked, [undefined], "none handed: none asked");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
 });
 
 // Delta review 8 of 5697d7a1, F3: W's buy record goes through the page's wallet store, written by the buy host the page
@@ -1060,4 +1202,12 @@ test("card wallet-restore-reads-ux review P3: the testnet build's restore reads 
   } finally {
     store.close();
   }
+});
+
+// review P3-6 of a34c1626: the helper's start check (apps/helper/src/env-check.ts checkSolanaPairOperators) refuses a
+// keyed Solana URL of this page's direct seat's operator; it names that seat in its own constant (the helper imports no
+// page code), read here as text and held equal to the page's, so a new direct seat moves both
+test("the helper's start check names this page's direct Solana seat (SOLANA_PROVIDER_A)", () => {
+  const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
+  assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
 });

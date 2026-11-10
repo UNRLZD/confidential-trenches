@@ -168,7 +168,7 @@ export type Pacer = ReturnType<typeof createPacer>;
  * token watches and the pool senders read their own providers), so 0. The token page's reads are not in it: they are
  * one per token a caller opens, so they draw that caller's share and stop at the total less this, as callers do.
  */
-export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0, "solana-devnet": 0 };
+export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base: 0, robinhood: 0, near: 0, "solana-devnet": 0, "solana-marks": 0 };
 /**
  * The part of each chain's total, and of each method's, the helper's own background reads never draw (card
  * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
@@ -187,6 +187,8 @@ export const RPC_BUDGETS: Readonly<Record<RpcChain, BudgetLimits & { perMethod?:
   // mainnet's public numbers: under what api.devnet.solana.com's headers named (x-ratelimit-rps-limit 250,
   // x-ratelimit-method-limit 150, read 5 Nov 15:03Z); a keyed SOLANA_DEVNET_RPC_URL names its plan's in RPC_BUDGET_SOLANA_DEVNET
   "solana-devnet": { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
+  // the mark scan's second route: its providers' own paces and daily budgets (keyedPaces) bound it as they bound Solana's
+  "solana-marks": { total: RPC_CHAIN_MAX, perClient: RPC_CLIENT_MAX, perMethod: RPC_METHOD_MAX },
 };
 /** The chains whose providers speak EVM JSON-RPC, where -32005 is a throttle (limits.ts EVM_LIMIT_CODE). */
 const EVM_CHAINS: ReadonlySet<string> = new Set(["base", "robinhood"]);
@@ -305,7 +307,14 @@ export const RPC_UPSTREAMS: Readonly<Record<RpcChain, { env: string; fallback: s
   // page reads itself as its first (packages/signpage/src/pool-testnet.ts TESTNET_RPCS); none set: off (503), never
   // a silent fallback to that same operator, which would make the page's two reads one provider's (review L-1)
   "solana-devnet": { env: "SOLANA_DEVNET_RPC_URL", fallback: null, keyed: ["SOLANA_DEVNET_RPC_URL"] },
+  // card sol-pools-mainnet-pin: the mainnet mark scan's second route (methods.ts SOLANA_MARKS), Solana's keyed names
+  // past SOLANA_RPC_URL, which alone answers the first route's scan (MARKS_A_ENV); a name on that one's company is
+  // never asked (route()), and none set is off (503), never a public endpoint, which refuses the scan anyway
+  "solana-marks": { env: "SOLANA_RPC_URL_QUICKNODE", fallback: null, keyed: ["SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"] },
 };
+/** The one name the first route's mark scan (getProgramAccounts on /v1/rpc/solana) is sent to (card
+ *  sol-pools-mainnet-pin): never a keyed spare or the public endpoint, so the two routes' answers are two companies'. */
+export const MARKS_A_ENV = "SOLANA_RPC_URL";
 /** The company each new keyed name is (card rpc-keyed-lists), whose pace it reads under (limits.ts KEYED_PACE). The
  *  existing names keep the pace they had (the chain's budget, rpc.ts createPacer). */
 export const KEYED_PROVIDER: Readonly<Record<string, KeyedProvider>> = {
@@ -401,7 +410,7 @@ const timingOf = (t: Trace): string[] => [
 /** `keyless`: the URL holds no part where a provider puts a key (user, password, a query value, a path segment of 16
  *  characters or more): a public endpoint set under a keyed name, which /v1/health marks so it is not counted as a key. */
 type KeyedUrl = { env: string; url: string; host: string; forms: Buffer[]; keyless: boolean };
-type Upstream = { url: string; forms: Buffer[]; off?: true; keyed: KeyedUrl[] };
+export type Upstream = { url: string; forms: Buffer[]; off?: true; keyed: KeyedUrl[] };
 
 const error = (status: number, code: string): RpcAnswer => ({ status, body: JSON.stringify({ error: { code } }) });
 const REFUSED = () => error(400, "method_not_allowed");
@@ -462,14 +471,14 @@ const isPlain = (v: unknown): v is Record<string, unknown> => typeof v === "obje
 /** The pool programs each Solana route may scan with getProgramAccounts: the helper's own pinned pool programs for that
  *  cluster (apps/helper/src/pool/solana.ts POOL_SOLANA_ENV; devnet's a list, comma apart, solanaPoolPrograms, which
  *  refuses a bad one at start), none when unset. */
-export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET" };
-/** The note restore's scan (packages/wallet/src/pool/solana-restore.ts solanaMarks, the bucket read; the settle's
- *  solanaSettleSpent reads through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
+export const RPC_SCAN_PROGRAM_ENV: Readonly<Partial<Record<RpcChain, string>>> = { solana: "POOL_SOLANA_PROGRAM_MAINNET", "solana-devnet": "POOL_SOLANA_PROGRAM_DEVNET", "solana-marks": "POOL_SOLANA_PROGRAM_MAINNET" };
+/** The note restore's mark list (packages/wallet/src/pool/solana-restore.ts solanaMarksListed, the lister's bucket
+ *  read; the settle's solanaSettleSpent lists through the same call): each mark size (13 a spent mark, 17 a pre-mark) and the memcmp at 9,
  *  past the counter's low byte, of size - 9 bytes whose last is the program's mark tag (SOL_MARK_TAG 1). */
 const SCAN_SIZES: ReadonlySet<unknown> = new Set([13, 17]);
 const SCAN_AT = 9;
 const SCAN_TAG = 1;
-const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "filters"]);
+const SCAN_CONFIG: ReadonlySet<string> = new Set(["commitment", "encoding", "withContext", "minContextSlot", "dataSlice", "filters"]);
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 /** Base58 to bytes (each leading "1" a zero byte), or null for a character off the alphabet. */
 function base58Bytes(s: string): Uint8Array | null {
@@ -488,7 +497,8 @@ const exactKeys = (o: Record<string, unknown>, keys: readonly string[]): boolean
 /**
  * getProgramAccounts only in the note restore's exact shape (review L-2 and its re-review): on the route's own pinned
  * pool program; config { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot? (a positive
- * whole number), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
+ * whole number), dataSlice? (exactly { offset: 0, length: 0 }: the wallet's lister asks for the addresses alone, card
+ * sol-pools-mainnet-pin), filters } and no other key; filters exactly [{ dataSize: 13 | 17 }, { memcmp: { offset: 9, bytes } }],
  * the bytes base58 of exactly size - 9 bytes ending in the mark tag: one bucket of one mark size. An open scan of any
  * program, or a wider one of the pool's (the tag alone, a large size, a compressed encoding, a slice, a sort, a
  * changed-since read), would spend the keyed provider's quota for every caller. Anything else is refused before any call.
@@ -500,6 +510,7 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
   if (Object.keys(c).some((k) => !SCAN_CONFIG.has(k))) return false;
   if (c.commitment !== "finalized" || c.encoding !== "base64" || c.withContext !== true) return false;
   if (Object.hasOwn(c, "minContextSlot") && !(Number.isSafeInteger(c.minContextSlot) && (c.minContextSlot as number) > 0)) return false;
+  if (Object.hasOwn(c, "dataSlice") && !(isPlain(c.dataSlice) && exactKeys(c.dataSlice, ["offset", "length"]) && c.dataSlice.offset === 0 && c.dataSlice.length === 0)) return false;
   const f = c.filters;
   if (!Array.isArray(f) || f.length !== 2) return false;
   const [size, cmp] = f as unknown[];
@@ -509,6 +520,27 @@ function scanAllowed(r: Record<string, unknown>, programs: readonly string[]): b
   if (!exactKeys(m, ["offset", "bytes"]) || m.offset !== SCAN_AT || typeof m.bytes !== "string" || m.bytes.length > 24) return false;
   const bytes = base58Bytes(m.bytes);
   return bytes !== null && bytes.length === (size.dataSize as number) - SCAN_AT && bytes[bytes.length - 1] === SCAN_TAG;
+}
+
+/**
+ * The mark scan's two providers (card sol-pools-mainnet-pin): `a`, the URL set under MARKS_A_ENV, and `b`, the
+ * solana-marks route's keyed URLs, in order, whose company (operatorOf) is not a's. The signing page lists the mainnet
+ * pool's marks on route b alone (packages/signpage/src/pool-testnet.ts pageSolanaLister) and reads each listed address on
+ * its pair, provider A directly, never through this helper (packages/wallet/src/pool/solana-restore.ts
+ * solanaMarksListed).
+ *
+ * Why a list from this helper can only stop a restore or a settle, never decide one: a mark is the pool's record that a
+ * note was deposited (pre-mark) or spent (spent mark), and the list only names addresses. A listed mark counts only when
+ * both of the page's RPCs hold that account with the same bytes, so an address made up is no account on provider A and
+ * is refused; and each RPC's own pool count (deposits and releases, numbered with no hole) must equal the listed marks
+ * (solanaMarkCounts), so a mark left out is refused. A refused list stops the restore or leaves the settle held: a spent
+ * note is never shown unspent nor freed. The recipient, the amount, the fee and the fee payer of every release come from
+ * the user's request and the page's pins, and every proof is checked on chain.
+ */
+export function marksRoutes(upstreams: Record<RpcChain, Upstream>): { a: () => string | undefined; b: () => string[] } {
+  const a = upstreams.solana.keyed.find((k) => k.env === MARKS_A_ENV)?.url;
+  const b = upstreams["solana-marks"].keyed.map((k) => k.url).filter((u) => a === undefined || operatorOf(u) !== operatorOf(a));
+  return { a: () => a, b: () => b };
 }
 
 /** One checked request, rebuilt from its four fields only, or undefined. `scan`: the route's pinned pool programs. */
@@ -594,6 +626,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     const keyedUrls = upstreams[c].keyed.map((k) => k.url);
     return [...new Set([...(keyedUrls.length > 0 ? keyedUrls : fb === null ? [] : [fb]), ...(deps.pinned?.[c] ?? []), ...(fb === null ? [] : [fb])])];
   };
+  const { a: marksA, b: marksB } = marksRoutes(upstreams);
   /** A keyed provider's URL and its sends a second, or null for the public endpoint and a chain on its default
    *  provider, which are not paced (their published limits are per 10 s). */
   const pacedOf = (key: string): { url: string; perSecond: number } | null =>
@@ -703,7 +736,19 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     // review L2: a company's URL first (SOLANA_RPC_URL unset): the whole keyed list is walked under each company's pace
     // review L4: the read's whole walk, every path below, ends by `by`
     const by = now() + WALK_MS;
-    // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public one
+    // card sol-pools-mainnet-pin: the mark scan's two routes, each one company's. A: SOLANA_RPC_URL alone, never a spare
+    // or the public endpoint. B: its keyed names off A's company, in order. Either only lists: the page reads each listed
+    // mark by address on its pair (marksRoutes below)
+    if (c === "solana" && methods.includes("getProgramAccounts")) {
+      const a = marksA();
+      return a === undefined ? UPSTREAM() : callList(c, [a], forward, methods, client, reserved, by);
+    }
+    if (c === "solana-marks") {
+      const b = marksB();
+      return b.length === 0 ? UPSTREAM() : callList(c, b, forward, methods, client, reserved, by);
+    }
+    // card evm-pool-leaves-any-source: the keyed URLs that hold a key, walked in order; past them 503, never a public
+    // one. After the mark routes, which ?keyed=only never widens (review P3-1)
     if (keyedOnly) {
       const own = upstreams[c].keyed.filter((k) => !k.keyless).map((k) => k.url);
       return own.length === 0 ? UPSTREAM() : callList(c, own, forward, methods, client, reserved, by);

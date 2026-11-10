@@ -12,13 +12,14 @@ import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { SOLANA_POOL_FEE_STEP, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { ALT, BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, rent, replay, setup, unhex } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
+import { POOL_BLOCKHASH_LIFE_MS, POOL_BUY_READS, POOL_BUY_SETTLE_MS, PoolSendBusy, poolBuyKind, readBack, runPoolBuy, solanaProofBytes, type PoolBuyHost } from "../src/pool-buy.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 import { SIGNPAGE_KIT_VERSION, type TxRef } from "../../kit/src/signpage/messages.ts";
 import { pairDown } from "./outage.ts";
@@ -93,8 +94,12 @@ type World = {
   minOut: bigint;
   /** the venue's pool address: the bonding curve's account */
   curve: string;
+  /** the minSlots each settle was asked with, in turn (null: none) */
+  settleSlots: (number[] | null)[];
 };
 type Plant = {
+  /** our lookup table as served lacks the venue's program (a table made for another venue) */
+  tableNotForVenue?: boolean;
   /** the slot of the device's blockhash read, past the quote's */
   slotAhead?: number;
   /** provider B's curve account changed at one byte: "reserves" (the top byte of its virtual SOL reserves: far past
@@ -133,6 +138,12 @@ type Plant = {
   /** RPC p's first this-many read-back reads (getTransaction at confirmed) answer this very transaction with an
    *  unreadable meta, then as `readBack` says */
   metaJunkReads?: number;
+  /** the settle throws at its n-th call (1 first) when this says so: a lister that refuses, a 429 past the retry, a stop */
+  settleThrows?: (n: number) => boolean;
+  /** the finalized slot each RPC's getEpochInfo answers beside its block height (500 when not given) */
+  finalSlot?: (p: 0 | 1) => number;
+  /** the spend's slot: a settle not held to a slot at or past it on both RPCs answers from before it ("unspent") */
+  spendSlot?: number;
 };
 
 /** The keys a v0 transaction's lookups load, as getTransaction's meta gives them (loadedAddresses): every lookup's
@@ -170,10 +181,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const current = readies.at(-1)![0] ?? proof;
   let skewed = false;
   let settles = 0;
+  const settleSlots: (number[] | null)[] = [];
   const heightReads = [0, 0];
   const txReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
-    [s.tableAddr]: { owner: ALT, data: s.tableData },
+    [s.tableAddr]: { owner: ALT, data: plant.tableNotForVenue ? s.tableData.filter((_, i) => i < 56 || Math.floor((i - 56) / 32) !== s.addresses.indexOf(SOLANA_PUMP_PROGRAM)) : s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
@@ -228,6 +240,11 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         if ((params[0] as { commitment: string }).commitment === "confirmed") return 0;
         return plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000;
       }
+      // the not_landed verdict's read: one bank's block height and its slot (the same height count as getBlockHeight's)
+      if (method === "getEpochInfo") {
+        assert.equal((params[0] as { commitment: string }).commitment, "finalized");
+        return { blockHeight: plant.finalHeight?.(p, heightReads[p]!++) ?? 1_000, absoluteSlot: plant.finalSlot?.(p) ?? 500, epoch: 1, slotIndex: 0, slotsInEpoch: 432_000 };
+      }
       if (method === "getTransaction") {
         const how = txReads[p]!++ < (plant.metaJunkReads ?? 0) ? "metaJunk" : plant.readBack ?? "ours";
         if (how === "none" || sent === null) return null;
@@ -280,10 +297,14 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       return { signature: plant.helper === "badSig" ? "not-a-signature" : plant.helperSig ?? SIG };
     },
     // the wallet's solanaSettleSpent: spent only when the chain holds the transaction (its mark and change)
-    settle: async (id) => {
+    settle: async (id, minSlots) => {
       log.push(`settle:${id}`);
       const how = plant.readBack ?? "ours";
       settles++;
+      settleSlots.push(minSlots ? [...minSlots] : null);
+      if (plant.settleThrows?.(settles)) throw new Error("restore: the lister listed 10 deposits and 2 releases, but rpc 0's pages hold 12 state and 10 label leaves");
+      // a seat answering from before the spend unless held to a slot at or past it
+      if (plant.spendSlot !== undefined && !(minSlots && minSlots[0] >= plant.spendSlot && minSlots[1] >= plant.spendSlot)) return { kind: "unspent" };
       // another device's spend: the note's spent mark is on chain, so the settle writes the change and the note SPENT
       if (plant.otherSpent && sent !== null) {
         st = "SPENT";
@@ -299,7 +320,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     wait: async (ms: number) => void waits.push(ms),
     pick: () => 2,
   };
-  return { host, log, state: () => st, sentTx: () => sent, sends, waits, E: s.E, minOut: s.minOut, curve: (s.venue as { curve: string }).curve };
+  return { host, log, state: () => st, sentTx: () => sent, sends, waits, E: s.E, minOut: s.minOut, curve: (s.venue as { curve: string }).curve, settleSlots };
 }
 
 const ASK: PoolAsk = { kind: "pool.buy", chain: "solana", token: fx.pump.mint, amount: SPEND, slippageBps: 300, decimals: 6 };
@@ -351,6 +372,16 @@ test("a quote off the request (older than the device's slot allows) is refused: 
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "quote_check_failed" });
   assert.equal(w.state(), "HELD", "the proof stays ready for the next tap");
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+// review P3-4 of a34c1626: a buy on a venue our lookup table is not made for (PumpSwap on the mainnet's curve-only table)
+// threw a plain Error and answered "failed"; the kit's SolanaPoolBuyError venue_not_in_table answers not_allowed, as a page
+// with no table does, before W signs
+test("a buy whose venue our lookup table is not made for is refused not_allowed, never failed: nothing signed or sent", async () => {
+  const w = await world({ tableNotForVenue: true });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" });
+  assert.ok(!w.log.includes("send") && !w.log.includes("seed"), "nothing signed or sent");
+  assert.notEqual(w.state(), "RESERVED");
 });
 
 test("a venue the two RPCs disagree on is refused: nothing taken or sent", async () => {
@@ -973,3 +1004,67 @@ for (const p of [0, 1] as const) {
     assert.ok(before > 0 && after > 0, `${before} before, ${after} after`);
   });
 }
+
+// Card sol-settle-failed-is-not-unspent: a settle that throws says nothing of the chain (a lister that refuses, a 429
+// past the retry, a stop). The helper answers 502 (or no signature, or one that never reads back) and sends the buy
+// anyway, the buy lands, and the settle fails while both RPCs read the blockhash past: the answer was not_landed, the app
+// told nothing happened while the tokens were on W. A thrown settle is not known yet: the reads go on, and past them the
+// answer is "sent", the note RESERVED for the state reads' pass.
+for (const [name, plant] of [["the helper's 502", { helper: "502" }], ["a signature that is not one", { helper: "badSig" }], ["the helper's signature never read back", { readBack: "none" }], ["the helper's signature read as another transaction", { readBack: "other" }]] as const) {
+  test(`a settle that throws is not known yet, ${name}: every settle failing past the blockhash, sent and never not_landed; failing once, filled`, async () => {
+    const w = await world({ ...plant, finalHeight: () => 1_000, settleThrows: () => true });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "sent", txs: [] });
+    assert.equal(w.state(), "RESERVED", "held for the state reads' pass");
+    assert.equal(w.log.filter((x) => x === "settle:note-1").length, 3, "the reads went on");
+    if ("readBack" in plant) return; // the transaction is not this one's under the helper's name: never filled by it
+    const x = await world({ ...plant, finalHeight: () => 1_000, settleThrows: (n) => n === 1 });
+    assert.deepEqual(await runPoolBuy(x.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+    assert.equal(x.state(), "SPENT");
+  });
+}
+
+// Card sol-settle-failed-is-not-unspent (C3): seats behind a load balancer may answer from before the spend unless held
+// to a slot, so the settle that decides not_landed is read at or past each RPC's slot of the read that saw the blockhash
+// past (one getEpochInfo at finalized: its block height and its slot are one bank's).
+test("the not_landed verdict's settle is held to the slots of the read that saw the blockhash past: seats from before the spend never answer a landed buy not_landed", async () => {
+  // the spend at slot 450; the past read's bank at 500 on RPC 0 and 510 on RPC 1
+  const w = await world({ helper: "502", finalHeight: () => 1_000, finalSlot: (p) => 500 + 10 * p, spendSlot: 450 });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(w.settleSlots[0], [500, 510], "each RPC's own slot");
+  assert.equal(w.state(), "SPENT");
+  // not past yet on both: the settle is asked with no slot, and its "unspent" decides nothing
+  const n = await world({ helper: "502", finalHeight: (p) => (p === 0 ? 1_000 : 50), finalSlot: () => 500, spendSlot: 450 });
+  assert.deepEqual(await runPoolBuy(n.host, ASK), { stage: "sent", txs: [] });
+  assert.deepEqual(n.settleSlots, [null, null, null]);
+});
+
+// How long each ending takes on the page's clock (it moves with each wait the run asks for), at the production read
+// count: a real not-landed buy still ends not_landed at its first read past the blockhash; a settle that keeps failing
+// ends "sent" at the read-back's bound.
+test("each ending's time: not_landed at the first read past the blockhash (and one read later after one failed settle); a settle that never works, sent within POOL_BUY_SETTLE_MS", async () => {
+  const run = async (plant: Plant) => {
+    const w = await world(plant);
+    w.host.now = () => BigInt(1_000 + w.waits.reduce((s, x) => s + x, 0));
+    const a = await runPoolBuy({ ...w.host, reads: POOL_BUY_READS }, ASK);
+    return { a, ms: w.waits.reduce((s, x) => s + x, 0) };
+  };
+  const NL = { stage: "not_landed", txs: [] };
+  assert.deepEqual(await run({ helper: "502", landsAtSettle: "never" }), { a: NL, ms: 0 }, "past at the first read");
+  assert.deepEqual(await run({ helper: "502", landsAtSettle: "never", settleThrows: (n) => n === 1 }), { a: NL, ms: 1_000 }, "one failed settle: one read later");
+  assert.deepEqual(await run({ helper: "502", landsAtSettle: "never", finalHeight: (_p, i) => (i < 60 ? 50 : 1_000) }), { a: NL, ms: 60_000 }, "past from the 61st read");
+  const always = await run({ helper: "502", settleThrows: () => true });
+  assert.deepEqual(always.a, { stage: "sent", txs: [] });
+  assert.ok(always.ms <= POOL_BUY_SETTLE_MS, `${always.ms} ms`);
+  assert.equal(always.ms, 119_000);
+});
+
+// Card sol-settle-failed-is-not-unspent: "past" is a finalized height above the blockhash's last valid one (151 here:
+// the higher of RPC 0's word, 100, and RPC 1's height + 151). At the last itself a block may still take the transaction.
+test("past is a finalized height above the blockhash's last valid one: at the last itself, sent; one above, not_landed", async () => {
+  const at = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 151 });
+  assert.deepEqual(await runPoolBuy(at.host, ASK), { stage: "sent", txs: [] });
+  assert.deepEqual(at.settleSlots, [null, null, null], "never asked as the verdict's settle");
+  const above = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 152 });
+  assert.deepEqual(await runPoolBuy(above.host, ASK), { stage: "not_landed", txs: [] });
+  assert.deepEqual(above.settleSlots, [[500, 500]]);
+});

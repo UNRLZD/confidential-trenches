@@ -1626,6 +1626,7 @@ test("P2-A (P1): the page: a buy that ended sent and never lands: one round of r
   const timers: (() => void)[] = [];
   const progresses: ((s: string) => void)[] = [];
   let runs = 0;
+  let routed = 0;
   const buy = (host: () => { bought?: { put(a: string, m: { mint: string; program: string }): Promise<void> } }) => (_ask: unknown, ctx: { route(r: unknown): void; progress(s: string): void }) => {
     const first = runs++ === 0;
     progresses.push(ctx.progress);
@@ -1637,6 +1638,7 @@ test("P2-A (P1): the page: a buy that ended sent and never lands: one round of r
         ctx.route({ wallet: solanaWallet() });
         ctx.route({ out: "3" });
       }
+      routed++;
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: first ? "sent" : "filled", txs: [] } }) };
   };
@@ -1652,14 +1654,14 @@ test("P2-A (P1): the page: a buy that ended sent and never lands: one round of r
     }
   };
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT2, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
-  await until(() => progresses.length === 1);
+  await until(() => routed === 1);
   progresses[0]!("sent");
   const fired = await fire();
   assert.ok(fired >= POSITIONS_RETRIES && fired <= POSITIONS_RETRIES + 1, `one round: ${fired}`);
   c.amounts[0] = 3_000_000n;
   const reads = c.calls.finder;
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 } as never, { id: "b2", sha: "00", progress: () => {}, route: () => {} } as never);
-  await until(() => progresses.length === 2);
+  await until(() => routed === 2);
   progresses[1]!("filled");
   await until(async () => JSON.stringify((await tp.positions())?.map((p) => p.amount)) === JSON.stringify(["3"]));
   assert.equal(await fire(), 0, "the next trade's end: no retry");
@@ -1752,5 +1754,5 @@ test("r02: a mint answer that is not a mint is refused, never read as 0 decimals
   assert.equal(tokenDecimalsShown("solana", mint(0)), 0, "a real 0-decimals mint");
   assert.equal(tokenDecimalsShown("solana", mint(9)), 9);
   for (const junk of [null, {}, { value: null }, { value: { owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } }, mint(6, 0), { value: { owner: "Other1111111111111111111111111111111111111", data: mint(6).value.data } }])
-    assert.throws(() => tokenDecimalsShown("solana", junk), undefined, JSON.stringify(junk));
+    assert.throws(() => tokenDecimalsShown("solana", junk), () => true, JSON.stringify(junk));
 });

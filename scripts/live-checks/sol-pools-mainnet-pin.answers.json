@@ -1,0 +1,165 @@
+{
+ "note": "good: apps/helper at this card branch (47ad94c65777222674a87baafc105123e768aa88) run on the Mac with node src/server.ts, read at 2026-11-09T18:23:40.654Z: SOLANA_RPC_URL and SOLANA_RPC_URL_QUICKNODE set to one stand-in RPC served on two hosts (127.0.0.1 and localhost, two operators to rpc.ts operatorOf), which answers the scan as the deployed helper route A answered the same scan on mainnet at 2026-11-09T18:20:30.814Z (no account, slot 467415950); its mainnet pool sender on a fee payer key made for the run, never funded, thrown away: PASS. bad: the deployed helper https://ct-api.unrealized.trade (a5ffb026dcea0cc3502f37aab4b9f4f303413214) at 2026-11-09T18:20:30.814Z, before this card: route A answers the scan from SOLANA_RPC_URL, route B is 404 not_found: FAIL.",
+ "good": {
+  "check": "sol-pools-mainnet-pin",
+  "base": "http://127.0.0.1:18472",
+  "at": "2026-11-09T18:23:40.654Z",
+  "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "reads": [
+   {
+    "route": "A",
+    "size": 13,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "47ad94c65777222674a87baafc105123e768aa88",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=1;desc=\"SOLANA_RPC_URL\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415950
+      },
+      "value": []
+     }
+    }
+   },
+   {
+    "route": "B",
+    "size": 13,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "47ad94c65777222674a87baafc105123e768aa88",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=1;desc=\"SOLANA_RPC_URL_QUICKNODE\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415950
+      },
+      "value": []
+     }
+    }
+   },
+   {
+    "route": "A",
+    "size": 17,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "47ad94c65777222674a87baafc105123e768aa88",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"SOLANA_RPC_URL\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415950
+      },
+      "value": []
+     }
+    }
+   },
+   {
+    "route": "B",
+    "size": 17,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "47ad94c65777222674a87baafc105123e768aa88",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"SOLANA_RPC_URL_QUICKNODE\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415950
+      },
+      "value": []
+     }
+    }
+   }
+  ],
+  "refusal": {
+   "status": 400
+  }
+ },
+ "bad": {
+  "check": "sol-pools-mainnet-pin",
+  "base": "https://ct-api.unrealized.trade",
+  "at": "2026-11-09T18:20:30.814Z",
+  "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "reads": [
+   {
+    "route": "A",
+    "size": 13,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "a5ffb026dcea0cc3502f37aab4b9f4f303413214",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=66;desc=\"SOLANA_RPC_URL\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415950,
+       "apiVersion": "4.3.2"
+      },
+      "value": []
+     }
+    }
+   },
+   {
+    "route": "B",
+    "size": 13,
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "a5ffb026dcea0cc3502f37aab4b9f4f303413214",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "not_found"
+     }
+    }
+   },
+   {
+    "route": "A",
+    "size": 17,
+    "status": 200,
+    "headers": {
+     "x-helper-commit": "a5ffb026dcea0cc3502f37aab4b9f4f303413214",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=70;desc=\"SOLANA_RPC_URL\""
+    },
+    "answer": {
+     "result": {
+      "context": {
+       "slot": 467415954,
+       "apiVersion": "4.3.0-alpha.2"
+      },
+      "value": []
+     }
+    }
+   },
+   {
+    "route": "B",
+    "size": 17,
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "a5ffb026dcea0cc3502f37aab4b9f4f303413214",
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "server-timing": "rpc-wait;dur=0, rpc;dur=0;desc=\"none\""
+    },
+    "answer": {
+     "error": {
+      "code": "not_found"
+     }
+    }
+   }
+  ],
+  "refusal": {
+   "status": 404
+  }
+ }
+}

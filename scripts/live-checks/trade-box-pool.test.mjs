@@ -1,9 +1,15 @@
 // node --test scripts/live-checks/trade-box-pool.test.mjs: the live check's verdict replays recorded runs
 // (trade-box-pool.answers.json), each read on 4 Nov by trade-box-pool.mjs collect() in headless Chromium, the stand-in
 // shell sending a signed-in state with the devnet Solana pool (one 0.01 SOL note), its proof ready and still making:
-//   good: the deployed APP_HOST at main 27d7ce0 (entry /assets/index-D2sAQfy_.js), read at 12:03Z: at 1440 and 390 the
+//   good (4 Nov; the 10 Nov record below replaces it): the deployed APP_HOST at main 27d7ce0 (entry /assets/index-D2sAQfy_.js), read at 12:03Z: at 1440 and 390 the
 //         token page's box is on the pool path, its proof label is the state's, and a tap asks for no vault buy: PASS;
 //   bad:  the deployed APP_HOST on 4 Nov, before this card: the box is on the vault's path with no proof label: FAIL.
+// Recorded again on 10 Nov (card live-check-pool-price-own-token), on the token's own page /token/solana/<DJT>, which
+// also reads the token and chain the page drew:
+//   good: the deployed APP_HOST (entry /assets/index-XvbkxnaR.js), read at 03:27Z: DJT on Solana at both widths, the box
+//         on the pool path, the proof label the state's, a tap asks for no vault buy: PASS;
+//   wrongChain: the same check opening / (its old path) at 03:27Z, when the live Trending column's top was "Anthropic"
+//         (0xecc4...1627) on Robinhood: the box is on the vault path, and the verdict names the token and chain: FAIL.
 // Planted from the good run: a tap that sends the vault's buy, a proof label that is not the state's or has no words, a
 // box off the pool path, a missing run, a terminal outside the shell, no entry script.
 import assert from "node:assert/strict";
@@ -11,7 +17,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge, POOL } from "./trade-box-pool.mjs";
+import { CHAIN, judge, POOL } from "./trade-box-pool.mjs";
+import { MINT } from "./app-sell-mount.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "trade-box-pool.answers.json"), "utf8"));
@@ -63,4 +70,22 @@ test("planted: a missing run, a terminal outside the shell, no screenshot, no en
   fails(mut((rec) => (run(rec, "desktop", "ready").framed = false)), /^BAD desktop ready: not inside SIGN_HOST's shell/);
   fails(mut((rec) => (run(rec, "desktop", "making").shot = null)), /^BAD desktop making: no screenshot/);
   fails(mut((rec) => (rec.entry = null)), /^BAD the served \/ names its entry script none/);
+});
+
+test("recorded good answer: the check drew the Solana token it opened (DJT), on solana, in every run", () => {
+  assert.ok(ANSWERS.good.runs.every((r) => r.mint === MINT && r.chain === CHAIN), JSON.stringify(ANSWERS.good.runs.map((r) => [r.mint, r.chain])));
+});
+
+test("recorded wrong-chain answer: the old open path drew the live Trending top on Robinhood, and the verdict names the token and chain: FAIL", () => {
+  const r = judge(ANSWERS.wrongChain);
+  assert.equal(r.ok, false);
+  const named = bad(r).filter((l) => /the token page drew 0x\w+ on robinhood, not the Solana token DJT\w+ on solana/.test(l));
+  assert.equal(named.length, ANSWERS.wrongChain.runs.length, r.lines.join("\n"));
+});
+
+test("planted: a page of another token or chain, or one that names neither, fails with a line that says so", () => {
+  fails(mut((rec) => (run(rec, "desktop", "ready").chain = "base")), /^BAD desktop ready: the token page drew DJT\w+ on base, not the Solana token DJT\w+ on solana/);
+  fails(mut((rec) => (run(rec, "phone", "making").mint = "So11111111111111111111111111111111111111112")), /^BAD phone making: the token page drew So1\w+ on solana, not the Solana token DJT/);
+  fails(mut((rec) => (run(rec, "desktop", "making").chain = null)), /^BAD desktop making: the token page drew DJT\w+ on no chain/);
+  fails(mut((rec) => (run(rec, "phone", "ready").mint = null)), /^BAD phone ready: the token page drew no token on solana/);
 });
