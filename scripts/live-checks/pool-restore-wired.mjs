@@ -24,10 +24,10 @@
 // page until card restore-first-sign-in-under-two-minutes sets the restore's time and this wait from its measure.
 // Since that card a restore is done at the walk's end and step 5 reads on after it, so on the live page the check also
 // sees step 5 go on: after the run with no tap is done, id reads (idReadOf: a NEAR `query` naming a 64-hex implicit id,
-// never the pass's own view of intents.near) reach both NEAR operators the page reads ids on (NEAR_OPS) within WAIT_MS,
-// or a try of step 5 ends and is told (its `restore ids unread:` or `restore stalled:` line after done), so a first try
-// that ends on a read to retry and pauses past WAIT_MS still shows step 5 going on (review P3-7 of 53f5e92f); a deploy
-// with no step 5 shows neither. A local build serves no pinned host, so there that line is not judged. The page's
+// never the pass's own view of intents.near) reach both NEAR operators the page reads ids on (NEAR_OPS). The check waits
+// for them through step 5's first try, its first pause (FIRST_PAUSE_MS, pool-restore.ts STEP5_PAUSES_MS[0]) and the
+// second try's start (STEP5_WAIT_MS), so a first try that ends on a read to retry still shows its reads; a told try is
+// never a read (delta review P3-C: a deploy whose step 5 fails before any id read, or reads on one operator only, fails). A local build serves no pinned host, so there that line is not judged. The page's
 // lines are printed with it.
 // After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
@@ -73,8 +73,10 @@ export function idReadOf(post) {
     return false;
   }
 }
-/** A console line of a step 5 try's end (main.ts's step5 hook). */
-const STEP5_TOLD = /restore ids unread: try \d+|restore stalled: /;
+/** Step 5's first pause (pool-restore.ts STEP5_PAUSES_MS[0]), and the wait for its id reads after done: the first try,
+ * that pause and the second try's start. */
+export const FIRST_PAUSE_MS = 30_000;
+const STEP5_WAIT_MS = WAIT_MS + FIRST_PAUSE_MS + WAIT_MS;
 if (!NEAR_OPS.every((h) => PINNED_HOSTS.includes(h))) throw new Error("a NEAR operator is not a pinned host");
 
 const A8 = JSON.parse(readFileSync(path.join(REPO, "packages/wallet/test/vectors/a8.json"), "utf8"));
@@ -114,10 +116,9 @@ export function judge(rec) {
   // step 5 goes on after done (card restore-first-sign-in-under-two-minutes): judged on the live page only
   if (String(rec?.source ?? "").startsWith("live")) {
     const after = isObj(rec?.afterDone) ? rec.afterDone : {};
-    const told = Number.isInteger(rec?.toldAfterDone) ? rec.toldAfterDone : 0;
     const unread = (rec?.console ?? []).filter((c) => typeof c === "string" && c.includes("restore ids unread:"));
     const reads = NEAR_OPS.every((h) => Number.isInteger(after[h]) && after[h] > 0);
-    say(reads || told > 0, `after done, step 5 reads on: id reads to both NEAR operators (${NEAR_OPS.map((h) => `${h} ${after[h] ?? 0}`).join(", ")}), ${told} tr${told === 1 ? "y" : "ies"} told${unread.length ? `; ${unread.join(" | ")}` : ""}`);
+    say(reads, `after done, step 5 reads on: id reads to both NEAR operators (${NEAR_OPS.map((h) => `${h} ${after[h] ?? 0}`).join(", ")})${unread.length ? `; ${unread.join(" | ")}` : ""}`);
   }
   if (rec?.errors?.length) say(false, `the run had no error (${rec.errors.join(" | ")})`);
   return { ok: lines.every((l) => l.startsWith("OK")), lines };
@@ -170,7 +171,7 @@ async function until(f, ms = WAIT_MS) {
 }
 
 export async function collect({ local }) {
-  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), toldAfterDone: 0, stray: [], console: [], errors: [] };
+  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, afterDone: Object.fromEntries(NEAR_OPS.map((h) => [h, 0])), stray: [], console: [], errors: [] };
   // set once the run with no tap is seen done: each NEAR `query` after it is step 5 reading on
   let done = false;
   let built = null;
@@ -207,7 +208,6 @@ export async function collect({ local }) {
     const page = await ctx.newPage();
     page.on("console", (m) => {
       if ((m.type() === "warning" || m.type() === "error") && rec.console.length < 50) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
-      if (done && STEP5_TOLD.test(m.text())) rec.toldAfterDone += 1;
     });
     page.on("response", (res) => {
       if (res.request().isNavigationRequest() && res.frame() === page.mainFrame() && rec.connect === null) rec.connect = connectHosts(res.headers()["content-security-policy"] ?? "");
@@ -248,8 +248,8 @@ export async function collect({ local }) {
     const stagesOf = () => msgs().filter((m) => m.data?.id === id && m.data?.type === "progress").map((m) => m.data.stage);
     await until(async () => stagesOf().some((x) => x === "done" || x === "stalled"));
     rec.steps.asked = { answer, stages: stagesOf() };
-    // step 5 after done: id reads on both NEAR operators, within the window (the live page only)
-    if (!local && done) await until(async () => NEAR_OPS.every((h) => rec.afterDone[h] > 0) || rec.toldAfterDone > 0);
+    // step 5 after done: id reads on both NEAR operators, through its first pause (the live page only)
+    if (!local && done) await until(async () => NEAR_OPS.every((h) => rec.afterDone[h] > 0), STEP5_WAIT_MS);
   } catch (e) {
     rec.errors.push(String(e?.message ?? e).slice(0, 300));
   } finally {

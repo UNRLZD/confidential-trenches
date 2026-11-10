@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { idReadOf, judge } from "./pool-restore-wired.mjs";
+import { FIRST_PAUSE_MS, idReadOf, judge } from "./pool-restore-wired.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "pool-restore-wired.answers.json"), "utf8"));
@@ -100,7 +100,7 @@ test("planted: a live run done with step 5's id reads after it on both NEAR oper
   };
   const ok = judge(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 }));
   assert.equal(ok.ok, true, ok.lines.join("\n"));
-  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11), 0 tries told"), ok.lines.join("\n"));
+  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11)"), ok.lines.join("\n"));
   const fail = (rec, re) => {
     const r = judge(rec);
     assert.equal(r.ok, false, r.lines.join("\n"));
@@ -119,20 +119,22 @@ test("planted: a live run done with step 5's id reads after it on both NEAR oper
   assert.ok(a.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), a.lines.join("\n"));
   // a local build serves no pinned host: not judged there
   assert.ok(!judge(ANSWERS.good).lines.some((l) => l.includes("after done")));
-  // review P3-7 of 53f5e92f: a first try that ends on a read to retry, then pauses past WAIT_MS, is told: step 5 goes
-  // on with no id read in the window on one operator (or none): PASS; a deploy with no step 5 has neither: FAIL
-  const paused = live({ "rpc.mainnet.fastnear.com": 3, "near.drpc.org": 0 });
-  paused.toldAfterDone = 1;
-  paused.console = ["warning: restore ids unread: try 1, asked again: step 5 did not finish: HTTP 503"];
-  const p = judge(paused);
+  // delta review P3-C: a told try is never a read. The recorded shapes: a first try that ended on a read to retry, its
+  // pause, and the second try's reads on both operators: PASS; told with no id read, or with one operator's: FAIL
+  const planted = (k) => Object.assign(live(), structuredClone(ANSWERS.afterDonePlanted[k]));
+  const p = judge(planted("pausedHealthy"));
   assert.equal(p.ok, true, p.lines.join("\n"));
-  assert.ok(p.lines.some((l) => l.startsWith("OK  after done") && l.includes("1 try told")), p.lines.join("\n"));
-  const none = live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 0 });
-  none.toldAfterDone = 0;
-  fail(none, /0 tries told/);
-  const notInt = live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 0 });
-  notInt.toldAfterDone = "1";
-  fail(notInt, /0 tries told/);
+  assert.ok(p.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), p.lines.join("\n"));
+  fail(planted("toldNoReads"), /rpc\.mainnet\.fastnear\.com 0, near\.drpc\.org 0/);
+  fail(planted("toldOneOp"), /near\.drpc\.org 0/);
+});
+
+// delta review P3-C: the check waits for step 5's reads through its first pause, the page's own
+test("the wait after done covers step 5's first pause as the page has it", () => {
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/src/pool-restore.ts"), "utf8");
+  const m = /export const STEP5_PAUSES_MS: readonly number\[\] = Object\.freeze\(\[([\d_]+),/.exec(src);
+  assert.ok(m, "STEP5_PAUSES_MS read");
+  assert.equal(FIRST_PAUSE_MS, Number(m[1].replaceAll("_", "")));
 });
 
 // review P3-7 of 53f5e92f: only a step 5 id read counts: a `query` naming a 64-hex implicit id, in view_account or in a
