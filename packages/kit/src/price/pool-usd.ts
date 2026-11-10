@@ -115,9 +115,14 @@ export const POOL_USD_FEEDS: {
     feedId: "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
     // heartbeat 60 s, with 15 s for a late write (card pool-usd-price-never-stale). Pyth's sponsored-feed list
     // (docs.pyth.network/pro/sponsored-feeds#solana, read 10 Nov 04:00Z) has this account at "time_difference":60,
-    // "price_deviation":0.5: written each 60 s or on a 0.5% move. Read 10 Nov 03:56-04:26Z (720 reads, two providers that
-    // agreed 60 of 60): 34 writes, each when the price was 50 to 57 s old, landing 1 to 3 s after its publish time, so the
-    // account was 52 to 58 s old at each write. A bound of the heartbeat alone left 2 s for the write and the read.
+    // "price_deviation":0.5: the pusher's own off-chain targets (a write each 60 s, or on a 0.5% move). The account holds
+    // no heartbeat or deviation field, so neither is a cap the chain enforces: a price here can trail the market by more
+    // than 0.5% if the pusher is slow. Read 10 Nov 03:56-04:26Z (720 reads, two providers that agreed 60 of 60): 34 writes,
+    // each when the price was 50 to 57 s old, landing 1 to 3 s after its publish time, so the account was 52 to 58 s old
+    // at each write. A bound of the heartbeat alone left 2 s for the write and the read. What 15 s more costs the deposit
+    // floor (review of eb2dfdc5): its room below fair is F 20 + S 15 + slippage 100, about 135 bps, and one-sided: a price
+    // that trails a market moving up refuses an honest quote once the market is 0.1 to 15 bps above it, and 15 s of SOL's
+    // drift is about 5 bps at 70% a year.
     maxAgeS: 60 + 15,
     maxConfBps: 100,
   } as const),
@@ -398,11 +403,12 @@ async function readPrice(args: PoolUsdArgs, bound: Bound): Promise<PoolUsdPrice>
   if (chain !== "robinhood") return chainlinkPrice(chain as "base", feed, rpcs, nowS, bound);
   // Robinhood: its own feed, held to Base's ETH/USD read now
   const base = checkArgs({ chain: "base", rpcs: args.baseRpcs ?? (fail("robinhood: Base's two RPCs are needed to hold its ETH/USD to Base's") as never), nowMs });
-  // Base's price late is not Robinhood's feed late: a plain refusal, so a holder never reads Base's time as Robinhood's
-  const held = chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS, bound).catch((e: unknown) => {
-    throw e instanceof PoolUsdStale ? new Error(`Base's ETH/USD: ${e.message}`) : e;
-  });
-  const [p, b] = await Promise.all([chainlinkPrice("robinhood", feed, rpcs, nowS, bound), held]);
+  // both read to their end: Robinhood's feed is named late (PoolUsdStale) only when Base's read is whole and agreeing,
+  // and Base's own price late is a plain refusal, so a holder never reads Base's time as Robinhood's
+  const [rp, rb] = await Promise.allSettled([chainlinkPrice("robinhood", feed, rpcs, nowS, bound), chainlinkPrice("base", base.feed as PoolUsdChainlinkFeed, base.rpcs, nowS, bound)]);
+  if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base's ETH/USD: ${rb.reason.message}`) : rb.reason;
+  if (rp.status === "rejected") throw rp.reason;
+  const [p, b] = [rp.value, rb.value];
   // both at one exponent, the finer
   const e = Math.min(p.expo, b.expo);
   const x = p.price * 10n ** BigInt(p.expo - e);

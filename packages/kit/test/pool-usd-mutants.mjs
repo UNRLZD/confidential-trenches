@@ -85,7 +85,9 @@ export const MUTANTS = [
   [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 60 + 16,", STALE],
   [PRICE, 'override readonly name = "PoolUsdStale";', 'override readonly name = "Error";', STALE],
   [PRICE, "    this.publishedS = publishedS;", "    this.publishedS = 0;", STALE],
-  [PRICE, "throw e instanceof PoolUsdStale ? new Error(`Base's ETH/USD: ${e.message}`) : e;", "throw e;", STALE],
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', 'if (rb.status === "rejected") throw rb.reason;', STALE],
+  // review of eb2dfdc5, P3: Robinhood's late tag only once Base's read is whole and agreeing
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;\n  if (rp.status === "rejected") throw rp.reason;', 'if (rp.status === "rejected") throw rp.reason;\n  if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', STALE],
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],
   [PRICE, "maxAgeS: 86_700 }", "maxAgeS: 867_000 }", STALE],
   [PRICE, "if (updatedAt === 0n || updatedAt >= U64) fail(", "if (updatedAt >= U64) fail(", STALE],

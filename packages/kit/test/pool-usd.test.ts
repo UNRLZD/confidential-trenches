@@ -497,6 +497,16 @@ test("staleness: a refusal for age alone is named PoolUsdStale with the feed's t
   // Robinhood's own feed late is
   const own = await evm("robinhood", [], (Number(words(FX.robinhood)[3]) + POOL_USD_FEEDS.robinhood.maxAgeS + 1) * 1000).then(() => null, (e: unknown) => e as Error);
   assert.equal(own?.name, "PoolUsdStale");
+  // review of eb2dfdc5, P3: but not while Base's read is not whole and agreeing: Base's refusal is the answer, whichever
+  // read ends first
+  const rhLateMs = (Number(words(FX.robinhood)[3]) + POOL_USD_FEEDS.robinhood.maxAgeS + 1) * 1000;
+  const baseFresh = then(wordEdit(LRD, 3, BigInt(Math.floor(rhLateMs / 1000) - 10)), blockAt(rhLateMs));
+  const baseApart = then(wordEdit(LRD, 1, 1n), baseFresh);
+  const both = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [blockAt(rhLateMs), blockAt(rhLateMs)]), nowMs: rhLateMs, baseRpcs: pair(FX.base, [baseApart, baseFresh]) }).then(() => null, (e: unknown) => e as Error);
+  assert.match(String(both), /disagree/);
+  assert.notEqual(both?.name, "PoolUsdStale");
+  const alone = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [blockAt(rhLateMs), blockAt(rhLateMs)]), nowMs: rhLateMs, baseRpcs: pair(FX.base, [baseFresh, baseFresh]) }).then(() => null, (e: unknown) => e as Error);
+  assert.equal(alone?.name, "PoolUsdStale", String(alone));
 });
 
 test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async (t) => {
