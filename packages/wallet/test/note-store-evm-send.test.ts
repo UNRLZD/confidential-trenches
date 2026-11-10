@@ -124,3 +124,44 @@ test("R3: a sell's R note with evmSends planned again (INCOMING -> PLANNED) drop
   assert.equal(back!.state, "PLANNED");
   assert.equal((await t.ns.list()).length, 2, "every note still reads");
 });
+
+test("evm-deposit-note-stays-incoming: an INCOMING note keeps the block U's last send's nonce was read used at (evmSpent): read back after a reopen, gone with a new send or a move out of INCOMING", async () => {
+  const t = await tab();
+  const a = await t.ns.planDeposit(970n, pc);
+  const B = (nonce: bigint, n = 100n) => ({ nonce, number: n, hash: H(n === 100n ? 7 : 8) });
+  assert.deepEqual(await t.ns.keepEvmSpent(a.id, B(0n)), (await t.ns.get(a.id))!, "PLANNED: nothing written");
+  await t.ns.move(a.id, "PLANNED", "INCOMING", { evmSend: E(1) });
+  assert.deepEqual((await t.ns.keepEvmSpent(a.id, B(0n))).evmSpent, B(0n));
+  t.ns.close();
+  const t2 = await tab(t.idb);
+  assert.deepEqual((await t2.ns.get(a.id))!.evmSpent, B(0n), "kept across a reopen");
+  assert.deepEqual((await t2.ns.keepEvmSpent(a.id, B(1n))).evmSpent, B(0n), "another nonce than the last send's: nothing written");
+  assert.deepEqual((await t2.ns.keepEvmSpent(a.id, B(0n, 200n))).evmSpent, B(0n, 200n), "replaced");
+  assert.equal((await t2.ns.keepEvmSpent(a.id, null)).evmSpent, undefined, "dropped");
+  await t2.ns.keepEvmSpent(a.id, B(0n));
+  const two = await t2.ns.addEvmSend(a.id, E(2), 1);
+  assert.equal(two.evmSpent, undefined, "a new send: the old nonce's block goes");
+  assert.equal((await t2.ns.get(a.id))!.evmSpent, undefined);
+  await t2.ns.keepEvmSpent(a.id, B(1n));
+  assert.deepEqual((await t2.ns.get(a.id))!.evmSpent, B(1n));
+  const taken = await t2.ns.move(a.id, "INCOMING", "TAKEN");
+  assert.equal(taken.evmSpent, undefined, "out of INCOMING: gone");
+  assert.equal("evmSpent" in (await t2.ns.get(a.id))!, false);
+  assert.deepEqual(await t2.ns.keepEvmSpent(a.id, B(1n)), (await t2.ns.get(a.id))!, "TAKEN: nothing written");
+});
+
+test("evm-deposit-note-stays-incoming: a kept block's fields: a u64 nonce and number, a 0x 32-byte lowercase hash, nothing else; a Solana-send note keeps none", async () => {
+  const t = await tab();
+  const a = await t.ns.planDeposit(971n, pc);
+  await t.ns.move(a.id, "PLANNED", "INCOMING", { evmSend: E(1) });
+  for (const [bad, re] of [
+    [{ nonce: 0n, number: 1n, hash: "0x" + H(0xab).slice(2).toUpperCase() }, /hash/],
+    [{ nonce: 0n, number: -1n, hash: H(1) }, /number/],
+    [{ nonce: 0n, number: 1n, hash: H(1), key: 1 }, /may not hold key/],
+    [{ nonce: -1n, number: 1n, hash: H(1) }, /nonce/],
+  ] as const)
+    await assert.rejects(t.ns.keepEvmSpent(a.id, bad as never), re);
+  const b = await t.ns.planDeposit(972n, pc);
+  await t.ns.move(b.id, "PLANNED", "INCOMING", { send: S(1) });
+  assert.equal((await t.ns.keepEvmSpent(b.id, { nonce: 0n, number: 1n, hash: H(1) })).evmSpent, undefined);
+});
