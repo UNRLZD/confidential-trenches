@@ -16,7 +16,8 @@
 // at least one trade is judged and none is wrong. A quiet market (no served tape holds a trade it can judge) is no fault of
 // the deploy: with none judged in the first TOKENS tapes it reads more of the lists' tapes, up to MAX_TOKENS and BUDGET_MS,
 // and if there is still nothing to judge it is INCONCLUSIVE (exit 3, which the live run reads again after a pause, and
-// red at the bound), never a PASS and never a FAIL. A wrongly reported v4 trade is a FAIL whatever else was read. Every
+// red at the bound), never a PASS and never a FAIL. So is a receipt or a token's decimals that fewer than two providers answered (a provider's
+// no-answer, worded as provider-answer.mjs words it); two providers that both answer and differ stay a FAIL. A wrongly reported v4 trade is a FAIL whatever else was read. Every
 // run prints how many tapes, trades and receipts it read.
 // After: helper
 //   node scripts/live-checks/helper-v4-hook-liquidity.mjs [--base <url>] [--chain base|robinhood] [--record <file>]
@@ -86,7 +87,7 @@ export function judgeable(receipt, coin, pm, side) {
   return moves.length === 1 ? moves[0] : null;
 }
 
-/** The check on one run: { base, chain, at, coins, tapes: { [coin]: { status, trades } }, decimals, receipts }. */
+/** The check on one run: { base, chain, at, coins, tapes: { [coin]: { status, trades } }, decimals, receipts, quiet: { [read]: [why] } }. */
 export function judge(run) {
   const lines = [];
   const bad = (s) => lines.push(`BAD ${s}`);
@@ -105,11 +106,12 @@ export function judge(run) {
       const r = run.receipts?.[t.tx];
       if (r === undefined) continue;
       if (r === null) {
-        bad(`${coin} trade ${t.tx}: its receipt is not agreed by two providers`);
+        bad(`${coin} trade ${t.tx}: two providers answered and their receipts differ`);
         continue;
       }
       const move = judgeable(r, coin, pm, t.side);
-      if (move === null) {
+      // the token's decimals met fewer than two providers (INCONCLUSIVE below): the trade is not judged
+      if (move === null || run.quiet?.[`decimals of ${coin}`]) {
         skipped++;
         continue;
       }
@@ -121,15 +123,18 @@ export function judge(run) {
       else if (want !== leg) bad(`${coin} trade ${t.tx}: amt ${t.amt} is not the ${leg} its trader ${move.sender} ${t.side === "b" ? "got" : "paid"} (${want})`);
     }
   }
+  // a read that fewer than two providers answered is a provider's no-answer: never judged, and the run is no pass
+  const silent = Object.entries(run.quiet ?? {});
+  for (const [what, why] of silent) lines.push(`INCONCLUSIVE ${what}: ${why.join("; ")}`);
   const tapes = Object.values(run.tapes ?? {}).filter((t) => t?.status === 200 && Array.isArray(t.trades));
   const trades = tapes.reduce((n, t) => n + t.trades.length, 0);
-  lines.push(`ok  read ${tapes.length} of ${run.coins?.length ?? 0} ${chain} tapes, ${trades} trades, ${Object.values(run.receipts ?? {}).filter((r) => r !== null).length} receipts agreed by two providers`);
+  lines.push(`ok  read ${tapes.length} of ${run.coins?.length ?? 0} ${chain} tapes, ${trades} trades, ${Object.values(run.receipts ?? {}).filter((r) => r !== null).length} receipts agreed by two providers${silent.length ? `, ${silent.length} read${silent.length === 1 ? "" : "s"} fewer than two providers answered` : ""}`);
   const failed = lines.some((l) => l.startsWith("BAD"));
   // nothing judged is no fault of the deploy (a quiet market) and no pass: INCONCLUSIVE, unless something else is wrong
   const quiet = judged === 0 && Array.isArray(run.coins) && run.coins.length > 0;
   if (judged > 0) lines.push(`ok  ${judged} v4 trade${judged === 1 ? "" : "s"} judged, each the token its trader moved (${skipped} not judged)`);
   else if (quiet && !failed) lines.push(`INCONCLUSIVE no v4 trade to judge on ${run.coins.length} ${chain} tapes (${trades} trades read, ${skipped} with no single sender's move of the token): nothing checked, not a pass`);
-  const verdict = failed ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  const verdict = failed ? "FAIL" : quiet || silent.length ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
 
@@ -144,19 +149,35 @@ async function getJson(base, path, fetchFn) {
   return { status: r.status, body };
 }
 
-/** JSON-RPC calls batched on the providers in turn until each has two answers, which must agree on `pick` of the
- *  result: each call's agreed answer, or null. A batch is 10 calls (base-pokt.nodies.app's most, 2026-11-05), and a
- *  refused one is sent again as batches of 3 (base.drpc.org's free most). */
+/** JSON-RPC calls batched on the providers in turn until each has two answers, which must agree on `pick` of the result.
+ *  Each call's outcome is `{ agreed }` (two providers answered alike), `{ differ: [hostA, hostB] }` (two providers answered
+ *  and the answers differ: a wrong answer, judged), or `{ quiet: [why, ...] }` (fewer than two providers answered: a
+ *  provider's no-answer, never judged), each why worded as provider-answer.mjs words one, `<host> HTTP <status>: <why>` or
+ *  `<host>: no answer (<why>)`. A batch is 10 calls (base-pokt.nodies.app's most, 2026-11-05), and a refused one is sent
+ *  again as batches of 3 (base.drpc.org's free most). */
 async function agreedMany(calls, fetchFn, rpcs, pick = (x) => x) {
   const got = calls.map(() => []);
+  const silent = calls.map(() => new Map());
   const send = async (url, part) => {
+    const host = new URL(url).host;
+    const quiet = (why) => part.forEach((i) => silent[i].set(host, why));
     try {
       const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(part.map((i) => ({ jsonrpc: "2.0", id: i, method: calls[i].method, params: calls[i].params }))), signal: AbortSignal.timeout(15000) });
-      const j = await r.json();
-      if (r.status !== 200 || !Array.isArray(j)) return false;
-      for (const o of j) if (isObj(o) && part.includes(o.id) && "result" in o && o.result !== null) got[o.id].push(JSON.stringify(pick(o.result)));
+      const j = await r.json().catch(() => null);
+      if (r.status !== 200 || !Array.isArray(j)) {
+        quiet(`${host} HTTP ${r.status}: ${r.status === 429 ? "429 Too Many Requests" : r.status === 200 ? "not a JSON-RPC batch answer" : "not a success"}`);
+        return false;
+      }
+      for (const i of part) {
+        const o = j.find((x) => isObj(x) && x.id === i);
+        if (o && "result" in o && o.result !== null) {
+          got[i].push({ host, value: JSON.stringify(pick(o.result)) });
+          silent[i].delete(host);
+        } else silent[i].set(host, `${host}: no answer (${o && "result" in o ? "null result, not held yet" : o?.error ? `error ${String(o.error.code ?? "").slice(0, 12)}` : "no answer for the call"})`);
+      }
       return true;
-    } catch {
+    } catch (e) {
+      quiet(`${host}: no answer (${e?.cause?.code ?? e?.name ?? "failed"})`);
       return false;
     }
   };
@@ -168,7 +189,10 @@ async function agreedMany(calls, fetchFn, rpcs, pick = (x) => x) {
       if (!(await send(url, part))) for (let m = 0; m < part.length; m += 3) await send(url, part.slice(m, m + 3));
     }
   }
-  return got.map((g) => (g.length >= 2 && g[0] === g[1] ? JSON.parse(g[0]) : null));
+  return got.map((g, i) => {
+    if (g.length < 2) return { quiet: silent[i].size ? [...silent[i].values()] : ["fewer than two providers answered"] };
+    return g[0].value === g[1].value ? { agreed: JSON.parse(g[0].value) } : { differ: [g[0].host, g[1].host] };
+  });
 }
 const receiptOf = (r) => ({ status: r.status, logs: (r.logs ?? []).map((l) => ({ address: String(l.address).toLowerCase(), topics: (l.topics ?? []).map((t) => String(t).toLowerCase()), data: String(l.data).toLowerCase() })) });
 
@@ -176,7 +200,7 @@ const receiptOf = (r) => ({ status: r.status, logs: (r.logs ?? []).map((l) => ({
  *  the lists' next coins, one tape at a time, until a trade can be judged, MAX_TOKENS tapes are read or `budgetMs` has
  *  passed since the lists were read (a quiet market, not a fault of the deploy). */
 export async function read(base = BASE, fetchFn = fetch, chain = "base", rpcs = SWAP_RPCS[chain], { budgetMs = BUDGET_MS, now = Date.now } = {}) {
-  const run = { base, chain, at: new Date().toISOString(), coins: [], tapes: {}, decimals: {}, receipts: {} };
+  const run = { base, chain, at: new Date().toISOString(), coins: [], tapes: {}, decimals: {}, receipts: {}, quiet: {} };
   const l = await getJson(base, `/v1/market/lists?chain=${chain}`, fetchFn);
   if (l.status !== 200 || !isObj(l.body?.lists)) {
     run.lists = `lists ${l.status}`;
@@ -196,10 +220,16 @@ export async function read(base = BASE, fetchFn = fetch, chain = "base", rpcs = 
     if (t.status !== 200 || trades === null) return;
     const txs = [...new Set(trades.map((x) => x.tx))].filter((tx) => !(tx in run.receipts));
     const rs = await agreedMany(txs.map((tx) => ({ method: "eth_getTransactionReceipt", params: [tx] })), fetchFn, rpcs, receiptOf);
-    txs.forEach((tx, i) => (run.receipts[tx] = rs[i]));
+    // agreed: the receipt; two providers that answered and differ: null (judged); fewer than two answered: kept in run.quiet
+    txs.forEach((tx, i) => {
+      if ("agreed" in rs[i]) run.receipts[tx] = rs[i].agreed;
+      else if ("differ" in rs[i]) run.receipts[tx] = null;
+      else run.quiet[`receipt ${tx}`] = rs[i].quiet;
+    });
     if (trades.some((x) => senderMoves(run.receipts[x.tx], coin, pm)?.length)) {
-      const [d] = await agreedMany([{ method: "eth_call", params: [{ to: coin, data: "0x313ce567" }, "latest"] }], fetchFn, rpcs);
-      run.decimals[coin] = typeof d === "string" && /^0x[0-9a-f]{1,64}$/.test(d) ? Number(BigInt(d)) : null;
+      const [o] = await agreedMany([{ method: "eth_call", params: [{ to: coin, data: "0x313ce567" }, "latest"] }], fetchFn, rpcs);
+      if ("quiet" in o) run.quiet[`decimals of ${coin}`] = o.quiet;
+      else run.decimals[coin] = typeof o.agreed === "string" && /^0x[0-9a-f]{1,64}$/.test(o.agreed) ? Number(BigInt(o.agreed)) : null;
     }
     ready += trades.filter((x) => judgeable(run.receipts[x.tx], coin, pm, x.side) !== null).length;
   };
