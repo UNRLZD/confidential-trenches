@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SELL = `${W}/src/pool-sell.ts`;
 const KIT = `${W}/../kit/src/checks/solana/checks.ts`;
@@ -19,7 +20,7 @@ const TESTNET = `${W}/src/pool-testnet.ts`;
 const TT = "test/pool-testnet.test.ts";
 // [name, file, the test that kills it, from, to]; from an array of [from, to] pairs plants each one (a rule held twice,
 // as what W read as is: the pass's end names it W's own state, and the record keeps it only on those ends)
-const M = [
+export const M = [
   ["A10 a sweep priced on one RPC's lamports of W", SELL, T, '      if (a !== b) throw new Error("W\'s lamports differ on the two RPCs");\n', ""],
   ["B4 the accounts' data left out of what W read as", SELL, T, "`${t.owner}:${t.lamports}:${base64.encode(t.data)}`", "`${t.owner}:${t.lamports}`"],
   ["B7 what W read as kept on a pass that gave up", SELL, T, [['steady = e === "holds" || e === "kept" || e === "refused"', 'steady = e === "holds" || e === "kept" || e === "refused" || e === "gave_up"'], ['(e === "floor" || e === "holds" || e === "kept" || e === "refused")' , '(e === "floor" || e === "holds" || e === "kept" || e === "refused" || e === "gave_up")']]],
@@ -128,46 +129,44 @@ const M = [
   // review of 5de2165e: P3-2 the state read's kept list read unguarded (one that always fails ends the read early)
   ["review P3-2 the kept list read unguarded", TESTNET, TT, "(await keptSells(page.store).list().catch(() => [])).length > 0", "(await keptSells(page.store).list()).length > 0"],
 ];
-// ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
-const only = process.env.ONLY;
-// <k>/<n>: part k of n only, mutant i in part (i % n) + 1, as the helper's sweeps split (apps/helper/test/pool-evm/
-// mutant-sweep.mjs partOf); test:mutants runs the parts, one command each, so ci.yml's split shares them out
-const arg = process.argv.slice(2);
-const part = /^(\d+)\/(\d+)$/.exec(arg[0] ?? "");
-if (arg.length > 1 || (arg.length === 1 && (!part || Number(part[1]) < 1 || Number(part[1]) > Number(part[2])))) {
-  console.log(`FAIL the part is <k>/<n> with 1 <= k <= n, one at most, not ${JSON.stringify(arg)}`);
-  process.exit(1);
+// every mutant's name, in the order the parts take them
+export const NAMES = M.map(([name]) => name);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // ONLY=<text>: run just the mutants whose name holds it (a fix's own red/green), the rest skipped
+  const only = process.env.ONLY;
+  // <k>/<n>: part k of n only, mutant i in part (i % n) + 1, as the helper's sweeps split (scripts/mutant-part.mjs);
+  // test:mutants runs the parts, one command each, so ci.yml's split shares them out
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
+  const run = (only ? M.filter(([name]) => name.includes(only)) : M).filter((m) => part.pick(M.indexOf(m)));
+  let killed = 0;
+  for (const [name, file, test, from, to] of run) {
+    const src = readFileSync(file, "utf8");
+    const pairs = Array.isArray(from) ? from : [[from, to]];
+    const once = pairs.find(([f]) => src.split(f).length !== 2);
+    if (once) {
+      console.log(`NOT ONCE [${name}]: ${once[0]}`);
+      process.exitCode = 1;
+      continue;
+    }
+    writeFileSync(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src));
+    // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
+    let r;
+    try {
+      r = runSync("node", ["--test", "--test-timeout=20000", test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
+    } finally {
+      writeFileSync(file, src);
+    }
+    const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
+    const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
+    const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
+    const dead = r.status !== 0 && Number(fail) > 0;
+    if (dead) killed++;
+    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
+    if (readFileSync(file, "utf8") !== src) {
+      console.log("SOURCE NOT RESTORED");
+      process.exitCode = 1;
+    }
+  }
+  console.log(`${killed}/${run.length} killed`);
+  if (killed !== run.length || run.length === 0) process.exitCode = 1;
 }
-const inPart = (i) => !part || i % Number(part[2]) === Number(part[1]) - 1;
-const run = (only ? M.filter(([name]) => name.includes(only)) : M).filter((_, i) => inPart(i));
-let killed = 0;
-for (const [name, file, test, from, to] of run) {
-  const src = readFileSync(file, "utf8");
-  const pairs = Array.isArray(from) ? from : [[from, to]];
-  const once = pairs.find(([f]) => src.split(f).length !== 2);
-  if (once) {
-    console.log(`NOT ONCE [${name}]: ${once[0]}`);
-    process.exitCode = 1;
-    continue;
-  }
-  writeFileSync(file, pairs.reduce((s, [f, t]) => s.replace(f, t), src));
-  // a run past 180 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", "--test-timeout=20000", test], { cwd: W, encoding: "utf8", timeoutMs: 180_000 });
-  } finally {
-    writeFileSync(file, src);
-  }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-  const dead = r.status !== 0 && Number(fail) > 0;
-  if (dead) killed++;
-  console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
-  if (readFileSync(file, "utf8") !== src) {
-    console.log("SOURCE NOT RESTORED");
-    process.exitCode = 1;
-  }
-}
-console.log(`${killed}/${run.length} killed`);
-if (killed !== run.length || run.length === 0) process.exitCode = 1;
