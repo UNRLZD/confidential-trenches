@@ -23,6 +23,10 @@
 //      holds at its start, so a fresh run ends inside the bound (a price at most 58 s old at a write, the bound 75 s):
 //        - fresh: Bal shows USD, Buy is on, and the one tap asks the shell for exactly one pool.buy of $0.05 in SOL at
 //          that price, rounded down (5 x 10^15 / price lamports at exponent -8), never the vault's buy;
+//        - aged (card pool-usd-price-never-stale, review P2-5): the same price published AGED_S (62) s before the run,
+//          past the 60 s bound the app held before that card and inside its 75 s: as fresh. An app on the 60 s bound
+//          fails it, so a run proves the deployed app holds 75 s. Deploy order: APP_HOST first, then SIGN_HOST: with
+//          youngRead gone a fresh run sends a held price up to about 58 s old, which an app still on 60 s drops mid-run;
 //        - stale and none: Bal shows no USD, Buy is off, and the tap asks for nothing.
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
 // After: app --host app
@@ -54,7 +58,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const HELPER_HOST = "https://ct-api.unrealized.trade";
 /** The signing page's Solana pair (packages/signpage/src/trade.ts): its provider A and the helper's keyed route. */
 export const PAGE_PAIR = ["https://solana-rpc.publicnode.com", `${HELPER_HOST}/v1/rpc/solana`];
-export const PRICES = ["fresh", "stale", "none"];
+export const PRICES = ["fresh", "aged", "stale", "none"];
+/** The aged run's price age as it starts (card pool-usd-price-never-stale, review P2-5): past the 60 s bound the app held
+ *  before that card and inside the 75 s it holds since, with 13 s for the run, so an app still on 60 s fails it. */
+export const AGED_S = 62;
 /** The amount typed: $0.05, under the devnet pool's one-tap most (0.00173608 SOL) at any SOL price over $28.80. */
 export const TYPED = "0.05";
 const CENTS = 5n;
@@ -74,6 +81,7 @@ const MAX_AGE_S = POOL_USD_FEEDS.solana.maxAgeS;
 /** The pool entry the stand-in sends for `which`, from the page's read `p`, at the run's clock `nowMs`. */
 export function poolWith(which, p, nowMs) {
   if (which === "none") return POOL.ready;
+  if (which === "aged") return { ...POOL.ready, price: { price: p.price, expo: p.expo, published_s: Math.floor(nowMs / 1000) - AGED_S, read_ms: nowMs } };
   const published_s = which === "fresh" ? p.published_s : Math.floor(nowMs / 1000) - MAX_AGE_S - 30;
   return { ...POOL.ready, price: { price: p.price, expo: p.expo, published_s, read_ms: which === "fresh" ? p.read_ms : published_s * 1000 } };
 }
@@ -108,7 +116,7 @@ export function judge(rec) {
   const runs = rec.runs ?? [];
   const want = WIDTHS.flatMap((w) => PRICES.map((p) => `${w.name} ${p}`));
   const have = new Set(runs.map((x) => `${x.width} ${x.price}`));
-  say(want.every((k) => have.has(k)), `${runs.length} run(s) of ${want.length} (desktop and phone; a fresh, a stale and no price)`);
+  say(want.every((k) => have.has(k)), `${runs.length} run(s) of ${want.length} (desktop and phone; a fresh, an aged ${AGED_S} s, a stale and no price)`);
   for (const x of runs) {
     // the price this run sent: the page's held price at its start (card pool-usd-price-never-stale), or, in a record
     // before it, the one read
@@ -125,9 +133,9 @@ export function judge(rec) {
       const usd = typeof x.box.bal === "string" && /\$\s?\d/.test(x.box.bal);
       const asked = x.asked ?? null;
       if (asked === null) bad.push("the tap was not read");
-      if (x.price === "fresh") {
+      if (x.price === "fresh" || x.price === "aged") {
         if (!usd) bad.push(`Bal shows ${x.box.bal ?? "nothing"}, not USD`);
-        if (x.box.ctaOn !== true) bad.push("Buy is off with a fresh price");
+        if (x.box.ctaOn !== true) bad.push(`Buy is off with ${x.price === "aged" ? `a price ${AGED_S} s old (inside the kit's ${MAX_AGE_S} s)` : "a fresh price"}`);
         const buys = (asked ?? []).filter((m) => m.type === "pool.buy");
         if (asked && (asked.length !== 1 || buys.length !== 1)) bad.push(`the tap asked for ${asked.map((m) => m.type).join(", ") || "nothing"}, not one pool.buy`);
         else if (buys[0] && (buys[0].params?.chain !== "solana" || buys[0].params?.amount !== sol)) bad.push(`its pool.buy is ${buys[0].params?.amount} SOL on ${buys[0].params?.chain}, not ${sol} SOL on solana`);
@@ -138,7 +146,7 @@ export function judge(rec) {
       }
     }
     if (!x.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${n}: ${bad.length ? bad.join("; ") : x.price === "fresh" ? `Bal ${x.box.bal}, Buy on, one pool.buy of ${sol} SOL` : `Bal ${x.box.bal}, Buy off, nothing asked`}`);
+    say(bad.length === 0, `${n}: ${bad.length ? bad.join("; ") : x.price === "fresh" || x.price === "aged" ? `Bal ${x.box.bal}, Buy on, one pool.buy of ${sol} SOL` : `Bal ${x.box.bal}, Buy off, nothing asked`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -274,7 +282,7 @@ export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()
         const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed", { state: account(poolWith(price, p, Date.now())) });
         const route = build ? shell : (r) => (originOf(r.request().url()) === APP_HOST || originOf(r.request().url()) === HELPER_HOST ? r.continue() : shell(r));
         const run = await runOne(browser, w, price, shots, route);
-        if (price === "fresh" && p.price !== "1") run.read = { price: p.price, expo: p.expo, published_s: p.published_s };
+        if ((price === "fresh" || price === "aged") && p.price !== "1") run.read = { price: p.price, expo: p.expo, published_s: p.published_s };
         runs.push(run);
       }
     }

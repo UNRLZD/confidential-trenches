@@ -1,18 +1,22 @@
 // node --test scripts/live-checks/pool-usd-price-never-stale.test.mjs: the live check replays its recorded answers
 // (pool-usd-price-never-stale.answers.json), each a 3-minute run of read() on the signing page's own Solana pair
 // (provider A and the helper's keyed route) on 10 Nov:
-//   good: the page's schedule (SCHEDULE): a price held from the first read to the end, never gone, each write held within
-//         WRITE_HELD_MS of landing: PASS on the feed and the pin. Its SIGN_HOST bundle is release-110's, from before this
-//         card, so the ledger line is judged against a release list that names it (planted) until release-FOLDED_FROM is
-//         cut and the answer recorded again from it;
-//   bad:  the page's schedule before this card (BEFORE: every 15 s): each write held up to 15 s after it landed: FAIL.
+//   good: the page's schedule (SCHEDULE: from publish + 55 s, each 3 s): a price held from the first read to the end,
+//         never gone, each write held within WRITE_HELD_MS of landing; its `sign` is facts() over this tree's own
+//         signing page build (SIGN_HOST still served release-110's when it was recorded), so the release list line is
+//         judged against a list that names it (planted) until a release of this card is cut and the answer recorded again;
+//   bad:  the page's schedule before this card (BEFORE: every 15 s), and SIGN_HOST's page as served then
+//         (release-110): writes held up to 11.6 s after they landed, the 60 s bound, no schedule at the write: FAIL.
 // Planted on the good one: a span with no price, too few writes, a short run, another pair, a write with no landing
-// time, an unpinned bundle, a bundle no release list from FOLDED_FROM on names: each FAIL. And follow() itself on a
-// recorded timeline (the 10 Nov 03:56-04:26Z writes), on a mocked clock: never gone, each write held within a second.
+// time, a late hold, an unpinned bundle, a bundle in no release list: each FAIL. And on this tree's own build (review of
+// eb2dfdc5, P2-3): the bundle of release-110 under any release number, the 60 s bound, the 15 s schedule, the 1 s poll,
+// no timer rearm and no late tag each FAIL on the bundle's marks. And follow() on the 10 Nov writes, a mocked clock.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
-import { BEFORE, FOLDED_FROM, follow, foldedReleases, judge, RUN_MS, SCHEDULE, WRITE_HELD_MS, WRITES_MIN } from "./pool-usd-price-never-stale.mjs";
+import { signBuilt } from "../signpage-built.mjs";
+import { BEFORE, BOUND_S, facts, follow, foldedReleases, HEARTBEAT_FROM_S, judge, MOVE_HELD_MS, RUN_MS, SCHEDULE, WRITE_HELD_MS, WRITES_MIN } from "./pool-usd-price-never-stale.mjs";
 import { PAGE_PAIR } from "./signpage-pool-price.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./pool-usd-price-never-stale.answers.json", import.meta.url), "utf8"));
@@ -21,20 +25,35 @@ const bad = (v) => v.lines.filter((l) => l.startsWith("BAD"));
 const planted = (f) => {
   const rec = structuredClone(A.good);
   f(rec);
-  return judge(rec, okLedger(A.good));
+  return judge(rec, okLedger(rec));
 };
 
-test("recorded good answer: the page's schedule on its own pair, never gone, each write held within WRITE_HELD_MS: PASS", () => {
+test("recorded good answer: the page's schedule on its own pair, never gone, each write held within WRITE_HELD_MS, the bundle's marks: PASS", () => {
   const v = judge(A.good, okLedger(A.good));
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.ok(A.good.run.held.length - 1 >= WRITES_MIN);
   assert.deepEqual(A.good.run.gone, []);
+  assert.equal(A.good.sign.boundS, BOUND_S);
 });
 
-test("recorded bad answer: the page's schedule before this card (every 15 s): writes held long after they landed: FAIL", () => {
+test("recorded good answer on a moving market (the account written each 15 s): writes on a move held within MOVE_HELD_MS, never gone: PASS", () => {
+  const v = judge(A.goodMoving, okLedger(A.goodMoving));
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  const w = A.goodMoving.run.held;
+  assert.ok(w.slice(1).some((x, i) => x.blockTimeS - w[i].publishedS < HEARTBEAT_FROM_S), "a write on a move is in it");
+  // the same writes held to the heartbeat's bound would fail: the two bounds are not one
+  const tight = judge({ ...A.goodMoving, run: { ...A.goodMoving.run, held: w.map((x, i) => (i === 0 ? x : { ...x, heldMs: Math.max(x.heldMs, x.blockTimeS * 1000 + MOVE_HELD_MS + 1) })) } }, okLedger(A.goodMoving));
+  assert.equal(tight.ok, false);
+});
+
+test("recorded bad answer: the page before this card (every 15 s, the 60 s bound, release-110's bundle): FAIL on the holds and on every mark, even with its bundle in a release list", () => {
   const v = judge(A.bad, okLedger(A.bad));
   assert.equal(v.ok, false);
-  assert.ok(bad(v).some((l) => /^BAD the write published \d+ \(landed \d+\) was held \d+\.\d s after it landed, not within 3 s/.test(l)), v.lines.join("\n"));
+  const b = bad(v);
+  assert.ok(b.some((l) => /^BAD the write published \d+ \(landed \d+, \d+ s into the last price, at the heartbeat\) was held \d+\.\d s after it landed, not within 5 s/.test(l)), v.lines.join("\n"));
+  assert.ok(b.includes(`BAD SIGN_HOST's page holds Solana's price 60 s, not ${BOUND_S} s: a price between writes runs out`), v.lines.join("\n"));
+  assert.ok(b.some((l) => l.startsWith("BAD SIGN_HOST's page reads on no schedule at the write")), v.lines.join("\n"));
+  assert.ok(foldedReleases(undefined, 110).has(A.bad.sign.sha384), "the bad answer's bundle is release-110's");
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -49,18 +68,45 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   one((r) => (r.run.endMs = s + RUN_MS / 2), /^BAD the feed was followed for 90 s, not 180 s/);
   one((r) => (r.rpcs = [PAGE_PAIR[0], "https://api.mainnet-beta.solana.com"]), /^BAD not the page's Solana pair/);
   one((r) => (r.run.held[1].blockTimeS = null), /^BAD the write published \d+ has no landing time/);
-  one((r) => (r.run.held[1].heldMs = r.run.held[1].blockTimeS * 1000 + WRITE_HELD_MS + 500), /^BAD the write published \d+ \(landed \d+\) was held 3\.5 s after it landed/);
+  one((r) => (r.run.held[1].heldMs = r.run.held[1].blockTimeS * 1000 + WRITE_HELD_MS + 500), /^BAD the write published \d+ \(landed \d+, \d+ s into the last price, at the heartbeat\) was held 5\.5 s after it landed/);
   one((r) => (r.run.held = []), /^BAD no price was ever held/);
-  one((r) => (r.sign.sha384 = "sha384-other"), /^BAD SIGN_HOST's served \/app\.js is not the one index\.html pins/);
   one((r) => (r.sign.index = "<html></html>"), /^BAD SIGN_HOST's index\.html pins no \/app\.js/);
-  const v = judge(A.good, { folded: new Set() });
-  assert.deepEqual(bad(v), [`BAD SIGN_HOST's /app.js is not a release-${FOLDED_FROM}-or-later build: ${A.good.sign.sha384}`]);
+  // a bundle the index does not pin
+  const v = judge({ ...A.good, sign: { ...A.good.sign, sha384: "sha384-other" } }, okLedger(A.good));
+  assert.ok(bad(v).includes("BAD SIGN_HOST's served /app.js is not the one index.html pins"), v.lines.join("\n"));
+  // a bundle in no release list
+  assert.deepEqual(bad(judge(A.good, { folded: new Set() })), [`BAD SIGN_HOST's /app.js is in no release list: ${A.good.sign.sha384}`]);
   assert.equal(judge(null, okLedger(A.good)).ok, false);
 });
 
-test("the ledger: release lists from FOLDED_FROM on; none names release-110's bundle, which the good answer was recorded on", () => {
-  assert.ok(!foldedReleases().has(A.good.sign.sha384));
-  assert.ok(foldedReleases(undefined, 110).has(A.good.sign.sha384), "the good answer's bundle is release-110's");
+test("planted on this tree's own signing page build (review P2-3): release-110's bundle under any number, the 60 s bound, the 15 s schedule, the 1 s poll, no rearm, no late tag: each FAILs on the bundle's marks", () => {
+  const dir = signBuilt();
+  const js = readFileSync(path.join(dir, "public/app.js"), "utf8");
+  const index = readFileSync(path.join(dir, "index.html"), "utf8");
+  const asBuilt = facts(index, js);
+  assert.deepEqual({ boundS: asBuilt.boundS, schedule: asBuilt.schedule, rearm: asBuilt.rearm, late: asBuilt.late }, { boundS: BOUND_S, schedule: { ...SCHEDULE }, rearm: true, late: true }, "this tree's build carries every mark");
+  const on = (edit, re) => {
+    const j = edit(js);
+    assert.notEqual(j, js, String(re));
+    const f = facts(index.replace(/integrity="sha384-[^"]+"/, `integrity="${facts("", j).sha384}"`), j);
+    const v = judge({ ...A.good, sign: f }, { folded: new Set([f.sha384]) });
+    assert.equal(v.ok, false, String(re));
+    assert.ok(bad(v).some((l) => re.test(l)), v.lines.join("\n"));
+  };
+  // the 60 s bound
+  on((j) => j.replace(/(7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE[^}]{0,400}?maxAgeS:)75/, "$160"), /^BAD SIGN_HOST's page holds Solana's price 60 s, not 75 s/);
+  // the 15 s schedule: no lead or poll before wakeWhenShown
+  on((j) => j.replace(/(var [\w$]+=15e3,[\w$]+=1e3,[\w$]+=6e4),[\w$]+=2e4,[\w$]+=3e3;/, "$1;"), /^BAD SIGN_HOST's page reads on no schedule at the write/);
+  // the as-built 1 s poll from publish + 50 s
+  on((j) => j.replace(/(var [\w$]+=15e3,[\w$]+=1e3,[\w$]+=6e4,[\w$]+=)2e4,([\w$]+=)3e3;/, "$125e3,$21e3;"), /^BAD SIGN_HOST's page reads on refresh 15000, retry 1000, Retry-After cap 60000, lead 25000, poll 1000/);
+  // the timer that does not make its own read due
+  on((j) => j.replace(/([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\1\.set\(\2,Math\.min\(\3,[\w$]+\(\)\)\),/, ""), /^BAD SIGN_HOST's page's timer does not make its own read due/);
+  // no late tag
+  on((j) => j.replace(/\.name===`PoolUsdStale`/, ".name===`PoolUsdLate`"), /^BAD SIGN_HOST's page does not tell a late feed/);
+  // release-110's bundle (the bad answer's facts) under a new release number: in the ledger, and still FAIL
+  const old = judge({ ...A.good, sign: A.bad.sign }, { folded: new Set([A.bad.sign.sha384]) });
+  assert.equal(old.ok, false);
+  assert.ok(bad(old).length >= 4, old.lines.join("\n"));
 });
 
 // the writes read 10 Nov 03:56-04:26Z: [publish time step from the last write, s; the price's age when it landed, s]
@@ -80,7 +126,7 @@ async function onTimeline(schedule) {
   }
   const read = async () => {
     const p = lands.filter((w) => w.atMs <= t).at(-1).pubS;
-    if (t / 1000 - p > 75) throw Object.assign(new Error(`the price is older than 75 s: published ${p}`), { name: "PoolUsdStale", publishedS: p });
+    if (t / 1000 - p > BOUND_S) throw Object.assign(new Error(`the price is older than ${BOUND_S} s: published ${p}`), { name: "PoolUsdStale", publishedS: p });
     return { chain: "solana", price: 1n, expo: -8, publishedS: p, at: BigInt(p) };
   };
   const run = await follow({ read, now, sleep, untilMs: at + 10_000, schedule });
@@ -88,7 +134,7 @@ async function onTimeline(schedule) {
   return { run, late };
 }
 
-test("follow() on the 10 Nov writes, a mocked clock: the page's schedule is never gone and holds each write within a second; before this card, up to 15 s late", async () => {
+test("follow() on the 10 Nov writes, a mocked clock: the page's schedule is never gone and holds each write within one poll; before this card, up to 15 s late", async () => {
   const now = await onTimeline(SCHEDULE);
   assert.deepEqual(now.run.gone, []);
   assert.equal(now.late.length, WRITES.length);

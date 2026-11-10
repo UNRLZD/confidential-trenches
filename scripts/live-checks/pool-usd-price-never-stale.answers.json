@@ -1,284 +1,383 @@
 {
  "_note": {
-  "good": "read() on 10 Nov 2026 04:47:14Z for 180 s on the signing page's own pair (solana-rpc.publicnode.com and the helper's keyed route), on SCHEDULE: 26 reads (8.7 a minute), 4 prices held, never gone, each write held 1.0 to 1.6 s after its posted slot's block time; SIGN_HOST served release-110's /app.js (from before this card)",
-  "bad": "the same 180 s from the same machine, read() with BEFORE (the page's schedule before this card, every 15 s): 12 reads, the writes held 10.5, 7.4 and 14.8 s after landing"
+  "good": "read() on 10 Nov 2026 2026-11-10T06:55:24.930Z for 180 s on the signing page's own pair (solana-rpc.publicnode.com and the helper's keyed route), on SCHEDULE (publish + 55 s, each 3 s): 14 reads, 3 writes each landed 53 to 56 s into the last price and held 1.3 to 3.0 s after its block time, never gone. Its sign is facts() over this tree's own signing page build (SIGN_HOST served release-110's then)",
+  "goodMoving": "the same from 2026-11-10T06:59:37.689Z: 12 reads, the account written each 15 s for 90 s on a moving market; 7 writes held 0.9 to 7.0 s after landing, one at the heartbeat (2.6 s); never gone",
+  "bad": "the same 180 s as good, from the same machine, read() with BEFORE (every 15 s): 12 reads, the writes held 5.9, 3.1 and 11.6 s after landing; its sign is SIGN_HOST's page as served (release-110: the 60 s bound, no schedule mark)"
  },
  "good": {
-  "at": "2026-11-10T04:47:14.292Z",
+  "at": "2026-11-10T06:55:24.930Z",
   "rpcs": [
    "https://solana-rpc.publicnode.com",
    "https://ct-api.unrealized.trade/v1/rpc/solana"
   ],
   "run": {
-   "startMs": 1794286034293,
-   "endMs": 1794286214326,
+   "startMs": 1794293724930,
+   "endMs": 1794293905014,
    "reads": [
     {
-     "startMs": 1794286034293,
-     "ms": 673,
+     "startMs": 1794293724930,
+     "ms": 801,
      "kind": "good"
     },
     {
-     "startMs": 1794286049968,
-     "ms": 681,
+     "startMs": 1794293740733,
+     "ms": 1742,
      "kind": "good"
     },
     {
-     "startMs": 1794286065649,
-     "ms": 697,
+     "startMs": 1794293757477,
+     "ms": 1425,
      "kind": "good"
     },
     {
-     "startMs": 1794286081348,
-     "ms": 609,
+     "startMs": 1794293766001,
+     "ms": 677,
      "kind": "good"
     },
     {
-     "startMs": 1794286082959,
-     "ms": 204,
+     "startMs": 1794293769680,
+     "ms": 288,
      "kind": "good"
     },
     {
-     "startMs": 1794286084165,
-     "ms": 201,
+     "startMs": 1794293784969,
+     "ms": 1897,
      "kind": "good"
     },
     {
-     "startMs": 1794286085366,
-     "ms": 212,
+     "startMs": 1794293801867,
+     "ms": 993,
      "kind": "good"
     },
     {
-     "startMs": 1794286086580,
-     "ms": 202,
+     "startMs": 1794293817864,
+     "ms": 1231,
      "kind": "good"
     },
     {
-     "startMs": 1794286087783,
-     "ms": 204,
+     "startMs": 1794293834096,
+     "ms": 661,
      "kind": "good"
     },
     {
-     "startMs": 1794286102987,
+     "startMs": 1794293849759,
+     "ms": 714,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293865473,
+     "ms": 608,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293871001,
+     "ms": 1258,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293887260,
+     "ms": 611,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293902871,
+     "ms": 623,
+     "kind": "good"
+    }
+   ],
+   "held": [
+    {
+     "publishedS": 1794293711,
+     "at": "467627104",
+     "heldMs": 1794293725731,
+     "blockTimeS": 1794293713
+    },
+    {
+     "publishedS": 1794293764,
+     "at": "467627355",
+     "heldMs": 1794293769968,
+     "blockTimeS": 1794293767
+    },
+    {
+     "publishedS": 1794293816,
+     "at": "467627591",
+     "heldMs": 1794293819095,
+     "blockTimeS": 1794293817
+    },
+    {
+     "publishedS": 1794293870,
+     "at": "467627841",
+     "heldMs": 1794293872259,
+     "blockTimeS": 1794293871
+    }
+   ],
+   "gone": []
+  },
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL",
+   "boundS": 75,
+   "schedule": {
+    "refreshMs": 15000,
+    "retryMs": 1000,
+    "retryAfterMaxMs": 60000,
+    "leadMs": 20000,
+    "pollMs": 3000
+   },
+   "rearm": true,
+   "late": true
+  }
+ },
+ "goodMoving": {
+  "at": "2026-11-10T06:59:37.689Z",
+  "rpcs": [
+   "https://solana-rpc.publicnode.com",
+   "https://ct-api.unrealized.trade/v1/rpc/solana"
+  ],
+  "run": {
+   "startMs": 1794293977690,
+   "endMs": 1794294157979,
+   "reads": [
+    {
+     "startMs": 1794293977690,
+     "ms": 618,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293993310,
+     "ms": 1035,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294009347,
+     "ms": 1575,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294025924,
+     "ms": 3651,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294044577,
+     "ms": 1382,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294060961,
+     "ms": 910,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294076873,
+     "ms": 1695,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294093569,
+     "ms": 803,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294109374,
+     "ms": 918,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294125292,
+     "ms": 606,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294140900,
+     "ms": 768,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794294156670,
+     "ms": 1309,
+     "kind": "good"
+    }
+   ],
+   "held": [
+    {
+     "publishedS": 1794293974,
+     "at": "467628333",
+     "heldMs": 1794293978308,
+     "blockTimeS": 1794293976
+    },
+    {
+     "publishedS": 1794294025,
+     "at": "467628565",
+     "heldMs": 1794294029575,
+     "blockTimeS": 1794294027
+    },
+    {
+     "publishedS": 1794294058,
+     "at": "467628718",
+     "heldMs": 1794294061871,
+     "blockTimeS": 1794294061
+    },
+    {
+     "publishedS": 1794294073,
+     "at": "467628786",
+     "heldMs": 1794294078568,
+     "blockTimeS": 1794294075
+    },
+    {
+     "publishedS": 1794294088,
+     "at": "467628857",
+     "heldMs": 1794294094372,
+     "blockTimeS": 1794294090
+    },
+    {
+     "publishedS": 1794294104,
+     "at": "467628933",
+     "heldMs": 1794294110292,
+     "blockTimeS": 1794294106
+    },
+    {
+     "publishedS": 1794294119,
+     "at": "467629001",
+     "heldMs": 1794294125898,
+     "blockTimeS": 1794294121
+    },
+    {
+     "publishedS": 1794294134,
+     "at": "467629070",
+     "heldMs": 1794294141668,
+     "blockTimeS": 1794294136
+    },
+    {
+     "publishedS": 1794294148,
+     "at": "467629139",
+     "heldMs": 1794294157979,
+     "blockTimeS": 1794294151
+    }
+   ],
+   "gone": []
+  },
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL",
+   "boundS": 75,
+   "schedule": {
+    "refreshMs": 15000,
+    "retryMs": 1000,
+    "retryAfterMaxMs": 60000,
+    "leadMs": 20000,
+    "pollMs": 3000
+   },
+   "rearm": true,
+   "late": true
+  }
+ },
+ "bad": {
+  "at": "2026-11-10T06:55:24.930Z",
+  "rpcs": [
+   "https://solana-rpc.publicnode.com",
+   "https://ct-api.unrealized.trade/v1/rpc/solana"
+  ],
+  "run": {
+   "startMs": 1794293724930,
+   "endMs": 1794293904972,
+   "reads": [
+    {
+     "startMs": 1794293724930,
+     "ms": 801,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293740733,
+     "ms": 693,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293756427,
+     "ms": 738,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293772167,
+     "ms": 729,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293787896,
+     "ms": 754,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293803651,
+     "ms": 704,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293819357,
+     "ms": 726,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794293835085,
      "ms": 601,
      "kind": "good"
     },
     {
-     "startMs": 1794286118590,
-     "ms": 584,
+     "startMs": 1794293850687,
+     "ms": 649,
      "kind": "good"
     },
     {
-     "startMs": 1794286134002,
-     "ms": 591,
+     "startMs": 1794293866338,
+     "ms": 612,
      "kind": "good"
     },
     {
-     "startMs": 1794286135595,
-     "ms": 216,
+     "startMs": 1794293881950,
+     "ms": 623,
      "kind": "good"
     },
     {
-     "startMs": 1794286136811,
-     "ms": 212,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286138025,
-     "ms": 208,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286153233,
-     "ms": 690,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286168924,
-     "ms": 585,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286184509,
-     "ms": 583,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286186094,
-     "ms": 219,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286187313,
-     "ms": 209,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286188524,
-     "ms": 207,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286189732,
-     "ms": 203,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286190937,
-     "ms": 207,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286192145,
-     "ms": 206,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286193351,
-     "ms": 230,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286208591,
-     "ms": 581,
+     "startMs": 1794293897575,
+     "ms": 688,
      "kind": "good"
     }
    ],
    "held": [
     {
-     "publishedS": 1794286032,
-     "at": "467591243",
-     "heldMs": 1794286034966,
-     "blockTimeS": 1794286033
+     "publishedS": 1794293711,
+     "at": "467627104",
+     "heldMs": 1794293725731,
+     "blockTimeS": 1794293713
     },
     {
-     "publishedS": 1794286084,
-     "at": "467591494",
-     "heldMs": 1794286087987,
-     "blockTimeS": 1794286087
+     "publishedS": 1794293764,
+     "at": "467627355",
+     "heldMs": 1794293772896,
+     "blockTimeS": 1794293767
     },
     {
-     "publishedS": 1794286136,
-     "at": "467591733",
-     "heldMs": 1794286138233,
-     "blockTimeS": 1794286137
+     "publishedS": 1794293816,
+     "at": "467627591",
+     "heldMs": 1794293820083,
+     "blockTimeS": 1794293817
     },
     {
-     "publishedS": 1794286190,
-     "at": "467591991",
-     "heldMs": 1794286193581,
-     "blockTimeS": 1794286192
+     "publishedS": 1794293870,
+     "at": "467627841",
+     "heldMs": 1794293882573,
+     "blockTimeS": 1794293871
     }
    ],
    "gone": []
   },
   "sign": {
    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
-   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
-  }
- },
- "bad": {
-  "at": "2026-11-10T04:47:14.292Z",
-  "rpcs": [
-   "https://solana-rpc.publicnode.com",
-   "https://ct-api.unrealized.trade/v1/rpc/solana"
-  ],
-  "run": {
-   "startMs": 1794286034293,
-   "endMs": 1794286214331,
-   "reads": [
-    {
-     "startMs": 1794286034293,
-     "ms": 697,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286049990,
-     "ms": 658,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286065648,
-     "ms": 698,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286081348,
-     "ms": 605,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286096954,
-     "ms": 582,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286112537,
-     "ms": 616,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286128153,
-     "ms": 597,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286143751,
-     "ms": 607,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286159360,
-     "ms": 626,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286174988,
-     "ms": 592,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286190581,
-     "ms": 592,
-     "kind": "good"
-    },
-    {
-     "startMs": 1794286206173,
-     "ms": 582,
-     "kind": "good"
-    }
-   ],
-   "held": [
-    {
-     "publishedS": 1794286032,
-     "at": "467591243",
-     "heldMs": 1794286034990,
-     "blockTimeS": 1794286033
-    },
-    {
-     "publishedS": 1794286084,
-     "at": "467591494",
-     "heldMs": 1794286097536,
-     "blockTimeS": 1794286087
-    },
-    {
-     "publishedS": 1794286136,
-     "at": "467591733",
-     "heldMs": 1794286144358,
-     "blockTimeS": 1794286137
-    },
-    {
-     "publishedS": 1794286190,
-     "at": "467591991",
-     "heldMs": 1794286206755,
-     "blockTimeS": 1794286192
-    }
-   ],
-   "gone": []
-  },
-  "sign": {
-   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
-   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+   "boundS": 60,
+   "schedule": null,
+   "rearm": false,
+   "late": false
   }
  }
 }
