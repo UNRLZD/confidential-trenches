@@ -821,10 +821,12 @@ test("deploy.mjs run as the main module reaches its gate on every path: --dry-ru
     const dry = main("--dry-run");
     assert.ok([0, 1].includes(dry.status), `--dry-run exit ${dry.status}:\n${dry.all}`);
     assert.match(dry.stdout, /deploy: gate ok on \S+; --dry-run: nothing was uploaded; a deploy would (go ahead|refuse it:)/, dry.all);
-    // a deploy: past the late import, it refuses a build no release names, or stops at the missing token
+    // a deploy: past the late import, it refuses a build no release names (the newest list was cut from other build
+    // inputs than this tree's, as on a branch that changes pnpm-lock.yaml after a release, or its build differs), or
+    // stops at the missing token
     const real = main();
     assert.ok([1, 2].includes(real.status), `a deploy exit ${real.status}:\n${real.all}`);
-    assert.match(real.stderr, /deploy: (REFUSED release-\d+, the newest release, is not this SIGN_HOST build|REFUSED .*RELEASED|gate ok; CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set, nothing was uploaded)/, real.all);
+    assert.match(real.stderr, /deploy: (REFUSED release-\d+ was cut from other SIGN_HOST build inputs than HEAD's|REFUSED release-\d+, the newest release, is not this SIGN_HOST build|REFUSED .*RELEASED|gate ok; CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID not set, nothing was uploaded)/, real.all);
     const built = main("--build");
     assert.equal(built.status, 0, built.all);
     assert.match(built.stdout, /deploy: gate ok on \S+; --build:/);
