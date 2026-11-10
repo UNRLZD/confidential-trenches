@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { POOL_USD_FEEDS } from "../../packages/kit/src/index.ts";
 import { check, RPCS } from "./kit-pool-tap-inputs.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./kit-pool-tap-inputs.answers.json", import.meta.url), "utf8"));
@@ -54,7 +55,7 @@ test("the recorded bad run fails: the two Solana RPCs disagree on the Pyth accou
 
 test("the good run replayed two hours later fails: every price is stale, each EVM read's block first", async () => {
   const r = await run(A.good, { nowMs: A.good.nowMs + 2 * 3600_000 });
-  fails(r, /solana: .*older than 60 s/);
+  fails(r, new RegExp(`solana: .*older than ${POOL_USD_FEEDS.solana.maxAgeS} s`));
   // the Chainlink reads' block is held within 60 s of the clock, before any round's own age
   fails(r, /base: .*block \d+'s time \d+ is more than 60 s from the device's clock/);
   fails(r, /robinhood: chainlink .*block \d+'s time \d+ is more than 60 s from the device's clock/);
