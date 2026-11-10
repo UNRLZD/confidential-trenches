@@ -2,7 +2,7 @@
 // (signpage-pool-price.answers.json), each read on 4 Nov by signpage-pool-price.mjs collect() in headless Chrome on the
 // test box: Pyth's SOL/USD on the signing page's own Solana pair, then the terminal in the stand-in shell sent the
 // devnet Solana pool with that price fresh, stale and absent:
-//   good: the harness, this card's terminal build (entry /assets/index-C4hTE6bh.js) at APP_HOST's name and this checkout's
+//   good (4 Nov; the 10 Nov record below replaces it): the harness, this card's terminal build (entry /assets/index-C4hTE6bh.js) at APP_HOST's name and this checkout's
 //         signing page bundle as SIGN_HOST's, read at 15:36:52Z: the pair agreed on 9663681652 x 10^-8 published 3 s
 //         before, SIGN_HOST's connect-src names both; at 1440 and 390 a fresh price shows Bal $0.96, Buy on, and the tap
 //         asks for one pool.buy of 0.000517401 SOL
@@ -11,6 +11,12 @@
 //         checkout's); its kit's exact
 //         state schema refuses a pool entry carrying a price, so with a fresh or stale price the box reads signed out
 //         on the vault path and asks for nothing: FAIL.
+// Recorded again on 10 Nov (card live-check-pool-price-own-token), on the token's own page /token/solana/<DJT>, which
+// also reads the token and chain the page drew, and with the price read again until it is at most 20 s old (youngRead):
+//   good: the deployed APP_HOST (entry /assets/index-XvbkxnaR.js) and SIGN_HOST: DJT on Solana at both widths, a fresh
+//         price priced and tapped, a stale and no price shut: PASS;
+//   wrongChain: the same check opening / (its old path), when the live Trending column's top was "Anthropic"
+//         (0xecc4...1627) on Robinhood: the box is on the vault path, and the verdict names the token and chain: FAIL.
 // Planted from the good run: a wrong amount, a vault buy, Buy on or USD drawn with a stale price, a disagreeing or
 // stale read, the page's pair changed, a missing run.
 import assert from "node:assert/strict";
@@ -18,7 +24,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { expectedSol, judge, PAGE_PAIR, poolWith } from "./signpage-pool-price.mjs";
+import { MINT } from "./app-sell-mount.mjs";
+import { CHAIN, expectedSol, judge, PAGE_PAIR, poolWith, YOUNG_S, youngRead } from "./signpage-pool-price.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-pool-price.answers.json"), "utf8"));
@@ -52,13 +59,13 @@ test("recorded good answer: the page's pair agrees, a fresh price turns Buy on w
 test("recorded bad answer: the deployed app before this card reads a priced state as signed out: FAIL", () => {
   const r = judge(ANSWERS.bad);
   assert.equal(r.ok, false);
-  assert.ok(bad(r).some((l) => /^BAD desktop fresh: the box is on the vault path.*the tap asked for nothing, not one pool\.buy/.test(l)), r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /^BAD desktop fresh: .*the box is on the vault path.*the tap asked for nothing, not one pool\.buy/.test(l)), r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /^BAD phone stale: .*Buy is on with a stale price/.test(l)), r.lines.join("\n"));
   assert.ok(bad(r).some((l) => /^BAD SIGN_HOST's \/app\.js is this checkout's signing page bundle: served sha384-/.test(l)), r.lines.join("\n"));
 });
 
 test("planted: a pool.buy of another amount or chain, a vault buy, two asks, or none with a fresh price fail", () => {
-  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000517402")), /^BAD desktop fresh: its pool\.buy is 0\.000517402 SOL on solana, not 0\.000517401/);
+  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000517402")), /^BAD desktop fresh: its pool\.buy is 0\.000517402 SOL on solana, not 0\.000583828/);
   fails(mut((rec) => (run(rec, "phone", "fresh").asked[0].params.chain = "base")), /^BAD phone fresh: its pool\.buy is .* on base/);
   fails(mut((rec) => (run(rec, "desktop", "fresh").asked = [{ type: "buy", params: {} }])), /^BAD desktop fresh: the tap asked for buy, not one pool\.buy/);
   fails(mut((rec) => run(rec, "phone", "fresh").asked.push(run(rec, "phone", "fresh").asked[0])), /^BAD phone fresh: the tap asked for pool\.buy, pool\.buy/);
@@ -93,4 +100,45 @@ test("planted (review M1): a SIGN_HOST bundle that is not this checkout's fails,
   fails(mut((rec) => delete rec.signBundle), /^BAD SIGN_HOST's \/app\.js/);
   const app = mut((rec) => { rec.host = "app"; rec.signBundle.sha384 = "sha384-" + "A".repeat(64); });
   assert.equal(app.ok, true, app.lines.join("\n"));
+});
+
+test("recorded good answer: the check drew the Solana token it opened (DJT), on solana, in every run", () => {
+  assert.ok(ANSWERS.good.runs.every((r) => r.mint === MINT && r.chain === CHAIN), JSON.stringify(ANSWERS.good.runs.map((r) => [r.mint, r.chain])));
+});
+
+test("recorded wrong-chain answer: the old open path drew the live Trending top on Robinhood, and the verdict names the token and chain: FAIL", () => {
+  const r = judge(ANSWERS.wrongChain);
+  assert.equal(r.ok, false);
+  const named = bad(r).filter((l) => /the token page drew 0x\w+ on robinhood, not the Solana token DJT\w+ on solana/.test(l));
+  assert.equal(named.length, ANSWERS.wrongChain.runs.length, r.lines.join("\n"));
+});
+
+test("planted: a page of another token or chain, or one that names neither, fails with a line that says so", () => {
+  fails(mut((rec) => (run(rec, "desktop", "fresh").chain = "base")), /^BAD desktop fresh: the token page drew DJT\w+ on base, not the Solana token DJT\w+ on solana/);
+  fails(mut((rec) => (run(rec, "phone", "stale").mint = "So11111111111111111111111111111111111111112")), /^BAD phone stale: the token page drew So1\w+ on solana, not the Solana token DJT/);
+  fails(mut((rec) => (run(rec, "desktop", "none").chain = null)), /^BAD desktop none: the token page drew DJT\w+ on no chain/);
+  fails(mut((rec) => (run(rec, "phone", "fresh").mint = null)), /^BAD phone fresh: the token page drew no token on solana/);
+});
+
+test("youngRead: the page's read again until its price is at most 20 s old, the last read when none is, a failed read at once", async () => {
+  let t = 1_794_281_200_000;
+  const now = () => t;
+  const sleep = async (ms) => void (t += ms);
+  const at = (ages) => {
+    let n = 0;
+    return { calls: () => n, read: async () => ({ price: "1", expo: -8, published_s: Math.floor(t / 1000) - ages[Math.min(n++, ages.length - 1)] }) };
+  };
+  const old = at([51, 40, 12]); // the 10 Nov read: 51 s old, so stale before the phone run
+  const r = await youngRead({ read: old.read, now, sleep });
+  assert.equal(old.calls(), 3);
+  assert.equal(Math.floor(t / 1000) - r.published_s, 12);
+  assert.ok(12 <= YOUNG_S);
+  const always = at([50]);
+  const last = await youngRead({ read: always.read, now, sleep, waitMs: 9_000, everyMs: 3_000 });
+  assert.equal(always.calls(), 4);
+  assert.equal(last.price, "1");
+  let n = 0;
+  const failed = await youngRead({ read: async () => (n++, { error: "the two RPCs disagree" }), now, sleep });
+  assert.equal(n, 1);
+  assert.equal(failed.error, "the two RPCs disagree");
 });

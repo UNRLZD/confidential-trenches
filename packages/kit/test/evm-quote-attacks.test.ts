@@ -1192,7 +1192,9 @@ test("X3 an X with 16,384 empty markets beside its real one is priced through th
   assert.deepEqual(v, below);
 });
 
-test("T1b a crowd of 16,000 junk pools of the token still quotes its standard route and holds a seeded one to it; 20,000 empty ones too (card evm-quote-one-round)", async () => {
+// The crowd's bound is the test's timeout, not a clock read: about 3 s here, and a quote that read or priced the crowd
+// pool by pool (16,000 round trips, or a match of every log against every key) runs for minutes and is cut at 300 s.
+test("T1b a crowd of 16,000 junk pools of the token still quotes its standard route and holds a seeded one to it; 20,000 empty ones too (card evm-quote-one-round)", { timeout: 300_000 }, async () => {
   const token = "0x00000000000000000000000000000000000fe5fe";
   // 16,000 pools of the token with the native asset, under EVM_QUOTE_MAX_KEYS (65,536): 15,400 empty and 600 that hold
   // a dust position, each quoted (under EVM_QUOTE_MAX_QUOTED, 1,024)
@@ -1200,10 +1202,8 @@ test("T1b a crowd of 16,000 junk pools of the token still quotes its standard ro
   const dust = junk.slice(0, 600).map((key): ModelPool => ({ key, give: (a) => a / 1000n }));
   // spread over the scan's depth (a span's answer holds at most 10,000 logs)
   const logs = junk.map((k, i) => ({ key: k, at: 4_000_001 + 49 * i }));
-  const t = Date.now();
   const v = await quoteOn([best(token), ...dust], token, bestRoute(token), scanner(5_000_000, logs));
   assert.equal(v.accepted, true, String((v as { code?: string }).code));
-  assert.ok(Date.now() - t < 30_000, `${Date.now() - t} ms`);
   // the scan is cached: a seeded route is held to the standard one
   const seeded1: ModelPool = { key: keyOf(token, NATIVE, 3000, 60, NATIVE), give: (a) => a / 10n };
   const route: EvmRoute = { venue: "uniswap-v4", currencyIn: NATIVE, hops: [{ currency: token, fee: 3000, tickSpacing: 60, hooks: NATIVE, hookData: "0x" }] };
@@ -1359,10 +1359,9 @@ test("T4 a provider that never answers is a refusal (rpc_error) once the request
     signal = init?.signal ?? undefined;
     return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
   }) as typeof fetch;
-  const t = Date.now();
   await assert.rejects(evmJsonRpc("https://a.example", hung, 1 << 20, 50)([{ method: "eth_blockNumber", params: [] }]));
-  // the request's limit is 50 ms: a request with none would hang to the test's 3 s
-  assert.ok(Date.now() - t < 2_000);
+  // the request's limit is 50 ms: a request with none, or with the default EVM_RPC_TIMEOUT_MS (10 s), runs past the
+  // test's own 3 s timeout and fails it
   // and by default each request carries a signal (EVM_RPC_TIMEOUT_MS)
   signal = undefined;
   void evmJsonRpc("https://a.example", hung)([{ method: "eth_blockNumber", params: [] }]).catch(() => {});

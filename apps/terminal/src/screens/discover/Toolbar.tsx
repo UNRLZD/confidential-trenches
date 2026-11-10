@@ -36,6 +36,8 @@ const PATHS: Record<string, ReactNode> = {
   check: <path d="M2.5 6.2l2.3 2.3 4.7-5" />,
   shield: <path d="M6 1.2l4 1.6v3c0 2.4-1.7 4.2-4 5-2.3-.8-4-2.6-4-5v-3z" />,
   pause: <path d="M4 2.5v7M8 2.5v7" />,
+  // the column filter panel's funnel (card app-discover-filter-panel): R5 app.js P.ic funnel
+  funnel: <path d="M1.5 2h9L7 6.2V10L5 9V6.2z" />,
 };
 
 export function Ic({ k, size = 12 }: { k: keyof typeof PATHS; size?: number }) {

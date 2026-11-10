@@ -387,7 +387,9 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held\);/);
+  // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists on the one GeckoTerminal budget
+  assert.match(main, /const held = heldFrom\(token, evmLists, gecko\);/);
   // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
   // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
   assert.match(main, /const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept \}\)\]\)\);/);
@@ -1035,7 +1037,8 @@ function getAs(port: number, path: string, xff: string): Promise<number> {
   });
 }
 /** The helper as deployed, on a stub of the public Solana endpoint (100 a 10 s, 40 a 10 s for one method, rolling) and
- * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` while they run. */
+ * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` once they have all
+ * answered, so their reads are spent however slow the machine, inside the same 10 s window. */
 async function tokenPagesThen(pages: number, then: (port: number) => Promise<number[]>) {
   const all: number[] = [];
   const per = new Map<string, number[]>();
@@ -1075,9 +1078,8 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
     // (card helper-page-jup-429, proxy.ts PACED), so the pages below are read at once, not behind the lists' first build
     await lists.get();
     const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
-    await new Promise((r) => setTimeout(r, 300));
-    const st = await then(port);
     const ps = await Promise.all(opened);
+    const st = await then(port);
     h.closeAllConnections();
     await new Promise<void>((r) => h.close(() => r()));
     return { refused, st, ps };
