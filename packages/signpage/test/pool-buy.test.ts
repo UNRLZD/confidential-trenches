@@ -83,6 +83,8 @@ const poolAccount = (): Uint8Array => {
 type World = {
   host: PoolBuyHost;
   log: string[];
+  /** every getMultipleAccounts read's key list, in order */
+  multi: (readonly string[])[];
   state: () => string;
   sentTx: () => Uint8Array | null;
   /** every send the helper got, busy ones included */
@@ -173,6 +175,8 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const coin = plant.coin ?? "pump";
   const s = await setup(coin, SPEND);
   const log: string[] = [];
+  /** Every getMultipleAccounts read's key list, in order (the reference's and the venue's). */
+  const multi: (readonly string[])[] = [];
   let st = "HELD";
   let sent: Uint8Array | null = null;
   const sends: Uint8Array[] = [];
@@ -225,7 +229,10 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         tx.set(base58.decode(SIG), 1);
         return at(tx);
       }
-      if (method === "getMultipleAccounts") return venue(method, params);
+      if (method === "getMultipleAccounts") {
+        multi.push(params[0] as readonly string[]);
+        return venue(method, params);
+      }
       if (method === "getAccountInfo") {
         const a = accounts(p)[params[0] as string];
         if (plant.sizeSkewOnce && p === 1 && params[0] === POOL && !skewed) {
@@ -321,7 +328,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
     wait: async (ms: number) => void waits.push(ms),
     pick: () => 2,
   };
-  return { host, log, state: () => st, sentTx: () => sent, sends, waits, E: s.E, minOut: s.minOut, curve: (s.venue as { curve: string }).curve };
+  return { host, log, multi, state: () => st, sentTx: () => sent, sends, waits, E: s.E, minOut: s.minOut, curve: (s.venue as { curve: string }).curve };
 }
 
 const ASK: PoolAsk = { kind: "pool.buy", chain: "solana", token: fx.pump.mint, amount: SPEND, slippageBps: 300, decimals: 6 };
@@ -390,11 +397,16 @@ test("a buy no pinned generation fits is refused no_table_fits before the claim,
   assert.deepEqual(await runPoolBuy(w.host, ASK_PS), { error: "no_table_fits" });
   nothingMoved(w);
 });
-test("a venue with no pinned table is refused venue_not_pinned: read, never claimed, taken, seeded, signed or sent (mutants A8, A8b)", async () => {
+test("a venue with no pinned table is refused venue_not_pinned once the reference names it, before the venue's own read: never claimed, taken, seeded, signed or sent (mutants A8, A8b)", async () => {
   const w = await world({ tables: { pumpswap: [OTHER_TABLE] } });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "venue_not_pinned" });
   nothingMoved(w);
-  assert.ok(w.log.includes("0:getMultipleAccounts"), "the venue was read: the refusal names the venue the quote picked");
+  // review P3-5 of the pin: the coin's venue is known only from its reference quote, read last on purpose (the quote's
+  // age counts from it), so the reads before it stand; the venue's own accounts are not read: the reference's two key
+  // lists (the curve's and PumpSwap's candidates) on each RPC are the only multi-account reads (6 at bf69679c: the
+  // venue's read on both RPCs after them)
+  assert.equal(w.multi.length, 4, JSON.stringify(w.multi));
+  assert.equal(new Set(w.multi.map((l) => l.join())).size, 2);
 });
 test("no table pinned, or a pin that is not a list of addresses: refused not_allowed before any read (mutant A2)", async () => {
   for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }]) {

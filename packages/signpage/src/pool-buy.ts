@@ -15,7 +15,8 @@
 //   venue that gives the most; readSolanaPoolBuyVenue reads it; min out is that venue's expected out less the ask's
 //   slippage. The blockhash is read on one RPC (its slot is the device's own slot for the quote's age) and must be valid
 //   on the other. The lookup tables are the pin's, a list of generations per venue (card sol-pool-venue-tables), each
-//   read on both; a venue with no pinned table is refused venue_not_pinned before the pick, and the build (the kit's
+//   read on both; a venue with no pinned table is refused venue_not_pinned once the reference names it, before the
+//   venue's own read and the pick, and the build (the kit's
 //   buildSolanaPoolBuyOnTables) loads the venue's generation that makes the smallest transaction; none that fits 1,232
 //   bytes is refused no_table_fits before the claim and the seed. A pinned table that holds no account of the venue's
 //   program is no generation of it (the kit passes over it); when none is made for the venue it has no table here,
@@ -491,10 +492,13 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const ref = await pageReference(h.rpcs, { side: "buy", token, amount: ask.amount });
       const best = ref?.pools.filter((p) => p.venue === "pump-curve" || p.venue === "pumpswap").sort((x, y) => (x.expectedOut > y.expectedOut ? -1 : 1))[0];
       if (!ref || !best) return no("quote_check_failed");
-      const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, best.venue as "pump-curve" | "pumpswap", token, ...(h.pick ? [h.pick] : []));
-      // the venue's own tables: a venue the page pins none for is refused before the pick, so no note is claimed
-      const own = tableReads.get(venue.kind);
+      // the venue's own tables: a venue the page pins none for is refused as soon as the reference names it, before its
+      // own accounts are read and before the pick, so no note is claimed (the reads before the reference stand: it is
+      // read last, as the quote's age counts from it)
+      const kind = best.venue as "pump-curve" | "pumpswap";
+      const own = tableReads.get(kind);
       if (own === undefined || own.length === 0) return no("venue_not_pinned");
+      const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
       const bh = await blockhashOf(h.rpcs);
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
