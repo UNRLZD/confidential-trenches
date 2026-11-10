@@ -34,6 +34,7 @@ export const CHANGED = [
   "scripts/live-checks/app-header-first-paint-auth.mjs",
   "scripts/live-checks/app-header-search-chain.mjs",
   "scripts/live-checks/app-host-gate.mjs",
+  "scripts/live-checks/app-legend-holds-still.mjs",
   "scripts/live-checks/app-list-age.mjs",
   "scripts/live-checks/app-quick-buy-one-tap.mjs",
   "scripts/live-checks/app-release-sri.mjs",
