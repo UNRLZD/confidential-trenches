@@ -240,11 +240,12 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint): P
 }
 
 /** What this buy is, from its two RPCs' reads: the nullifier's release the same on both (one each, the same block,
- *  transaction, index and fields) is this buy's when it pays W and the pinned fee recipient the chunk less the fee, as
- *  a Bought of the token at least min out (filled) or a Withdrawn (the swap failed: W holds the ETH); any other release
+ *  transaction, index and fields) is this buy's when it pays W and the pinned fee recipient the chunk, at a fee up to the
+ *  proof's cap (the sender picks the fee: PrivacyPool.sol _release refuses only one over the relay data's feeCap), as a
+ *  Bought of the token at least min out (filled) or a Withdrawn (the swap failed: W holds the ETH); any other release
  *  of the nullifier spent the note elsewhere, so this buy can never land (not_landed). No release on either, and both
  *  RPCs' newest block past the proof's deadline: the pool refuses it from then on (not_landed). Else null: read again. */
-export type EvmBuyWant = { nullifier: bigint; w: string; feeRecipient: string; token: string; minOut: bigint; value: bigint; fee: bigint; deadlineMs: bigint };
+export type EvmBuyWant = { nullifier: bigint; w: string; feeRecipient: string; token: string; minOut: bigint; value: bigint; feeCap: bigint; deadlineMs: bigint };
 export type EvmBuyVerdict = { end: "filled"; release: EvmRelease & { out: bigint } } | { end: "withdrawn"; release: EvmRelease } | { end: "not_landed"; release: EvmRelease | null } | null;
 const sameRelease = (a: EvmRelease, b: EvmRelease): boolean =>
   a.kind === b.kind && a.block === b.block && a.tx === b.tx && a.index === b.index && a.recipient === b.recipient && a.feeRecipient === b.feeRecipient && a.value === b.value && a.fee === b.fee && a.nullifier === b.nullifier && a.token === b.token && a.out === b.out;
@@ -253,7 +254,7 @@ export function evmBuyVerdict(reads: readonly [EvmReleaseRead, EvmReleaseRead], 
   if (a.length === 0 && b.length === 0) return reads.every((r) => r.head.timeMs > want.deadlineMs) ? { end: "not_landed", release: null } : null;
   if (a.length !== 1 || b.length !== 1 || !sameRelease(a[0]!, b[0]!)) return null;
   const x = a[0]!;
-  const paid = x.recipient === lower(want.w) && x.feeRecipient === lower(want.feeRecipient) && x.value === want.value && x.fee === want.fee;
+  const paid = x.recipient === lower(want.w) && x.feeRecipient === lower(want.feeRecipient) && x.value === want.value && x.fee <= want.feeCap;
   if (paid && x.kind === "bought" && x.token === lower(want.token) && x.out !== undefined && x.out >= want.minOut) return { end: "filled", release: x as EvmRelease & { out: bigint } };
   if (paid && x.kind === "withdrawn") return { end: "withdrawn", release: x };
   return { end: "not_landed", release: x };

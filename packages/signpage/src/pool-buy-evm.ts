@@ -30,10 +30,10 @@
 //   block read before the send, on both pool RPCs, asked by the pool's address and the events' topics only; this buy's
 //   release is found on the device by the proof's nullifier. Ends:
 //     filled: both RPCs show one Bought for the nullifier, the same in the same block, paying W the token, out at least
-//       the min out W signed, of the chunk less the fee; W's holding is completed with what W received, and filled
-//       names that transaction;
+//       the min out W signed, of the chunk at a fee up to the proof's (the sender picks the fee, at most the relay
+//       data's cap); W's holding is completed with what W received, and filled names that transaction;
 //     refused, with the release's transaction: both show a Withdrawn (the swap failed in the pool's own call and W got
-//       the chunk less the fee in ETH): that ETH is written owed back to the user (EVM_OWED_BACK_KEY) for the sell and
+//       the chunk less the fee charged, in ETH): that ETH is written owed back to the user (EVM_OWED_BACK_KEY) for the sell and
 //       withdraw cards to return, and the holding marked withdrawn; the buy did not fill;
 //     not_landed: both show another release of the nullifier (the note spent elsewhere), or both RPCs' newest block is
 //       past the proof's deadline with no release of it on either (the pool refuses it from then on: PrivacyPool.sol
@@ -262,7 +262,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         }
       }
       h.sent?.();
-      const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, fee, deadlineMs: relay.deadlineMs };
+      const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, feeCap: fee, deadlineMs: relay.deadlineMs };
       return { watch: { want, from, holding, w: w.address } };
     });
     if ("answer" in out) return out.answer;

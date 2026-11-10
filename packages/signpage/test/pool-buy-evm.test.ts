@@ -261,6 +261,15 @@ test("(ruling 2) never not_landed before the deadline on both RPCs: a send with 
   assert.ok(stuck.seen.late.every((x) => (x as { stage: string }).stage !== "not_landed"));
 });
 
+test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or owed back by its own fee", async () => {
+  const { h, seen } = host(both([release({ fee: FEE / 2n, out: 41_000_000n })]));
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.records.at(-1)![1].received, "41");
+  const free = host(both([release({ kind: "withdrawn", fee: 0n })]));
+  assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(free.seen.owed[0]!.wei, CHUNK.toString(), "the chunk less the fee charged");
+});
+
 test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, W's ETH (the chunk less the fee) is written owed back, and the answer names the release", async () => {
   const { h, seen } = host(both([release({ kind: "withdrawn" })]));
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });

@@ -300,7 +300,7 @@ test("release read: a log answer that is not a list, or a block with no number, 
 // ---- evmBuyVerdict ----
 
 const DEADLINE = 1_700_000_000_000n;
-const WANT: EvmBuyWant = { nullifier: NULLIFIER, w: W, feeRecipient: FEE_TO, token: TOKEN, minOut: MIN_OUT, value: VALUE, fee: FEE, deadlineMs: DEADLINE };
+const WANT: EvmBuyWant = { nullifier: NULLIFIER, w: W, feeRecipient: FEE_TO, token: TOKEN, minOut: MIN_OUT, value: VALUE, feeCap: FEE, deadlineMs: DEADLINE };
 const readOf = (releases: EvmRelease[], timeMs = DEADLINE - 1n): EvmReleaseRead => ({ head: { number: HEAD, timeMs }, releases });
 const both = (a: EvmRelease[], b: EvmRelease[] = a, ta?: bigint, tb?: bigint) => evmBuyVerdict([readOf(a, ta), readOf(b, tb)], WANT);
 
@@ -313,11 +313,18 @@ test("verdict: the two reads differing in any one field of the release: null", (
   for (const c of changed) assert.equal(both([BOUGHT], [{ ...BOUGHT, ...c }]), null, JSON.stringify(c, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 });
 
-test("verdict: a Bought on both that pays anyone else, another token, value or fee: not_landed with the release", () => {
-  const changed: Partial<EvmRelease>[] = [{ recipient: OTHER_W }, { feeRecipient: OTHER_FEE_TO }, { token: OTHER_TOKEN }, { value: VALUE + 1n }, { fee: FEE - 1n }];
+test("verdict: a Bought on both that pays anyone else, another token or value, or a fee over the cap: not_landed with the release", () => {
+  const changed: Partial<EvmRelease>[] = [{ recipient: OTHER_W }, { feeRecipient: OTHER_FEE_TO }, { token: OTHER_TOKEN }, { value: VALUE + 1n }, { fee: FEE + 1n }];
   for (const c of changed) {
     const x = { ...BOUGHT, ...c };
     assert.deepEqual(both([x]), { end: "not_landed", release: x }, Object.keys(c)[0]);
+  }
+});
+
+test("verdict: the sender's fee is its pick up to the cap: the cap, less, or none is filled", () => {
+  for (const fee of [FEE, FEE - 1n, 0n]) {
+    const x = { ...BOUGHT, fee };
+    assert.deepEqual(both([x]), { end: "filled", release: x }, String(fee));
   }
 });
 
