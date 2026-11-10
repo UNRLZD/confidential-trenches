@@ -91,16 +91,16 @@ test("one failed read on dRPC's public endpoint: the fee is read again on that s
   assert.ok(lines[0]!.includes(DEPTH), lines[0]);
 });
 
-test("a side whose every provider fails the read: the fee route still fails (503 upstream, no throttle), and that answer writes one log line naming the read, each host and its status, never a key", async (t) => {
+test("a read only one operator can answer: the fee route still fails (503 upstream, no throttle), and that answer writes one log line naming the read, each host and its status, never a key", async (t) => {
   let down = true;
-  const calls = stub(t, (host, method) => (down && (host === "robinhood.drpc.org" || host === "lb.drpc.live") && method === "eth_call" ? UNKNOWN_STATE : null));
+  stub(t, (host, method) => (down && host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
   const lines: string[] = [];
   const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l)).get(PIN)!;
   await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
   assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27/);
+  assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+  assert.ok(!lines[0]!.includes("rpc.mainnet.chain.robinhood.com"), "the other side's operator is never asked for the first side");
   assert.ok(!lines[0]!.includes(FAKE), lines[0]);
-  assert.ok(!calls.some((c) => c.host.endsWith("quiknode.pro")), "a spare of side B's never answers for side A");
   // the failed read is not held: the next caller reads again, and once the provider answers, gets the fee
   down = false;
   assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
@@ -111,22 +111,38 @@ test("the start's check reads the configured pair alone: a first provider that c
   await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async () => {}), (e: Error) => /^POOL_EVM_RPCS_ROBINHOOD: robinhood\.drpc\.org: no answer to 0x4a2b75c8 .*RPC error 27/.test(e.message));
 });
 
-test("the two sides never share an operator: a spare of a side's operator stays on that side, another company's goes to the side with fewer, the pair's own URL is not a spare", () => {
-  const sides = (pair: [string, string], spares: string[]) => evm.evmPoolSides(pair, spares.map((url, i) => ({ url, name: `s${i}` }))).map((side) => side.map((p) => p.url));
+test("one list of seats, each with its operator: the pair, the keyed URLs, the kit's quote providers, a URL listed before dropped; dRPC's keyed seats are dRPC's", () => {
+  const seats = (pair: [string, string], keyed: string[], listed: readonly string[]) => evm.evmPoolSeats(pair, keyed.map((url, i) => ({ url, name: `s${i}` })), listed).map((p) => `${new URL(p.url).host} ${p.operator}`);
   const drpc = [1, 2, 3].map((k) => `https://lb.drpc.live/robinhood/${FAKE}${k}`);
-  // Robinhood: dRPC's keys go with dRPC's public endpoint, QuickNode with Robinhood's own
-  assert.deepEqual(sides([DRPC!, OWN!], [SPARE_QN, ...drpc]), [[DRPC, ...drpc], [OWN, SPARE_QN]]);
-  // Base: neither of the kit's pair has a keyed spare of its company; QuickNode first, to the first side, then dRPC's three to the second
-  const [baseA, baseB] = evmPoolVenues().base.feeProviders!;
-  const baseDrpc = drpc.map((u) => u.replace("robinhood", "base"));
-  const baseQn = SPARE_QN.replace("robinhood", "base");
-  assert.deepEqual(sides([baseA!, baseB!], [baseQn, ...baseDrpc]), [[baseA, baseQn], [baseB, ...baseDrpc]]);
-  // the pair's own URL set again as a key is no second provider
-  assert.deepEqual(sides([DRPC!, OWN!], [`${DRPC}/`, OWN!]), [[DRPC], [OWN]]);
-  for (const [a, b] of [sides([DRPC!, OWN!], [SPARE_QN, ...drpc]), sides([baseA!, baseB!], [baseQn, ...baseDrpc])]) {
-    const ops = (side: string[]) => new Set(side.map((u) => new URL(u).hostname.split(".").slice(-2).join(".").replace("drpc.live", "drpc.org")));
-    assert.equal([...ops(a!)].filter((o) => ops(b!).has(o)).length, 0);
-  }
+  assert.deepEqual(seats([DRPC!, OWN!], [SPARE_QN, ...drpc], evmPoolVenues().robinhood.providers!), [
+    "robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com", "made-up.robinhood-mainnet.quiknode.pro quiknode.pro",
+    "lb.drpc.live drpc.org", "lb.drpc.live drpc.org", "lb.drpc.live drpc.org",
+    "robinhood-rpc.publicnode.com publicnode.com", "robinhood.rpc.blxrbdn.com blxrbdn.com", "rpc-robinhood.globalstake.io globalstake.io",
+  ]);
+  // the pair's own URL set again as a key is no second seat
+  assert.deepEqual(seats([DRPC!, OWN!], [`${DRPC}/`, OWN!], []), ["robinhood.drpc.org drpc.org", "rpc.mainnet.chain.robinhood.com robinhood.com"]);
+});
+
+test("a read on both sides never asks one operator for both: each side claims an operator before it asks it, and a side with none left fails", async () => {
+  const seat = (name: string, operator: string, answer: () => Promise<unknown>): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator, rpc: async () => answer() });
+  const run = async (fails: ReadonlySet<string>) => {
+    const seats = ["x", "y", "z"].map((op) => seat(op, op, async () => {
+      if (fails.has(op)) throw new Error("HTTP 502");
+      return `0x${op.charCodeAt(0).toString(16)}`;
+    }));
+    const pair = evm.evmReadPair(seats, ["x", "y"], { log: () => {} });
+    return pair.both("eth_blockNumber", []);
+  };
+  // x fails: side 0 goes past y (side 1's) to z
+  let [p, q] = await run(new Set(["x"]));
+  assert.deepEqual([p.ok && p.operator, q.ok && q.operator], ["z", "y"]);
+  // x and y fail: both go for z, one gets it, the other has none left
+  [p, q] = await run(new Set(["x", "y"]));
+  assert.equal([p, q].filter((r) => r.ok).length, 1);
+  assert.equal([p, q].filter((r) => r.ok && r.operator === "z").length, 1);
+  // a side's one read never sees the other's claims: one(0) goes on to y
+  const pair = evm.evmReadPair([seat("x", "x", () => Promise.reject(new Error("HTTP 502"))), seat("y", "y", async () => "0x1")], ["x", "y"], { log: () => {} });
+  assert.equal(await pair.one(0, "eth_blockNumber", []), "0x1");
 });
 
 // A read past its budget would wait on the hung spare forever: the test's own timeout is the bound, and the refusal names
@@ -134,25 +150,26 @@ test("the two sides never share an operator: a spare of a side's operator stays 
 test("a read tries its side's next provider only within its budget, never on the chain's own answer, never on a held spare; all failed, it throws the first provider's words first", { timeout: 10_000 }, async () => {
   const lines: string[] = [];
   const asked: string[] = [];
-  const p = (name: string, answer: () => Promise<unknown>, skip?: () => boolean) => ({ name, url: `https://${name}.example/${FAKE}`, rpc: async () => (asked.push(name), answer()), ...(skip ? { skip } : {}) });
+  const p = (name: string, answer: () => Promise<unknown>, skip?: () => boolean) => ({ name, url: `https://${name}.example/${FAKE}`, operator: name, rpc: async () => (asked.push(name), answer()), ...(skip ? { skip } : {}) });
+  const side = (seats: evm.EvmSeat[], o: { log: (l: string) => void; budgetMs?: number }): evm.EvmRpc => (method, params) => evm.evmReadPair(seats, [seats[0]!.operator, "none"], o).one(0, method, params);
   const fail = (m: string) => () => Promise.reject(new Error(m));
   const never = () => new Promise<never>(() => {});
   // a spare that hangs: the read ends at its budget, and the spare after it is not asked
-  const r1 = evm.evmFailoverRpc([p("a", fail("HTTP 503")), p("hang", never), p("late", async () => "0x1")], { log: (l) => void lines.push(l), budgetMs: 50 });
+  const r1 = side([p("a", fail("HTTP 503")), p("hang", never), p("late", async () => "0x1")], { log: (l) => void lines.push(l), budgetMs: 50 });
   await assert.rejects(r1("eth_blockNumber", []), (e: Error) => /^HTTP 503 \(eth_blockNumber/.test(e.message) && e.message.includes("hang: no answer in the read's 50 ms"));
   assert.deepEqual(asked, ["a", "hang"]);
   // the chain's own answer (a revert) is the same on any provider: thrown at once
   asked.length = 0;
-  const r2 = evm.evmFailoverRpc([p("a", fail("RPC error 3: execution reverted")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
+  const r2 = side([p("a", fail("RPC error 3: execution reverted")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
   await assert.rejects(r2("eth_estimateGas", [{}, "pending"]), (e: Error) => e.message === "RPC error 3: execution reverted");
   assert.deepEqual(asked, ["a"]);
   // a held spare is passed over
   asked.length = 0;
-  const r3 = evm.evmFailoverRpc([p("a", fail("HTTP 502")), p("held", async () => "0x2", () => true), p("c", async () => "0x3")], { log: (l) => void lines.push(l) });
+  const r3 = side([p("a", fail("HTTP 502")), p("held", async () => "0x2", () => true), p("c", async () => "0x3")], { log: (l) => void lines.push(l) });
   assert.equal(await r3("eth_blockNumber", []), "0x3");
   assert.deepEqual(asked, ["a", "c"]);
   // a throttled first provider whose spares fail too stays a throttle (429 with its wait), as it was with no spare
-  const r4 = evm.evmFailoverRpc([p("a", fail("HTTP 429")), p("b", fail("HTTP 502"))], { log: () => {} });
+  const r4 = side([p("a", fail("HTTP 429")), p("b", fail("HTTP 502"))], { log: () => {} });
   await assert.rejects(r4("eth_blockNumber", []), (e: Error) => throttleOf(e, true) > 0);
   assert.ok(lines.every((l) => !l.includes(FAKE)), lines.join("\n"));
 });
@@ -244,9 +261,10 @@ test("only one operator alive: every read is refused 503 upstream (no throttle),
   const calls = chainStub(t, (host) => (host === "rpc.mainnet.chain.robinhood.com" ? null : down));
   const lines: string[] = [];
   await assert.rejects(sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
-  assert.equal(lines.length, 1, lines.join("\n"));
-  assert.match(lines[0]!, /^evm robinhood: fee upstream: /);
-  assert.ok(!lines[0]!.includes(FAKE), lines[0]);
+  const up = lines.filter((l) => /^evm robinhood: fee upstream: /.test(l));
+  assert.equal(up.length, 1, lines.join("\n"));
+  assert.ok(lines.every((l) => l === up[0] || / answered$/.test(l)), lines.join("\n"));
+  assert.ok(!up[0]!.includes(FAKE), up[0]);
   assert.ok(!calls.some((c) => c.method === "eth_call"), "no state read once the block could not be read on two operators");
 });
 
