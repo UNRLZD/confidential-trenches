@@ -94,6 +94,8 @@ test("one failed read on dRPC's public endpoint: the fee is read again on that s
 test("a read only one operator can answer: the fee route still fails (503 upstream, no throttle), and that answer writes one log line naming the read, each host and its status, never a key", async (t) => {
   let down = true;
   stub(t, (host, method) => (down && host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
+  let at = NOW_MS;
+  Date.now = () => at;
   const lines: string[] = [];
   const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l)).get(PIN)!;
   await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
@@ -101,8 +103,11 @@ test("a read only one operator can answer: the fee route still fails (503 upstre
   assert.match(lines[0]!, /^evm robinhood: fee upstream: .*eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400: RPC error 27[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
   assert.ok(!lines[0]!.includes("rpc.mainnet.chain.robinhood.com"), "the other side's operator is never asked for the first side");
   assert.ok(!lines[0]!.includes(FAKE), lines[0]);
-  // the failed read is not held: the next caller reads again, and once the provider answers, gets the fee
+  // the failed read answers its period's callers for EVM_FEE_MISS_MS (review of d190f62f, A-4), then the next caller
+  // reads again, and once the provider answers, gets the fee
   down = false;
+  await assert.rejects(s.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
+  at += evm.EVM_FEE_MISS_MS;
   assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
 });
 
@@ -305,7 +310,13 @@ test("a read each side fails, one side on a throttle: the answer stays a throttl
 // plant answers through a public quote seat (publicnode) while dRPC's node is behind (its block reads null), so the
 // search walks to publicnode
 const PUBLIC = { POOL_EVM_ADDRESS_ROBINHOOD: PIN, POOL_EVM_SENDER_KEY_ROBINHOOD: KEY }; // no keyed seat: the public operators alone
-const DRPC_BEHIND = (host: string, method: string, params: unknown[]): Plant => (DRPC_HOSTS.has(host) && method === "eth_getBlockByNumber" && params[0] !== "latest" ? { result: null } : null);
+// dRPC's node behind: its newest block 20 blocks before the period's first, every block after it unknown (null)
+const DRPC_HEAD = FIRST - 20;
+const DRPC_BEHIND = (host: string, method: string, params: unknown[]): Plant => {
+  if (!DRPC_HOSTS.has(host) || method !== "eth_getBlockByNumber") return null;
+  if (params[0] === "latest") return { result: block(DRPC_HEAD) };
+  return Number(BigInt(params[0] as string)) > DRPC_HEAD ? { result: null } : null;
+};
 test("F1: a seat naming the period's first block's true hash with a base fee 1000 times the chain's is refused (two operators agree on the hash, number, time and base fee), never published", async (t) => {
   chainStub(t, (host, method, params) => {
     if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") return { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), baseFeePerGas: `0x${(1000n * GWEI).toString(16)}` } };
@@ -499,4 +510,72 @@ test("F1e: a search that lands past the period's first block (a seat naming the 
     return DRPC_BEHIND(host, method, params);
   });
   await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+
+// review of d190f62f (A-1): the search starts from the newer of two operators' newest blocks. On the live chain
+// robinhood.drpc.org, side a's first seat, ran up to 20 s behind; its "latest" alone put the period's first block in the
+// future, and the fee was answered "no fee yet" though every other operator held it
+test("A-1: dRPC 20 s behind (its newest block 10 s before the period's start) and every other operator at the head: the fee is read on the first try", async (t) => {
+  const CUR = EPOCH + 60_000; // the period now running, its first block HEAD - 40
+  const top = HEAD - 30; // the chain's head, 10 s into the period
+  const lag = top - 20;
+  chainStub(t, (host, method, params) => {
+    if (method !== "eth_getBlockByNumber") return null;
+    const head = DRPC_HOSTS.has(host) ? lag : top;
+    if (params[0] === "latest") return { result: block(head) };
+    return Number(BigInt(params[0] as string)) > head ? { result: null } : null;
+  });
+  const f = await sendersOf(PUBLIC, []).get(PIN)!.fee(CUR + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${(CUR / 1000 - S).toString(16)}`);
+});
+
+// review of d190f62f (A-3): "known transaction" is a node's word for one it holds; "unknown transaction type" is a refusal
+test("A-3: a send refused 'unknown transaction type' is a refusal, never the send accepted; 'known transaction' is", async () => {
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: unknown transaction type") }), false);
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: Unknown Transaction Type 0x7f") }), false);
+  assert.equal(evm.evmSendAccepted({ status: "rejected", reason: new Error("RPC error -32000: known transaction: 0xab") }), true);
+});
+
+// review of d190f62f (A-2): a search on side a that names a block the two operators do not agree on (a node of dRPC's
+// balancer on a short fork, once) runs once more on side b, whose block the two then agree on: the fee is answered
+test("A-2: the first search names a block of a fork dRPC answered once; the search runs again on the other side and the fee is answered", async (t) => {
+  const seen = new Set<number>();
+  chainStub(t, (host, method, params) => {
+    if (host !== "robinhood.drpc.org" || method !== "eth_getBlockByNumber" || params[0] === "latest") return null;
+    const n = Number(BigInt(params[0] as string));
+    if (n < FIRST || seen.has(n)) return null;
+    seen.add(n);
+    return { result: { ...block(n), hash: `0x${(n + 7).toString(16).padStart(64, "f")}` } };
+  });
+  const f = await sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+});
+test("A-2: the search on the other side meets the same disagreement: refused; the newest blocks read once, on two operators", async (t) => {
+  const calls = chainStub(t, (host, method, params) => (host === "rpc.mainnet.chain.robinhood.com" && method === "eth_getBlockByNumber" ? { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), hash: `0x${"e".repeat(64)}` } } : null));
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+  assert.equal(calls.filter((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest").length, 2, "the newest block read once, on two operators");
+});
+
+// review of d190f62f (A-4): a fee read that failed is kept EVM_FEE_MISS_MS before it is read again, so one caller asking
+// for every unreadable period of a proof's life over and over makes one read per period, not one per request
+test("A-4: 30 requests for 10 unreadable periods within 2 s read each period once; 2 s later a request reads again", async (t) => {
+  const calls = chainStub(t, (_host, method) => (method === "eth_call" ? UNKNOWN_STATE : null));
+  let at = NOW_MS;
+  Date.now = () => at;
+  const s = sendersOf(PUBLIC, []).get(PIN)!;
+  await assert.rejects(s.fee(EPOCH + 1));
+  const one = calls.length;
+  assert.ok(one > 0);
+  calls.length = 0;
+  for (let i = 0; i < 30; i++) {
+    at = NOW_MS + i * 60;
+    await assert.rejects(s.fee(EPOCH + 60_000 - (i % 10) * 60_000 + 1));
+  }
+  assert.ok(calls.length <= 10 * one, `${calls.length} provider calls for 30 requests (one read: ${one})`);
+  calls.length = 0;
+  at = NOW_MS + 30 * 60 + evm.EVM_FEE_MISS_MS;
+  await assert.rejects(s.fee(EPOCH + 1));
+  assert.ok(calls.length > 0, "read again once the miss is 2 s old");
 });

@@ -173,7 +173,7 @@ export const MUTANTS = [
   [EVM, "export const evmChainAnswered = (e: unknown): boolean => /^RPC error (3: |-32000: execution reverted)/i.test(", "export const evmChainAnswered = (e: unknown): boolean => /^RPC error (3: |-32000: execution reverted)/.test(", T4, "each wording of a block or state the node lacks"],
   [EVM, "  if (evmChainAnswered(e)) return true;\n  const m = String", "  const m = String", T4, "F2: a code-3 revert or a -32000 'execution reverted'"],
   [EVM, "      if (!evmChainAnswered(e) && throttleOf(e, true) > 0) {", "      if (throttleOf(e, true) > 0) {", T4, "F2: a code-3 revert or a -32000 'execution reverted'"],
-  [EVM, "  x.status === \"fulfilled\" || /already known|already imported|known transaction/i.test(", "  x.status === \"fulfilled\" || /already imported|known transaction/i.test(", T2, "a withdraw whose send every provider answers"],
+  [EVM, "  x.status === \"fulfilled\" || /already known|already imported|\\bknown transaction/i.test(", "  x.status === \"fulfilled\" || /already imported|\\bknown transaction/i.test(", T2, "a withdraw whose send every provider answers"],
   [EVM, "(await settled(\"eth_sendRawTransaction\", [raw])).map((x) => (evmSendAccepted(x) && x.status === \"rejected\" ? { status: \"fulfilled\" as const, value: null } : x));", "(await settled(\"eth_sendRawTransaction\", [raw]));", T2, "a withdraw whose send every provider answers"],
   [EVM, "x.timestamp !== block.timestamp || x.baseFeePerGas !== block.baseFeePerGas)", "x.timestamp !== block.timestamp)", T4, "F1: a seat naming the period's first block's true hash"],
   [EVM, "(prior !== null && prior.some((x) => x.timestamp >= seconds || x.number !== block.number - 1n))", "false", T4, "F1e: a search that lands past the period's first block"],
@@ -189,6 +189,18 @@ export const MUTANTS = [
   [EVM, "  if (reserve) holds.reserve(url);", "  holds.reserve(url);", T2, "review L-3"],
   // a sale's receipts count as two only from two operators, whichever side each came on
   [EVM, "        seen.delete(x.operator);\n        seen.set(x.operator, x.value as Record<string, unknown>);", "        seen.set(`${seen.size}`, x.value as Record<string, unknown>);", T5, "one operator's receipt on both sides"],
+  // review of d190f62f: the search from the newer of two newest blocks (A-1), "known transaction" as a word (A-3), the
+  // search again on side b (A-2), a failed fee read kept EVM_FEE_MISS_MS (A-4)
+  [EVM, "      const head = heads[0]!.number >= heads[1]!.number ? heads[0]! : heads[1]!;", "      const head = heads[0]!;", T4, "A-1: dRPC 20 s behind"],
+  [EVM, "      const head = heads[0]!.number >= heads[1]!.number ? heads[0]! : heads[1]!;", "      const head = heads[0]!.number <= heads[1]!.number ? heads[0]! : heads[1]!;", T4, "A-1: dRPC 20 s behind"],
+  [EVM, "        const block = await evmFirstBlockAtOrAfter(side, seconds, head);", "        const block = await evmFirstBlockAtOrAfter(side, seconds);", T4, "A-1: dRPC 20 s behind"],
+  [EVM, '  let hi = head ?? (await at("latest"));', '  let hi = await at("latest");', T4, "A-1: dRPC 20 s behind"],
+  [EVM, "/already known|already imported|\\bknown transaction/i", "/already known|already imported|known transaction/i", T4, "A-3: a send refused"],
+  [EVM, "        if ((e as Error | undefined)?.message !== DIFFERENT) throw e;\n        return agreed(b);", "        throw e;", T4, "A-2: the first search names a block"],
+  [EVM, "        if ((e as Error | undefined)?.message !== DIFFERENT) throw e;", "        if (true) throw e;", T4, "A-2: the first search names a block"],
+  [EVM, "    if (known && (known.until === undefined || now() < known.until)) return known.p;", "    if (known && known.until === undefined) return known.p;", T4, "A-4: 30 requests"],
+  [EVM, "    if (known && (known.until === undefined || now() < known.until)) return known.p;", "    if (known) return known.p;", T4, "A-4: 30 requests"],
+  [EVM, "() => void (entry.until = now() + EVM_FEE_MISS_MS));", "() => fees.delete(epochStartMs));", T4, "A-4: 30 requests"],
 ];
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "release-mutants.mjs");
