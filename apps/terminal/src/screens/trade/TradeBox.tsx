@@ -14,6 +14,7 @@ import {
   amountWrong,
   busy,
   centsToDecimal,
+  filledOut,
   fmtUsd,
   outcome,
   parseUsd,
@@ -200,8 +201,16 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // what the page tells of the running buy besides its stage: the wallet, the venue and pool, the filled amount
   useEffect(() => {
     if (!kit.route) return;
-    return kit.route((d) => setRoute((r) => routeEvent(r, d)));
-  }, [kit.route]);
+    return kit.route((d) => {
+      // the amount W received, read at confirmed on both RPCs: the buy is Filled (card pool-buy-filled-2s), Final at
+      // the kit's stage; the time is read when the fact arrives
+      if (d.t === "out") {
+        const at = src.now();
+        setPhase((p) => filledOut(p, d.id, at));
+      }
+      setRoute((r) => routeEvent(r, d));
+    });
+  }, [kit.route, src.now]);
 
   // the fill toast goes by itself a few seconds after the fill (a notice, never a wait: the next tap does not wait on it)
   useEffect(() => {
@@ -300,7 +309,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
   else if (account === "loading") label = "\u00a0"; // the header's skeleton state: no word until the first `state` says which
-  else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} final />;
+  else if (hasRunLabel(phase)) label = <RunLabel phase={phase} now={now} final={phase.k === "filled" && !phase.provisional} />;
   else
     label = (
       <span className="trb-ctaLbl" title={`${WORDS.buy.text} ${symbol}`}>

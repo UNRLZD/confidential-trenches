@@ -104,7 +104,9 @@ export type Phase =
   | { k: "ready" }
   | { k: "sending"; id: string; at: number }
   | { k: "landing"; id: string; at: number }
-  | { k: "filled"; id: string; at: number; ms: number }
+  /** `provisional`: a pool buy the page read filled at confirmed (its route's amount out), not Final yet (card
+   *  pool-buy-filled-2s); the kit's stage filled makes it Final, and a stage that is no fill ends it. */
+  | { k: "filled"; id: string; at: number; ms: number; provisional?: true }
   /** The kit's part_filled or not_landed, or a refusal: drawn by the next card (Failed, Not landed). */
   | { k: "ended"; id: string; at: number; stage: Stage | "refused"; code?: ErrorCode };
 
@@ -120,12 +122,29 @@ export function tap(p: Phase, id: string, now: number): Phase {
 
 /** A `progress` event of the kit: only the running buy's id moves the button, never backwards. */
 export function progress(p: Phase, id: string, stage: Stage, now: number): Phase {
+  // a Filled not yet Final: the stage filled makes it Final with its own time; a stage that is no fill (a fork the
+  // settle read as not landed) ends it
+  if (p.k === "filled" && p.provisional && p.id === id) {
+    if (stage === "filled") return { k: "filled", id, at: p.at, ms: p.ms };
+    if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
+    return p;
+  }
   if (!busy(p) || p.id !== id) return p;
   if (stage === "signed") return p;
   if (stage === "sent") return p.k === "sending" ? { k: "landing", id, at: p.at } : p;
   if (stage === "filled") return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at) };
   if (stage === "part_filled" || stage === "not_landed" || stage === "refused") return { k: "ended", id, at: p.at, stage };
   return p;
+}
+
+/**
+ * A pool buy's route fact "out" (card pool-buy-filled-2s): the amount W received, which the signing page tells only once
+ * both RPCs read this very transaction at confirmed with no error and the amount the same on both and at least the min
+ * out the device asked. The running buy of that id is Filled, its time from the tap, not Final until the kit's stage.
+ */
+export function filledOut(p: Phase, id: string, now: number): Phase {
+  if (!busy(p) || p.id !== id) return p;
+  return { k: "filled", id, at: p.at, ms: Math.max(0, now - p.at), provisional: true };
 }
 
 /** The kit's client codes for a request that ended without the page's answer (messages client.ts). */
