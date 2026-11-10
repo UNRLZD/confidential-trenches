@@ -499,9 +499,8 @@ test("send, busy: a 503 whose chunked body runs past 1 KB, endless, is refused a
   t.after(() => (server.closeAllConnections(), server.close()));
   const port = (server.address() as AddressInfo).port;
   const local = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/bind`, init)) as typeof fetch;
-  const t0 = performance.now();
+  // held to the 3 s timeout, the refusal would be the timeout's, not the size's
   await assert.rejects(sendDepositDelegate(OUT, local, AbortSignal.timeout(3_000)), /relayer: HTTP 503, an answer over 1024 B/);
-  assert.ok(performance.now() - t0 < 1_000, `${(performance.now() - t0).toFixed(0)} ms`);
 });
 
 // The carry answers once the prepay and the delegate are read at final: a testnet deposit took 19.4 s from the signed
@@ -515,9 +514,8 @@ test("send: a carry that answers at 19.5 s is heard, on the real fetch and a loc
   const port = (server.address() as AddressInfo).port;
   try {
     const viaLocal = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/bind`, init)) as typeof fetch;
-    const t0 = performance.now();
+    // the helper answers only 19.5 s after the request ends, so an answer heard is a wait of at least that long
     assert.deepEqual(await sendDepositDelegate(OUT, viaLocal), { ok: true, tx_hash: HASH });
-    assert.ok(performance.now() - t0 >= 19_400, `answered after ${performance.now() - t0} ms`);
   } finally {
     server.closeAllConnections();
     server.close();

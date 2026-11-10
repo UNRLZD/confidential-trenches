@@ -21,6 +21,18 @@ import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "
 import { BUSY_ASKS, BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
 import { argsFor, BLOCK_MS, closeVaults, FEE_MAX, type FeeEdit, feeReplay, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
 
+/** Whether `p` has settled once the event loop has run; mocked timers move only when ticked, so a wait still running
+ * stays unsettled however slow this machine is. */
+async function settledNow(p: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  p.then(
+    () => (done = true),
+    () => (done = true),
+  );
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  return done;
+}
+
 after(closeVaults);
 
 type Answer = { status: number; body: unknown };
@@ -157,14 +169,18 @@ test("the fee, busy: a Retry-After over the cap waits only the cap", async () =>
   }
 });
 
-test("the fee, busy: the caller's signal ends a wait at once", async () => {
+test("the fee, busy: the caller's signal ends a wait at once", async (t) => {
+  // on mocked timers: the abort at 50 ms must end the 10 s wait with no more time passing
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const stop = new AbortController();
   const sent: string[] = [];
-  const t0 = Date.now();
   setTimeout(() => stop.abort(new Error("stopped")), 50);
-  await assert.rejects(askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "10" }], sent), { signal: stop.signal })), /stopped/);
+  const p = askWithdrawFee(feeArgs(timedHelper([{ status: 429, body: RATE_LIMITED, retryAfter: "10" }], sent), { signal: stop.signal }));
+  assert.equal(await settledNow(p), false, "waiting on the 429");
+  t.mock.timers.tick(50);
+  assert.equal(await settledNow(p), true, "the abort ended the wait");
+  await assert.rejects(p, /stopped/);
   assert.equal(sent.length, 1);
-  assert.ok(Date.now() - t0 < 2_000);
 });
 
 test("the fee, busy: a 503 whose chunked body runs past 1 KB, endless, is refused as over the size at once, never held to the timeout (review of 407ba3bc, P2)", async (t) => {
@@ -179,9 +195,8 @@ test("the fee, busy: a 503 whose chunked body runs past 1 KB, endless, is refuse
   const port = (server.address() as { port: number }).port;
   const local = ((_: unknown, init?: RequestInit) => fetch(`http://127.0.0.1:${port}/v1/withdraw/fee`, init)) as typeof fetch;
   const slept: number[] = [];
-  const t0 = performance.now();
+  // held to the 3 s timeout, the refusal would be the timeout's, not the size's
   await assert.rejects(askWithdrawFee(feeArgs(local, { sleep: waits(slept), signal: AbortSignal.timeout(3_000) })), (e: WithdrawRelayRefused) => e.code === "answer" && /an answer over 1024 B/.test(e.message));
-  assert.ok(performance.now() - t0 < 1_000, `${(performance.now() - t0).toFixed(0)} ms`);
   assert.deepEqual(slept, []);
 });
 

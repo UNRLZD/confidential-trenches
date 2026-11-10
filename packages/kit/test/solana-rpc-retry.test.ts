@@ -122,12 +122,10 @@ test("the quote's age: the page's retry stops two calls (the venue, then the blo
   assert.ok(2 * SOLANA_RPC_RETRY.deadlineMs < SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 360);
 });
 
-test("with retry, a forever-throttled read ends inside the quote's window, measured", async () => {
+test("with retry, a forever-throttled read ends inside the quote's window, measured on mocked time", async (t) => {
   const p = provider(Array.from({ length: 1000 }, () => ({ status: 429, body: "", headers: { "retry-after": "1" } })));
-  const t0 = Date.now();
-  const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getLatestBlockhash", []).catch((x: unknown) => x);
-  const took = Date.now() - t0;
-  assert.ok(e instanceof SolanaRpcTransportError);
+  const { value: e, ms: took } = await onMockedTime(t, () => solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getLatestBlockhash", []), 10, 60_000);
+  assert.ok(e instanceof SolanaRpcTransportError, String(e));
   assert.ok(took <= SOLANA_RPC_RETRY.deadlineMs, `took ${took} ms`);
   assert.ok(2 * took < SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 360);
 });

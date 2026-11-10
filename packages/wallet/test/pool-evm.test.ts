@@ -23,6 +23,18 @@ import {
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
 
+/** Whether `p` has settled once the event loop has run; mocked timers move only when ticked, so a wait still running
+ * stays unsettled however slow this machine is. */
+async function settledNow(p: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  p.then(
+    () => (done = true),
+    () => (done = true),
+  );
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  return done;
+}
+
 type Spend = { name: string; request: { recipient: string; feeRecipient: string; feeCap: string; deadlineMs: string; refundPrecommitment: string; salt: string; trailing?: string }; contextPreimage: string; context: string; proof: { pubSignals: string[] } };
 type Set3 = { pool: string; chainId: string; scope: string; labels: string[]; commitments: string[] };
 const fx = (f: string) => JSON.parse(readFileSync(new URL(`../../../contracts/pool-evm/test/fixtures/${f}`, import.meta.url), "utf8"));
@@ -1269,14 +1281,17 @@ test("X15, X20, X21 bind refuses W as the fee recipient, a chunk of 2^128, a sal
   await assert.rejects(mk(PIN, () => new Uint8Array(15)).bind(bindArgs()), /salt/);
 });
 
-test("X16 the wait between retries ends at once when the read is aborted (the real wait)", async () => {
+test("X16 the wait between retries ends at once when the read is aborted (the real wait)", async (t) => {
+  // the real sleep on mocked timers: the abort at 50 ms must end the wait with no more time passing
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const c = C3();
   const ac = new AbortController();
-  const t0 = Date.now();
   const p = evmTreeSync({ rpcs: pair(c, c, {}, { latest: () => 22, finalized: () => 12 }), pin: PIN }).trees(after(25), ac.signal);
   setTimeout(() => ac.abort(new Error("stopped")), 50);
+  assert.equal(await settledNow(p), false, "waiting between retries");
+  t.mock.timers.tick(50);
+  assert.equal(await settledNow(p), true, "the abort ended the wait");
   await assert.rejects(p, /stopped/);
-  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
 });
 
 // ---- fold 3: the re-check's cases ----
@@ -1572,15 +1587,18 @@ test("a pool read that failed by name is never tried again by a read around it (
   assert.deepEqual(waits, [1_000, 2_000, 4_000]);
 });
 
-test("an abort during a pool read's wait ends it at once, and the other RPC's read with it", async () => {
+test("an abort during a pool read's wait ends it at once, and the other RPC's read with it", async (t) => {
+  // on mocked timers: the abort at 50 ms must end the wait with no more time passing
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const rpcs = pair(c3, c3);
   rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(HTTP_429));
   const ac = new AbortController();
-  const t0 = Date.now();
   const p = evmNow(rpcs, ac.signal);
   setTimeout(() => ac.abort(new Error("stopped")), 50);
+  assert.equal(await settledNow(p), false, "waiting on the 429");
+  t.mock.timers.tick(50);
+  assert.equal(await settledNow(p), true, "the abort ended the wait");
   await assert.rejects(p, /stopped/);
-  assert.ok(Date.now() - t0 < 900, `${Date.now() - t0} ms`);
 });
 
 // ---- card evm-transfer-rpc-spares: a pool read's pinned list keeps two operators while one is out ----
