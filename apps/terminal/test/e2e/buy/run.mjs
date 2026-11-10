@@ -90,12 +90,21 @@ export function judge(rec) {
 const ALLOWED = new Set([REAL.app, REAL.sign, REAL.api, new URL(DEVNET_RPC).hostname]);
 
 // ------------------------------------------------------------------------------------------------ devnet reads and the fund wait
-async function rpc(url, method, params) {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", origin: `https://${REAL.sign}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = await r.json();
-  if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
-  return j.result;
+/** One read, asked again after a rate limit (HTTP 429 or a JSON-RPC 429: the public devnet RPC limits per connection;
+ *  the first paid run lost its post-buy read to one, 10 Nov 21:30Z), up to RATE_TRIES times with a growing pause. */
+export async function rpc(url, method, params, { tries = RATE_TRIES, pauseMs = 1_500, fetchFn = fetch } = {}) {
+  for (let i = 1; ; i++) {
+    const r = await fetchFn(url, { method: "POST", headers: { "content-type": "application/json", origin: `https://${REAL.sign}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+    const j = r.status === 429 ? { error: { code: 429 } } : await r.json();
+    if (j.error?.code === 429 && i < tries) {
+      await new Promise((ok) => setTimeout(ok, pauseMs * i));
+      continue;
+    }
+    if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
+    return j.result;
+  }
 }
+const RATE_TRIES = 8;
 const both = (method, params) => Promise.all([DEVNET_RPC, HELPER_RPC].map((u) => rpc(u, method, params)));
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 export function b58(bytes) {

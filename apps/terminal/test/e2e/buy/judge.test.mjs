@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { b58, DEVNET_GENESIS, devnetOnly, judge, unb58 } from "./run.mjs";
+import { b58, DEVNET_GENESIS, devnetOnly, judge, rpc, unb58 } from "./run.mjs";
 
 const SRC = readFileSync(new URL("./run.mjs", import.meta.url), "utf8");
 
@@ -79,4 +79,25 @@ test("the run checks the cluster before it prints, starts a browser or asks for 
   for (const later of ["console.log(", "startHarness(", "fund: "]) assert.ok(at("devnetOnly(") < at(later), later);
   for (const no of [".keys", "createPrivateKey", "PRIVATE"]) assert.equal(SRC.includes(no), false, no);
   assert.equal(/rpc\([^)]*"sendTransaction"/.test(SRC), false, "the run sends no transaction itself");
+});
+
+test("a rate-limited read is asked again, a bounded number of times; any other error is not", async () => {
+  const answers = (list) => {
+    let n = 0;
+    const fetchFn = async () => {
+      const a = list[Math.min(n++, list.length - 1)];
+      return { status: a === "http429" ? 429 : 200, json: async () => a };
+    };
+    return { fetchFn, calls: () => n };
+  };
+  const limited = { jsonrpc: "2.0", id: 1, error: { code: 429, message: "Connection rate limits exceeded" } };
+  let f = answers(["http429", limited, { jsonrpc: "2.0", id: 1, result: 7 }]);
+  assert.equal(await rpc("https://x.test", "getBalance", [], { pauseMs: 0, fetchFn: f.fetchFn }), 7);
+  assert.equal(f.calls(), 3);
+  f = answers([limited]);
+  await assert.rejects(rpc("https://x.test", "getBalance", [], { tries: 4, pauseMs: 0, fetchFn: f.fetchFn }), /429/);
+  assert.equal(f.calls(), 4);
+  f = answers([{ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "bad" } }]);
+  await assert.rejects(rpc("https://x.test", "getBalance", [], { pauseMs: 0, fetchFn: f.fetchFn }), /-32602/);
+  assert.equal(f.calls(), 1);
 });
