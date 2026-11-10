@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Bar } from "../src/screens/token/candles.ts";
-import { TRADES_URL, groupMarks, layoutMarks, shortTrader, toTrades } from "../src/screens/token/trades.ts";
+import { TRADES_URL, groupMarks, layoutMarks, pickMark, shortTrader, toTrades } from "../src/screens/token/trades.ts";
 import type { Mark, Trade } from "../src/screens/token/trades.ts";
 
 const T0 = 1_762_000_200_000; // a 15m bucket start, ms
@@ -15,8 +15,8 @@ const bars: Bar[] = [
 ];
 const good = () => ({
   trades: [
-    { t_ms: T0 + 1000, side: "buy", usd: "100.50", amt: "50", trader: "TraderAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", tx: "tx1" },
-    { t_ms: T0 + 500, side: "sell", usd: "20", amt: "40", trader: null, tx: "tx2" },
+    { t_ms: T0 + 1000, side: "b", usd: "100.50", amt: "50", trader: "TraderAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", tx: "tx1" },
+    { t_ms: T0 + 500, side: "s", usd: "20", amt: "40", trader: null, tx: "tx2" },
   ],
   src: "chain",
   as_of_ms: T0 + 2000,
@@ -64,6 +64,10 @@ test("planted bad answers: each refused whole", () => {
     ["tx missing", gone("tx")],
     ["side sell-ish", row("side", "SELL")],
     ["side other", row("side", "swap")],
+    // card market-data-push: the helper's sides are "b" and "s" (06b Trades); the words spelled out are not its shape
+    ["side spelled out, buy", row("side", "buy")],
+    ["side spelled out, sell", row("side", "sell")],
+    ["side an inherited name", row("side", "toString")],
     ["usd a number", row("usd", 5)],
     ["usd zero", row("usd", "0")],
     ["usd negative", row("usd", "-1")],
@@ -211,4 +215,25 @@ test("a failed tape read waits longer each time, at most TRADES_BACKOFF_MAX_MS; 
   assert.equal(nextWait(1), 2 * TRADES_POLL_MS);
   assert.equal(nextWait(2), 4 * TRADES_POLL_MS);
   assert.equal(nextWait(10), TRADES_BACKOFF_MAX_MS);
+});
+
+// card app-phone-token-taps-and-rows: on a phone each 12 px mark (r 6) is tapped through a 44 px area, which reaches
+// over its neighbours; the tap's point picks the mark
+test("tap: on a disc, that disc; where two discs overlap, the one drawn on top (the later)", () => {
+  const marks = [{ id: "a", x: 100, y: 100 }, { id: "b", x: 109.6, y: 100 }];
+  assert.equal(pickMark(marks, 96, 100, 6), "a");
+  assert.equal(pickMark(marks, 113, 100, 6), "b");
+  // 104.8 is on both discs: b is drawn after a, so on top
+  assert.equal(pickMark(marks, 104.8, 100, 6), "b");
+});
+
+test("tap: off every disc, inside the 44 px areas, the nearest centre; the first drawn on a tie; none drawn is null", () => {
+  // two marks one slide step apart (2 r + 2 = 14 px), their 44 px areas overlapping
+  const marks = [{ id: "low", x: 100, y: 114 }, { id: "high", x: 100, y: 100 }];
+  assert.equal(pickMark(marks, 118, 98, 6), "high");
+  assert.equal(pickMark(marks, 118, 116, 6), "low");
+  assert.equal(pickMark(marks, 120, 107, 6), "low");
+  // a lone mark: anywhere in its area opens it
+  assert.equal(pickMark([{ id: "m", x: 50, y: 50 }], 50 + 21, 50 - 21, 6), "m");
+  assert.equal(pickMark([], 1, 1, 6), null);
 });

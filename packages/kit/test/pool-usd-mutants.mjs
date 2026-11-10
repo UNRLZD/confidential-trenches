@@ -16,6 +16,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 import { KIT, kitCopy } from "./mutant-copy.mjs";
 
 // the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
@@ -72,13 +73,26 @@ export const MUTANTS = [
   [PRICE, "const lo = x < y ? x : y;", "const lo = x < y ? y : x;", AGREE],
   [PRICE, 'if (chain !== "robinhood") return chainlinkPrice', 'if (chain !== "robinhood" || args.baseRpcs === undefined) return chainlinkPrice', AGREE],
   // staleness: the age against the device's clock, both ways, and each bound
-  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(", "if (false) fail(", STALE],
-  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(", "if (nowS >= goodUntil(publishedS, nowS, maxAgeS)) fail(", STALE],
+  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", "if (false) throw new PoolUsdStale(", STALE],
+  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", "if (nowS >= goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", STALE],
   [PRICE, "Math.min(publishedS, readS) + maxAgeS", "publishedS + maxAgeS", STALE],
   [PRICE, "if (publishedS - nowS > POOL_USD_MAX_AHEAD_S) fail(", "if (false) fail(", STALE],
   [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain: \"solana\"", "return { chain: \"solana\"", STALE],
   [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain, asset", "return { chain, asset", STALE],
-  [PRICE, "    maxAgeS: 60,", "    maxAgeS: 600,", STALE],
+  // card pool-usd-price-never-stale: Pyth's bound, its heartbeat and 15 s; a refusal for age alone named so, with the
+  // feed's time; Base's late price never named as Robinhood's
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 600,", STALE],
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 60,", STALE],
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 60 + 16,", STALE],
+  [PRICE, 'override readonly name = "PoolUsdStale";', 'override readonly name = "Error";', STALE],
+  [PRICE, "    this.publishedS = publishedS;", "    this.publishedS = 0;", STALE],
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', 'if (rb.status === "rejected") throw rb.reason;', STALE],
+  // review of eb2dfdc5, K1-K3: the age is told after every other check, so a late price with another fault is no late tag
+  [PRICE, "  if (conf * 10_000n > price", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (conf * 10_000n > price", STALE],
+  [PRICE, "  for (const r of reads) if (BigInt(r.slot) < posted)", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  for (const r of reads) if (BigInt(r.slot) < posted)", STALE],
+  [PRICE, "  if (price <= 0n) fail(`the price ${price} is not positive`);\n  const publishedS = Number(updatedAt);\n", "  const publishedS = Number(updatedAt);\n  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (price <= 0n) fail(`the price ${price} is not positive`);\n", STALE],
+  // review of eb2dfdc5, P3: Robinhood's late tag only once Base's read is whole and agreeing
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;\n  if (rp.status === "rejected") throw rp.reason;', 'if (rp.status === "rejected") throw rp.reason;\n  if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', STALE],
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],
   [PRICE, "maxAgeS: 86_700 }", "maxAgeS: 867_000 }", STALE],
   [PRICE, "if (updatedAt === 0n || updatedAt >= U64) fail(", "if (updatedAt >= U64) fail(", STALE],
@@ -208,6 +222,8 @@ export const MUTANTS = [
   [S6, "d.subarray(body + 32, body + 64).some((x) => x !== 0)", "d[body + 32] !== 0", "S6 refused: a hook program whose first byte is 0", S6_TEST],
   [S6, "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n    }", "      if (feeCharged(d, body + 72) || feeCharged(d, body + 90)) return \"the mint charges a transfer fee (TransferFeeConfig)\";\n      return null;\n    }", "S6 refused: a zero fee config followed by a hook program", S6_TEST],
 ];
+// every mutant's name, in the order the parts take them
+export const NAMES = MUTANTS.map(([, find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
 
 // a child test run must not inherit this process's own node --test context
 const CHILD_ENV = { ...process.env, NODE_TEST_CONTEXT: undefined };
@@ -222,8 +238,10 @@ function run(name, file = TEST) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // <k>/<n>: part k of n only, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs); test:mutants runs the parts
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
   let bad = 0;
-  for (const [t, f] of new Map(MUTANTS.map((m) => [m[3], m[4]]))) {
+  for (const [t, f] of new Map(MUTANTS.filter((_, i) => part.pick(i)).map((m) => [m[3], m[4]]))) {
     const r = run(t, f);
     if (r !== "pass") {
       console.log(`FAIL "${t}" ${r === "none" ? "names no test" : "fails on the code as it is"}`);
@@ -232,6 +250,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (bad > 0) process.exit(1);
   MUTANTS.forEach(([file, find, repl, t, testFile], i) => {
+    if (!part.pick(i)) return;
     const src = readFileSync(file, "utf8");
     if (src.split(find).length !== 2) {
       console.log(`FAIL mutant ${i + 1}: its text is not in ${path.basename(file)} exactly once`);
@@ -249,6 +268,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
     if (r !== "fail") bad++;
   });
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${part.at.length} mutants fails its named test` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }

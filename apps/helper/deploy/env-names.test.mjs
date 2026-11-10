@@ -26,6 +26,7 @@ import { evmSwapsFromEnv, sendersFromEnv, solanaTokenFromEnv, solanaTradesFromEn
 import { solanaPoolSendersFromEnv } from "../src/pool/solana.ts";
 import { evmPoolSendersFromEnv } from "../src/pool/evm.ts";
 import { releaseOf } from "../src/health.ts";
+import { checkPoolRpcOperators, checkSolanaPairOperators } from "../src/env-check.ts";
 
 const HELPER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Quoted constants in src/ that are not environment names: NEAR RPC error causes, a Ref pool kind and a 1Click
@@ -82,6 +83,10 @@ export const ENV_READERS = {
   solanaTradesFromEnv: (env) => solanaTradesFromEnv(env, noLists, noToken).stop(),
   // the senders' handover (card helper-ready-gate): the store folder and the fee quoter's names
   sendersFromEnv: (env) => sendersFromEnv(env),
+  // card evm-pool-sync-holds: every Base and Robinhood keyed name (rpc.ts RPC_UPSTREAMS keyed)
+  checkPoolRpcOperators,
+  // card sol-pools-mainnet-pin: every Solana keyed name (rpc.ts RPC_UPSTREAMS.solana keyed)
+  checkSolanaPairOperators,
 };
 
 /** An env that records every name read from it (a get, an `in`), holding `values`. */

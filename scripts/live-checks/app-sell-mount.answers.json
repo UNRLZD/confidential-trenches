@@ -1,15 +1,16 @@
 {
  "good": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:27:17.381Z",
+  "at": "2026-11-10T00:58:34.278Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
-  "entry": "/assets/index-Dlhrxsxp.js",
+  "entry": "/assets/index-CHIet_WK.js",
   "runs": [
    {
     "width": "desktop",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "sellOn": true,
     "before": {
      "state": "S8.29",
@@ -21,7 +22,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "250",
+       "share_bps": 2500,
        "slippage_bps": 1000
       }
      },
@@ -30,7 +31,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "1000",
+       "share_bps": 10000,
        "slippage_bps": 1000
       }
      }
@@ -45,6 +46,7 @@
     "width": "phone",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "sellOn": null,
     "before": {
      "state": "S8.29",
@@ -56,7 +58,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "250",
+       "share_bps": 2500,
        "slippage_bps": 1000
       }
      },
@@ -65,7 +67,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "1000",
+       "share_bps": 10000,
        "slippage_bps": 1000
       }
      }
@@ -80,15 +82,16 @@
  },
  "bad": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:27:35.816Z",
-  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
-  "browser": "157.0.8103.38",
-  "entry": "/assets/index-DQm2uIN5.js",
+  "at": "2026-11-09T23:59:37.669Z",
+  "source": "harness, terminal build of 681147d0 (main before this card), the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
+  "browser": "156.0.8078.79",
+  "entry": "/assets/index-kAFWFs7l.js",
   "runs": [
    {
     "width": "desktop",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "sellOn": false,
     "before": null,
     "asked": [],
@@ -99,6 +102,7 @@
     "width": "phone",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
     "sellOn": null,
     "before": null,
     "asked": [],

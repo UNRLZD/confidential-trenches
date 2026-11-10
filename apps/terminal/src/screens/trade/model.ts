@@ -169,14 +169,23 @@ export const SLOW_MS = 5_000;
 export const isSlow = (p: Phase, now: number): boolean => busy(p) && now - p.at >= SLOW_MS;
 
 /** A reason the app has words for, by the kit's code (words.ts). */
-export type Reason = "priceCheck" | "notSent";
+export type Reason = "priceCheck" | "notSent" | "unavailable";
 
 /**
- * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), and the
- * signing page down, so the request was never posted (the kit's client code, S8.28 Not sent). Any other code draws
- * Failed alone: the app never makes up a reason.
+ * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), the signing
+ * page down, so the request was never posted (the kit's client code, S8.28 Not sent), and a Solana pool buy the pool
+ * cannot make yet: the token's venue has no pinned lookup table (venue_not_pinned) or no table fits the buy
+ * (no_table_fits), Unavailable (owner 10 Nov 18:12Z). Any other code draws Failed alone: the app never makes up a
+ * reason, and never draws a code.
  */
-const REASONS: Record<string, Reason> = { quote_check_failed: "priceCheck", signpage_down: "notSent" };
+const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable" });
+
+/** The app's reason for a kit code; null for a code it has no words for, or none. Own keys only. */
+export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !== undefined && Object.hasOwn(REASONS, code) ? REASONS[code]! : null);
+
+/** A buy the pool cannot make on this token yet (Unavailable): the box keeps Buy and its presets off, with no Retry,
+ *  since the same buy would be refused again; a new token page starts ready. */
+export const unavailable = (p: Phase): boolean => p.k === "ended" && p.stage === "refused" && reasonOf(p.code) === "unavailable";
 
 /** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), or part filled (CH-045). */
 export interface EndView {
@@ -189,13 +198,13 @@ export interface EndView {
  * to its ready label, so any further tap is a new trade of the amount on screen: a retry of the whole amount would
  * trade more than the user asked (a buy), or re-apply a share to the smaller balance (a sell).
  */
-export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled";
+export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && !unavailable(p);
 
 export function endView(p: Phase): EndView | null {
   if (p.k !== "ended") return null;
   if (p.stage === "not_landed") return { k: "notLanded", reason: null };
   if (p.stage === "part_filled") return { k: "partial", reason: null };
-  return { k: "failed", reason: (p.code && REASONS[p.code]) || null };
+  return { k: "failed", reason: reasonOf(p.code) };
 }
 
 // ------------------------------------------------------------------------------------------------ the pool's proof
@@ -327,16 +336,34 @@ export function poolBuyAsk(pools: SignpageState["pools"], chain: Chain, token: s
   return { ok: true, kind: "pool.buy", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } };
 }
 
-/** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. */
-export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, amount: string, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
+/**
+ * The presets row (owner 8 Nov 07:55Z, kept): on Base and Robinhood a private buy spends one whole chunk, so the row is
+ * one button holding the chunk's USD, the pool's `tapMax` (poolView: the page's tap_max at the device's price, the one
+ * amount poolBuyAsk takes there), null while that is unknown (no proof ready, no price, no pool in the state); the four
+ * presets everywhere else.
+ */
+export function presetsOf(chain: Chain, pool: PoolView | null): readonly (Cents | null)[] {
+  if (!isPoolChain(chain) || chain === "solana") return PRESETS;
+  const c = pool?.tapMax ?? null;
+  return [c !== null && c > 0n ? c : null];
+}
+
+/** Cents as the amount box takes them: "25" for whole dollars, "3.50" otherwise. */
+export const amountText = (c: Cents): string => (c % 100n === 0n ? String(c / 100n) : centsToDecimal(c));
+
+/** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. `size`:
+ *  a share of the whole holding in basis points (a percent, All: the signing page turns it into units from its own reads
+ *  of every wallet that holds the token, card pool-sell-share-across-wallets), or a token amount in whole units. */
+export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, size: { share_bps: number } | { amount: string }, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
   const p = poolOf(pools, chain);
-  return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } } : null;
+  return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, ...size, slippage_bps: slippageBps } as SignpageParams["pool.sell"] } : null;
 }
 
 /**
- * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the one balance the header and Portfolio's
- * Cash tile draw (balanceOf), never a second sum; on a chain whose pool the signing page reports, that pool's balance
- * in USD (poolView), null while it cannot be priced. One number for the amount gate (amountOk) either way.
+ * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the vault path's part of Portfolio's Cash
+ * (Totals.offPool, from the same totals as balanceOf, never a second sum; card portfolio-one-balance); on a chain whose
+ * pool the signing page reports, that pool's balance in USD (poolView), its part of Cash, null while it cannot be priced.
+ * One number for the amount gate (amountOk) either way.
  */
 export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null): { from: "cash" | "pool"; cents: Cents | null } {
   return onPool ? { from: "pool", cents: pool?.balance ?? null } : { from: "cash", cents: cash };

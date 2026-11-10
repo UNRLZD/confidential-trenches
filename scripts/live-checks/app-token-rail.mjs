@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Live check of card app-token-rail: the token page's left rail lists Trending and New, as design-lock-r5 draws it
 // (trenches-1440.html rail, proto.css .rail and .rr, token.css's width modes). Two reads:
-//   - the rail's data: HELPER_HOST's GET /v1/market/lists?chain=solana, Discover's own read, which the rail draws. It
+//   - the rail's data on Solana: HELPER_HOST's GET /v1/market/lists?chain=solana, one of the chains of Discover's own
+//     read that the rail draws (every chain's since card app-chains-evm-rail, whose check reads Base and Robinhood). It
 //     must answer 200 with a Solana snapshot whose Trending column (the 1h list, rows traded in the hour) and New column
 //     each hold at least one row with a token id and a symbol;
 //   - what APP_HOST serves: the page, then every script and stylesheet it names, which must hold the rail (token-rail,

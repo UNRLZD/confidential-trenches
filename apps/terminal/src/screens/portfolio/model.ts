@@ -5,12 +5,15 @@
 //
 // What the kit gives (packages/kit/src/signpage/messages.ts SignpageState): the vault's USDC (`vault_balance`), the
 // wallets with their state and size, each open position's chain, token, amount and cost, and every operation's id,
-// kind, stage and txs (`ops`). What it does not give, so the screen takes it from `PortfolioData` (source.tsx), a local
-// type the card's report names as missing kit calls: a token's symbol, name and price and whether a route sells it; a
-// position's bought, sold and realized, its open time, its TP/SL and its held or reverted mark; the closed positions;
-// the value series; the fees paid; and each operation's time, USD size, token and units.
-import { moneyWallets, POOL_ASSET_DECIMALS } from "@blindfill/kit";
+// kind, stage and txs (`ops`) with what the device knows of it beside them (kit OpDetail, card kit-portfolio-reads: its
+// time, chain, token, units and USD size, each when the device holds it). What it does not give, so the screen takes it
+// from `PortfolioData` (source.tsx), a local type the card's report names as missing kit calls: a token's symbol, name
+// and price and whether a route sells it; a position's bought, sold and realized, its open time, its TP/SL and its held
+// or reverted mark; the closed positions; the value series; and the fees paid.
+import { moneyWallets, POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
 import { small } from "../discover/format.ts";
+import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
+import type { Reason } from "../trade/model.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -88,8 +91,9 @@ export interface TokenMarket {
   name: string;
   /** USD per unit, decimal string; null when no price is known (S10.4). */
   price: string | null;
-  /** False when no route sells it now (S10.6: valued at the last price). */
-  route: boolean;
+  /** False when no route sells it now (S10.6: valued at the last price). Null: not read; whether a token sells is the
+   *  device's own sell quote, which no read gives the app yet, never the helper's word (card market-token-reads). */
+  route: boolean | null;
 }
 
 /** What a position carries beyond the kit's row. Not in the kit. */
@@ -115,16 +119,6 @@ export interface ClosedTrade {
   closed_at: number;
 }
 
-/** An operation's own facts. Not in the kit (ops carry id, kind, stage and txs only). */
-export interface OpDetail {
-  at: number;
-  /** USD decimal string. */
-  usd?: string;
-  units?: string;
-  chain?: Chain;
-  token?: string;
-}
-
 /** A one-time wallet whose key was exported on SIGN_HOST (S14.4). Not in the kit. */
 export interface ExportedKey {
   id: string;
@@ -142,12 +136,11 @@ export interface PortfolioData {
   series: readonly (readonly [number, string])[];
   /** USD decimal string: the buys' and sells' fees from this browser's receipts (CN-116). */
   fees: string | null;
-  op(id: string): OpDetail | null;
   exported: readonly ExportedKey[];
 }
 
 /** No market reads, no closed trades, no series: what the live source has until the kit carries them (dashes). */
-export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, op: () => null, exported: [] };
+export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, exported: [] };
 
 // --------------------------------------------------------------------------------------------------- positions S10
 
@@ -177,12 +170,30 @@ export interface Row {
   /** The wallets that hold it, each with its own export (card app-export-every-wallet). */
   addresses: string[];
   openedAt: number | null;
-  /** S10.12: a sell of this token on its way, from the kit's op and its detail. */
+  /** S10.12: a sell of this token on its way, from the kit's op: its stage, chain, token and time. */
   selling: { stage: "sending" | "landing"; ms: number } | null;
 }
 
+/** One chain's part of Cash (card portfolio-one-balance): NEAR's is the vault's USDC, a pool chain's its pool at the
+ *  signing page's price, each with the READY wallets on that chain. */
+export interface CashPart {
+  chain: Chain;
+  /** Null: a pool that holds something the page has no fresh price for. It is left out of Cash, never priced here (the
+   *  chain's other money still counts in Cash). */
+  cents: bigint | null;
+  /** A deposit of this chain's money is between its source and the vault or pool (CASH_MOVING): its amount is on
+   *  neither side yet, and the kit carries none for it. */
+  moving: boolean;
+}
+
 export interface Totals {
+  /** The vault, every pool priced and the READY wallets, each once. */
   cash: bigint;
+  /** Each chain's part of `cash`, NEAR first, then the pool chains in the kit's order: a chain with nothing and no
+   *  deposit moving is left out, NEAR never. */
+  parts: CashPart[];
+  /** Cash less the SOL and ETH pools: what a chain the trade box buys on with no pool spends (the vault path). */
+  offPool: bigint;
   onWay: bigint;
   inPos: bigint;
   total: bigint;
@@ -209,13 +220,13 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   const m = d.market(p.chain, p.token);
   const x = d.extra(p.chain, p.token) ?? {};
   const cost = cents(p.cost) ?? 0n;
-  const value = m?.price != null ? mulCents(p.amount, m.price) : null;
+  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z)
+  const value = m?.price != null && /[1-9]/.test(m.price) ? mulCents(p.amount, m.price) : null;
   const pnl = value === null ? null : value - cost;
   let selling: Row["selling"] = null;
   for (const o of ops) {
     if (o.kind !== "sell" || (o.stage !== "signed" && o.stage !== "sent")) continue;
-    const od = d.op(o.id);
-    if (od?.chain === p.chain && od.token === p.token) selling = { stage: o.stage === "signed" ? "sending" : "landing", ms: Math.max(0, now - od.at) };
+    if (o.chain === p.chain && o.token === p.token) selling = { stage: o.stage === "signed" ? "sending" : "landing", ms: o.created_ms === undefined ? 0 : Math.max(0, now - o.created_ms) };
   }
   return {
     key: key(p.chain, p.token),
@@ -232,7 +243,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     bought: cents(x.bought) ?? cost,
     sold: cents(x.sold) ?? 0n,
     realized: cents(x.realized) ?? 0n,
-    mark: x.mark ?? (m && !m.route ? "noRoute" : null),
+    mark: x.mark ?? (m && m.route === false ? "noRoute" : null),
     exit: x.exit ?? null,
     wallets: p.wallets.length,
     addresses: [...new Set(p.wallets)],
@@ -259,18 +270,81 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
   return r;
 }
 
-export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
-  // Cash: the vault's USDC, each pool held in USDC and the READY wallets, each source counted once. A SOL or ETH pool
-  // has no dollar value until a price read exists, so it never joins Cash: no dollar figure is invented. The vault's
-  // USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/signpage
-  // test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
-  let cash = cents(s.vault_balance) ?? 0n;
-  for (const p of s.pools ?? []) if (p.asset === "USDC") cash += cents(p.balance) ?? 0n;
-  let onWay = 0n;
-  for (const w of s.wallets) {
-    if (w.state === "READY") cash += cents(w.size) ?? 0n;
-    else if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
+/**
+ * Money between its source and a side of Cash (card portfolio-one-balance): the stages at which a deposit's money has
+ * been sent and is on neither side. The rule, from the kit's stages:
+ * - Cash counts the kit's two totals and nothing else: vault_balance (the vault's notes) and each pool's balance (its
+ *   notes, read back at finalized). An op's own amount never joins Cash: a deposit's amount_usd is what those totals
+ *   already hold once it is done, and a trade's is its ask, so adding it would count the note twice.
+ * - So a note is counted on the side whose total holds it, once: a vault deposit's note from "done" (vault_balance), a
+ *   pool deposit's from "in_pool" (state.pools), never before, and never on the side it left.
+ * - At these stages the money has left its source and is in neither total; the kit sends no amount for it (a pool
+ *   deposit never carries amount_usd, a vault deposit only on done), so it cannot be counted without making one up.
+ *   Its chain's part is marked moving instead, so the breakdown shows it and the money is never silently gone.
+ * - Before the send (quote_checked), after a send that never happened (expired) and once landed (done, in_pool), nothing
+ *   is moving. held and halted are money waiting under an id (state.held), not moving to a side.
+ */
+export const CASH_MOVING: { readonly deposit: ReadonlySet<string>; readonly pool_deposit: ReadonlySet<string> } = {
+  deposit: new Set(["waiting", "in_transit", "into_vault", "refunded", "refund_move", "failed", "short"]),
+  pool_deposit: new Set(["waiting", "in_transit", "refunded", "refund_move", "failed", "short"]),
+};
+
+/** The chain whose part an op moves money into: a vault deposit's is NEAR (the vault's chain), a pool deposit's its
+ *  pool's; null for any other op or stage. */
+export function movingChain(o: Operation): Chain | null {
+  if (o.kind === "deposit") return CASH_MOVING.deposit.has(o.stage) ? "near" : null;
+  if (o.kind === "pool_deposit") return CASH_MOVING.pool_deposit.has(o.stage) ? o.chain : null;
+  return null;
+}
+
+/** The parts of Cash per chain: the vault on NEAR, each pool in dollars at the signing page's own price while it is
+ *  fresh on this device's clock (trade model statePoolPrice, the trade box's one rule), each READY wallet on its chain. */
+function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPart[]; offPool: bigint } {
+  const at = new Map<Chain, CashPart>();
+  const part = (chain: Chain): CashPart => at.get(chain) ?? (at.set(chain, { chain, cents: 0n, moving: false }).get(chain)!);
+  let cash = 0n;
+  const add = (chain: Chain, c: bigint | null) => {
+    const p = part(chain);
+    p.cents = p.cents === null || c === null ? null : p.cents + c;
+    cash += c ?? 0n;
+  };
+  // The vault's USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/
+  // signpage test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
+  let offPool = cents(s.vault_balance) ?? 0n;
+  add("near", offPool);
+  for (const p of s.pools ?? []) {
+    if (p.asset === "USDC") {
+      const c = cents(p.balance) ?? 0n;
+      offPool += c;
+      add(p.chain, c);
+      continue;
+    }
+    const units = baseUnits(p.balance, POOL_ASSET_DECIMALS[p.asset]) ?? 0n;
+    const price = statePoolPrice(s.pools, p.chain, now);
+    // a pool with nothing is $0 at any price; one with something and no fresh price has no dollar figure: none is made up
+    add(p.chain, units === 0n ? 0n : price ? unitsToCents(units, price) : null);
   }
+  for (const w of s.wallets) {
+    if (w.state !== "READY") continue;
+    const c = cents(w.size) ?? 0n;
+    offPool += c;
+    add(w.chain, c);
+  }
+  for (const o of s.ops) {
+    const c = movingChain(o);
+    if (c) part(c).moving = true;
+  }
+  const order = (c: Chain) => (c === "near" ? -1 : (POOL_CHAINS as readonly Chain[]).indexOf(c) >>> 0);
+  const parts = [...at.values()].filter((p) => p.chain === "near" || p.cents !== 0n || p.moving).sort((a, b) => order(a.chain) - order(b.chain));
+  return { cash, parts, offPool };
+}
+
+export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
+  // Cash: the vault's USDC, each pool in dollars and the READY wallets, each source counted once (cashParts; the
+  // in-flight rule is CASH_MOVING's).
+  const { cash, parts, offPool } = cashParts(s, now);
+  let onWay = 0n;
+  for (const w of s.wallets) if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
   let inPos = 0n;
   let unreal = 0n;
   let partial = false;
@@ -283,7 +357,7 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
       unreal += r.pnl!;
     }
   }
-  return { cash, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
+  return { cash, parts, offPool, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
 }
 
 /** The screen's state from the signing page's snapshot and the local data. */
@@ -539,6 +613,10 @@ export interface ActRow {
   txs: readonly TxRef[];
   /** S14.4: the address whose key was exported. */
   address: string | null;
+  /** A buy or sell that did not happen (refused, not landed): its row's Transaction failed tag, with the trade box's
+   *  reason for the kit's code on hover when the app has words for it (notLanded for a trade that did not land); null
+   *  for any other row. Never the kit's code itself. */
+  failed: { reason: Reason | "notLanded" | null } | null;
 }
 
 export interface ActGroup {
@@ -557,16 +635,28 @@ export interface ActFilter {
 export const NO_FILTER: ActFilter = { kinds: [], min: 0n, q: "" };
 
 const SHOWN = new Set(["buy", "sell", "deposit", "withdraw"]);
+/** A trade's stages where its asked amount never moved in full: its row draws no amount (the dash), since the op's
+ *  amount_usd and units are the request's ask (kit OpDetail), and only a done op's amount is what moved. */
+const NOT_MOVED = new Set(["refused", "not_landed", "part_filled"]);
 
-/** Every row Activity lists: the kit's deposits, withdrawals, buys and sells with their local detail, and the exported keys. Newest first; rows with no time last, in the kit's order. */
+/** A trade op's failure as its row draws it: refused (with the reason for its code) or not landed; null otherwise. */
+function failedOf(o: Operation): ActRow["failed"] {
+  if (o.kind !== "buy" && o.kind !== "sell") return null;
+  if (o.stage === "not_landed") return { reason: "notLanded" };
+  return o.stage === "refused" ? { reason: reasonOf(o.code) } : null;
+}
+
+/** Every row Activity lists: the kit's deposits, withdrawals, buys and sells, each with what its op carries (kit OpDetail:
+ *  time, USD size, units, chain, token; a deposit's USD is its amount_usd), and the exported keys. Newest first; rows
+ *  with no time last, in the kit's order. */
 export function activity(ops: readonly Operation[] | null | undefined, d: PortfolioData): ActRow[] {
   const rows: ActRow[] = [];
   for (const o of ops ?? []) {
     if (!SHOWN.has(o.kind)) continue;
-    const x = d.op(o.id);
-    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: x?.at ?? null, usd: cents(x?.usd), units: x?.units ?? null, chain: x?.chain ?? null, token: x?.token ?? null, txs: o.txs, address: null });
+    const moved = !NOT_MOVED.has(o.stage);
+    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });
   }
-  for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address });
+  for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address, failed: null });
   const timed = rows.filter((r) => r.at !== null).sort((a, b) => b.at! - a.at!);
   return [...timed, ...rows.filter((r) => r.at === null)];
 }

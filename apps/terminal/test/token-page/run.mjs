@@ -24,8 +24,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
+import { LIST_CHAINS } from "../../src/screens/discover/data.ts";
 import { FIXTURE_NOW_MS, TOKENS } from "./fixtures.ts";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser, pushSockets } from "../../../../scripts/harness-sockets.mjs";
 
 const HELPER = "https://ct-api.unrealized.trade";
 
@@ -122,11 +124,13 @@ function live(key) {
 }
 
 /** HELPER_HOST for one state: the lists (the top token alone in Trending, with an hour's volume so the column keeps it)
- *  and the token read. Returns null for any other helper path (refused). `calls` counts the lists reads. */
+ *  and the token read. Returns null for any other helper path (refused). `calls` counts the lists reads, and lists the
+ *  chain of each (/ reads every chain's lists: card app-chains-evm-rail). */
 function helperAnswer(s, url, calls) {
   const json = (status, body) => ({ status, headers: { "content-type": "application/json", "access-control-allow-origin": APP_HOST }, body: JSON.stringify(body) });
   if (url.pathname === "/v1/market/lists") {
     calls.lists++;
+    calls.chains.push(url.searchParams.get("chain"));
     if (s.lists === "hang") return "hang";
     if (typeof s.lists === "number") return json(s.lists, { error: "unavailable" });
     const top = s.lists === "empty" ? [] : [{ ...live(s.top), vol_1h_usd: live(s.top).vol_1h_usd ?? "1000" }];
@@ -200,7 +204,7 @@ function tape(p) {
     const b = bars[bars.length - 1 - i * 3];
     const usdV = 20 + ((i * 53) % 400);
     const amt = usdV / Number(b[4]);
-    out.push({ t_ms: b[0] * 1000 + 30_000, side: i % 3 === 0 ? "sell" : "buy", usd: usdV.toFixed(2), amt: amt.toFixed(6), trader: `Trader${i % 5}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx${i % 5}`, tx: `tx${i}` });
+    out.push({ t_ms: b[0] * 1000 + 30_000, side: i % 3 === 0 ? "s" : "b", usd: usdV.toFixed(2), amt: amt.toFixed(6), trader: `Trader${i % 5}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx${i % 5}`, tx: `tx${i}` });
   }
   return out;
 }
@@ -252,7 +256,7 @@ async function openAt(browser, route, w, s, calls) {
 
 const dir = await build();
 const route = await harnessRoute(dir, SIGNED_OUT ? "tap" : "signed");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {
@@ -261,7 +265,7 @@ try {
       if (ONLY && !ONLY.has(s.id)) continue;
       n++;
       const tag = `${s.id} @${w.name}`;
-      const calls = { lists: 0, live: 0, plant: null, edged: false };
+      const calls = { lists: 0, chains: [], live: 0, plant: null, edged: false };
       const { ctx, page, f, errors, consoles } = await openAt(browser, route, w, s, calls);
       const sel = `main[data-route="token"] [data-token-page="${s.state}"]`;
       const drawn = await f.locator(sel).first().isVisible().catch(() => false);
@@ -355,6 +359,17 @@ try {
           check(marks.every((m) => m.logo && (m.side === "buy" || m.side === "sell")), `${tag}: a mark without the token's logo or a side`);
           check(marks.every((m) => m.r.left >= plotR.left - 1 && m.r.right <= plotR.right + 1 && m.r.top >= plotR.top - 1 && m.r.bottom <= plotR.bottom + 1), `${tag}: a mark outside the plot`);
           console.log(`${tag}: ${marks.length} trade marks (${marks.filter((m) => m.side === "buy").length} buy), each the token's logo`);
+          if (phone && marks.length > 0) {
+            // card app-phone-token-taps-and-rows: a mark is tapped through a 44 px area, its disc still 12 px; a tap 18 px
+            // right of its centre (off the disc) opens a card, a second closes it
+            const tm = q("trade-mark").last();
+            const at = { x: 6 + 18, y: 6 };
+            check(Math.round(marks.at(-1).r.width) === 12, `${tag}: a mark drawn ${marks.at(-1).r.width} px, want 12`);
+            await tm.tap({ position: at, force: true });
+            check(await q("trade-mark-card").isVisible().catch(() => false), `${tag}: a tap 18 px off a mark's centre opened no card`);
+            await tm.tap({ position: at, force: true });
+            check(!(await q("trade-mark-card").isVisible().catch(() => false)), `${tag}: a second tap left the card open`);
+          }
           if (!phone) {
             for (const t of ["chart-toolbar", "chart-indicators", "chart-display", "chart-mode", "chart-denom", "chart-bottom", "chart-clock", "chart-scale-pct", "chart-scale-log", "chart-scale-auto"]) check((await q(t).count()) === 1, `${tag}: no ${t}`);
             const ranges = await f.$$eval(`${box} [data-testid^="chart-range-"]`, (els) => els.map((e) => e.textContent.trim()));
@@ -429,6 +444,29 @@ try {
             check(after.bars === before.bars && after.last.split(":")[0] === before.last.split(":")[0], `${tag}: the live read redrew the chart: ${before.bars} bars at ${before.last} -> ${after.bars} at ${after.last}`);
             check(after.close !== before.close, `${tag}: the legend's close stayed ${before.close}`);
             console.log(`${tag}: planted close ${calls.plant} drawn on the last bar in ${ms} ms; legend close ${before.close} -> ${after.close}; ${calls.live} live reads`);
+            // card market-data-push: a trade pushed on the socket is on the tape (its mark on the last bar) and wakes the
+            // chart, whose last bar takes the trade's close at once, not at its next LIVE_MS read; no reload
+            // the helper's push socket, mocked by the harness's browser (scripts/harness-sockets.mjs): the page's newest
+            const ws = pushSockets(ctx).at(-1) ?? null;
+            check(ws !== null, `${tag}: the page opened no push socket`);
+            if (ws !== null) {
+              const marks = () => f.locator(`${box} [data-testid="trade-mark"]`).count();
+              const marks0 = await marks();
+              const [ts] = after.last.split(":");
+              calls.plant = (Number(calls.plant) * 1.05).toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+              const t1 = Date.now();
+              ws.send(JSON.stringify({ trades: [{ t_ms: Number(ts) + 1_000, side: "b", usd: "50.00", amt: (50 / Number(calls.plant)).toFixed(6), trader: "TraderPushxxxxxxxxxxxxxxxxxxxxxxxxxxxx", tx: "txPush" }], src: "chain", as_of_ms: Date.now() }));
+              let pushed = after;
+              while (Date.now() - t1 < 3 * LIVE_MS && !pushed.last.endsWith(`:${Number(calls.plant)}`)) {
+                await f.waitForTimeout(20);
+                pushed = await read();
+              }
+              const ms2 = Date.now() - t1;
+              check(pushed.last.endsWith(`:${Number(calls.plant)}`) && ms2 < LIVE_MS / 2, `${tag}: the pushed trade (close ${calls.plant}) reached the last bar in ${ms2} ms (${pushed.last}), want under ${LIVE_MS / 2} ms (the wake, not the next tick)`);
+              const marks1 = await marks();
+              check(marks1 === marks0 + 1, `${tag}: the pushed trade's mark: ${marks0} -> ${marks1} marks, want one more`);
+              console.log(`${tag}: pushed trade drawn on the last bar in ${ms2} ms; marks ${marks0} -> ${marks1}`);
+            }
           } else {
             await f.waitForTimeout(4 * LIVE_MS);
             const after = await read();
@@ -498,7 +536,9 @@ try {
         await f.locator(".tkp-retry").click();
         const back = await f.locator(sel).waitFor({ timeout: 5_000 }).then(() => true, () => false);
         check(back, `${tag}: Retry lost the page`);
-        check(calls.lists === before + 1, `${tag}: Retry read the lists ${calls.lists - before} times, not once`);
+        // one read of the lists: each chain's once
+        const read = calls.chains.slice(before).sort().join(",");
+        check(read === [...LIST_CHAINS].sort().join(","), `${tag}: Retry read the lists of [${read}], not each of ${LIST_CHAINS.join(", ")} once`);
       }
       if (drawn && s.lower) {
         const box = phone ? ".tkp-phone" : ".tkp-desk";
@@ -506,9 +546,10 @@ try {
         const tabs = await f.$$eval(`${lp} [data-testid^="lower-tab-"]`, (els) => els.map((e) => e.textContent.trim()));
         const row = live(s.top);
         const count = s.holders === "chain" ? "2,703" : "2,680";
-        const wantTabs = phone ? ["Trades", `Holders${count}`] : [`Holders(${count})`, "Trades"];
+        // My orders last (card app-orders-coming-soon: its tab says Coming soon, test/orders-soon)
+        const wantTabs = phone ? ["Trades", `Holders${count}`, "My orders"] : [`Holders(${count})`, "Trades", "My orders"];
         // the tab's count comes from the token row until the Holders tab has read
-        const rowTabs = phone ? ["Trades", "Holders2,680"] : ["Holders(2,680)", "Trades"];
+        const rowTabs = phone ? ["Trades", "Holders2,680", "My orders"] : ["Holders(2,680)", "Trades", "My orders"];
         check(JSON.stringify(tabs) === JSON.stringify(rowTabs), `${tag}: the tabs read ${JSON.stringify(tabs)}, want ${JSON.stringify(rowTabs)}`);
         if (s.lower === "trades") {
           if (s.tape) {
@@ -517,7 +558,7 @@ try {
             check(rows.length === TAPE_COUNT, `${tag}: ${rows.length} trade rows, want ${TAPE_COUNT}`);
             const t0 = tape(row.price_usd)[0];
             const want0 = phone ? ["S", `$${Number(t0.usd).toFixed(2)}`] : ["Sell", `$${Number(t0.usd).toFixed(2)}`];
-            check(rows[0] && rows[0].side === t0.side && rows[0].cells[1] === want0[0] && rows[0].cells.includes(want0[1]) && rows[0].cells.at(-1) === t0.trader, `${tag}: the first trade row reads ${JSON.stringify(rows[0])}`);
+            check(rows[0] && rows[0].side === { b: "buy", s: "sell" }[t0.side] && rows[0].cells[1] === want0[0] && rows[0].cells.includes(want0[1]) && rows[0].cells.at(-1) === t0.trader, `${tag}: the first trade row reads ${JSON.stringify(rows[0])}`);
             check((await f.locator(`${lp} [data-testid="trades-heads"] [data-col="mc"]`).count()) === (phone ? 0 : 1), `${tag}: the MC column ${phone ? "drawn on the phone" : "missing"}`);
           } else {
             const empty = await f.locator(`${lp} [data-testid="lower-empty"]`).textContent({ timeout: 8_000 }).catch(() => null);

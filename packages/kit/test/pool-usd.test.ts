@@ -459,16 +459,79 @@ test("staleness: Robinhood's read holds Base's at the device's own clock, as giv
   assert.equal(p.price, words(FX.robinhood)[1]);
 });
 
-test("staleness: a Pyth price older than 60 s is refused; at 60 s it is used; one ahead of the clock is refused", async (t) => {
+test("staleness: a Pyth price older than 75 s (its 60 s heartbeat and 15 s for a late write) is refused; at 74 s and 75 s it is used; one ahead of the clock is refused", async (t) => {
   // the age is told as the read returns: a clock that does not move, so the bound is met exactly
   enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
   const f = POOL_USD_FEEDS.solana;
-  assert.equal(f.maxAgeS, 60);
-  assert.ok(await solana(undefined, (SOL_PUBLISH_S + 60) * 1000));
-  await assert.rejects(solana(undefined, (SOL_PUBLISH_S + 60) * 1000 + 1), /older than 60 s/);
-  await assert.rejects(solana(undefined, (SOL_PUBLISH_S + 3600) * 1000), /older than 60 s/);
+  // card pool-usd-price-never-stale: the sponsored account is written when its price is 50 to 57 s old and lands 1 to 3
+  // s later (read 10 Nov 03:56-04:26Z), so a 60 s bound blanked the box at every late write
+  assert.equal(f.maxAgeS, 75);
+  assert.ok(await solana(undefined, (SOL_PUBLISH_S + 61) * 1000), "61 s: used");
+  assert.ok(await solana(undefined, (SOL_PUBLISH_S + 74) * 1000), "74 s: used");
+  assert.ok(await solana(undefined, (SOL_PUBLISH_S + 75) * 1000), "75 s: used");
+  await assert.rejects(solana(undefined, (SOL_PUBLISH_S + 75) * 1000 + 1), /older than 75 s/);
+  await assert.rejects(solana(undefined, (SOL_PUBLISH_S + 76) * 1000), /older than 75 s/);
+  await assert.rejects(solana(undefined, (SOL_PUBLISH_S + 3600) * 1000), /older than 75 s/);
   assert.ok(await solana(undefined, (SOL_PUBLISH_S - POOL_USD_MAX_AHEAD_S) * 1000));
   await assert.rejects(solana(undefined, (SOL_PUBLISH_S - POOL_USD_MAX_AHEAD_S) * 1000 - 1), /ahead of the device's clock/);
+});
+
+test("staleness: a refusal for age alone is named PoolUsdStale with the feed's time; any other refusal is not (card pool-usd-price-never-stale)", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
+  const late = await solana(undefined, (SOL_PUBLISH_S + 76) * 1000).then(() => null, (e: unknown) => e as Error & { publishedS?: number });
+  assert.equal(late?.name, "PoolUsdStale");
+  assert.equal(late?.publishedS, SOL_PUBLISH_S);
+  // ahead of the clock, disagreeing, or a wrong account: not a late feed
+  const ahead = await solana(undefined, (SOL_PUBLISH_S - POOL_USD_MAX_AHEAD_S) * 1000 - 1).then(() => null, (e: unknown) => e as Error);
+  assert.match(String(ahead), /ahead of the device's clock/);
+  assert.notEqual(ahead?.name, "PoolUsdStale");
+  const lying = await solana([solEdit(setI64(AT.publish, 1n)), undefined]).then(() => null, (e: unknown) => e as Error);
+  assert.match(String(lying), /disagree/);
+  assert.notEqual(lying?.name, "PoolUsdStale");
+  // Robinhood: Base's ETH/USD late is a plain refusal, never read as Robinhood's own feed late
+  const nowMs = (Number(words(FX.base)[3]) + POOL_USD_FEEDS.base.maxAgeS + 1) * 1000;
+  const fresh = then(wordEdit(LRD, 3, BigInt(Math.floor(nowMs / 1000) - 10)), blockAt(nowMs));
+  const r = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [fresh, fresh]), nowMs, baseRpcs: pair(FX.base, [blockAt(nowMs), blockAt(nowMs)]) }).then(() => null, (e: unknown) => e as Error);
+  assert.match(String(r), /Base's ETH\/USD: the price is older than 1500 s/);
+  assert.notEqual(r?.name, "PoolUsdStale");
+  // Robinhood's own feed late is
+  const own = await evm("robinhood", [], (Number(words(FX.robinhood)[3]) + POOL_USD_FEEDS.robinhood.maxAgeS + 1) * 1000).then(() => null, (e: unknown) => e as Error);
+  assert.equal(own?.name, "PoolUsdStale");
+  // review of eb2dfdc5, P3: but not while Base's read is not whole and agreeing: Base's refusal is the answer, whichever
+  // read ends first
+  const rhLateMs = (Number(words(FX.robinhood)[3]) + POOL_USD_FEEDS.robinhood.maxAgeS + 1) * 1000;
+  const baseFresh = then(wordEdit(LRD, 3, BigInt(Math.floor(rhLateMs / 1000) - 10)), blockAt(rhLateMs));
+  const baseApart = then(wordEdit(LRD, 1, 1n), baseFresh);
+  const both = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [blockAt(rhLateMs), blockAt(rhLateMs)]), nowMs: rhLateMs, baseRpcs: pair(FX.base, [baseApart, baseFresh]) }).then(() => null, (e: unknown) => e as Error);
+  assert.match(String(both), /disagree/);
+  assert.notEqual(both?.name, "PoolUsdStale");
+  const alone = await poolUsdPrice({ chain: "robinhood", rpcs: pair(FX.robinhood, [blockAt(rhLateMs), blockAt(rhLateMs)]), nowMs: rhLateMs, baseRpcs: pair(FX.base, [baseFresh, baseFresh]) }).then(() => null, (e: unknown) => e as Error);
+  assert.equal(alone?.name, "PoolUsdStale", String(alone));
+});
+
+test("staleness: the PoolUsdStale tag comes only after every other check holds: a late price that is also wide, read before its own slot, or not positive is a plain refusal (review of eb2dfdc5, K1-K3)", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
+  const lateSol = (SOL_PUBLISH_S + POOL_USD_FEEDS.solana.maxAgeS + 30) * 1000;
+  const err = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e as Error);
+  const both = (f: (b: Uint8Array) => void) => [solEdit(f), solEdit(f)];
+  // control: late alone is the tag
+  assert.equal((await err(solana(undefined, lateSol)))?.name, "PoolUsdStale");
+  const wide = await err(solana(both(setU64(AT.conf, SOL_PRICE / 20n)), lateSol));
+  assert.match(String(wide), /confidence .* is wider than/);
+  assert.equal(wide?.name, "Error");
+  const early = await err(solana(both(setU64(AT.postedSlot, 1n << 60n)), lateSol));
+  assert.match(String(early), /before the update's own slot/);
+  assert.equal(early?.name, "Error");
+  const zero = await err(solana(both(setI64(AT.price, 0n)), lateSol));
+  assert.match(String(zero), /price 0 is not positive/);
+  assert.equal(zero?.name, "Error");
+  for (const chain of ["base", "robinhood"] as const) {
+    const late = (Number(words(FX[chain])[3]) + POOL_USD_FEEDS[chain].maxAgeS + 30) * 1000;
+    assert.equal((await err(evm(chain, [], late)))?.name, "PoolUsdStale", chain);
+    const z = await err(evm(chain, [wordEdit(LRD, 1, 0n), wordEdit(LRD, 1, 0n)], late));
+    assert.match(String(z), /price 0 is not positive/, chain);
+    assert.equal(z?.name, "Error", chain);
+  }
 });
 
 test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async (t) => {
@@ -488,15 +551,17 @@ test("staleness: a Chainlink price older than its chain's bound is refused; at t
 
 test("staleness: a price's age is told as the read returns: inside its bound at the start and past it by the end, refused", async (t) => {
   const startS = Math.floor(NOW / 1000);
-  // Pyth: 55 s old at the read's start; read at once it is used, and with one provider slow once (5250 ms) it is 60 s old
-  const aged = () => solEdit(setI64(AT.publish, BigInt(startS - 55)))("getMultipleAccounts", [], GOOD());
+  // Pyth: 5 s inside its bound at the read's start; read at once it is used, and with one provider slow once (5250 ms)
+  // it is past it
+  const solMax = POOL_USD_FEEDS.solana.maxAgeS;
+  const aged = () => solEdit(setI64(AT.publish, BigInt(startS - (solMax - 5))))("getMultipleAccounts", [], GOOD());
   let r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
   assert.equal(r.ok, true, String(r.e));
   resetTimers(t.mock.timers);
   r = await onClock(t, () => poolUsdPrice({ chain: "solana", rpcs: [turns("https://a.example", [HANG, aged]).rpc, turns("https://b.example", [aged]).rpc], nowMs: NOW }));
   assert.equal(r.ok, false);
   assert.equal(r.ms, POOL_USD_CALL_TIMEOUT_MS + POOL_USD_RETRY_BACKOFF_MS);
-  assert.match(String(r.e), /older than 60 s/);
+  assert.match(String(r.e), new RegExp(`older than ${solMax} s`));
   resetTimers(t.mock.timers);
   // Chainlink on Base: 1495 s old at the start (its bound 1500 s), the same slow provider
   const max = POOL_USD_FEEDS.base.maxAgeS;

@@ -628,19 +628,49 @@ test("a reference without one E per leg is no reference", async () => {
   for (const l of r.legs) assert.match(l.refused ?? "", /no reference pool/);
 });
 
-test("one long-lived map across trades: a user with 204 wallets, the next three-wallet sell inside the 2 s budget, nothing derived again", async () => {
+test("one long-lived map across trades: a user with 204 wallets, the next three-wallet sell uses the caller's map and derives nothing again", async () => {
   const extra = Array.from({ length: 200 }, (_, i) => base58.encode(Uint8Array.from({ length: 32 }, (_, j) => (i * 31 + j * 7 + 1) & 0xff)));
   const req = { ...request(SELL), wallets: [...request(SELL).wallets, ...extra] };
-  const links = new SolanaWalletLinks();
+  // The work is counted, not timed: a map derives a wallet's accounts once, when it first holds it, so a next trade that
+  // asks the caller's map for no wallet it lacks, and never finds it short (S11 then builds its own map of every
+  // wallet), derives no wallet's accounts again. A key the map was never given still reaches every wallet once.
+  const asked = { wallets: [] as string[], keys: [] as string[], short: 0, held: 0 };
+  class Counted extends SolanaWalletLinks {
+    override addWallets(wallets: Iterable<string>): void {
+      const w = [...wallets];
+      asked.wallets.push(...w);
+      super.addWallets(w);
+    }
+    override add(keys: Iterable<string>): void {
+      const k = [...keys];
+      asked.keys.push(...k);
+      super.add(k);
+    }
+    override grow(wallets: Iterable<string>, keys: Iterable<string>, sliceMs?: number): Promise<void> {
+      const [w, k] = [[...wallets], [...keys]];
+      asked.wallets.push(...w);
+      asked.keys.push(...k);
+      return super.grow(w, k, sliceMs);
+    }
+    override holds(wallets: Iterable<string>): boolean {
+      const r = super.holds(wallets);
+      if (r) asked.held++;
+      else asked.short++;
+      return r;
+    }
+  }
+  const links = new Counted();
   const first = await runSolanaTrade(req, { ...deps(SELL), links });
   assert.ok(first.legs.every((l) => l.refused === undefined));
   assert.equal(links.holds(req.wallets), true, "the trade grew the caller's map by every wallet");
-  const t = performance.now();
+  const known = new Set(links.wallets);
+  Object.assign(asked, { wallets: [], keys: [], short: 0, held: 0 });
   const next = await runSolanaTrade(req, { ...deps(SELL), links });
-  const ms = performance.now() - t;
   assert.ok(next.legs.every((l) => l.refused === undefined && l.dry?.state === "simulated"));
-  assert.ok(ms < 2_000, `the next trade took ${ms.toFixed(0)} ms`);
-  console.log(`204 wallets, long-lived map: the next sell ${ms.toFixed(0)} ms`);
+  assert.ok(asked.wallets.length >= req.wallets.length && asked.keys.length > 0, "the next trade asked the caller's map");
+  assert.equal(asked.short, 0, "S11 never found the map short, so it built no map of its own");
+  assert.ok(asked.held >= next.legs.length, `S11 checked the caller's map on every leg: ${asked.held} of ${next.legs.length}`);
+  assert.deepEqual(asked.wallets.filter((w) => !known.has(w)), [], "no wallet derived again");
 });
 
 // Card solana-uncapped-fits, fold 2: the trade's build is the cap search, judged on the device's own assembly.

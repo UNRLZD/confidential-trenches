@@ -80,6 +80,15 @@ test("every host of an aliased domain is the alias's operator: two hosts of Offc
   assert.equal(op("https://rpc2.degenprotocol.io"), "pocket.network");
 });
 
+// card evm-pool-sync-holds: dRPC's keyed hosts (lb.drpc.live) and Grove's (*.rpc.grove.city, Pocket's gateway) are the
+// operators of drpc.org and pocket.network, so a helper's keyed URL of either never counts as a second operator beside them
+test("dRPC's keyed domain is drpc.org and Grove's is pocket.network: a keyed URL of either is never another operator", () => {
+  assert.equal(op("https://lb.drpc.live/base/FAKEKEY123"), "drpc.org");
+  assert.equal(op("https://lb.drpc.live/x"), op("https://base.drpc.org"));
+  assert.equal(op("https://base.rpc.grove.city/v1/FAKEKEY123"), "pocket.network");
+  assert.equal(op("https://robinhood.rpc.grove.city/v1/x"), op("https://robinhood.api.pocket.network"));
+});
+
 test("every list the kit pins for an EVM venue, quote, fee and pool, is each entry another operator's", () => {
   for (const [chain, v] of Object.entries(evmPoolVenues()) as [string, EvmPoolVenue][]) {
     for (const [name, list] of [["providers", v.providers], ["feeProviders", v.feeProviders], ["poolProviders", v.poolProviders]] as const) {
@@ -113,5 +122,23 @@ test("every pool-list reader takes the list from evmPoolProvidersOf, never a ven
     const src = readFileSync(new URL(f, import.meta.url), "utf8");
     assert.match(src, /evmPoolProvidersOf\(/, `${f}: takes the accessor`);
     assert.doesNotMatch(src, /\.poolProviders\b|\?\.providers\b|\.providers\s*\?\?/, `${f}: reads no venue list itself`);
+  }
+});
+
+// card evm-pool-sync-holds (review P3-2, P2-3): the deep public sources an EVM pool's old logs are read from past its
+// pool list, one list in the kit for the signing page, the helper's start check and the live checks; apart from the
+// venue objects, so the venues' URL order (and SIGN_HOST's pinned connect-src) stays as it was.
+test("EVM_POOL_HISTORY: Base's bloXroute and Tenderly, none on Robinhood; frozen; each an operator apart from its chain's pool list", async () => {
+  const { EVM_POOL_HISTORY } = (await import("../src/index.ts")) as unknown as { EVM_POOL_HISTORY?: Readonly<Record<"base" | "robinhood", readonly string[]>> };
+  assert.ok(EVM_POOL_HISTORY, "the kit's index exports EVM_POOL_HISTORY");
+  assert.deepEqual(Object.keys(EVM_POOL_HISTORY), ["base", "robinhood"]);
+  assert.deepEqual(EVM_POOL_HISTORY.base, ["https://base.rpc.blxrbdn.com", "https://base.gateway.tenderly.co"]);
+  assert.deepEqual(EVM_POOL_HISTORY.robinhood, []);
+  assert.ok(Object.isFrozen(EVM_POOL_HISTORY) && Object.isFrozen(EVM_POOL_HISTORY.base) && Object.isFrozen(EVM_POOL_HISTORY.robinhood));
+  assert.deepEqual(EVM_POOL_HISTORY.base.map(op), ["blxrbdn.com", "tenderly.co"]);
+  for (const chain of ["base", "robinhood"] as const) {
+    const pool = new Set((evmPoolProvidersOf(evmPoolVenues()[chain]) ?? []).map(op));
+    for (const u of EVM_POOL_HISTORY[chain]) assert.ok(!pool.has(op(u)), `${u} runs ${chain}'s pool list`);
+    assert.ok(!Object.hasOwn(evmPoolVenues()[chain], "history"), "never inside the venue object");
   }
 });

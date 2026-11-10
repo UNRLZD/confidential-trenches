@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SignpageState } from "@blindfill/kit";
-import { amountWrong, centsToUnits, decimalToUnits, poolBuyAsk, poolSellAsk, poolView, unitsToCents, unitsToDecimal } from "../src/screens/trade/model.ts";
+import { amountText, amountWrong, centsToUnits, decimalToUnits, parseUsd, poolBuyAsk, poolSellAsk, poolView, presetsOf, PRESETS, unitsToCents, unitsToDecimal } from "../src/screens/trade/model.ts";
 
 type Pool = NonNullable<SignpageState["pools"]>[number];
 // Pyth SOL/USD as read on 4 Nov 07:40Z (packages/kit/src/price/pool-usd.ts): $93.01048308
@@ -71,8 +71,10 @@ test("pool.buy on Base and Robinhood spends a whole chunk: only the chunk's own 
 });
 
 test("pool.sell: the position's token units for the chain's pool, the proceeds back into it; none off a pool chain", () => {
-  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", "1200.5", 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", amount: "1200.5", slippage_bps: 1_000 } });
-  assert.deepEqual(poolSellAsk([base("0.01")], "base", "0xabc", "5", 1_000), { kind: "pool.sell", params: { chain: "base", token: "0xabc", amount: "5", slippage_bps: 1_000 } });
+  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", { amount: "1200.5" }, 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", amount: "1200.5", slippage_bps: 1_000 } });
+  assert.deepEqual(poolSellAsk([base("0.01")], "base", "0xabc", { amount: "5" }, 1_000), { kind: "pool.sell", params: { chain: "base", token: "0xabc", amount: "5", slippage_bps: 1_000 } });
+  // card pool-sell-share-across-wallets: a share of the whole holding, the page's own units
+  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", { share_bps: 7_500 }, 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", share_bps: 7_500, slippage_bps: 1_000 } });
   // no pool for the chain (signed out, notes unread, or NEAR): the vault's own sell stays
   assert.equal(poolSellAsk(undefined, "solana", "Mint1", "1", 1_000), null);
   assert.equal(poolSellAsk([sol("0.2")], "near", "x.near", "1", 1_000), null);
@@ -88,4 +90,32 @@ test("the amount field is marked wrong only when the amount is what is wrong: ov
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 3_000n, SOL, 1_000)), true);
   assert.equal(amountWrong(poolBuyAsk([base("0.03", "0.02", "0.01")], "base", "0xabc", 2_500n, ETH, 500)), true);
   assert.equal(amountWrong(poolBuyAsk(ready, "solana", "Mint1", 0n, SOL, 1_000)), true);
+});
+
+test("the presets row: on Base and Robinhood one button holding the chunk's USD, the one amount pool.buy takes; the four elsewhere", () => {
+  const rh = (balance: string, ready?: string, tap_max?: string): Pool => ({ ...base(balance, ready, tap_max), chain: "robinhood" });
+  for (const [chain, entry] of [["base", base], ["robinhood", rh]] as const) {
+    const pools = [entry("0.03", "0.02", "0.01")];
+    const row = presetsOf(chain, poolView(pools, chain, ETH));
+    assert.deepEqual(row, [3_500n], chain);
+    // the button's value is what the buy takes, and its tap's text parses back to it
+    assert.equal(poolBuyAsk(pools, chain, "0xabc", row[0]!, ETH, 500).ok, true, chain);
+    assert.equal(parseUsd(amountText(row[0]!)), row[0], chain);
+    // a chunk worth cents: 0.001 ETH at $3,500.12345678 is $3.50, drawn and filled as 3.50, never 3
+    const small = [entry("0.003", "0.003", "0.001")];
+    const one = presetsOf(chain, poolView(small, chain, ETH));
+    assert.deepEqual(one, [350n], chain);
+    assert.equal(amountText(one[0]!), "3.50");
+    assert.equal(poolBuyAsk(small, chain, "0xabc", parseUsd(amountText(one[0]!))!, ETH, 500).ok, true, chain);
+    // the value unknown: a proof still making (no tap_max), no price, no pool for the chain: one button, no value
+    assert.deepEqual(presetsOf(chain, poolView([entry("0.02", "0")], chain, ETH)), [null], chain);
+    assert.deepEqual(presetsOf(chain, poolView(pools, chain, null)), [null], chain);
+    assert.deepEqual(presetsOf(chain, null), [null], chain);
+    assert.deepEqual(presetsOf(chain, poolView([entry("0.02", "0.02", "0")], chain, ETH)), [null], chain);
+  }
+  // Solana and NEAR keep the four
+  assert.deepEqual(presetsOf("solana", poolView([sol("1.25", "0.4", "0.3")], "solana", SOL)), PRESETS);
+  assert.deepEqual(presetsOf("solana", null), PRESETS);
+  assert.deepEqual(presetsOf("near", null), PRESETS);
+  assert.equal(amountText(2_500n), "25");
 });

@@ -2,7 +2,9 @@
 // (pool-deposit-sent-end.answers.json). good: this card's build with the delta reviews of 09542dc6 and bce5cde5 folded:
 // PASS. badc3c: the card's build at c3cb08c8, bad095: the card's build at 09542dc6, bad37a: the card's build at 37abecea, bad: the card's build before the first fold
 // (6f20021b), bad5a9: main 5a9e5d8c's build,
-// and liveBefore: SIGN_HOST before this card's deploy: each FAIL, each path named. Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL. Planted in
+// and liveBefore: SIGN_HOST before this card's deploy: each FAIL, each path named. goodSpent: the build of card
+// evm-deposit-note-stays-incoming (U's nonce through spentFinal): PASS; liveFinalized: SIGN_HOST before its deploy
+// (U's nonce at finalized): FAIL on evmEnd alone. Planted on the good one: another /app.js, no pin, each mark taken away: each FAIL. Planted in
 // the bundle's own excerpt (pool-deposit-sent-end.excerpt.txt, cut from this build's public/app.js): each mutant the
 // review's finding 7 found the old marks blind to, and each rule of the fold, taken away: the fact it rests on FAILs.
 import assert from "node:assert/strict";
@@ -19,6 +21,18 @@ test("recorded good answer: this card's build: PASS", () => {
   const v = judge(ANSWERS.good);
   assert.equal(v.ok, true, v.lines.join("\n"));
   assert.deepEqual(v.lines, []);
+});
+
+test("recorded good answer: the build of card evm-deposit-note-stays-incoming (U's nonce through spentFinal): PASS", () => {
+  const v = judge(ANSWERS.goodSpent);
+  assert.equal(v.ok, true, v.lines.join("\n"));
+  assert.deepEqual(v.lines, []);
+});
+
+test("recorded bad answer: SIGN_HOST before the deploy of card evm-deposit-note-stays-incoming (U's nonce at finalized): FAIL on evmEnd alone", () => {
+  const v = judge(ANSWERS.liveFinalized);
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, bad("evmEnd"));
 });
 
 test("recorded bad answer: the card's build before the review fold (6f20021b): FAIL on every rule the fold added", () => {
@@ -91,11 +105,11 @@ const PLANTED = [
   ["no backoff (review 4)", [["d&&(u=Math.min(u*2,IP))", "d&&(u=u)"]], "loops"],
   ["filled without the whole ask sent (S9)", [["return e.signal?.aborted?null:t.whole&&o.length>0", "return e.signal?.aborted?null:o.length>0"]], "loops"],
   ["the hand-off keeps settled sends (S12)", [["let t=new Set(d().map(e=>e.hash))", "let t=new Set(l.map(e=>e.hash))"]], "solLeft"],
-  ["EVM: the round read before U's nonce (E1)", [["let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`));nF(e);let c=await e.round(),", "let c=await e.round();nF(e);let s=await bI(e.rpcs,async(e,n)=>gI(await e(`eth_getTransactionCount`,[t.u,`finalized`]),`rpc ${n} finalized nonce`)),"]], "evmEnd"],
-  ["EVM: the first send's nonce (E8)", [["(i?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(i?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
-  ["EVM: a Deposited not final read as an end (E4)", [["l.block>c.finalBlock?null:", ""]], "evmEnd"],
-  ["EVM: a Deposited at another value read as landed (E5)", [["l.value===t.value?`landed`:`dead`}", "`landed`}"]], "evmEnd"],
-  ["EVM: every send dead read as dead (review 1)", [["s[0]>a&&s[1]>a?`expired`:null", "s[0]>a&&s[1]>a?`dead`:null"]], "evmEnd"],
+  ["EVM: the round read before U's nonce (E1)", [["s!==void 0&&n(s.hash);let c=", "s!==void 0&&n(s.hash);let d=await e.round(e.signal);let c="], ["nF(e);let d=await e.round(e.signal),f=", "nF(e);let f="]], "evmEnd"],
+  ["EVM: the first send's nonce (E8)", [["(a?.evmSends??[]).reduce((e,t)=>t.nonce>e?t.nonce:e,t.nonce)", "(a?.evmSends?.[0]?.nonce??t.nonce)"]], "evmEnd"],
+  ["EVM: a Deposited not final read as an end (E4)", [["f.block>d.finalBlock?null:", ""]], "evmEnd"],
+  ["EVM: a Deposited at another value read as landed (E5)", [["f.value===t.value?`landed`:`dead`;", "`landed`;"]], "evmEnd"],
+  ["EVM: every send dead read as dead (review 1)", [["d.finalBlock>=l?`expired`:null", "d.finalBlock>=l?`dead`:null"]], "evmEnd"],
   ["EVM: the store read before the keys are zeroed (review 6)", [["finally{n.fill(0);for(let e of r)e.fill(0);let i=p;", "finally{let i=p;"]], "evmLeft"],
   ["EVM: part_filled with an open note read as the end (review 3)", [["e.stage===`part_filled`&&(a===null||a.notes.length===0)", "e.stage===`part_filled`"]], "evmKind"],
   // the delta review's fold
@@ -104,16 +118,16 @@ const PLANTED = [
   ["the Solana kind posts only part_filled after its answer (fold review 1)", [["i?n?r?.progress(u.stage):", "i?n?u.stage===`part_filled`&&r?.progress(u.stage):"]], "solKind"],
   ["the EVM kind posts no end after its answer (fold review 1)", [["i?o?r?.progress(e.stage):", "i?o?void 0:"]], "evmKind"],
   ["the Solana record read through the note store (fold review 6)", [["s=(await e.records()).find(", "s=(await (await e.notes()).list()).find("]], "solEnd"],
-  ["the EVM record read through the note store (fold review 6)", [["i=(await e.records()).find(", "i=(await (await e.notes()).list()).find("]], "evmEnd"],
+  ["the EVM record read through the note store (fold review 6)", [["a=(await e.records()).find(", "a=(await (await e.notes()).list()).find("]], "evmEnd"],
   // the delta review of 09542dc6's five Lows
   ["a Solana read that may land counted so past its window (low 1)", [["t===null&&s-l[n]<12e4&&(d=!1)", "t===null&&(d=!1)"]], "loops"],
-  ["an EVM read that may land counted so past its window (low 1)", [["t===null&&i-o[n]<15e5&&(c=!1)", "t===null&&(c=!1)"]], "loops"],
+  ["an EVM read that may land counted so past its window (low 1)", [["t===null&&a-s[n]<15e5&&(l=!1)", "t===null&&(l=!1)"]], "loops"],
   ["no new window for a note the pass sends anew (low 1)", [["e=>void(e!==c[n]&&(c[n]=e,l[n]=s))", "e=>void 0"]], "loops"],
-  ["no new window for an EVM note the pass sends anew (low 1)", [["e=>void(e!==a[n]&&(a[n]=e,o[n]=i))", "e=>void 0"]], "loops"],
+  ["no new window for an EVM note the pass sends anew (low 1)", [["e=>void(e!==o[n]&&(o[n]=e,s[n]=a))", "e=>void 0"]], "loops"],
   ["the Solana window stretched to ten minutes (low 1)", [["s-l[n]<12e4&&", "s-l[n]<6e5&&"]], "windows"],
   ["the EVM per-note stop removed (low 4)", [["if(r[n]!==null)continue;if(e.signal?.aborted)return null;", "if(r[n]!==null)continue;"]], "loops"],
   ["no stop before the Solana heights (low 4)", [["a(c[c.length-1].signature),nF(e);let l=await YP(e)", "a(c[c.length-1].signature);let l=await YP(e)"]], "solEnd"],
-  ["no stop before U's nonce (low 4)", [["o!==void 0&&n(o.hash),nF(e);let s=await bI(", "o!==void 0&&n(o.hash);let s=await bI("]], "evmEnd"],
+  ["no stop before U's nonce (low 4)", [["o();let c=await bI(e,async(e,n)=>gI(await e(`eth_getTransactionCount`", "let c=await bI(e,async(e,n)=>gI(await e(`eth_getTransactionCount`"]], "evmEnd"],
   ["the stop helper never stops (low 4)", [["function nF(e){if(e.signal?.aborted)throw Error(`signed out`)}", "function nF(e){}"]], "evmEnd"],
   ["the wait's timer not cleared at sign out (low 4)", [["clearTimeout(i),", ""]], "waits"],
   ["the Solana reads' wait not given the sign out (low 4)", [["let n=e.wait??(t=>LP(t,e.signal)),r=async", "let n=e.wait??(t=>LP(t)),r=async"]], "waits"],
@@ -123,9 +137,24 @@ const PLANTED = [
   ["the Solana end's wait inside a note's reads not ended in the stop (review 2 M1)", [["r=async t=>{await n(t),nF(e)}", "r=async t=>{await n(t)}"]], "stopWait"],
   ["the Solana end's reads given the bare wait (review 2 M1)", [["await tF(e,i,a,u,r,", "await tF(e,i,a,u,n,"]], "stopWait"],
   ["the Solana end hands the follower no newest send (review 2)", [["a(c[c.length-1].signature),nF(e);", "nF(e);"]], "solEnd"],
-  ["the EVM end hands the follower no newest send (review 2)", [["o!==void 0&&n(o.hash),nF(e);", "nF(e);"]], "evmEnd"],
+  ["the EVM end hands the follower no newest send (review 2)", [["s!==void 0&&n(s.hash);", ""]], "evmEnd"],
   ["only the Solana follower's own kick starts a new window (review 2)", [["e=>void(e!==c[n]&&(c[n]=e,l[n]=s))", "e=>void 0"], ["t===`expired`?f=!0:", "t===`expired`?(f=!0,l[n]=s):"]], "loops"],
-  ["only the EVM follower's own kick starts a new window (review 2)", [["e=>void(e!==a[n]&&(a[n]=e,o[n]=i))", "e=>void 0"], ["t===`expired`?l=!0:", "t===`expired`?(l=!0,o[n]=i):"]], "loops"],
+  ["only the EVM follower's own kick starts a new window (review 2)", [["e=>void(e!==o[n]&&(o[n]=e,s[n]=a))", "e=>void 0"], ["t===`expired`?u=!0:", "t===`expired`?(u=!0,s[n]=a):"]], "loops"],
+  // card evm-deposit-note-stays-incoming: U's nonce read through spentFinal, at the newest block both RPCs hold
+  ["EVM: the end's read not stopped at sign out (the stop not handed to the spent read)", [[",e.signal,()=>nF(e));", ",e.signal);"]], "evmEnd"],
+  ["EVM: no stop before the spent read's newest block", [["{if(r===void 0){o();let s=", "{if(r===void 0){let s="]], "evmEnd"],
+  ["EVM: no stop before the finalized headers", [["let s=r;o();let c=", "let s=r;let c="]], "evmEnd"],
+  ["EVM: U's nonce read at finalized again", [["[t,{blockHash:s.hash}]", "[t,`finalized`]"]], "evmEnd"],
+  ["EVM: U's nonce past on one RPC only", [["if(c[0]<=n||c[1]<=n)", "if(c[0]<=n)"]], "evmEnd"],
+  ["EVM: the spent block final on one RPC's finalized header", [["if(c[0].number<s.number||c[1].number<s.number)", "if(c[0].number<s.number)"]], "evmEnd"],
+  ["EVM: the spent block final with no hash read at its number (a reorg kept)", [["return l[0].hash!==s.hash||l[1].hash!==s.hash||", "return "]], "evmEnd"],
+  ["EVM: the newest block read with no sign-out signal", [["_C(e,`latest`,a,i),i,a)", "_C(e,`latest`,void 0,i),i)"]], "evmEnd"],
+  ["EVM: the spent read's wait not ended at sign out", [["t=>(e.wait??(t=>LP(t,e.signal)))(t)", "t=>(e.wait??(t=>LP(t)))(t)"]], "evmEnd"],
+  ["EVM: a kept block taken at another nonce", [["a?.evmSpent!==void 0&&a.evmSpent.nonce===o?", "a?.evmSpent!==void 0?"]], "evmEnd"],
+  ["EVM: expired before the round's finalized block reaches the spent block", [["l!==null&&d.finalBlock>=l?", "l!==null?"]], "evmEnd"],
+  ["EVM: a failed read thrown before the round (a landed deposit never read)", [["catch(e){u={e}}", "catch(e){throw e}"]], "evmEnd"],
+  ["EVM: a failed read dropped (told may land)", [["if(u!==null)throw u.e;", ""]], "evmEnd"],
+  ["EVM: the reads never back off", [["l&&(c=Math.min(c*2,IP))", "l&&(c=c)"]], "loops"],
 ];
 
 for (const [what, pairs, k] of PLANTED) {

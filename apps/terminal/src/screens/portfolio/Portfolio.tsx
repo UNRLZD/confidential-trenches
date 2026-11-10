@@ -9,7 +9,8 @@ import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
 import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
-import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
+import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
+import { chainOf } from "../market/pads.ts";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -21,7 +22,8 @@ import "./portfolio.css";
 // S14). Desktop: the header row of three panels (the total with Where it is and the value line; the PnL calendar; how
 // you trade), then the positions table (Open / Closed, search, hide small) beside Allocation and Activity. Phone: the
 // total, Deposit and Withdraw, the dot line, the breakdown and Where it is, then the sticky segments Positions, Orders
-// (a link to the Orders route), Activity and Stats, and a position's action sheet (S10.13). Both forms are in the page
+// (a link to the Orders route), Activity and Stats, and a position's action sheet (S10.13). Orders are out of the plan
+// for now (card app-orders-coming-soon): the exit plan cell and the sheet's Exit plan row say `Coming soon`, no tap. Both forms are in the page
 // and CSS shows one, as the shell does. Every sell, exit plan, share, export and view-key tap goes to the mount
 // (PortfolioAction): those screens are other cards'. `data-states` on the root lists every brief state on screen.
 // Every wallet that holds money has its own export (card app-export-every-wallet): a position row's Export key icon for
@@ -256,19 +258,54 @@ function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phon
     { id: "positions", w: "positions" as const, v: t?.inPos ?? 0n, col: "var(--acc)" },
     { id: "onway", w: "onTheWay" as const, v: t?.onWay ?? 0n, col: "var(--blue)" },
   ];
+  const body = (p: (typeof parts)[number]) => (
+    <>
+      <div className="pvk"><W id={p.w} /></div>
+      <div className="pvvr"><span className="pvv num">{usd(p.v)}</span><span className="pvp num">{tot > 0n ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
+      <Strip lit={tot > 0n ? Number((p.v * 40n) / tot) : 0} col={p.col} />
+    </>
+  );
   return (
     <div className="pvtiles">
-      {parts.map((p) => (
-        <div className="pvt" key={p.id} data-tile={p.id} style={{ ["--tc" as string]: p.col }}>
-          <div className="pvk"><W id={p.w} /></div>
-          <div className="pvvr"><span className="pvv num">{usd(p.v)}</span><span className="pvp num">{tot > 0n ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
-          <Strip lit={tot > 0n ? Number((p.v * 40n) / tot) : 0} col={p.col} />
-        </div>
-      ))}
+      {parts.map((p) =>
+        p.id === "cash" ? (
+          <CashTile key={p.id} parts={t?.parts ?? []} col={p.col}>{body(p)}</CashTile>
+        ) : (
+          <div className="pvt" key={p.id} data-tile={p.id} style={{ ["--tc" as string]: p.col }}>{body(p)}</div>
+        ),
+      )}
       <div className="pvt pvtot" data-tile="total">
         <div className="pvk"><W id="total" /></div>
         <div className="pvvr"><span className="pvv num">{usd(tot)}</span></div>
         <Strip lit={tot > 0n ? 40 : 0} col="var(--acc)" />
+      </div>
+    </div>
+  );
+}
+
+/** The Cash tile with each chain's part (card portfolio-one-balance): the chain's mark and name (pads.ts CHAINS, data),
+ *  its part in dollars, a dash for a pool with no fresh price, and Processing while a deposit of its money is on neither
+ *  side (model.ts CASH_MOVING). Shown on hover or focus on desktop and by a tap on the phone; data-part names each row's
+ *  chain and cents for the checks. */
+function CashTile({ parts, col, children }: { parts: readonly CashPart[]; col: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const flip = () => setOpen((o) => !o);
+  return (
+    <div className={`pvt pvcash${open ? " open" : ""}`} data-tile="cash" style={{ ["--tc" as string]: col }} role="button" tabIndex={0} aria-expanded={open} onClick={flip} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), flip())}>
+      {children}
+      <div className="pvparts" data-parts={parts.length}>
+        {parts.map((p) => {
+          const m = chainOf(p.chain);
+          return (
+            <div className="pvpr" key={p.chain} data-part={p.chain} data-cents={p.cents === null ? "none" : p.cents.toString()} data-moving={p.moving || undefined}>
+              {m && <img className="pvpl" src={m.logo} alt="" style={{ padding: Math.round(16 * m.inset) }} />}
+              <span className="ell">{m?.name ?? p.chain}</span>
+              <span className="grow" />
+              {p.moving && <span className="tag blue"><W id="processing" /></span>}
+              <span className="num">{p.cents === null ? DASH : usd(p.cents)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -500,14 +537,14 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td>{usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>
       <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
-      <td data-value>{r.value === null ? DASH : usd(r.value)}</td>
+      <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
       <td className={sgn(r.pnl)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnl)}`}>{pct(r.pnlBps)}</div></>}</td>
       <td className={r.realized ? sgn(r.realized) : ""}>{r.realized ? usd(r.realized, true) : DASH}</td>
       <td className="l">
         {r.exit ? (
           <span className="xs"><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></span>
         ) : (
-          <button type="button" className="addx" data-control="exit" onClick={() => act({ kind: "exit", ...at })}><ExitIc size={26} /><W id="addExit" /></button>
+          <span className="addx" data-testid="orders-soon" data-place="portfolio-exit"><W id="soon" /></span>
         )}
       </td>
       <td className="t2">{r.openedAt !== null ? held(now - r.openedAt) : DASH}</td>
@@ -606,7 +643,7 @@ function Allocation({ rows, loading }: { rows: Row[]; loading: boolean }) {
 }
 
 /** R5's empty-state plate: paper dots, a few lit. */
-function Plate() {
+export function Plate() {
   const dots = [];
   for (let c = 0; c < 44; c++)
     for (let y = 0; y < 12; y++) {
@@ -696,7 +733,7 @@ function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: Portfolio
           <div className="v sell-live" data-selling={r.selling.stage}><Selling r={r} /></div>
         ) : (
           <>
-            <div className="v num" data-value>{r.value === null ? "—" : usd(r.value)}</div>
+            <div className="v num" data-value data-unread={r.value === null || undefined}>{r.value === null ? "—" : usd(r.value)}</div>
             <span className={`pl num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
           </>
         )}
@@ -722,7 +759,7 @@ function Sheet({ r, close, act }: { r: Row; close(): void; act(a: PortfolioActio
           </div>
           <div className="arows">
             <button type="button" className="arow" data-control="sheet-sell" onClick={() => go({ kind: "sell", ...at, part: "box" })}><span className="tile32 sl"><Ic name="arrowDown" /></span><span className="grow"><W id="sell" /></span><Ic name="chevR" size={13} /></button>
-            <button type="button" className="arow" data-control="sheet-exit" onClick={() => go({ kind: "exit", ...at })}><span className="tile32"><ExitIc size={32} /></span><span className="grow"><W id="exitPlan" /></span>{r.exit && <><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></>}<Ic name="chevR" size={13} /></button>
+            <div className="arow" data-control="sheet-exit" aria-disabled="true"><span className="tile32"><ExitIc size={32} /></span><span className="grow"><W id="exitPlan" /></span>{r.exit ? <><span className="xt tp num">TP {pct(r.exit.tp_bps).replace(".0", "")}</span><span className="xt sl num">SL {pct(-r.exit.sl_bps).replace(".0", "")}</span></> : <span className="t3" data-testid="orders-soon" data-place="portfolio-sheet-exit"><W id="soon" /></span>}</div>
             {r.addresses.map((a) => (
               <button type="button" key={a} className="arow" data-control="sheet-export" data-export-chain={r.chain} data-export-address={a} onClick={() => go({ kind: "export", chain: r.chain, address: a })}><span className="tile32"><Ic name="key" /></span><span className="grow"><W id="export" /></span>{r.addresses.length > 1 && <span className="t3 num" title={a}>{shortAddress(a)}</span>}<Ic name="chevR" size={13} /></button>
             ))}

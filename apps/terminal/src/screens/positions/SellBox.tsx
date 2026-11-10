@@ -7,6 +7,8 @@ import { EndLine, hasRunLabel, RunLabel, stateId } from "../trade/States.tsx";
 import { BOX_PERCENTS, parsePercent, pctLabel, sellAmount, shareCents } from "./model.ts";
 import { useSellKit } from "./source.tsx";
 import type { Sell, SellPreview } from "./source.tsx";
+import { OrderTabs, OrdersSoon } from "../trade/OrderTabs.tsx";
+import type { OrderTab } from "../trade/OrderTabs.tsx";
 import { W } from "./W.tsx";
 import { WORDS } from "./words.ts";
 import "../trade/trade.css";
@@ -51,6 +53,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
   const kit = useSellKit();
   const [text, setText] = useState(initialPercent);
   const [preview, setPreview] = useState<{ amount: string; p: SellPreview } | null>(null);
+  const [tab, setTab] = useState<OrderTab>("market");
 
   const bps = parsePercent(text);
   const noRoute = row.mark === "noRoute";
@@ -108,15 +111,13 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
         <button type="button" className="trb-side" data-on="sell" aria-pressed="true"><W id="sell" /></button>
       </div>
       <div className="trb-ot">
-        <div className="trb-tabs" role="tablist">
-          <button type="button" role="tab" className="trb-tab" aria-selected="true"><W id="market" /></button>
-          <button type="button" role="tab" className="trb-tab" aria-selected="false" disabled><W id="limit" /></button>
-          <button type="button" role="tab" className="trb-tab" aria-selected="false" disabled><W id="tpsl" /></button>
-        </div>
+        <OrderTabs tab={tab} setTab={setTab} running={running} W={W} />
         <span className="trb-avail" data-testid="sell-held">
           {units(row.units)} {row.symbol} <W id="held" />
         </span>
       </div>
+      {tab !== "market" && <OrdersSoon place={tab === "limit" ? "sell-limit" : "sell-tpsl"} W={W} />}
+      {tab === "market" && (<>
       <label className="trb-amount" data-bad={text !== "" && bps === null}>
         <input
           className="trb-input"
@@ -190,6 +191,7 @@ export function SellBox({ row, s, slippageBps = 1000, initialPercent = "50", onB
           <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="sell-fee">{(shown ?? last) ? pct((shown ?? last)!.fee_bps) : "—"}</span></span>
         </div>
       </div>
+      </>)}
       {footer}
     </div>
   );

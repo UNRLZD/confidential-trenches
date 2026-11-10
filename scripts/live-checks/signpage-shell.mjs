@@ -30,7 +30,7 @@
 //     then gives exactly signed out, and a state asked again answers signed out;
 //   - every message the frame gets is ready, an answer or a state event, each state exact;
 //   - the frame cannot be sent to another origin: set to https://example.com, no request for it is made (CSP frame-src);
-//   - no request goes to any host but SIGN_HOST and APP_HOST.
+//   - no request goes to any host but SIGN_HOST and APP_HOST, but a pinned pool's host while signed in (below).
 // Each event must come within EVENT_MS of its step. The APP_HOST page is this check's own (APP_PAGE): it speaks the
 // kit's messages to its parent as app-in-shell's parent mode does, and reports what it gets to the check. A build with
 // no shell (main's: SIGN_HOST framed by APP_HOST) is read the old way, so its recorded run shows what that frame reads:
@@ -47,7 +47,11 @@
 //   node scripts/live-checks/signpage-shell.mjs --engine chromium|firefox --live [--width phone|desktop] [--record <file>]
 //     the deployed SIGN_HOST, with APP_HOST answered by APP_PAGE
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
-// No money and no network beyond the two hosts; the account is the published test vector's, thrown away with the profile.
+// No money; the account is the published test vector's, thrown away with the profile. Since card
+// sign-live-checks-read-a-pinned-page the page pins the mainnet Solana pool, so live, signed in, it reads that pool, its
+// price and the restore's first reads on PINNED_HOSTS (the helper, the Solana pair, the NEAR pair): those requests go
+// to the network and are recorded with what each asks; signed out none may leave the two hosts, signed in none may go
+// to a host that is not pinned or that the page's served connect-src does not name. On the harness they are refused.
 import "../net-window.mjs";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +68,17 @@ export const SIGN_HOST = "confidential.unrealized.trade";
 export const APP_HOST = "ct-app.unrealized.trade";
 const SIGN = `https://${SIGN_HOST}`;
 const APP = `https://${APP_HOST}`;
+/** The hosts the mainnet page's pinned Solana pool reads on (card sign-live-checks-read-a-pinned-page): the helper
+ *  (packages/signpage/src/trade.ts TRADE_HELPER: its keyed Solana seat and the marks route), Solana provider A and the
+ *  U_X pair's second operator (trade.ts SOLANA_PROVIDER_A, pool-restore.ts RESTORE_UX_SOLANA), and the NEAR pair step 5
+ *  reads deposit ids on (the kit's NEAR_NETWORKS.mainnet: fastnear[0] and drpc). signpage-shell.test.mjs holds the list
+ *  to those sources. */
+export const PINNED_HOSTS = Object.freeze(["ct-api.unrealized.trade", "solana-rpc.publicnode.com", "solana.api.pocket.network", "rpc.mainnet.fastnear.com", "near.drpc.org"]);
+/** The hosts a CSP's connect-src names (https sources only). */
+export const connectHosts = (csp) => {
+  const d = String(csp).split(";").map((x) => x.trim().split(/\s+/)).find((x) => x[0] === "connect-src") ?? [];
+  return d.slice(1).filter((x) => x.startsWith("https://")).map((x) => new URL(x).host);
+};
 const STRANGER = "https://example.com/";
 /** The path and query the shell is opened on; the frame must carry exactly these. */
 export const START = "/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell";
@@ -201,8 +216,21 @@ export function judge(rec) {
   const strayFrame = (rec.requests ?? []).filter((x) => x.host === new URL(STRANGER).host);
   say(st.stranger?.done === true && strayFrame.length === 0,
     `the frame cannot be sent to ${STRANGER} (${st.stranger?.done ? `${strayFrame.length} requests for it` : "not tried"})`);
-  const stray = (rec.requests ?? []).filter((x) => x.host !== SIGN_HOST && x.host !== APP_HOST);
-  say(stray.length === 0, `no request leaves SIGN_HOST and APP_HOST (${stray.length}${stray.length ? `: ${stray.slice(0, 4).map((x) => x.host).join(", ")}` : ""})`);
+  // the pinned pool's hosts are asked only while a seed is held (card sign-live-checks-read-a-pinned-page: the price, the
+  // Rent and the pool's reads, the restore's): from Create passkey to its sign out (Chromium), and from the words'
+  // Continue to their sign out; a request at no time of the run counts as signed out
+  const reqs = rec.requests ?? [];
+  const held = [...(rec.engine === "chromium" ? [[st.created?.t, st.passkeyOut?.t]] : []), [st.words?.t, st.wordsOut?.t]];
+  const signedIn = (x) => typeof x.t === "number" && held.some(([a, b]) => typeof a === "number" && typeof b === "number" && x.t >= a && x.t < b);
+  const pinned = (x) => PINNED_HOSTS.includes(x.host);
+  const stray = reqs.filter((x) => x.host !== SIGN_HOST && x.host !== APP_HOST && !pinned(x));
+  say(stray.length === 0, `no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts (${stray.length}${stray.length ? `: ${stray.slice(0, 4).map((x) => x.host).join(", ")}` : ""})`);
+  const out = reqs.filter((x) => pinned(x) && !signedIn(x));
+  const connect = Array.isArray(rec.connect) ? rec.connect : [];
+  const unlisted = [...new Set(reqs.filter((x) => pinned(x) && !connect.includes(x.host)).map((x) => x.host))];
+  const ins = reqs.filter((x) => pinned(x) && signedIn(x));
+  say(out.length === 0 && unlisted.length === 0,
+    `signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names (${out.length} signed out${out.length ? `: ${out.slice(0, 4).map((x) => `${x.host}${x.path}`).join(", ")}` : ""}; ${ins.length} signed in${ins.length ? ` to ${[...new Set(ins.map((x) => x.host))].join(", ")}` : ""}${unlisted.length ? `; not in its connect-src: ${unlisted.join(", ")}` : ""})`);
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -280,12 +308,24 @@ async function siteServer(root) {
 
 /** The harness's answer for every request: SIGN_HOST from `site` (null: the network's), APP_HOST from APP_PAGE, else none. */
 function serveWith(sign, requests) {
-  return (host, pathAndQuery, method = "GET") => {
-    requests.push({ host, path: pathAndQuery.split("?")[0], method });
+  return (host, pathAndQuery, method = "GET", body = null) => {
+    requests.push({ t: Date.now(), host, path: pathAndQuery.split("?")[0], method, ...(pathAndQuery.includes("?") ? { query: pathAndQuery.split("?").slice(1).join("?") } : {}), ...(body !== null ? { rpc: rpcOf(body) } : {}) });
     if (host === SIGN_HOST && sign) return sign(decodeURIComponent(pathAndQuery.split("?")[0]));
     if (host === APP_HOST) return { status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: APP_PAGE };
     return null;
   };
+}
+
+/** What a request body asks: each JSON-RPC call's method and params (the body as text when it is not JSON-RPC). */
+export function rpcOf(body) {
+  let j;
+  try {
+    j = JSON.parse(body);
+  } catch {
+    return { text: String(body).slice(0, 300) };
+  }
+  const one = (c) => (isObj(c) && typeof c.method === "string" ? { method: c.method, params: c.params ?? null } : { text: JSON.stringify(c).slice(0, 300) });
+  return Array.isArray(j) ? j.map(one) : [one(j)];
 }
 
 // ------------------------------------------------------------------------------------------------ the engines
@@ -304,11 +344,21 @@ async function playwrightDriver(engine, serve, live, size) {
   await ctx.route("**/*", async (r) => {
     const u = new URL(r.request().url());
     if (live && u.host === SIGN_HOST) return r.continue();
+    // the pinned pool's hosts, live only: recorded with what each asks (rpcOf), then sent
+    if (live && PINNED_HOSTS.includes(u.host)) {
+      serve(u.host, u.pathname + u.search, r.request().method(), r.request().postData());
+      return r.continue();
+    }
     const a = serve(u.host, u.pathname + u.search, r.request().method());
     if (!a) return r.abort("blockedbyclient");
     return r.fulfill({ status: a.status, headers: a.headers, body: a.body });
   });
   const page = await ctx.newPage();
+  // the CSP SIGN_HOST's first top-level answer carries (live: the deployed page's own)
+  let csp = null;
+  page.on("response", (res) => {
+    if (csp === null && res.request().isNavigationRequest() && res.frame() === page.mainFrame()) csp = res.headers()["content-security-policy"] ?? "";
+  });
   const appFrame = () => page.frames().find((f) => f !== page.mainFrame() && (() => { try { return new URL(f.url()).host === APP_HOST; } catch { return false; } })());
   return {
     version: browserLabel(browser),
@@ -323,6 +373,7 @@ async function playwrightDriver(engine, serve, live, size) {
       return f.evaluate(`(async () => { ${body} })()`);
     },
     messages: () => reports,
+    csp: () => csp,
     close: () => browser.close(),
   };
 }
@@ -368,7 +419,7 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     sign = await siteServer(realpathSync(site ?? built));
   }
   const d = await driverFor(engine, serveWith(sign, requests), live, size);
-  const rec = { engine, view: { name: width, width: size.width, height: size.height, inner: null }, source: live ? `live ${SIGN}` : `harness, SIGN_HOST from ${site ? named(site) : "packages/signpage's committed build"}`, at: new Date().toISOString(), browser: d.version, topology: null, steps: {}, messages: [], requests, errors: [] };
+  const rec = { engine, view: { name: width, width: size.width, height: size.height, inner: null }, source: live ? `live ${SIGN}` : `harness, SIGN_HOST from ${site ? named(site) : "packages/signpage's committed build"}`, at: new Date().toISOString(), browser: d.version, topology: null, steps: {}, messages: [], requests, connect: null, errors: [] };
   const reports = () => d.messages().filter((m) => m.frame?.host === APP_HOST);
   const msgs = () => reports().filter((m) => m.data?.kind === "message").map((m) => ({ t: m.data.t, data: m.data.data }));
   const top = async (not) => {
@@ -419,6 +470,8 @@ export async function collect({ engine, site, live, width = "desktop" }) {
   };
   try {
     await d.goto(`${SIGN}${START}`);
+    // the page's own connect-src as served: the live answer's header, or the harness's own _headers for it
+    rec.connect = connectHosts(live ? (d.csp?.() ?? "") : (sign(START.split("?")[0]).headers["content-security-policy"] ?? ""));
     const loaded = await until(async () => reports().find((m) => m.data?.kind === "loaded"), 5_000);
     rec.topology = loaded && loaded.data.topLevel === false ? "shell" : "none";
     rec.steps.open = { frameHref: loaded?.data.href ?? null, top: await top() };

@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, "../..");
@@ -104,10 +105,9 @@ async function judgeBox(tag, f, scope) {
   check(!/available/i.test(await box.innerText()), `${tag}: the box says "available"`);
   const exit = box.locator('[data-testid="trade-exit"]');
   const exitText = (await exit.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-  check(exitText === "Exit plan Sells automatically once this buy fills", `${tag}: the exit plan block reads ${JSON.stringify(exitText)}`);
-  const sw = exit.locator("button");
-  check((await sw.getAttribute("aria-pressed")) === "false" && (await exit.getAttribute("data-on")) === "false", `${tag}: the exit plan is not off`);
-  check((await sw.getAttribute("aria-label")) === "Exit plan", `${tag}: the exit plan switch's name`);
+  // orders are out of the plan for now (card app-orders-coming-soon): Coming soon where the switch was, no control
+  check(exitText === "Exit plan Sells automatically once this buy fills Coming soon", `${tag}: the exit plan block reads ${JSON.stringify(exitText)}`);
+  check((await exit.locator("button, input").count()) === 0 && (await exit.getAttribute("data-on")) === "false", `${tag}: the exit plan is not off, or draws a control`);
   const cta = box.locator('[data-testid="trade-cta"]');
   check((await cta.innerText()).trim() === "Sign in to trade", `${tag}: the main button reads ${JSON.stringify((await cta.innerText()).trim())}`);
   check(await cta.isEnabled(), `${tag}: the main button is disabled`);
@@ -179,7 +179,7 @@ async function rules(tag, f, w, errors, dialogs, page) {
 
 const dir = await build();
 const route = await harnessRoute(dir, "tap");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 const shot = async (page, name, w, scheme) => {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) });

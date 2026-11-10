@@ -1,26 +1,16 @@
-// The token page's left rail's data (card app-token-rail): Discover's own lists read (../discover/data.ts readLists,
-// GET /v1/market/lists?chain=solana), re-read on Discover's cadence (REFRESH_MS) with Discover's failure rule
-// (afterFail). Display only: nothing here feeds a signature.
+// The token page's left rail's data (card app-token-rail; every chain since card app-chains-evm-rail): Discover's own
+// read of every chain's lists, merged (../discover/data.ts sharedAllLists: GET /v1/market/lists?chain=<chain> for each
+// chain the helper serves), re-read on Discover's cadence (REFRESH_MS) with Discover's failure rule (afterFail). The
+// store holds every chain's lists; the rail narrows them to the shell's chain filter as it draws (Rail.tsx, pickSnapshot),
+// so a new pick redraws at once with no read. Display only: nothing here feeds a signature.
 //
 // One store for the whole page, outside React: a token page is keyed by its token (TokenPage.tsx TokenRoute), so a hop
 // from one rail row to the next mounts a new page; the store keeps the lists drawn across that hop, with no skeleton and
 // no second read. It reads only while a rail is drawn (`subscribe`). A read in flight is shared with the top-token read
-// of / (source.ts loadTopToken), so opening / reads the lists once, not once per part.
-import { afterFail, readLists, REFRESH_MS } from "../discover/data.ts";
+// of / (source.ts loadTopToken) and Discover's, so opening / reads the lists once, not once per part.
+import { afterFail, REFRESH_MS, sharedAllLists } from "../discover/data.ts";
 import type { DiscoverData } from "../discover/Discover.tsx";
 import type { MarketSnapshot } from "../discover/fields.ts";
-
-let inflight: { fetchFn: typeof fetch; p: Promise<MarketSnapshot> } | null = null;
-
-/** readLists, one request for every caller while one is in flight with the same fetch. */
-export function sharedLists(fetchFn: typeof fetch = fetch): Promise<MarketSnapshot> {
-  if (inflight && inflight.fetchFn === fetchFn) return inflight.p;
-  const p = readLists(fetchFn).finally(() => {
-    if (inflight?.p === p) inflight = null;
-  });
-  inflight = { fetchFn, p };
-  return p;
-}
 
 export interface RailState {
   data: DiscoverData;
@@ -36,7 +26,7 @@ export interface RailDeps {
 /** A lists store: loading until the first read, then the lists, read again every REFRESH_MS while anyone listens; a
  *  failed read keeps the last good lists until STALE_MS pass with no 200 (afterFail). */
 export function railStore(deps: RailDeps = {}) {
-  const read = deps.read ?? (() => sharedLists());
+  const read = deps.read ?? (() => sharedAllLists());
   const now = deps.now ?? Date.now;
   const every =
     deps.every ??

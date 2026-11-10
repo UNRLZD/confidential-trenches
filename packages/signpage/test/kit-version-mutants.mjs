@@ -3,7 +3,7 @@
 // mutant. Each later deposit stage's mapping is mutated to every other kit-v1.4 stage, so a mapping that tells an older
 // app another place for its money (a refund move read as done, a failed deposit read as held) is caught. A mutant is
 // written to a copy of src/api.ts and src/kit-version.ts in packages/.kit-version-mutant-<pid>/src/ (the same depth, so
-// their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4 and kit-v1.7 fixtures beside it, all removed after,
+// their ../../kit/src imports resolve), run by a copy of the test and its kit-v1.4, kit-v1.7 and kit-v1.8 fixtures beside it, all removed after,
 // so the sources are never changed and a test run beside the sweep never reads a mutant. Exits 1 when the test fails on
 // the code as it is, passes on a mutant, or a mutant's text is not in its file exactly once.
 // test/kit-version-mutants.test.mjs runs it in the package's test:mutants.
@@ -33,7 +33,7 @@ export const MUTANTS = [
   ["kit", 'export const KIT_DEFAULT: KitLevel = "1.4";', 'export const KIT_DEFAULT: KitLevel = "current";'],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 4] as [number, number];"],
   ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 7] as [number, number];"],
-  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 9] as [number, number];"],
+  ["kit", 'const CURRENT_FROM = SIGNPAGE_KIT_VERSION.split(".").map(Number) as [number, number];', "const CURRENT_FROM = [1, 10] as [number, number];"],
   // a refund's later leg read as a new deposit's, or a landed refund read as still moving
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', "return stage;"],
   ["kit", 'return d.refunded === true && (stage === "in_transit" || stage === "into_vault") ? "refunded" : stage;', 'return d.refunded === true && stage === "in_transit" ? "refunded" : stage;'],
@@ -80,7 +80,7 @@ export const MUTANTS = [
   ["kit", '  if (level === "1.6") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', '  if (level === "1.6") return result;\n'],
   // card signpage-state-holdings: a position's decimals sent to kit-v1.7 or below, whose schema refuses the key, or
   // kit-v1.7 read at another level
-  ["kit", "  const s = noDecimals(given);\n", "  const s = given;\n"],
+  ["kit", "  const s = noDecimals(plain);\n", "  const s = plain;\n"],
   ["kit", "positions: s.positions.map(({ decimals: _d, ...p }) => p)", "positions: s.positions"],
   ["kit", '  if (level === "1.7") return s;\n', '  if (level === "1.7") return given;\n'],
   ["kit", '  if (level === "1.7") return s;\n', ""],
@@ -93,6 +93,23 @@ export const MUTANTS = [
   ["kit", 'kind === "deposit.confirm" && typeof result === "object" && result !== null ? factsV1_5(result) : result;', 'result;'],
   ["kit", 'kind === "state" ? stateFor(level, result as SignpageState) : kind === "deposit.confirm"', 'kind === "deposit.confirm"'],
   ["kit", 'if (level !== "1.4" || V1_4_STAGES.has(stage)) return stage;', 'if (level === "current" || V1_4_STAGES.has(stage)) return stage;'],
+  // card kit-portfolio-reads: an op's detail sent to kit-v1.8 or below, whose client drops the op for it, a pool
+  // deposit's chain or a deposit's amount_usd fact taken from it, or kit-v1.8 read at another level
+  ["kit", "  const plain = { ...given, ops: given.ops.map(noDetail) };\n", "  const plain = given;\n"],
+  ["kit", '  if (level === "1.8") return plain;\n', '  if (level === "1.8") return given;\n'],
+  ["kit", '  if (level === "1.8") return plain;\n', ""],
+  ["kit", "const { created_ms: _t, token: _k, units: _u, ...rest } = o;", "const { token: _k, units: _u, ...rest } = o;"],
+  ["kit", "const { created_ms: _t, token: _k, units: _u, ...rest } = o;", "const { created_ms: _t, units: _u, ...rest } = o;"],
+  ["kit", "const { created_ms: _t, token: _k, units: _u, ...rest } = o;", "const { created_ms: _t, token: _k, ...rest } = o;"],
+  ["kit", '  if (o.kind !== "pool_deposit") delete r.chain;\n', ""],
+  ["kit", '  if (o.kind !== "pool_deposit") delete r.chain;\n', "  delete r.chain;\n"],
+  ["kit", '  if (o.kind !== "deposit") delete r.amount_usd;\n', ""],
+  ["kit", '  if (o.kind !== "deposit") delete r.amount_usd;\n', "  delete r.amount_usd;\n"],
+  ["kit", 'from(1, 8) ? "1.8" : ', ""],
+  ["kit", 'from(1, 8) ? "1.8" : ', 'from(1, 8) ? "current" : '],
+  ["kit", 'from(1, 8) ? "1.8" : ', 'from(1, 7) ? "1.8" : '],
+  ["kit", '  if (level === "1.8") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', '  if (level === "1.8") return result;\n'],
+  ["kit", '  if (level === "1.8") return kind === "state" ? stateFor(level, result as SignpageState) : result;\n', ""],
   // the level not read, not reset on a ready, an answer's kind not passed, a replay not shaped
   ["api", "if (kit !== null) return void (level = kitLevel(kit));", "if (kit !== null) return;"],
   ["api", "      level = KIT_DEFAULT;\n", ""],
@@ -121,6 +138,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   cpSync(`${PKG}${TEST}`, `${COPY}${TEST}`);
   cpSync(`${PKG}test/fixtures/kit-v1.4`, `${COPY}test/fixtures/kit-v1.4`, { recursive: true });
   cpSync(`${PKG}test/fixtures/kit-v1.7`, `${COPY}test/fixtures/kit-v1.7`, { recursive: true });
+  cpSync(`${PKG}test/fixtures/kit-v1.8`, `${COPY}test/fixtures/kit-v1.8`, { recursive: true });
   // the kit-v1.7 fixture's schema imports @scure/base: the copy resolves packages the way the package does (a link, which
   // the removal after drops without following)
   symlinkSync(`${PKG}node_modules`, `${COPY}node_modules`, "dir");

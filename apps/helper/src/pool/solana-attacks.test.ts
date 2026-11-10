@@ -27,9 +27,10 @@ import {
 } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
 import { POOL_EPOCH_MS } from "./fee.ts";
+import { enableTimers, resetTimers } from "../../test/mock-timers.ts";
 import { solanaPoolPriorityBudget, type SolanaRent } from "@blindfill/kit";
 import { checkSolanaPoolTx, solanaPoolSender, type PoolSendAnswer } from "./solana.ts";
-import { JITO_TICK_SLACK_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch } from "./jito.ts";
+import { JITO_TICK_SLACK_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoFetch, type JitoSleep } from "./jito.ts";
 
 const key = (n: string) => {
   const seed = new Uint8Array(createHash("sha256").update(`helper-pool-senders/attack/${n}`).digest());
@@ -317,14 +318,14 @@ type Done = Promise<{ txs: { signature: string; state: "filled" | "failed" | "ex
 /** A mainnet sender on a fake block engine; the kit's send is faked as the chain: a bundle-only send that would fail
  * never lands (expired), a plain one that fails lands as a paid failure. `done`, when set, decides each send instead.
  * The block engine's pacer runs at `intervalMs` (0 unless a test is about the pacing). */
-function mainnet(o: { engine: ReturnType<typeof blockEngine> | { fetchFn: JitoFetch }; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled"; done?: (s: Sent) => Done; intervalMs?: number }) {
+function mainnet(o: { engine: ReturnType<typeof blockEngine> | { fetchFn: JitoFetch }; a?: Calls; now?: () => number; paths?: string[][]; end?: "failed" | "filled"; done?: (s: Sent) => Done; intervalMs?: number; jitoClock?: () => number; jitoSleep?: JitoSleep }) {
   return solanaPoolSender(
     { cluster: "mainnet", program: PROGRAM, feePayerSecret: FP.secret, fee: String(FEE) },
     {
       providers: [stub(o.a ?? []), stub([])],
       now: o.now ?? (() => NOW),
       readRent: async () => MAINNET,
-      jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000, intervalMs: o.intervalMs ?? 0 }),
+      jito: jitoSender({ fetch: o.engine.fetchFn, timeoutMs: 1_000, intervalMs: o.intervalMs ?? 0, ...(o.jitoClock === undefined ? {} : { clock: o.jitoClock }), ...(o.jitoSleep === undefined ? {} : { sleep: o.jitoSleep }) }),
       send: (set, opts) => {
         const names = opts.paths.map((p) => p.name);
         o.paths?.push(names);
@@ -461,7 +462,33 @@ const deferred = () => {
   return { p, resolve };
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** The Jito sender's own time for one test: a wait it asks for ends only when `advance` moves the clock past it. */
+function jitoTime() {
+  let t = 0;
+  const due: { at: number; done: (v: boolean) => void }[] = [];
+  const sleep: JitoSleep = (ms, signal) =>
+    new Promise((done) => {
+      if (signal?.aborted) return done(false);
+      const e = { at: t + ms, done };
+      due.push(e);
+      signal?.addEventListener("abort", () => (due.includes(e) && due.splice(due.indexOf(e), 1), done(false)), { once: true });
+    });
+  const advance = async (ms: number) => {
+    t += ms;
+    for (const e of due.filter((x) => x.at <= t)) due.splice(due.indexOf(e), 1), e.done(true);
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+  };
+  return { clock: () => t, sleep, advance };
+}
 const pending = async (p: Promise<unknown>, ms = 50) => (await Promise.race([p.then(() => "settled"), sleep(ms).then(() => "pending")])) === "pending";
+/** `p`'s answer (or its error's message) once the promise steps queued now have run, before any timer; undefined while
+ *  it waits on one. */
+async function atOnce<T>(p: Promise<T>): Promise<T | string | undefined> {
+  let got: T | string | undefined;
+  void p.then((v) => (got = v), (e: Error) => (got = `error: ${e.message}`));
+  for (let i = 0; i < 10 && got === undefined; i++) await new Promise((r) => setImmediate(r));
+  return got;
+}
 function base58decode64(s: string): Uint8Array {
   let n = 0n;
   for (const c of s) n = n * 58n + BigInt(B58.indexOf(c));
@@ -569,26 +596,55 @@ test("M369 (M1): a client has at most two mainnet tag 3 carries waiting for thei
 });
 
 test("M369 (M1): a rebroadcast goes to the region that took the first send only, through its one shared pacer, and rejects when it is not sent (J14)", async () => {
+  // the region's pace on the sender's own time: a tick held for the next second stays held until the test moves it on,
+  // however slow the runner (a load run on the box sent it early, 10 Nov 00:2xZ)
+  const time = jitoTime();
   let refuse = false;
   const engine = blockEngine(() => (refuse ? "rpc_error" : "ok"));
   let path: SolanaSendPath | undefined;
   let b64 = "";
-  const s = mainnet({ engine, intervalMs: 50, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
-  const a = await s.carry(body(tipped()));
-  assert.equal(code(a), "ok");
-  const sig = (a.body as { signature: string }).signature;
+  let sig = "";
+  let fill = () => {};
+  // the send stays open while its ticks go (a tick waiting at the send's end is dropped, the next test)
+  const s = mainnet({ engine, intervalMs: 50, jitoClock: time.clock, jitoSleep: time.sleep, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), (sig = x.sig), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  while (!path) await sleep(1); // the first send went, the kit's send started
   assert.equal(path!.name, "jito");
   assert.equal(path!.paceKey, engine.seen[0]!.url, "the kit paces it per region, shared by every carry rebroadcasting there");
   // card helper-jito-pace-margin: the kit's pacer runs at the region's own pace plus the tick slack (./jito.ts)
   assert.equal(path!.minIntervalMs, 50 + JITO_TICK_SLACK_MS);
-  await assert.rejects(path!.send(b64), /block engine busy/, "the first send's second: not sent, and the kit's record says so");
+  // the first send's second: a tick waits for the region's next one (card helper-pace-tick-refused-flake); a second
+  // tick while it waits is not sent, and the kit's record says so
+  const held = path!.send(b64);
+  await assert.rejects(path!.send(b64), /block engine busy/);
   assert.equal(engine.seen.length, 1);
-  await sleep(60);
-  assert.equal(await path!.send(b64), sig);
-  await sleep(60);
+  await time.advance(50);
+  assert.equal(await held, sig);
+  assert.equal(engine.seen.length, 2);
+  await time.advance(60);
   refuse = true;
   await assert.rejects(path!.send(b64), /block engine refused/);
   assert.equal(new Set(engine.seen.map((x) => x.url)).size, 1, "never another region");
+  fill();
+  assert.equal(code(await a), "ok");
+});
+
+// Card helper-pace-tick-refused-flake: a tick waiting for its region's next second when the carry's send ends (here
+// the fill) is dropped unsent, so a decided send never takes a region's second.
+test("a rebroadcast waiting for its region's second is dropped unsent once the carry's send has ended", async () => {
+  const engine = blockEngine(() => "ok");
+  let path: SolanaSendPath | undefined;
+  let b64 = "";
+  let fill = () => {};
+  const s = mainnet({ engine, intervalMs: 1_000, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  await sleep(10);
+  const held = path!.send(b64); // inside the first send's second: it waits
+  fill();
+  assert.equal(code(await a), "ok");
+  // dropped at the send's end, before any timer runs: not at the region's next second
+  assert.equal(await atOnce(held), "error: block engine busy: the send ended");
+  assert.equal(engine.seen.length, 1, "never sent");
 });
 
 // Review of 48c11e3c, P3: the kit's pacer ticks on whole Date.now() ms from its last tick (packages/kit send.ts paceArm
@@ -598,33 +654,53 @@ test("the kit's ticks at the path's minIntervalMs are never refused by the regio
   const engine = blockEngine(() => "ok");
   let path: SolanaSendPath | undefined;
   let b64 = "";
-  const s = mainnet({ engine, intervalMs: 20, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })) });
-  assert.equal(code(await s.carry(body(tipped()))), "ok");
-  const min = path!.minIntervalMs!;
+  let fill = () => {};
+  // the send stays open while its ticks go, as the kit's pacer ticks only for a send not yet ended
+  const s = mainnet({ engine, intervalMs: 20, done: (x) => ((path = x.paths[0]), (b64 = Buffer.from(x.wire).toString("base64")), new Promise((ok) => (fill = () => ok({ txs: [{ signature: x.sig, state: "filled", sends: [] }] })))) });
+  const a = s.carry(body(tipped()));
+  while (!path) await sleep(1); // the first send went, the kit's send started
+  const min = path.minIntervalMs!;
   let last = Date.now();
   let refused = 0;
+  const why = new Set<string>();
   for (let n = 0; n < 200; ) {
     // paceArm: a timer for the rest of the interval; paceFire only once Date.now() - last reaches it
     await sleep(Math.max(0, last + min - Date.now()));
     if (Date.now() - last < min) continue;
     last = Date.now();
     n++;
-    await path!.send(b64).catch(() => refused++);
+    await path.send(b64).catch((e: Error) => (refused++, why.add(e.message)));
   }
-  assert.equal(refused, 0, `${refused} of 200 ticks refused`);
+  assert.equal(refused, 0, `${refused} of 200 ticks refused: ${[...why].join("; ")}`);
   assert.equal(engine.seen.length, 201);
+  fill();
+  assert.equal(code(await a), "ok");
 });
 
 // The review's capacity run, on the helper: the keyless limit is one request a second per region from the helper's
 // address, refused requests counted too. Sixteen carries from eight clients (two each, the most M1 lets them) wait for
 // a fill that never comes and rebroadcast once a second, as the kit would; an honest client's carry comes every 700 ms.
-// Real time, about 6 s.
-test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send out of a region for over 1 s", async () => {
+// On mocked timers and a mocked Date, the block engines' clock and the sender's alike: about 6 s of the run's own time,
+// however busy the machine is.
+test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send out of a region for over 1 s", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "setInterval", "Date"], now: NOW });
+  t.after(() => resetTimers(t.mock.timers));
+  const flush = async () => {
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+  };
+  /** The mocked clock moved `ms` on, 10 ms at a time, every promise step run between. */
+  const run = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 10) {
+      await flush();
+      t.mock.timers.tick(Math.min(10, left));
+    }
+    await flush();
+  };
   const times = new Map<string, number[]>();
   let refused = 0;
   const fetchFn: JitoFetch = async (url, init) => {
     const host = new URL(url).host;
-    const now = performance.now();
+    const now = Date.now();
     const seen = (times.get(host) ?? []).filter((t) => now - t < 990);
     seen.push(now);
     times.set(host, seen);
@@ -637,6 +713,7 @@ test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send 
   const s = mainnet({
     engine: { fetchFn },
     intervalMs: 1_000,
+    jitoClock: () => Date.now(),
     done: (x) => {
       if (honest.has(Buffer.from(x.wire.subarray(65, 129)).toString("hex"))) return Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] });
       const b64 = Buffer.from(x.wire).toString("base64");
@@ -646,16 +723,20 @@ test("M369 (M1): sixteen carries rebroadcasting never keep an honest first send 
   });
   try {
     for (let i = 0; i < 16; i++) void s.carry(body(tipped({ r: { existingNullifierHash: f32(1 + i) } })), `attacker${i % 8}`);
-    await sleep(1_200);
+    await run(1_200);
     const ms: number[] = [];
     const codes: string[] = [];
     for (let i = 0; i < 7; i++) {
       const w = tipped({ r: { existingNullifierHash: f32(150 + i) } });
       honest.add(Buffer.from(w.subarray(65, 129)).toString("hex"));
-      const t0 = performance.now();
-      codes.push(code(await s.carry(body(w), "honest")));
-      ms.push(performance.now() - t0);
-      await sleep(700);
+      const t0 = Date.now();
+      let a: Awaited<ReturnType<typeof s.carry>> | undefined;
+      void s.carry(body(w), "honest").then((x) => (a = x));
+      for (let k = 0; a === undefined && k < 500; k++) await run(10);
+      assert.ok(a !== undefined, `honest carry ${i} unanswered after 5 s`);
+      codes.push(code(a));
+      ms.push(Date.now() - t0);
+      await run(700);
     }
     const sorted = [...ms].sort((x, y) => x - y);
     console.log(`honest first sends with 16 carries rebroadcasting: ${codes.join(",")}; ms p50 ${Math.round(sorted[3]!)} max ${Math.round(sorted[6]!)}; 429s ${refused}`);
@@ -695,12 +776,12 @@ test("M374 (1): a block engine's words never reach the caller: the 503 says only
 
 // The review's G1 (fold 4, R4c and R4d): a mainnet tag 2 answers at once and is not the cap's. Three tag 2 carries from
 // one client at once, their sends undecided: each answers 200 with its signature now.
-test("G1: mainnet tag 2 carries answer at once, three from one client together, while their sends are undecided", async () => {
+// The decision never comes: a carry that waited on it would never answer, and the test's own timeout fails it (a
+// 70 ms real window did, on a busy runner).
+test("G1: mainnet tag 2 carries answer at once, three from one client together, while their sends are undecided", { timeout: 10_000 }, async () => {
   const s = mainnet({ engine: blockEngine(() => "ok"), done: () => new Promise(() => {}) });
   const ps = [0, 1, 2].map((i) => s.carry(body(wire({ r: { existingNullifierHash: f32(240 + i) } })), "x"));
-  await sleep(20);
-  for (const p of ps) assert.ok(!(await pending(p)), "answered before the decision");
-  for (const p of ps) assert.equal(code(await p), "ok");
+  for (const p of ps) assert.equal(code(await p), "ok", "answered before the decision");
 });
 
 // The review's G4 (fold 4, R4i): an unknown end is held to the release's deadline and no longer: past it, a new release
@@ -825,10 +906,8 @@ test("review R-S4: send with queue limit 0 answers at once when every second is 
   const j = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async (u, i) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "SIG" }), { status: 200 }), timeoutMs: 500, intervalMs: 5_000 });
   assert.equal((await j.send("AA==", "SIG")).kind, "ok");
   assert.equal((await j.send("AA==", "SIG")).kind, "ok");
-  const t0 = performance.now();
-  const r = await j.send("AA==", "SIG", 0);
-  assert.ok(performance.now() - t0 < 50, "no wait");
-  assert.deepEqual(r, { kind: "busy", detail: "every region's next second is booked", throttled: true });
+  // answered before any timer runs: no wait
+  assert.deepEqual(await atOnce(j.send("AA==", "SIG", 0)), { kind: "busy", detail: "every region's next second is booked", throttled: true });
   const j5 = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async () => new Response("", { status: 502 }), timeoutMs: 500, intervalMs: 0 });
   assert.deepEqual(await j5.send("AA==", "SIG", 0), { kind: "busy", detail: "HTTP 502", throttled: false });
 });

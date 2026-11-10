@@ -11,9 +11,12 @@
 //   - Solana mark read (markOf): at finalized, each RPC's at its height's slot (minContextSlot), through an account read
 //     that sends it;
 //   - Solana run's hand-off: the ask's open sends only (open(): its sends less the settled ones), with landed and whole;
-//   - EVM end read (noteEndEvm): the note's own record first, read only (records), its sends' highest nonce, U's finalized nonce on both RPCs
-//     before the round; no Deposited with the nonce past on both "expired"; a Deposited above the finalized block no end;
-//     landed only at the note's value;
+//   - EVM end read (noteEndEvm): the note's own record first, read only (records), its sends' highest nonce, then before
+//     the round the block U's nonce was spent at (spentFinal: U's nonce at the newest block both RPCs hold, by its hash,
+//     past on both; final once both finalized headers are at or past it with its hash at its number on both), a read
+//     that fails held until the round is read; no Deposited "expired" only once the round's finalized block is at or past
+//     that block, a held fault thrown only then; a Deposited above the finalized block no end; landed only at the note's
+//     value;
 //   - EVM run's hand-off: the seed and keys zeroed before the store read, then the ask's notes still INCOMING;
 //   - each run: a rung's (an EVM note's) landing posts no stage, since "filled" ends the trade in the app;
 //   - each kind: filled, or part_filled with no open note, is the end, posted once (after the answer: the answer's own
@@ -70,9 +73,20 @@ const SOL_END = (finals, mark, failed, landed, stop) => new RegExp(
 // the Solana run's hand-off: open() is its sends less the settled ones, and the hand-off keeps only those
 const OPEN = new RegExp(`(${N})=\\(\\)=>${N}\\.filter\\((${N})=>!${N}\\.has\\(\\2\\.hash\\)\\)`, "g");
 const SOL_LEFT = (open) => new RegExp(`let (${N})=new Set\\((?:${open})\\(\\)\\.map\\(${N}=>${N}\\.hash\\)\\),(${N})=\\[\\];for\\(let ${N} of ${N}\\.filter\\(${N}=>\\1\\.has\\(${N}\\.send\\.signature\\)\\)\\)\\{[^]{0,240}?\\}${N}\\.left\\?\\.\\(\\{notes:\\2,landed:${N}>0,whole:${N}===0\\}\\)`);
-// noteEndEvm (see the header), the stop read before U's nonce and before the round
-const EVM_END = (stop) => new RegExp(
-  `(${N})=\\(await (${N})\\.records\\(\\)\\)\\.find\\(${N}=>${N}\\.scope===${N}&&${N}\\.precommitment===${N}\\.precommitment\\);if\\(\\1!==void 0&&\\1\\.state!==${Q}INCOMING${Q}\\)return \\1\\.state===${Q}PLANNED${Q}\\?null:\\1\\.leaf\\?\\.value===(${N})\\.value\\?${Q}landed${Q}:${Q}dead${Q};let (${N})=\\(\\1\\?\\.evmSends\\?\\?\\[\\]\\)\\.reduce\\(\\((${N}),(${N})\\)=>\\6\\.nonce>\\5\\?\\6\\.nonce:\\5,\\3\\.nonce\\),(${N})=\\1\\?\\.evmSends\\?\\.\\[\\1\\.evmSends\\.length-1\\];\\7!==void 0&&${N}\\(\\7\\.hash\\),(?:${stop})\\(\\2\\);let (${N})=await ${N}\\(\\2\\.rpcs,async\\(${N},(${N})\\)=>${N}\\(await ${N}\\(${Q}eth_getTransactionCount${Q},\\[\\3\\.u,${Q}finalized${Q}\\]\\),${Q}rpc \\$\\{\\9\\} finalized nonce${Q}\\)\\);(?:${stop})\\(\\2\\);let (${N})=await \\2\\.round\\(\\),(${N})=\\10\\.events\\.find\\(${N}=>${N}\\.kind===${Q}deposit${Q}&&${N}\\.precommitment===\\3\\.precommitment\\);return \\11===void 0\\?\\8\\[0\\]>\\4&&\\8\\[1\\]>\\4\\?${Q}expired${Q}:null:\\11\\.block>\\10\\.finalBlock\\?null:\\11\\.value===\\3\\.value\\?${Q}landed${Q}:${Q}dead${Q}`,
+// spentFinal (pool-deposit-evm.ts): the stop before each of its RPC reads; with no kept block, the newest block both
+// hold (the lag retry and the agreed block given the signal and the wait), U's nonce at that block's hash on both, no
+// block kept unless both are past the nonce; then the finalized header on both at or past the kept block, then its
+// header on both at its number with its hash: the block final only then, its number the end's
+const SPENT = new RegExp(
+  `async function (${N})\\((${N}),(${N}),(${N}),(${N}),(${N}),(${N}),(${N})=\\(\\)=>\\{\\}\\)\\{if\\(\\5===void 0\\)\\{\\8\\(\\);let (${N})=await ${N}\\(\\(\\)=>${N}\\(\\2,${Q}latest${Q},\\7,\\6\\),\\6,\\7\\);\\8\\(\\);let (${N})=await ${N}\\(\\2,async\\(${N},(${N})\\)=>${N}\\(await ${N}\\(${Q}eth_getTransactionCount${Q},\\[\\3,\\{blockHash:\\9\\.hash\\}\\]\\),${Q}rpc \\$\\{\\11\\} nonce at \\$\\{\\9\\.hash\\}${Q}\\)\\);if\\(\\10\\[0\\]<=\\4\\|\\|\\10\\[1\\]<=\\4\\)return\\{final:null,kept:void 0\\};\\5=\\{number:\\9\\.number,hash:\\9\\.hash\\.toLowerCase\\(\\)\\}\\}let (${N})=\\5;\\8\\(\\);let (${N})=await ${N}\\(\\2,\\(${N},(${N})\\)=>${N}\\(${N},${Q}finalized${Q},${Q}rpc \\$\\{\\14\\} finalized block${Q}\\)\\);if\\(\\13\\[0\\]\\.number<\\12\\.number\\|\\|\\13\\[1\\]\\.number<\\12\\.number\\)return\\{final:null,kept:\\12\\};\\8\\(\\);let (${N})=await ${N}\\(\\2,\\(${N},(${N})\\)=>${N}\\(${N},${N}\\(\\12\\.number\\),${Q}rpc \\$\\{\\16\\} block \\$\\{\\12\\.number\\}${Q}\\)\\);return \\15\\[0\\]\\.hash!==\\12\\.hash\\|\\|\\15\\[1\\]\\.hash!==\\12\\.hash\\|\\|\\15\\[0\\]\\.number!==\\12\\.number\\|\\|\\15\\[1\\]\\.number!==\\12\\.number\\?\\{final:null,kept:void 0\\}:\\{final:\\12\\.number,kept:\\12\\}\\}`,
+  "g",
+);
+// noteEndEvm (see the header): its sends' highest nonce, the newest handed to the reads; U's nonce through spentFinal
+// (by name) with the record's kept block at that nonce or the follow's, the sign-out wait and the stop, its fault held;
+// the stop before the round; a Deposited above the finalized block no end; the fault thrown only with no Deposited; no
+// Deposited "expired" only once the round's finalized block is at or past the block U's nonce was spent at
+const EVM_END = (spent, wait, stop) => new RegExp(
+  `(${N})=\\(await (${N})\\.records\\(\\)\\)\\.find\\(${N}=>${N}\\.scope===${N}&&${N}\\.precommitment===${N}\\.precommitment\\);if\\(\\1!==void 0&&\\1\\.state!==${Q}INCOMING${Q}\\)return \\1\\.state===${Q}PLANNED${Q}\\?null:\\1\\.leaf\\?\\.value===(${N})\\.value\\?${Q}landed${Q}:${Q}dead${Q};let (${N})=\\(\\1\\?\\.evmSends\\?\\?\\[\\]\\)\\.reduce\\(\\((${N}),(${N})\\)=>\\6\\.nonce>\\5\\?\\6\\.nonce:\\5,\\3\\.nonce\\),(${N})=\\1\\?\\.evmSends\\?\\.\\[\\1\\.evmSends\\.length-1\\];\\7!==void 0&&${N}\\(\\7\\.hash\\);let (${N})=\\1\\?\\.evmSpent!==void 0&&\\1\\.evmSpent\\.nonce===\\4\\?\\{number:\\1\\.evmSpent\\.number,hash:\\1\\.evmSpent\\.hash\\}:void 0,(${N})=null,(${N})=null;try\\{let (${N})=${Q}\\$\\{\\3\\.precommitment\\}:\\$\\{\\4\\}${Q},(${N})=await (?:${spent})\\(\\2\\.rpcs,\\3\\.u,\\4,(${N})\\.has\\(\\11\\)\\?\\13\\.get\\(\\11\\):\\8,(${N})=>\\(\\2\\.wait\\?\\?\\((${N})=>(?:${wait})\\(\\15,\\2\\.signal\\)\\)\\)\\(\\14\\),\\2\\.signal,\\(\\)=>(?:${stop})\\(\\2\\)\\);\\9=\\12\\.final,\\13\\.set\\(\\11,\\12\\.kept\\)\\}catch\\((${N})\\)\\{\\10=\\{(?:e:\\16|(?=e\\})\\16)\\}\\}(?:${stop})\\(\\2\\);let (${N})=await \\2\\.round\\(\\2\\.signal\\),(${N})=\\17\\.events\\.find\\(${N}=>${N}\\.kind===${Q}deposit${Q}&&${N}\\.precommitment===\\3\\.precommitment\\);if\\(\\18!==void 0\\)return \\18\\.block>\\17\\.finalBlock\\?null:\\18\\.value===\\3\\.value\\?${Q}landed${Q}:${Q}dead${Q};if\\(\\10!==null\\)throw \\10\\.e;return \\9!==null&&\\17\\.finalBlock>=\\9\\?${Q}expired${Q}:null\\}`,
 );
 // the EVM run's hand-off: seed and keys zeroed first, then each kept note still INCOMING; a store read that fails hands
 // every kept note over as open (low 5)
@@ -93,7 +107,7 @@ const EVM_RUNG = new RegExp(`if\\((${N})\\.kind===${Q}landed${Q}\\)\\{${N}\\+\\+
 // the reads (see the header): the sign out read before each note's read; a "may land" read (null) keeps the reads at their
 // base wait only inside the note's landing window (the waited ms less the note's window start, kept anew on "expired")
 const LOOP = new RegExp(
-  `for\\(;;\\)\\{let (${N})=!0,(${N})=!1;for\\(let\\[(${N}),(${N})\\]of (${N})\\.notes\\.entries\\(\\)\\)\\{if\\((${N})\\[\\3\\]!==null\\)continue;if\\((${N})\\.signal\\?\\.aborted\\)return null;let (${N})=await ${N}\\([^;]*?,(${N})=>void\\(\\9!==(${N})\\[\\3\\]&&\\(\\10\\[\\3\\]=\\9,(${N})\\[\\3\\]=(${N})\\)\\)\\)\\.catch\\(\\(\\)=>${Q}fault${Q}\\);\\8===${Q}landed${Q}\\|\\|\\8===${Q}dead${Q}\\?\\6\\[\\3\\]=\\8:\\8===${Q}expired${Q}\\?\\2=!0:\\8===null&&\\12-\\11\\[\\3\\]<(\\d[\\d.e+]*)&&\\(\\1=!1\\)\\}if\\(\\6\\.every\\(${N}=>${N}!==null\\)\\)break;\\2&&\\7\\.settle\\?\\.\\(\\),\\1\\|\\|\\((${N})=${N}\\),await ${N}\\(\\14\\),\\12\\+=\\14,\\1&&\\(\\14=Math\\.min\\(\\14\\*2,${N}\\)\\)\\}return \\7\\.signal\\?\\.aborted\\?null:\\5\\.whole&&\\6\\.length>0&&\\6\\.every\\(${N}=>${N}===${Q}landed${Q}\\)\\?${Q}filled${Q}:\\5\\.landed\\|\\|\\6\\.includes\\(${Q}landed${Q}\\)\\?${Q}part_filled${Q}:${Q}not_landed${Q}`,
+  `for\\(;;\\)\\{let (${N})=!0,(${N})=!1;for\\(let\\[(${N}),(${N})\\]of (${N})\\.notes\\.entries\\(\\)\\)\\{if\\((${N})\\[\\3\\]!==null\\)continue;if\\((${N})\\.signal\\?\\.aborted\\)return null;let (${N})=await ${N}\\([^;]*?,(${N})=>void\\(\\9!==(${N})\\[\\3\\]&&\\(\\10\\[\\3\\]=\\9,(${N})\\[\\3\\]=(${N})\\)\\)(?:,${N})?\\)\\.catch\\(\\(\\)=>${Q}fault${Q}\\);\\8===${Q}landed${Q}\\|\\|\\8===${Q}dead${Q}\\?\\6\\[\\3\\]=\\8:\\8===${Q}expired${Q}\\?\\2=!0:\\8===null&&\\12-\\11\\[\\3\\]<(\\d[\\d.e+]*)&&\\(\\1=!1\\)\\}if\\(\\6\\.every\\(${N}=>${N}!==null\\)\\)break;\\2&&\\7\\.settle\\?\\.\\(\\),\\1\\|\\|\\((${N})=${N}\\),await ${N}\\(\\14\\),\\12\\+=\\14,\\1&&\\(\\14=Math\\.min\\(\\14\\*2,${N}\\)\\)\\}return \\7\\.signal\\?\\.aborted\\?null:\\5\\.whole&&\\6\\.length>0&&\\6\\.every\\(${N}=>${N}===${Q}landed${Q}\\)\\?${Q}filled${Q}:\\5\\.landed\\|\\|\\6\\.includes\\(${Q}landed${Q}\\)\\?${Q}part_filled${Q}:${Q}not_landed${Q}`,
   "g",
 );
 const names = (re, js, k = 1) => [...js.matchAll(re)].map((m) => esc(m[k]));
@@ -116,7 +130,7 @@ export function facts(index, js) {
     solEnd: SOL_END(finals, mark, any(names(FAILED, js)), any(names(LANDED, js)), stop).test(js),
     solLeft: SOL_LEFT(any(names(OPEN, js))).test(js),
     solKind: SOL_KIND.every((r) => r.test(js)),
-    evmEnd: EVM_END(stop).test(js),
+    evmEnd: EVM_END(any(names(SPENT, js)), any(names(WAIT, js)), stop).test(js),
     evmLeft: EVM_LEFT.test(js),
     evmKind: EVM_KIND.every((r) => r.test(js)),
     solRung: SOL_RUNG.test(js),

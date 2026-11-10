@@ -43,6 +43,12 @@ export const EVM_RPC_DOMAIN_ALIASES: Readonly<Record<string, string>> = /* @__PU
   // rpc.degenprotocol.io answers in Pocket's own words ("-32602: eth_getLogs block range too large (max 10001
   // blocks)", read 2026-11-07 01:46Z): counted as Pocket's, so none of its hosts pairs with Pocket
   "degenprotocol.io": "pocket.network",
+  // card evm-pool-sync-holds: dRPC's keyed endpoint lb.drpc.live answers as lb.drpc.org does ({"message":"Invalid
+  // request"} to a keyless eth_chainId on both, read 2026-11-09 14:19Z): one operator, dRPC
+  "drpc.live": "drpc.org",
+  // Grove is Pocket Network Inc. renamed (grove.city links "Pocket Network Inc. rebrands to Grove", read 2026-11-09
+  // 14:2xZ): its *.rpc.grove.city gateway is counted as Pocket's, so none of its hosts pairs with Pocket
+  "grove.city": "pocket.network",
 });
 
 const V4_MAPPED = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/;

@@ -1,6 +1,6 @@
-// src/main.ts booted top-level as SIGN_HOST's build, the mainnet one (card signpage-pool-mainnet), with a mainnet pool
-// pin planted by a load hook (SOL_POOLS.mainnet is empty until pool-sol-deploy-mainnet; the devnet pool's program
-// stands in for it, and a lookup table for MAINNET_TABLE): the same pool flow and proof queue the testnet build runs
+// src/main.ts booted top-level as SIGN_HOST's build, the mainnet one (card signpage-pool-mainnet), on the wallet's
+// mainnet pool pin (SOL_POOLS.mainnet, card sol-pools-mainnet-pin) and its lookup table (MAINNET_TABLE, the deploy
+// record's): the same pool flow and proof queue the testnet build runs
 // (src/pool-testnet.ts) run here. The shell's state lists the pinned pool with the queue's ready proof as `ready`, the
 // page's own price and tap_max from the Rent read on the page's mainnet pair; pool.deposit, pool.buy, pool.sell and
 // pool.withdraw reach that flow, never refused not_allowed. Stand-ins as test/main-testnet-pools.test.ts: testnetPool's
@@ -17,11 +17,8 @@ import { base64 } from "@scure/base";
 import { openWalletStore } from "@blindfill/wallet/store";
 import { APP_ORIGIN } from "../src/api.ts";
 import { SIGNPAGE_KIT_VERSION } from "../../kit/src/signpage/messages.ts";
+import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 
-const DEVNET_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
-const DEVNET_FEE_PAYER = "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb";
-const SOL_LINE = `  POOL_TESTNET ? { devnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) } : {},`;
-const TABLE_LINE = "export const MAINNET_TABLE: string | null = null;";
 const wrap = (src: string, name: string, body: string): string => {
   const anchor = `export function ${name}(`;
   if (!src.includes(anchor)) throw new Error(`${name}: its line moved; update this test's hook`);
@@ -31,12 +28,7 @@ registerHooks({
   load(url, context, next) {
     const r = next(url, context);
     if (url.endsWith("/signpage/src/pool-testnet.ts"))
-      return { ...r, source: wrap(String(r.source).replace(TABLE_LINE, 'export const MAINNET_TABLE: string | null = "4cYEUrtdqrGTMZcsNp7XbYwNNNUBaWKb7fBs6kGMYPYy";'), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
-    if (url.endsWith("/wallet/src/pool/solana.ts")) {
-      const src = String(r.source);
-      if (!src.includes(SOL_LINE)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");
-      return { ...r, source: src.replace(SOL_LINE, SOL_LINE.replace(": {},", `: { mainnet: Object.freeze({ program: "${DEVNET_PROGRAM}", feePayer: "${DEVNET_FEE_PAYER}" }) },`)) };
-    }
+      return { ...r, source: wrap(String(r.source), "testnetPool", "export function testnetPool(page, over) { return { ...testnetPool__real(page, over), readyWith: async (read) => ({ ready: globalThis.__ctReady, value: await read() }) }; }") };
     if (url.endsWith("/signpage/src/pool-price.ts"))
       return { ...r, source: wrap(String(r.source), "poolPrices", "export function poolPrices(deps) { return poolPrices__real({ ...deps, read: globalThis.__ctPriceRead, after: (ms, fn) => void setTimeout(fn, ms).unref() }); }") };
     return r;
@@ -132,6 +124,10 @@ const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mintData = new Uint8Array(82);
 mintData[44] = 6;
 mintData[45] = 1;
+/** While set, every Solana read but the Rent's and the sold mint's waits on it until the test releases it (review P3-3):
+ *  the landing's settle pass's reads, held, as a provider that is down and retried holds them; heldReads counts them. */
+let hold: Promise<void> | undefined;
+let heldReads = 0;
 g.fetch = async (url: unknown, init?: RequestInit) => {
   let body: { id?: unknown; method?: string; params?: unknown[] } = {};
   try {
@@ -139,6 +135,11 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   } catch {}
   const id = body.id ?? 1;
   calls.push({ url: String(url), method: String(body.method) });
+  const rentOrMint = body.method === "getAccountInfo" && (body.params?.[0] === "SysvarRent111111111111111111111111111111111" || body.params?.[0] === SELL_MINT);
+  if (hold && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) {
+    heldReads++;
+    await hold;
+  }
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
     rentReads.push(String(url));
     const value = { owner: "Sysvar1111111111111111111111111111111111111", data: [base64.encode(rentData), "base64"], lamports: 1009200, executable: false, rentEpoch: 0, space: 17 };
@@ -154,6 +155,20 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   if (body.method === "getTokenAccountsByOwner") return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: { context: { slot: 1 }, value: [] } }), { status: 200 });
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "not in this test" } }), { status: 200 });
 };
+
+/** Asks deposit.quote as the APP_HOST frame does; its answer's code (any: this test's helper refuses the quote). */
+async function askQuote(): Promise<string> {
+  const id = crypto.randomUUID();
+  const e = new Event("message");
+  Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "deposit.quote", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" } } });
+  win.dispatchEvent(e);
+  for (let t = 0; t < 2000; t++) {
+    const a = posted.find((m) => m.id === id);
+    if (a) return a.ok ? "ok" : a.error!.code;
+    await new Promise((ok) => setTimeout(ok, 5));
+  }
+  throw new Error("no answer to deposit.quote");
+}
 
 async function askState(): Promise<{ signed_in: boolean; pools?: { chain: string; ready?: string; tap_max?: string; price?: { price: string; expo: number } }[] }> {
   const id = crypto.randomUUID();
@@ -185,10 +200,25 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   const held = await ns.move(p.id, "UNSPENT", "HELD", { deadlineMs: BigInt(Date.now() + 600_000), context: "1" });
   g.__ctReady = [{ noteId: held.id, attempt: held.attempt, poolId: `sol:${PROGRAM}`, chunk: CHUNK, binding: { feeCap: FEE_CAP, request: { tipCap: SOL_TIP_CAP } } }];
 
+  // review P3-3 (card sol-pools-mainnet-pin): the landing's settle pass (src/pool-testnet.ts settle, a pool.deposit run)
+  // holds the seed lock shared across its Solana reads, and a deposit.quote waits for the landing's naming, whose write
+  // takes that lock exclusive: the pass starts only once the naming is written, so a slow provider never holds the quote
+  // proven by order, not by a clock: the settle pass's Solana reads are held until the quote has answered, so a quote
+  // that waits for them never answers
+  let release!: () => void;
+  hold = new Promise((ok) => (release = ok));
   await import("../src/main.ts");
   const app = doc.body.children.find((c) => c.tagName === "iframe");
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
+  const quoted = await askQuote().then(() => true, () => false);
+  // the settle pass did run into the hold (waited for by count, on no clock): the quote above answered beside it
+  for (let t = 0; t < 2000 && heldReads === 0; t++) await new Promise((ok) => setTimeout(ok, 5));
+  const heldSeen = heldReads;
+  hold = undefined;
+  release();
+  assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldSeen} held): it waits behind them`);
+  assert.ok(heldSeen > 0, "the settle pass's Solana reads never met the hold, so this test held nothing");
 
   const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
@@ -257,9 +287,12 @@ test("with a mainnet pin, pool.deposit, pool.buy, pool.sell and pool.withdraw re
 });
 
 test("the mainnet build's pool reads on the network's own pair and fee route: SIGN_HOST's provider A and the helper's keyed route, and GET /v1/pool/fee with cluster=mainnet", async () => {
-  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN } = await import("../src/pool-testnet.ts");
+  const { pageSolanaRpcs, poolRelayFee, PAGE_CLUSTER, PAGE_SOL_PIN, MAINNET_TABLE } = await import("../src/pool-testnet.ts");
+  const { SOL_MAINNET_DEPLOY } = await import("../../wallet/src/pool/solana.ts");
   assert.equal(PAGE_CLUSTER, "mainnet");
   assert.equal(PAGE_SOL_PIN, SOL_POOLS.mainnet, "the mainnet pin, never the devnet one");
+  assert.ok(PAGE_SOL_PIN !== undefined && PAGE_SOL_PIN.program === SOL_MAINNET_DEPLOY.program, "the deploy record's program");
+  assert.equal(MAINNET_TABLE, SOL_MAINNET_DEPLOY.table, "pool.buy loads the deploy record's lookup table");
   // the pair: one read each, to two hosts
   const before = rentReads.length;
   const [a, b] = pageSolanaRpcs();
@@ -274,4 +307,32 @@ test("the mainnet build's pool reads on the network's own pair and fee route: SI
   const fetchFn = (async (url: string | URL | Request) => (asked.push(String(url)), new Response("{}", { status: 404 }))) as typeof fetch;
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchFn), /HTTP 404/);
   assert.equal(asked[0], `https://ct-api.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
+});
+
+test("pool.address's quote reads the price for the origin asked (main.ts pricedFor, review of eb2dfdc5 W2): USDC goes on to the floor read; any other origin gets no price, refused not_allowed with no read", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  // the page names U_X under the pinned pool's scope, and holds its own price
+  let named: { ok?: boolean } = {};
+  for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
+  assert.equal(named.ok, true, JSON.stringify(named));
+  assert.ok((await askState()).pools?.find((p) => p.chain === "solana")?.price, "the page holds its price");
+  // USDC: priced, so the quote goes on to the floor read on the page's pair, which this test's RPCs refuse: down
+  const usdc = await ask({ chain: "solana", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" });
+  assert.equal(usdc.error?.code, "down", JSON.stringify(usdc));
+  // another origin: no price for it, so no floor read and no quote asked
+  const from = calls.length;
+  const other = await ask({ chain: "solana", origin_asset: "nep141:wrap.near", amount: "25" });
+  assert.equal(other.error?.code, "not_allowed", JSON.stringify(other));
+  assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
 });

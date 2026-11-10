@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { asks, COMMIT_PIN, DEVNET_POOL, judge, judgeSign, MAINNET_USDC, read, readSign, SIGN } from "./withdraw-fee-busy-waits.mjs";
+import { asks, commitPin, DEVNET_POOL, judge, judgeSign, MAINNET_USDC, read, readSign, SIGN } from "./withdraw-fee-busy-waits.mjs";
 import { TOKENS } from "./relayer-withdraw-fee.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -70,8 +70,8 @@ test("planted: a 500, a busy status with another code, a Retry-After of 0 or pas
   assert.equal(quiet.verdict, "INCONCLUSIVE", quiet.lines.join("\n"));
 });
 
-test("sign part: the commit's own pin is read from this checkout's packages/signpage/index.html", () => {
-  assert.match(String(COMMIT_PIN), /^sha384-[A-Za-z0-9+/=]{64}$/);
+test("sign part: the commit's own pin is read from this checkout's signing page build (signBuilt)", () => {
+  assert.match(String(commitPin()), /^sha384-[A-Za-z0-9+/=]{64}$/);
 });
 
 test("sign part, recorded good answer (this card's build served, the index pinning this commit's /app.js): PASS", async () => {

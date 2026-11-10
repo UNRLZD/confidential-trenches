@@ -369,6 +369,11 @@ export type SolanaRpcRetry = { readonly deadlineMs: number; readonly backoffMs: 
  * so two calls at their deadline (7 s) stay inside SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) at a slot of 360 ms (9 s; the
  * cluster's target is 400 ms, agave sdk clock.rs DEFAULT_MS_PER_SLOT), and the quote rule never sees a retry age it. */
 export const SOLANA_RPC_RETRY: SolanaRpcRetry = Object.freeze({ deadlineMs: 3_500, backoffMs: 250 });
+/** A read with no quote to age (a pool settle's or restore's marks and pages, card sol-pools-mainnet-pin): it waits out
+ *  one whole 10 s window of a provider that throttles per window (the helper's RPC_CLIENT_MAX of 16 a caller,
+ *  apps/helper/src/rpc/rpc.ts, answers the 17th with 429 and a Retry-After of up to 10 s), so a cold read of many marks
+ *  goes on at the provider's pace, never fails at its first window. */
+export const SOLANA_RPC_WINDOW_RETRY: SolanaRpcRetry = Object.freeze({ deadlineMs: 12_000, backoffMs: 250 });
 /** A fault the retry takes: HTTP 429 or 5xx, a JSON-RPC throttle (RPC_THROTTLE_CODES) in a 200, an answer that is not JSON,
  * an attempt with no answer in time, or no connection. */
 export type SolanaRpcFault = "http_429" | "http_5xx" | "rpc_throttled" | "not_json" | "timeout" | "network";
@@ -408,11 +413,18 @@ const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "Tim
 /** ": RPC error <code>: <message>" when `text` is a JSON-RPC error object, else "". */
 function rpcErrorWords(text: string): string {
   try {
-    const e = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown } } | null)?.error;
-    return e && typeof e === "object" && (typeof e.code === "number" || typeof e.message === "string") ? `: RPC error ${String(e.code)}: ${String(e.message).slice(0, 120)}` : "";
+    const e = (JSON.parse(text) as { error?: { code?: unknown; message?: unknown; data?: unknown } } | null)?.error;
+    return e && typeof e === "object" && (typeof e.code === "number" || typeof e.message === "string") ? `: ${rpcErrorText(e)}` : "";
   } catch {
     return "";
   }
+}
+/** A JSON-RPC error's words: its code, its message and, when it is text, its data, where a provider may name its cap
+ *  (base.gateway.tenderly.co: message "invalid params", data "Block range too large: maximum 1000 blocks without an
+ *  access key. ...", read 2026-11-09 19:43Z; review of 39a4c67a, P3-4). Each part bounded. */
+function rpcErrorText(e: { code?: unknown; message?: unknown; data?: unknown } | null): string {
+  const data = typeof e?.data === "string" && e.data !== "" ? `: ${e.data.slice(0, 200)}` : "";
+  return `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}${data}`;
 }
 /** Retry-After in ms: delta-seconds or an HTTP date (RFC 9110 10.2.3); null when absent or unreadable. */
 function retryAfterMs(h: string | null, now: number): number | null {
@@ -468,8 +480,8 @@ export function solanaJsonRpc(url: string, opts: { fetch?: SolanaFetch; init?: R
         const o = j as Record<string, unknown>;
         if (!(o.id === id || (typeof o.id === "number" && String(o.id) === id))) throw new Error(`answer id ${JSON.stringify(o.id)} is not request id ${id}`);
         if (o.error !== undefined) {
-          const e = o.error as { code?: unknown; message?: unknown } | null;
-          const msg = `RPC error ${String(e?.code)}: ${String(e?.message).slice(0, 120)}`;
+          const e = o.error as { code?: unknown; message?: unknown; data?: unknown } | null;
+          const msg = rpcErrorText(e);
           if (typeof e?.code === "number" && RPC_THROTTLE_CODES.has(e.code)) throw new Fault("rpc_throttled", msg, new Error(msg));
           throw new Error(msg);
         }

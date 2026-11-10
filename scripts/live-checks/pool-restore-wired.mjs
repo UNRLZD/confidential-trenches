@@ -9,10 +9,19 @@
 //   3. the new frame's state holds a restore op of the page's own (the run with no tap) that ends done;
 //   4. the probe asks restore: answered {stage: "started"}, then progress for its id: reading, and done at the end;
 //      never stalled.
-// The page's network pins no pool on mainnet yet (SOL_POOLS.mainnet and EVM_POOLS are empty), so each run there reads
-// no pool and ends done at once; a pin that lands makes the same run read it, and a pool it cannot read ends stalled,
-// which this check fails. The devnet and Base Sepolia notes themselves are the card's run record
+// Since card sol-pools-mainnet-pin the page's network pins the Solana pool on mainnet (SOL_POOLS.mainnet; EVM_POOLS is
+// empty), so each run there reads that pool for the vector's seed, which holds no note there, then step 5's deposit ids
+// and each id's U_X on Solana (card wallet-restore-reads-ux), and ends done; a pool it cannot read ends stalled, which
+// this check fails. Its marks are listed on the helper's solana-marks route (no keyless mainnet RPC answers that list)
+// and read by address on the page's pair, so it passes only once the helper admitting the wallet lister's request is
+// deployed. The devnet and Base Sepolia notes themselves are the card's run record
 // (pool-restore-wired.run.json), read on two RPCs.
+// Since card sign-live-checks-read-a-pinned-page the page reaches the pinned pool's own hosts (PINNED_HOSTS: the
+// helper, the Solana pair and the U_X pair, the NEAR pair step 5 reads ids on), each of them in the page's own
+// connect-src as served; any other host is refused and fails the check. A stalled run prints the page's own reason
+// (main.ts's "restore stalled: ..." console line). The wait (WAIT_MS) and the done rule are as before: step 5 reads
+// RESTORE_LANES x DEPOSIT_ID_MARGIN ids at the providers' pace, minutes on mainnet, so the check stays red on the live
+// page until card restore-first-sign-in-under-two-minutes sets the restore's time and this wait from its measure.
 // After: sign
 //   node scripts/live-checks/pool-restore-wired.mjs [--record <file>]           the deployed SIGN_HOST
 //   node scripts/live-checks/pool-restore-wired.mjs --local [--record <file>]   SIGN_HOST from this checkout's
@@ -25,6 +34,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../browsers.mjs";
 import { SIGNPAGE_KIT_VERSION } from "../../packages/kit/src/index.ts";
+import { PINNED_HOSTS, connectHosts } from "./signpage-shell.mjs";
 
 const KEY = "pool-restore-wired";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -59,6 +69,16 @@ export function judge(rec) {
   say(isObj(a) && a.ok === true && JSON.stringify(a.result) === JSON.stringify({ stage: "started" }), `restore is answered started (${JSON.stringify(a ?? null)})`);
   const stages = Array.isArray(s.asked?.stages) ? s.asked.stages : [];
   say(stages[0] === "reading" && stages.at(-1) === "done" && !stages.includes("stalled"), `its progress reads, then ends done, never stalled (${stages.join(", ") || "none"})`);
+  const stalled = (rec?.console ?? []).filter((c) => typeof c === "string" && c.includes("restore stalled:"));
+  if (stalled.length) say(false, `the page logged no stalled restore (${stalled.join(" | ")})`);
+  // each host the run asked, with its count (a record before this card lists its requests one by one)
+  const count = isObj(rec?.hosts) ? rec.hosts : Object.fromEntries(Object.entries(Object.groupBy(Array.isArray(rec?.requests) ? rec.requests : [], (x) => x?.host)).map(([h, v]) => [h, v.length]));
+  const hosts = Object.keys(count);
+  const csp = Array.isArray(rec?.connect) ? rec.connect : [];
+  const stray = hosts.filter((h) => h !== SIGN_HOST && h !== APP_HOST && !PINNED_HOSTS.includes(h));
+  const unlisted = hosts.filter((h) => PINNED_HOSTS.includes(h) && !csp.includes(h));
+  say(hosts.length > 0 && stray.length === 0 && unlisted.length === 0,
+    `every request goes to SIGN_HOST, APP_HOST or a pinned pool's host the page's own connect-src names (${hosts.map((h) => `${h} ${count[h]}`).join(", ") || "none"}${stray.length ? `; stray: ${stray.join(", ")}` : ""}${unlisted.length ? `; not in its connect-src: ${unlisted.join(", ")}` : ""})`);
   if (rec?.errors?.length) say(false, `the run had no error (${rec.errors.join(" | ")})`);
   return { ok: lines.every((l) => l.startsWith("OK")), lines };
 }
@@ -110,7 +130,7 @@ async function until(f, ms = WAIT_MS) {
 }
 
 export async function collect({ local }) {
-  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, requests: [], errors: [] };
+  const rec = { source: local ? "local: this checkout's committed packages/signpage build" : `live ${SIGN}`, at: new Date().toISOString(), browser: null, steps: {}, connect: null, hosts: {}, stray: [], console: [], errors: [] };
   let built = null;
   let sign = null;
   if (local) {
@@ -132,12 +152,22 @@ export async function collect({ local }) {
     });
     await ctx.route("**/*", async (r) => {
       const u = new URL(r.request().url());
-      rec.requests.push({ host: u.host, path: u.pathname });
+      rec.hosts[u.host] = (rec.hosts[u.host] ?? 0) + 1;
       if (u.host === SIGN_HOST) return local ? r.fulfill(sign(decodeURIComponent(u.pathname))) : r.continue();
       if (u.host === APP_HOST) return r.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `frame-ancestors ${SIGN}` }, body: APP_PAGE });
+      // the pinned pool's hosts: the live network's (the local build serves none, so they are refused there and its run
+      // ends as the network leaves it)
+      if (!local && PINNED_HOSTS.includes(u.host)) return r.continue();
+      if (rec.stray.length < 20) rec.stray.push({ host: u.host, path: u.pathname });
       return r.abort("blockedbyclient");
     });
     const page = await ctx.newPage();
+    page.on("console", (m) => {
+      if ((m.type() === "warning" || m.type() === "error") && rec.console.length < 50) rec.console.push(`${m.type()}: ${m.text()}`.slice(0, 600));
+    });
+    page.on("response", (res) => {
+      if (res.request().isNavigationRequest() && res.frame() === page.mainFrame() && rec.connect === null) rec.connect = connectHosts(res.headers()["content-security-policy"] ?? "");
+    });
     const app = () => page.frames().find((f) => { try { return new URL(f.url()).host === APP_HOST; } catch { return false; } });
     const msgs = () => reports.filter((m) => m.kind === "message");
     const readyAfter = (t) => until(async () => msgs().some((m) => m.t >= t && m.data?.type === "ready"));

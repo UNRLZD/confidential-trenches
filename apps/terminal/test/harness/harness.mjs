@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { signBuilt } from "../../../../scripts/signpage-built.mjs";
 import { makeCert } from "./certs.mjs";
 import { startServer } from "./server.mjs";
@@ -108,10 +109,10 @@ export async function startHarness(opts = {}) {
   try {
     server = await startServer({ cert: cert.cert, key: cert.key, sites });
     const rules = [...mapped.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND", ...through.map((d) => `EXCLUDE ${d}`)].join(", ");
-    browser = await launchBrowser("chromium", {
+    browser = await launchHarnessBrowser("chromium", {
       headless: opts.headless ?? true,
       args: [`--host-resolver-rules=${rules}`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
-    });
+    }, { hosts: [...mapped, ...through], refuseHttp: true });
   } catch (e) {
     await browser?.close();
     await server?.close();

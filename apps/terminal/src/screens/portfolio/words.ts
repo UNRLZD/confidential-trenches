@@ -44,6 +44,7 @@ export const WORDS = {
   deposit: ok("Deposit", "R5 app.js:626 (dseg); src/screens/deposit/words.ts"),
   withdraw: ok("Withdraw", "R5 app.js:626 (dseg); src/screens/deposit/words.ts"),
   processing: ok("Processing", "R5 app.js:653 (S4.15); src/screens/deposit/words.ts"),
+  txFailed: ok("Transaction failed", "owner 10 Nov 18:12Z (owner-decisions: Mainnet run tonight and three labels, typed): a failed buy or sell's Activity row, the reason on hover"),
   refunded: ok("Refunded", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.17 / S12.15 [draft copy: Refunded]"),
   more: draft("More", "the row overflow button's accessible name only (never drawn; R5 draws the icon)"),
   close: ok("Close", "owner 1 Nov 16:45Z (Keep the drafts); the close icon's accessible name only (never drawn)"),
@@ -103,6 +104,8 @@ export const WORDS = {
   // card app-export-every-wallet: kept as drafted (the 8 Nov words page)
   exportKey: ok("Export key", "owner 8 Nov 07:55Z, kept; drafted on card app-export-every-wallet: the export icon's hover label and accessible name (words-pending)"),
   wallets: ok("Wallets", "owner 8 Nov 07:55Z, kept; drafted on card app-export-every-wallet: the heading over the wallets that hold money and no position (words-pending)"),
+  // the exit plan cell and row, and the Orders route (card app-orders-coming-soon): orders are out of the plan for now
+  soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;

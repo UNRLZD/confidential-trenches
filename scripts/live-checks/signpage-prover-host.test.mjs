@@ -1,7 +1,7 @@
 // node --test scripts/live-checks/signpage-prover-host.test.mjs: the live check replays recorded answers
 // (signpage-prover-host.answers.json). good: the harness run on a fresh `deploy.mjs --dry-run` build of this branch
 // (SIGN_HOST does not serve the prover before this card's deploy), in the installed Google Chrome (scripts/browsers.mjs): PASS
-// (re-recorded for card page-evm-rpc-csp, the site's CSP with the kit's EVM providers, 2026-11-07; and for card held-move-forgotten-tx, with the mainnet archival RPCs, 2026-11-08; and for card wallet-restore-reads-ux, with Pocket's Solana gateway, 2026-11-09 on the Mac, Chrome 157). bad: the same build
+// (re-recorded for card page-evm-rpc-csp, the site's CSP with the kit's EVM providers, 2026-11-07; and for card held-move-forgotten-tx, with the mainnet archival RPCs, 2026-11-08; and for card wallet-restore-reads-ux, with Pocket's Solana gateway, 2026-11-09 on the Mac, Chrome 157; and for card evm-pool-sync-holds on that build with Base's bloXroute too, 2026-11-09 on the Mac). bad: the same build
 // with one byte of withdraw.zkey changed: its sha256 is not the pin and the worker refuses it at load, so nothing is
 // proved: FAIL. The other bad answers are the good one with one fault planted each: FAIL.
 import assert from "node:assert/strict";

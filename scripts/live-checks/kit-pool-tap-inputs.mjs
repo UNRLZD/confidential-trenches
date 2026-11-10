@@ -4,7 +4,7 @@
 //   - each chain's two RPCs are of two operators (two hosts, and not one provider by the kit's own check);
 //   - Solana: Pyth's SOL/USD account (POOL_USD_FEEDS.solana) reads the same bytes on both RPCs, is the Receiver's
 //     PriceUpdateV2 of the SOL/USD feed, fully verified, its price positive, its confidence within the bound and its
-//     publish time within 60 s of now (poolUsdPrice refuses otherwise);
+//     publish time within the feed's bound of now (POOL_USD_FEEDS maxAgeS; poolUsdPrice refuses otherwise);
 //   - Base and Robinhood: each chain's own Chainlink ETH/USD proxy (POOL_USD_FEEDS.base, .robinhood) answers the same
 //     decimals and latestRoundData on both RPCs at one block (the same hash on both, its time within 60 s of now),
 //     positive and within the chain's bound; and description()

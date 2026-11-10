@@ -4,8 +4,9 @@
 // under the box. Phone: under the tiles, the tabs Trades and Holders N; About under the box in the trade sheet, as R5.
 // Trades is the tape the chart's marks read, while it is served, else `No data`; Holders is the helper's holders read,
 // its rows when the helper holds the holders key, else the count and the top share from Jupiter and `No data` for the
-// rows. R5's other tabs (Top traders, My orders, My position) and the trades toolbar are other cards'. The data and its
-// formats are lower.ts's.
+// rows. My orders (R5's fourth, after Top traders; the phone's last) draws `Coming soon` in the empty state's style: orders
+// are out of the plan for now (card app-orders-coming-soon, owner 10 Nov). R5's Top traders and My position and the
+// trades toolbar are other cards'. The data and its formats are lower.ts's.
 import { useEffect, useState } from "react";
 import type { MarketRow } from "../discover/fields.ts";
 import { DASH } from "../discover/format.ts";
@@ -15,7 +16,7 @@ import type { Tape } from "./trades.ts";
 import { supplyOf } from "./units.ts";
 import "./lower.css";
 
-type Tab = "trades" | "holders";
+type Tab = "trades" | "holders" | "orders";
 
 /** The clock the trades' ages are drawn against, ticking each second while the tab is open. */
 function useNow(on: boolean): number {
@@ -57,8 +58,11 @@ function Trades({ row, tape, phone, nowMs }: { row: MarketRow; tape: Tape; phone
         <Empty />
       ) : (
         <div className="tkl-list" data-testid="lower-rows-trades">
-          {rows.map((t) => (
-            <div key={t.key} className="tkl-trow tkl-tr" data-testid="lower-row" data-side={t.side}>
+          {/* each row is a slot keyed by its place, newest first: a trade arriving fills slot 0 and moves each trade's text
+              one slot down, so no row's box moves (BAR-10 CLS 0; keyed by trade, every row under the new one moved 44 px
+              on the phone, app-shell run 42773072293) */}
+          {rows.map((t, slot) => (
+            <div key={slot} className="tkl-trow tkl-tr" data-testid="lower-row" data-side={t.side}>
               <span className="tkl-c tkl-dim" data-col="age">{t.age}</span>
               <span className="tkl-c tkl-side" data-col="type">{phone ? <W id={t.side === "buy" ? "buyShort" : "sellShort"} /> : <W id={t.side} />}</span>
               {!phone && <span className="tkl-c" data-col="mc">{t.mc}</span>}
@@ -132,6 +136,8 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
     <button key={k} type="button" role="tab" className="tkl-tab" aria-selected={tab === k} data-testid={`lower-tab-${k}`} onClick={() => setTab(k)}>
       {k === "trades" ? (
         <W id="trades" />
+      ) : k === "orders" ? (
+        <W id="myOrders" />
       ) : (
         <>
           <W id="holders" />
@@ -145,9 +151,11 @@ export function LowerPanel({ row, decimals, tape, phone = false }: { row: Market
   return (
     <section className="tkl" data-testid="lower-panel" data-tab={tab} data-phone={phone || undefined}>
       <div className="tkl-tabs" role="tablist" data-testid="lower-tabs">
-        {(phone ? (["trades", "holders"] as const) : (["holders", "trades"] as const)).map(tabBtn)}
+        {(phone ? (["trades", "holders", "orders"] as const) : (["holders", "trades", "orders"] as const)).map(tabBtn)}
       </div>
-      {row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
+      {tab === "orders" ? (
+        <div className="tkl-empty" role="tabpanel" data-testid="orders-soon" data-place="token-orders"><W id="soon" /></div>
+      ) : row === null ? <Skel n={8} /> : tab === "trades" ? <Trades row={row} tape={tape} phone={phone} nowMs={nowMs} /> : <Holders row={row} decimals={decimals} top={sum!.top} state={holders} />}
     </section>
   );
 }

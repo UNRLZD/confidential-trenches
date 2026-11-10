@@ -426,6 +426,31 @@ test("card helper-live-red: a keyed URL whose callers spent its day is still pro
   assert.deepEqual(r.keyed?.().base, ["quiknode.test answers"]);
 });
 
+test("card helper-live-red: a day spent whole, the probe's share too, before a helper starts leaves its keyed URL unread only until 00:00Z: the next day's probe reads it", async () => {
+  // live run 42694130536 (20:34Z, helper fc76a9fb): Base's QuickNode day files summed 322,580 of 322,580 credits, spent
+  // by helpers that ran before the probe share (PROBE_DAY_SHARE) existed, so the share was gone with the rest and the
+  // probe of every helper started after it could not draw: "quiknode.pro unread" until the day turns
+  const qnBase = LISTS.base[1][1];
+  const env = { BASE_RPC_URL_QUICKNODE: qnBase, RPC_DAY_QUICKNODE: "2000" };
+  const asked: string[] = [];
+  const fetch = async (url: string, init: RequestInit): Promise<Response> => (asked.push(url), answer(init, "0x2105"));
+  const c = clock();
+  c.t.v = Math.ceil(c.t.v / 86_400_000) * 86_400_000 + 1_000;
+  const holds = providerHolds(c.now, keyedPaces?.(env) ?? {});
+  assert.equal(holds.take(qnBase, 99, false), 0, "callers spend 1,980");
+  c.t.v += 2_000; // the pace's bucket full again: what refuses below is the day alone
+  assert.equal(holds.take(qnBase, 1, true, false, true), 0, "and the last 20, the probe's share, as before the share was kept");
+  c.t.v += 2_000;
+  const r = createRpc(env, { fetch: fetch as never, holds, now: c.now, sleep: c.sleep, log: () => undefined }) as Rpc;
+  await r.probe?.();
+  assert.equal(asked.filter((u) => u === qnBase).length, 0, "nothing is sent past the plan's day");
+  assert.deepEqual(r.keyed?.().base, ["quiknode.test unread"]);
+  c.t.v = Math.ceil(c.t.v / 86_400_000) * 86_400_000 + 1_000; // 00:00:01Z the next day
+  await r.probe?.();
+  assert.equal(asked.filter((u) => u === qnBase).length, 1, "the next day's probe reads it");
+  assert.deepEqual(r.keyed?.().base, ["quiknode.test answers"]);
+});
+
 test("review M2: each account's daily budget is its plan's month over 31 days (dRPC's 30-day period over 30), in its own unit, overridable by RPC_DAY_<COMPANY>; a pool sender's read is never refused by it", () => {
   const { KEYED_DAY } = rpcModule as unknown as { KEYED_DAY?: unknown };
   void KEYED_DAY;

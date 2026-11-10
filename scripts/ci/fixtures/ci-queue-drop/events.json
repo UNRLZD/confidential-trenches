@@ -1,0 +1,13 @@
+{
+  "_source": "the two groups of pull request #540 on 9 Nov (runs 42684845293 and 42685422939: head_branch and head_sha read from GitHub's API on 2026-11-09); the payload shape is GitHub's merge_group webhook (head_ref is the group branch's full ref) with action checks_requested or destroyed and a destroyed event's reason",
+  "group1": {
+    "head_ref": "refs/heads/gh-readonly-queue/main/pr-540-7b976ba8d92a1811fef610e15db2b150401a9db5",
+    "head_sha": "3de0918608f9a7d7a787c29dd31ce0d09f7c0cbf",
+    "base_ref": "refs/heads/main"
+  },
+  "group2": {
+    "head_ref": "refs/heads/gh-readonly-queue/main/pr-540-b44a41d133b3e5f7e2f1401205566d117f5a26f1",
+    "head_sha": "f5482da69e1ccac415e55519ee40415923cf0f1f",
+    "base_ref": "refs/heads/main"
+  }
+}

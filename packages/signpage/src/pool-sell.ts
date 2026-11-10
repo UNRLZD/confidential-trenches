@@ -74,7 +74,7 @@ import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync }
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
-import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
+import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
 export { solanaSellAfterFull };
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -121,9 +121,19 @@ export type PoolSellHost = {
   wait?(ms: number): Promise<void>;
   /** Tests only: the venue's buyback recipient, else random. */
   pick?: (n: number) => number;
+  /** A sign out was asked (pool-testnet.ts signingOut): no sale signs from then on (review P3-5 of 77055f4e); each is
+   *  refused "failed" right before its signature, so a sale already sent stands and none after it starts. */
+  stopped?(): boolean;
 };
 
-export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down" };
+/** One wallet's sale in a sell (card pool-sell-share-across-wallets): W's address, the token's base units it sells (a
+ *  decimal string, as an answer carries it), its transaction's signature once W signed (null: it ended before signing),
+ *  and how it ended: its stage, or the refusal before it signed. */
+export type PoolSellLeg = { wallet: string; amount: string; tx: string | null; stage: TradeStage | null; error?: PoolSellError };
+type PoolSellError = "not_allowed" | "not_funded" | "quote_check_failed" | "failed" | "down";
+/** A sell's answer: its stage over every wallet's sale (filled when each filled, part_filled when some did), each sale's
+ *  transaction in `txs`, and every sale in `legs`; or a refusal, nothing signed. */
+export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly PoolSellLeg[] } | { error: PoolSellError };
 
 /** Verdict reads a sell gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_SELL_READS = 120;
@@ -198,15 +208,21 @@ async function account(rpc: SolanaRpc, address: string, commitment: "confirmed" 
   return { slot, owner: v.owner, data: base64.decode(v.data[0]), lamports: v.lamports };
 }
 
-/** Up to 10 accounts in one getMultipleAccounts call (one provider's cap), all at one slot; null: no account. */
-async function accountsOf(rpc: SolanaRpc, addresses: readonly string[]): Promise<(SolanaHeldRead | null)[]> {
+/** Up to 10 accounts in one getMultipleAccounts call (one provider's cap), all at one slot; null: no account.
+ *  `lamports` as the RPC wrote it (accountsOf prices it). */
+async function accountsRaw(rpc: SolanaRpc, addresses: readonly string[]): Promise<({ owner: string; lamports: unknown; data: Uint8Array } | null)[]> {
   const r = (await rpc("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "confirmed" }])) as { value?: unknown };
   if (!Array.isArray(r?.value) || r.value.length !== addresses.length) return no();
   return r.value.map((a: { owner?: unknown; data?: unknown; lamports?: unknown } | null) => {
     if (a === null) return null;
     if (typeof a?.owner !== "string" || !Array.isArray(a.data) || a.data[1] !== "base64" || typeof a.data[0] !== "string") return no();
-    return { owner: a.owner, lamports: BigInt(int(a.lamports)), data: base64.decode(a.data[0]) };
+    return { owner: a.owner, lamports: a.lamports, data: base64.decode(a.data[0]) };
   });
+}
+
+/** accountsRaw, each account's lamports priced. */
+async function accountsOf(rpc: SolanaRpc, addresses: readonly string[]): Promise<(SolanaHeldRead | null)[]> {
+  return (await accountsRaw(rpc, addresses)).map((a) => (a === null ? null : { ...a, lamports: BigInt(int(a.lamports)) }));
 }
 
 /** The pool account on both RPCs, the same bytes (read again once when they differ): its two tree sizes. */
@@ -220,23 +236,40 @@ async function treeSizes(rpcs: Rpcs, program: string, pool: string, wait: (ms: n
       await wait(POOL_SELL_SIZE_RETRY_MS);
       continue;
     }
-    const d = a.data;
-    if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) return no();
-    const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
-    return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
+    return sizesOf(a.data);
   }
 }
 
-/** The token's program (the mint's owner, the same on both RPCs) and W's associated token account under it: its
- *  amount, the same on both RPCs (two that differ are read again once, then failed: neither RPC's word alone sets what
- *  the sell takes or what W keeps after it). None on either RPC holds nothing; frozen on either: not_allowed. */
-async function tokenHeld(rpcs: Rpcs, w: string, mint: string): Promise<{ program: string; amount: bigint }> {
+/** The pool account's two tree sizes. */
+function sizesOf(d: Uint8Array): { stateSize: number; labelSize: number } {
+  if (d.length !== POOL_LEN || !sameBytes(d.subarray(0, 8), POOL_DISC)) return no();
+  const size = (at: number): number => int(Number(new DataView(d.buffer, d.byteOffset + at, 8).getBigUint64(0, true)));
+  return { stateSize: size(OFF_TREES), labelSize: size(OFF_TREES + TREE_LEN) };
+}
+
+/** The token's program: the mint's owner, the same on both RPCs, the token program or Token-2022. */
+async function mintProgram(rpcs: Rpcs, mint: string): Promise<string> {
   const mints = await both(rpcs, (r) => account(r, mint, "confirmed"));
   const programs = mints.map((m) => ("none" in m ? no() : m.owner));
   const program = programs[0]!;
   if (programs[1] !== program || (program !== SOLANA_TOKEN_PROGRAM && program !== SOLANA_TOKEN_2022_PROGRAM)) return no();
+  return program;
+}
+
+/** The token's program (mintProgram) and W's associated token account under it: its amount, the same on both RPCs
+ *  (ataHeld). */
+async function tokenHeld(rpcs: Rpcs, w: string, mint: string): Promise<{ program: string; amount: bigint }> {
+  const program = await mintProgram(rpcs, mint);
+  return { program, amount: await ataHeld(rpcs, w, mint, program) };
+}
+
+/** W's associated token account of `mint` under `program`: its amount, the same on both RPCs (two that differ are read
+ *  again once, then failed: neither RPC's word alone sets what the sell takes or what W keeps after it). None on either
+ *  RPC holds nothing. Frozen on both: not_allowed; frozen on one RPC alone is two RPCs that differ (review P3-3 of
+ *  77055f4e: one RPC's word that W is frozen never leaves W out of a sell of all of it). */
+async function ataHeld(rpcs: Rpcs, w: string, mint: string, program: string): Promise<bigint> {
   const ata = solanaAta(w, mint, program);
-  const read = async () => (await both(rpcs, (r) => account(r, ata, "confirmed"))).map((a) => {
+  const read = async () => (await both(rpcs, (r) => account(r, ata, "confirmed"))).map((a): bigint | "frozen" => {
     if ("none" in a) return 0n;
     if (a.owner !== program) return no();
     let t: ReturnType<typeof solanaDecodeTokenAccount>;
@@ -246,12 +279,12 @@ async function tokenHeld(rpcs: Rpcs, w: string, mint: string): Promise<{ program
       return no();
     }
     if (t.mint !== mint || t.owner !== w) return no();
-    if (t.state === 2) return no("not_allowed");
+    if (t.state === 2) return "frozen";
     return t.amount;
   });
   for (let i = 0; i < 2; i++) {
     const [a, b] = await read();
-    if (a === b) return { program, amount: a! };
+    if (a === b) return a === "frozen" ? no("not_allowed") : a!;
   }
   return no();
 }
@@ -472,7 +505,16 @@ async function goneOnBoth(rpcs: Rpcs, signature: string, last: number): Promise<
 
 /** What a sell leaves to run after its answer: the rent back, after a full sell filled; or the sell built again, its
  *  deposit having met a page another deposit filled first. */
-type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean };
+type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean; throttle?: number | null };
+
+/** A provider's rate limit before any signature (review of the 5-wallet devnet run): a read that drew one, past the
+ *  page's own retry (kit send.ts SolanaRpcTransportError, HTTP 429 or a throttle code), makes the step it failed (the
+ *  plan, or one wallet's sale from its first read) again after the provider's Retry-After, at least POOL_SELL_WAIT_MS
+ *  and at most POOL_SELL_THROTTLE_MAX_MS, this many times; then "down", nothing signed. A new quote is read each time. */
+export const POOL_SELL_THROTTLE_WAITS = 3;
+export const POOL_SELL_THROTTLE_MAX_MS = 10_000;
+const throttled = (e: unknown): e is SolanaRpcTransportError => e instanceof SolanaRpcTransportError && (e.fault === "http_429" || e.fault === "rpc_throttled");
+const throttleWait = (afterMs: number | null): number => Math.min(Math.max(afterMs ?? 0, POOL_SELL_WAIT_MS), POOL_SELL_THROTTLE_MAX_MS);
 
 /** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `seen`,
  *  what W read as (heldSeen) when its last pass ended on W's own state (under the floor, holding, an account kept), so
@@ -518,6 +560,9 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
   };
 };
 
+/** Where W's buy mints are: the wallet store's meta, by W's address; the key buyMints writes (its own literal there is
+ *  the shape scripts/live-checks/sol-w-sweep.mjs reads in the bundle; positions.test holds the two the same). */
+export const BUY_MINTS_KEY = "owed/buy-sol";
 /** W's buy mints, in the wallet store's meta/owed/buy-sol, by W's address (pool-buy.ts BuyMints). */
 export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">>): BuyMints => {
   const KEY = "owed/buy-sol";
@@ -531,26 +576,205 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
   };
 };
 
-/** A sell, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
-async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<PoolSellAnswer> {
-  for (let i = 0; ; i++) {
+/** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
+async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet): Promise<LegAnswer> {
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (let i = 0, waits = 0; ; ) {
     delete later.rebuild;
+    delete later.throttle;
     later.last = i >= POOL_SELL_REBUILDS;
-    const a = await sellRun(h, ask, later);
+    const a = await sellRun(h, ask, later, w);
+    // a provider's rate limit before W signed: the sale again from its first read, after the provider's wait
+    if ("error" in a && later.throttle !== undefined && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
+      await wait(throttleWait(later.throttle));
+      waits++;
+      continue;
+    }
     if (!later.rebuild || i >= POOL_SELL_REBUILDS) return a;
+    i++;
   }
 }
 
-/** One pool.sell: the ask is the user's own (rules/pool.ts checkPoolRequest passed it, with the token's decimals). After
- *  a full sell filled, the rent back (rentBack) runs before this answers; it never changes the answer. */
+/** One wallet's sale as its run answers it. */
+type LegAnswer = { stage: TradeStage; txs: TxRef[] } | { error: PoolSellError };
+
+/** A sell's plan: the units it sells over every wallet, and each wallet's sale in the order they run. `frozen`: a W
+ *  both RPCs read frozen was left out, so a share of the holding never sells all of it. */
+export type PoolSellPlan = { units: bigint; total: bigint; legs: readonly { w: BuyWallet; units: bigint; held: bigint }[]; frozen: boolean };
+
+/**
+ * The sell's plan (card pool-sell-share-across-wallets), from the device's own reads alone. Every buy of a token lands in
+ * its own fresh wallet W, so the user's holding of it is spread over several.
+ * - The Ws: the page's buy wallets (h.wallets(): every W the pool's spent notes paid, derived from the seed) that its own
+ *   buy record names for this token (h.bought, written by the buy before its send) or that the listed holdings show
+ *   holding it. The listed holdings (on mainnet the helper's one read) only add a W to read; no amount of theirs is used.
+ * - Each W's holding: its token account on both RPCs, the same on both (ataHeld: read again once, then failed), each W
+ *   in requests of its own (a read names one W of the user's at most); the mint once, on both RPCs. An account both
+ *   RPCs read frozen is not sold (holds 0 here; a sell it leaves short is not_allowed; a share then ends part_filled at
+ *   best, never filled). A W that cannot be read, or that one RPC alone reads frozen, fails the whole sell before
+ *   anything is signed: a share of a total that misses a W would sell less than the user asked. A W reading 0 is no
+ *   sale. A W whose full sale of the token was sent before (its owed record names it) is read like any other: that
+ *   record outlives a sale that never landed, so only the chain says W is sold out.
+ * - The units: a share's, the total times the share in basis points, rounded down (10,000: the whole total, every unit);
+ *   a typed amount's, the amount, refused not_funded when it is over the total. Zero: not_funded.
+ * - One W holding at least the units: one sale, from the smallest such W (review P2-3 of 77055f4e), for a share and a
+ *   typed amount alike: one transaction, one fee, the fewest Ws touched.
+ * - Else the walk, smallest holding first (then by address, so one read gives one plan). Each W the units still cover is
+ *   sold whole (the full sell: its accounts closed and every lamport back as a note, the rent back); the first W they do
+ *   not cover is sold in part, and the walk ends. Smallest first closes the most Ws and leaves the one part sale where
+ *   the most is held.
+ */
+export async function planPoolSell(h: Pick<PoolSellHost, "rpcs" | "wallets" | "bought">, ask: PoolAsk): Promise<PoolSellPlan> {
+  if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
+  const token = ask.token;
+  const listed = (await h.wallets()).filter((x) => x.chain === "sol");
+  const seen = new Set<string>();
+  const ws: BuyWallet[] = [];
+  for (const x of listed) {
+    if (seen.has(x.address)) continue;
+    const bought = await Promise.resolve(h.bought?.get(x.address)).catch(() => undefined);
+    if (bought?.mint !== token && !x.holdings.tokens.has(token)) continue;
+    seen.add(x.address);
+    ws.push(x);
+  }
+  const program = ws.length === 0 ? null : await mintProgram(h.rpcs, token);
+  const held = await Promise.all(
+    ws.map(async (w) => {
+      try {
+        return { w, held: await ataHeld(h.rpcs, w.address, token, program!) };
+      } catch (e) {
+        // frozen on both RPCs: never sold, so none of it counts
+        if (e instanceof Refused && e.code === "not_allowed") return { w, held: 0n, frozen: true };
+        throw e;
+      }
+    }),
+  );
+  const frozen = held.some((x) => "frozen" in x);
+  const order = held.filter((x) => x.held > 0n).sort((x, y) => (x.held < y.held ? -1 : x.held > y.held ? 1 : x.w.address < y.w.address ? -1 : x.w.address > y.w.address ? 1 : 0));
+  const total = order.reduce((t, x) => t + x.held, 0n);
+  const units = ask.shareBps === undefined ? ask.amount : ask.shareBps === 10_000 ? total : (total * BigInt(ask.shareBps)) / 10_000n;
+  // short of the units: a frozen account among the Ws is why (not_allowed, as one W's frozen sale is), else not_funded
+  if (units <= 0n || units > total) return no(frozen ? "not_allowed" : "not_funded");
+  const one = order.find((x) => x.held >= units);
+  if (one) return { units, total, legs: [{ w: one.w, units, held: one.held }], frozen };
+  const legs: { w: BuyWallet; units: bigint; held: bigint }[] = [];
+  let left = units;
+  for (const x of order) {
+    if (left === 0n) break;
+    const take = left < x.held ? left : x.held;
+    legs.push({ w: x.w, units: take, held: x.held });
+    left -= take;
+  }
+  return { units, total, legs, frozen };
+}
+
+/** What each wallet's sale is told beyond the run's host: which leg it is, for the host's record. */
+export type LegHooks = {
+  /** The plan is made: the units the sell takes and each leg's W and units, before any leg runs. */
+  planned?(plan: PoolSellPlan): void | Promise<void>;
+  /** Leg `i` is signed and about to leave the device: its signature (awaited before the send; a throw sends nothing). */
+  signed?(i: number, signature: string): Promise<void> | void;
+  /** Leg `i` was sent. */
+  sent?(i: number, signature: string): void;
+  /** Leg `i` ended (its stage, or its refusal before it signed). */
+  ended?(i: number, leg: PoolSellLeg): void;
+};
+
+/** The stage of a sell over its legs: filled when each filled; part_filled when some filled and the rest ended without
+ *  filling; while any leg may still land, sent; with none filled, refused when any was refused on chain, else not_landed. */
+export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[]): TradeStage {
+  const ended = (l: Pick<PoolSellLeg, "stage" | "error">) => l.error !== undefined || (l.stage !== null && l.stage !== "signed" && l.stage !== "sent");
+  if (!legs.every(ended)) return "sent";
+  const filled = legs.filter((l) => l.stage === "filled").length;
+  if (filled === legs.length) return "filled";
+  if (filled > 0) return "part_filled";
+  return legs.some((l) => l.stage === "refused" || l.error !== undefined) ? "refused" : "not_landed";
+}
+
+/**
+ * Every wallet's sale of one sell (card pool-sell-share-across-wallets): the plan (planPoolSell), then each leg as today's
+ * complete sell of one W (sellRuns: its own reads, quote check, return note, owed record written before its send, its
+ * rent back after a full sale), never changed by the others. The legs take turns up to their send, so each reads its own
+ * quote after the one before it left and the page's paced RPCs carry one leg's reads at a time; their verdicts are read
+ * side by side. A leg that fails ends alone: nothing is retried, the others' results stand, and the answer names every
+ * leg. One leg's refusal before it signed, with no other leg, is the sell's own refusal, as before.
+ */
+async function sellAll(h: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
+  let plan: PoolSellPlan;
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (let waits = 0; ; waits++) {
+    try {
+      plan = await planPoolSell(h, ask);
+      break;
+    } catch (e) {
+      if (e instanceof Refused) return { error: e.code };
+      // a provider's rate limit: the plan read again after its wait (POOL_SELL_THROTTLE_WAITS), then "down"
+      if (throttled(e) && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
+        await wait(throttleWait(e.afterMs));
+        continue;
+      }
+      if (e instanceof SolanaRpcTransportError) return { error: "down" };
+      return { error: "failed" };
+    }
+  }
+  await hooks.planned?.(plan);
+  const legs: PoolSellLeg[] = plan.legs.map((l) => ({ wallet: l.w.address, amount: l.units.toString(), tx: null, stage: null }));
+  // each leg's turn: the one before it sent, or ended before sending
+  let turn: Promise<void> = Promise.resolve();
+  const runs = plan.legs.map((l, i) => {
+    const later: Later = {};
+    laters.push(later);
+    let open!: () => void;
+    const mine = new Promise<void>((r) => (open = r));
+    const prior = turn;
+    turn = mine;
+    // the run's host with this leg's two hooks; every other field read from `h` when it is read (never a copy taken
+    // here: the rule reads the page's pin again at its check)
+    const leg: PoolSellHost = Object.assign(Object.create(h) as PoolSellHost, {
+      signed: async (signature: string) => {
+        legs[i] = { ...legs[i]!, tx: signature, stage: "signed" };
+        await hooks.signed?.(i, signature);
+        await h.signed?.(signature);
+      },
+      sent: (signature: string) => {
+        legs[i] = { ...legs[i]!, tx: signature, stage: "sent" };
+        open();
+        hooks.sent?.(i, signature);
+        h.sent?.(signature);
+      },
+    });
+    return prior
+      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w)))
+      .catch((): LegAnswer => ({ error: "failed" }))
+      .then((a) => {
+        open();
+        legs[i] = "error" in a ? { ...legs[i]!, tx: null, stage: null, error: a.error } : { ...legs[i]!, tx: a.txs.at(-1)?.hash ?? legs[i]!.tx, stage: a.stage };
+        hooks.ended?.(i, legs[i]!);
+        return a;
+      });
+  });
+  const got = await Promise.all(runs);
+  if (got.length === 1 && "error" in got[0]!) return got[0]!;
+  if (got.every((a) => "error" in a)) return got[0]!;
+  const txs: TxRef[] = legs.flatMap((l) => (l.tx === null ? [] : [{ chain: "solana" as const, hash: l.tx }]));
+  return { stage: shortOf(stageOfLegs(legs), plan.frozen && ask.shareBps !== undefined), txs, legs };
+}
+
+/** A sell's stage when part of the holding it was asked a share of could not be sold (`short`: a W both RPCs read
+ *  frozen was left out): filled becomes part_filled, every other stage stays. */
+const shortOf = (stage: TradeStage, short: boolean): TradeStage => (short && stage === "filled" ? "part_filled" : stage);
+
+/** One pool.sell: the ask is the user's own (rules/pool.ts checkPoolRequest passed it, with the token's decimals): its
+ *  units, or its share of the whole holding (planPoolSell). After the sales, each full sale's rent back (rentBack) runs,
+ *  one W after another, before this answers; none changes the answer. */
 export async function runPoolSell(h: PoolSellHost, ask: PoolAsk): Promise<PoolSellAnswer> {
-  const later: Later = {};
-  const a = await sellRuns(h, ask, later);
-  await later.back?.(null);
+  const laters: Later[] = [];
+  const a = await sellAll(h, ask, laters);
+  for (const later of laters) await later.back?.(null);
   return a;
 }
 
-async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<PoolSellAnswer> {
+async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet): Promise<LegAnswer> {
   const seeds: Uint8Array[] = [];
   let key: Uint8Array | null = null;
   let sent: string | null = null;
@@ -563,22 +787,19 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
   };
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   try {
-    if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return no("not_allowed");
+    if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null || ask.shareBps !== undefined || w.chain !== "sol") return no("not_allowed");
     const token = ask.token;
     const amount = ask.amount;
-    // W: the smallest holding of the token that covers the amount, not frozen; the pick reads nothing
-    const held = (x: BuyWallet) => x.holdings.tokens.get(token);
-    const w = (await h.wallets())
-      .filter((x) => x.chain === "sol" && held(x) !== undefined && !held(x)!.frozen && held(x)!.amount >= amount)
-      .sort((x, y) => (held(x)!.amount < held(y)!.amount ? -1 : held(x)!.amount > held(y)!.amount ? 1 : 0))[0];
-    if (w === undefined) return no("not_funded");
+    // W: the plan's (planPoolSell), from the device's own reads; read again here, as every sale does
     // the pin, read once for every read and the build; the rule reads the page's pin again at the check
     const program = h.pin.program;
     const { pool, scope } = solanaPoolOf(program);
     const rpcs = h.rpcs;
     // the gating reads, each on both RPCs
     const rent: SolanaRent = await readSolanaRent(rpcs);
-    const sizes = await treeSizes(rpcs, program, pool, wait);
+    // the gate: the pool there, the same on both RPCs; the sizes the deposit is priced on are read again with its pages
+    // (depositHeld), so an earlier sale's deposit landing in between never leaves them apart (review P2-1 of 77055f4e)
+    let sizes = await treeSizes(rpcs, program, pool, wait);
     const tokens = await tokenHeld(rpcs, w.address, token);
     if (tokens.amount < amount) return no("not_funded");
     const lamports = lower(...(await both(rpcs, async (r) => {
@@ -640,6 +861,22 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     // venue the coin can reach, the buy's rule (solanaPoolBuySellNeed: a curve coin's PumpSwap need, cashback accounts
     // included), so no sell leaves tokens on a W that cannot pay to sell them (the re-review of 40cdc3e)
     const keeps = tokens.amount > amount;
+    // the lamports the deposit's mark and both pages hold, read on both RPCs with the pool's tree sizes in one call: the
+    // same for either form; with them, W's volume accounts owed a claim after the sell (review L3 of 38faee89): each pump program's whose claim pays out on
+    // either RPC's read (solanaVolumeClaimable: one RPC's word that nothing is owed never lowers what W keeps), or the
+    // venue's own on a cashback coin, whose sell earns cashback there
+    const venueProgram = venue.kind === "pumpswap" ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM;
+    const owesOn = async (vp: string): Promise<boolean> => {
+      if (venue.cashback && vp === venueProgram) return true;
+      const reads = await both(rpcs, (r) => account(r, solanaVolumeAccumulator(w.address, vp), "confirmed"));
+      return reads.some((a) => !("none" in a) && a.owner === vp && solanaVolumeClaimable(vp, a.data) > 0n);
+    };
+    const [deposit, owed] = await Promise.all([depositHeld(rpcs, program, pool, sizes, pre, wait), Promise.all([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].map(owesOn)).then((o) => o.filter(Boolean).length)]);
+    // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
+    // sol-w-sweep): every lamport over it goes into this sell's note
+    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    const holds = deposit.held;
+    sizes = deposit.sizes;
     // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
     // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
     // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
@@ -649,20 +886,6 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
     const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
-    // the lamports the deposit's mark and both pages hold, read on both RPCs: the same for either form; with them, W's
-    // volume accounts owed a claim after the sell (review L3 of 38faee89): each pump program's whose claim pays out on
-    // either RPC's read (solanaVolumeClaimable: one RPC's word that nothing is owed never lowers what W keeps), or the
-    // venue's own on a cashback coin, whose sell earns cashback there
-    const venueProgram = venue.kind === "pumpswap" ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM;
-    const owesOn = async (vp: string): Promise<boolean> => {
-      if (venue.cashback && vp === venueProgram) return true;
-      const reads = await both(rpcs, (r) => account(r, solanaVolumeAccumulator(w.address, vp), "confirmed"));
-      return reads.some((a) => !("none" in a) && a.owner === vp && solanaVolumeClaimable(vp, a.data) > 0n);
-    };
-    const [holds, owed] = await Promise.all([depositHeld(rpcs, program, sizes, pre, wait), Promise.all([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].map(owesOn)).then((o) => o.filter(Boolean).length)]);
-    // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
-    // sol-w-sweep): every lamport over it goes into this sell's note
-    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     // the smallest note the deposit back makes (the kit's solanaPoolNoteFloor at the rent both RPCs read, card
     // sol-sell-deposit-back-floor): under it, no deposit, the sale's lamports stay on W
@@ -710,6 +933,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     // unsigned: an RPC cannot send what it simulates
     const sims = await both(rpcs, async (r) => ((await r("simulateTransaction", [base64.encode(wire), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: false, commitment: "confirmed" }])) as { value?: { err?: unknown } } | null)?.value);
     if (!sims.every((v) => v !== undefined && v !== null && v.err === null)) return no();
+    // a sign out asked while this sale was built: nothing signs from here (review P3-5 of 77055f4e)
+    if (h.stopped?.()) return no();
     // W, from the seed, right before it signs: it must be the W the bytes were built and checked for
     signing = true;
     const fw = freshWallet(await seed(), "sol", w.l, w.j);
@@ -795,7 +1020,10 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later): Promise<Poo
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
-    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
+    if (!signing && e instanceof SolanaRpcTransportError) {
+      if (throttled(e)) later.throttle = e.afterMs;
+      return { error: "down" };
+    }
     return { error: "failed" };
   } finally {
     for (const x of seeds) x.fill(0);
@@ -844,16 +1072,29 @@ const wrongAccount = (err: unknown, ix: number): boolean => {
 /** The mark a tag 1 deposit on `pre` makes. */
 const markAddress = (program: string, pre: Uint8Array): string => solanaProgramAddress([enc.encode("pre"), pre], program);
 
-/** The lamports the deposit's mark and two pages hold, on both RPCs at one slot each, the same on both (read again
- *  once, POOL_SELL_SIZE_RETRY_MS on: two RPCs a slot apart). */
-async function depositHeld(rpcs: Rpcs, program: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, wait: (ms: number) => Promise<void>): Promise<SolanaDepositHeld> {
-  const keys = [solanaPoolPage(program, 0, sizes.stateSize), solanaPoolPage(program, 1, sizes.labelSize), markAddress(program, pre)];
-  for (let i = 0; ; i++) {
-    const [a, b] = await both(rpcs, (r) => accountsOf(r, keys));
-    const pair = (k: number) => [a[k]?.lamports ?? null, b[k]?.lamports ?? null] as const;
-    const held = { state: pair(0), label: pair(1), mark: pair(2) };
-    if ([held.state, held.label, held.mark].every(([x, y]) => x === y)) return held;
-    if (i > 0) return no();
+/** The pool's two tree sizes and the lamports the deposit's mark and the two pages at those sizes hold, in one
+ *  getMultipleAccounts call on each RPC (one slot each), the same on both (review P2-1 of 77055f4e: sizes read before an
+ *  earlier sale's deposit landed priced pages read after it). Sizes other than the ones asked: read again at them, at
+ *  once; two RPCs that differ: read again once, POOL_SELL_SIZE_RETRY_MS on (two RPCs a slot apart); then failed. */
+async function depositHeld(rpcs: Rpcs, program: string, pool: string, sizes: { stateSize: number; labelSize: number }, pre: Uint8Array, wait: (ms: number) => Promise<void>): Promise<{ held: SolanaDepositHeld; sizes: { stateSize: number; labelSize: number } }> {
+  let at = sizes;
+  for (let moved = 0, split = 0; ; ) {
+    const keys = [pool, solanaPoolPage(program, 0, at.stateSize), solanaPoolPage(program, 1, at.labelSize), markAddress(program, pre)];
+    // the pool's balance is never priced (card pool-answer-unknown F5: past 2^53 it is never parsed)
+    const [a, b] = await both(rpcs, (r) => accountsRaw(r, keys));
+    const [pa, pb] = [a[0], b[0]].map((p) => (p == null ? no("not_allowed") : p.owner !== program ? no() : sizesOf(p.data)));
+    const lam = (x: { lamports: unknown } | null | undefined): bigint | null => (x == null ? null : BigInt(int(x.lamports)));
+    const pair = (k: number) => [lam(a[k]), lam(b[k])] as const;
+    const held = { state: pair(1), label: pair(2), mark: pair(3) };
+    const agree = pa!.stateSize === pb!.stateSize && pa!.labelSize === pb!.labelSize && [held.state, held.label, held.mark].every(([x, y]) => x === y);
+    if (agree && pa!.stateSize === at.stateSize && pa!.labelSize === at.labelSize) return { held, sizes: at };
+    if (agree) {
+      // both RPCs read the trees at other sizes: the pages at those
+      if (moved++ > 0) return no();
+      at = pa!;
+      continue;
+    }
+    if (split++ > 0) return no();
     await wait(POOL_SELL_SIZE_RETRY_MS);
   }
 }
@@ -1129,7 +1370,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       const lamports = a!;
       // W at 0 with a claim still owed is owed, never dropped (review 5 of 38e59182, info)
       if (lamports === 0n) return { end: owed > 0 ? ("owed" as const) : ("nothing" as const), detail: owed > 0 ? `W holds nothing, owed ${owed} cashback claim${owed > 1 ? "s" : ""}` : "W holds nothing" };
-      const sizes = await treeSizes(rpcs, x.program, x.pool, wait);
+      // the gate; the sizes the sweep is priced on are read again with its pages (depositHeld, review P2-1 of 77055f4e)
+      let sizes = await treeSizes(rpcs, x.program, x.pool, wait);
       const s = await seed();
       let found: Awaited<ReturnType<typeof returnNote>>;
       try {
@@ -1140,7 +1382,9 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
       }
       const { ref, precommitment, planned } = found;
       const pre = be32(precommitment);
-      const held = await depositHeld(rpcs, x.program, sizes, pre, wait);
+      const deposit = await depositHeld(rpcs, x.program, x.pool, sizes, pre, wait);
+      const held = deposit.held;
+      sizes = deposit.sizes;
       const value = lamports - SOLANA_POOL_SELL_FEE - solanaDepositRents(rent, sizes, held) - solanaSweepKeep(rent, owed);
       // under the floor: steady (its `seen` kept) only when W stays under it at the cheapest deposit, both pages already
       // open, so a page another deposit opens meanwhile runs the pass again (review 5 of 38e59182, L3)
@@ -1364,28 +1608,56 @@ const sentAnswer = (a: HostAnswer<"pool.sell"> | HostRefusal): boolean => "resul
 
 /** A pool sell's ops record (src/state.ts's op contract: nothing secret), keyed by its request's id: kind "sell", as
  *  the app reads a trade's; `pool` marks it as this kind's, so the settle on load finds it by its transaction. */
-type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number };
+/** A pool sell's ops record: its chain, token and the token amount it asks, whole units at the token's decimals, kept
+ *  from the request so state.ops names them (kit messages.ts OpDetail, card kit-portfolio-reads). */
+type SellOp = { kind: "sell"; pool: "sol"; sha: string; stage: "pending" | TradeStage; txs: TxRef[]; code?: ErrorCode; created_ms: number; chain?: "solana"; token?: string; units?: string; legs?: SellOpLeg[]; short?: true };
+/** One wallet's sale as the record keeps it (card pool-sell-share-across-wallets; never sent to the app: state.ts reads
+ *  only the op contract's keys): W, the units it sells in whole units, its signature once signed, and its stage
+ *  ("pending" until it runs; refused with the code of a refusal before it signed). */
+type SellOpLeg = { wallet: string; units: string; tx: string | null; stage: "pending" | TradeStage; code?: ErrorCode };
+/** The record's stage over its legs (stageOfLegs): a leg still "pending" is one that never ran when `dead`; `short`, a
+ *  share that left a frozen W out (shortOf). */
+const recordStage = (legs: readonly SellOpLeg[], dead: boolean, short = false): TradeStage =>
+  shortOf(stageOfLegs(legs.map((l) => (l.stage === "pending" ? (dead ? { stage: null, error: "failed" as const } : { stage: null }) : { stage: l.stage, ...(l.code === undefined ? {} : { error: "failed" as const }) }))), short);
+
+/** A record its request's run left before its end: "pending" (written before the run), or "signed"/"sent" with a leg
+ *  that never ran or with every leg ended (review P1-1 of 77055f4e: a page closed between two sales, the sent one
+ *  settled live, left a record "sent" that no settle by signature ever ended, and it locked every sell button). */
+const unfinished = (r: Partial<SellOp> | undefined): boolean =>
+  r?.kind === "sell" &&
+  r.pool === "sol" &&
+  (r.stage === "pending" || ((r.stage === "signed" || r.stage === "sent") && Array.isArray(r.legs) && r.legs.length > 0 && (r.legs.some((l) => l.stage === "pending") || r.legs.every((l) => l.stage !== "signed" && l.stage !== "sent"))));
 
 /** What the kind needs beyond a run's host: the wallet store its ops records go in, and the end of the run. */
 export type PoolSellKindHost = PoolSellHost & { ops(): Promise<TradeStore>; end?(): void; storeMs?: number };
 
-/** A dead "pending" record (written under its request's lock before the run, so with that lock free its page closed
- *  before it signed): nothing was sent, so it is refused "failed". */
+/** A dead record (written under its request's lock, so with that lock free its page closed before the run ended):
+ *  "pending", nothing was sent, so it is refused "failed"; "signed" or "sent", each leg that never ran is refused
+ *  "failed" (nothing was sent for it) and the record's stage is its legs' (recordStage): a leg still signed or sent
+ *  keeps it open until that sale settles by its signature (settlePoolSells), every other record ends here. */
 const settleDead = (ops: TradeStore, k: string): Promise<unknown> =>
-  ops.update("ops", k, (v) => ((v as SellOp | undefined)?.stage === "pending" ? { ...(v as SellOp), stage: "refused", code: "failed" } : v));
+  ops.update("ops", k, (v) => {
+    const r = v as SellOp | undefined;
+    if (!unfinished(r)) return v;
+    if (r!.stage === "pending") return { ...r!, stage: "refused", code: "failed" };
+    const legs = r!.legs!.map((l) => (l.stage === "pending" ? { ...l, stage: "refused" as const, code: "failed" as const } : l));
+    const stage = recordStage(legs, true, r!.short === true);
+    return { ...r!, legs, stage: stage === "sent" ? r!.stage : stage };
+  });
 
-/** Pool sell records left "pending" by requests whose page closed before they signed: refused "failed", so their ids
- *  answer that, never id_reused for good. Run once per page load (pool-testnet.ts). It takes no lock, so a re-ask never
- *  meets one it holds. The order is what makes that safe: first the "pending" records, then which request locks are
- *  held (LockManager.query), and only the records read before that query and not held are settled. A live request
- *  takes its lock before it writes "pending", so a record read before the query is either held at the query or dead;
- *  one written after the first read is never touched (the re-review of fd5eec3). A request that takes a dead record's
- *  lock first settles it the same way (poolSellKind). */
+/** Pool sell records their requests' pages left before the run's end (unfinished): "pending" ones refused "failed", so
+ *  their ids answer that, never id_reused for good; "signed" or "sent" ones with a leg that never ran, that leg refused
+ *  and the record at its legs' stage (settleDead). Run once per page load (pool-testnet.ts). It takes no lock, so a
+ *  re-ask never meets one it holds. The order is what makes that safe: first the unfinished records, then which request
+ *  locks are held (LockManager.query), and only the records read before that query and not held are settled. A live
+ *  request takes its lock before it writes "pending" and holds it until its record's end is written, so a record read
+ *  before the query is either held at the query or dead; one written after the first read is never touched (the
+ *  re-review of fd5eec3). A request that takes a dead record's lock first settles it the same way (poolSellKind). */
 export async function settleDeadSellOps(ops: TradeStore, locks: Pick<LockManager, "query">): Promise<void> {
   const pending: string[] = [];
   for (const k of await ops.keys("ops")) {
     const rec = (await ops.get("ops", k)) as Partial<SellOp> | undefined;
-    if (rec?.kind === "sell" && rec.pool === "sol" && rec.stage === "pending") pending.push(k);
+    if (unfinished(rec)) pending.push(k);
   }
   if (pending.length === 0) return;
   const held = new Set(((await locks.query()).held ?? []).map((l) => l.name));
@@ -1393,11 +1665,28 @@ export async function settleDeadSellOps(ops: TradeStore, locks: Pick<LockManager
 }
 
 /** Writes a settled sell's stage to the pool sell record that names its transaction (one a closed page left "signed"
- *  or "sent"); a record already at an end stays. */
-export async function settleSellOps(ops: TradeStore, signature: string, stage: TradeStage): Promise<void> {
+ *  or "sent"); a record already at an end stays. A record of several wallets' sales (card pool-sell-share-across-wallets)
+ *  writes the stage to the leg that names the transaction, and the record's stage over its legs: filled once each leg
+ *  filled, part_filled when some did. Settled at a load (no sell runs then: settlePoolSells holds the sell lock), a leg
+ *  still "pending" never ran: its page closed first, so nothing was sent for it. `liveId`: the running request's id,
+ *  the one record whose legs are still to run (review P3-2 of 77055f4e: a run's settle of another record's sale, an
+ *  older note it settles first, treats that record as dead). */
+export async function settleSellOps(ops: TradeStore, signature: string, stage: TradeStage, liveId?: string): Promise<void> {
   for (const k of await ops.keys("ops")) {
+    const live = k === liveId;
     const rec = (await ops.get("ops", k)) as Partial<SellOp> | undefined;
-    if (rec?.kind !== "sell" || rec.pool !== "sol" || rec.txs?.[0]?.hash !== signature || (rec.stage !== "signed" && rec.stage !== "sent")) continue;
+    if (rec?.kind !== "sell" || rec.pool !== "sol" || (rec.stage !== "signed" && rec.stage !== "sent")) continue;
+    if (Array.isArray(rec.legs) && rec.legs.length > 0) {
+      if (!rec.legs.some((l) => l.tx === signature && (l.stage === "signed" || l.stage === "sent"))) continue;
+      await ops.update("ops", k, (v) => {
+        const r = v as SellOp;
+        if (r.stage !== "signed" && r.stage !== "sent") return undefined;
+        const legs = r.legs!.map((l) => (l.tx === signature && (l.stage === "signed" || l.stage === "sent") ? { ...l, stage } : !live && l.stage === "pending" ? { ...l, stage: "refused" as const, code: "failed" as const } : l));
+        return { ...r, legs, stage: recordStage(legs, !live, r.short === true) };
+      });
+      continue;
+    }
+    if (rec.txs?.[0]?.hash !== signature) continue;
     await ops.update("ops", k, (v) => ({ ...(v as SellOp), stage }));
   }
 }
@@ -1416,9 +1705,10 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
     let answer: HostAnswer<"pool.sell"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
-    // after a full sell filled, the rent back: run once the sell's stage is told and its request's lock is free (an id
-    // seen again is answered from its record, never id_reused), under the seed's shared lock and the sell lock again
-    const later: Later = {};
+    // after a full sale filled, its W's rent back: run once the sell's stage is told and its request's lock is free (an id
+    // seen again is answered from its record, never id_reused), under the seed's shared lock and the sell lock again;
+    // one per leg (card pool-sell-share-across-wallets)
+    const laters: Later[] = [];
     let ran: PoolSellKindHost | null = null;
     const run = locks
       .request(WALLET_SEED_LOCK, { mode: "shared" }, async () => {
@@ -1431,60 +1721,77 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
             // the record first, under the request's own lock and before the wait for the sell lock (a sell before it
             // may hold that lock through its verdict): an id seen before is answered from it, never run again
             let prior = await ops.get("ops", ctx.id);
-            // "pending" under the lock this request now holds: its writer's page closed before it signed (settleDead)
-            if ((prior as Partial<SellOp> | undefined)?.stage === "pending" && (prior as Partial<SellOp>).pool === "sol") {
+            // unfinished under the lock this request now holds: its writer's page closed before the run ended (settleDead)
+            if (unfinished(prior as Partial<SellOp> | undefined)) {
               await settleDead(ops, ctx.id);
               prior = await ops.get("ops", ctx.id);
             }
             if (prior !== undefined) return void (answer ??= fromRecord(prior, ctx.sha) as HostAnswer<"pool.sell"> | HostRefusal);
-            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())) };
+            // a sell by share names its units once the plan has read them (planned, below)
+            const op: SellOp = { kind: "sell", pool: "sol", sha: ctx.sha, stage: "pending", txs: [], created_ms: Number(h.now?.() ?? BigInt(Date.now())), ...(ask.token === null ? {} : { chain: "solana" as const, token: ask.token, ...(ask.shareBps === undefined ? { units: poolUnits(ask.amount, ask.decimals) } : {}) }) };
             await ops.put("ops", ctx.id, { ...op });
             let writes: Promise<void> = Promise.resolve();
-            const snap = () => ({ ...op, txs: op.txs.map((t) => ({ ...t })) });
+            const snap = () => ({ ...op, txs: op.txs.map((t) => ({ ...t })), ...(op.legs ? { legs: op.legs.map((l) => ({ ...l })) } : {}) });
             const write = (patch: Partial<SellOp>): void => {
               Object.assign(op, patch);
               const v = snap();
               writes = writes.then(() => ops.put("ops", ctx.id, v)).catch(() => {});
             };
-            const txs = (signature: string): TxRef[] => [{ chain: "solana", hash: signature }];
+            // every leg's signature so far, in leg order (card pool-sell-share-across-wallets)
+            const legTxs = (): TxRef[] => (op.legs ?? []).flatMap((l) => (l.tx === null ? [] : [{ chain: "solana" as const, hash: l.tx }]));
+            const setLeg = (i: number, patch: Partial<SellOpLeg>): void => {
+              op.legs = (op.legs ?? []).map((l, j) => (j === i ? { ...l, ...patch } : l));
+            };
             await locks.request(POOL_SELL_LOCK, { mode: "exclusive" }, async () => {
-              const a = await sellRuns({
+              const a = await sellAll({
                 ...h,
-                // awaited before the send, and not swallowed: a record that cannot name the signature sends nothing
-                signed: async (signature) => {
-                  await writes;
-                  Object.assign(op, { stage: "signed", txs: txs(signature) });
-                  await ops.put("ops", ctx.id, snap());
-                },
-                // each attempt's send names its own signature: a sell built again (L2) answers with the one it sent last,
-                // never the attempt that failed (review L-B)
-                sent: (signature) => {
-                  write({ stage: "sent", txs: txs(signature) });
-                  if (!answer || sentAnswer(answer)) answer = { result: { stage: "sent", txs: txs(signature) } };
-                  give();
-                },
                 // in order after the record's writes, and not swallowed: the sell's record is let go only once it lands
                 settled: (signature, stage) => {
-                  const w = writes.then(() => settleSellOps(ops, signature, stage));
+                  // this run's own sale: its leg in the record the run writes next too, so no later write of it puts the
+                  // leg back (review P3-1 of 77055f4e)
+                  const i = (op.legs ?? []).findIndex((l) => l.tx === signature && (l.stage === "signed" || l.stage === "sent"));
+                  if (i >= 0) setLeg(i, { stage });
+                  const w = writes.then(() => settleSellOps(ops, signature, stage, ctx.id));
                   writes = w.catch(() => {});
                   return w;
                 },
-              }, ask, later);
+              }, ask, laters, {
+                // the units the plan read and each leg, before any leg runs
+                planned: (plan) => write({ units: poolUnits(plan.units, ask.decimals), legs: plan.legs.map((l) => ({ wallet: l.w.address, units: poolUnits(l.units, ask.decimals), tx: null, stage: "pending" })), ...(plan.frozen && ask.shareBps !== undefined ? { short: true as const } : {}) }),
+                // awaited before the send, and not swallowed: a record that cannot name the signature sends nothing
+                signed: async (i, signature) => {
+                  await writes;
+                  setLeg(i, { tx: signature, stage: "signed" });
+                  Object.assign(op, { stage: op.stage === "pending" ? "signed" : op.stage, txs: legTxs() });
+                  await ops.put("ops", ctx.id, snap());
+                },
+                // each attempt's send names its own signature: a sale built again (L2) answers with the one it sent last,
+                // never the attempt that failed (review L-B)
+                sent: (i, signature) => {
+                  setLeg(i, { tx: signature, stage: "sent" });
+                  write({ stage: "sent", txs: legTxs() });
+                  if (!answer || sentAnswer(answer)) answer = { result: { stage: "sent", txs: legTxs() } };
+                  give();
+                },
+                ended: (i, leg) => setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error } : { tx: leg.tx, stage: leg.stage ?? "refused" }),
+              });
               if ("error" in a) write({ stage: "refused", code: a.error });
               else write({ stage: a.stage, txs: a.txs });
               await writes;
-              if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
+              const result = "error" in a ? null : { stage: a.stage, txs: a.txs };
+              if (!answer) answer = result === null ? { error: (a as { error: PoolSellError }).error } : { result };
               else {
                 // the message api.ts posted at the first send names that attempt (the kit never sends the id again:
                 // after its timeout it asks for state, client.ts REASK_STATE); answer() from here on, like the record
-                // state.ops reads, names the end and the signature that landed
-                if ("stage" in a && sentAnswer(answer)) answer = { result: a };
-                if ("stage" in a) ctx.progress(a.stage);
+                // state.ops reads, names the end and every signature sent
+                if (result !== null && sentAnswer(answer)) answer = { result };
+                if (result !== null) ctx.progress(result.stage);
               }
             });
           });
-          // the rent back takes W's own lock and the sell lock itself, the sell lock only between its sleeps
-          await later.back?.(locks);
+          // each full sale's rent back, one W after another: each takes W's own lock and the sell lock itself, the sell
+          // lock only between its sleeps (two at once would each find the other holding it and give up)
+          for (const later of laters) await later.back?.(locks);
         } finally {
           // the run's end (the page closes its note store): after the rent back, which writes its note there
           ran?.end?.();

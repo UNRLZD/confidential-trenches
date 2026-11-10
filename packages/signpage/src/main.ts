@@ -68,18 +68,19 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type PoolFollowHost } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
-import { POOL_ASSET_DECIMALS } from "../../kit/src/signpage/messages.ts";
+import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
-import { poolPrices } from "./pool-price.ts";
+import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
+import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
@@ -140,12 +141,15 @@ let shell: Shell | null = null;
 // the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
 // flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
 const prover = !framed ? proverHost() : null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
+// the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
+let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
   ? poolRestore({
       store: () => open(),
+      held: () => opened(),
       seed64: () => openSeed64(),
       signedIn: async () => {
         const s = await readSeedSettled();
@@ -195,6 +199,9 @@ else {
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
   const poolDeps = testnetPoolDeps(testnet?.flow);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
+  // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
+  wakeWhenShown(document, prices);
+  pagePrice = (chain) => prices.get(chain);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
   const told = new Set<() => void>();
@@ -212,14 +219,7 @@ else {
   const poolKindMap = poolKinds(poolDeps);
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
-  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => {
-    if (!ONECLICK_USDC_ASSETS.includes(origin)) return null;
-    const p = prices.get(chain);
-    if (p === null) return null;
-    const d = -p.expo, digits = p.price.padStart(d + 1, "0");
-    const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
-    return { decimalsIn: 6, pricing: { in: ["1", "1"], out: [usd, usd] } };
-  };
+  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
   // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor); none on a
   // chain whose reads are not built here yet (Base and Robinhood: no mainnet pool is pinned)
@@ -279,9 +279,11 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
-        prices.refresh((out.pools ?? []).map((p) => p.chain));
-        return out;
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open);
+        prices.refresh((pooled.pools ?? []).map((p) => p.chain));
+        // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
+        // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
+        return withPositions(pooled, s.signed_in && testnet ? await testnet.positions() : null);
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
@@ -644,7 +646,7 @@ const open = async (): Promise<WalletStore> => {
   const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
-      moved += 1;
+      if (walletSeedMoved(e)) moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
       // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
       if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed(), poolFollow?.stop();
@@ -663,6 +665,9 @@ const open = async (): Promise<WalletStore> => {
   return s;
 };
 
+// The store only while one is open: the pool syncs' holds (src/pool-testnet.ts TestnetPage.held), so a round still
+// running after a sign out, here or on another tab, never makes the store again (review of 7eb8cfb9, P2-2).
+const opened = (): Promise<WalletStore> => (store !== null ? Promise.resolve(store) : Promise.reject(new Error("no wallet store is open")));
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
 // here and the seed64 by the signer when the trade ends.
@@ -783,8 +788,11 @@ function settleTrades(ifDue = false): Promise<void> {
 // stored, which may be another tab's (never its words then).
 async function landed(l: Landing): Promise<void> {
   namer.name(l.seed.entropy);
-  // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask
-  void testnet?.settle();
+  // a deposit a reload cut short is finished now (src/pool-testnet.ts), not at the next ask; once the landing's naming
+  // is written (card sol-pools-mainnet-pin, review P3-3): the run holds the seed lock shared across its RPC reads, which
+  // the naming's write waits out, and a deposit.quote waits for the naming (deposit-name.ts named), so a settle started
+  // first held the quote for as long as its reads took (3.28 s with both RPCs answering 503)
+  void namer.named().then(() => testnet?.settle()).catch(() => {});
   // a NEAR deposit followed on from its stage (src/deposit-follow.ts)
   void follows?.settle().catch(() => {});
   // a pool quote's money followed on into its pool from its stage (src/pool-deposit-follow.ts)
@@ -891,6 +899,8 @@ async function signOut(): Promise<void> {
   follows?.signedOut();
   poolFollow?.stop();
   withdrawsSignedOut();
+  // a Solana or EVM pool settle holds the seed lock shared, which the sign out waits for: each stops first
+  testnet?.signingOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;

@@ -2,7 +2,8 @@
 // within the call's bounds and the call lands; a fault that outlasts them rejects as a SolanaRpcTransportError naming
 // it; anything else rejects at once; without `retry` the client is one attempt, as before.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { SOLANA_POOL_QUOTE_MAX_AGE_SLOTS } from "../src/trade/solana/pool-buy.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, type SolanaRpcRetry } from "../src/trade/solana/send.ts";
 
@@ -29,6 +30,28 @@ function provider(faults: Answer[]) {
 }
 
 const FAST: SolanaRpcRetry = { deadlineMs: 1_500, backoffMs: 10 };
+/** Runs the call on mocked time (setTimeout and Date): the event loop is flushed, then the clock moved `step` ms at a
+ * time until the call settles or `maxMs` passes. Returns what it settled to and the mocked ms that took, so a wait is
+ * judged by the time the code asked for, never by how fast this machine ran. */
+async function onMockedTime(t: TestContext, call: () => Promise<unknown>, step: number, maxMs: number) {
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: 1_700_000_000_000 });
+  t.after(() => resetTimers(t.mock.timers));
+  const out: { settled: boolean; value?: unknown; ms: number } = { settled: false, ms: 0 };
+  void call().then(
+    (v) => Object.assign(out, { settled: true, value: v }),
+    (e: unknown) => Object.assign(out, { settled: true, value: e }),
+  );
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  };
+  await flush();
+  while (!out.settled && out.ms < maxMs) {
+    t.mock.timers.tick(step);
+    out.ms += step;
+    await flush();
+  }
+  return out;
+}
 const rpcError = (code: number) => ({ body: JSON.stringify({ jsonrpc: "2.0", id: "$ID", error: { code, message: "too many requests" } }) });
 
 const FORMS: [string, Answer][] = [
@@ -56,43 +79,42 @@ for (const [name, fault] of FORMS) {
   });
 }
 
-test("with retry, a fault that outlasts the deadline rejects as a SolanaRpcTransportError naming the fault, never a bare failure", async () => {
+test("with retry, a fault that outlasts the deadline rejects as a SolanaRpcTransportError naming the fault, never a bare failure", async (t) => {
   const p = provider(Array.from({ length: 1000 }, () => rpcError(-32429)));
-  const t0 = Date.now();
-  const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: FAST })("getSlot", []).catch((x: unknown) => x);
-  assert.ok(e instanceof SolanaRpcTransportError);
+  const { value: e, ms } = await onMockedTime(t, () => solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: FAST })("getSlot", []), 10, 60_000);
+  assert.ok(e instanceof SolanaRpcTransportError, String(e));
   assert.equal(e.fault, "rpc_throttled");
   assert.equal(e.host, "rpc.example");
   assert.ok(e.tries >= 3, `tries ${e.tries}`);
   assert.match(e.message, /RPC error -32429.*rpc_throttled.*rpc\.example/);
-  assert.ok(Date.now() - t0 < FAST.deadlineMs + 100, `took ${Date.now() - t0} ms`);
+  assert.ok(ms <= FAST.deadlineMs, `answered after ${ms} ms of waits, past the ${FAST.deadlineMs} ms deadline`);
 });
 
-test("with retry, Retry-After is honoured: a 429 naming 1 s is tried again only after it", async () => {
+test("with retry, Retry-After is honoured: a 429 naming 1 s is tried again only after it", async (t) => {
   const p = provider([{ status: 429, body: "", headers: { "retry-after": "1" } }]);
-  const t0 = Date.now();
-  assert.equal(await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []), 7);
-  assert.ok(Date.now() - t0 >= 990, `took ${Date.now() - t0} ms`);
+  const got = await onMockedTime(t, () => solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []), 1, 5_000);
+  assert.equal(got.value, 7);
+  assert.equal(got.ms, 1_000, `tried again after ${got.ms} ms`);
 });
 
-test("with retry, a Retry-After that ends past the deadline is not waited: the call answers at once, the 429 named", async () => {
+test("with retry, a Retry-After that ends past the deadline is not waited: the call answers at once, the 429 named", async (t) => {
   const p = provider([{ status: 429, body: "", headers: { "retry-after": "30" } }]);
-  const t0 = Date.now();
-  const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []).catch((x: unknown) => x);
-  assert.ok(e instanceof SolanaRpcTransportError);
+  const { value: e, ms } = await onMockedTime(t, () => solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []), 100, 60_000);
+  assert.ok(e instanceof SolanaRpcTransportError, String(e));
   assert.equal(e.fault, "http_429");
   assert.equal(e.afterMs, 30_000, "the provider's Retry-After goes with the fault, for the caller's next ask");
   assert.equal(p.tries(), 1);
-  assert.ok(Date.now() - t0 < 200, `took ${Date.now() - t0} ms`);
+  assert.equal(ms, 0, `answered after ${ms} ms of waits`);
 });
 
 test("with retry, a stall forever stops at the deadline, named a timeout", async () => {
   const p = provider(Array.from({ length: 1000 }, () => ({ stall: true })));
-  const t0 = Date.now();
   const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: FAST })("getSlot", []).catch((x: unknown) => x);
   assert.ok(e instanceof SolanaRpcTransportError);
   assert.equal(e.fault, "timeout");
-  assert.ok(Date.now() - t0 < FAST.deadlineMs + 150, `took ${Date.now() - t0} ms`);
+  // the try's own limit is what the deadline left, never the call's SOLANA_CALL_TIMEOUT_MS: the fault names it
+  const limit = Number(/no answer in (\d+) ms/.exec(e.message)?.[1]);
+  assert.ok(limit > 0 && limit <= FAST.deadlineMs, e.message);
 });
 
 test("the quote's age: the page's retry stops two calls (the venue, then the blockhash and its slot) inside 25 slots", () => {
@@ -102,12 +124,10 @@ test("the quote's age: the page's retry stops two calls (the venue, then the blo
   assert.ok(2 * SOLANA_RPC_RETRY.deadlineMs < SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 360);
 });
 
-test("with retry, a forever-throttled read ends inside the quote's window, measured", async () => {
+test("with retry, a forever-throttled read ends inside the quote's window, measured on mocked time", async (t) => {
   const p = provider(Array.from({ length: 1000 }, () => ({ status: 429, body: "", headers: { "retry-after": "1" } })));
-  const t0 = Date.now();
-  const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getLatestBlockhash", []).catch((x: unknown) => x);
-  const took = Date.now() - t0;
-  assert.ok(e instanceof SolanaRpcTransportError);
+  const { value: e, ms: took } = await onMockedTime(t, () => solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getLatestBlockhash", []), 10, 60_000);
+  assert.ok(e instanceof SolanaRpcTransportError, String(e));
   assert.ok(took <= SOLANA_RPC_RETRY.deadlineMs, `took ${took} ms`);
   assert.ok(2 * took < SOLANA_POOL_QUOTE_MAX_AGE_SLOTS * 360);
 });
@@ -182,4 +202,20 @@ test("with retry, Retry-After 0 is never a burst: the backoff is its floor (at m
   const e = await solanaJsonRpc("https://rpc.example", { fetch: p.fetch, retry: SOLANA_RPC_RETRY })("getSlot", []).catch((x: unknown) => x);
   assert.ok(e instanceof SolanaRpcTransportError);
   assert.ok(p.tries() <= 5, `${p.tries()} requests`);
+});
+
+test("review of 39a4c67a, P3-4: an RPC error keeps its data's words after its message, so a range cap named there is read (Tenderly's, recorded)", async () => {
+  // base.gateway.tenderly.co, eth_getLogs over 2,001 blocks, 2026-11-09 19:43Z
+  const DATA = "Block range too large: maximum 1000 blocks without an access key. Try [0x33cf5a7, 0x33cf98f], or use an access key for larger ranges.";
+  const tenderly = { body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { code: -32602, message: "invalid params", data: DATA } }) };
+  for (const retry of [undefined, FAST]) {
+    const e = await solanaJsonRpc("https://rpc.example", { fetch: provider([tenderly]).fetch, ...(retry ? { retry } : {}) })("eth_getLogs", []).catch((x: unknown) => x);
+    assert.ok(e instanceof Error);
+    assert.equal(e.message, `RPC error -32602: invalid params: ${DATA}`);
+  }
+  // the same in a refusal's body after its status; data that is not text adds nothing
+  const as400 = { status: 400, body: tenderly.body.replace('"$ID"', "1") };
+  assert.equal(((await solanaJsonRpc("https://rpc.example", { fetch: provider([as400]).fetch })("eth_getLogs", []).catch((x: unknown) => x)) as Error).message, `HTTP 400: RPC error -32602: invalid params: ${DATA}`);
+  const objData = { body: JSON.stringify({ id: "$ID", jsonrpc: "2.0", error: { code: -32602, message: "invalid params", data: { x: 1 } } }) };
+  assert.equal(((await solanaJsonRpc("https://rpc.example", { fetch: provider([objData]).fetch })("eth_getLogs", []).catch((x: unknown) => x)) as Error).message, "RPC error -32602: invalid params");
 });

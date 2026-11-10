@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
 import { providerHolds, type ProviderHolds } from "../limits/limits.ts";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
-import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_EVM_ENV, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
+import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmReadPair, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_EVM_ENV, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -292,6 +292,51 @@ test("upstream: two providers on different chains, or holding different blocks; 
   const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [rpc([]), rpc(b, {}, other)], () => NOW);
   assert.equal(code(await t.carry(req())), "upstream");
   assert.equal(sends(b).length, 0);
+});
+
+// review of 686dda50: a send both sides answer "already known" (a first seat timed out after passing it on, or a
+// repeat of a send the node holds) is the send accepted: the caller gets 200 and the transaction's hash, and the lane
+// watches it as any send
+test("a withdraw whose send every provider answers 'already known' is sent: 200 with its hash", async () => {
+  const known = (r: EvmRpc): EvmRpc => async (m, p) => {
+    if (m === "eth_sendRawTransaction") {
+      await r(m, p);
+      throw new Error("RPC error -32000: already known");
+    }
+    return r(m, p);
+  };
+  const a: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log: () => {} }, [known(rpc(a)), known(rpc([]))], () => NOW);
+  const r = await s.carry(req());
+  assert.equal(code(r), "ok");
+  assert.equal(sends(a).length, 1);
+  assert.match(String((r.body as { hash?: string }).hash), /^0x[0-9a-f]{64}$/);
+});
+
+// card helper-pool-fee-one-read-fails, helper-evm-read-two-operators: the send routes read through the same pair as the
+// fee (evmReadPair), so a read one operator fails is asked of the next operator the other side did not ask; with none
+// left the answer is 503 upstream and one log line names it
+test("a withdraw whose read one operator fails is read on another operator and sent; with none left, 503 upstream and one log line naming the read, the host and its answer", async () => {
+  const lines: string[] = [];
+  const log = (l: string) => void lines.push(l);
+  const down = (r: EvmRpc): EvmRpc => async (m, p) => {
+    if (m === "eth_getTransactionCount") throw new Error("HTTP 502");
+    return r(m, p);
+  };
+  const seat = (r: EvmRpc, i: number) => ({ name: `p${i}.example`, url: `https://p${i}.example`, operator: `p${i}.example`, rpc: r });
+  const pairOf = (rs: EvmRpc[]) => evmReadPair(rs.map(seat), ["p0.example", "p1.example"], { log });
+  const b: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log, readyProviders: [rpc([]), rpc([])] }, pairOf([down(rpc([])), rpc(b), rpc([])]), () => NOW);
+  assert.equal(code(await s.carry(req())), "ok");
+  assert.equal(sends(b).length, 1);
+  assert.deepEqual(lines, ["eth_getTransactionCount failed at p0.example: HTTP 502; p2.example answered", "eth_getTransactionCount failed at p0.example: HTTP 502; p2.example answered"]);
+  lines.length = 0;
+  const b2: Calls = [];
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log, readyProviders: [rpc([]), rpc([])] }, pairOf([down(rpc([])), rpc(b2)]), () => NOW);
+  assert.equal(code(await t.carry(req())), "upstream");
+  assert.equal(sends(b2).length, 0);
+  assert.equal(lines.length, 1, lines.join("\n"));
+  assert.match(lines[0]!, /^evm base-sepolia: upstream: HTTP 502 \(eth_getTransactionCount: p0\.example: HTTP 502\)$/);
 });
 
 test("one send per nullifier: a repeat in flight or landed, even as other bytes, gets the first hash and sends nothing", async () => {

@@ -41,3 +41,14 @@ description = "Circle's native USDC account id on NEAR mainnet, a public value"
 targetRules = ["generic-api-key"]
 regexTarget = "secret"
 regexes = ['''^17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1$''']
+
+# A devnet pool page address frozen in the devnet PumpSwap lookup table J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU
+# (contracts/pool-solana/deployments/devnet.json, the label tree's page 38 of program 9Z6Yi2Vc…, the kit's
+# solanaPoolPage): a public base58 address that starts with EAAA, which the default square-access-token rule reads as a
+# Square token. The table is frozen, so the address cannot change. Only that exact value passes, and only for that rule;
+# another EAAA value, or this one with a character more, is still found (scripts/ci/gitleaks-config.test.mjs).
+[[allowlists]]
+description = "a devnet pool page address frozen in a lookup table, a public value"
+targetRules = ["square-access-token"]
+regexTarget = "secret"
+regexes = ['''^EAAAWNtz9NocNuxbT6PsZE7E3jRveSuVFDFuLDULZVGk$''']

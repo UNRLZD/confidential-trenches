@@ -11,7 +11,7 @@
 // and whether the helper answers, as the error state, only after 60 s with no 200 (afterFail). Each chain's answer is
 // held by the same rule on its own (allListsReader): one chain's failed read keeps its last good lists for 60 s and
 // never empties the others.
-// The token page's rail and / still read Solana's lists alone (readLists, rail.ts): they move with their own live checks.
+// The token page's rail and / read the same lists on the same filter (card app-chains-evm-rail: token/rail.ts, source.ts).
 import { HELPER_FETCH_INIT } from "@blindfill/kit";
 import { useCallback, useEffect, useState } from "react";
 import type { DiscoverData } from "./Discover.tsx";
@@ -47,9 +47,6 @@ export async function readChainLists(chain: ListChain, fetchFn: typeof fetch = f
   if (!lists.new || !lists.trending) throw new Error("lists: new or trending missing");
   return { chain, as_of_ms: body.as_of_ms, lists: lists as unknown as MarketSnapshot["lists"] };
 }
-
-/** One read of Solana's lists (the token page's rail and /). */
-export const readLists = (fetchFn: typeof fetch = fetch): Promise<MarketSnapshot> => readChainLists("solana", fetchFn);
 
 /** Each chain's own read time (as_of_ms) in a merged snapshot, so one chain's view dates its lists by its own read. */
 const AS_OF = new WeakMap<MarketSnapshot, Partial<Record<MarketChain, number>>>();
@@ -107,7 +104,7 @@ export function allListsReader(deps: { now?: () => number; chains?: readonly Lis
   };
 }
 
-/** The app's one reader of every chain's lists (Discover and the search). */
+/** The app's one reader of every chain's lists (Discover, the search, the token page's rail and /). */
 export const readAllLists = allListsReader();
 
 let inflight: { fetchFn: typeof fetch; p: Promise<MarketSnapshot> } | null = null;

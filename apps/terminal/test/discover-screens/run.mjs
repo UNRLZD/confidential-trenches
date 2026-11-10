@@ -11,7 +11,10 @@
 // The toolbar (card app-discover-toolbar): each preset, the MC chip, a launchpad pick and the column search leave each
 // column (each tab at 390) with exactly the rows view.ts keeps on the same fixture; Clear and Escape undo them; the Quick
 // buy amount is kept across a reload and a bad one is flagged; Pause holds the phone's list through a reorder and counts
-// the new tokens, and Resume draws them.
+// the new tokens, and Resume draws them. The column filter panel (card app-discover-filter-panel): the funnel opens it
+// under the column head at 1440 and as a sheet at 390, in R5's sections and order; a launchpad pick and a Min leave the
+// column with exactly the rows filters.ts keeps, its head count and the panel's foot agree, a filter nothing passes
+// draws S5.13, the filters outlive Escape, a tab switch and a reload, and Reset undoes them.
 //   node apps/terminal/test/discover-screens/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
@@ -19,10 +22,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { READ, rowFaults } from "../../../../scripts/live-checks/app-launchpad-badges.mjs";
-import { edgy, solana } from "./snapshots.ts";
+import { edgy, NOW_MS, solana } from "./snapshots.ts";
 import { COLUMNS, columnRows } from "../../src/screens/discover/model.ts";
 import { padEntries, VIEW0, viewRows } from "../../src/screens/discover/view.ts";
+import { filterRows, panelPads } from "../../src/screens/discover/filters.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -259,11 +264,108 @@ async function toolbarCheck(browser, w) {
   await ctx.close();
 }
 
+/** The rows a column keeps under the panel alone (filters.ts on the same snapshot and clock as page.tsx). */
+const wantF = (col, f) => filterRows(viewRows(columnRows(solana, col), VIEW0), { pads: [], ranges: {}, ...f }, NOW_MS).map((r) => r.token);
+const SECS = (col) => ["Launchpad", ...(col === "graduating" ? ["Curve"] : []), "Metrics", "Audit"].map((x) => x.toUpperCase());
+const LABELS = (col) => [...(col === "graduating" ? ["Curve progress"] : []), "Age", "MC", "Liquidity", "Volume 5m", "Volume 1h", "Txns 5m", "Buys 5m", "Sells 5m", "Holders", "Top 10 %", "Dev %"];
+
+async function filterCheck(browser, w) {
+  const { ctx, page, external } = await openAt(browser, w, "dark", "rows");
+  const phone = w.name === "390";
+  const at = `@${w.name} filters`;
+  const shot = async (name) => SHOTS && (await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}.png`) }));
+  const col = phone ? "graduating" : "trending";
+  const P = '[data-testid="discover-filters"]';
+  const rowsNow = () => page.$$eval(phone ? '.dsc-phone [role="listitem"]' : `.dsc-col[data-col="${col}"] [role="listitem"]`, (els) => els.map((e) => e.dataset.token));
+  const countNow = () => page.locator(phone ? `.dsc-tab[data-tab="${col}"] .dsc-count` : `.dsc-col[data-col="${col}"] .dsc-head .dsc-count`).textContent();
+  const open = () => page.locator(phone ? '[data-testid="m-filter-open"]' : `[data-testid="col-filter-${col}"]`).click();
+  if (phone) await page.locator(`.dsc-tab[data-tab="${col}"]`).click();
+  await open();
+  check((await page.locator(P).count()) === 1, `${at}: the funnel opened no panel`);
+  check((await page.locator(P).getAttribute("data-col")) === col, `${at}: the panel is not ${col}'s`);
+  if (!phone) check((await page.locator(`.dsc-col[data-col="${col}"] ${P}`).count()) === 1, `${at}: the panel does not hang in its column`);
+  else check((await page.locator(".dsc-fscrim").count()) === 1 && (await page.locator(`${P}.ph`).count()) === 1, `${at}: no sheet over a scrim`);
+  const secs = await page.$$eval(`${P} .dsc-fst`, (els) => els.map((e) => getComputedStyle(e).textTransform === "uppercase" ? e.textContent.toUpperCase() : e.textContent));
+  check(JSON.stringify(secs) === JSON.stringify(SECS(col)), `${at}: sections ${JSON.stringify(secs)}`);
+  const labels = await page.$$eval(`${P} .dsc-fk`, (els) => els.map((e) => e.textContent));
+  check(JSON.stringify(labels) === JSON.stringify(LABELS(col)), `${at}: controls ${JSON.stringify(labels)}`);
+  const head = (await page.locator(`${P} .dsc-fhd`).textContent()).trim();
+  check(head === `Filters${col[0].toUpperCase()}${col.slice(1)}`, `${at}: head "${head}"`);
+  const pads = panelPads(solana, col);
+  const drawnPads = await page.$$eval(`${P} [data-pad]`, (els) => els.map((e) => [e.dataset.pad, e.querySelector(".dsc-padcount").textContent]));
+  check(JSON.stringify(drawnPads) === JSON.stringify(pads.flatMap((g) => g.entries.map((e) => [e.key, String(e.count)]))), `${at}: launchpads ${JSON.stringify(drawnPads)}`);
+  const scroll = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  check(scroll <= 0, `${at}: the open panel scrolls ${scroll}px`);
+  const foot = async () => (await page.locator('[data-testid="filters-count"]').textContent()).trim();
+  check((await foot()) === `${wantF(col, {}).length} tokens`, `${at}: unset foot "${await foot()}"`);
+  await shot("filters-open");
+  // a launchpad and a Min (R5 S5.12: a pick and a bound), each applied as it is made
+  const pick = pads[0].entries.find((e) => e.count > 0).key;
+  await page.locator(`${P} [data-pad="${pick}"]`).click();
+  check(JSON.stringify(await rowsNow()) === JSON.stringify(wantF(col, { pads: [pick] })), `${at}: ${pick} drew ${(await rowsNow()).length}, want ${wantF(col, { pads: [pick] }).length}`);
+  const ctl = phone ? "curve" : "mc", typed = phone ? "25" : "10k", bound = phone ? 25 : 10_000;
+  await page.locator(`[data-testid="filter-${ctl}-min"]`).fill(typed);
+  const f12 = { pads: [pick], ranges: { [ctl]: { min: bound } } };
+  const exp = wantF(col, f12);
+  check(JSON.stringify(await rowsNow()) === JSON.stringify(exp) && exp.length > 0, `${at}: ${ctl} Min ${typed} drew ${(await rowsNow()).length}, want ${exp.length}`);
+  check((await countNow()) === String(exp.length) && (await foot()) === `${exp.length} ${exp.length === 1 ? "token" : "tokens"}`, `${at}: count ${await countNow()}, foot "${await foot()}", want ${exp.length}`);
+  await page.locator(`${P} .dsc-fhd`).click();
+  const shown = await page.locator(`[data-testid="filter-${ctl}-min"]`).inputValue();
+  check(shown === (phone ? "25%" : "$10K"), `${at}: the set box reads "${shown}"`);
+  await page.locator('[data-testid="filter-age-max"]').fill("abc");
+  check((await page.locator('[data-testid="filter-age-max"]').getAttribute("aria-invalid")) === "true" && JSON.stringify(await rowsNow()) === JSON.stringify(exp), `${at}: a bad bound is not flagged or changed the rows`);
+  await page.locator('[data-testid="filter-age-max"]').fill("");
+  await page.locator(`${P} .dsc-fhd`).click();
+  await shot("filters-S5.12");
+  // closing keeps the filters; the funnel shows the dot
+  if (phone) await page.mouse.click(195, 60);
+  else await page.keyboard.press("Escape");
+  check((await page.locator(P).count()) === 0, `${at}: the panel did not close`);
+  check((await page.locator(phone ? '[data-testid="m-filter-open"] .dsc-hbdot' : `[data-testid="col-filter-${col}"] .dsc-hbdot`).count()) === 1, `${at}: no dot on a narrowed column's funnel`);
+  check(JSON.stringify(await rowsNow()) === JSON.stringify(exp), `${at}: closing changed the rows`);
+  await shot("filters-on");
+  // the other columns are their own
+  if (!phone) for (const c of COLUMNS.filter((x) => x.key !== col)) check((await page.locator(`.dsc-col[data-col="${c.key}"] [role="listitem"]`).count()) === wantF(c.key, {}).length, `${at}: ${c.key} narrowed by ${col}'s filters`);
+  // a tab switch and a reload keep them
+  if (phone) {
+    await page.locator('.dsc-tab[data-tab="new"]').click();
+    check((await page.locator('.dsc-phone [role="listitem"]').count()) === wantF("new", {}).length, `${at}: New narrowed by Graduating's filters`);
+    await page.locator(`.dsc-tab[data-tab="${col}"]`).click();
+    check(JSON.stringify(await rowsNow()) === JSON.stringify(exp), `${at}: a tab switch lost the filters`);
+  }
+  await page.reload();
+  await page.waitForSelector(".dsc");
+  if (phone) await page.locator(`.dsc-tab[data-tab="${col}"]`).click();
+  check(JSON.stringify(await rowsNow()) === JSON.stringify(exp), `${at}: a reload lost the filters`);
+  // a filter nothing passes: S5.13 in the column, No results in the foot
+  await open();
+  await page.locator(`[data-testid="filter-${ctl}-min"]`).fill(phone ? "99.99" : "999b");
+  check((await page.locator(phone ? '.dsc-phone [data-state="S5.13"]' : `.dsc-col[data-col="${col}"] [data-state="S5.13"]`).count()) === 1, `${at}: nothing passing is not S5.13`);
+  check((await foot()) === "No results", `${at}: foot "${await foot()}" with nothing left`);
+  await page.locator(`${P} .dsc-fhd`).click();
+  const big = await page.locator(`[data-testid="filter-${ctl}-min"]`).inputValue();
+  check(big === (phone ? "99.99%" : "$999B"), `${at}: a set box typed over reads "${big}"`);
+  await shot("filters-S5.13");
+  await page.locator('[data-testid="filters-reset"]').click();
+  check(JSON.stringify(await rowsNow()) === JSON.stringify(wantF(col, {})), `${at}: Reset left ${(await rowsNow()).length} rows`);
+  check((await page.locator(phone ? '[data-testid="m-filter-open"] .dsc-hbdot' : `[data-testid="col-filter-${col}"] .dsc-hbdot`).count()) === 0, `${at}: the dot outlived Reset`);
+  if (!phone) {
+    // Graduating's panel has the Curve section
+    await page.locator('[data-testid="col-filter-graduating"]').click();
+    check((await page.locator(`${P}[data-col="graduating"] [data-sec="curve"]`).count()) === 1 && (await page.locator(P).count()) === 1, `${at}: the funnel did not move the panel to Graduating with its Curve`);
+    await shot("filters-graduating");
+    await page.locator('[data-testid="filters-close"]').click();
+    check((await page.locator(P).count()) === 0, `${at}: Close left the panel open`);
+  }
+  check(external.length === 0, `${at}: requests off the page: ${external.join(" ")}`);
+  await ctx.close();
+}
+
 let BASE = "";
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const w of WIDTHS) {
@@ -327,6 +429,8 @@ try {
     for (const tab of w.name === "390" ? ["new", "trending", "hot", "graduating"] : [null]) await reorderCheck(browser, w, tab);
     // behaviour: the toolbar (card app-discover-toolbar)
     await toolbarCheck(browser, w);
+    // behaviour: the column filter panel (card app-discover-filter-panel)
+    await filterCheck(browser, w);
     // behaviour: the phone tabs hold one list at a time, each its column's rows
     if (w.name === "390") {
       const { ctx, page } = await openAt(browser, w, "dark", "rows");

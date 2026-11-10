@@ -15,6 +15,7 @@ import { type EvmPoolBuyQuote } from "../../checks/evm/quote.ts";
 import { evmIsQuotedBuy, evmQuotedBuy } from "./quoted.ts";
 
 export {
+  EVM_POOL_HISTORY,
   EVM_POOL_MAX_HOOK_DATA,
   EVM_POOL_MAX_HOPS,
   EvmPoolBuyError,

@@ -434,3 +434,21 @@ test("pool-deposit-op-txs: the page's follower adds a refund move's tx to the op
   await op.record({ ...MOVE, txs: [{ ...heard(HASH), final: true }] } as never);
   assert.deepEqual((rows.get("op-1") as { txs: unknown[] }).txs, [{ chain: "near", hash: HASH }], "final: shown, once");
 });
+
+test("card pool-usd-price-never-stale, review P1: the refund quote is checked at the price as it is at the check: none by then (past its bound while the floor and the quote were read) holds the money, nothing signed; a newer one is the one checked", async () => {
+  const at = (later: { decimalsIn: number; pricing: typeof PRICING | { in: readonly [string, string]; out: readonly [string, string] } } | null) => {
+    const w = world({ read: readOf(25_000_000n) });
+    w.host.priced = () => (w.asked.length === 0 ? { decimalsIn: 6, pricing: PRICING } : later) as never;
+    return w;
+  };
+  const gone = at(null);
+  assert.equal(await poolRefundMover(gone.host)(F, signal), "held");
+  assert.deepEqual(gone.log, ["quote"], "past its bound at the check: nothing signed, recorded or sent");
+  // SOL 2% cheaper by the check: the floor in SOL is 2% higher, and the answer on the old price's floor is short of it
+  const cheaper = at({ decimalsIn: 6, pricing: { in: ["1", "1"], out: ["147", "147.1"] } });
+  assert.equal(await poolRefundMover(cheaper.host)(F, signal), "held");
+  assert.deepEqual(cheaper.log, ["quote"]);
+  // the same price at the check: moved, as before
+  const same = at({ decimalsIn: 6, pricing: PRICING });
+  assert.equal(await poolRefundMover(same.host)(F, signal), "moved");
+});

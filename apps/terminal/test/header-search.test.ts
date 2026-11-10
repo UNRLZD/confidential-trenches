@@ -1,7 +1,7 @@
 // The top bar's search model (card app-header-search-chain, src/shell/search.ts): the rows it searches (every list of
 // the lists read, one row a token), the matching rules (symbol, then name, then an address), the chain filter (All, plus
 // the chains with data) and the address forms that send a pasted id to the token read (source.ts loadToken), plus the
-// lists it searches: the rail's store when it is fresh, else one shared read (rail.ts sharedLists), never a poll.
+// lists it searches: the rail's store when it is fresh, else one shared read (data.ts sharedAllLists), never a poll.
 // test/discover-data/helper-lists-2026-11-01.json is a recorded answer of GET /v1/market/lists?chain=solana.
 import assert from "node:assert/strict";
 import { test } from "node:test";

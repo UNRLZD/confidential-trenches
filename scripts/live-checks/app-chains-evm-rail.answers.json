@@ -1,0 +1,94 @@
+{
+ "good": {
+  "note": "this card's tree on card/app-chains-evm-rail (base 7b5770f3 plus this card's change, uncommitted at record time): apps/terminal built fresh (vite build) and served at APP_HOST under its _headers inside the stand-in shell (app-in-shell.mjs harnessRoute, signed), HELPER_HOST answered live",
+  "source": "harness: the build dist-green at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-09T19:42:40.563Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "chain": "base",
+    "lists": 200,
+    "opened": true,
+    "state": "ready",
+    "all": {
+     "solana": 99,
+     "base": 19,
+     "robinhood": 16
+    },
+    "picked": {
+     "base": 19
+    },
+    "listed": true,
+    "marked": true,
+    "shots": [
+     "base-all.png",
+     "base-base.png"
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "lists": 200,
+    "opened": true,
+    "state": "ready",
+    "all": {
+     "solana": 99,
+     "base": 19,
+     "robinhood": 16
+    },
+    "picked": {
+     "robinhood": 16
+    },
+    "listed": true,
+    "marked": true,
+    "shots": [
+     "robinhood-all.png",
+     "robinhood-robinhood.png"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "note": "the build of card/app-chains-evm at 7b5770f3 (the rail reads Solana's lists alone), served the same way, HELPER_HOST answered live",
+  "source": "harness: the build dist-red at APP_HOST's name in the stand-in shell, HELPER_HOST live",
+  "at": "2026-11-09T19:42:58.356Z",
+  "browser": "157.0.8103.38",
+  "loads": [
+   {
+    "chain": "base",
+    "lists": 200,
+    "opened": true,
+    "state": "ready",
+    "all": {
+     "solana": 99
+    },
+    "picked": {
+     "solana": 99
+    },
+    "listed": false,
+    "marked": false,
+    "shots": [
+     "base-all.png",
+     "base-base.png"
+    ]
+   },
+   {
+    "chain": "robinhood",
+    "lists": 200,
+    "opened": true,
+    "state": "ready",
+    "all": {
+     "solana": 99
+    },
+    "picked": {
+     "solana": 99
+    },
+    "listed": false,
+    "marked": false,
+    "shots": [
+     "robinhood-all.png",
+     "robinhood-robinhood.png"
+    ]
+   }
+  ]
+ }
+}

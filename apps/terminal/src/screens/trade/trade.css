@@ -27,6 +27,7 @@
 .trb-unit > span:first-child { font-size: 14px; font-weight: 600; }
 .trb-unit > span:last-child { font-size: 11px; color: var(--text-3); }
 .trb-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.trb-presets[data-one] { grid-template-columns: minmax(0, 1fr); }
 .trb .trb-preset { height: 40px; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 10px; font: 500 14px var(--font-num); font-variant-numeric: tabular-nums; background: var(--bg-raised); color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .trb .trb-preset svg { color: var(--acc); flex: none; }
 .trb .trb-preset[data-on] { background: rgba(var(--acc-rgb), 0.14); color: var(--acc); }
@@ -75,15 +76,11 @@
 .trb-end { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
 .trb-end[data-end="failed"], .trb-end[data-end="notLanded"] { color: var(--sell); }
 
-/* The exit plan block (R5 unrlzd.css .tk-block, .tk-blockHead, .tk-toggle): drawn off; its own card turns it on. */
+/* The exit plan block (R5 unrlzd.css .tk-block, .tk-blockHead): `Coming soon` where R5's switch is (.trb-soonTag below). */
 .trb-exit { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 10px; background: var(--bg-page); }
 .trb-exitText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .trb-exitText > span:first-child { font-weight: 600; }
 .trb-exitText > span:last-child { font-size: 11px; color: var(--text-3); }
-.trb .trb-toggle { position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: var(--border-strong); }
-.trb .trb-toggle::after { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); }
-/* BAR-10: the tap box is at least 44 x 44, the switch stays as drawn */
-.trb .trb-toggle::before { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 
 /* The safety grid (R5 unrlzd.css .rg-*): 4 columns x 3 rows, no tiles, no borders. The first column starts at the left
    edge, the middle two are centred, the last ends at the right edge; every cell is one fixed size, so nothing moves when
@@ -171,3 +168,8 @@
 .tsh-grab { position: sticky; top: 0; z-index: 2; display: flex; justify-content: center; align-items: center; width: 100%; height: 44px; padding: 0; border: 0; background: var(--m-ink-panel); cursor: pointer; }
 .tsh-grab i { display: block; width: 38px; height: 4px; border-radius: 2px; background: var(--border-active); }
 .tsh-box .trb { border: 0; border-radius: 0; background: transparent; padding: 4px 16px 12px; }
+
+/* An orders tab not built yet (card app-orders-coming-soon): the app's empty-state style (the lower panel's .tkl-empty),
+   in the box's place under the tabs; and the exit plan block's label where its switch was. */
+.trb-soon { min-height: 200px; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 13px; }
+.trb-soonTag { flex: none; font-size: 12px; color: var(--text-3); }

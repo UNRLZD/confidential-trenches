@@ -61,6 +61,7 @@ export const WORDS = {
   notLanded: draft("Not landed", "09-design-brief S8.36 [draft copy: Not landed]; S8.24's `· refunded` left out: no refund step, the money never left W (app.md CH-050)"),
   priceCheck: draft("Price check failed", "09-design-brief S8.20 [draft copy: Price check failed]; the kit's quote_check_failed"),
   notSent: draft("Not sent", "09-design-brief S8.28 [draft copy: Not sent]; the kit's signpage_down (never posted)"),
+  unavailable: ok("Unavailable", "owner 10 Nov 18:12Z (owner-decisions: Mainnet run tonight and three labels); a Solana pool buy refused venue_not_pinned or no_table_fits: Buy off"),
   filledOf: draft("filled", "app.md CH-045 (the filled part shown), after 09-design-brief S8.35 [draft copy: 2/3 sold]: `2/3 filled`"),
   soldOf: draft("sold", "09-design-brief S8.35 [draft copy: 2/3 sold]"),
   partFilled: draft("Part filled", "app.md CH-045 (set partly filled); drawn when the kit gives no count"),
@@ -76,6 +77,8 @@ export const WORDS = {
   newWallet: draft("New one-time wallet", "buy-route-strip-spec.md Words on screen; design-lock-r5 P.pvTrade PV-02"),
   poolSuffix: ok("pool", "owner 8 Nov 07:55Z, kept; drafted from buy-route-strip-spec.md Words on screen: `<Venue> pool` (PV-03, the venue's name + ` pool`)"),
   final: draft("Final", "buy-route-strip-spec.md Words on screen: the tag beside Filled (S8.12)"),
+  // every orders place (the Limit and TP/SL tabs, the exit plan): orders are out of the plan for now
+  soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
   poolBare: ok("Pool", "owner 8 Nov 07:55Z, kept; drafted on card app-buy-route-strip: the pool step's label before an event names the venue (words-pending)"),
 } as const satisfies Record<string, Word>;
 

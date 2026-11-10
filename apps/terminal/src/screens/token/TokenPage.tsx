@@ -9,12 +9,13 @@ import { Avatar } from "../market/Avatar.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
+import { usePick } from "../../shell/chain-pick.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeView, useTrade } from "../trade/TradeBox.tsx";
 import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
-import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
+import { centsToDecimal, fmtUsd } from "../trade/model.ts";
 import { CHART_TFS, DEFAULT_TF, followFrom, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
@@ -168,20 +169,29 @@ const TF_LEGEND: Record<ChartTf, string> = { "1s": "1s", "1m": "1", "5m": "5", "
 /** The chart's candle read, one per page (the desktop and the phone draw the same): `token` null while the token read
  *  is still loading. A new token or timeframe reads again from loading; `retry` reads the same again. Every chart the
  *  helper holds is then followed live (candles.ts followFrom, cards app-chart-live and app-chart-live-stall) until the
- *  page, the token or the timeframe changes. */
-function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf): { data: CandleData; retry: () => void } {
+ *  page, the token or the timeframe changes. Each new tape (`trades`, pushed by the helper's socket: card
+ *  market-data-push) wakes the follow, which reads the newest bars at once, so the last bar moves with the tape. */
+function useCandles(chain: MarketChain | null, token: string | null, tf: ChartTf, trades: readonly TapeTrade[]): { data: CandleData; retry: () => void } {
   const [data, setData] = useState<CandleData>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const wakeRef = useRef<(() => void) | null>(null);
+  useEffect(() => wakeRef.current?.(), [trades]);
   useEffect(() => {
     if (chain === null || token === null) return;
     const [ch, id] = [chain, token];
     let live = true;
     let stop = () => {};
     setData({ status: "loading" });
+    const wake = (fn: () => void) => {
+      wakeRef.current = fn;
+      return () => {
+        if (wakeRef.current === fn) wakeRef.current = null;
+      };
+    };
     void loadCandles(ch, id, tf).then((d) => {
       if (!live) return;
       setData(d);
-      stop = followFrom(ch, id, tf, d, (r) => live && setData(r));
+      stop = followFrom(ch, id, tf, d, (r) => live && setData(r), { wake });
     });
     return () => {
       live = false;
@@ -666,9 +676,9 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">
           <div className="tkp-quick">
-            {PRESETS.map((p) => (
-              <button key={String(p)} type="button" className="tkp-chip" data-preset={centsToDecimal(p)} disabled={t.presetOff(p)} onClick={() => t.tapPreset(p)}>
-                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>{fmtUsd(p)}
+            {t.presets.map((p) => (
+              <button key={String(p)} type="button" className="tkp-chip" data-preset={p === null ? "" : centsToDecimal(p)} disabled={t.presetOff(p)} onClick={() => t.tapPreset(p)}>
+                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>{p === null ? "—" : fmtUsd(p)}
               </button>
             ))}
           </div>
@@ -699,11 +709,11 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
     setTf(t);
     if (!range) setCtl((x) => (x.range === null ? x : { ...x, range: null }));
   }, []);
-  const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf);
+  // the tape: the lower panel's Trades and, while they are drawn, the chart's marks; each new one wakes the chart's follow
+  const tape = useTrades(row?.chain ?? null, row?.token ?? null);
+  const { data: candles, retry } = useCandles(row?.chain ?? null, row?.token ?? null, tf, tape.trades);
   // the page's one trade state, drawn by the desktop column's box and the phone sheet's (card app-phone-trade-sheet)
   const trade = useTrade(row ? { chain: row.chain, token: row.token } : null);
-  // the tape: the lower panel's Trades and, while they are drawn, the chart's marks
-  const tape = useTrades(row?.chain ?? null, row?.token ?? null);
   if (data.status === "error" || data.status === "empty")
     return (
       <section className="tkp tkp-msg" data-token-page={data.status} data-pushed={pushed || undefined}>
@@ -724,7 +734,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 }
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
- *  not-found, with no read. / draws the top Trending token. */
+ *  not-found, with no read. / draws the top Trending token on the shell's chain filter. */
 export function TokenRoute() {
   const params = useParams();
   if (params.chain === undefined) return <TopToken />;
@@ -733,8 +743,14 @@ export function TokenRoute() {
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
+/** / on the shell's chain filter: a new pick draws that pick's top Trending token. */
 function TopToken() {
-  const { data, nowMs, retry } = useTopToken();
+  const pick = usePick();
+  return <TopTokenOn key={pick} pick={pick} />;
+}
+
+function TopTokenOn({ pick }: { pick: MarketChain | "all" }) {
+  const { data, nowMs, retry } = useTopToken(pick);
   return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }
 

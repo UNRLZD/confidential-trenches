@@ -28,6 +28,16 @@ import R5 from "./r5.json";
 export const NOW = Date.parse("2026-11-02T03:00:00Z");
 
 type Pos = (typeof R5.open)[number];
+type Act = (typeof R5.activity)[number];
+/** An R5 Activity row as the signing page sends its op (card kit-portfolio-reads, kit OpDetail): every op its time; a
+ *  deposit its USD at done; a buy its chain, token and USD spend (trade.ts); a sell its chain, token and units
+ *  (pool-sell.ts). Nothing the page does not send. */
+const opOf = (a: Act): Operation => {
+  const txs = [{ chain: (a.chain ?? "near") as "near", hash: `${a.id}Hx9QxkTn3d2bYpW8LhF4cVzR7mKe1sJ6uA5gN0oPiHq` }];
+  if (a.kind === "deposit") return { id: a.id, kind: "deposit", stage: "done", txs, created_ms: a.at, amount_usd: a.usd };
+  const trade = { id: a.id, kind: a.kind as "buy" | "sell", stage: "filled" as const, txs, created_ms: a.at, chain: a.chain as "near", token: a.token };
+  return a.kind === "buy" ? { ...trade, amount_usd: a.usd } : { ...trade, units: a.units };
+};
 const STATE: SignpageState = {
   release: "signpage-v1",
   api: 1,
@@ -39,12 +49,11 @@ const STATE: SignpageState = {
   positions: R5.open.map((p) => ({ chain: p.chain as Pos["chain"] & SignpageState["positions"][number]["chain"], token: p.token, amount: p.amount, cost: p.cost, wallets: [`${p.token}-w1`] })),
   orders: [],
   held: [],
-  ops: R5.activity.map((a) => ({ id: a.id, kind: a.kind as "buy", stage: a.kind === "deposit" ? "done" : "filled", txs: [{ chain: (a.chain ?? "near") as "near", hash: `${a.id}Hx9QxkTn3d2bYpW8LhF4cVzR7mKe1sJ6uA5gN0oPiHq` }] }) as Operation),
+  ops: R5.activity.map(opOf),
 };
 const MARKET = new Map<string, TokenMarket>(R5.open.map((p) => [`${p.chain}:${p.token}`, { symbol: p.symbol, name: p.name, price: p.price, route: true }]));
 for (const c of R5.closed) if (!MARKET.has(`${c.chain}:${c.token}`)) MARKET.set(`${c.chain}:${c.token}`, { symbol: c.symbol, name: c.name, price: null, route: true });
 const EXTRA = new Map<string, PositionExtra>(R5.open.map((p) => [`${p.chain}:${p.token}`, { bought: p.cost, realized: p.realized, opened_at: p.opened_at, exit: p.exit ? { tp_bps: 10000, sl_bps: 3000 } : undefined }]));
-const OPS = new Map(R5.activity.map((a) => [a.id, { at: a.at, usd: a.usd, units: a.units, chain: a.chain as "near" | undefined, token: a.token }]));
 
 const base: PortfolioData = {
   market: (c, t) => MARKET.get(`${c}:${t}`) ?? null,
@@ -52,7 +61,6 @@ const base: PortfolioData = {
   closed: R5.closed.map((c) => ({ chain: c.chain as "near", token: c.token, bought: c.bought, sold: c.sold, opened_at: c.opened_at, closed_at: c.closed_at })),
   series: R5.series as [number, string][],
   fees: "4.37",
-  op: (id) => OPS.get(id) ?? null,
   exported: [],
 };
 
@@ -62,6 +70,12 @@ interface Fx {
   data?: Partial<PortfolioData>;
   ui?: Partial<Ui>;
 }
+const PX = (usd: number) => ({ price: String(usd * 1e8), expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 });
+const FOUR: NonNullable<SignpageState["pools"]> = [
+  { chain: "solana", asset: "SOL", balance: "2.5", ready: "2", tap_max: "0.5", price: PX(150) },
+  { chain: "base", asset: "ETH", balance: "0.25", ready: "0.25", tap_max: "0.05", price: PX(3000) },
+  { chain: "robinhood", asset: "ETH", balance: "0.1", ready: "0.1", tap_max: "0.05", price: PX(3000) },
+];
 const mark = (token: string, m: PositionExtra["mark"]): Partial<PortfolioData> => ({ extra: (c, t) => (t === token ? { ...EXTRA.get(`${c}:${t}`), mark: m } : EXTRA.get(`${c}:${t}`) ?? null) });
 const act = (ui: Partial<Ui["act"]> = {}): Partial<Ui> => ({ pane: "activity", act: { filter: NO_FILTER, open: null, ...ui } });
 
@@ -77,12 +91,27 @@ export const FIXTURES: Record<string, Fx> = {
   closed: { ui: { closed: true } },
   search: { ui: { q: "r", hideSmall: true } },
   selling: {
-    state: { ops: [...STATE.ops, { id: "sell-live", kind: "sell", stage: "sent", txs: [] }] },
-    data: { op: (id) => (id === "sell-live" ? { at: NOW - 500, chain: "near", token: "WTH" } : OPS.get(id) ?? null) },
+    state: { ops: [...STATE.ops, { id: "sell-live", kind: "sell", stage: "sent", txs: [], created_ms: NOW - 500, chain: "near", token: "WTH", units: "891485.96" }] },
   },
   sheet: { ui: { sheet: "near:NEARLY" } },
   notrades: { data: { closed: [], fees: null } },
   activity: { ui: act() },
+  // the owner's labels (owner 10 Nov 18:12Z): failed buys and sells, each Transaction failed with its reason on hover
+  // (Price check failed, Unavailable, none for a code the app has no words for, Not landed); a filled buy has none
+  failed: {
+    state: {
+      ops: [
+        { id: "f1", kind: "buy", stage: "refused", code: "quote_check_failed", txs: [], created_ms: NOW - 60_000, chain: "solana", token: "ALPENGLOW", amount_usd: "10" },
+        { id: "f2", kind: "buy", stage: "refused", code: "venue_not_pinned", txs: [], created_ms: NOW - 120_000, chain: "solana", token: "ALPENGLOW", amount_usd: "25" },
+        { id: "f3", kind: "sell", stage: "refused", code: "not_allowed", txs: [], created_ms: NOW - 180_000, chain: "near", token: "HOOT", units: "4465.8702" },
+        { id: "f4", kind: "sell", stage: "not_landed", txs: [], created_ms: NOW - 240_000, chain: "near", token: "HOOT", units: "4465.8702" },
+        ...STATE.ops,
+      ],
+    },
+    ui: act(),
+  },
+  // a price that reads zero is no read: KINU's value is the dash, never $0.00 (owner 10 Nov 18:12Z)
+  zeroprice: { data: { market: (c, t) => (t === "KINU" ? { ...MARKET.get(`${c}:${t}`)!, price: "0" } : MARKET.get(`${c}:${t}`) ?? null) } },
   "activity-empty": { state: { ops: [] }, ui: act() },
   restored: {
     state: { ops: [{ id: "rs", kind: "restore", stage: "done", txs: [] }, ...STATE.ops.filter((o) => o.kind === "buy" || o.kind === "sell")] },
@@ -95,6 +124,17 @@ export const FIXTURES: Record<string, Fx> = {
   pools: { state: { pools: [{ chain: "solana", asset: "SOL", balance: "1250000.5", ready: "999999.99" }, { chain: "base", asset: "ETH", balance: "0.25", ready: "0.2" }, { chain: "robinhood", asset: "ETH", balance: "0", ready: "0" }] } },
   "pools-noready": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "12.5" }, { chain: "base", asset: "ETH", balance: "0.001" }] } },
   "pools-empty": { state: { pools: [] } },
+  // one balance (card portfolio-one-balance): the vault alone, the vault and one pool, the vault and all three pools, and
+  // a pool deposit in flight on Robinhood; each pool at the page's own price, read 5 s before NOW
+  "cash-vault": { state: { pools: [] } },
+  "cash-one": { state: { pools: [{ chain: "solana", asset: "SOL", balance: "2.5", ready: "2", tap_max: "0.5", price: PX(150) }] } },
+  "cash-four": { state: { pools: FOUR } },
+  "cash-moving": {
+    state: {
+      pools: [FOUR[0]!, FOUR[1]!, { chain: "robinhood", asset: "ETH", balance: "0", price: PX(3000) }],
+      ops: [...STATE.ops, { id: "pd-live", kind: "pool_deposit", chain: "robinhood", stage: "in_transit", txs: [], since_ms: NOW - 40_000 }],
+    },
+  },
 };
 
 declare global {

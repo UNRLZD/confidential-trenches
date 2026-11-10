@@ -65,12 +65,13 @@ export const NON_SIGNERS: Readonly<Record<string, readonly string[]>> = {
   "packages/kit/src/trade/evm/sell-unpinned.ts": ["evmHookListed", "evmSellRouteCheck", "evmSellRouteOf", "evmPoolSellFeeMax", "EVM_POOL_SELL_DEADLINE_MIN_S", "EVM_POOL_SELL_DEADLINE_MAX_S", "EvmPoolSellError", "EVM_SELL_SIM", "EVM_POOL_SELL_GAS", "evmPoolSellTip", "EVM_7702_AUTH_GAS"],
   "packages/kit/src/trade/evm/quoted.ts": ["evmQuotedBuy", "evmIsQuotedBuy", "evmIsQuotedSell"],
   "packages/signpage/src/rules/pool.ts": [
-    "poolTokenAddress", "tokenDecimalsOf", "checkPoolRequest", "checkSolanaDeposit", "checkSolanaWithdraw", "checkSolanaOnwardSend", "checkSolanaBuy", "checkSolanaSell",
+    "poolTokenAddress", "tokenDecimalsOf", "tokenDecimalsShown", "checkPoolRequest", "checkSolanaDeposit", "checkSolanaWithdraw", "checkSolanaOnwardSend", "checkSolanaBuy", "checkSolanaSell",
     "solanaDepositRents", "checkSolanaSweep", "checkSolanaTeardownFrames", "signSolana", "checkEvmBuy", "checkEvmWithdraw", "checkEvmSell", "checkEvmSellSim", "checkEvmAuthorization",
     "signEvmBuy", "evmWithdrawDigest", "signEvmWithdraw", "checkEvmOnwardSend", "evmOnwardSendDigest", "signEvmOnwardSend", "poolUnits", "drawPool", "POOL_KINDS", "POOL_CHAINS",
     "SOLANA_POOL_TAG_DEPOSIT", "SOLANA_POOL_DEPOSIT_LEN", "POOL_MAX_SLIPPAGE_BPS", "SOLANA_POOL_CU_LIMIT_MAX", "SOLANA_POOL_TX_FEE_MAX", "SOLANA_RENT_PER_BYTE_MAX", "SOLANA_POOL_SELL_RESERVE_MAX",
     "PoolRuleRefused", "SOL_KEY", "EVM_ADDRESS", "POOL_ASSET_DECIMALS_OF", "SOLANA_RESERVED_KEYS", "SOLANA_POOL_MIN_DEPOSIT", "solanaWithdrawMinPart", "withdrawNoteFloor", "solanaSweepFloor", "solanaSweepKeep", "SOLANA_SWEEP_OWED_MAX", "solanaSellAfterFull",
     "EVM_ONWARD_GAS", "EVM_ONWARD_GAS_MAX", "checkEvmDeposit", "EVM_DEPOSIT_GAS_MAX", "EVM_DEPOSIT_FIELD_P", "EVM_DEPOSIT_GAS_PER_LEVEL", "evmDepositHeadroom",
+    "TOKEN_DECIMALS_MAX", // a number: the decimals bound the rule and the EVM buy's load follow read (card signpage-evm-pool-buy)
   ],
 };
 /** What each file may do, and only that: `define` (a signer file: it calls its own signers with no pick), `calls`

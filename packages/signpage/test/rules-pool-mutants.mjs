@@ -47,6 +47,7 @@ const EFEE = "card evm-testnet-delegate-review3: an EVM sell pays";
 const DREF = "EVM deposit: one refusal per field";
 const DOK = "EVM deposit: U's one rung";
 const DSIGN = "EVM deposit: signs as U";
+const SHARE = "card pool-sell-share-across-wallets: a sell by share is 1 to 10,000";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
@@ -66,9 +67,19 @@ export const MUTANTS = [
   ["(d.length > 165 && d.length !== 355 && d[165] === 1)", "(d.length > 165 && d[165] === 1)", DEC],
   ['if (!mint || d[45] !== 1) return refuse("decimals");', 'if (!mint) return refuse("decimals");', DEC],
   ['/^0x[0-9a-fA-F]{64}$/.test(a)', "/^0x[0-9a-fA-F]+$/.test(a)", DEC],
-  ['if (n > 255n) return refuse("decimals");', "", DEC],
-  ["s > POOL_MAX_SLIPPAGE_BPS) return refuse(\"slippage\");", "s > 10_000) return refuse(\"slippage\");", REQ],
-  ['!Number.isInteger(s) || s < 0', "s < 0", REQ],
+  ['if (n > BigInt(TOKEN_DECIMALS_MAX)) return refuse("decimals");', "", DEC],
+  // the slippage of a sell or buy by amount (two spaces in) and of a sell by share (four), each its own row
+  ['s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', 's > 10_000) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', REQ],
+  ['\n  if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n  if (typeof s !== "number" || s < 0 ||', REQ],
+  // a sell by share (card pool-sell-share-across-wallets): its slippage, and the share itself
+  ['s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");\n    return { kind: p.kind, chain, token: token!, amount: 0n,', 's > 10_000) return refuse("slippage");\n    return { kind: p.kind, chain, token: token!, amount: 0n,', SHARE],
+  ['\n    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n    if (typeof s !== "number" || s < 0 ||', SHARE],
+  ['\n    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n    if (typeof s !== "number" || !Number.isInteger(s) ||', SHARE],
+  ['b < 1 || b > 10_000) return refuse("amount");', 'b > 10_000) return refuse("amount");', SHARE],
+  ['b < 1 || b > 10_000) return refuse("amount");', 'b < 1) return refuse("amount");', SHARE],
+  ['!Number.isInteger(b) || b < 1', "b < 1", SHARE],
+  ['p.amount !== undefined || typeof b', "typeof b", SHARE],
+  ['p.kind !== "pool.sell" || p.amount !== undefined', "p.amount !== undefined", SHARE],
   // the signed bytes
   ['if (m.blockhash !== reads.blockhash) return refuse("blockhash");', "", DEP],
   ['if (ixs.slice(n).some((x) => x.program === SOLANA_COMPUTE_BUDGET_PROGRAM)) refuse("compute_budget");', "", DEP],
@@ -196,7 +207,12 @@ export const MUTANTS = [
   ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],
   ['  if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n', "", ESELL],
   // the EVM floors
-  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
+  // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
+  ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
+  ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
+  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', "", EBUY],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', "const floor = 1n;", EBUY],
   ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
   // only what a check passed is signed
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],

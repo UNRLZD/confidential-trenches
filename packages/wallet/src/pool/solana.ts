@@ -187,21 +187,24 @@ export const solanaEpochFee = (rent: SolanaRent): { cost: bigint; fee: bigint } 
 
 /** A cluster's pool, pinned on the device: its program id and the relayer's fee payer, which every proof binds. */
 export type SolanaPoolPin = { readonly program: string; readonly feePayer: string };
+/** The mainnet deploy (card pool-sol-deploy-mainnet): the program id and the pool buy's lookup table, frozen (authority
+ *  none), each written here from contracts/pool-solana/deployments/mainnet.json, which the owner's paste
+ *  (contracts/pool-solana/scripts/mainnet-deploy.sh) wrote once both RPCs read them back.
+ *  test/pool-sol-mainnet-pin.test.ts fails whenever this differs from the record. */
+export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } = /* @__PURE__ */ Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
+
 /** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
- *  Mainnet: none until pool-sol-deploy-mainnet pins it. Devnet, in the testnet build only (./network.ts, card
+ *  Mainnet, in SIGN_HOST's build (card sol-pools-mainnet-pin): SOL_MAINNET_DEPLOY's program (its pool
+ *  7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8) and the helper's mainnet fee payer, the one
+ *  GET /v1/pool/fee?cluster=mainnet&pool=7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8 answered at helper ed0f714a on
+ *  9 Nov 16:53Z, a system account on two mainnet RPCs (test/vectors/sol-pool-mainnet-pin.json, held by
+ *  test/sol-pool-mainnet-pin.test.ts). Devnet, in the testnet build only (./network.ts, card
  *  signpage-pool-flow): the program of scripts/live-checks/pool-sol-deploy.devnet.json (its pool 92YuYhb4…, read back
  *  on two devnet RPCs by scripts/live-checks/signpage-pool-flow.mjs) and the helper's devnet fee payer, which
  *  GET /v1/pool/fee?cluster=devnet&pool=D7DSrQdqBZQEKxVXZpwVzdMrpyjfoZ8Vz13kGeMTKfef answered on 3 Nov 21:07Z. */
 export const SOL_POOLS: Readonly<Partial<Record<"devnet" | "mainnet", SolanaPoolPin>>> = Object.freeze(
-  POOL_TESTNET ? { devnet: Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : {},
+  POOL_TESTNET ? { devnet: Object.freeze({ program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb" }) } : { mainnet: Object.freeze({ program: SOL_MAINNET_DEPLOY.program, feePayer: "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU" }) },
 );
-
-/** The mainnet deploy (card pool-sol-deploy-mainnet): the program id and the pool buy's lookup table, frozen (authority
- *  none), each written here from contracts/pool-solana/deployments/mainnet.json, which the owner's paste
- *  (contracts/pool-solana/scripts/mainnet-deploy.sh) writes once both RPCs read them back; null until then.
- *  test/pool-sol-mainnet-pin.test.ts fails while the record is missing or this differs from it. SOL_POOLS.mainnet also
- *  needs the relayer's mainnet fee payer, which every proof binds, so it stays unset until that is pinned beside this. */
-export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } | null = Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
 
 export type SolanaPoolArgs = {
   /** The cluster's pin (SOL_POOLS[cluster]): the program id and the fee payer, never the helper's word. */
@@ -336,9 +339,11 @@ export type SolanaTreeSync = {
   trees(beforeMs: bigint, signal?: AbortSignal, opts?: SolanaTreesOpts): Promise<PoolTrees>;
   /**
    * Every leaf of both trees both RPCs agree on, each RPC read at or past minContextSlot (a restore's marks' slot), and
-   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot.
+   * the highest slot each RPC answered this call's pages at: every leaf it gave is in its chain at that slot. `counts`:
+   * each RPC's own state and label leaf counts at that slot, in rpcs order, since the agreed part is the shorter of the
+   * two and an RPC that returns a short page would otherwise hide a leaf from a count.
    */
-  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number] }>;
+  leaves(minContextSlot: number, signal?: AbortSignal): Promise<{ state: bigint[]; label: bigint[]; slots: [number, number]; counts: [[number, number], [number, number]] }>;
 };
 
 export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: string, lagWait?: SolanaLagWait): SolanaTreeSync {
@@ -346,7 +351,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
   const held: [Entry[], Entry[]] = [[], []];
   const lastSlot = [0, 0];
   // beforeMs null: no cut, no reached check, every agreed entry
-  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number] }> {
+  async function run(beforeMs: bigint | null, commitment: Commitment, minSlot: number, signal?: AbortSignal): Promise<{ lists: Entry[][]; tops: [number, number]; counts: [[number, number], [number, number]] }> {
     const base = [held[0], held[1]] as const;
     const from = [Math.floor(base[0].length / SOL_PAGE_ENTRIES), Math.floor(base[1].length / SOL_PAGE_ENTRIES)] as const;
     const reads = await both(rpcs, async (rpc, k) => {
@@ -360,6 +365,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     }, signal);
     const next: Entry[][] = [];
     const cuts: Entry[][] = [];
+    const counts: [[number, number], [number, number]] = [[0, 0], [0, 0]];
     for (const tree of [TREE_STATE, TREE_LABEL]) {
       const kept = base[tree]!;
       const start = from[tree]! * SOL_PAGE_ENTRIES;
@@ -371,6 +377,8 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
         return [...kept.slice(0, start), ...fresh];
       });
       const [x, y] = lists as [Entry[], Entry[]];
+      counts[0][tree] = x.length;
+      counts[1][tree] = y.length;
       const common = Math.min(x.length, y.length);
       for (let i = start; i < common; i++) if (!same(x[i]!.bytes, y[i]!.bytes)) throw new Error(`tree ${tree}: the two RPCs differ at leaf ${i}`);
       for (const l of lists) for (let i = Math.max(1, start); i < l.length; i++) if (l[i]!.t < l[i - 1]!.t) throw new Error(`tree ${tree}: a time goes back at leaf ${i}`);
@@ -389,7 +397,7 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
       for (const tree of [TREE_STATE, TREE_LABEL]) if (next[tree]!.length > held[tree]!.length) held[tree] = next[tree]!;
       reads.forEach((r, k) => (lastSlot[k] = Math.max(lastSlot[k]!, r.slot)));
     }
-    return { lists: beforeMs === null ? next : cuts, tops: [reads[0]!.top, reads[1]!.top] };
+    return { lists: beforeMs === null ? next : cuts, tops: [reads[0]!.top, reads[1]!.top], counts };
   }
   return {
     async trees(beforeMs, signal, opts) {
@@ -403,8 +411,8 @@ export function solanaTreeSync(rpcs: readonly [SolanaRpc, SolanaRpc], program: s
     },
     async leaves(minContextSlot, signal) {
       if (!Number.isSafeInteger(minContextSlot) || minContextSlot < 0) throw new Error("minContextSlot: a slot");
-      const { lists: [state, label], tops } = await run(null, "finalized", minContextSlot, signal);
-      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops };
+      const { lists: [state, label], tops, counts } = await run(null, "finalized", minContextSlot, signal);
+      return { state: state!.map((e) => e.leaf), label: label!.map((e) => e.leaf), slots: tops, counts };
     },
   };
 }

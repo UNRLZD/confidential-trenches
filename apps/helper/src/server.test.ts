@@ -387,7 +387,10 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.equal(main.match(/const holds = providerHolds\(undefined, \{ \.\.\.PROVIDER_PACE, \.\.\.keyedPaces\(process\.env\) \}, dayFiles\(storeDir, id\)\);/g)?.length, 1);
   assert.match(main, /const rpc = createRpc\(process\.env, \{ holds, pinned: SWAP_RPCS \}\);/);
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
-  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens\);/);
+  assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held\);/);
+  // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists, and DexScreener on
+  // its own budget for a token no list carries, never the GeckoTerminal budget
+  assert.match(main, /const held = heldFrom\(token, evmLists\);/);
   // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
   // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
   assert.match(main, /const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept \}\)\]\)\);/);
@@ -681,6 +684,40 @@ test("POST /v1/pool/evm/sell carries the body to the named EVM pool's sender wit
   assert.equal(f.status, 200, f.body);
   assert.equal(JSON.parse(f.body).sell_sender, evmAddressOf(sellKey));
   assert.equal(Object.hasOwn(JSON.parse(f.body), "sender"), false);
+});
+
+// card evm-fee-quiet-epoch: an EVM epoch whose first block the helper's provider does not hold yet is 503 index_behind
+// with a wait, never 404 not_found, the answer for a pool this helper does not carry (helper live run 42726731385 read
+// robinhood-testnet's fee in the first half second of 10 Nov 00:15Z and got 404; the same ask answered 200 two minutes
+// later). The epoch before, which has its first block, answers 200. Test key only: sha256 of a label.
+test("GET /v1/pool/fee for an EVM epoch with no block yet is 503 index_behind with Retry-After; a pool not carried stays 404 not_found", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { evmPoolSender } = await import("./pool/evm.ts");
+  const POOL = "0xb239a38af69b68e6c5c305df64985f283b5d5fe5";
+  const NOW = 1_800_000_000_500; // half a second into the epoch that starts at 1_800_000_000_000
+  // a chain whose newest block is a second before the epoch now, blocks 2 s apart, 1 gwei base fee
+  const chain = async (m: string, p: readonly unknown[]): Promise<unknown> => {
+    if (m === "eth_chainId") return "0x14a34";
+    if (m === "eth_call") return `0x${(2n).toString(16).padStart(64, "0")}`;
+    const n = p[0] === "latest" ? 1000n : BigInt(p[0] as string);
+    return { number: `0x${n.toString(16)}`, timestamp: `0x${(1_800_000_000n - 1n - 2n * (1000n - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
+  };
+  const key = new Uint8Array(createHash("sha256").update("evm-fee-quiet-epoch/server/EVM_SENDER").digest());
+  const pool = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: key }, [chain, chain], () => NOW);
+  const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map([[POOL, pool]]), () => NOW)));
+  t.after(() => closeServer(h));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  for (const q of [`pool=${POOL}`, `pool=${POOL}&epoch=1800000000000`]) {
+    const f = await call("GET", `/v1/pool/fee?${q}`, {}, undefined, to);
+    assert.deepEqual([f.status, JSON.parse(f.body)], [503, { error: { code: "index_behind" } }], q);
+    assert.equal(f.headers["retry-after"], "1", q);
+  }
+  const before = await call("GET", `/v1/pool/fee?pool=${POOL}&epoch=1799999940000`, {}, undefined, to);
+  assert.equal(before.status, 200, before.body);
+  assert.equal(JSON.parse(before.body).epoch_start_ms, 1_799_999_940_000);
+  const other = await call("GET", "/v1/pool/fee?pool=0x000000000000000000000000000000000000beef", {}, undefined, to);
+  assert.deepEqual([other.status, JSON.parse(other.body)], [404, { error: { code: "not_found" } }]);
 });
 
 // M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
@@ -1001,7 +1038,8 @@ function getAs(port: number, path: string, xff: string): Promise<number> {
   });
 }
 /** The helper as deployed, on a stub of the public Solana endpoint (100 a 10 s, 40 a 10 s for one method, rolling) and
- * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` while they run. */
+ * a Jupiter that lists nothing: `pages` token pages of fresh mints opened by one address, then `then` once they have all
+ * answered, so their reads are spent however slow the machine, inside the same 10 s window. */
 async function tokenPagesThen(pages: number, then: (port: number) => Promise<number[]>) {
   const all: number[] = [];
   const per = new Map<string, number[]>();
@@ -1041,9 +1079,8 @@ async function tokenPagesThen(pages: number, then: (port: number) => Promise<num
     // (card helper-page-jup-429, proxy.ts PACED), so the pages below are read at once, not behind the lists' first build
     await lists.get();
     const opened = Array.from({ length: pages }, () => getAs(port, `/v1/market/token?chain=solana&token=${b58encode(randomBytes(32))}`, "198.51.100.77"));
-    await new Promise((r) => setTimeout(r, 300));
-    const st = await then(port);
     const ps = await Promise.all(opened);
+    const st = await then(port);
     h.closeAllConnections();
     await new Promise<void>((r) => h.close(() => r()));
     return { refused, st, ps };

@@ -7,8 +7,9 @@
 //   GET /v1/market/holders?chain=<chain>&token=<address>
 //   GET /v1/market/token?chain=<chain>&token=0x000000000000000000000000000000000000dead (an address no list holds)
 // It passes only when the lists answer 200 with a row, the token and holders answer 200 JSON with X-Helper-Commit a full
-// sha, X-Fetched-At an ISO time within 10 minutes of that answer's own read and Access-Control-Allow-Origin echoing
-// APP_HOST, and their bodies hold exactly the frozen fields in their wire forms:
+// sha, X-Fetched-At an ISO time within AGE_MS of that answer's own read (the token page 10 minutes; holders 70: the
+// helper serves a held count, dated, for an hour, and GeckoTerminal dates it up to minutes behind its read; card
+// market-data-evm-capacity) and Access-Control-Allow-Origin echoing APP_HOST, and their bodies hold exactly the frozen fields in their wire forms:
 //   - token: {row, decimals, pool, risk, route, filling}; `row` exactly the terminal's Row fields
 //     (apps/terminal/src/screens/discover/fields.ts) with chain <chain>, token <address> and the launchpad the lists'
 //     row carries (the lists' maker read on chain, so the page's tag is the list's); `risk` exactly the 14 Risk fields,
@@ -27,6 +28,9 @@ export const BASE = "https://ct-api.unrealized.trade";
 export const APP = "https://ct-app.unrealized.trade";
 export const CHAINS = ["base", "robinhood"];
 export const UNLISTED = "0x000000000000000000000000000000000000dead";
+/** How old each answer's X-Fetched-At may be at its read: holders as apps/helper/src/data/evm/token.ts INFO_SERVE_MS
+ *  (an hour) and 10 minutes for GeckoTerminal's own date behind its read. */
+export const AGE_MS = { token: 600_000, holders: 4_200_000 };
 export const READS = {
   lists: (c) => `/v1/market/lists?chain=${c}`,
   token: (c, t) => `/v1/market/token?chain=${c}&token=${t}`,
@@ -118,7 +122,7 @@ export function judge(run) {
       say(SHA.test(h["x-helper-commit"] ?? ""), `${chain} ${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
       const at = Date.parse(h["x-fetched-at"] ?? "");
       const ref = Date.parse(r.at ?? run.readAt);
-      say(ISO.test(h["x-fetched-at"] ?? "") && Math.abs(ref - at) <= 600_000, `${chain} ${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within 10 min of its read at ${r.at ?? run.readAt}`);
+      say(ISO.test(h["x-fetched-at"] ?? "") && Math.abs(ref - at) <= AGE_MS[k], `${chain} ${k} X-Fetched-At: ${show(h["x-fetched-at"])}, within ${AGE_MS[k] / 60_000} min of its read at ${r.at ?? run.readAt}`);
       say(h["access-control-allow-origin"] === APP, `${chain} ${k} Access-Control-Allow-Origin: ${show(h["access-control-allow-origin"])}`);
       const b = parse(r.body);
       const f = r.status !== 200 ? "not a 200" : k === "token" ? pageFault(chain, row, b) : holdersFault(b);

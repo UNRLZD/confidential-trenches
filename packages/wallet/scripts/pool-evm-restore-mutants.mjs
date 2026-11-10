@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
-const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`;
+const S = `${W}/src/pool/evm.ts`, R = `${W}/src/pool/evm-restore.ts`, H = `${W}/src/pool/evm-hold-store.ts`;
 const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
@@ -94,6 +94,29 @@ const M = [
   [S, "  if (at >= 0) {\n    const [short, long]", "  if (false) {\n    const [short, long]", T, "a lying Transfer RPC"],
   [S, "if (e.block === anchor.number && e.blockHash !== anchor.hash) await refuse(", "if (false) await refuse(", T, "a lying Transfer RPC"],
   [S, "for (const e of [...x, ...y]) {\n    if (e.block === fin.number && e.blockHash !== fin.hash) throw", "for (const e of [...x, ...y]) {\n    if (false) throw", TE, "not of the anchor's block"],
+  // card evm-pool-sync-holds: the verified hold and each source's kept logs carry a sync past every public window
+  [S, "reads.some((y) => y.ok && y.fresh.length > x.fresh.length", "reads.some((y) => y.fresh.length > x.fresh.length", TE, "behind only when the longer read"],
+  [S, "const to = progress.to < fin.number ? progress.to : fin.number;", "const to = progress.to;", TE, "kept only up to the finalized"],
+  [S, "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, finTo, x.fresh);", "if (fin.number >= from && (x.ok || behindOf(x))) keep(x.op, anchor.number, x.fresh);", TE, "kept only up to the finalized"],
+  // review of 7eb8cfb9: the hold proven by the pool's root times (P2-1), its events their bytes (P3-1), written on new
+  // leaves or a day of blocks (P3-4)
+  [S, "if (!(await heldProven(anchor.hash, size, signal))) {", "if (false) {", TE, "7eb8cfb9, P2-1"],
+  // the delta review of 39a4c67a: a leaf's time is the pool's root time (P2), an empty hold proven by size 0 (P3-5), the
+  // record's own write time (P3-3)
+  [S, "if (held.length === 0) return size === 0n;", "if (held.length === 0) return true;", TE, "39a4c67a, P3-5"],
+  [S, "    if (t === 0n) throw", "    if (false) throw", TE, "another root on one RPC"],
+  [S, "lt !== (labelAt === n ? st :", "lt !== lt + 0n * (labelAt === n ? st :", TE, "another root on one RPC"],
+  [S, "writtenAt = h.at ?? null;", "writtenAt = null;", TE, "39a4c67a, P3-3"],
+  [S, "const lt = await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", "const lt = st || await agreed(VIEWS.labelRootTimes + hex(word(new VaultTree(", TE, "7eb8cfb9, P2-1: a stored hold whose label"],
+  [S, "        await a.held!.drop(bad).catch(() => {});\n", "", TE, "7eb8cfb9, P2-1: a stored hold that lacks"],
+  [H, "to === to ? null : undefined", "to === to ? null : null", "test/pool-evm-hold-store.test.ts", "7eb8cfb9, P2-1"],
+  [S, " || !rebuilt(e, from, to, pool)) return false;", ") return false;", TE, "7eb8cfb9, P3-1"],
+  [S, "top > writtenTo && (held.length > writtenCount ||", "top > writtenTo && (true ||", TE, "7eb8cfb9, P3-4"],
+  [S, "fin.timestamp - writtenAt >= EVM_HOLD_WRITE_SECONDS", "false", TE, "7eb8cfb9, P3-4"],
+  [S, "if (lagged || moved || reads.some(behindOf)) lag(", "if (lagged || reads.some(behindOf)) lag(", TE, "RV-D|RV-E|fold, P3-3: a source stopped"],
+  [S, "if (a.held !== undefined && kept.size > 0 && signal?.aborted !== true) {", "if (false) {", TE, "RV-E"],
+  [S, "if (h !== null && h.to === heldTo) for (const k of h.kept ?? [])", "if (false) for (const k of h.kept ?? [])", TE, "RV-E"],
+  [S, "v.to >= (h as EvmSyncHeld).to;", "v.to > (h as EvmSyncHeld).to;", "test/pool-evm-hold-store.test.ts", "the same block again"],
 ];
 let ok = 0;
 for (const [f, find, repl, file, pat] of M) {

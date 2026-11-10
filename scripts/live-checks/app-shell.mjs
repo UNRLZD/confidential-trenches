@@ -17,7 +17,12 @@
 //     rects before and after), every shift counted, the
 //     hadRecentInput exclusion not applied (BAR-04, app.md:1102);
 //   - no horizontal scroll, no text under 11 px, and on the phone no tap target under 44 px (BAR-10, app.md:1108; the
-//     tests of R5's design/proto/tools/shoot.mjs:68, :76-91, :92-108).
+//     tests of R5's design/proto/tools/shoot.mjs:68, :76-91, :92-108);
+//   - the token page is judged with trades on it, whatever the live token's book holds (card
+//     app-phone-token-taps-and-rows: a 12 px chart mark and a trades list that moved as trades arrived passed every run
+//     whose token had none): the run answers the page's tape itself (plantTape), its read with trades inside the chart's
+//     own bars, so marks are drawn, and its push socket with one more trade every TAPE.everyMs, so rows arrive while
+//     the load settles; a token load with no mark, no trade row or under 2 trades arrived fails.
 // A screenshot of every load is kept at both widths.
 // After: app
 //   node scripts/live-checks/app-shell.mjs [--url <origin>] [--shots <dir>] [--record <file>]
@@ -35,6 +40,8 @@ import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
+import { PUSH_SOCKET } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 import { downNote, footerEvidence, outages, rpcRows, verifyEvidence, VERIFY_RELEASES } from "./rpc-outage.mjs";
 
@@ -58,11 +65,12 @@ export const WIDTHS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false, nav: ".tb .nav a, .ft .links a" },
 ];
 const SETTLE_MS = 2000;
+const TAPE_WAIT_MS = 12_000;
 
 const sha384 = (bytes) => `sha384-${createHash("sha384").update(bytes).digest("base64")}`;
 
 /** What moved, for a FAIL line: each layout shift's time, value and sources (element, rect before -> after). */
-const shiftsOf = (shifts) =>
+export const shiftsOf = (shifts) =>
   shifts?.length ? ` [${shifts.map((e) => `+${e.at}ms ${e.value.toFixed(4)}${e.input ? " after input" : ""}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]` : "";
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -103,6 +111,13 @@ export function judge(rec) {
     if (l.hscroll) bad.push("horizontal scroll");
     if (l.smallText.length) bad.push(`text under 11 px: ${l.smallText.join(", ")}`);
     if (l.smallTaps.length) bad.push(`tap under 44 px: ${l.smallTaps.join(", ")}`);
+    // the token page is judged with its marks drawn and trades arriving (plantTape), never on an empty tape
+    if (l.expect === "token") {
+      const t = l.tape ?? {};
+      if (!(t.marks > 0)) bad.push("no trade mark on the chart");
+      if (!(t.rows > 0)) bad.push("no trade row");
+      if (!(t.pushed >= 2)) bad.push(`${t.pushed ?? 0} trade(s) arrived while it settled, want 2 or more`);
+    }
     if (!l.shot) bad.push("no screenshot");
     say(bad.length === 0, `${l.width} ${l.path} (${l.expect}): ${bad.length ? bad.join("; ") : `CLS ${l.cls.toFixed(4)}, no violation, no error${downNote(errors.down)}`}`);
   }
@@ -175,8 +190,16 @@ export const MEASURE = ({ phone, vw }) => {
     });
   }
   const scripts = [...document.querySelectorAll("script, link[rel=modulepreload]")].map((s) => ({ src: s.src || s.href || "", integrity: s.integrity || "" }));
+  const shown = (e) => e.getBoundingClientRect().width > 0;
   return {
     route: document.querySelector("main[data-route]")?.dataset.route ?? null,
+    marks: [...document.querySelectorAll('[data-testid="trade-mark"]')].filter(shown).length,
+    rows: [...document.querySelectorAll('[data-testid="lower-rows-trades"] [data-testid="lower-row"]')].filter(shown).length,
+    // a drawn mark's own box, as the eye sees it (its tap area is a ::before, not in this box)
+    markPx: (() => {
+      const r = [...document.querySelectorAll('[data-testid="trade-mark"]')].find(shown)?.getBoundingClientRect();
+      return r ? [Math.round(r.width), Math.round(r.height)] : null;
+    })(),
     hscroll,
     smallText: [...smallText],
     smallTaps: [...smallTaps],
@@ -236,13 +259,88 @@ export async function open(page, url, origin) {
   return { resp, doc: f ?? page.mainFrame(), framed, top: page.url() };
 }
 
+/** The planted tape: `first` trades on the page's read, then one more every `everyMs` on its push socket. */
+export const TAPE = { first: 8, everyMs: 400, max: 50 };
+const HELPER = "https://ct-api.unrealized.trade";
+const helperPath = (p) => (u) => u.origin === HELPER && u.pathname === p;
+
+/** Trade `k` of the planted tape at `tMs`, priced at its bar's close `c`: a trader of its own and sides in turn, so no
+ *  two fold into one mark (the helper's row, apps/helper/src/data/candles.ts). */
+const plantedTrade = (k, tMs, c) => {
+  const usd = 10 + k;
+  const raw = Number.isFinite(c) && c > 0 ? (usd / c).toFixed(12).replace(/0+$/, "").replace(/\.$/, "") : "1";
+  const amt = /^\d{1,40}(\.\d{1,40})?$/.test(raw) && Number(raw) > 0 ? raw : "1";
+  return { t_ms: tMs, side: k % 2 ? "s" : "b", usd: usd.toFixed(2), amt, trader: `CtCheck${k}`.padEnd(44, "x"), tx: `ctcheck${k}` };
+};
+
+/**
+ * The token page's tape on every load of `ctx`, live or harness (card app-phone-token-taps-and-rows): each token's first
+ * candle answer (any tf, 2 bars or more, read from the page's own response) sets the bars; the trades read is answered
+ * with TAPE.first trades, one in each of the last 6 bars and two more in the last, so the chart draws marks; the push socket
+ * (a later routeWebSocket wins over the harness's) sends the whole tape, newest first, with one more trade every
+ * TAPE.everyMs, inside the last bar (at most TAPE.max rows). `sent` counts the tapes pushed, which a load reads before
+ * and after it settles. The deployed tape (the helper's own reads and socket) is other checks' (app-chart-controls,
+ * market-data-push).
+ */
+export async function plantTape(ctx, origin) {
+  const bars = new Map();
+  const tape = { sent: 0 };
+  ctx.on("response", async (r) => {
+    const u = new URL(r.url());
+    if (!helperPath("/v1/market/candles")(u) || !r.ok() || bars.has(u.searchParams.get("token"))) return;
+    const b = await r.json().catch(() => null);
+    if (Array.isArray(b?.candles) && b.candles.length >= 2 && !bars.has(u.searchParams.get("token"))) bars.set(u.searchParams.get("token"), b.candles);
+  });
+  const barsOf = async (token) => {
+    for (const until = Date.now() + 8_000; !bars.has(token) && Date.now() < until; ) await new Promise((r) => setTimeout(r, 50));
+    return bars.get(token) ?? null;
+  };
+  /** The first trades, oldest first. */
+  const start = (c) => {
+    const last = c.at(-1);
+    const out = [];
+    for (let k = 0; k < TAPE.first; k++) {
+      const bar = c.at(Math.min(-1, k - 6)) ?? last;
+      out.push(plantedTrade(k, Number(bar[0]) * 1000 + 1 + k, Number(bar[4])));
+    }
+    return out;
+  };
+  const body = (trades) => JSON.stringify({ trades: [...trades].reverse().slice(0, TAPE.max), src: "chain", as_of_ms: Date.now() });
+  await ctx.route(helperPath("/v1/market/trades"), async (r) => {
+    const c = await barsOf(new URL(r.request().url()).searchParams.get("token"));
+    await r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": origin }, body: body(c ? start(c) : []) }).catch(() => {});
+  });
+  await ctx.routeWebSocket(PUSH_SOCKET, async (ws) => {
+    const c = await barsOf(new URL(ws.url()).searchParams.get("token"));
+    if (!c) return;
+    const trades = start(c);
+    const last = c.at(-1);
+    const end = (Number(last[0]) + (Number(last[0]) - Number(c.at(-2)[0]))) * 1000 - 1;
+    const timer = setInterval(() => {
+      const k = trades.length;
+      trades.push(plantedTrade(k, Math.max(trades.at(-1).t_ms + 1, Math.min(Date.now(), end)), Number(last[4])));
+      try {
+        ws.send(body(trades));
+        tape.sent++;
+      } catch {
+        clearInterval(timer);
+      }
+    }, TAPE.everyMs);
+    // a closed page closes its socket; the timer never holds the run open
+    timer.unref();
+    ws.onClose(() => clearInterval(timer));
+  });
+  return tape;
+}
+
 // `route`: the harness's answers for the hosts' real names (app-in-shell.mjs harnessRoute). `prepare(context)` runs on
 // each fresh browser context after it, before any page opens: the terminal's own browser test (test/bar10) answers the
 // helper there.
 export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null, network = "mainnet" } = {}) {
   const origin = new URL(url).origin;
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // a run with `route` is the harness's: its browser routes every socket too (scripts/harness-sockets.mjs)
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url: origin, network, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
   const seen = new Map();
   try {
@@ -251,18 +349,31 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
       if (route) await ctx.route("**/*", route);
       await ctx.addInitScript(INIT);
       if (prepare) await prepare(ctx);
+      const tape = await plantTape(ctx, origin);
       for (const [id, p] of ROUTES) {
         const page = await ctx.newPage();
         const seenBy = watch(page, origin);
+        const sent0 = tape.sent;
         const { resp, doc, framed, top } = await open(page, origin + p, origin);
         if (!rec.headers) {
           const h = resp.headers();
           rec.headers = { csp: h["content-security-policy"] ?? "", integrityPolicy: h["integrity-policy"] ?? "" };
         }
         await doc.evaluate(() => document.fonts.ready);
-        await page.waitForTimeout(SETTLE_MS);
+        const settled = Date.now() + SETTLE_MS;
+        // a page that draws the token (/, and / under Verify's panel) settles SETTLE_MS as every load does, and never
+        // before its tape is in play, a mark drawn and 2 trades pushed (up to TAPE_WAIT_MS: a cold live load reads the
+        // lists, the token and its candles first, and this check's first live run read phone / before any arrived)
+        if (id === "token" || id === "verify") {
+          for (const until = Date.now() + TAPE_WAIT_MS; Date.now() < until; await page.waitForTimeout(100)) {
+            const marks = await doc.evaluate(() => document.querySelectorAll('[data-testid="trade-mark"]').length).catch(() => 0);
+            if (marks > 0 && tape.sent - sent0 >= 2) break;
+          }
+        }
+        await page.waitForTimeout(Math.max(0, settled - Date.now()));
         const verify = id === "verify" ? await verifyEvidence(doc) : null;
         const m = await doc.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
+        const pushed = tape.sent - sent0;
         // the record keeps the file's name only: the folder is the recorder's own, printed once at the end
         const shot = `${w.name}-${id}.png`;
         await page.screenshot({ path: path.join(shots, shot) });
@@ -270,7 +381,7 @@ export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${K
         const footer = await footerEvidence(doc);
         for (const s of m.scripts) seen.set(`${s.src} ${s.integrity}`, s);
         rec.loadedScripts.push(...seenBy.loadedScripts);
-        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, shot });
+        rec.loads.push({ width: w.name, path: p, expect: id, framed, top, route: m.route, violations: m.violations, consoleErrors: seenBy.consoleErrors, verify, footer, cls: m.cls, shiftCount: m.shiftCount, shifts: m.shiftLog, hscroll: m.hscroll, smallText: m.smallText, smallTaps: m.smallTaps, tape: { marks: m.marks, rows: m.rows, pushed, markPx: m.markPx }, shot });
         await page.close();
       }
       // inside the shell: load the first route, then click every navigation link in turn

@@ -9,11 +9,12 @@
 //   - decimals, the holder count and the top 10 share: GeckoTerminal's keyless `networks/<net>/tokens/<address>/info`
 //     (api.geckoterminal.com/docs/index.html, "tokens/{address}/info", read 2026-11-09 01:50Z: `decimals`,
 //     `holders.count`, `holders.distribution_percentage.top_10` and `holders.last_updated` for a Base and a Robinhood
-//     token), one call a token, held INFO_FRESH_MS. It draws on the one GeckoTerminal budget (../gecko.ts) in the lane
-//     refreshLane names from the held read's time, as every other read of it: a first read (nothing held, or held past
-//     GT_SERVE_MS) is a page read, a held one's re-read "stale" or "refresh", which leave a cold read its calls (card
-//     evm-holders-never-starve: a first read sent to "stale" or "refresh" was refused behind the helper's own lists and
-//     ahead reads, live 14:46Z). A held count is served while under GT_SERVE_MS, the market routes' freshness bound.
+//     token), one call a token, fresh INFO_FRESH_MS. It draws on the one GeckoTerminal budget (../gecko.ts): a first
+//     read (nothing held, or held past INFO_SERVE_MS) is a page read, a held one's re-read "refresh", which leaves a cold
+//     read its calls (card evm-holders-never-starve: a first read sent to "stale" or "refresh" was refused behind the
+//     helper's own lists and ahead reads, live 14:46Z). A held count is served, dated by its read, while under
+//     INFO_SERVE_MS (card market-data-evm-capacity: display data that moves slowly, on a budget the helper's own
+//     background reads hold 2 to 3 of).
 //     A first read waits for the budget's next free call up to GT_PAGE_WAIT_MS (../gecko.ts takeOrWait, the bound the
 //     Solana path's cold reads wait under) instead of a 429; a held one's re-read never waits, the held count serves.
 //     The page waits for a first read at most INFO_WAIT_MS and is otherwise answered with those fields null, the read
@@ -31,13 +32,21 @@
 import type { Row } from "../solana/lists.ts";
 import type { ListsAnswer } from "../solana/lists.ts";
 import { CACHE_MAX, NOT_FOUND, RISK_FIELDS, UPSTREAM, type DataAnswer, type Field } from "../solana/token.ts";
-import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
+import { GT_PAGE_WAIT_MS, takeOrWait, throttledUntil, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./lists.ts";
 
 /** A token's GeckoTerminal info is read again once this old [design: the holder count moves slowly (GeckoTerminal's own
  *  `last_updated` was 1-3 min behind its read, 2026-11-09 01:50Z) and the keyless budget is 5 calls in 75 s for the
  *  whole helper; 5 min keeps a page's holders current to the minute at one call a token]. */
 export const INFO_FRESH_MS = 300_000;
+/** A held info serves, dated by its own read (`as_of_ms`, X-Fetched-At), this long; past it the token is read as one
+ *  nobody holds [design (card market-data-evm-capacity): the holder count and top 10 share are display data that move
+ *  slowly, and the keyless budget (5 calls in 75 s) holds the helper's own lists and ahead reads in 2 to 3 of its 5
+ *  calls (helper log 21:2x-22:2xZ, 9 Nov: lists 1.42 and ahead 0.73 calls a minute, window 3 of 5 in 40 of 60 minutes),
+ *  so a count dropped at GT_SERVE_MS (10 min) was read again on a full window and answered 429 (live 20:34Z). An hour
+ *  keeps every token opened in the last hour answering with its count however busy the window is, and the count's age
+ *  is on the answer; the live check's own runs are an hour apart]. */
+export const INFO_SERVE_MS = 3_600_000;
 /** The longest a page waits for a token's first info read [design: GeckoTerminal answered the info in 0.38-0.58 s from
  *  a Mac, 2026-11-09 01:52Z; 700 ms keeps the page inside its 1 s with that read, and a later answer is held for the
  *  next read]. */
@@ -181,16 +190,17 @@ export function createEvmToken(
     }
   }
 
-  /** The info held for the token while servable (under GT_SERVE_MS) and, when it is not fresh, the read that refreshes
-   *  it (one at a time), in refreshLane's lane for the held read's time: the page and holders share it, so either one's
-   *  read serves the other. */
+  /** The info held for the token while servable (under INFO_SERVE_MS) and, when it is not fresh, the read that refreshes
+   *  it (one at a time): a page read when nothing servable is held, else a "refresh", which leaves COLD_RESERVE calls
+   *  for a read of what nobody holds. The page and holders share it, so either one's read serves the other. */
   function infoOf(token: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
     const h = infos.get(token);
     if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
+    const servable = h !== undefined && now() - h.at < INFO_SERVE_MS;
     let p = running.get(token);
     if (p === undefined) {
       const started = now();
-      p = readInfo(token, refreshLane(h?.at ?? null, started))
+      p = readInfo(token, servable ? "refresh" : "pages")
         .then((x) => {
           if (x !== "refused" && x !== "failed") infos.set(token, { info: x, at: started });
           return x;
@@ -198,7 +208,7 @@ export function createEvmToken(
         .finally(() => running.delete(token));
       running.set(token, p);
     }
-    return { held: h !== undefined && now() - h.at < GT_SERVE_MS ? h.info : undefined, read: p };
+    return { held: servable && h !== undefined ? h.info : undefined, read: p };
   }
 
   const LATE = Symbol("late");
@@ -222,7 +232,7 @@ export function createEvmToken(
       return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
     },
     /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; 429 when the budget refuses a token nothing is held
-     *  for (or held past GT_SERVE_MS), 503 when GeckoTerminal fails it. */
+     *  for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
     async holders(token: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;

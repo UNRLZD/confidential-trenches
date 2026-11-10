@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
-import { pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
+import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { HELPER_RPC_METHODS } from "../../kit/src/helper/v1.ts";
@@ -164,4 +164,75 @@ test("card solana-release-reads-paced: the page's Solana pair waits its turn beh
   } finally {
     globalThis.fetch = real;
   }
+});
+
+test("pageHelperRpcStopped: a call the stop came before is never sent, whether it waited its turn in the route's queue or a try again after a throttle", async () => {
+  const real = globalThis.fetch;
+  const sent: string[] = [];
+  let throttle = true;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const q = JSON.parse(String(init?.body)) as { id: number; params: unknown[] };
+    sent.push(String(q.params[0]));
+    if (throttle) return new Response("slow", { status: 429, headers: { "retry-after": "0" } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: null }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    // a try again: the first answer is a 429, the stop comes before the page's retry
+    const a = new AbortController();
+    const p = pageHelperRpcStopped("https://stop-retry.example", a.signal)("getAccountInfo", ["RETRIED"]);
+    await new Promise((r) => setTimeout(r, 0));
+    a.abort();
+    await assert.rejects(p);
+    await new Promise((r) => setTimeout(r, 600));
+    assert.deepEqual(sent, ["RETRIED"], "no try again after the stop");
+    // a queued call: one call a window on the route's queue, the second waits its turn and is stopped while it does
+    throttle = false;
+    sent.length = 0;
+    const b = new AbortController();
+    const limit = { windowMs: 1_000, total: 1, perMethod: 1 };
+    const first = solanaPacedRpc(pageHelperRpcStopped("https://stop-queue.example", new AbortController().signal), limit)("getAccountInfo", ["FIRST"]);
+    const queued = solanaPacedRpc(pageHelperRpcStopped("https://stop-queue.example", b.signal), limit)("getAccountInfo", ["QUEUED"]);
+    await first;
+    b.abort();
+    await assert.rejects(queued);
+    await new Promise((r) => setTimeout(r, 1_200));
+    assert.deepEqual(sent, ["FIRST"], "the queued call is not sent after its stop");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+// card sol-pools-mainnet-pin: no keyless mainnet provider answers the mark list (publicnode 403 "Indexed requests
+// require a personal token", api.mainnet-beta 403, read 9 Nov 17:23Z), so on the mainnet build the page's lister is the
+// helper's marks route (/v1/rpc/solana-marks). The pair reads each listed mark by address, and provider A's reads go to
+// provider A alone, never through the helper: a mark the helper makes up is no account there (review of 369a87a8, P1).
+test("the mainnet build's Solana reads: the lister is the helper's marks route; the pair's reads go to provider A directly and to the helper's solana route", async () => {
+  const real = globalThis.fetch;
+  const sent: [string, string][] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const b = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push([String(u), b.method]);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result: 42 }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const [a, b] = pageSolanaRpcs();
+    const lister = pageSolanaLister();
+    assert.ok(lister !== undefined, "the mainnet build names a lister");
+    const scanParams = ["EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", { commitment: "finalized", encoding: "base64", withContext: true, filters: [{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "1112" } }] }];
+    const byAddress = [["11111111111111111111111111111111"], { commitment: "finalized", encoding: "base64" }];
+    await lister("getProgramAccounts", scanParams);
+    for (const r of [a, b]) {
+      await r("getProgramAccounts", scanParams);
+      await r("getMultipleAccounts", byAddress);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.deepEqual(sent, [
+    [`${TRADE_HELPER}/v1/rpc/solana-marks`, "getProgramAccounts"],
+    [SOLANA_PROVIDER_A, "getProgramAccounts"],
+    [SOLANA_PROVIDER_A, "getMultipleAccounts"],
+    [`${TRADE_HELPER}/v1/rpc/solana`, "getProgramAccounts"],
+    [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
+  ]);
 });

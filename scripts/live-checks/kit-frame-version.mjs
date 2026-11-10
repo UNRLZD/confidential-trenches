@@ -24,6 +24,10 @@
 //     below the current one each position with no decimals (`n=Al(t);if(e===\`1.7\`)return n;`, Al being
 //     `e=>({...e,positions:e.positions.map(({decimals:e,...t})=>t)})`): kit-v1.7's schema refuses the key, whole state
 //     and all. judge(answer, era) also reads a record of an earlier build at the version and levels it was cut at;
+//   - (card kit-portfolio-reads) kit-v1.8 is a level of its own below kit 1.9, and the state shaper first sends every
+//     level below the current one each op with no detail (`let n={...t,ops:t.ops.map(jl)};if(e===\`1.8\`)return n;`, jl
+//     taking created_ms, token and units, and chain and amount_usd but on a pool deposit and a deposit, whose own they
+//     are): a kit-v1.8 app drops an op that carries one, so it would lose that row; its answers go through its own level;
 //   - (card pool-deposit-op-txs) a kit-v1.7+ app's pool_deposit op carries the txs that moved its money, each shown only
 //     on the device's own reads: the follow's Solana read lists U_X's finalized signatures (getSignaturesForAddress,
 //     finalized, limit 1e3) and keeps a tx only when every RPC's finalized getTransaction reads it a deposit (`.every(`);
@@ -45,8 +49,8 @@ import { fileURLToPath } from "node:url";
 const KEY = "kit-frame-version";
 /** The kit version the page reads every app at in full (packages/kit/src/signpage/messages.ts SIGNPAGE_KIT_VERSION), and
  *  its levels below that, newest first, down to kit-v1.4's (packages/signpage/src/kit-version.ts KitLevel). */
-export const KIT = "1.8";
-export const LEVELS = ["1.7", "1.6", "1.5"];
+export const KIT = "1.9";
+export const LEVELS = ["1.8", "1.7", "1.6", "1.5"];
 export const SIGN = "https://confidential.unrealized.trade";
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
@@ -72,6 +76,9 @@ const LEVEL = /function ([\w$]+)\(([\w$]+)\)\{let ([\w$]+)=[\w$]+\.exec\(\2\);if
 const POOL_FILTER = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\2\.filter\(([\w$]+)=>\3\.kind!==`pool_deposit`\)/;
 /** The positions with no decimals (card signpage-state-holdings), as minified. */
 const NO_DECIMALS = /(?:^|[^\w$])([\w$]+)=([\w$]+)=>\(\{\.\.\.\2,positions:\2\.positions\.map\(\(\{decimals:[\w$]+,\.\.\.([\w$]+)\}\)=>\3\)\}\)/;
+/** An op with no detail (card kit-portfolio-reads), as minified: created_ms, token and units taken, chain kept on a
+ *  pool deposit alone and amount_usd on a deposit alone. */
+const NO_DETAIL = /function ([\w$]+)\(([\w$]+)\)\{let\{created_ms:[\w$]+,token:[\w$]+,units:[\w$]+,\.\.\.([\w$]+)\}=\2,([\w$]+)=\3;return \2\.kind!==`pool_deposit`&&delete \4\.chain,\2\.kind!==`deposit`&&delete \4\.amount_usd,\4\}/;
 
 /** The pairs of a `key:\`value\`` object literal, as an object. */
 const pairsOf = (src) => Object.fromEntries(src.split(",").map((p) => p.split(":").map((x) => x.replace(/`/g, ""))));
@@ -97,21 +104,28 @@ function helloPath(js) {
   // (deposit.confirm keeps moved_out at kit-v1.6)
   const filter = POOL_FILTER.exec(js)?.[1];
   const noDec = NO_DECIMALS.exec(js)?.[1];
+  const noDet = NO_DETAIL.exec(js)?.[1];
   const stateFn = shaper ? esc(shaper[5]) : null;
   const poolOps = filter && stateFn
     ? (new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\2,ops:${esc(filter)}\\(\\2\\.ops\\)\\.map\\(`).exec(js)?.[0] ??
       // card signpage-state-holdings: every level below the current one first takes the positions with no decimals
       (noDec
-        ? new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=${esc(noDec)}\\(\\2\\);if\\(\\1===\`1\\.7\`\\)return \\3;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
+        ? new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=${esc(noDec)}\\(\\2\\);if\\(\\1===\`1\\.7\`\\)return \\3;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\3,ops:${esc(filter)}\\(\\3\\.ops\\)\\.map\\(`).exec(js)?.[0] ??
+          // card kit-portfolio-reads: every level below the current one first takes each op's detail, kit-v1.8 its own level
+          // (the op map read as any function here; `detail` below holds it to the strip NO_DETAIL reads)
+          new RegExp(`function ${stateFn}\\(([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\2;let ([\\w$]+)=\\{\\.\\.\\.\\2,ops:\\2\\.ops\\.map\\([\\w$]+\\)\\};if\\(\\1===\`1\\.8\`\\)return \\3;let ([\\w$]+)=${esc(noDec)}\\(\\3\\);if\\(\\1===\`1\\.7\`\\)return \\4;if\\(\\1===\`1\\.6\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\};if\\(\\1===\`1\\.5\`\\)return\\{\\.\\.\\.\\4,ops:${esc(filter)}\\(\\4\\.ops\\)\\.map\\(`).exec(js)?.[0] ?? null
         : null))
     : null;
   const decimals = noDec && poolOps && poolOps.includes(`=${noDec}(`) ? poolOps : null;
+  const detail = noDet && poolOps && poolOps.includes(`.map(${noDet})};`) ? poolOps : null;
   const result16 = shaper && stateFn
-    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.7\`\\|\\|)?\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
+    ? (new RegExp(`function ${esc(shaper[4])}\\(([\\w$]+),([\\w$]+),([\\w$]+)\\)\\{if\\(\\1===\`current\`\\)return \\3;if\\((?:\\1===\`1\\.[78]\`\\|\\|)*\\1===\`1\\.6\`\\)return \\2===\`state\`\\?${stateFn}\\(\\1,\\3\\):\\3;`).exec(js)?.[0] ?? null)
     : null;
   // review of edc6815f: at 1.8 the answer shaper's kit-v1.6 branch also takes kit-v1.7 (`e===\`1.7\`||e===\`1.6\``), so a
   // kit-v1.7 app's deposit.confirm keeps its facts; a 1.7-era build has no such alternative
   const result17 = result16 && /===`1\.7`\|\|/.test(result16) ? result16 : null;
+  // card kit-portfolio-reads: at 1.9 that branch takes kit-v1.8 too, so its deposit.confirm keeps its facts
+  const result18 = result16 && /===`1\.8`\|\|/.test(result16) ? result16 : null;
   const post = shaper ? new RegExp(`=\\(([\\w$]+),([\\w$]+)\\)=>\\{let ([\\w$]+)=${esc(shaper[1])}\\(\\1,\\2\\);\\3!==null&&[\\w$]+\\.parent\\.postMessage\\(\\3,`).exec(js) : null;
   // the progress branch, read where the shaper's state branch ends (sticky): a route event (no stage) is sent at every
   // level but kit-v1.4 (the current level only, before kit-v1.5 had its own), a stage through the stage function at the level, dropped when it gives null
@@ -137,6 +151,8 @@ function helloPath(js) {
     result16,
     decimals,
     result17,
+    detail,
+    result18,
   };
 }
 
@@ -187,12 +203,14 @@ export function judge(a, era = ERA) {
   else if (!sameMap(h.progressMap, MAP)) bad(`the progress stage function reads a map other than kit-v1.4's (${JSON.stringify(h.progressMap)})`);
   // card pool-deposit-stages: the version read in full, the levels below it, the pool deposit's op left out below it
   if (typeof h?.assign === "string" && typeof h?.shaper === "string" && typeof h?.post === "string") {
-    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : "position decimals"} has no level of its own`);
+    if (h.kit !== era.kit) bad(`the page reads an app in full from kit-v${h.kit ?? "?"}, not kit-v${era.kit}: a kit-v${era.kit} app's ${era.kit === "1.7" ? "pool deposit op" : era.kit === "1.8" ? "position decimals" : "op detail"} has no level of its own`);
     if (!same(h.levels, era.levels)) bad(`the page's levels below the current one are ${JSON.stringify(h.levels)}, not ${JSON.stringify(era.levels)}: an older kit's app is sent what it cannot read`);
     if (era.kit !== "1.7" && typeof h.decimals !== "string") bad("the state sent below the current level keeps each position's decimals, which kit-v1.7 refuses the whole state for");
     if (typeof h.poolOps !== "string") bad("the state sent to kit-v1.6 and kit-v1.5 does not leave the pool_deposit op out");
     if (typeof h.result16 !== "string") bad("kit-v1.6's answers do not go through its own level: its deposit.confirm is sent without moved_out");
     if (era.kit !== "1.7" && typeof h.result17 !== "string") bad("kit-v1.7's answers do not go through its own level: its deposit.confirm is sent with no facts");
+    if (era.kit !== "1.7" && era.kit !== "1.8" && typeof h.detail !== "string") bad("the state sent below the current level keeps each op's detail, for which a kit-v1.8 app drops the op");
+    if (era.kit !== "1.7" && era.kit !== "1.8" && typeof h.result18 !== "string") bad("kit-v1.8's answers do not go through its own level: its deposit.confirm is sent with no facts");
   }
   if (a?.posts !== 1)
     bad(`the bundle holds ${Number.isInteger(a?.posts) ? a.posts : "no count of"} parent.postMessage( calls, not exactly one: a post past the shaper sends an older kit what it cannot read`);

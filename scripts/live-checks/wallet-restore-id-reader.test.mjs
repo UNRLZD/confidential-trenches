@@ -44,6 +44,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 import { countOf, judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
@@ -351,7 +352,7 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
 // a guard, an always-true or never-true compare, a step dropped, a same-shaped dead copy beside a broken real one. The
 // plants find their place by shape, `§` for any name the minifier gave, so they hold from build to build. Each plant
 // counts its marker 0, and the good record with that count fails on the markers alone.
-const APP = readFileSync(path.join(HERE, "../../packages/signpage/public/app.js"), "utf8");
+const APP = readFileSync(path.join(signBuilt(), "public/app.js"), "utf8"); // made from this tree's sources (never committed)
 const rx = (src) => new RegExp(src.replaceAll("§", String.raw`[\w$]+`), "g");
 // the build with the one place `src` finds (exactly one) rewritten by `to` (its match, its groups)
 const plant = (src, to, text = APP) => {

@@ -15,8 +15,8 @@
 //   - unlisted: every read answers the chain row with filling false. Want the symbol, the price drawn as the dash,
 //     data-filling false, and a second read 4.5 to 7.5 s after the first (the page still follows a chain row).
 //   No page error in the terminal's frame; a screenshot of each state is kept.
-// The helper side, read live (Origin APP_HOST): the top of the helper's Trending column (its row Jupiter's) read as a
-// token page answers 200 with filling false (a read named on chain, its search late, is read again 6 s later, up to
+// The helper side, read live (Origin APP_HOST): the top of the helper's Solana Trending column (its row Jupiter's) read
+// as a Solana token page answers 200 with filling false (a read named on chain, its search late, is read again 6 s later, up to
 // HELPER_TRIES times). Run after the helper's deploy: the helper deploys first, then the app.
 // After: app
 //   node scripts/live-checks/token-page-fills-after.mjs [--helper <url>] [--shots <dir>] [--record <file>]

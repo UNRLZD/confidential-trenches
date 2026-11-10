@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -61,6 +62,9 @@ const STATES = [
   ["S8.23", "notsent", true, 400, null, "Retry", "Not sent"],
   ["S8.23", "other", true, 400, null, "Retry", "Failed"],
   ["S8.24", "notlanded", true, 3_100, null, "Retry", "Not landed"],
+  // a pool buy the pool cannot make yet (owner 10 Nov 18:12Z): Unavailable, Buy and the presets off, no Retry
+  ["S8.23", "unavailable", true, 400, null, "Buy TORCH", "Unavailable"],
+  ["S8.23", "unavailable-fit", true, 400, null, "Buy TORCH", "Unavailable"],
   ["partial", "partial", true, 1_200, null, "Buy TORCH", "1/2 filled"],
   ["partial", "partial-nocount", true, 1_200, null, "Buy TORCH", "Part filled"],
 ];
@@ -152,7 +156,7 @@ function kitSet(cents) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const [want, f, tapIt, ms, time, LABEL, end] of STATES) {
@@ -168,7 +172,7 @@ try {
       const got = await settle(() => box.getAttribute("data-state"), want);
       check(got === want, `${tag}: state ${got}, want ${want}`);
       if (time) check((await page.locator('[data-testid="trade-cta"] [data-time]').getAttribute("data-time")) === time, `${tag}: time, want ${time}`);
-      const stage = { refuse: "refused", notsent: "refused", other: "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" }[f];
+      const stage = { refuse: "refused", notsent: "refused", other: "refused", unavailable: "refused", "unavailable-fit": "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" }[f];
       if (stage) check((await box.getAttribute("data-stage")) === stage, `${tag}: the end's stage ${await box.getAttribute("data-stage")}, want ${stage}`);
       // the set preview equals the kit's set for $25 (20 + 5), and the estimate is drawn from it
       const set = await settle(() => box.getAttribute("data-set"), kitSet(2500));
@@ -180,8 +184,10 @@ try {
       // presets: $10, $25, $50 on and $100 off at Bal $73.18 while nothing runs; all off while a buy runs
       const off = await page.$$eval("[data-preset]", (bs) => bs.map((b) => `${b.getAttribute("data-preset")}:${b.disabled}`).join(" "));
       const running = want === "S8.9" || want === "S8.10" || want === "S8.11";
-      const wantOff = running ? "10.00:true 25.00:true 50.00:true 100.00:true" : "10.00:false 25.00:false 50.00:false 100.00:true";
+      const unavailable = f.startsWith("unavailable");
+      const wantOff = running || unavailable ? "10.00:true 25.00:true 50.00:true 100.00:true" : "10.00:false 25.00:false 50.00:false 100.00:true";
       check(off === wantOff, `${tag}: presets ${off}, want ${wantOff}`);
+      if (unavailable) check(await page.locator('[data-testid="trade-cta"]').isDisabled(), `${tag}: Buy is on, want off`);
       const m = await page.evaluate(MEASURE, { phone: w.isMobile, vw: w.viewport.width });
       check(!m.hscroll, `${tag}: horizontal scroll`);
       check(m.smallText.length === 0, `${tag}: text under 11 px: ${m.smallText.join(", ")}`);
