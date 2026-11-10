@@ -11,7 +11,8 @@
 // blocks, and the pool's logs span 1,057,182 blocks (its deploy block 53,801,443 to 54,858,625, read 5 Nov 15:50Z),
 // about 6,800 pages for a cold sync; PublicNode answered a 50,000-block page in 292 ms and Pocket a 10,000-block page
 // in 985 ms (15:52Z), about 130 pages. Between the device and each provider sits a stand-in that answers the first call of each kind
-// (eth_chainId; a block by tag, by number and by hash; each view by its selector; a log page) as the device's client
+// (eth_chainId; a block by tag and by number; each view by its selector; a log page; a block by hash too, though the
+// pool reads none since its leaf times come from stateRootTimes) as the device's client
 // ends a throttled call: HTTP 429 with no Retry-After, and no answer in 3.5 s for the first block by number. Every
 // later call reaches the provider. Nothing is signed or sent.
 // It passes when the binding is made (the epoch's deadline, a fee, W the recipient) and the stand-in throttled every
@@ -43,7 +44,7 @@ const DEPLOY = JSON.parse(readFileSync(poolFile(NETWORK), "utf8")).txs.find((t) 
 /** The sync's pair: two keyless providers of two operators that page the pool's logs wide (see the header). */
 export const SYNC = Object.freeze(["https://base-sepolia-rpc.publicnode.com", "https://base-testnet.api.pocket.network"]);
 /** The kinds of read the stand-in throttles once on each sync provider; each must be met (a fee provider: a view). */
-export const KINDS = Object.freeze(["eth_chainId", "block finalized", "block latest", "block number", "block hash", "view", "eth_getLogs"]);
+export const KINDS = Object.freeze(["eth_chainId", "block finalized", "block latest", "block number", "view", "eth_getLogs"]);
 const VIEW_MIN = 6; // SCOPE, currentRoot, currentTreeSize, currentLabelRoot, currentLabelTreeSize, stateRootTimes (and more)
 
 const host = (u) => new URL(u).host;

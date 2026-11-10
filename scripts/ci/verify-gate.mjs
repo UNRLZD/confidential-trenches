@@ -11,8 +11,9 @@
 //     or removed; a list or entry main wrote after that point and the branch also holds is the same bytes (else a name
 //     clash), and one the branch never had is not read as removed, since main merges by merge commit only and a merge
 //     keeps it; and every list the pull request adds names the tree it was built from (`tree`), the tree of the base,
-//     of the merge base or of one of the pull request's commits, whose SIGN_HOST build inputs (./sign-build-inputs.mjs)
-//     are the head's, and a `commit` that is null (cut on the remote test machine) or has that tree.
+//     of the pull request's merge base with it or of one of the pull request's commits, whose SIGN_HOST build inputs
+//     (./sign-build-inputs.mjs) are the pull request's head's, and a `commit` that is null (cut on the remote test
+//     machine) or has that tree. In a merge queue group the pull request's head is its merge commit's second parent.
 // A card is proven by its own live check, run after every deploy. A release is never written again.
 // No token and no network: it reads the git history checked out by CI (fetch-depth 0) and the body CI passes in.
 //   PR_BODY="<pull request body>" node scripts/ci/verify-gate.mjs <base sha> <head sha>
@@ -37,6 +38,25 @@ function exemptions(body) {
     if (m && m[2].trim()) out.add(m[1] ?? "*");
   }
   return out;
+}
+
+// GitHub hard-wraps a queued pull request's description at 72 characters when it writes the group's merge commit (group
+// 3de09186: PR 540's one-line "Live check: exit-withdraw: none (...)" landed on two lines), greedily: a line breaks only
+// before a word that does not fit. So two lines are one wrapped line only when the second's first word did not fit on
+// the first; every such pair is joined, with one space, back into the line the pull request's body held. A blank line,
+// or a line whose first word fit, is a line of the body's own: a "Live check:" there starts an entry, and one the wrap
+// moved to a line start from mid-sentence is joined back to its sentence, where it exempts nothing, as on the pull request.
+const WRAP = 72;
+const chars = (s) => [...s].length;
+const wrapped = (a, b) => a.trim() !== "" && b.trim() !== "" && chars(a.trimEnd()) + 1 + chars(b.trim().split(/\s/)[0]) > WRAP;
+export function unwrap(body) {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const out = [];
+  lines.forEach((line, i) => {
+    if (i > 0 && wrapped(lines[i - 1], line)) out[out.length - 1] = `${out.at(-1).trimEnd()} ${line.trim()}`;
+    else out.push(line);
+  });
+  return out.join("\n");
 }
 
 const RELEASES = "packages/signpage/releases";
@@ -79,8 +99,13 @@ const mergeBases = (cwd, base, head) => {
 /**
  * Refusals for SIGN_HOST's release lists and ledger, judged on the branch's own change: what it had from main never
  * changes, what main wrote since is either absent (the merge keeps main's) or the same bytes, and a new list names its tree.
+ * head: the tree the files are read from. tip: the pull request's own head, which names the trees a new list may name (the
+ * base's, its merge bases' with the base, its commits') and the build inputs that list must match. On a pull request run
+ * they are one commit. In a group, head is the merge commit C and tip is C^2: the merge base of C^1 and C is C^1 itself,
+ * which names neither the commit the pull request was cut from nor its inputs once a pull request queued ahead changed them
+ * (PR 548, group run 42701775123). What main had is still read on C against C^1: the tree that lands keeps every list.
  */
-export function releaseRefusals(cwd, base, head) {
+export function releaseRefusals(cwd, base, head, tip = head) {
   const r = [];
   const mbs = mergeBases(cwd, base, head);
   const [main, now] = [lists(cwd, base), lists(cwd, head)];
@@ -104,10 +129,11 @@ export function releaseRefusals(cwd, base, head) {
       r.push(`${RELEASES}/${name} is on main as another list: a release name is never used twice`);
   for (const [tag, sha] of mainLed)
     if (!hadLed.has(tag) && nowLed.has(tag) && nowLed.get(tag) !== sha) r.push(`RELEASED ${tag} is on main with another hash`);
+  const own = tip === head ? mbs : mergeBases(cwd, base, tip);
   const trees = new Set([
     git(cwd, ["rev-parse", `${base}^{tree}`]),
-    ...mbs.map((mb) => git(cwd, ["rev-parse", `${mb}^{tree}`])),
-    ...git(cwd, ["log", "--format=%T", `${base}..${head}`]).split("\n").filter(Boolean),
+    ...own.map((mb) => git(cwd, ["rev-parse", `${mb}^{tree}`])),
+    ...git(cwd, ["log", "--format=%T", `${base}..${tip}`]).split("\n").filter(Boolean),
   ]);
   for (const name of now.keys()) {
     if (had.has(name) || main.has(name)) continue;
@@ -124,13 +150,13 @@ export function releaseRefusals(cwd, base, head) {
     }
     if (list.commit !== null && !(typeof list.commit === "string" && /^[0-9a-f]{40}$/.test(list.commit) && treeOf(cwd, list.commit) === list.tree))
       r.push(`${RELEASES}/${name} names a commit that is not null and has not its tree`);
-    if (!sameInputs(cwd, list.tree, head))
+    if (!sameInputs(cwd, list.tree, tip))
       r.push(`${RELEASES}/${name} names a tree whose SIGN_HOST build inputs (${SIGN_BUILD_INPUTS.join(", ")}) are not the pull request's`);
   }
   return [...new Set(r)]; // a list several merge bases hold is named once
 }
 
-export function verifyGate(cwd, base, head, body = "") {
+export function verifyGate(cwd, base, head, body = "", tip = head) {
   const refusals = [];
   const commits = git(cwd, ["rev-list", "--reverse", `${base}..${head}`]).split("\n").filter(Boolean);
   if (commits.length === 0) return { refusals: ["the pull request has no commits"], cards: [] };
@@ -156,7 +182,7 @@ export function verifyGate(cwd, base, head, body = "") {
       `card ${key} has no live check: add ${path} (a recorded good answer passes, a recorded bad one fails), or put "Live check: ${cards.size === 1 ? "" : `${key}: `}none (<reason>)" in the PR body`,
     );
   }
-  refusals.push(...releaseRefusals(cwd, base, head));
+  refusals.push(...releaseRefusals(cwd, base, head, tip));
   return { refusals, cards: [...cards] };
 }
 
@@ -165,9 +191,11 @@ export function verifyGate(cwd, base, head, body = "") {
  * head on main with one merge commit per queued pull request, its first parent the line so far and its second the
  * pull request's head, its message the pull request's title and number, a blank line and its description (the
  * repository's "Pull request title and description" default). Walking the head's first parents down to main, each
- * merge commit C is judged as verifyGate(C^1, C, its description): that pull request's own commits, its live checks in
- * the tree it lands as, and its body's exemptions, which cover its own cards alone. A commit on that line that is not
- * a merge is refused, so a squash or rebase queue never lands a commit nobody judged; so is a group with no merge.
+ * merge commit C is judged as verifyGate(C^1, C, its description, unwrapped as GitHub wrapped it, C^2): that pull
+ * request's own commits, its live checks in the tree it lands as, its body's exemptions, which cover its own cards
+ * alone, and its release lists on its own merge base and head, as its pull request run judges them (releaseRefusals).
+ * A commit on that line that is not a merge is refused, so a squash or rebase queue never lands a commit nobody
+ * judged; so is a group with no merge.
  * main: a commit on main (CI passes the merge base of main and the group's head); the walk stops at its first ancestor.
  */
 export function verifyGroup(cwd, main, head) {
@@ -190,7 +218,7 @@ export function verifyGroup(cwd, main, head) {
   if (!entries.length) return { refusals: ["the group has no queued pull request"], cards: [] };
   for (const c of entries) {
     const title = git(cwd, ["log", "-1", "--format=%s", c]);
-    const one = verifyGate(cwd, `${c}^1`, c, git(cwd, ["log", "-1", "--format=%b", c]));
+    const one = verifyGate(cwd, `${c}^1`, c, unwrap(git(cwd, ["log", "-1", "--format=%b", c])), `${c}^2`);
     for (const r of one.refusals) refusals.push(`${title}: ${r}`);
     for (const k of one.cards) cards.add(k);
   }

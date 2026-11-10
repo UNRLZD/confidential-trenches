@@ -81,6 +81,27 @@ test("ready absent: no ready key on any entry, never \"0\" in its place; an empt
   ]);
 });
 
+test("ready per open queue: a chain none of whose pools has its queue open has no ready key, never \"0\"; an open one with none ready is \"0\"", () => {
+  const h = note(SOL.scope, "HELD", LAMPORTS);
+  const b = note(BASE.scope, "UNSPENT", WEI);
+  const BASE_SPENDS = evmBalancePool("base-pool", "base", BASE.scope, evmTapSpendOf);
+  // only Solana's queue is open: Base's entry has neither ready nor tap_max
+  assert.deepEqual(poolBalances([h, b], [SOL, BASE_SPENDS], [proof(SOL, h, LAMPORTS)], new Set([SOL.id])), [
+    { chain: "solana", asset: "SOL", balance: "1", ready: "1" },
+    { chain: "base", asset: "ETH", balance: "1" },
+  ]);
+  // only Base's queue is open, with nothing ready yet: Base reads "0", Solana nothing
+  assert.deepEqual(poolBalances([h, b], [SOL, BASE_SPENDS], [], new Set([BASE.id])), [
+    { chain: "solana", asset: "SOL", balance: "1" },
+    { chain: "base", asset: "ETH", balance: "1", ready: "0", tap_max: "0" },
+  ]);
+  // two pools on one chain: the chain reads ready when either one's queue is open
+  const BASE2: BalancePool = { id: "base-pool-2", chain: "base", scope: 44n, asset: "ETH" };
+  assert.deepEqual(poolBalances([b], [BASE, BASE2], [], new Set([BASE2.id])), [{ chain: "base", asset: "ETH", balance: "1", ready: "0" }]);
+  // no queue open at all, with a list given: no ready anywhere
+  for (const e of poolBalances([h, b], [SOL, BASE], [], new Set())) assert.equal(Object.hasOwn(e, "ready"), false, e.chain);
+});
+
 test("tap_max: the most one ready proof can spend at the tap, the largest of the pool's spendOf over the chain's counted ready proofs", () => {
   // one tap spends one ready proof: spendOf(chunk, feeCap), from its pool (the kit's one rule, given by the caller)
   const spend = (chunk: bigint, feeCap: bigint): bigint => chunk - feeCap - 1_000n;

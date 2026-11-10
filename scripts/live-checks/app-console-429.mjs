@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live check of card app-console-429: a crowd opening a token page never meets a 429 or a 503 from the helper. With
-// Origin APP_HOST it reads Discover's Solana lists, takes the top Trending token (the token "/" draws, and the one
-// app-token-chart picks), then opens that token's page CROWD times at once: GET /v1/market/token, /holders, /candles
+// Origin APP_HOST it reads Discover's Solana lists, takes Solana's top Trending token (the token "/" draws with the
+// chain filter on Solana), then opens that token's page CROWD times at once: GET /v1/market/token, /holders, /candles
 // (15m, 500, the page's own read) and /trades for it, every request in flight together, with the lists of all three
 // chains alongside. It passes only when every answer is a 200. A failing answer is named by its route, its status and
 // its Retry-After, so a FAIL says which route refused (the helper's own log says which limit: "refused <route> <why>").

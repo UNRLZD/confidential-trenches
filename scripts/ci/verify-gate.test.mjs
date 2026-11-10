@@ -493,6 +493,241 @@ test("planted: a group judged from a main that already holds its first pull requ
   }
 });
 
+// ---------- GitHub hard-wraps a queued pull request's description at 72 characters in the group's merge commit ----------
+
+// GitHub's wrap as the group commits show it: each line of the description, greedily, at most 72 characters a line
+const wrap72 = (text) =>
+  text.split("\n").map((line) => {
+    const out = [];
+    for (const w of line.split(" ")) {
+      if (out.length && [...out.at(-1)].length + 1 + [...w].length <= 72) out[out.length - 1] += ` ${w}`;
+      else out.push(w);
+    }
+    return out.join("\n");
+  }).join("\n");
+
+test("wrap72 writes PR 540's description as GitHub wrote it in group commit 3de09186", () => {
+  const body = "Card exit-withdraw: Nov 6 · The exit tool proves on the device and sends each withdrawal itself from its own one-use account, then closes that account to the typed one\n\nLive check: exit-withdraw: none (no deploy, the exit tool runs on the user's device)";
+  assert.equal(
+    wrap72(body),
+    "Card exit-withdraw: Nov 6 · The exit tool proves on the device and sends\neach withdrawal itself from its own one-use account, then closes that\naccount to the typed one\n\nLive check: exit-withdraw: none (no deploy, the exit tool runs on the\nuser's device)",
+  );
+});
+
+const long = "A plan for every screen the terminal shows, written before a line of its code, read by people.";
+
+test("a description GitHub wrapped at 72 exempts its card, keyed or bare (PR 540's group)", () => {
+  for (const line of ["Live check: docs-plan: none (no deploy, the plan is read by people and nothing runs it)", "Live check: none (no deploy, the plan is read by people and nothing at all runs it)"]) {
+    const body = wrap72(`${long}\n\n${line}`);
+    assert.match(body, /^Live check: .*\n[^\n]+\)$/m); // wrapped across two lines
+    const q = group([shell, { ...plan, body }]);
+    try {
+      const out = verifyGroup(q.r.dir, q.main, q.head);
+      assert.deepEqual(out.refusals, []);
+      assert.deepEqual(out.cards.sort(), ["app-shell", "docs-plan"]);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
+test("planted: a wrapped exemption naming another card does not exempt this one", () => {
+  const q = group([{ ...plan, body: wrap72(`${long}\n\nLive check: app-copy: none (no deploy, the plan is read by people and nothing runs it)`) }]);
+  try {
+    assert.match(groupRefusals(q), /card docs-plan has no live check/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: a wrapped exemption with an empty reason is refused; the same with a reason passes", () => {
+  const key = "docs-plan-of-every-screen-the-terminal-shows-on-a-phone";
+  const pr = (reason) => ({ n: 4, title: `Card ${key}: merge (a plan)`, body: wrap72(`Live check: ${key}: none (${reason})`), commits: [[`Card ${key}: a plan`, { "docs/plans/app.md": "# app\n" }]] });
+  for (const reason of [" ", ""]) {
+    const q = group([pr(reason)]);
+    try {
+      assert.match(q.r.g("log", "-1", "--format=%b", q.head), /^Live check: [^\n]+:\nnone \(/m); // "none (" wrapped onto its own line
+      assert.match(groupRefusals(q), new RegExp(`card ${key} has no live check`));
+    } finally {
+      q.r.done();
+    }
+  }
+  const q = group([pr("docs only")]);
+  try {
+    assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, []);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("two Live check lines one after the other, each wrapped, each exempt their own card alone", () => {
+  const two = { n: 5, title: "Card docs-plan: merge (a plan and copy)", commits: [["Card docs-plan: a plan", { "docs/plans/app.md": "# app\n" }], ["Card app-copy: copy", { "apps/terminal/src/copy.ts": "export {}\n" }]] };
+  const lines = (second) => wrap72(`${long}\n\nLive check: docs-plan: none (no deploy, the plan is read by people and nothing runs it)\nLive check: ${second}: none (the words ship with the next deploy of the terminal's screens)`);
+  const q = group([{ ...two, body: lines("app-copy") }]);
+  try {
+    assert.equal(q.r.g("log", "-1", "--format=%b", q.head).split("\n").filter((l) => l.startsWith("Live check:")).length, 2);
+    const out = verifyGroup(q.r.dir, q.main, q.head);
+    assert.deepEqual(out.refusals, []);
+    assert.deepEqual(out.cards.sort(), ["app-copy", "docs-plan"]);
+  } finally {
+    q.r.done();
+  }
+  const bad = group([{ ...two, body: lines("app-shell") }]);
+  try {
+    const out = groupRefusals(bad);
+    assert.match(out, /card app-copy has no live check/);
+    assert.doesNotMatch(out, /card docs-plan/);
+  } finally {
+    bad.r.done();
+  }
+});
+
+test("planted: a Live check quoted mid-line, which GitHub's wrap moves to a line start, is no exemption, as on the pull request", () => {
+  const prose = "The gate's hint for a pull request with nothing live, if it needs one: Live check: none (docs only)";
+  const body = wrap72(prose);
+  assert.match(body, /\nLive check: none \(docs only\)$/); // the wrap put it at a line start
+  const q = group([{ ...plan, body }]);
+  try {
+    assert.match(groupRefusals(q), /card docs-plan has no live check/);
+    assert.match(refusals(q.r, `${q.head}^1`, `${q.head}^2`, prose), /card docs-plan has no live check/); // the PR path refuses it too
+  } finally {
+    q.r.done();
+  }
+});
+
+// ---------- a release list in a group is judged on its pull request's own merge base and commits, as on its pull request ----------
+
+/**
+ * PR 548 replayed (group run 42701775123): main at `old`, then `from` (release-1 and its ledger); pull request 2 cut at
+ * `from` (build(r) makes its commits there); pull request 1, cut at `from` too, writes `ahead` (in 548's group it was
+ * #547, which changed the wallet's and the kit's sources, both SIGN_HOST build inputs); main may gain mainAfter(r); then
+ * the queue's group: main, #1, #2, each a merge commit. Pull request 2's merge commit C has C^1 = main + #1, so the
+ * merge base of C^1 and C is C^1 itself, while its pull request's is `from`. { r, old, from, main, head, pr }.
+ */
+function queuedRelease(build, { ahead = { "packages/wallet/src/pool.ts": "export const v = 2;\n" }, mainAfter } = {}) {
+  const r = repo();
+  const old = r.commit("Card kickoff-kit: kit", { "README.md": "x\n" });
+  const from = r.commit("Card kickoff-kit: release-1", {
+    "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"x","hosts":{}}\n`,
+    [LEDGER]: ledgerText({ "release-1": H1 }),
+    "scripts/live-checks/signpage-release.mjs": check,
+    "scripts/live-checks/app-ahead.mjs": check,
+  });
+  r.g("checkout", "-q", "-b", "pr-2", from);
+  build(r);
+  const pr = r.g("rev-parse", "HEAD");
+  r.g("checkout", "-q", "-b", "pr-1", from);
+  r.commit("Card app-ahead: the pull request queued ahead", typeof ahead === "function" ? ahead(r) : ahead);
+  r.g("checkout", "-q", "main");
+  const main = mainAfter ? r.commit("Card signpage-later: main gains a list", mainAfter(r)) : from;
+  r.g("checkout", "-q", "-b", "gh-readonly-queue/main/pr", main);
+  r.g("merge", "-q", "--no-ff", "-m", "Card app-ahead: merge (#1)", "-m", "", "pr-1");
+  r.g("merge", "-q", "--no-ff", "-m", "Card signpage-release: merge (#2)", "-m", "", "pr-2");
+  return { r, old, from, main, head: r.g("rev-parse", "HEAD"), pr };
+}
+const release2 = (r, extra = {}) =>
+  r.commit("Card signpage-release: release-2", { [LIST2]: cut(r, extra), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) });
+
+test("a release list naming the tree its pull request was cut from passes in a group queued behind another pull request, and on its pull request run", () => {
+  const q = queuedRelease((r) => release2(r)); // cut() names HEAD's tree: `from`, the pull request's parent and merge base
+  try {
+    assert.equal(JSON.parse(q.r.g("show", `${q.pr}:${LIST2}`)).tree, q.r.g("rev-parse", `${q.from}^{tree}`));
+    assert.notEqual(q.r.g("rev-parse", `${q.head}^1`), q.from); // C^1 is main + #1, not the list's commit
+    assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, []);
+    assert.equal(refusals(q.r, q.from, q.pr), ""); // its pull request run, base main as it was
+    assert.equal(refusals(q.r, `${q.head}^1`, q.pr), ""); // and run again on main + #1
+  } finally {
+    q.r.done();
+  }
+  // the same pull request with a page change after the cut, its list naming that later commit's tree: passes too
+  const b = queuedRelease((r) => {
+    r.commit("Card signpage-release: a page change", { "packages/signpage/src/main.ts": "export {};\n" });
+    release2(r);
+  });
+  try {
+    assert.deepEqual(verifyGroup(b.r.dir, b.main, b.head).refusals, []);
+  } finally {
+    b.r.done();
+  }
+});
+
+test("planted: in a group, a release list naming a tree of no base, no merge base and no commit of its pull request is refused", () => {
+  for (const [what, tree] of [
+    ["an older main commit's tree", (r) => r.g("rev-parse", "HEAD~1^{tree}")],
+    ["a tree of no commit here", () => "f".repeat(40)],
+  ]) {
+    const q = queuedRelease((r) => release2(r, { tree: tree(r) }));
+    try {
+      assert.match(refusals(q.r, q.from, q.pr), /release-2\.json names no tree/, what); // as on its pull request run
+      assert.match(groupRefusals(q), /Card signpage-release: merge \(#2\): packages\/signpage\/releases\/release-2\.json names no tree of the base, of the merge base or of this pull request's commits/, what);
+    } finally {
+      q.r.done();
+    }
+  }
+  // the tree of the pull request queued ahead: a commit of the line, but on none of this pull request's three (main
+  // moved after #1 was cut, so main + #1 is another tree): refused
+  const r = repo();
+  try {
+    const from = r.commit("Card kickoff-kit: kit", { "README.md": "x\n", "scripts/live-checks/app-ahead.mjs": check, "scripts/live-checks/signpage-release.mjs": check });
+    r.g("checkout", "-q", "-b", "pr-1");
+    const aheadTree = r.g("rev-parse", `${r.commit("Card app-ahead: ahead", { "docs/x.md": "x\n" })}^{tree}`);
+    r.g("checkout", "-q", "-b", "pr-2", from);
+    r.commit("Card signpage-release: release-1", { "packages/signpage/releases/release-1.json": `${JSON.stringify({ release: "release-1", commit: null, tree: aheadTree, hosts: {} })}\n` });
+    r.g("checkout", "-q", "main");
+    const main = r.commit("Card app-other: main moves on", { "docs/y.md": "y\n" });
+    r.g("merge", "-q", "--no-ff", "-m", "Card app-ahead: merge (#1)", "-m", "", "pr-1");
+    r.g("merge", "-q", "--no-ff", "-m", "Card signpage-release: merge (#2)", "-m", "", "pr-2");
+    assert.notEqual(r.g("rev-parse", "HEAD^1^{tree}"), aheadTree);
+    assert.match(verifyGroup(r.dir, main, r.g("rev-parse", "HEAD")).refusals.join("\n"), /merge \(#2\): .*release-1\.json names no tree/);
+  } finally {
+    r.done();
+  }
+});
+
+test("planted: in a group, a list naming a tree whose SIGN_HOST build inputs are not its pull request's own is refused", () => {
+  // the pull request ships page v1, then v2, then names v1's tree (the review's repro, queued behind #1)
+  const q = queuedRelease((r) => {
+    r.commit("Card signpage-release: v1", { "packages/signpage/src/main.ts": "v1 (say, a script that sends the words out)\n" });
+    const v1 = r.g("rev-parse", "HEAD^{tree}");
+    r.commit("Card signpage-release: v2", { "packages/signpage/src/main.ts": "v2, the page shipped\n" });
+    release2(r, { tree: v1 });
+  });
+  try {
+    assert.match(groupRefusals(q), /merge \(#2\): .*release-2\.json names a tree whose SIGN_HOST build inputs .* are not the pull request's/);
+  } finally {
+    q.r.done();
+  }
+});
+
+test("planted: in a group, a release list or ledger line main had, changed or removed by the pull request, is refused", () => {
+  for (const [what, change, want] of [
+    ["edit the list", (r) => r.commit("Card signpage-release: edit", { "packages/signpage/releases/release-1.json": `{"release":"release-1","commit":"y","hosts":{}}\n` }), /release-1\.json is on main and was changed/],
+    ["remove the list", (r) => { r.g("rm", "-q", "--", "packages/signpage/releases/release-1.json"); r.g("commit", "-q", "-m", "Card signpage-release: remove"); }, /release-1\.json is on main and was removed/],
+    ["edit the ledger line", (r) => r.commit("Card signpage-release: edit", { [LEDGER]: ledgerText({ "release-1": H2 }) }), /RELEASED release-1 is on main and was changed/],
+    ["drop the ledger line", (r) => r.commit("Card signpage-release: drop", { [LEDGER]: ledgerText({}) }), /RELEASED release-1 is on main and was removed/],
+  ]) {
+    const q = queuedRelease(change);
+    try {
+      assert.match(groupRefusals(q), want, what);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
+test("in a group, a list main gained after the pull request was cut, which it never touches, is no refusal", () => {
+  const later = (r) => ({ [LIST2]: cut(r), [LEDGER]: ledgerText({ "release-1": H1, "release-2": H2 }) }); // names `from`'s tree
+  const test = (r) => r.commit("Card signpage-release: a test", { "packages/signpage/test/y.test.ts": "export {}\n" });
+  for (const [what, opts] of [["on main before the group", { mainAfter: later }], ["from the pull request queued ahead", { ahead: later }]]) {
+    const q = queuedRelease(test, opts);
+    try {
+      assert.deepEqual(verifyGroup(q.r.dir, q.main, q.head).refusals, [], what);
+    } finally {
+      q.r.done();
+    }
+  }
+});
+
 // main's verify gate runs from scripts/ alone (ci.yml verify-gate: git archive "$BASE" scripts), so what it imports reads
 // nothing outside scripts/: sign-build-inputs.mjs loads in a folder that holds scripts/ci/ and nothing else (a read of the
 // kit's prover names there, delta review P3-2, would break main's gate; release.test.mjs holds the names instead)

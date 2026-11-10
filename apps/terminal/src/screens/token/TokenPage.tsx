@@ -9,12 +9,13 @@ import { Avatar } from "../market/Avatar.tsx";
 import { text as signinWord } from "../signin/Word.tsx";
 import { SafetyGrid } from "../trade/SafetyGrid.tsx";
 import { safetyCells } from "../trade/safety.ts";
+import { usePick } from "../../shell/chain-pick.ts";
 import { SIGN_HOST_URL } from "../../shell/signpage-frame.tsx";
 import { TradeView, useTrade } from "../trade/TradeBox.tsx";
 import type { Trade } from "../trade/TradeBox.tsx";
 import { TradeSheet, useTradeSheet } from "../trade/TradeSheet.tsx";
 import { TradeToast } from "../trade/TradeToast.tsx";
-import { centsToDecimal, fmtUsd, PRESETS } from "../trade/model.ts";
+import { centsToDecimal, fmtUsd } from "../trade/model.ts";
 import { CHART_TFS, DEFAULT_TF, followFrom, loadCandles, pricePrecision, TF_SECONDS, tfServed } from "./candles.ts";
 import type { Bar, CandleData, ChartTf } from "./candles.ts";
 import { fitBars, fitPrice, INDICATORS, isAuto, liveBars, mountChart, setDisplay, setIndicators, setScale, unmountChart } from "./chart.ts";
@@ -666,9 +667,9 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
       {v && (
         <div className="tkp-bottom" data-testid="token-bar">
           <div className="tkp-quick">
-            {PRESETS.map((p) => (
-              <button key={String(p)} type="button" className="tkp-chip" data-preset={centsToDecimal(p)} disabled={t.presetOff(p)} onClick={() => t.tapPreset(p)}>
-                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>{fmtUsd(p)}
+            {t.presets.map((p) => (
+              <button key={String(p)} type="button" className="tkp-chip" data-preset={p === null ? "" : centsToDecimal(p)} disabled={t.presetOff(p)} onClick={() => t.tapPreset(p)}>
+                <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true"><path d="M6 0L0 7h4l-1 5 7-7.5H6z" /></svg>{p === null ? "—" : fmtUsd(p)}
               </button>
             ))}
           </div>
@@ -724,7 +725,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
 }
 
 /** The token route. /token/<chain>/<id> draws that token (source.ts); a chain the terminal does not draw is the page's
- *  not-found, with no read. / draws the top Trending token. */
+ *  not-found, with no read. / draws the top Trending token on the shell's chain filter. */
 export function TokenRoute() {
   const params = useParams();
   if (params.chain === undefined) return <TopToken />;
@@ -733,8 +734,14 @@ export function TokenRoute() {
   return <ReadToken key={`${t.chain}/${t.id}`} chain={t.chain} id={t.id} />;
 }
 
+/** / on the shell's chain filter: a new pick draws that pick's top Trending token. */
 function TopToken() {
-  const { data, nowMs, retry } = useTopToken();
+  const pick = usePick();
+  return <TopTokenOn key={pick} pick={pick} />;
+}
+
+function TopTokenOn({ pick }: { pick: MarketChain | "all" }) {
+  const { data, nowMs, retry } = useTopToken(pick);
   return <TokenPage data={data} nowMs={nowMs} onRetry={retry} />;
 }
 

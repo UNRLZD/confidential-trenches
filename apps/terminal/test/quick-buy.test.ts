@@ -38,9 +38,11 @@ test("the toast over the page: the running buy and its end while the sheet is cl
 test("the chip is the box's preset: one tap function, no sheet, and the terminal has one buy request site", () => {
   const page = src("screens/token/TokenPage.tsx");
   const box = src("screens/trade/TradeBox.tsx");
-  // the phone bar's chips call the trade state's tapPreset with the box's own PRESETS, and none opens the sheet
+  // the phone bar's chips call the trade state's tapPreset with the box's own presets row (on Base and Robinhood the
+  // chunk's one button), and none opens the sheet
   const bar = /<div className="tkp-quick">([\s\S]*?)<\/div>/.exec(page)?.[1] ?? "";
-  assert.match(bar, /PRESETS\.map/, "the chips are not the box's presets");
+  assert.match(bar, /t\.presets\.map/, "the chips are not the box's presets");
+  assert.doesNotMatch(page, /\bPRESETS\b/, "the token page draws the four presets of its own");
   assert.match(bar, /t\.tapPreset\(p\)/, "a chip does not tap through the trade state's tapPreset");
   assert.doesNotMatch(bar, /sheet\.open/, "a chip still opens the sheet");
   assert.doesNotMatch(bar, /kit\.request/, "a chip calls the kit itself");

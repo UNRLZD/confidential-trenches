@@ -143,12 +143,13 @@ let shell: Shell | null = null;
 const prover = !framed ? proverHost() : null;
 // the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
 let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
   ? poolRestore({
       store: () => open(),
+      held: () => opened(),
       seed64: () => openSeed64(),
       signedIn: async () => {
         const s = await readSeedSettled();
@@ -283,7 +284,7 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get);
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open);
         prices.refresh((pooled.pools ?? []).map((p) => p.chain));
         // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
         // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
@@ -650,7 +651,7 @@ const open = async (): Promise<WalletStore> => {
   const s = (store ??= await openWalletStore({
     // another tab signed out: its store closed ours; drop it and show signed-out
     onEvent: (e) => {
-      moved += 1;
+      if (walletSeedMoved(e)) moved += 1;
       // a delete or upgrade closed our connection: the next step opens the store again
       // the follows ran on that connection: they end (U's lock freed) and start again on the store opened next
       if (e.kind === "closed") (store = null), (followsClosed = true), follows?.storeClosed(), poolFollow?.stop();
@@ -669,6 +670,9 @@ const open = async (): Promise<WalletStore> => {
   return s;
 };
 
+// The store only while one is open: the pool syncs' holds (src/pool-testnet.ts TestnetPage.held), so a round still
+// running after a sign out, here or on another tab, never makes the store again (review of 7eb8cfb9, P2-2).
+const opened = (): Promise<WalletStore> => (store !== null ? Promise.resolve(store) : Promise.reject(new Error("no wallet store is open")));
 const readSeed = async (): Promise<Seed | undefined> => checkSeed(await (await open()).get("meta", "seed"));
 // The seed for a trade's signer (src/trade.ts), opened only once a wallet passed its arm check; the entropy is zeroed
 // here and the seed64 by the signer when the trade ends.
@@ -897,6 +901,8 @@ async function signOut(): Promise<void> {
   follows?.signedOut();
   poolFollow?.stop();
   withdrawsSignedOut();
+  // an EVM pool's RESERVED settle holds the seed lock shared, which the sign out waits for: it stops first
+  testnet?.signingOut();
   // the handle is dropped only once the store has signed out: a refused sign out leaves it open and still held
   await s.signOut();
   store = null;
