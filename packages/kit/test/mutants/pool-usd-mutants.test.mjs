@@ -8,11 +8,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../../scripts/group-run.mjs";
+// MUTANT_PART=<k>/<n>: part k of n of the sweep, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs), which the kit's
+// test:mutants runs as a command of its own for each part (card ci-mutant-shards-true-times); the sweep refuses a part
+// it cannot read, so this file fails on one. Unset: the whole sweep.
+const PART = process.env.MUTANT_PART === undefined ? [] : [process.env.MUTANT_PART];
 // The sweep runs in a process group of its own (scripts/group-run.mjs): at this test's timeout it gets SIGTERM, ends its
 // own test runs' groups, and its group is killed after it, so nothing it started outlives this test.
 
 test("pool-usd-mutants.mjs: every agreement and staleness mutant fails its named tests", { timeout: 600_000 }, (t) => {
-  const r = runSync(process.execPath, [fileURLToPath(new URL("../pool-usd-mutants.mjs", import.meta.url))], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeoutMs: 600_000, killSignal: "SIGTERM" });
+  const r = runSync(process.execPath, [fileURLToPath(new URL("../pool-usd-mutants.mjs", import.meta.url)), ...PART], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeoutMs: 600_000, killSignal: "SIGTERM" });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   assert.equal(r.status, 0, out.split("\n").filter((l) => /^FAIL/.test(l)).join("\n") || out.slice(-2000));
   assert.match(out, /^every one of \d+ mutants fails its named test$/m);

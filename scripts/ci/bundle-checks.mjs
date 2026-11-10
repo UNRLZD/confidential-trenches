@@ -127,6 +127,7 @@ export const OUT = {
   "kit-deposit-assets-dry": "a browser",
   "app-shell": "a browser",
   "app-shell-rpc-outage-judge": "a browser",
+  "app-phone-token-taps-and-rows": "a browser",
   "app-in-shell": "a browser (its --harness run is in test-browser)",
   "app-discover-live": "a browser and the helper",
   "app-no-test-token": "a browser and the helper",

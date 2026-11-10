@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Bar } from "../src/screens/token/candles.ts";
-import { TRADES_URL, groupMarks, layoutMarks, shortTrader, toTrades } from "../src/screens/token/trades.ts";
+import { TRADES_URL, groupMarks, layoutMarks, pickMark, shortTrader, toTrades } from "../src/screens/token/trades.ts";
 import type { Mark, Trade } from "../src/screens/token/trades.ts";
 
 const T0 = 1_762_000_200_000; // a 15m bucket start, ms
@@ -215,4 +215,25 @@ test("a failed tape read waits longer each time, at most TRADES_BACKOFF_MAX_MS; 
   assert.equal(nextWait(1), 2 * TRADES_POLL_MS);
   assert.equal(nextWait(2), 4 * TRADES_POLL_MS);
   assert.equal(nextWait(10), TRADES_BACKOFF_MAX_MS);
+});
+
+// card app-phone-token-taps-and-rows: on a phone each 12 px mark (r 6) is tapped through a 44 px area, which reaches
+// over its neighbours; the tap's point picks the mark
+test("tap: on a disc, that disc; where two discs overlap, the one drawn on top (the later)", () => {
+  const marks = [{ id: "a", x: 100, y: 100 }, { id: "b", x: 109.6, y: 100 }];
+  assert.equal(pickMark(marks, 96, 100, 6), "a");
+  assert.equal(pickMark(marks, 113, 100, 6), "b");
+  // 104.8 is on both discs: b is drawn after a, so on top
+  assert.equal(pickMark(marks, 104.8, 100, 6), "b");
+});
+
+test("tap: off every disc, inside the 44 px areas, the nearest centre; the first drawn on a tie; none drawn is null", () => {
+  // two marks one slide step apart (2 r + 2 = 14 px), their 44 px areas overlapping
+  const marks = [{ id: "low", x: 100, y: 114 }, { id: "high", x: 100, y: 100 }];
+  assert.equal(pickMark(marks, 118, 98, 6), "high");
+  assert.equal(pickMark(marks, 118, 116, 6), "low");
+  assert.equal(pickMark(marks, 120, 107, 6), "low");
+  // a lone mark: anywhere in its area opens it
+  assert.equal(pickMark([{ id: "m", x: 50, y: 50 }], 50 + 21, 50 - 21, 6), "m");
+  assert.equal(pickMark([], 1, 1, 6), null);
 });
