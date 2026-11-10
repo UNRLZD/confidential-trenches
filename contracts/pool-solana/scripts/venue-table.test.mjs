@@ -1020,7 +1020,7 @@ function countCase({ extends: ext = [{ n: 29, state: "sent" }], held = 28, view 
   })();
 }
 
-test("a journaled extend that lands after the resume's table reads and before its status read: the statuses come first, so the resume extends from what landed and the table is the list once (reviewer's probe F: 231 addresses, 202 distinct, stranded)", async () => {
+test("a journaled extend that lands after the resume's table reads and before its status read: the statuses come first, so the resume extends from what landed and the table is the list once (probe F: 231 addresses, 202 distinct, stranded)", async () => {
   const c = await countCase();
   const S = sigOf(2);
   let landed = false;
@@ -1044,7 +1044,7 @@ test("a journaled extend that lands after the resume's table reads and before it
   c.finished();
 });
 
-test("a journaled extend that landed while both RPCs' account reads are a moment behind their statuses: the resume stops, nothing sent; a later one finishes (reviewer's probe G)", async () => {
+test("a journaled extend that landed while both RPCs' account reads are a moment behind their statuses: the resume stops, nothing sent; a later one finishes (probe G)", async () => {
   let stale = null;
   const c = await countCase({ view: (i, a, cm, v) => (stale && a === stale.T && stale.left-- > 0 ? stale.v : v) });
   const old = c.k.get(c.T);
@@ -1095,7 +1095,7 @@ test("two journaled extends open at once: the resume stops while either can land
   }
 });
 
-test("a resume inside the finality lag after an extend the journal marks landed (confirmed reads 57, finalized 28) stops, nothing sent; a minute later it finishes (reviewer's probe P)", async () => {
+test("a resume inside the finality lag after an extend the journal marks landed (confirmed reads 57, finalized 28) stops, nothing sent; a minute later it finishes (probe P)", async () => {
   const k = fakeCluster({ fin: 13_000 });
   const base = keyBase();
   const dir = recordDir();
@@ -1283,7 +1283,7 @@ test("the lock is released on SIGINT and on SIGTERM, and when a run stops", asyn
   assert.equal(existsSync(path.join(kd, "run.lock")), false);
 });
 
-test("a lock whose pid now belongs to another live process (a restart, pids reused) is a dead lock: the resume takes it over and said so, and it never stops a fresh paste (reviewer's probe H)", async () => {
+test("a lock whose pid now belongs to another live process (a restart, pids reused) is a dead lock: the resume takes it over and said so, and it never stops a fresh paste (probe H)", async () => {
   const k = fakeCluster();
   const base = keyBase();
   const dir = recordDir();
@@ -1499,7 +1499,7 @@ test("a stopped run's folder whose journal marks its create landed stops a fresh
   assert.equal(k.sends.length, 0);
 });
 
-test("an old folder's resume after another run made the same generation makes no second table: it only gives back (reviewer's probe I: 2 record rows, 42,550,080 lamports locked)", async () => {
+test("an old folder's resume after another run made the same generation makes no second table: it only gives back (probe I: 2 record rows, 42,550,080 lamports locked)", async () => {
   const k = fakeCluster();
   const base = keyBase();
   const dir = recordDir();
