@@ -256,6 +256,13 @@ test("no liquidity, then a quote that fails a check: refused, no address", async
   assert.equal(mock.sent.length, 2);
 });
 
+test("review d: no liquidity, then a 1Click-signed quote for another amount: refused on the request echo, no address", async () => {
+  // the answer is whole for 24 USDC (its echo, amountIn and minAmountIn), so only the echo against 25 refuses it
+  const mock = h1c({ noLiquidity: 1, before: (a) => { a.quoteRequest.amount = a.quote.amountIn = a.quote.minAmountIn = "24000000"; a.quote.amountInFormatted = "24.0"; } });
+  refusedWith(await depositQuoteKind(PARAMS, ctx(mock.fetch)), "quote_check_failed");
+  assert.equal(mock.sent.length, 2);
+});
+
 test("no liquidity on every ask: three asks, then not_available, no address", async () => {
   const mock = h1c({ noLiquidity: 99 });
   refusedWith(await depositQuoteKind(PARAMS, ctx(mock.fetch)), "not_available");

@@ -26,7 +26,7 @@ import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
 import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type SignpageResults } from "../../kit/src/signpage/messages.ts";
-import { POOL_DEPOSIT_NETWORK, askDepositQuote, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
+import { POOL_DEPOSIT_NETWORK, askDepositQuoteAgain, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
 import { checkPoolDepositQuote, solanaPoolDepositFloor } from "./pool-deposit-quote.ts";
@@ -190,7 +190,8 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       }
       let reply;
       try {
-        reply = await askDepositQuote(request, deps.fetch);
+        // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
+        reply = await askDepositQuoteAgain(request, deps.fetch);
       } catch {
         return void (out = { error: "down" });
       }

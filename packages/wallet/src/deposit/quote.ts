@@ -164,20 +164,12 @@ export interface DepositQuoteReply {
  */
 const NO_LIQUIDITY = /^No liquidity available\b/;
 /**
- * The pauses before each re-ask of the same request after a NO_LIQUIDITY answer: two re-asks, three asks in all. A
- * no-liquidity answer creates no deposit address, so a live request is asked again as it is, and the answer that comes
+ * The pauses before each re-ask of the same request after a NO_LIQUIDITY answer: two re-asks at most, three asks in all.
+ * A no-liquidity answer creates no deposit address, so a live request is asked again as it is, and the answer that comes
  * back is checked by its caller exactly as one answer is.
  */
 export const NO_LIQUIDITY_PAUSES_MS: readonly number[] = Object.freeze([500, 1_000]);
-/**
- * The whole ask, re-asks and pauses in, ends inside this time past the first send: each re-ask's timeout is what is
- * left of it, so a deposit waits seconds, never minutes. 12 s sits inside the signing page's read deadline (14 s,
- * src/deposit-wire.ts DEPOSIT_READ_DEADLINE_MS) and the kit client's 15 s for deposit.quote, deposit.dry and
- * pool.address, with room for the steps around the ask. 1Click's no-liquidity answer takes some 3.6 s (research
- * docs/research/intents-confidential.md C37) and a quote 0.7 to 1.4 s (18:59Z), so three asks fit.
- */
-export const NO_LIQUIDITY_SPAN_MS = 12_000;
-/** No re-ask starts with less than this left of NO_LIQUIDITY_SPAN_MS: a quote's own answer time, 1.4 s at most read. */
+/** No re-ask starts with less than this left of the ask's window: a quote's own answer time, 1.4 s at most read (18:59Z). */
 export const NO_LIQUIDITY_ASK_MIN_MS = 2_000;
 
 /** True when a reply is 1Click's no-liquidity answer: 400 with that message. */
@@ -188,25 +180,51 @@ export function noLiquidity(reply: DepositQuoteReply): boolean {
 }
 
 /**
- * POSTs `request` as it is to the helper's 1Click proxy, with no cookie and no referrer. Returns the status and the
- * parsed body; throws when the helper does not answer in time, answers over DEPOSIT_QUOTE_ANSWER_MAX or not in JSON. On
- * 1Click's no-liquidity answer the same request is asked again after each of NO_LIQUIDITY_PAUSES_MS, each re-ask cut at
- * what is left of NO_LIQUIDITY_SPAN_MS; a re-ask that fails in any way leaves the no-liquidity answer standing. The last
- * reply comes back, and every caller checks it as it checks one answer.
+ * One ask: POSTs `request` as it is to the helper's 1Click proxy, with no cookie and no referrer. Returns the status and
+ * the parsed body; throws when the helper does not answer in DEPOSIT_QUOTE_TIMEOUT_MS, answers over
+ * DEPOSIT_QUOTE_ANSWER_MAX or not in JSON. The display reads ask this way (signpage rules/deposit-dry.ts: the dry lines
+ * and the asset list's probes, asked again as the user types and opens the sheet).
  */
-export async function askDepositQuote(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = () => performance.now()): Promise<DepositQuoteReply> {
-  const start = clock();
+export function askDepositQuote(request: OneClickRequest, fetchFn: typeof fetch = fetch): Promise<DepositQuoteReply> {
+  return askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
+}
+
+/** 1Click's answered statuses (wallet.md D52: a quote answers 201; 200 too). */
+const ANSWERED: readonly number[] = Object.freeze([200, 201]);
+/** A re-ask that failed as an ask fails (no answer in time, a failed fetch, an answer too large or not JSON); anything
+ *  else (a programming error such as a RangeError) is thrown, never read as a failed re-ask. */
+const askFailed = (e: unknown): boolean =>
+  e instanceof DepositAnswerTooLarge || e instanceof DepositAnswerNotJson || e instanceof TypeError ||
+  (typeof e === "object" && e !== null && ((e as { name?: unknown }).name === "TimeoutError" || (e as { name?: unknown }).name === "AbortError"));
+
+/**
+ * The committed asks (card deposit-quote-no-liquidity): deposit.quote, pool.address and the refund move, whose answer is
+ * a deposit address. The first ask is askDepositQuote's; on 1Click's no-liquidity answer the same request is asked again
+ * after each of NO_LIQUIDITY_PAUSES_MS, the clock read again after each pause, and only while NO_LIQUIDITY_ASK_MIN_MS is
+ * left of the one ask's own window, DEPOSIT_QUOTE_TIMEOUT_MS (10 s) from the first send, each re-ask cut at what is left
+ * (whole ms). So no caller waits longer than one ask could before this card: with 1Click's no-liquidity answers taking
+ * some 3.6 s (research docs/research/intents-confidential.md C37) that is two asks, 3.6 s, then 0.5 s and 3.6 s; with
+ * faster ones, three. Only a 200 or 201, or another no-liquidity answer, replaces the standing one: a re-ask the helper
+ * answers 429, 503 or anything else, or that fails as an ask fails, leaves the no-liquidity answer standing and asks no
+ * more. The last standing reply comes back, and every caller checks it as it checks one answer.
+ */
+export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = Date.now): Promise<DepositQuoteReply> {
+  const end = clock() + DEPOSIT_QUOTE_TIMEOUT_MS;
   let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
   for (const ms of NO_LIQUIDITY_PAUSES_MS) {
-    if (!noLiquidity(reply)) break;
-    const left = NO_LIQUIDITY_SPAN_MS - (clock() - start) - ms;
-    if (left < NO_LIQUIDITY_ASK_MIN_MS) break;
+    if (!noLiquidity(reply) || end - clock() - ms < NO_LIQUIDITY_ASK_MIN_MS) break;
     await sleep(ms);
+    const left = Math.floor(end - clock());
+    if (!(left >= NO_LIQUIDITY_ASK_MIN_MS)) break;
+    let next: DepositQuoteReply;
     try {
-      reply = await askOnce(request, fetchFn, Math.min(DEPOSIT_QUOTE_TIMEOUT_MS, left));
-    } catch {
-      break;
+      next = await askOnce(request, fetchFn, left);
+    } catch (e) {
+      if (askFailed(e)) break;
+      throw e;
     }
+    if (!ANSWERED.includes(next.status) && !noLiquidity(next)) break;
+    reply = next;
   }
   return reply;
 }
@@ -227,9 +245,17 @@ async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutM
   try {
     body = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
   } catch {
-    throw new Error(`deposit quote: HTTP ${res.status}, not JSON`);
+    throw new DepositAnswerNotJson(res.status);
   }
   return { status: res.status, body };
+}
+
+/** An answer that is not JSON. */
+export class DepositAnswerNotJson extends Error {
+  constructor(status: number) {
+    super(`deposit quote: HTTP ${status}, not JSON`);
+    this.name = "DepositAnswerNotJson";
+  }
 }
 
 /** An answer refused for its size, declared or streamed (readCapped). */

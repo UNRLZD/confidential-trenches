@@ -273,6 +273,12 @@ test("no liquidity twice, then a quote: the same request three times, checked, h
   const bad = world({ noLiquidity: 1, change: (x: Answer) => { x.quoteRequest.refundTo = "ab".repeat(32); } });
   assert.deepEqual(await ask(bad, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "quote_check_failed" });
   assert.equal(bad.took.length, 0);
+  // review d: a 1Click-signed quote for another amount after the no-liquidity answer: refused on the request echo
+  // whole for 24 USDC (its echo, amountIn and minAmountIn), so only the echo against 25 refuses it
+  const other = world({ noLiquidity: 1, change: (x: Answer) => { x.quoteRequest.amount = x.quote.amountIn = x.quote.minAmountIn = "24000000"; x.quote.amountInFormatted = "24.000000"; } });
+  assert.deepEqual(await ask(other, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "quote_check_failed" });
+  assert.equal(other.sent.length, 2);
+  assert.equal(other.took.length, 0);
   const never = world({ noLiquidity: 99 });
   assert.deepEqual(await ask(never, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "not_available" });
   assert.equal(never.sent.length, 3);

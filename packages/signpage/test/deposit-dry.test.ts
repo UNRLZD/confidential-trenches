@@ -328,37 +328,24 @@ test("deposit.dry: the helper's codes, busy and down not kept", async () => {
     assert.deepEqual((await frame({ quote: q }).ask(dry("25"))).error, { code }, code);
 });
 
-// Card deposit-quote-no-liquidity: 1Click answered 25 USDC from Solana 400 "No liquidity available" through the helper (10
-// Nov 07:04-07:43Z). The dry read and the asset list's probes ask the same request again, the answer that follows is
-// checked as one is, and the whole ask fits inside the page's read deadline and the kit client's window.
-test("deposit.dry and deposit.assets: no liquidity twice, then a quote: the lines and the list, each request asked three times", async () => {
-  const f = frame({ quote: { noLiquidity: 2 } });
-  const d = await f.ask(dry("25"));
-  assert.equal(d.ok, true, JSON.stringify(d));
-  const quotes = f.sent.filter((x) => x.body !== undefined);
-  assert.equal(quotes.length, 3);
-  assert.deepEqual(quotes[2]!.body, quotes[0]!.body);
-  const a = frame({ quote: { noLiquidity: 2 } });
+// Card deposit-quote-no-liquidity (review ruling a): the display reads are asked again as the user types and opens the
+// sheet, so on 1Click's 400 "No liquidity available" they make one ask: the dry lines answer not_available, and an asset
+// whose probe had no liquidity is left out of the list while the others are listed.
+test("deposit.dry and deposit.assets: a no-liquidity answer is one ask: not_available, and only that asset left out", async () => {
+  const f = frame({ quote: { noLiquidity: 1 } });
+  assert.deepEqual((await f.ask(dry("25"))).error, { code: "not_available" });
+  assert.equal(f.sent.filter((x) => x.body !== undefined).length, 1);
+  const a = frame({ by: { [SOL_USDC]: { noLiquidity: 1 } } });
   const list = await a.ask(ASSETS);
   assert.equal(list.ok, true, JSON.stringify(list));
-  assert.equal((list.result as { assets: unknown[] }).assets.length, ONECLICK_USDC_ASSETS.length);
-  assert.equal(a.sent.filter((x) => x.body !== undefined).length, 3 * ONECLICK_USDC_ASSETS.length);
-  // no liquidity on every ask: three asks, then Not available, as one refused ask was
-  const never = frame({ quote: { noLiquidity: 99 } });
-  assert.deepEqual((await never.ask(dry("25"))).error, { code: "not_available" });
-  assert.equal(never.sent.filter((x) => x.body !== undefined).length, 3);
-  // a bad answer after the re-ask is refused as ever
-  const bad = frame({ quote: { noLiquidity: 1, after: (x) => void (x.quote.amountOut = "1") } });
-  assert.deepEqual((await bad.ask(dry("25"))).error, { code: "quote_check_failed" });
+  assert.deepEqual((list.result as { assets: { origin_asset: string }[] }).assets.map((x) => x.origin_asset), ONECLICK_USDC_ASSETS.filter((x) => x !== SOL_USDC));
+  assert.equal(a.sent.filter((x) => x.body !== undefined).length, ONECLICK_USDC_ASSETS.length);
 });
 
-test("the no-liquidity re-asks fit inside the page's read deadline and the kit client's window for every quoting kind", async () => {
-  const { NO_LIQUIDITY_SPAN_MS } = await import("../../wallet/src/deposit/quote.ts");
-  const { DEPOSIT_READ_DEADLINE_MS } = await import("../src/deposit-wire.ts");
+test("the committed asks end inside the one ask's window, well inside the kit client's for each committed kind", async () => {
+  const { DEPOSIT_QUOTE_TIMEOUT_MS } = await import("../../wallet/src/deposit/quote.ts");
   const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
-  assert.ok(NO_LIQUIDITY_SPAN_MS + 2_000 <= DEPOSIT_READ_DEADLINE_MS);
-  for (const kind of ["deposit.quote", "deposit.dry", "deposit.assets", "pool.address"] as const)
-    assert.ok(NO_LIQUIDITY_SPAN_MS + 3_000 <= SIGNPAGE_TIMEOUT_MS[kind]!, kind);
+  for (const kind of ["deposit.quote", "pool.address"] as const) assert.ok(DEPOSIT_QUOTE_TIMEOUT_MS + 3_000 <= SIGNPAGE_TIMEOUT_MS[kind]!, kind);
 });
 
 // ------------------------------------------------------------------------------------------------ deposit.quote

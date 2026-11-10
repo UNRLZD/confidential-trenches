@@ -9,9 +9,10 @@ import {
   DEPOSIT_QUOTE_ANSWER_MAX,
   DEPOSIT_QUOTE_URL,
   depositQuoteRequest,
+  askDepositQuoteAgain,
+  DEPOSIT_QUOTE_TIMEOUT_MS,
   NO_LIQUIDITY_ASK_MIN_MS,
   NO_LIQUIDITY_PAUSES_MS,
-  NO_LIQUIDITY_SPAN_MS,
   noLiquidity,
 } from "../src/deposit/quote.ts";
 
@@ -71,76 +72,111 @@ test("an answer over the cap, or not JSON, throws", async () => {
   await assert.rejects(askDepositQuote(request, bom), /not JSON/);
 });
 
-// Card deposit-quote-no-liquidity: 1Click's 400 "No liquidity available" (10 Nov 07:04-07:43Z through the helper, 25 USDC
-// from Solana; the body's message as research proofs/p3-coverage/results/oneclick-sweep.json holds it) is asked again,
-// the same request, a bounded number of times; every other answer comes back from the one ask. The body is 1Click's own,
-// as the deployed helper passed it on 10 Nov 19:06:57Z (a dry quote of NEAR USDC into a meme no solver quotes, in 3.5 s).
+// Card deposit-quote-no-liquidity: on 1Click's 400 "No liquidity available" the committed ask (askDepositQuoteAgain:
+// deposit.quote, pool.address, the refund move) asks the same request again inside the one ask's own 10 s window; the
+// display ask (askDepositQuote: the dry lines, the asset list's probes) asks once. The body is 1Click's own, as the
+// deployed helper passed it on 10 Nov 19:06:57Z (a dry quote of NEAR USDC into a meme no solver quotes, in 3.5 s).
 const NO_LIQ = { status: 400, body: { message: "No liquidity available", correlationId: "2357c43d-9fdf-4c05-9732-edaa447fcb6a", timestamp: "2026-11-10T19:06:57.250Z", path: "/v0/quote" } };
-function replay(answers: { status: number; body: unknown }[]) {
+const QUOTED = { status: 201, body: { quote: { amountOut: "24992592" } } };
+/** A helper answering `answers` in turn (the last again), each after `ms[i]` of its fake clock, real time 0. */
+function replay(answers: { status: number; body: unknown }[], ms: number[] = []) {
   const bodies: string[] = [];
+  const timeouts: unknown[] = [];
+  let now = 1_000.25;
   const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {
     bodies.push(String(init?.body));
+    timeouts.push(init?.signal);
+    now += ms[bodies.length - 1] ?? 0;
     const a = answers[Math.min(bodies.length, answers.length) - 1]!;
     return new Response(JSON.stringify(a.body), { status: a.status, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   const waits: number[] = [];
-  const sleep = async (ms: number) => void waits.push(ms);
-  return { fetchFn, bodies, waits, sleep };
+  const sleep = async (t: number) => void (waits.push(t), (now += t));
+  return { fetchFn, bodies, waits, sleep, clock: () => now, at: () => now };
 }
-const QUOTED = { status: 201, body: { quote: { amountOut: "24992592" } } };
+const req = () => depositQuoteRequest(U, SOL_USDC, 25_000_000n, NOW);
 
-test("a no-liquidity answer is asked again, the same request, and the quote that follows comes back", async () => {
-  const request = depositQuoteRequest(U, SOL_USDC, 25_000_000n, NOW);
+test("committed ask: a no-liquidity answer is asked again, the same request, and the quote that follows comes back", async () => {
   const r = replay([NO_LIQ, NO_LIQ, QUOTED]);
-  assert.deepEqual(await askDepositQuote(request, r.fetchFn, r.sleep), QUOTED);
-  assert.deepEqual(r.bodies, Array(3).fill(JSON.stringify(request)));
+  assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), QUOTED);
+  assert.deepEqual(r.bodies, Array(3).fill(JSON.stringify(req())));
   assert.deepEqual(r.waits, [...NO_LIQUIDITY_PAUSES_MS]);
-  // scripts/live-checks/deposit-quote-no-liquidity.mjs PAUSES_MS holds the served page to these
+  // scripts/live-checks/deposit-quote-no-liquidity.mjs reads these
   assert.deepEqual([...NO_LIQUIDITY_PAUSES_MS], [500, 1_000]);
 });
 
-test("no liquidity on every ask: three asks in all, then the last answer comes back for the caller to refuse", async () => {
-  const r = replay([NO_LIQ]);
-  assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 25_000_000n, NOW), r.fetchFn, r.sleep), NO_LIQ);
-  assert.equal(r.bodies.length, NO_LIQUIDITY_PAUSES_MS.length + 1);
-  assert.equal(r.bodies.length, 3);
+test("display ask: a no-liquidity answer is the one ask's, asked once", async () => {
+  const r = replay([NO_LIQ, QUOTED]);
+  assert.deepEqual(await askDepositQuote(req(), r.fetchFn), NO_LIQ);
+  assert.equal(r.bodies.length, 1);
 });
 
-test("the whole ask ends inside the span: each re-ask cut at what is left, none started with too little left", async () => {
-  // a re-ask with ASK_MIN left starts, cut at what is left; one with less does not start
-  const signals: (AbortSignal | null | undefined)[] = [];
-  const r = replay([NO_LIQ, NO_LIQ, QUOTED]);
-  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => (signals.push(init?.signal), r.fetchFn(url, init))) as typeof fetch;
-  const t1 = NO_LIQUIDITY_SPAN_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS;
-  const times = [0, t1, t1 + 1];
-  assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), fetchFn, r.sleep, () => times.shift() ?? 1e9), NO_LIQ);
-  assert.equal(r.bodies.length, 2, "the second ask starts with ASK_MIN left; the third has less and does not");
-  const late = replay([NO_LIQ, QUOTED]);
-  const lateTimes = [0, t1 + 1];
-  assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), late.fetchFn, late.sleep, () => lateTimes.shift() ?? 1e9), NO_LIQ);
+test("review P2-1: a fractional clock and 1Click's real 3.6 s refusals: the re-ask goes, cut at whole ms, inside the one ask's 10 s", async () => {
+  // real Node AbortSignal.timeout: a fractional timeout throws RangeError, which must never read as a failed re-ask
+  const r = replay([NO_LIQ, NO_LIQ, QUOTED], [3_600.4, 3_600.4, 900]);
+  const got = await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock);
+  // 3.6 s, then 0.5 s and 3.6 s: 7.7 s past the first send, 1.3 s left after the next pause: two asks, no third
+  assert.deepEqual(got, NO_LIQ);
+  assert.equal(r.bodies.length, 2);
+  assert.ok(r.at() - 1_000.25 <= DEPOSIT_QUOTE_TIMEOUT_MS, `inside the one ask's window: ${r.at() - 1_000.25}`);
+  // a faster first refusal leaves room for the quote
+  const fast = replay([NO_LIQ, QUOTED], [1_500.7, 900]);
+  assert.deepEqual(await askDepositQuoteAgain(req(), fast.fetchFn, fast.sleep, fast.clock), QUOTED);
+  assert.equal(fast.bodies.length, 2);
+});
+
+test("review c: the clock is read again after the pause: a late timer leaves too little of the window, and no re-ask starts", async () => {
+  const r = replay([NO_LIQ, QUOTED]);
+  let now = 0;
+  const lateSleep = async (t: number) => void (now += t + 8_000);
+  assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, lateSleep, () => now), NO_LIQ);
+  assert.equal(r.bodies.length, 1);
+  // and a first answer that used the window asks no more
+  const late = replay([NO_LIQ, QUOTED], [DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS + 1]);
+  assert.deepEqual(await askDepositQuoteAgain(req(), late.fetchFn, late.sleep, late.clock), NO_LIQ);
   assert.equal(late.bodies.length, 1);
-  // seconds, never minutes: inside the signing page's 14 s read deadline and the kit client's 15 s
-  assert.ok(NO_LIQUIDITY_SPAN_MS <= 12_000 && NO_LIQUIDITY_PAUSES_MS.reduce((a, b) => a + b, 0) <= 2_000);
 });
 
-test("a re-ask that fails leaves the no-liquidity answer standing: a throw, a timeout", async () => {
-  let n = 0;
-  const throws = (async () => {
-    if (n++ === 0) return new Response(JSON.stringify(NO_LIQ.body), { status: 400, headers: { "content-type": "application/json" } });
-    throw new TypeError("fetch failed");
+test("review P2-2: a re-ask the helper answers 429, 503 or 500 leaves the no-liquidity answer standing and asks no more", async () => {
+  for (const status of [429, 503, 500, 404]) {
+    const r = replay([NO_LIQ, { status, body: { error: { code: "busy" } } }, QUOTED]);
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), NO_LIQ, String(status));
+    assert.equal(r.bodies.length, 2, String(status));
+  }
+});
+
+test("a re-ask that fails as an ask fails leaves the no-liquidity answer standing; a programming error is thrown", async () => {
+  for (const err of [new TypeError("fetch failed"), Object.assign(new Error("t"), { name: "TimeoutError" })]) {
+    let n = 0;
+    const f = (async () => {
+      if (n++ === 0) return new Response(JSON.stringify(NO_LIQ.body), { status: 400, headers: { "content-type": "application/json" } });
+      throw err;
+    }) as unknown as typeof fetch;
+    assert.deepEqual(await askDepositQuoteAgain(req(), f, async () => {}), NO_LIQ);
+    assert.equal(n, 2);
+  }
+  let m = 0;
+  const html = (async () => (m++ === 0 ? new Response(JSON.stringify(NO_LIQ.body), { status: 400 }) : new Response("<html>", { status: 200 }))) as unknown as typeof fetch;
+  assert.deepEqual(await askDepositQuoteAgain(req(), html, async () => {}), NO_LIQ);
+  let k = 0;
+  const broken = (async () => {
+    if (k++ === 0) return new Response(JSON.stringify(NO_LIQ.body), { status: 400 });
+    throw new RangeError("a programming error");
   }) as unknown as typeof fetch;
-  assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), throws, async () => {}), NO_LIQ);
-  assert.equal(n, 2, "one re-ask, then the answer stands");
-  // the re-ask's own timeout is what is left of the span, never the 10 s of one ask
+  await assert.rejects(askDepositQuoteAgain(req(), broken, async () => {}), RangeError);
+});
+
+test("the re-ask's own timeout is what is left of the window, in whole ms", async () => {
   let m = 0;
   const hangs = ((_u: string | URL | Request, init?: RequestInit) => {
     if (m++ === 0) return Promise.resolve(new Response(JSON.stringify(NO_LIQ.body), { status: 400 }));
     return new Promise<Response>((_ok, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
   }) as typeof fetch;
   const t0 = Date.now();
-  const times = [0, NO_LIQUIDITY_SPAN_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS];
-  assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), hangs, async () => {}, () => times.shift() ?? 1e9), NO_LIQ);
+  const times = [0.5, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS + 0.1, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_ASK_MIN_MS - 0.3];
+  assert.deepEqual(await askDepositQuoteAgain(req(), hangs, async () => {}, () => times.shift() ?? 1e9), NO_LIQ);
   const took = Date.now() - t0;
+  assert.equal(m, 2);
   assert.ok(took >= NO_LIQUIDITY_ASK_MIN_MS - 50 && took < NO_LIQUIDITY_ASK_MIN_MS + 1_000, `cut at what was left: ${took} ms`);
 });
 
@@ -150,7 +186,7 @@ test("any other answer is the one ask's: a 400 of another message, 429, 503, a q
     { status: 503, body: { message: "No liquidity available" } }, { status: 400, body: { message: "Not: No liquidity available" } },
     { status: 429, body: {} }, { status: 503, body: {} }, QUOTED]) {
     const r = replay([a, QUOTED]);
-    assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), r.fetchFn, r.sleep), a, JSON.stringify(a));
+    assert.deepEqual(await askDepositQuoteAgain(req(), r.fetchFn, r.sleep, r.clock), a, JSON.stringify(a));
     assert.equal(r.bodies.length, 1, JSON.stringify(a));
     assert.deepEqual(r.waits, []);
   }

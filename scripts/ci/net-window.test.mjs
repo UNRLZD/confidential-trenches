@@ -216,7 +216,6 @@ export const CHANGED = [
   "scripts/live-checks/wallet-withdraw-move-out.mjs",
   "scripts/live-checks/wallet-mainnet-relayer-pins.mjs",
   "scripts/live-checks/deposit-sheet-oneclick-budget.mjs",
-  "scripts/live-checks/deposit-quote-no-liquidity.mjs",
   "scripts/live-checks/provider-answer.mjs",
   "scripts/live-checks/terminal-harness-sign-spa.mjs",
   "scripts/live-checks/verify-pools.mjs",
