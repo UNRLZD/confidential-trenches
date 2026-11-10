@@ -152,7 +152,7 @@ export const MUTANTS = [
   [EVM, "authorizations: [auth] });", "authorizations: [] });", T, "a good sell:"],
   [EVM, "    if (nonce + 1n > lane.nextNonce) lane.nextNonce = nonce + 1n;", "", T, "once per (W, Sell nonce):"],
   // fold 1, M3 (b): one provider refusing the send still sends, and the next sale takes nonce + 1
-  [EVM, "    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", "    if (why.length > 0) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", T, "one provider refusing the send:"],
+  [EVM, "    if (why.length === sent.length) return unread(why.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", "    if (why.length > 0) return unread(why.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? why[0]);\n    const until = Number(s.deadline)", T, "one provider refusing the send:"],
   // the fee answer
   [EVM, "fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector", "fee_recipient: feeRecipient, sell_sender: sender, fee_collector", T, "the fee answer names"],
   [EVM, "fee_collector: feeCollector ?? null, epoch_ms", "fee_collector: feeRecipient, epoch_ms", T, "the fee answer names"],
@@ -303,9 +303,9 @@ export const MUTANTS = [
   [EVM, "      if (x !== null && l > x.nonce) x = null;", "", T, "a provider whose latest count stays below"],
   [EVM, "      if (x !== null && l > x.nonce) x = null;", "      if (x !== null && l >= x.nonce) x = null;", T, "a provider whose latest count stays below"],
   [EVM, "      if (x === null && l < lane.nextNonce) x = {", "      if (x === null) x = {", T, "a provider whose latest count stays below"],
-  [EVM, "    behindOf(sellLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
-  [EVM, "    behindOf(withdrawLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
-  [EVM, "    behindOf(lane, la, lb);", "", T, "a held answer whose tend sent something"],
+  [EVM, "      behindOf(sellLane, qty(latest[0]), qty(latest[1]), opsOf(latest));", "", T, "a provider whose latest count stays below"],
+  [EVM, "      behindOf(withdrawLane, qty(latest[0]), qty(latest[1]), opsOf(latest));", "", T, "a provider whose latest count stays below"],
+  [EVM, "    behindOf(lane, la, lb, opsOf(l!));", "", T, "a held answer whose tend sent something"],
   // fold 7: a held answer's wait, one hold read per block, the prior hashes kept, a provider ahead
   [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = Infinity;", T, "callers obeying Retry-After through a heal"],
   [EVM, "      if (sent > 0) lane.heldSentAt = now();", "", T, "callers obeying Retry-After through a heal"],

@@ -67,6 +67,19 @@
 //                    answers), or the two answers differ, or name a chain other than the network's pinned one
 //                    (M356 (6)): the send is signed only for the chain W signed for. Each such answer writes one log
 //                    line naming the read, each provider's host and its answer, never a key.
+// What one operator's word may set, and what it never sets (review of 686dda50). On two operators that agree, each
+// side its own (two, wordsOnBoth, viewAt): the chain id W's signature and the send are checked and signed for; the
+// period's first block (its hash, number, time and base fee, and the block before it named before the period, F1) and
+// every fee input read at its hash (the tree depth, the chain fee), so the fee GET /v1/pool/fee publishes and fee_off
+// checks; the recipient's code; the senders' pending and latest counts (the nonce signed, lower of the two) and pending
+// balances (the reserve and the low mark); a sale's W nonce, block base fees (the higher bounds the fee per gas signed),
+// and its chain fee; every receipt that clears or charges a send (two operators' receipts). On one side alone, each
+// read bounded by what the request already fixed: the newest block's base fee and the tip at a withdraw's send (the fee
+// per gas signed is min(2 x base + tip, fee / gas limit): the fee caps it), the gas estimate (capped at EVM_GAS_MAX, the
+// fee caps its price), and the simulations (eth_call at pending for a withdraw, a buy and a sale): a lie there can only
+// refuse a send or let one through that reverts at the sender's own gas, under the caps above. On a failover a
+// simulation shows the buy or sale to a public operator a few hundred ms before it is sent, from the helper's address,
+// bounded by its minOut.
 // A nullifier is sent once (./once.ts): a repeat gets the first hash and sends nothing; a repeat after that send
 // reverted by the same method is refused as reverted. Each send's maxFeePerGas is at most fee / gas limit, so the
 // sender never pays more gas than the fee. A withdraw the helper accepts lands or fails in the simulation (the recipient
@@ -807,9 +820,21 @@ const qty = (v: unknown): bigint => {
  * code) is the provider's, so it answers 503 upstream (429 rate_limited for a throttle) and never blames the request.
  */
 const failedInExecution = (e: unknown): boolean => {
+  if (evmChainAnswered(e)) return true;
   const m = String((e as Error | undefined)?.message ?? e);
   return /^RPC error (3|-32000|-32003): /.test(m) && !/rate|limit exceeded|too many|capacity/i.test(m) && !(/^RPC error -32000: (?!execution reverted)/i.test(m) && STATE_MISS.test(m));
 };
+/**
+ * A revert: code 3, or a -32000 whose message starts "execution reverted" (geth's words). The chain's own answer before
+ * any word in it is read (review of 686dda50, F2): its reason is the called contract's (a token's "Max wallet limit
+ * exceeded", a hook's), which a caller chooses, so it never reads as a provider's throttle or miss, never walks to
+ * another seat and never holds a provider.
+ */
+export const evmChainAnswered = (e: unknown): boolean => /^RPC error (3: |-32000: execution reverted)/i.test(String((e as Error | undefined)?.message ?? e));
+/** A send's answer that means the node holds the transaction: sent, or refused as one it already has (geth "already
+ *  known", Nethermind "Transaction with the same hash was already imported", "known transaction"). */
+export const evmSendAccepted = (x: PromiseSettledResult<unknown>): boolean =>
+  x.status === "fulfilled" || /already known|already imported|known transaction/i.test(String((x.reason as Error | undefined)?.message ?? x.reason));
 /**
  * A block or state the node does not hold, in a JSON-RPC error's words: the provider's miss, never the chain's answer
  * (card helper-evm-read-two-operators). robinhood-rpc.publicnode.com, robinhood.rpc.blxrbdn.com and
@@ -855,12 +880,18 @@ export function evmPoolSender(
   /** Both sides' answers to one read, as Promise.allSettled gives them. */
   const settled = async (method: string, params: readonly unknown[]): Promise<PromiseSettledResult<unknown>[]> =>
     (await pair.both(method, params)).map((x) => (x.ok ? { status: "fulfilled" as const, value: x.value } : { status: "rejected" as const, reason: x.error }));
-  /** Both sides' answers to one read, or a throw: a throttle on either side first (429 with its wait), else side a's. */
+  /** A signed transaction sent on both sides, two operators; a node that already holds it ("already known": a first
+   *  seat that timed out after passing it on, or the other side's) took it, so that answer is the send accepted. */
+  const sendBoth = async (raw: string): Promise<PromiseSettledResult<unknown>[]> => (await settled("eth_sendRawTransaction", [raw])).map((x) => (evmSendAccepted(x) && x.status === "rejected" ? { status: "fulfilled" as const, value: null } : x));
+  /** The operators that answered a `two` read, side by side (a log line names them, never "a" and "b"). */
+  const opsOf = (v: readonly unknown[]): readonly [string, string] => (v as unknown as { operators?: readonly [string, string] }).operators ?? ["a", "b"];
+  /** Both sides' answers to one read, or a throw: a throttle on either side first (429 with its wait), else side a's;
+   *  the array carries the two operators as `operators`. */
   const two = async (method: string, params: readonly unknown[]): Promise<[unknown, unknown]> => {
     const [x, y] = await pair.both(method, params);
-    if (x.ok && y.ok) return [x.value, y.value];
+    if (x.ok && y.ok) return Object.assign([x.value, y.value] as [unknown, unknown], { operators: [x.operator, y.operator] as const });
     const errs = [x, y].flatMap((r) => (r.ok ? [] : [r.error]));
-    throw errs.find((e) => throttleOf(e, true) > 0) ?? errs[0];
+    throw errs.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? errs[0];
   };
   /** The chain fee's reads at latest, each on both sides: each side's words, in the reads' order. */
   const wordsOnBoth = async (reads: readonly { to: string; data: string }[]): Promise<[bigint[], bigint[]]> => {
@@ -1016,10 +1047,17 @@ export function evmPoolSender(
     const known = fees.get(epochStartMs);
     if (known) return known;
     const p = (async () => {
-      const block = await evmFirstBlockAtOrAfter(a, BigInt(Math.ceil(epochStartMs / 1000)));
+      const seconds = BigInt(Math.ceil(epochStartMs / 1000));
+      const block = await evmFirstBlockAtOrAfter(a, seconds);
       if (block === null) return null;
-      const same = (await two("eth_getBlockByNumber", [tag(block.number), false])).map(blockOf);
-      if (same.some((x) => x.hash !== block.hash)) throw new Error("the providers hold different blocks");
+      // review of 686dda50 (F1): the block the search found, and the one before it, read again on two operators: both
+      // name its hash, number, time and base fee, and a time before the period for the one before, else no fee (one
+      // seat's word never picks the period's first block nor prices it)
+      const [same, before] = await Promise.all([two("eth_getBlockByNumber", [tag(block.number), false]), block.number > 0n ? two("eth_getBlockByNumber", [tag(block.number - 1n), false]) : Promise.resolve(null)]);
+      const at = same.map(blockOf);
+      const prior = before?.map(blockOf) ?? null;
+      if (at.some((x) => x.hash !== block.hash || x.number !== block.number || x.timestamp !== block.timestamp || x.baseFeePerGas !== block.baseFeePerGas) || block.timestamp < seconds || (prior !== null && prior.some((x) => x.timestamp >= seconds || x.number !== block.number - 1n)))
+        throw new Error("the providers hold different blocks");
       const d = await viewAt(pool, TREE_DEPTH_DATA, block.hash);
       const gas = evmPoolGas(Number(d)); // a depth past the pool's 32 throws
       const answers = [];
@@ -1178,12 +1216,12 @@ export function evmPoolSender(
       const codes = (await Promise.all(["pending", "latest"].map((at) => two("eth_getCode", [w.recipient, at])))).flat();
       if (codes.some((c) => c !== "0x")) return no(422, "recipient_code");
       // a buy reads the sender's pending balance on both providers too (the withdraws' reserve)
-      const [block, t, [n, m], [ln, lm], bal] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), two("eth_getTransactionCount", [sender, "pending"]), two("eth_getTransactionCount", [sender, "latest"]), keys === undefined ? [] : two("eth_getBalance", [sender, "pending"])]);
+      const [block, t, [n, m], latest, bal] = await Promise.all([a("eth_getBlockByNumber", ["latest", false]), a("eth_maxPriorityFeePerGas", []), two("eth_getTransactionCount", [sender, "pending"]), two("eth_getTransactionCount", [sender, "latest"]), keys === undefined ? [] : two("eth_getBalance", [sender, "pending"])]);
       base = qty((block as { baseFeePerGas?: unknown })?.baseFeePerGas);
       tip = qty(t);
       [pa, pb] = [qty(n), qty(m)];
       if (bal.length === 2) [balA, balB] = [qty(bal[0]), qty(bal[1])];
-      behindOf(withdrawLane, qty(ln), qty(lm));
+      behindOf(withdrawLane, qty(latest[0]), qty(latest[1]), opsOf(latest));
     } catch (e) {
       return unread(e);
     }
@@ -1239,9 +1277,9 @@ export function evmPoolSender(
     if (w.buy !== undefined && sim !== BUY_TRUE) return no(422, "simulation_failed", `the buy's simulation answers ${String(sim).slice(0, 80)}, not true: its swap would fail and the pool would pay W ETH`);
     const nonce = await nonceFor(withdrawLane, pa, pb);
     const { raw, hash } = signEvmTx({ chainId: id, nonce, maxPriorityFeePerGas, maxFeePerGas, gas, to: pool, data: bytes }, cfg.senderKey);
-    const sent = await settled("eth_sendRawTransaction", [`0x${hex(raw)}`]);
+    const sent = await sendBoth(`0x${hex(raw)}`);
     const why = sent.flatMap((s) => (s.status === "rejected" ? [s.reason as unknown] : []));
-    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
+    if (why.length === sent.length) return unread(why.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(w.deadlineMs) + EVM_POOL_SEND_MARGIN_MS;
     sentAt(withdrawLane, nonce, until, maxFeePerGas, maxPriorityFeePerGas, hash, false);
     let landed: ((ra: Record<string, unknown>, rb: Record<string, unknown>) => void) | undefined;
@@ -1350,26 +1388,26 @@ export function evmPoolSender(
   const lower = (x: bigint, y: bigint) => (x < y ? x : y);
   /** The lane's sender's pending and latest counts on both providers. */
   const countsOf = async (lane: Lane) => {
-    const [p, l] = await Promise.all(["pending", "latest"].map(async (at) => (await two("eth_getTransactionCount", [lane.from, at])).map(qty)));
-    const [pa, pb, la, lb] = [...p!, ...l!] as [bigint, bigint, bigint, bigint];
-    behindOf(lane, la, lb);
+    const [p, l] = await Promise.all(["pending", "latest"].map((at) => two("eth_getTransactionCount", [lane.from, at])));
+    const [pa, pb, la, lb] = [...p!, ...l!].map(qty) as [bigint, bigint, bigint, bigint];
+    behindOf(lane, la, lb, opsOf(l!));
     return { pa, pb, la, lb };
   };
   /** Each provider's latest count against the nonces the lane sent: one that stays below the same sent nonce for
    *  EVM_LANE_WATCH_MS is logged once, naming the provider and the nonce (a provider that lies about receipts or counts
    *  is never silent). A count that passes it starts the watch again at the lane's next nonce. A count past the lane's next
    *  nonce (more sends than this key made) is logged once as ahead, naming the provider. */
-  const behindOf = (lane: Lane, la: bigint, lb: bigint): void => {
+  const behindOf = (lane: Lane, la: bigint, lb: bigint, ops: readonly [string, string]): void => {
     [la, lb].forEach((l, i) => {
       if (lane.nextNonce >= 0n && l > lane.nextNonce && !lane.ahead[i]) {
-        log(`evm ${cfg.network}: provider ${i === 0 ? "a" : "b"}'s latest count for ${lane.from} is ${l}, ahead of the lane's next nonce ${lane.nextNonce}: it counts sends this key never made`);
+        log(`evm ${cfg.network}: provider ${ops[i]}'s latest count for ${lane.from} is ${l}, ahead of the lane's next nonce ${lane.nextNonce}: it counts sends this key never made`);
         lane.ahead[i] = true;
       }
       let x: Behind = lane.behind[i] ?? null;
       if (x !== null && l > x.nonce) x = null;
       if (x === null && l < lane.nextNonce) x = { nonce: l, since: now(), said: false };
       if (x !== null && !x.said && now() - x.since >= EVM_LANE_WATCH_MS) {
-        log(`evm ${cfg.network}: provider ${i === 0 ? "a" : "b"}'s latest count for ${lane.from} has stayed at ${x.nonce} for ${EVM_LANE_WATCH_MS / 60_000} min: the lane's send at nonce ${x.nonce} is unmined there`);
+        log(`evm ${cfg.network}: provider ${ops[i]}'s latest count for ${lane.from} has stayed at ${x.nonce} for ${EVM_LANE_WATCH_MS / 60_000} min: the lane's send at nonce ${x.nonce} is unmined there`);
         x.said = true;
       }
       lane.behind[i] = x;
@@ -1565,7 +1603,7 @@ export function evmPoolSender(
       if (again) {
         // the same signed bytes, broadcast again: its hash, fee fields and gas unchanged
         const raw = old!.raw!;
-        const sent = await settled("eth_sendRawTransaction", [raw]);
+        const sent = await sendBoth(raw);
         if (sent.every((x) => x.status === "rejected")) throw new Error(`both providers refused the replacement at nonce ${n} again: ${String((sent[0] as PromiseRejectedResult).reason).slice(0, 120)}`);
         made.n++;
         const until = now() + EVM_SELL_DROP_MARGIN_MS;
@@ -1593,7 +1631,7 @@ export function evmPoolSender(
         gas += poster + (poster + 4n) / 5n;
       }
       const { raw, hash } = signEvmTx({ chainId: id, nonce: n, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee, gas, to: lane.from, data: new Uint8Array() }, key);
-      const sent = await settled("eth_sendRawTransaction", [`0x${hex(raw)}`]);
+      const sent = await sendBoth(`0x${hex(raw)}`);
       if (sent.every((x) => x.status === "rejected")) throw new Error(`both providers refused the replacement at nonce ${n}: ${String((sent[0] as PromiseRejectedResult).reason).slice(0, 120)}`);
       made.n++;
       lane.ceilingSaid = false;
@@ -1704,7 +1742,7 @@ export function evmPoolSender(
           return null;
         }
       }));
-      const [[ba, bb], [wa, wb], [n, m], [ln, lm], [bla, blb]] = await Promise.all([two("eth_getBlockByNumber", ["latest", false]), two("eth_getTransactionCount", [w, "pending"]), two("eth_getTransactionCount", [from, "pending"]), two("eth_getTransactionCount", [from, "latest"]), balances]);
+      const [[ba, bb], [wa, wb], [n, m], latest, [bla, blb]] = await Promise.all([two("eth_getBlockByNumber", ["latest", false]), two("eth_getTransactionCount", [w, "pending"]), two("eth_getTransactionCount", [from, "pending"]), two("eth_getTransactionCount", [from, "latest"]), balances]);
       // the low mark: one log line when the lower balance first falls under one hour's unpaid sell budget, again only
       // after a read at or over it; the sale goes on either way (a dry sender fails at broadcast, 503)
       const known = [bla, blb].filter((x): x is bigint => x !== null);
@@ -1721,7 +1759,7 @@ export function evmPoolSender(
       const [na, nb] = [qty(wa), qty(wb)];
       if (na !== auth.nonce || nb !== auth.nonce) return no(422, "auth_nonce", `W's pending nonce ${na} and ${nb}, the authorization's ${auth.nonce}`);
       [pa, pb] = [qty(n), qty(m)];
-      behindOf(sellLane, qty(ln), qty(lm));
+      behindOf(sellLane, qty(latest[0]), qty(latest[1]), opsOf(latest));
     } catch (e) {
       return unread(e);
     }
@@ -1759,9 +1797,9 @@ export function evmPoolSender(
       return failedInExecution(e) ? no(422, "simulation_failed", String((e as Error).message).slice(0, 200)) : unread(e);
     }
     const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), key);
-    const sent = await settled("eth_sendRawTransaction", [`0x${hex(raw)}`]);
+    const sent = await sendBoth(`0x${hex(raw)}`);
     const why = sent.flatMap((x) => (x.status === "rejected" ? [x.reason as unknown] : []));
-    if (why.length === sent.length) return unread(why.find((e) => throttleOf(e, true) > 0) ?? why[0]);
+    if (why.length === sent.length) return unread(why.find((e) => !evmChainAnswered(e) && throttleOf(e, true) > 0) ?? why[0]);
     const until = Number(s.deadline) * 1000 + EVM_POOL_SEND_MARGIN_MS;
     sentAt(sellLane, nonce, until, maxFeePerGas, tip, hash, false);
     watch(sellLane, nonce, hash, until, landedSale(charge(keys, worst), s, w, maxFeePerGas, keys));
@@ -1838,6 +1876,7 @@ const EVM_READY_WAIT_MS = 1_000;
  *  throttle codes) or a timeout: the provider's moment, which ready() asks again. A missing state is neither. */
 const askAgain = (e: unknown): boolean => {
   const m = String((e as Error | undefined)?.message ?? e);
+  if (evmChainAnswered(e)) return false;
   return throttleOf(e, true) > 0 || /^RPC error (-32029|-32429|-429|15):/.test(m) || (e as Error | undefined)?.name === "TimeoutError" || /no answer in \d+ ms|aborted due to timeout|timed? ?out/i.test(m);
 };
 
@@ -1910,7 +1949,7 @@ export function pacedEvmRpc(url: string, rpc: EvmRpc, holds: ProviderHolds, slee
     try {
       return await rpc(method, params);
     } catch (e) {
-      if (throttleOf(e, true) > 0) {
+      if (!evmChainAnswered(e) && throttleOf(e, true) > 0) {
         const after = (e as { afterMs?: unknown }).afterMs;
         holds.hold(url, typeof after === "number" && after > 0 ? Math.min(Math.ceil(after / 1000), RETRY_AFTER_MAX_S) : 1);
       }
@@ -2045,24 +2084,33 @@ export function evmReadPair(seats: readonly EvmSeat[], first: readonly [string, 
     const failed: string[] = [];
     let firstError: unknown;
     let asked = 0;
-    seats: for (const op of orders[k]) {
-      if (theirs.has(op)) continue;
-      mine.add(op);
-      for (const p of seatsOf.get(op) ?? []) {
-        const left = start + budgetMs - now();
-        if (asked > 0 && left <= 0) break seats;
-        if (asked > 0 && p.skip?.() === true) continue;
-        try {
-          const v = await (asked++ === 0 ? p.rpc(method, params) : within(p.rpc(method, params), left));
-          if (BLOCK_READS.has(method) && (v === null || typeof v !== "object")) throw new Error(`${v === null ? "null" : typeof v}: no such block here`);
-          if (failed.length > 0) o.log(`${readOf(method, params)} failed at ${failed.join("; ")}; ${p.name} answered`);
-          return { value: v, operator: op };
-        } catch (e) {
-          if (failedInExecution(e)) throw e;
-          if (firstError === undefined) firstError = e;
-          failed.push(`${p.name}: ${said(e)}`);
-          if (e === CUT) break seats; // the budget is spent, whatever a timer's grain says of the clock
+    // a held seat (the first included, review of 686dda50 F3) is passed over while another seat can be asked, and asked
+    // after them, in order, only when none answered: its call waits its hold out
+    const held: EvmSeat[] = [];
+    const queue = function* (): Generator<{ p: EvmSeat; op: string }> {
+      for (const op of orders[k]) {
+        if (theirs.has(op)) continue;
+        mine.add(op);
+        for (const p of seatsOf.get(op) ?? []) {
+          if (p.skip?.() === true) held.push(p);
+          else yield { p, op };
         }
+      }
+      for (const p of held) yield { p, op: p.operator };
+    };
+    seats: for (const { p, op } of queue()) {
+      const left = start + budgetMs - now();
+      if (asked > 0 && left <= 0) break seats;
+      try {
+        const v = await (asked++ === 0 ? p.rpc(method, params) : within(p.rpc(method, params), left));
+        if (BLOCK_READS.has(method) && (v === null || typeof v !== "object")) throw new Error(`${v === null ? "null" : typeof v}: no such block here`);
+        if (failed.length > 0) o.log(`${readOf(method, params)} failed at ${failed.join("; ")}; ${p.name} answered`);
+        return { value: v, operator: op };
+      } catch (e) {
+        if (failedInExecution(e)) throw e;
+        if (firstError === undefined) firstError = e;
+        failed.push(`${p.name}: ${said(e)}`);
+        if (e === CUT) break seats; // the budget is spent, whatever a timer's grain says of the clock
       }
     }
     if (asked === 0) throw new Error(`${readOf(method, params)}: no operator left apart from the other side's`);
@@ -2072,10 +2120,11 @@ export function evmReadPair(seats: readonly EvmSeat[], first: readonly [string, 
   return {
     one: (k, method, params) => walk(k, method, params, new Set(), NONE).then((r) => r.value),
     both: (method, params) => {
-      const claimed: [Set<string>, Set<string>] = [new Set(), new Set()];
+      // each side's own first operator is its claim before either side asks anything: a side whose first seat is held
+      // walks on at once, and never into the other side's first
+      const claimed: [Set<string>, Set<string>] = [new Set([first[0]]), new Set([first[1]])];
       const side = (k: 0 | 1): Promise<EvmSideAnswer> =>
         walk(k, method, params, claimed[k], claimed[1 - k]!).then((r) => ({ ok: true as const, value: r.value, operator: r.operator }), (error: unknown) => ({ ok: false as const, error }));
-      // side 0's first claim is made before side 1 starts: each claims its own first operator before any wait
       return Promise.all([side(0), side(1)]);
     },
   };
@@ -2167,7 +2216,7 @@ export function evmPoolSendersFromEnv(env: Record<string, string | undefined>, v
     const keyed = keyedOf(env, network);
     const seats = evmPoolSeats(urls as [string, string], keyed, listed).map((p): EvmSeat => {
       const k = urls.indexOf(evmRpcUrlOf(p.url));
-      return { ...p, rpc: k >= 0 ? pairRpcs[k]! : paced(p.url, keyed.some((x) => x.url === p.url)), ...(k < 0 && holds !== undefined ? { skip: () => holds.heldMs(p.url) > 0 || holds.dayOut(p.url, 1) } : {}) };
+      return { ...p, rpc: k >= 0 ? pairRpcs[k]! : paced(p.url, keyed.some((x) => x.url === p.url)), ...(holds !== undefined ? { skip: () => holds.heldMs(p.url) > 0 || holds.dayOut(p.url, 1) } : {}) };
     });
     const providers = evmReadPair(seats, [ops[0]!, ops[1]!], { log: (line) => say(`evm ${network}: ${line}`) });
     const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;

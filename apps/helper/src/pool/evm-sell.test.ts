@@ -201,7 +201,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
       }
       case "eth_getBalance": return params[0] === SENDER && params[1] === "pending" ? (o.balance?.() ?? `0x${(10n ** 18n).toString(16)}`) : "0x0";
       case "eth_sendRawTransaction":
-        if (o.sendFails) throw new Error("RPC error -32000: already known");
+        if (o.sendFails) throw new Error("RPC error -32000: transaction underpriced"); // a refusal ("already known" is the send accepted)
         return `0x${hex(keccak_256(unhex(params[0] as string)))}`;
       case "eth_getTransactionReceipt": if (o.receipt) return o.receipt(params[0] as string); break;
       case "eth_getTransactionByHash": if (o.tx) return o.tx(params[0] as string); break;
@@ -1457,7 +1457,7 @@ const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
     return async (method, params) => {
       if (method === "eth_sendRawTransaction" && (st.refuse || fieldsOf(params[0] as string).nonce === st.refuseAt)) {
         calls.push({ method, params });
-        throw new Error("RPC error -32000: already known");
+        throw new Error("RPC error -32000: replacement transaction underpriced"); // a refusal ("already known" is the send accepted)
       }
       const out = await r(method, params);
       if (method === "eth_sendRawTransaction" && !st.drop) {
@@ -2152,6 +2152,40 @@ test("one operator's receipt on both sides, at two reads, never clears a charge:
       assert.ok(detail(last!).includes("this client"), detail(last!));
     } else assert.equal(sent, 60, `${name}: ${sent} sent`);
   }
+});
+
+// review of 686dda50: the watch judges a sale on the two newest operators' receipts: an operator's receipt read first
+// (here one with no Paid log) gives way to two later operators that prove it
+test("a sale's first receipt from one operator, then two other operators' proving it: the two newest decide, and the sale is paid", async () => {
+  const x: Calls = [];
+  const proven = provenOf(x);
+  const unproven = provenOf(x, { log: () => ({ address: "0x00000000000000000000000000000000000bad00", topics: [], data: "0x" }) });
+  const [ra, rb] = [rpc(x, { receipt: proven }), rpc([], { receipt: proven })];
+  const answer = (r: EvmRpc, operator: string, m: string, p: readonly unknown[]) => r(m, p).then((value) => ({ ok: true as const, value, operator }), (error: unknown) => ({ ok: false as const, error }));
+  let reads = 0;
+  const pair: EvmPair = {
+    one: (k, m, p) => (k === 0 ? ra : rb)(m, p),
+    both: async (m, p) => {
+      if (m !== "eth_getTransactionReceipt") return Promise.all([answer(ra, "a", m, p), answer(rb, "b", m, p)]);
+      const first = reads++ % 2 === 0;
+      const h = p[0] as string;
+      // the first read: operator x's receipt without the Paid log, and none from w; the next: y's and z's, proven
+      return first ? [{ ok: true as const, value: unproven(h), operator: "x" }, { ok: true as const, value: null, operator: "w" }] : [{ ok: true as const, value: proven(h), operator: "y" }, { ok: true as const, value: proven(h), operator: "z" }];
+    },
+  };
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1, readyProviders: [ra, rb] }, pair, () => clock);
+  let sent = 0;
+  for (let i = 0; i < 60; i++) {
+    const r = await s.sell(freshBody(`W-newest-${i}`, { sell: { token: `0x${(0xe200 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.79");
+    if (r.status !== 200) break;
+    sent++;
+    const before = reads;
+    while (reads < before + 2) await new Promise((ok) => setTimeout(ok, 1));
+    await new Promise((ok) => setImmediate(ok));
+  }
+  clock = PAST_EVERY_WATCH;
+  assert.equal(sent, 60, `${sent} sent: each sale cleared by the two newest operators' proofs`);
 });
 
 test("each part of the Paid log is checked: another emitter (W itself, the pool, another), another topic, another from, a value under the fee, a removed log, a short data or a third topic is no proof, on either provider", async () => {
