@@ -87,7 +87,7 @@ const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length ===
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
-    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,${N}\\(\\5\\.scope\\)\\);`,
+    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,await ${N}\\(\\5\\.scope\\)\\);`,
 );
 const UX_CARRY = new RegExp(
   `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null;for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\7!==\\8\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
@@ -127,7 +127,7 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // looked up across the bundle; `R` the held reader's builder; named groups: ids, keep, signal, why (readDepositIds'
 // sixth parameter), pair, pass, net (the network), H, R
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
     `(?<H>${N})=await (?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),`,
 );
 // the held reader: each provider's reader (`readOn`) reads the token (ft_balance_of, once U is registered on it) and adds

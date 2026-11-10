@@ -213,6 +213,12 @@ export async function restoreDepositIds(
     first?: number;
     /** each lane's ids once read, before the next lane is read (step 7's counter on the device's own lane) */
     laneRead?: (x: LaneIds) => Promise<void>;
+    /**
+     * lanes an earlier run read whole, each with the index it read to: a lane is not read again (nor returned) while
+     * that index is at or past the bound its notes give it now (more notes since, past it, and the lane is read whole
+     * again)
+     */
+    done?: ReadonlyMap<number, number>;
     /** the run's signal: a read that throws after it ended stops the lanes (never an id unread) */
     signal?: AbortSignal;
   } = {},
@@ -253,6 +259,8 @@ export async function restoreDepositIds(
     // for that alone; the bound is still checked at each index
     let win = new Map<number, string>();
     const bound = (): number => Math.min(U32, (highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);
+    const was = opts.done?.get(lane);
+    if (was !== undefined && was >= bound()) continue;
     for (let i = lane; i <= U32 && i <= bound(); i += RESTORE_LANES) {
       readTo = i;
       if (!win.has(i)) {

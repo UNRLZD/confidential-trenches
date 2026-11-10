@@ -450,7 +450,7 @@ test("deposit ids: an id unread on both providers is named unread and the ids af
   const asked = new Set(n.log.map((l) => l.split(" ")[1]!));
   for (let lane = 0; lane < 8; lane++) assert.ok(asked.has(idOf(EVM_SCOPE, lane + 8 * 19)), `lane ${lane} read on`);
   assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
-  assert.deepEqual(n.found.get(EVM_SCOPE)!.lanes[3]!.unread.map((x) => x.i), [43]);
+  assert.deepEqual(n.found.get(EVM_SCOPE)!.lanes.find((x) => x.lane === 3)!.unread.map((x) => x.i), [43]);
   // the floor: the walk's notes are written whatever the ids read
   const notes = [...notesOf(SOL_SCOPE, LABEL_S, 1000n), ...notesOf(EVM_SCOPE, LABEL_E, 2000n)].map((x) => `${refKey(x.ref)} ${x.state}`).sort();
   assert.deepEqual(await listed(w.store), notes);
@@ -728,7 +728,7 @@ test("planted: a U_X holding money with no note on this device and no trace on N
   assert.equal(await whole(w), "stalled");
   assert.deepEqual(w.ends, [{ stage: "done", why: [] }]);
   assert.deepEqual(w.steps.map((x) => ({ retry: x.retry, named: x.named })), [{ retry: [], named: [`solana: deposit index 3's one-time wallet ${solUx(id)} holds ${HELD}, with no deposit note on this device for its index to carry it into the pool`] }]);
-  const lane = n.found.get(SOL_SCOPE)!.lanes[3]!;
+  const lane = n.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === 3)!;
   assert.deepEqual({ money: lane.money, highest: lane.highest, readTo: lane.readTo }, { money: [3], highest: 3, readTo: 3 + 8 * 21 });
   assert.deepEqual(ux.deposits, []);
   // every U_X asked on both providers at finalized, one U_X per request, each one of the scope's own ids
@@ -910,7 +910,7 @@ test("review P1: a refund left under U_{s,i} inside intents.near, every U_X empt
   const n = nearOf(new Map<string, As>([[id, "intents"]]));
   const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await whole(w), "stalled");
-  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes[3]!.money, [3]);
+  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === 3)!.money, [3]);
   assert.deepEqual(w.steps[0]!.retry, []);
   const why = w.steps[0]!.named;
   assert.ok(why.length > 0 && why.every((y) => y.startsWith(`solana: deposit index 3's id ${id} holds `) && y.includes(" on NEAR, above the 1 a move out keeps")), JSON.stringify(why));
@@ -922,7 +922,7 @@ test("review P1: an id holding only the kept unit a move out leaves (ID_KEEP, on
   const n = nearPlanted(new Map([[id, [KEEP, KEEP] as const]]));
   const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await whole(w), "done", JSON.stringify(w.steps));
-  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes[2]!.money, [2]);
+  assert.deepEqual(n.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === 2)!.money, [2]);
 });
 
 test("review P1: the kept unit plus 1 ends stalled with the amount named", async () => {
@@ -1052,8 +1052,10 @@ test("a Retry reads on where the last run stopped: no id answered at the kept pa
   assert.equal(n.found.get(SOL_SCOPE)?.complete, true);
   assert.deepEqual(n.log.map((l) => l.split(" ")[1]!).filter((u) => answered.has(u)), [], "an id answered at the kept pass asked again");
   assert.ok(n.log.some((l) => l.endsWith(down)));
-  // a sign out drops the kept pass and answers: the next run asks every id again
+  // a sign out drops the kept pass and answers, and deletes the store with the marker (the app's sign out): the next
+  // run asks every id again
   w.r.signedOut();
+  await w.store.delete("meta", IDS_KEY());
   n.log.length = 0;
   assert.equal(await whole(w), "stalled");
   // every id to each lane's margin (the unread id's lane read past it before; healed, it stops at its margin)
@@ -1191,7 +1193,7 @@ test("E2a: a step 5 that ends on a read that failed writes no op and opens no sh
     await w.r.idle();
     assert.deepEqual(steps.map((x) => [x.tries, x.last, x.named.length > 0]), [[1, false, false], [2, false, false], [3, false, false], [4, true, true]]);
     assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["done", "stalled"]);
-    assert.deepEqual(await w.store.get("meta", IDS_KEY()), { scopes: [SOL_SCOPE.toString()] });
+    assert.deepEqual(((await w.store.get("meta", IDS_KEY())) as { scopes?: unknown } | undefined)?.scopes, [SOL_SCOPE.toString()]);
   }
 });
 
@@ -1239,13 +1241,13 @@ test("E3: step 5 is owed by a marker (scopes only) from the walk's end; a reload
   const w = await world({ store: async () => store, pools: () => SOL_ONLY, ids: g.ids, ux: () => uxOf(new Map()).reads });
   assert.equal(await w.r.auto(), "done");
   // written at the walk's end, its scopes alone, under owed/ (which the frame's reader never reads or lists)
-  assert.deepEqual(await store.get("meta", IDS_KEY()), { scopes: [SOL_SCOPE.toString()] });
+  assert.deepEqual(((await store.get("meta", IDS_KEY())) as { scopes?: unknown } | undefined)?.scopes, [SOL_SCOPE.toString()]);
   assert.ok(IDS_KEY().startsWith(WALLET_OWED_PREFIX));
   // the page closes mid step 5 (its run ends with it): the marker stays
   w.r.signedOut();
   g.open();
   await w.r.idle();
-  assert.deepEqual(await store.get("meta", IDS_KEY()), { scopes: [SOL_SCOPE.toString()] });
+  assert.deepEqual(((await store.get("meta", IDS_KEY())) as { scopes?: unknown } | undefined)?.scopes, [SOL_SCOPE.toString()]);
   // the next load (a new page on the same store): resume reads again, no op written, no sheet
   const before = (await store.keys("ops")).length;
   const steps: Step5End[] = [];
@@ -1384,7 +1386,7 @@ test("review P2-1: a finding told in a run holds: a Retry joining in a pause is 
   assert.ok(steps[1]!.named.some((x) => x.includes(solUx(held))), JSON.stringify(steps[1]));
   assert.equal((await restoreOps(w.store)).at(-1)!.stage, "stalled");
   // a finding stands: step 5 is still owed, the next load reads it again
-  assert.deepEqual(await w.store.get("meta", IDS_KEY()), { scopes: [SOL_SCOPE.toString()] });
+  assert.deepEqual(((await w.store.get("meta", IDS_KEY())) as { scopes?: unknown } | undefined)?.scopes, [SOL_SCOPE.toString()]);
 });
 
 test("review P2-2: a read that fails on every try is told on the last (the stalled sheet), never silent; the ids after it are read; the marker stays", async () => {
@@ -1403,7 +1405,7 @@ test("review P2-2: a read that fails on every try is told on the last (the stall
   // every other id of the scope read: lane 3 read on past it, the other lanes whole
   const asked = new Set(n.log.map((l) => l.split(" ")[1]!));
   for (let lane = 0; lane < 8; lane++) for (const u of laneIds(SOL_SCOPE, lane, (lane === 3 ? 43 : lane) + 8 * 20)) assert.ok(asked.has(u), `lane ${lane}: ${u} read`);
-  const lane3 = n.found.get(SOL_SCOPE)!.lanes[3]!;
+  const lane3 = n.found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === 3)!;
   assert.deepEqual(lane3.unread.map((x) => x.i), [43]);
 });
 
@@ -1417,7 +1419,7 @@ test("review P2-2: one NEAR provider answering apart on one id is that id unread
   await w.r.idle();
   assert.equal(w.steps.length, 5);
   assert.ok(w.steps.at(-1)!.named.some((x) => x.includes("lane 1: 1 id unread") && x.includes("one of the pair is wrong")), JSON.stringify(w.steps.at(-1)));
-  assert.deepEqual(found.get(SOL_SCOPE)!.lanes[1]!.unread.map((x) => x.i), [9]);
+  assert.deepEqual(found.get(SOL_SCOPE)!.lanes.find((x) => x.lane === 1)!.unread.map((x) => x.i), [9]);
   const asked = new Set(log.map((l) => l.split(" ")[1]!));
   for (const u of laneIds(SOL_SCOPE, 1, 9 + 8 * 20)) assert.ok(asked.has(u), `${u} read`);
   assert.equal((await restoreOps(w.store)).at(-1)!.stage, "stalled");
@@ -1437,4 +1439,58 @@ test("review P2-4: a second tab's restore is answered at its own walk's end whil
   assert.deepEqual(n2.log, [], "tab 2 reads no id while tab 1's step 5 reads them");
   g.open();
   await w.r.idle();
+});
+
+test("review P2-3: the marker keeps each lane read whole with nothing to tell; the next load reads only the others; a lane kept lasts the marker's life", async () => {
+  const probe = await world();
+  const order = laneOrder(probe.store.lane);
+  // a NEAR pair that closes the page (a sign out stands in for it) once `stop` is asked, logging every id asked
+  const closing = (stop: string | null, r: () => ReturnType<typeof poolRestore>) => {
+    const n = nearOf();
+    const asked = new Set<string>();
+    const base = n.ids.rpcs;
+    const ids = { ...n.ids, rpcs: () => base().map((x) => ({ name: x.name, query: async (p: Record<string, unknown>) => {
+      const u = idOfU(p);
+      if (u !== "intents.near") { asked.add(u); if (u === stop) r().signedOut(); }
+      return x.query(p as never);
+    } })) as unknown as readonly [NearRpc, NearRpc] };
+    return { ids, asked };
+  };
+  const lanesAsked = (asked: Set<string>) => [...Array(8).keys()].filter((l) => laneIds(SOL_SCOPE, l, l + 8 * 20).some((u) => asked.has(u)));
+  const marker = async () => (await probe.store.get("meta", IDS_KEY())) as { scopes: string[]; read?: Record<string, [number, number][]> } | undefined;
+  // the second lane read holds money at its first id's U_X: a finding, so that lane is never kept
+  const held = idOf(SOL_SCOPE, order[1]!);
+  const host = (ids: NonNullable<PoolRestoreHost["ids"]>) => ({ ...probe.host, store: async () => probe.store, pools: () => SOL_ONLY, solana: emptyWalk, ids, ux: () => uxOf(new Map<string, UxAs>([[solUx(held), "held"]])).reads, pausesMs: [] });
+  // load 1: closed at the third lane's first id; the first lane is kept, the second (money) is not
+  let r1: ReturnType<typeof poolRestore> | null = null;
+  const c1 = closing(idOf(SOL_SCOPE, order[2]!), () => r1!);
+  r1 = poolRestore(host(c1.ids));
+  await r1.auto();
+  await r1.idle();
+  assert.deepEqual((await marker())?.read?.[SOL_SCOPE.toString()], [[order[0]!, order[0]! + 8 * 20]]);
+  // load 2: the kept lane is not read; every other lane is, whole; the finding keeps the marker, every clean lane kept
+  let r2: ReturnType<typeof poolRestore> | null = null;
+  const c2 = closing(null, () => r2!);
+  r2 = poolRestore(host(c2.ids));
+  assert.equal(await r2.resume(), "done");
+  await r2.idle();
+  assert.deepEqual(lanesAsked(c2.asked), order.slice(1).sort((a, b) => a - b));
+  for (const l of order.slice(1)) for (const u of laneIds(SOL_SCOPE, l, l + 8 * 20)) assert.ok(c2.asked.has(u), `lane ${l}: ${u}`);
+  const kept = (await marker())!.read![SOL_SCOPE.toString()]!.map(([l]) => l).sort((a, b) => a - b);
+  assert.deepEqual(kept, order.filter((l) => l !== order[1]).sort((a, b) => a - b));
+  // load 3: only the lane with the finding is read again
+  let r3: ReturnType<typeof poolRestore> | null = null;
+  const c3 = closing(null, () => r3!);
+  r3 = poolRestore(host(c3.ids));
+  assert.equal(await r3.resume(), "done");
+  await r3.idle();
+  assert.deepEqual(lanesAsked(c3.asked), [order[1]!]);
+  // the marker's life ends (removed as a clean try removes it): the next restore reads every lane again
+  await probe.store.delete("meta", IDS_KEY());
+  let r4: ReturnType<typeof poolRestore> | null = null;
+  const c4 = closing(null, () => r4!);
+  r4 = poolRestore(host(c4.ids));
+  await r4.auto();
+  await r4.idle();
+  assert.deepEqual(lanesAsked(c4.asked), [...Array(8).keys()]);
 });
