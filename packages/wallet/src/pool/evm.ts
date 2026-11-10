@@ -77,7 +77,7 @@
 // Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
 // that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
@@ -1839,6 +1839,8 @@ export type EvmPoolArgs = {
   relayFee: (epochStartMs: bigint, signal?: AbortSignal) => Promise<EvmFeeAnswer>;
   /** The kit's epoch fee formula (EvmEpochFeeRule). */
   epochFee: EvmEpochFeeRule;
+  /** tests only: the fee walk's cut, budget, rest and clock (the kit's EvmTwoOperatorsOpts; its defaults live) */
+  feeRead?: EvmTwoOperatorsOpts;
   /** tests only: the salt source (16 random bytes unless given) and the wait between lag retries */
   salt?: () => Uint8Array;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -1849,7 +1851,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
   if (a.feeRpcs.some((r) => typeof r.url !== "string")) throw new Error("feeRpcs: each with its url (its operator)");
   for (let i = 0; i < a.feeRpcs.length; i++) for (let j = i + 1; j < a.feeRpcs.length; j++) if (solanaSameProvider(a.feeRpcs[i]!, a.feeRpcs[j]!)) throw new Error("feeRpcs: one provider twice is one read");
-  const feeRpcs = evmTwoOperators(a.feeRpcs.map((rpc) => ({ url: rpc.url!, rpc })));
+  const feeRpcs = evmTwoOperators(a.feeRpcs.map((rpc) => ({ url: rpc.url!, rpc })), a.feeRead);
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
@@ -1899,9 +1901,10 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
             signal,
           );
         } catch (e) {
-          // a lag on the side left with no operator is a retry; any other failure is its own (a read that failed by name
-          // is never tried again around it: evmAnswered)
-          if (e instanceof EvmOperatorsUnanswered) throw e.cause instanceof EvmLagError ? new EvmLagError(e.message) : (e.cause ?? e);
+          // no two operators answered: a retry (a lag, its words the walk's, every host and the read named) only when every
+          // seat the refusing side asked lagged, whatever their order; else the walk's own refusal, by name, never tried
+          // again around it (a read that failed by name: evmAnswered). Two that differ (EvmOperatorsDiffer) are never a lag
+          if (e instanceof EvmOperatorsUnanswered) throw e.errors.length > 0 && e.errors.every((x) => x instanceof EvmLagError) ? new EvmLagError(e.message) : e;
           throw e;
         }
         return { block, depth, chainFee: evmPoolChainFee(a.pin.network, EVM_POOL_TX_BYTES, x) };
