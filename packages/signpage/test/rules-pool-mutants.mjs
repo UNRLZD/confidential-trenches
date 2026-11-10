@@ -67,7 +67,7 @@ export const MUTANTS = [
   ["(d.length > 165 && d.length !== 355 && d[165] === 1)", "(d.length > 165 && d[165] === 1)", DEC],
   ['if (!mint || d[45] !== 1) return refuse("decimals");', 'if (!mint) return refuse("decimals");', DEC],
   ['/^0x[0-9a-fA-F]{64}$/.test(a)', "/^0x[0-9a-fA-F]+$/.test(a)", DEC],
-  ['if (n > 255n) return refuse("decimals");', "", DEC],
+  ['if (n > BigInt(TOKEN_DECIMALS_MAX)) return refuse("decimals");', "", DEC],
   // the slippage of a sell or buy by amount (two spaces in) and of a sell by share (four), each its own row
   ['s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', 's > 10_000) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', REQ],
   ['\n  if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n  if (typeof s !== "number" || s < 0 ||', REQ],
@@ -207,7 +207,12 @@ export const MUTANTS = [
   ['  if (!evmIsQuotedBuy(built)) return refuse("not_quoted");\n', "", EBUY],
   ['  if (!evmIsQuotedSell(built)) return refuse("not_quoted");\n', "", ESELL],
   // the EVM floors
-  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  checkRelay', "checkRelay", EBUY],
+  // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
+  ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
+  ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
+  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', "", EBUY],
+  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', "const floor = 1n;", EBUY],
   ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
   // only what a check passed is signed
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],

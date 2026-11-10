@@ -50,7 +50,7 @@ test("the chip is the box's preset: one tap function, no sheet, and the terminal
   assert.match(box, /onClick=\{\(\) => tapPreset\(p\)\}/, "the box's presets do not tap through tapPreset");
   // one buy request site in the box (the vault buy and the pool's checked ask), behind the running guard
   assert.equal(box.match(/kit\.request!\(/g)?.length, 2);
-  assert.match(box, /if \(!ready \|\| busy\(phaseRef\.current\) \|\| !amountOk\(c, max, balance\)\) return;/);
+  assert.match(box, /if \(!ready \|\| busy\(phaseRef\.current\) \|\| unavailable\(phaseRef\.current\) \|\| !amountOk\(c, max, balance\)\) return;/);
 });
 
 test("the toast's words are the box's own: no new word", () => {

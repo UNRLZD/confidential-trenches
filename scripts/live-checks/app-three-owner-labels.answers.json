@@ -1,0 +1,34 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-10T18:52:45.692Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-BbVFREV4.js",
+    "status": 200,
+    "found": [
+     "Transaction failed",
+     "the failed row's red tag",
+     "Unavailable",
+     "venue_not_pinned is Unavailable",
+     "no_table_fits is Unavailable",
+     "a zero price is no value",
+     "the unread value cell"
+    ]
+   }
+  ]
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-10T18:52:45.991Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CXIbayXZ.js",
+    "status": 200,
+    "found": []
+   }
+  ]
+ }
+}

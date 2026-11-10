@@ -124,6 +124,7 @@ export type NoteRecord = {
   searchFrom?: number; // with its calls: the deposits row its bind's search for P starts at, taken before P first left
   sends?: PoolSend[]; // from INCOMING on: each pool deposit tx U signed for it, written before it is sent
   evmSends?: EvmPoolSend[]; // the same on an EVM pool (card pool-deposits): never on a note that has sends
+  evmSpent?: EvmSpent; // INCOMING with evmSends only: the block U's last send's nonce was read used at (card evm-deposit-note-stays-incoming)
   contexts?: AttemptContext[]; // from its first HELD on: every attempt's context and deadline_ms, in the order written
   request?: string; // RESERVED: the vault withdrawal's request body as sent (JSON), written with HELD -> RESERVED, so a later page sends the same bytes again
 };
@@ -153,6 +154,10 @@ export type PoolSend = { signature: string; value: bigint; last_valid_block_heig
  *  which dates a send that reached neither RPC before one at the same nonce is built again. A note's sends are all of
  *  one shape: sends or evmSends. */
 export type EvmPoolSend = { hash: string; nonce: bigint; value: bigint; sentMs?: bigint };
+/** The block (number, hash: 0x, 32 bytes, lowercase) at which U's nonce read past `nonce`, its note's last send's, on
+ *  both RPCs (card evm-deposit-note-stays-incoming): kept so a reload waits on the same block until it is final, since
+ *  nodes that keep no old state cannot read U's nonce at an older block. Gone with a new send or a move out of INCOMING. */
+export type EvmSpent = { nonce: bigint; number: bigint; hash: string };
 
 /** A note born PLANNED (a return, move or second-arrival note) or UNSPENT (a change or refund note, or one restore found). */
 export type NewNote = {
@@ -198,6 +203,9 @@ export interface NoteStore {
   addSend(id: string, send: PoolSend, seen: number): Promise<NoteRecord>;
   /** addSend for an EVM pool's deposit tx: the note's evmSends, compare-and-set on `seen`, at its first send's value. */
   addEvmSend(id: string, send: EvmPoolSend, seen: number): Promise<NoteRecord>;
+  /** Keeps (or with null drops) an INCOMING note's evmSpent, at its last send's nonce; a note past INCOMING, or whose last
+   *  send is at another nonce (another run's send came first), is returned as stored with nothing written. */
+  keepEvmSpent(id: string, spent: EvmSpent | null): Promise<NoteRecord>;
   /** Lets this tab's lock go, as the page's death does (tests; a page need not call it). */
   close(): void;
 }
@@ -399,6 +407,15 @@ function checkEvmSend(x: unknown, what: string): EvmPoolSend {
   if (s.sentMs !== undefined) u64(s.sentMs, `${what}: sentMs`);
   return s;
 }
+function checkEvmSpent(x: unknown, what: string): EvmSpent {
+  if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error(`${what} is not a block`);
+  onlyKeys(x, ["nonce", "number", "hash"], what);
+  const b = x as EvmSpent;
+  if (typeof b.nonce !== "bigint" || b.nonce < 0n || b.nonce >= 1n << 64n) throw new Error(`${what}: nonce is a u64 bigint`);
+  u64(b.number, `${what}: number`);
+  if (typeof b.hash !== "string" || !TX_HASH.test(b.hash)) throw new Error(`${what}: hash is a 0x 32-byte lowercase hex block hash`);
+  return b;
+}
 // The EVM sends of a note: one value, each hash once, U's nonce never going back.
 function checkEvmSends(sends: unknown, id: string): EvmPoolSend[] {
   if (!Array.isArray(sends) || sends.length === 0) throw new Error(`note ${id}: evmSends is a list of sends`);
@@ -428,7 +445,7 @@ function checkRequest(r: unknown, what: string): string {
 function checkRecord(id: string, r: unknown): NoteRecord {
   if (r === null || typeof r !== "object") throw new Error(`note ${id} is not a record`);
   const n = r as NoteRecord;
-  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "contexts", "request"], `note ${id}`);
+  onlyKeys(n, ["id", "ref", "scope", "precommitment", "state", "parent", "leaf", "deadlineMs", "attempt", "tab", "calls", "searchFrom", "sends", "evmSends", "evmSpent", "contexts", "request"], `note ${id}`);
   if (n.id !== id) throw new Error(`note ${id} names another id`);
   refKey(n.ref);
   field(n.scope, "scope");
@@ -468,6 +485,10 @@ function checkRecord(id: string, r: unknown): NoteRecord {
     if (n.state === "PLANNED") throw new Error(`note ${id}: sends from INCOMING on`);
     checkEvmSends(n.evmSends, id);
   }
+  if (n.evmSpent !== undefined) {
+    if (n.state !== "INCOMING" || n.evmSends === undefined) throw new Error(`note ${id}: evmSpent on an INCOMING note with EVM sends only`);
+    if (checkEvmSpent(n.evmSpent, `note ${id}: evmSpent`).nonce !== n.evmSends[n.evmSends.length - 1]!.nonce) throw new Error(`note ${id}: evmSpent is at its last send's nonce`);
+  }
   // contexts: only on a note that has been HELD (a landed note), always while HELD or RESERVED, the last one this attempt's
   if (n.contexts !== undefined) {
     if (!LANDED.includes(n.state)) throw new Error(`note ${id}: contexts only on a note that has been HELD`);
@@ -490,6 +511,7 @@ function record(n: NoteRecord): NoteRecord {
   if (n.searchFrom !== undefined) out.searchFrom = n.searchFrom;
   if (n.sends !== undefined) out.sends = n.sends;
   if (n.evmSends !== undefined) out.evmSends = n.evmSends;
+  if (n.evmSpent !== undefined) out.evmSpent = n.evmSpent;
   if (n.contexts !== undefined) out.contexts = n.contexts;
   if (n.request !== undefined) out.request = n.request;
   return out;
@@ -572,6 +594,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
   // The one write of a state change: shape and fields checked, then one put. The callers check edge and ownership.
   async function put(cur: NoteRecord, to: NoteState, fields: Pick<MoveFields, "leaf" | "deadlineMs" | "context" | "request"> = {}): Promise<NoteRecord> {
     const next: NoteRecord = { ...cur, state: to };
+    if (to !== "INCOMING") delete next.evmSpent;
     if (cur.state === "INCOMING" && to === "UNSPENT") next.leaf = checkLeaf(fields.leaf, cur.precommitment);
     else if (fields.leaf !== undefined) throw new Error("a leaf is set once, when the note lands");
     if (to === "HELD") {
@@ -755,6 +778,19 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     const sends = cur.evmSends ?? [];
     if (sends.length !== seen) return cur; // another run's send came first: this one is not written, so never sent
     const next: NoteRecord = { ...cur, evmSends: checkEvmSends([...sends, x], id) };
+    delete next.evmSpent; // read for the old nonce: the new send's is read afresh
+    await write(next);
+    return next;
+  }
+  async function keepEvmSpentLocked(id: string, spent: EvmSpent | null): Promise<NoteRecord> {
+    const x = spent === null ? null : checkEvmSpent(spent, "a kept block");
+    const cur = (await settle()).find((n) => n.id === id);
+    if (cur === undefined) throw new Error(`no note ${id}`);
+    if (cur.state !== "INCOMING" || cur.evmSends === undefined) return cur;
+    if (x !== null && x.nonce !== cur.evmSends[cur.evmSends.length - 1]!.nonce) return cur;
+    const next: NoteRecord = { ...cur };
+    if (x === null) delete next.evmSpent;
+    else next.evmSpent = { nonce: x.nonce, number: x.number, hash: x.hash };
     await write(next);
     return next;
   }
@@ -790,6 +826,7 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
     addCallTx: (id, call, txHash) => locked(() => addCallTxLocked(id, call, txHash)),
     addSend: (id, send, seen) => locked(() => addSendLocked(id, send, seen)),
     addEvmSend: (id, send, seen) => locked(() => addEvmSendLocked(id, send, seen)),
+    keepEvmSpent: (id, spent) => locked(() => keepEvmSpentLocked(id, spent)),
     close: () => {
       closed = true;
       letGo();

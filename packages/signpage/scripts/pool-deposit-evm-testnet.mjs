@@ -2,9 +2,12 @@
 // src/pool-deposit-evm.ts runPoolDepositEvm on the testnet build's own pin of the chain's pool (the wallet's EVM_POOLS,
 // card evm-pool-pins), read on the testnet build's two RPCs of the chain (src/pool-testnet.ts TESTNET_RPCS), its tree
 // read by the wallet's evmTreeSync as the page reads it.
-//   node packages/signpage/scripts/pool-deposit-evm-testnet.mjs <base|robinhood> <out.json> [--settle]
-// - A seed made in this run only (16 random bytes), never printed or kept: its note's secrets end with the run, so the
-//   0.001 ETH stays in the pool as a test deposit.
+//   node packages/signpage/scripts/pool-deposit-evm-testnet.mjs <base|robinhood> <out.json> [--settle] [--keep-seed]
+//   FLOW_RESUME=<kept seed file> runs again with that seed (its U), never writing it again
+// - A seed made in this run only (16 random bytes), never printed: its note's secrets end with the run, so the
+//   0.001 ETH stays in the pool as a test deposit. With --keep-seed it is written, before U is asked for, to
+//   ~/.ct-devnet-runs/evm-buy-<chain>-<time>.seed (the folder 0700, the file 0600, its path logged, never its bytes), as
+//   pool-buy-own-spend-devnet.mjs keeps its, so pool-buy-evm-testnet.mjs buys with the note (card signpage-evm-pool-buy).
 // - The ask, one pool.deposit of 0.001 ETH: its first run names U and the wei U is short (`short`), and this run waits
 //   until U holds that on both RPCs. Someone else funds U.
 // - Then the ask again: it signs and sends U's deposit and answers "sent". The run waits until the send's receipt
@@ -13,7 +16,9 @@
 //   until it settles the note UNSPENT with its leaf (a Deposited is final only after ~22 min), 40 min at most.
 // - It writes U, the deposit's tx, the answers and the note to <out.json>. Nothing here logs a key or the words.
 import { randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { entropyToWords, wordsToSeed64 } from "../../wallet/src/derive/index.ts";
@@ -31,6 +36,7 @@ const { runPoolDepositEvm } = await import("../src/pool-deposit-evm.ts");
 
 const [CHAIN, OUT] = process.argv.slice(2);
 const SETTLE = process.argv.includes("--settle");
+const KEEP = process.argv.includes("--keep-seed");
 if ((CHAIN !== "base" && CHAIN !== "robinhood") || !OUT) throw new Error("usage: pool-deposit-evm-testnet.mjs <base|robinhood> <out.json> [--settle]");
 const NETWORK = CHAIN === "base" ? "base-sepolia" : "robinhood-testnet";
 // the page's own pin and pair
@@ -72,7 +78,18 @@ const rpcs = [traced(0, rpcOf(RPCS[0])), traced(1, rpcOf(RPCS[1]))];
 for (const r of rpcs) if (BigInt(await r("eth_chainId", [])) !== EVM_CHAIN_IDS[NETWORK]) throw new Error(`not ${NETWORK}`);
 
 const w = await openWalletStore({ indexedDB: new IDBFactory() });
-const entropy = randomBytes(16);
+// FLOW_RESUME=<seed file>: a kept seed again (a run whose reads failed after U was funded), so the same U deposits
+const resumed = process.env.FLOW_RESUME;
+const entropy = resumed ? Buffer.from(readFileSync(resumed, "utf8").trim(), "hex") : randomBytes(16);
+if (entropy.length !== 16) throw new Error("FLOW_RESUME: not a kept seed");
+if (KEEP && !resumed) {
+  const dir = join(homedir(), ".ct-devnet-runs");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const at = join(dir, `evm-buy-${CHAIN}-${new Date().toISOString().replace(/[:.]/g, "-")}.seed`);
+  writeFileSync(at, entropy.toString("hex") + "\n", { mode: 0o600, flag: "wx" });
+  log(`the run's seed is kept at ${at}`);
+}
 await w.insertSeed({ v: 1, entropy: Uint8Array.from(entropy), source: "code", code_saved: true, created_ms: Date.now() });
 const seed64 = wordsToSeed64(entropyToWords(Uint8Array.from(entropy)));
 entropy.fill(0);

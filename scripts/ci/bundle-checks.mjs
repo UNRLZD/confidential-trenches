@@ -71,6 +71,8 @@ export const IN_PROCESS = [
   { key: "wallet-mainnet-relayer-pins", host: "sign", load: () => import("../live-checks/wallet-mainnet-relayer-pins.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the bundle part only (the walk's reach): the CSP is the host's header and the providers' answers are past the build
   { key: "wallet-restore-id-reader", host: "sign", load: () => import("../live-checks/wallet-restore-id-reader.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
+  // the bundle part only (no state read at an old block's tag, every pool seat named): the providers' answers are past the build
+  { key: "evm-deposit-note-stays-incoming", host: "sign", load: () => import("../live-checks/evm-deposit-note-stays-incoming.mjs"), run: async (m, f) => m.judgeBundleOnly(await m.readBundle(f)) },
   // the bundle part only (step 5's U_X read and carry): the providers' answers are past the build
   { key: "wallet-restore-reads-ux", host: "sign", load: () => import("../live-checks/wallet-restore-reads-ux.mjs"), run: async (m, f) => m.judgeBundle(await m.readBundle(f)) },
   // the sign part only, against the pin of the build it serves (live: this checkout's): the index pins its /app.js and
@@ -89,6 +91,7 @@ export const CHILD_RUNS = [
   { key: "signpage-buy-route-events", host: "app", args: ["--local", "--host", "app"] },
   { key: "app-buy-route-strip", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-quick-buy-one-tap", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-three-owner-labels", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
@@ -106,6 +109,7 @@ export const OUT = {
   "page-evm-rpc-csp": "response headers (each page's served CSP connect-src; app-host-gate and signpage-skeleton pin it in the build's _headers)",
   "evm-pool-lists-mainnet": "mainnet Base and Robinhood RPC reads of the pool's logs on each chain's two seats, and SIGN_HOST's response headers (connect-src), never the build",
   "signpage-solana-trade": "the page's CSP header, and a run record's transactions on two RPCs",
+  "signpage-evm-pool-buy": "a run record's buys on two testnet RPCs each and the helper's send route; on the build, the mainnet refusal its bundle part reads is held by packages/signpage/test/pool-network.test.ts (pool.buy on Base and Robinhood not_allowed)",
   "signpage-withdraw-handoff": "the page's CSP header, and the testnet fee read on the release helper and RPCs",
   "held-move-forgotten-tx": "the page's CSP header (signpage-skeleton pins it in the build's _headers), and a mainnet archival RPC read",
   "signpage-release": "the release list against what the host serves",

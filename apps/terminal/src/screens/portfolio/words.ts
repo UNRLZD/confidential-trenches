@@ -44,6 +44,7 @@ export const WORDS = {
   deposit: ok("Deposit", "R5 app.js:626 (dseg); src/screens/deposit/words.ts"),
   withdraw: ok("Withdraw", "R5 app.js:626 (dseg); src/screens/deposit/words.ts"),
   processing: ok("Processing", "R5 app.js:653 (S4.15); src/screens/deposit/words.ts"),
+  txFailed: ok("Transaction failed", "owner 10 Nov 18:12Z (owner-decisions: Mainnet run tonight and three labels, typed): a failed buy or sell's Activity row, the reason on hover"),
   refunded: ok("Refunded", "owner 2 Nov 06:08Z, all approved; drafted from 09-design-brief S4.17 / S12.15 [draft copy: Refunded]"),
   more: draft("More", "the row overflow button's accessible name only (never drawn; R5 draws the icon)"),
   close: ok("Close", "owner 1 Nov 16:45Z (Keep the drafts); the close icon's accessible name only (never drawn)"),

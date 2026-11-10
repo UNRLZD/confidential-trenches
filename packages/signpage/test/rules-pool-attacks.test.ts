@@ -294,8 +294,8 @@ test("RECHECK R2: an EVM buy signs only the built and the proof one check passed
   const builtBig = evmQuotedBuy(VENUES, A_V3, q, QF.now); // a second build of it, checked with a 1 ETH proof
   const p1 = proofOf(r1, 10n ** 16n);
   const p2 = proofOf(r2, 10n ** 18n);
-  checkEvmBuy(builtSmall, EVM_POOL, p1, r1, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 16n, slippageBps: 100, decimals: 18 }, evmCtx(), q.minOut);
-  checkEvmBuy(builtBig, EVM_POOL, p2, r2, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 18n, slippageBps: 100, decimals: 18 }, evmCtx(), q.minOut);
+  checkEvmBuy(builtSmall, EVM_POOL, p1, r1, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 16n, slippageBps: 100, decimals: 18 }, evmCtx(), { token: q.token, amountIn: 10n ** 16n - 10n ** 15n, amountOut: q.amountOut });
+  checkEvmBuy(builtBig, EVM_POOL, p2, r2, { kind: "pool.buy", chain: "base", token: q.token, amount: 10n ** 18n, slippageBps: 100, decimals: 18 }, evmCtx(), { token: q.token, amountIn: 10n ** 18n - 10n ** 15n, amountOut: q.amountOut });
   let sig: Uint8Array | null = null;
   try { sig = signEvmBuy(EVM_SECRET, evmCtx(), builtSmall, EVM_POOL, p2); } catch (e) { if (!(e instanceof PoolRuleRefused)) throw e; }
   assert.equal(sig, null, "W signed a Buy pairing check 1's built (min out 10) with check 2's 1 ETH proof");
@@ -314,17 +314,17 @@ test("PLANTED M1a: an EVM buy with a server's hook data (the kit's unquoted pinn
   const hooked = pinnedBuild(VENUES, "base", A_V4, route, 1n, X);
   assert.ok(hooked.data.includes("de".repeat(20)), "the build carries the server's hook data");
   const proof = proofOf(r);
-  assert.throws(() => checkEvmBuy(hooked, EVM_POOL, proof, r, ask, evmCtx(), 1n), quotedRefusal);
+  assert.throws(() => checkEvmBuy(hooked, EVM_POOL, proof, r, ask, evmCtx(), { token: X, amountIn: ask.amount - 10n ** 15n, amountOut: 1n }), quotedRefusal);
   assert.throws(() => signEvmBuy(EVM_SECRET, evmCtx(), hooked, EVM_POOL, proof), (e: unknown) => e instanceof PoolRuleRefused && e.rule === "unchecked");
   // the quoted pinned builder, which takes a caller's route, and a copy of a quoted build: not the device's quote either
   const q = await buyQuote();
   const quoted = evmQuotedBuy(VENUES, A_V3, q, QF.now);
   const qAsk: PoolAsk = { ...ask, token: q.token };
   for (const b of [pinnedBuildQuoted(VENUES, "base", A_V3, q.route, q.minOut, q.token), { ...quoted }]) {
-    assert.throws(() => checkEvmBuy(b, EVM_POOL, proofOf(r), r, qAsk, evmCtx(), q.minOut), quotedRefusal);
+    assert.throws(() => checkEvmBuy(b, EVM_POOL, proofOf(r), r, qAsk, evmCtx(), { token: q.token, amountIn: qAsk.amount - 10n ** 15n, amountOut: q.amountOut }), quotedRefusal);
   }
   // the device's own build of the same quote passes and signs
-  checkEvmBuy(quoted, EVM_POOL, proof, r, qAsk, evmCtx(), q.minOut);
+  checkEvmBuy(quoted, EVM_POOL, proof, r, qAsk, evmCtx(), { token: q.token, amountIn: qAsk.amount - 10n ** 15n, amountOut: q.amountOut });
   assert.equal(signEvmBuy(EVM_SECRET, evmCtx(), quoted, EVM_POOL, proof).length, 65);
 });
 

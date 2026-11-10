@@ -11,7 +11,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { readFileSync } from "node:fs";
 import { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolSellTip, evmPoolSignSellAuthorization, evmPoolVenues } from "@blindfill/kit";
 import { signRelease, W as W_SIGNER } from "../../test/pool-evm/release-sign.ts";
-import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_MS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmRpc } from "./evm.ts";
+import { EVM_LANE_RETRY_S, EVM_LANE_SENT_RETRY_S, EVM_LANE_SENT_WINDOW_MS, EVM_SELL_UNPAID_BUDGET_WEI, EVM_SELL_UNPAID_CAP_WEI, EVM_SELL_UNPAID_WINDOW_MS, WITHDRAW_SELECTOR, evmAddressOf, evmTx4MaxLength, evmPoolSender, evmReadSell, evmSellDigest, type EvmPair, type EvmRpc } from "./evm.ts";
 import * as evmModule from "./evm.ts";
 
 // read by name, so a build without the ceiling fails only the tests that use it
@@ -201,7 +201,7 @@ function rpc(calls: Calls, o: Opts = {}): EvmRpc {
       }
       case "eth_getBalance": return params[0] === SENDER && params[1] === "pending" ? (o.balance?.() ?? `0x${(10n ** 18n).toString(16)}`) : "0x0";
       case "eth_sendRawTransaction":
-        if (o.sendFails) throw new Error("RPC error -32000: already known");
+        if (o.sendFails) throw new Error("RPC error -32000: transaction underpriced"); // a refusal ("already known" is the send accepted)
         return `0x${hex(keccak_256(unhex(params[0] as string)))}`;
       case "eth_getTransactionReceipt": if (o.receipt) return o.receipt(params[0] as string); break;
       case "eth_getTransactionByHash": if (o.tx) return o.tx(params[0] as string); break;
@@ -1457,7 +1457,7 @@ const chainOf = (clock: () => number = () => 0, blockMs = 0) => {
     return async (method, params) => {
       if (method === "eth_sendRawTransaction" && (st.refuse || fieldsOf(params[0] as string).nonce === st.refuseAt)) {
         calls.push({ method, params });
-        throw new Error("RPC error -32000: already known");
+        throw new Error("RPC error -32000: replacement transaction underpriced"); // a refusal ("already known" is the send accepted)
       }
       const out = await r(method, params);
       if (method === "eth_sendRawTransaction" && !st.drop) {
@@ -2114,6 +2114,78 @@ test("one provider's receipt never clears a charge: proven on one provider while
       assert.ok(detail(r.last).includes("this client"), `${name}, ${side}: ${detail(r.last)}`);
     }
   }
+});
+
+// card helper-evm-read-two-operators: a walk can give side a's answer at one read and side b's at another from one
+// operator; a sale's receipts count as two only from two operators, whichever side each came on
+test("one operator's receipt on both sides, at two reads, never clears a charge: proven only by two operators", async () => {
+  for (const [name, ops] of [["one operator on both sides", ["x", "x"]], ["two operators", ["x", "y"]]] as const) {
+    const x: Calls = [];
+    const [ra, rb] = [rpc(x, { receipt: provenOf(x) }), rpc([], { receipt: provenOf(x) })];
+    const answer = (r: EvmRpc, operator: string, m: string, p: readonly unknown[]) => r(m, p).then((value) => ({ ok: true as const, value, operator }), (error: unknown) => ({ ok: false as const, error }));
+    // receipts: side a's from ops[0], side b's from ops[1], each side answering on alternate reads, as a walk can
+    let reads = 0;
+    const pair: EvmPair = {
+      one: (k, m, p) => (k === 0 ? ra : rb)(m, p),
+      both: async (m, p) => {
+        if (m !== "eth_getTransactionReceipt") return Promise.all([answer(ra, "a", m, p), answer(rb, "b", m, p)]);
+        const odd = reads++ % 2 === 0;
+        return Promise.all([odd ? answer(ra, ops[0], m, p) : { ok: true as const, value: null, operator: "p" }, odd ? { ok: true as const, value: null, operator: "q" } : answer(rb, ops[1], m, p)]);
+      },
+    };
+    let clock = NOW;
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1, readyProviders: [ra, rb] }, pair, () => clock);
+    let sent = 0;
+    let last: Awaited<ReturnType<typeof s.sell>> | undefined;
+    for (let i = 0; i < 60 && last?.status !== 429; i++) {
+      last = await s.sell(freshBody(`W-ops-${name.length}-${i}`, { sell: { token: `0x${(0xe100 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.78");
+      if (last.status !== 200) continue;
+      sent++;
+      const before = reads;
+      // two receipt reads: side a's operator, then side b's
+      while (reads < before + 2) await new Promise((ok) => setTimeout(ok, 1));
+      await new Promise((ok) => setImmediate(ok));
+    }
+    clock = PAST_EVERY_WATCH;
+    if (ops[0] === ops[1]) {
+      assert.equal(BigInt(sent), EVM_SELL_UNPAID_CAP_WEI / WORST, `${name}: ${sent} sent`);
+      assert.ok(detail(last!).includes("this client"), detail(last!));
+    } else assert.equal(sent, 60, `${name}: ${sent} sent`);
+  }
+});
+
+// review of 686dda50: the watch judges a sale on the two newest operators' receipts: an operator's receipt read first
+// (here one with no Paid log) gives way to two later operators that prove it
+test("a sale's first receipt from one operator, then two other operators' proving it: the two newest decide, and the sale is paid", async () => {
+  const x: Calls = [];
+  const proven = provenOf(x);
+  const unproven = provenOf(x, { log: () => ({ address: "0x00000000000000000000000000000000000bad00", topics: [], data: "0x" }) });
+  const [ra, rb] = [rpc(x, { receipt: proven }), rpc([], { receipt: proven })];
+  const answer = (r: EvmRpc, operator: string, m: string, p: readonly unknown[]) => r(m, p).then((value) => ({ ok: true as const, value, operator }), (error: unknown) => ({ ok: false as const, error }));
+  let reads = 0;
+  const pair: EvmPair = {
+    one: (k, m, p) => (k === 0 ? ra : rb)(m, p),
+    both: async (m, p) => {
+      if (m !== "eth_getTransactionReceipt") return Promise.all([answer(ra, "a", m, p), answer(rb, "b", m, p)]);
+      const first = reads++ % 2 === 0;
+      const h = p[0] as string;
+      // the first read: operator x's receipt without the Paid log, and none from w; the next: y's and z's, proven
+      return first ? [{ ok: true as const, value: unproven(h), operator: "x" }, { ok: true as const, value: null, operator: "w" }] : [{ ok: true as const, value: proven(h), operator: "y" }, { ok: true as const, value: proven(h), operator: "z" }];
+    },
+  };
+  let clock = NOW;
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1, readyProviders: [ra, rb] }, pair, () => clock);
+  let sent = 0;
+  for (let i = 0; i < 60; i++) {
+    const r = await s.sell(freshBody(`W-newest-${i}`, { sell: { token: `0x${(0xe200 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.79");
+    if (r.status !== 200) break;
+    sent++;
+    const before = reads;
+    while (reads < before + 2) await new Promise((ok) => setTimeout(ok, 1));
+    await new Promise((ok) => setImmediate(ok));
+  }
+  clock = PAST_EVERY_WATCH;
+  assert.equal(sent, 60, `${sent} sent: each sale cleared by the two newest operators' proofs`);
 });
 
 test("each part of the Paid log is checked: another emitter (W itself, the pool, another), another topic, another from, a value under the fee, a removed log, a short data or a third topic is no proof, on either provider", async () => {
