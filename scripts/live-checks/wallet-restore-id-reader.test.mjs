@@ -308,32 +308,53 @@ test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s 
 });
 
 // review of e31892ef (P3-3): the end stage, the U_X push and the seed per use, each bound to its names; each planted
-// bundle line below is this build's own line with one change, and fails its marker
+// bundle line below is this build's own line with one change, and fails its marker. Card
+// restore-first-sign-in-under-two-minutes made each try of step 5 end on its own lists (retry, held, named) after the
+// walk's end, the seed gone passed on (SeedGone, sG here) and the unread chain a finding (`named`).
 test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never a stage that drops reasons, another constant or a run-long lock", () => {
   const n = (text, k) => [...text.matchAll(MARK[k])].length;
-  const end = (stage, to = "s") => `.catch(e=>void ${to}.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)),t.throwIfAborted(),${stage}`;
-  assert.equal(n(end("l(s.length>0?`stalled`:`done`)"), "ids_end"), 1);
-  // the review's mutant: a stage that drops the U_X reasons
-  assert.equal(n(end("l(s.some(e=>!e.endsWith(hV))?`stalled`:`done`)"), "ids_end"), 0);
-  assert.equal(n(end("l(s.length>0?`stalled`:`done`)", "x"), "ids_end"), 0, "the catch pushes to another array");
-  assert.equal(n(end("l(s.length>1?`stalled`:`done`)"), "ids_end"), 0);
-  // this build's two statements: each reason idsUndone names, then the U_X reason, with nothing between them
-  // card wallet-restore-reads-ux: the push is the branch of a pool whose chain has no U_X reads (its `ux` null), then the next pool
-  const ux = (push, head = "let o=r.ux;if(o===null){") => `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`;function gV(e){}async function vV(e,t,n,r,i){for(let r of t){${head}let a=await fV(e,r.scope,{notes:[...r.notes]},c);n.read?.(r.scope,a);for(let e of gV(a))i.push(\`\${r.label}: \${e}\`);${push};continue}let u=1}}var yV={}`;
-  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 1);
-  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o!==null){"), "ids_ux_push"), 0, "pushed where the chain has U_X reads");
-  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o===null||r.notes.length>0){"), "ids_ux_push"), 0, "another condition beside the chain's");
-  assert.equal(n(ux("i.push(`${r.label}: ${hV}`)", "let o=x.ux;if(o===null){"), "ids_ux_push"), 0, "another pool's reads");
-  assert.equal(n(ux("i.push(`${r.label}: ${gV}`)"), "ids_ux_push"), 0, "another constant pushed");
-  assert.equal(n(ux("i.push(`${r.label}: done`)"), "ids_ux_push"), 0);
-  // delta review 2 (P3): a condition before the push (a pool with no notes would end done, its U_X unread)
-  assert.equal(n(ux("r.notes.length>0&&i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "a condition before the U_X push");
-  assert.equal(n(ux("if(r.notes.length>0)i.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "an if before the U_X push");
-  assert.equal(n(ux("x.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "pushed to another array than the reasons'");
-  const lock = (check, mark, zero, use) =>
-    `d=n=>r().request(Io,{mode:\`shared\`,signal:t},async()=>{if(t.throwIfAborted(),${check})throw Error(\`signed out during the restore\`);let r=await e.seed64();try{let e=re(We,c,r);if(u===null)u=e;else{let t=e.length===u.length&&e.every((e,t)=>e===u[t]);if(e.fill(0),!t)throw Error(\`${mark}\`)}return await n(r)}finally{${zero}}}),${use}`;
+  const good5 = {
+    pass: "if(e instanceof sG||t.aborted)throw e;",
+    to: "r",
+    answered: "r.retry.length===0&&r.held.length===0",
+    last: "a=i||n>x.length",
+    told: "a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}",
+  };
+  const end = (o = {}) => {
+    const x = { ...good5, ...o };
+    return `.catch(e=>{${x.pass}${x.to}.retry.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)}),t.throwIfAborted();let i=${x.answered},${x.last};if(await v(${x.told}),i){`;
+  };
+  assert.equal(n(end(), "ids_end"), 1);
+  assert.equal(n(end({ pass: "" }), "ids_end"), 0, "a seed gone retried");
+  assert.equal(n(end({ pass: "if(e instanceof sG)throw e;" }), "ids_end"), 0, "an ended signal retried");
+  assert.equal(n(end({ to: "x" }), "ids_end"), 0, "the catch pushes to another try's lists");
+  assert.equal(n(end({ answered: "r.retry.length===0" }), "ids_end"), 0, "answered with money read apart left");
+  assert.equal(n(end({ answered: "r.retry.length<2&&r.held.length===0" }), "ids_end"), 0);
+  assert.equal(n(end({ last: "a=i||n>=x.length" }), "ids_end"), 0, "a try fewer");
+  assert.equal(n(end({ told: "a?{retry:r.retry,held:[],named:[...r.named],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops held");
+  assert.equal(n(end({ told: "a?{retry:r.retry,held:r.held,named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
+  assert.equal(n(end({ told: "{...r,tries:n,last:a}" }), "ids_end"), 0, "held never a finding");
+  // the branch of a pool whose chain has no U_X reads (its `ux` null): its ids' reasons through the helper by kind, then
+  // the unread chain on `named`, with nothing between them, then the next pool
+  const ux = (push, head = "let o=r.ux;if(o===null){", sep = ",") =>
+    `var hV=\`the pool's own chain is not read for a deposit's money (each id's U_X there), so the restore is not done\`${sep}gW=/x/;function gV(e){}async function vV(e,t,n,r,i){let m=(e,t)=>{};for(let r of t){${head}let a=await fV(e,r.scope,{notes:[...r.notes]},c);n.read?.(r.scope,a),m(r.label,a),${push};continue}let u=1}}var yV={}`;
+  assert.equal(n(ux("i.named.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 1);
+  assert.equal(n(ux("i.named.push(`${r.label}: ${hV}`)", undefined, ";"), "ids_ux_push"), 1, "the constant alone in its statement");
+  assert.equal(n(ux("i.retry.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "the unread chain retried, never told");
+  assert.equal(n(ux("i.held.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0);
+  assert.equal(n(ux("i.named.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o!==null){"), "ids_ux_push"), 0, "pushed where the chain has U_X reads");
+  assert.equal(n(ux("i.named.push(`${r.label}: ${hV}`)", "let o=r.ux;if(o===null||r.notes.length>0){"), "ids_ux_push"), 0, "another condition beside the chain's");
+  assert.equal(n(ux("i.named.push(`${r.label}: ${hV}`)", "let o=x.ux;if(o===null){"), "ids_ux_push"), 0, "another pool's reads");
+  assert.equal(n(ux("i.named.push(`${r.label}: ${gV}`)"), "ids_ux_push"), 0, "another constant pushed");
+  assert.equal(n(ux("i.named.push(`${r.label}: done`)"), "ids_ux_push"), 0);
+  assert.equal(n(ux("r.notes.length>0&&i.named.push(`${r.label}: ${hV}`)"), "ids_ux_push"), 0, "a condition before the U_X push");
+  assert.equal(n(ux("i.named.push(`${x.label}: ${hV}`)"), "ids_ux_push"), 0, "another pool's label");
+  const lock = (check, mark, zero, use, cls = ["sG", "sG"]) =>
+    `d=n=>r().request(Io,{mode:\`shared\`,signal:t},async()=>{if(t.throwIfAborted(),${check})throw new ${cls[0]}(\`signed out during the restore\`);let r=await e.seed64();try{let e=re(We,c,r);if(u===null)u=e;else{let t=e.length===u.length&&e.every((e,t)=>e===u[t]);if(e.fill(0),!t)throw new ${cls[1]}(\`${mark}\`)}return await n(r)}finally{${zero}}}),${use}`;
   const good = ["!await e.signedIn()", "other words were signed in during the restore", "r.fill(0)", "f=e=>d(async t=>e(t))"];
   assert.equal(n(lock(...good), "seed_per_use_lock"), 1);
+  assert.equal(n(lock(...good).replace("throw new sG(`signed out", "throw Error(`signed out"), "seed_per_use_lock"), 0, "a sign out a plain error, which a try retries");
+  assert.equal(n(lock(...good, ["sG", "Error"]), "seed_per_use_lock"), 0, "other words another class than a sign out");
   assert.equal(n(lock("!1", good[1], good[2], good[3]), "seed_per_use_lock"), 0, "no signed-in check");
   assert.equal(n(lock(good[0], "the words changed", good[2], good[3]), "seed_per_use_lock"), 0, "no run mark");
   // delta review 2 (P3): a compare that is always true holds the run to no seed
@@ -454,5 +475,32 @@ test("busy waited out, the pair's disagreement, the keep and the sign-out drop: 
     assert.notEqual(text, APP, why);
     assert.equal(countOf(text, MARK[key]), 0, `${key}: ${why}`);
     assert.deepEqual(BAD(planted(key, text)), [MARKS], why);
+  }
+});
+
+// card restore-first-sign-in-under-two-minutes: step 5 runs after the walk's end, each try told off its own lists. A
+// build that lets a try's catch swallow the seed gone (a sign out, other words), calls a try answered with money read
+// apart left (`held`), drops `held` from the last try's findings, throws a plain Error at the seed lock (which the catch
+// would then retry), or puts the unread pool chain on the retry list, fails on that one marker alone.
+test("a build of this tree whose step 5 end loses a list or retries a seed gone fails, on that marker alone", async () => {
+  const within = (marker, from, to) => (js) => {
+    const hit = js.match(new RegExp(MARK[marker].source));
+    assert.ok(hit, `${marker} found in the build`);
+    const planted = hit[0].replace(from, to);
+    assert.notEqual(planted, hit[0], `${marker}: ${from} planted`);
+    return js.replace(hit[0], planted);
+  };
+  const cases = [
+    ["ids_end", /if\([\w$]+ instanceof [\w$]+\|\|[\w$]+\.aborted\)throw [\w$]+;/, ""],
+    ["ids_end", /&&[\w$]+\.held\.length===0/, ""],
+    ["ids_end", /,\.\.\.[\w$]+\.held\]/, "]"],
+    ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
+    ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],
+    ["ids_ux_push", /\.named\.push\(`\$\{[\w$]+\.label\}: \$\{[\w$]+\}`\);continue\}$/, (s) => s.replace(".named.", ".retry.")],
+  ];
+  for (const [m, from, to] of cases) {
+    const rec = await treeRecord(plantedFetch(localFetch, within(m, from, to)));
+    assert.deepEqual(MARKERS.filter((o) => rec.app.markers[o] !== answers.good.app.markers[o]), [m], String(from));
+    assert.deepEqual(BAD(rec), [MARKS], String(from));
   }
 });

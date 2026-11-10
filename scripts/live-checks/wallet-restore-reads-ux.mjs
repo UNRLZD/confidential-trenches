@@ -82,34 +82,37 @@ const esc = (n) => n.replace(/[$]/g, "\\$");
 // every marker is counted in the whole bundle and must match exactly once (review P2): a dead same-shaped copy beside a
 // broken real one matches twice, or the real one's call site names another function
 const once = (re, js) => [...js.matchAll(new RegExp(re.source, "g"))].length === 1;
-// step 5's reader of an id, bound to its call site: the U_X reader `R` is the last argument of the scope's
-// restoreDepositIds call right after it, and it notes each id NEAR reads as money (`D`) for the held reads below
+// step 5's reader of an id, bound to its call site: the U_X reader `R` is the reader argument of the scope's
+// restoreDepositIds call right after it (its lane order after it: card restore-first-sign-in-under-two-minutes), and it notes each id NEAR reads as money (`D`) for the held reads below
 const UX_READ = new RegExp(
   `,(${N})=async\\((${N}),(${N})\\)=>\\{if\\(\\3===void 0\\)throw Error\\(${Q}no deposit index for its U_X${Q}\\);let (${N})=await ${N}\\(${N},${N},(${N})\\.scope,\\3,\\2\\),` +
     `\\[(${N}),\\[(${N}),(${N})\\]\\]=await Promise\\.all\\(\\[${N}\\(\\2,\\3\\),(${N})\\.balances\\(\\{u:\\4\\}\\)\\]\\);if\\(\\6===${Q}money${Q}&&(${N})\\.set\\(\\3,\\2\\),\\7!==\\8\\)throw Error\\(${Q}its U_X reads [^${Q}]*${Q}\\);` +
-    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1\\);`,
+    `return \\7===0n\\?\\6:\\((${N})\\.set\\(\\3,\\{[^}]*u:\\4,refund_id:\\2\\}\\),${Q}money${Q}\\)\\},${N}=await ${N}\\(${N},\\5\\.scope,\\{notes:\\[\\.\\.\\.\\5\\.notes\\],\\.\\.\\.${N}\\(\\5\\.notes,\\5\\.scope\\)\\},\\1,${N}\\(\\5\\.scope\\)\\);`,
 );
 const UX_CARRY = new RegExp(
-  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null;for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\7!==\\8\\)return${Q}reads [^${Q}]*${Q};` +
-    `if\\(\\6!==null&&\\7>=\\6\\)return${Q}holds [^${Q}]*after a deposit from it filled: read again${Q};if\\(\\7<\\2\\.ladder\\.min\\)return null;let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\7<\\9\\.floor\\)return null;` +
-    `let (${N})=${N}\\(\\2\\.ladder,\\7,\\9\\.perRung,\\9\\.keep\\);if\\(\\10===0n\\)return null;if\\(!\\4\\)return${Q}holds \\$\\{String\\(\\7\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q};` +
+  `async function (${N})\\((${N}),(${N}),(${N}),(${N})\\)\\{let (${N})=null;for\\(;;\\)\\{let\\[(${N}),(${N})\\]=await \\2\\.balances\\(\\3\\);if\\(\\7!==\\8\\)return\\{why:${Q}reads [^${Q}]*${Q},retry:\\6===null\\};` +
+    `if\\(\\6!==null&&\\7>=\\6\\)return\\{why:${Q}holds [^${Q}]*after a deposit from it filled: read again${Q},retry:!1\\};if\\(\\7<\\2\\.ladder\\.min\\)return null;let (${N})=await \\2\\.costs\\(\\3\\);if\\(\\7<\\9\\.floor\\)return null;` +
+    `let (${N})=${N}\\(\\2\\.ladder,\\7,\\9\\.perRung,\\9\\.keep\\);if\\(\\10===0n\\)return null;if\\(!\\4\\)return\\{why:${Q}holds \\$\\{String\\(\\7\\)\\}, with no deposit note on this device for its index to carry it into the pool${Q},retry:!1\\};` +
     `\\5\\.throwIfAborted\\(\\);let\\{end:(${N})\\}=await \\2\\.deposit\\(\\3,\\10,\\5\\);` +
-    `if\\(\\11!==${Q}filled${Q}&&\\11!==${Q}part_filled${Q}\\)return${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q};\\6=\\7\\}\\}`,
+    `if\\(\\11!==${Q}filled${Q}&&\\11!==${Q}part_filled${Q}\\)return\\{why:${Q}holds [^${Q}]*its carry into the pool ended [^${Q}]*${Q},retry:!1\\};\\6=\\7\\}\\}`,
 );
 // the carry's call site, bound to the reader's held map (`held`), the scope's U_X reads (`ux`) and the carry's own name:
 // `noted(scope)` read once per scope with a U_X held, and the carry handed whether U_{s,i}'s own index is among them
 const UX_NOTED = (held, ux, carry) =>
   new RegExp(`=${esc(held)}\\.size===0\\?new Set:await ${N}\\(${N}\\.scope\\);for\\(let (${N}) of\\[\\.\\.\\.${esc(held)}\\.values\\(\\)\\]\\.sort\\(\\([^)]*\\)=>[^)]*\\)\\)\\{${N}\\.throwIfAborted\\(\\);let ${N}=await ${esc(carry)}\\(${esc(ux)},\\1,${N}\\.has\\(\\1\\.i\\),${N}\\)`);
 // each id NEAR read as money (`D`), in index order, named by the held rule (`H`) on the both-provider held reader, into
-// step 5's own `why` (delta review 2 P3-1: a push into any other list names nothing)
+// step 5's own lists (delta review 2 P3-1: a push into any other list names nothing; card
+// restore-first-sign-in-under-two-minutes: a read again on `held`, which the last try tells as a finding, the rest on
+// `named`)
 const ID_HELD_LOOP = (d, why) =>
-  new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);let (${N})=await (${N})\\((${N}),\\2\\);for\\(let (${N}) of \\5\\)${esc(why)}\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\8\\}${Q}\\)\\}`);
+  new RegExp(`for\\(let\\[(${N}),(${N})\\]of\\[\\.\\.\\.${esc(d)}\\]\\.sort\\(\\((${N}),(${N})\\)=>\\3\\[0\\]-\\4\\[0\\]\\)\\)\\{${N}\\.throwIfAborted\\(\\);for\\(let (${N}) of await (${N})\\((${N}),\\2\\)\\)\\(\\5\\.retry\\?${esc(why)}\\.held:${esc(why)}\\.named\\)\\.push\\(${Q}\\$\\{${N}\\.label\\}: deposit index \\$\\{\\1\\}'s id \\$\\{\\2\\} \\$\\{\\5\\.why\\}${Q}\\)\\}`);
 // the held rule: an asset the two providers read apart, any amount of one that is not a fungible token (the token on its
-// own `T`, or a nep141 one), or one above the kept unit (the way out's ID_KEEP, 1n), is named
+// own `T`, or a nep141 one), or one above the kept unit (the way out's ID_KEEP, 1n), is named; the read apart and the
+// holdings unread a read again (`retry` true), the rest findings (card restore-first-sign-in-under-two-minutes)
 const ID_HELD_RULE = (h) =>
-  new RegExp(`async function ${esc(h)}\\((${N}),(${N})\\)\\{let (${N});try\\{\\3=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q}\\]\\}let (${N})=\\[\\];` +
-    `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\6!==(${N})&&!\\6\\.startsWith\\(${Q}nep141:${Q}\\)\\?\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, not a fungible token [^${Q}]*${Q}\\):` +
-    `\\7>1n&&\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q}\\):\\5\\.push\\(${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q}\\);return \\5\\}`);
+  new RegExp(`async function ${esc(h)}\\((${N}),(${N})\\)\\{let (${N});try\\{\\3=await \\1\\(\\2\\)\\}catch\\((${N})\\)\\{return\\[\\{why:${Q}holds money on NEAR whose amount is unread [^${Q}]*${Q},retry:!0\\}\\]\\}let (${N})=\\[\\];` +
+    `for\\(let\\{asset:(${N}),amounts:\\[(${N}),(${N})\\]\\}of \\3\\)\\7===\\8\\?\\6!==(${N})&&!\\6\\.startsWith\\(${Q}nep141:${Q}\\)\\?\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, not a fungible token [^${Q}]*${Q},retry:!1\\}\\):` +
+    `\\7>1n&&\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} of \\$\\{\\6\\} on NEAR, above the [^${Q}]*${Q},retry:!1\\}\\):\\5\\.push\\(\\{why:${Q}holds \\$\\{String\\(\\7\\)\\} and \\$\\{String\\(\\8\\)\\} of \\$\\{\\6\\} on NEAR's two RPCs: read again${Q},retry:!0\\}\\);return \\5\\}`);
 // `T`: the pool deposit network's release USDC, NEAR_NETWORKS[POOL_DEPOSIT_NETWORK].usdc, the table bound to the bundle's
 // NEAR_NETWORKS (its mainnet USDC its first entry; delta review 2 P3-2) and the network `mainnet`
 const NEAR_NETS = new RegExp(`[,; ](${N})=\\{mainnet:\\{usdc:${Q}17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1${Q},vault:${Q}vault\\.confidential\\.unrlzd\\.near${Q},`);
@@ -124,7 +127,7 @@ const MAINNET = (n) => new RegExp(`[,; ]${esc(n)}=${Q}mainnet${Q}[,;]`);
 // looked up across the bundle; `R` the held reader's builder; named groups: ids, keep, signal, why (readDepositIds'
 // sixth parameter), pair, pass, net (the network), H, R
 const STEP5_HEAD = new RegExp(
-  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
+  `async function ${N}\\(${N},${N},(?<ids>${N}),(?<keep>${N}),(?<signal>${N}),(?<why>${N}),${N},${N}\\)\\{let\\{rpcs:(?<pair>${N}),pass:(?<pass>${N}),reader:${N}\\}=await ${N}\\((?<net>${N}),\\k<ids>\\.rpcs,\\k<keep>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),` +
     `(?<H>${N})=await (?<R>${N})\\(\\k<net>,\\k<pair>,\\k<pass>,\\{\\.\\.\\.\\k<ids>\\.opts,signal:\\k<signal>\\}\\),`,
 );
 // the held reader: each provider's reader (`readOn`) reads the token (ft_balance_of, once U is registered on it) and adds

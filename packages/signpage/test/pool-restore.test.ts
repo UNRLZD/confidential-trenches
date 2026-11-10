@@ -1311,14 +1311,16 @@ test("E2: a try's retries stop at the run's seed gone: a sign out in the pause, 
     const n = nearOf(new Map<string, As>([[down, "down"]]));
     const steps: Step5End[] = [];
     let r: ReturnType<typeof poolRestore> | null = null;
-    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, pausesMs: [60_000], step5: (e) => void (steps.push(e), r!.signedOut()) });
+    // the reads asked when the first try ended (step 5 runs on after the walk's end, so not when auto returns)
+    let at = -1;
+    const w = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, pausesMs: [60_000], step5: (e) => void (steps.push(e), (at = n.log.length), r!.signedOut()) });
     r = w.r;
     assert.equal(await w.r.auto(), "done");
-    const before = n.log.length;
     // the 60 s pause ends at the sign out: the test's own timeout (10 s) holds it
     await w.r.idle();
     assert.equal(steps.length, 1);
-    assert.equal(n.log.length, before);
+    assert.ok(at > 0);
+    assert.equal(n.log.length, at, "no id read after the sign out");
   }
   // other words signed in in another tab, heard late here (no sign out in this tab): the next try stops at its first
   // use of the seed, before any id of either account is read, and is never tried again

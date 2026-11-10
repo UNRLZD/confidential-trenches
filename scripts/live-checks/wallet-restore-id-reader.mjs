@@ -221,27 +221,33 @@ export const MARK = Object.freeze({
   ids_drift: "; its ids are not read",
   // the seed opened per use, under the seed lock, only while still stored
   seed_per_use: "signed out during the restore",
-  // review of e31892ef (P3-3): the end stage is read off the very array step 5's catch pushes to (a stage line that
-  // drops some reasons, as `why.some((y)=>!y.endsWith(U_X))?"stalled":"done"`, holds none),
-  // `.catch(e=>void s.push(`step 5 did not finish: ${e instanceof Error?e.message:`it threw`}`)),t.throwIfAborted(),l(s.length>0?`stalled`:`done`)`
-  ids_end: /\.catch\(([\w$]+)=>void ([\w$]+)\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\),[\w$]+\.throwIfAborted\(\),[\w$]+\(\2\.length>0\?`stalled`:`done`\)/g,
+  // review of e31892ef (P3-3), as card restore-first-sign-in-under-two-minutes made it: step 5 runs after the walk's
+  // end, and each try's end is told off the very lists its catch pushes to: a throw goes on `retry` unless the run's
+  // seed is gone (SeedGone, the class the seed lock throws) or its signal ended; a try is answered only with `retry`
+  // and `held` both empty; on its last try `held` is told as `named` (a finding), on the others as it is (an end that
+  // drops a list, or calls a try answered with reasons left, holds none),
+  // `.catch(e=>{if(e instanceof sG||t.aborted)throw e;r.retry.push(`step 5 did not finish: ${...}`)}),t.throwIfAborted();let i=r.retry.length===0&&r.held.length===0,a=i||n>x.length;if(await v(a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}),i){`
+  ids_end: /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\4\.retry,held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{/g,
   // each pool scope whose chain has no U_X reads on the page (its walked entry's `ux` null; card
   // wallet-restore-reads-ux) pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
   // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
   // (delta review 2: no condition in front of it but that one), then goes to the next pool:
-  // `var hV=`the pool's own chain is not read ...`; ... let o=a.ux;if(o===null){let t=...;for(let e of gV(t))i.push(`${a.label}: ${e}`);i.push(`${a.label}: ${hV}`);continue}`
-  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`;[\s\S]*?let ([\w$]+)=([\w$]+)\.ux;if\(\2===null\)\{[\s\S]{0,400}?\)([\w$]+)\.push\(`\$\{\3\.label\}: \$\{[\w$]+\}`\);\4\.push\(`\$\{\3\.label\}: \$\{\1\}`\);continue\}/g,
+  // (card restore-first-sign-in-under-two-minutes: the reasons go through one helper by their kind, and the constant on
+  // the try's `named` list, a finding):
+  // `var WW=`the pool's own chain is not read ...`; ... let s=r.ux;if(s===null){let t=await BW(...);n.read?.(r.scope,t),m(r.label,t),a.named.push(`${r.label}: ${WW}`);continue}`
+  ids_ux_push: /var ([\w$]+)=`the pool's own chain is not read for a deposit's money[^`]*`[;,][\s\S]*?let ([\w$]+)=([\w$]+)\.ux;if\(\2===null\)\{[\s\S]{0,400}?\),[\w$]+\(\3\.label,[\w$]+\),([\w$]+)\.named\.push\(`\$\{\3\.label\}: \$\{\1\}`\);continue\}/g,
   // the seed per use, bound: the seed read inside one shared seed-lock request after the signed-in check, its HMAC kept
   // as the run's mark at the first use and compared byte by byte at every use after (delta review 2: the exact shape, so
   // a compare that is always true holds none), handed to that one use and zeroed when it ends; and the run's SeedUse is
   // that request per use (a run-long lock, with the run inside one request, holds none)
+  // (card restore-first-sign-in-under-two-minutes: both throws are one class, SeedGone, the one a try's catch passes on)
   // card wallet-id-reader-paced: busy waited out (BUSY_WAIT), one of the pair is wrong at one block (PAIR_WRONG)
   busy_wait: BUSY_WAIT,
   pair_wrong: PAIR_WRONG,
   // review of 31be751d (P2-2, P2-3): what a Retry keeps, and signing out drops it (ID_KEEP, ID_SIGNOUT)
   id_keep: ID_KEEP,
   id_signout: ID_SIGNOUT,
-  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw Error\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\3\);if\(([\w$]+)===null\)\5=\4;else\{let ([\w$]+)=\4\.length===\5\.length&&\4\.every\(\(([\w$]+),([\w$]+)\)=>\7===\5\[\8\]\);if\(\4\.fill\(0\),!\6\)throw Error\(`other words were signed in during the restore`\)\}return await \2\(\3\)\}finally\{\3\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\10\(\11\)\)/g,
+  seed_per_use_lock: /([\w$]+)=([\w$]+)=>[\w$]+\(\)\.request\([\w$]+,\{mode:`shared`,signal:[\w$]+\},async\(\)=>\{if\([\w$]+\.throwIfAborted\(\),!await [\w$]+\.signedIn\(\)\)throw new ([\w$]+)\(`signed out during the restore`\);let ([\w$]+)=await [\w$]+\.seed64\(\);try\{let ([\w$]+)=[\w$]+\([\w$]+,[\w$]+,\4\);if\(([\w$]+)===null\)\6=\5;else\{let ([\w$]+)=\5\.length===\6\.length&&\5\.every\(\(([\w$]+),([\w$]+)\)=>\8===\6\[\9\]\);if\(\5\.fill\(0\),!\7\)throw new \3\(`other words were signed in during the restore`\)\}return await \2\(\4\)\}finally\{\4\.fill\(0\)\}\}\),([\w$]+)=([\w$]+)=>\1\(async ([\w$]+)=>\11\(\12\)\)/g,
 });
 /** The markers' names, as the record keys their counts. */
 export const MARKERS = Object.keys(MARK);
