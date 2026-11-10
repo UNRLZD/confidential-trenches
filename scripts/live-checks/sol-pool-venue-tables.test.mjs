@@ -145,6 +145,23 @@ test("a tree past 80 percent of the newest pinned generation fails, naming the e
   }
 });
 
+test("an RPC that answers another cluster's genesis fails the cluster, before any table is judged", async () => {
+  const answers = structuredClone(A.answers);
+  const g = answers.find((a) => a.url === SECOND && a.method === "getGenesisHash" && a.json?.result);
+  g.json.result = CLUSTERS.devnet.genesis;
+  const r = await run(answers);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.match(failLines(r), new RegExp(`^FAIL mainnet: genesis ${CLUSTERS.devnet.genesis.slice(0, 12)} is mainnet's on ${SECOND.replace(/[.]/g, "\\.")}$`, "m"));
+  assert.ok(!r.lines.some((l) => l.startsWith("ok") && l.includes("mainnet pump-curve g1")), "no mainnet table judged");
+});
+
+test("a table both RPCs read the same, owned by another program, fails: only the lookup table program's account is a table", async () => {
+  const answers = structuredClone(A.answers);
+  for (const a of answers) if (a.method === "getAccountInfo" && a.params[0] === TABLE && a.json?.result?.value) a.json.result.value.owner = "11111111111111111111111111111111";
+  const r = await run(answers);
+  assert.match(failLines(r), /^FAIL mainnet pump-curve g1: the table is the lookup table program's: 11111111111111111111111111111111$/m);
+});
+
 test("a provider's no-answer (a 429, an empty body) is INCONCLUSIVE on its own line, never a FAIL and never a PASS", async () => {
   for (const [status, json] of [[429, { jsonrpc: "2.0", id: 1, error: { code: 429, message: "Too many requests" } }], [200, null]]) {
     const answers = structuredClone(A.answers);
