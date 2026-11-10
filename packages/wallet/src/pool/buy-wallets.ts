@@ -129,8 +129,16 @@ const randomIndex = (n: number): number => {
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Every W the pools' spent notes paid, with its holdings. The Ws are read in a random order (`pick`: tests only). */
-export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], opts: { signal?: AbortSignal; pick?: (n: number) => number } = {}): Promise<BuyWallets> {
-  const pick = opts.pick ?? randomIndex;
+export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], opts: BuyWalletsRead = {}): Promise<BuyWallets> {
+  return derivedBuyWallets(seed64, pools).read(opts);
+}
+
+/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given. */
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string> };
+
+/** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
+ *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
+export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): { read(opts?: BuyWalletsRead): Promise<BuyWallets> } {
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
@@ -153,6 +161,16 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
       failed.set(pi, msg(e));
     }
   });
+  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+}
+
+async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWallet | undefined)[][], all: readonly { p: number; k: number; address: string }[], failed: Map<number, string>, opts: BuyWalletsRead): Promise<BuyWallets> {
+  const pick = opts.pick ?? randomIndex;
+  const only = opts.only;
+  const kept = (w: BuyWallet | undefined): w is BuyWallet => w !== undefined && (only === undefined || only.has(w.address));
+  // each read's own copies: a read again starts from no holdings
+  const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
+  const jobs = all.filter((j) => only === undefined || only.has(j.address));
   // Fisher-Yates over every pool's Ws
   for (let i = jobs.length - 1; i > 0; i--) {
     const r = pick(i + 1);
@@ -170,7 +188,7 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
     }
   }
   return {
-    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : (ws as BuyWallet[]))),
+    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.filter(kept))),
     failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
   };
 }
@@ -191,10 +209,17 @@ class RpcFailed extends Error {
     this.afterMs = afterMs;
   }
 }
-async function call(rpc: JsonRpc, method: string, params: readonly unknown[]): Promise<unknown> {
+/** A read's stop, by the params of each call it makes: the paced route (holdingsRoute) checks it when the call's turn
+ *  comes, so a call queued before a stop never goes out after it (a sign out's next account never sees one of the last
+ *  account's Ws named after it signs in). */
+const stopOf = new WeakMap<readonly unknown[], AbortSignal>();
+async function call(rpc: JsonRpc, method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
+  signal?.throwIfAborted();
+  if (signal !== undefined) stopOf.set(params, signal);
   try {
     return await rpc(method, params);
   } catch (e) {
+    signal?.throwIfAborted();
     // a provider's throttle past the kit client's retry (kit send.ts SolanaRpcTransportError: HTTP 429, or a throttle
     // code such as -32029 in a 200), read by its fault, never its words: a 429, its Retry-After kept
     const t = e as { name?: unknown; fault?: unknown; afterMs?: unknown } | null;
@@ -245,7 +270,11 @@ function holdingsRoute(make: (fetch: SolanaFetch) => SolanaRpc): { rpc: SolanaRp
   const bare = make(t.fetch);
   let r = holdingsRoutes.get(String(bare.url));
   if (r === undefined) {
-    const own: SolanaRpc = (method, params) => bare(method, params); // no url: the kit keys its queue on this function
+    // no url: the kit keys its queue on this function; a call whose read was stopped while it waited its turn is not sent
+    const own: SolanaRpc = (method, params) => {
+      const stop = stopOf.get(params);
+      return stop?.aborted ? Promise.reject(stop.reason) : bare(method, params);
+    };
     r = { rpc: solanaPacedRpc(own, HOLDINGS_RPC_LIMIT), wait429: t.wait429 };
     holdingsRoutes.set(String(bare.url), r);
   }
@@ -274,14 +303,14 @@ function slotted(a: unknown, what: string, min: number | undefined): Slotted<unk
 export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): HoldingsReader {
   const wait429 = o.wait429 ?? (() => RETRY_AFTER_DEFAULT_MS), sleep = o.sleep ?? sleepMs;
   const cfg = (min?: number) => ({ commitment: "finalized", ...(min === undefined ? {} : { minContextSlot: min }) });
-  const balance = async (owner: string, min?: number): Promise<Slotted<bigint>> => {
-    const r = slotted(await call(rpc, "getBalance", [owner, cfg(min)]), "getBalance", min);
+  const balance = async (owner: string, min?: number, signal?: AbortSignal): Promise<Slotted<bigint>> => {
+    const r = slotted(await call(rpc, "getBalance", [owner, cfg(min)], signal), "getBalance", min);
     if (!Number.isSafeInteger(r.value) || (r.value as number) < 0) throw new Error("getBalance: not a whole number in range");
     return { slot: r.slot, value: BigInt(r.value as number) };
   };
   type Acct = { pubkey: string; mint: string; amount: bigint; frozen: boolean };
-  const accounts = async (owner: string, program: string, min?: number): Promise<Slotted<Acct[]>> => {
-    const r = slotted(await call(rpc, "getTokenAccountsByOwner", [owner, { programId: program }, { ...cfg(min), encoding: "base64" }]), "getTokenAccountsByOwner", min);
+  const accounts = async (owner: string, program: string, min?: number, signal?: AbortSignal): Promise<Slotted<Acct[]>> => {
+    const r = slotted(await call(rpc, "getTokenAccountsByOwner", [owner, { programId: program }, { ...cfg(min), encoding: "base64" }], signal), "getTokenAccountsByOwner", min);
     if (!Array.isArray(r.value)) throw new Error("getTokenAccountsByOwner: not a list");
     return {
       slot: r.slot,
@@ -297,7 +326,7 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
   return {
     chain: "sol",
     async read(address, signal) {
-      const once = (min?: number) => Promise.all([balance(address, min), accounts(address, SOLANA_TOKEN_PROGRAM, min), accounts(address, SOLANA_TOKEN_2022_PROGRAM, min)] as const);
+      const once = (min?: number) => Promise.all([balance(address, min, signal), accounts(address, SOLANA_TOKEN_PROGRAM, min, signal), accounts(address, SOLANA_TOKEN_2022_PROGRAM, min, signal)] as const);
       // Each round reads all three at the highest slot seen (none in the first). A round fails when they answer at
       // different slots, or on the helper's 429 (after its wait); the next round asks again, and SOL_HOLDINGS_ROUNDS
       // failed rounds are a refusal. A backend behind the slot asked (-32016) is asked again a slot later, SOL_LAG_SLOTS
@@ -398,11 +427,11 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
   async function once(address: string, signal?: AbortSignal): Promise<Holdings> {
     const w = toChecksum(address).toLowerCase();
     signal?.throwIfAborted();
-    const blk = (await call(rpc, "eth_getBlockByNumber", ["latest", false])) as { hash?: unknown; number?: unknown } | null;
+    const blk = (await call(rpc, "eth_getBlockByNumber", ["latest", false], signal)) as { hash?: unknown; number?: unknown } | null;
     const hash = evmRpcHex(blk?.hash), number = evmRpcHex(blk?.number);
     if (hash === null || !WORD.test(hash) || number === null || !QUANTITY.test(number)) throw new Error("eth_getBlockByNumber: not a block");
     const at = { blockHash: hash };
-    const b = evmRpcHex(await call(rpc, "eth_getBalance", [w, at]));
+    const b = evmRpcHex(await call(rpc, "eth_getBalance", [w, at], signal));
     if (b === null || !QUANTITY.test(b)) throw new Error("eth_getBalance: not a quantity");
     const out = new Map<string, TokenHolding>();
     const unreadable: string[] = [];
@@ -410,7 +439,7 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
       signal?.throwIfAborted();
       let r: unknown;
       try {
-        r = await call(rpc, "eth_call", [{ to: t, data: BALANCE_OF + w.slice(2).padStart(64, "0") }, at]);
+        r = await call(rpc, "eth_call", [{ to: t, data: BALANCE_OF + w.slice(2).padStart(64, "0") }, at], signal);
       } catch (e) {
         // reverted: the token's own answer. Any other error (a block a lagging backend lacks, a limit, an internal
         // error) is the provider's, and fails the pool so it is read again.

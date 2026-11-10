@@ -15,7 +15,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
-import { type ReaderOpts, buyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
+import { type ReaderOpts, buyWallets, derivedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
 const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(Buffer.from(A8.inputs.entropy, "hex"))));
@@ -292,6 +292,25 @@ test("the Ws are read in a random order across the pools, never the notes' order
   await assert.rejects(order(() => 9), /pick: not an index/);
 });
 
+test("derived first, read later: the Ws come from the seed at once, so the caller zeroes it before any read; a read of only some Ws reads and answers only those", async () => {
+  const spent = [0, 1, 2].map((j) => (j === 0 ? { ref: DEP, label: L } : { ref: { kind: "change", l: L, j: j - 1 } as NoteRef, label: L }));
+  const seed = SEED.slice();
+  const derived = derivedBuyWallets(seed, [{ id: "sol", chain: "sol", spent, reader: solReader() }]);
+  seed.fill(0);
+  log.length = 0;
+  const all = await derived.read();
+  const want = (await buyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solReader() }])).wallets.map((w) => w.address);
+  assert.deepEqual(all.wallets.map((w) => w.address), want, "the Ws of the seed as it was when derived");
+  assert.equal(want[0], solW(0));
+  log.length = 0;
+  const some = await derived.read({ only: new Set([want[1]!]) });
+  assert.deepEqual(some.wallets.map((w) => w.address), [want[1]]);
+  assert.deepEqual([...new Set(log.map(([, p]) => JSON.parse(p)[0] as string))], [want[1]], "no other W is read");
+  const stop = new AbortController();
+  stop.abort();
+  await assert.rejects(derived.read({ signal: stop.signal }), { name: "AbortError" });
+});
+
 test("a Solana restore's spends must be its spent notes, each at the queue's (l, j)", () => {
   const leaf = (label: bigint) => ({ value: 1n, label, commitment: 1n, leafIndex: 0n });
   const chg: NoteRef = { kind: "change", l: L, j: 0 };
@@ -517,6 +536,90 @@ test("HOLDINGS_RPC_LIMIT is the measured pace: a Solana round's three calls star
   // EVM: four calls, at most three in any 3 s
   assert.equal(evm.starts.length, 4);
   assert.ok(evm.starts[3]![0] - evm.starts[0]![0] >= HOLDINGS_RPC_LIMIT.windowMs, `EVM: the fourth call waits the window`);
+});
+
+test("a read stopped while its calls wait their turn on the paced route sends none of them: no W of a stopped read is named after the stop", async () => {
+  const bodies: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const url = String(u);
+    if (!url.startsWith("https://stop-sol.example") && !url.startsWith("https://stop-evm.example")) return real(u, init);
+    bodies.push(String(init?.body));
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    return url.startsWith("https://stop-sol.example") ? solOk(q.method, q.id) : evmOk(q.method, q.id);
+  }) as typeof fetch;
+  try {
+    const sol = solanaHelperHoldings("https://stop-sol.example");
+    const evm = evmHelperHoldings("https://stop-evm.example", "base", []);
+    // the first read takes the window's turns; the second's calls wait theirs, and it is stopped while they do
+    const first = [sol.read(solW(0)), evm.read(evmW(L, 0)), evm.read(evmW(L, 1))];
+    const stop = new AbortController();
+    const second = [sol.read(solW(1), stop.signal), evm.read(evmW(L, 2), stop.signal)].map((p) => p.then(() => "read", (e: unknown) => (stop.signal.aborted && e === stop.signal.reason ? "stopped" : `failed: ${String(e)}`)));
+    await new Promise((r) => setTimeout(r, 50));
+    stop.abort();
+    await Promise.all(first);
+    assert.deepEqual(await Promise.all(second), ["stopped", "stopped"]);
+    // past the window the queued calls would have gone out in
+    await new Promise((r) => setTimeout(r, HOLDINGS_RPC_LIMIT.windowMs + 500));
+    assert.equal(bodies.filter((b) => b.includes(solW(1)) || b.toLowerCase().includes(evmW(L, 2).slice(2).toLowerCase())).length, 0, "a stopped read's W named after its stop");
+    assert.ok(bodies.some((b) => b.includes(solW(0))), "the first read went out");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+/** globalThis.fetch for `origin`: each call answered after `ms`, every body kept. */
+const slowFetch = (origin: string, ms: number) => {
+  const real = globalThis.fetch;
+  const sent: { method: string; body: string }[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (!String(u).startsWith(origin)) return real(u, init);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push({ method: q.method, body: String(init?.body) });
+    await new Promise((r) => setTimeout(r, ms));
+    return evmOk(q.method, q.id);
+  }) as typeof fetch;
+  return { sent, restore: () => void (globalThis.fetch = real) };
+};
+const endOf = (p: Promise<unknown>, s: AbortSignal) => p.then(() => "read", (e: unknown) => (s.aborted && e === s.reason ? "stopped" : `failed: ${String(e)}`));
+const names = (body: string, w: string) => body.toLowerCase().includes(w.slice(2).toLowerCase());
+
+test("b07: the EVM reader stopped with its block read in flight sends no balance read naming W", async () => {
+  const f = slowFetch("https://b07.example", 200);
+  try {
+    const r = evmHelperHoldings("https://b07.example", "base", [USDC]);
+    const stop = new AbortController();
+    const end = endOf(r.read(evmW(L, 0), stop.signal), stop.signal);
+    await new Promise((r) => setTimeout(r, 50));
+    stop.abort();
+    assert.equal(await end, "stopped");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(f.sent.filter((x) => names(x.body, evmW(L, 0))).map((x) => x.method), [], "no call named W after the stop");
+  } finally {
+    f.restore();
+  }
+});
+
+test("b08: the EVM reader's token read waiting its turn on the route when its read is stopped is never sent", async () => {
+  const f = slowFetch("https://b08.example", 200);
+  try {
+    const r = evmHelperHoldings("https://b08.example", "base", [USDC]);
+    const stop = new AbortController();
+    const w = evmW(L, 1);
+    // W's block and balance go out; another reader's calls fill the window, so W's token read waits its turn
+    const end = endOf(r.read(w, stop.signal), stop.signal);
+    await new Promise((r) => setTimeout(r, 100));
+    const other = r.read(evmW(L, 0)).catch(() => {});
+    await new Promise((r) => setTimeout(r, 900));
+    assert.ok(f.sent.some((x) => x.method === "eth_getBalance" && names(x.body, w)), "W's balance read went out");
+    stop.abort();
+    assert.equal(await end, "stopped");
+    await other;
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(f.sent.filter((x) => x.method === "eth_call" && names(x.body, w)).map((x) => x.method), [], "W's token read sent after the stop");
+  } finally {
+    f.restore();
+  }
 });
 
 test("a chain whose finalized slot moves every 400 ms: every W's round answers at one slot, so each is read", async () => {
