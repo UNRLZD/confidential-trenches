@@ -548,6 +548,19 @@ test("run: an RPC that reads the table otherwise before the freeze: nothing is f
   assert.ok(k.logs.some((l) => /the key stays/.test(l)));
 });
 
+test("run: the RPCs read the full table under the funder at finalized, but not the same bytes (one's last-extended slot behind): nothing is frozen", async () => {
+  let table = null;
+  // equal at confirmed, so every extend's guard passes; at finalized the second RPC's meta differs and nothing else does
+  const k = fakeCluster({ view: (i, a, c, v) => (i === 1 && a === table && v && c === "finalized" ? { ...v, data: Buffer.concat([v.data.subarray(0, 12), Buffer.alloc(8, 1), v.data.subarray(20)]) } : v), onSend: ({ kinds, tx }) => ((table ??= kinds.includes("create") ? tx.ixs.find((x) => x.prog === ALT).acc[0] : null), "land") });
+  const dir = recordDir();
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", dir);
+  await assert.rejects(runOn(k, p, base), /different bytes/);
+  assert.equal(sent(k, "extend").length, 9, "every extend went");
+  assert.equal(sent(k, "freeze").length, 0, "no freeze while the two RPCs read different bytes");
+  assert.equal(readdirSync(base).length, 1, "the key folder is kept");
+});
+
 test("run: a freeze that lands but an RPC still reads the funder as authority: nothing recorded, the key kept", async () => {
   let table = null;
   const k = fakeCluster({
@@ -1229,6 +1242,34 @@ test("--return is refused before anything is made or printed: the pool program, 
   }
 });
 
+test("the success path keeps the key folder when neither RPC reads the frozen table at finalized before the folder would go: its create landed", async () => {
+  let table = null, gone = false;
+  const k = fakeCluster({
+    view: (i, a, c, v) => (gone && a === table && c === "finalized" ? null : v),
+    onSend: ({ kinds, tx }) => ((table ??= kinds.includes("create") ? tx.ixs.find((x) => x.prog === ALT).acc[0] : null), "land"),
+  });
+  const dir = recordDir();
+  const base = keyBase();
+  await runOn(k, await planOn(k, "pumpswap", dir), base, { say: (s) => (k.say(s), /tables\.pumpswap generation/.test(s) && (gone = true)) });
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
+  assert.equal(readdirSync(base).length, 1, "kept: no RPC reads the table its create made");
+  assert.ok(k.logs.some((l) => /its create \w+ landed/.test(l) && /the key stays/.test(l)), k.logs.slice(-4).join("\n"));
+});
+
+test("a stopped run's folder whose journal marks its create landed stops a fresh paste though no RPC reads the table and no status of that create is left", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  // the journal's word that the create landed (its status is past the RPCs' history, its blockhash long expired)
+  const { dir: kd } = keptFolder(base, p, { table: T, txs: [{ step: "lookup table: create and extend with 28 addresses", signature: sigOf(1), state: "landed", table: T, last_valid: 1 }] });
+  const j = journalAt(kd);
+  writeFileSync(path.join(kd, "journal.json"), JSON.stringify({ ...j, stopped_left: "0" }));
+  await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir), base), (e) => e.message.includes(kd) && /its create \w+ landed/.test(e.message));
+  assert.equal(k.sends.length, 0);
+});
+
 test("a stop that leaves the funder 5,000 lamports or less says what to do, and its folder does not stop a later fresh paste", async () => {
   const k = fakeCluster();
   const base = keyBase();
@@ -1392,12 +1433,14 @@ test("readBack: reads of the table that keep failing are never taken as the tabl
   const k = fakeCluster({ onSend: ({ kinds, tx }) => ((table ??= kinds.includes("create") ? tx.ixs.find((x) => x.prog === ALT).acc[0] : null), "land") });
   const fetchFn = async (url, init) => {
     const b = JSON.parse(init.body);
-    if (table && url === RPC1 && b.method === "getAccountInfo" && b.params[0] === table) return refusal("Internal error", -32603);
+    // at finalized only: the extends' guards read at confirmed and pass, so the read back before the freeze is what meets it
+    if (table && url === RPC1 && b.method === "getAccountInfo" && b.params[0] === table && b.params[1]?.commitment === "finalized") return refusal("Internal error", -32603);
     return k.fetchFn(url, init);
   };
   const base = keyBase();
   const dir = recordDir();
   await assert.rejects(runOn(k, await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait }), base), /not read: /);
+  assert.equal(sent(k, "extend").length, 9, "every extend went");
   assert.equal(sent(k, "freeze").length, 0);
   assert.equal(recOf(dir).tables.pumpswap, undefined);
   assert.equal(readdirSync(base).length, 1);
