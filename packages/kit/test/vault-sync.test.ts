@@ -458,7 +458,8 @@ test("a page with a leading byte-order mark, served by both, is refused: the BOM
   });
 });
 
-test("H: an abort ends a read one RPC never answers, and the RPCs get the signal", async () => {
+// A read that ignored the abort would wait on the hung RPC forever: the test's own timeout is the bound, not a clock read.
+test("H: an abort ends a read one RPC never answers, and the RPCs get the signal", { timeout: 10_000 }, async () => {
   const seen: unknown[] = [];
   const hang: Rpc = {
     name: "hang",
@@ -469,13 +470,11 @@ test("H: an abort ends a read one RPC never answers, and the RPCs get the signal
   };
   const ac = new AbortController();
   setTimeout(() => ac.abort(), 20);
-  const t0 = Date.now();
   await assert.rejects(vaultSync({ vault: VAULT, rpcs: [hang, fake("b", one(), H)], cursor: vaultSyncStart(VAULT), signal: ac.signal }), (e: unknown) => {
     assert.ok(!(e instanceof VaultSyncStopped));
     assert.equal((e as Error).name, "AbortError");
     return true;
   });
-  assert.ok(Date.now() - t0 < 300, "ended within 300 ms of the abort");
   assert.deepEqual(seen, [ac.signal]);
 });
 

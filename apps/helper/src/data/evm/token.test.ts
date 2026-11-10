@@ -16,6 +16,15 @@ import { GT_PAGE_WAIT_MS, GT_SERVE_MS, geckoBudget, WINDOW_MS, type GeckoBudget 
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
 import { GT_BASE } from "./lists.ts";
 import { createEvmToken, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
+import { enableTimers, resetTimers } from "../../../test/mock-timers.ts";
+
+/** `p`'s answer once the promise steps queued now have run, with no timer firing; undefined while it waits on one. */
+async function atOnce<T>(p: Promise<T>): Promise<T | undefined> {
+  let got: T | undefined;
+  void p.then((v) => (got = v));
+  for (let i = 0; i < 10 && got === undefined; i++) await new Promise((r) => setImmediate(r));
+  return got;
+}
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 type Snapshot = { as_of_ms: number; lists: Record<string, Record<string, unknown>[]> };
@@ -141,29 +150,27 @@ test("GeckoTerminal refusing (429) or failing (500): the page is the lists' row 
   }
 });
 
-test("the info is read once a token and held INFO_FRESH_MS; a held page answers with no call, and in well under the page's 1 s", async () => {
+test("the info is read once a token and held INFO_FRESH_MS; a held page answers with no call and no wait", async (ctx) => {
   let t = NOW;
   calls = 0;
   const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko: geckoBudget(() => t), fetch: fake("robinhood"), now: () => t });
   assert.equal((await tok.page(CASES[1].addr)).status, 200);
   assert.equal(calls, 1);
-  const ms: number[] = [];
-  for (let i = 0; i < 50; i++) {
-    const t0 = performance.now();
-    assert.equal((await tok.page(CASES[1].addr)).status, 200);
-    ms.push(performance.now() - t0);
+  // a held page waits on no timer: with the timers mocked and never moved, each answers at once
+  enableTimers(ctx.mock.timers, { apis: ["setTimeout"] });
+  try {
+    for (let i = 0; i < 50; i++) assert.equal((await atOnce(tok.page(CASES[1].addr)))?.status, 200, `held page ${i} answered with no wait`);
+  } finally {
+    resetTimers(ctx.mock.timers);
   }
   await tok.holders(CASES[1].addr);
   assert.equal(calls, 1, "held: no second call");
-  ms.sort((a, b) => a - b);
-  console.log(`warm page: p50 ${ms[25]!.toFixed(2)} ms, p95 ${ms[47]!.toFixed(2)} ms, n=50 (bound 1000 ms)`);
-  assert.ok(ms[47]! < 50, `warm page p95 ${ms[47]} ms`);
   t += INFO_FRESH_MS;
   await tok.page(CASES[1].addr);
   assert.equal(calls, 2, "read again once INFO_FRESH_MS old");
 });
 
-test("a first info read slower than INFO_WAIT_MS: the page answers without it, the read lands for the next one", async () => {
+test("a first info read slower than INFO_WAIT_MS: the page answers without it, the read lands for the next one", async (t) => {
   let release: () => void = () => {};
   const slow = new Promise<void>((ok) => (release = ok));
   const tok = createEvmToken("base", {
@@ -171,10 +178,21 @@ test("a first info read slower than INFO_WAIT_MS: the page answers without it, t
     gecko: geckoBudget(Date.now),
     fetch: async (url) => (await slow, fake("base")(url)),
   });
-  const t0 = performance.now();
-  const first = JSON.parse((await tok.page(CASES[0].addr)).body);
-  const waited = performance.now() - t0;
-  assert.ok(waited >= INFO_WAIT_MS - 5 && waited < INFO_WAIT_MS + 200, `waited ${waited} ms`);
+  // the page's wait for the info on mocked timers: it answers at INFO_WAIT_MS, not 1 ms before
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  let page: Awaited<ReturnType<typeof tok.page>> | undefined;
+  try {
+    const p = tok.page(CASES[0].addr);
+    assert.equal(await atOnce(p), undefined, "it waits for the info read");
+    t.mock.timers.tick(INFO_WAIT_MS - 1);
+    assert.equal(await atOnce(p), undefined, "1 ms before INFO_WAIT_MS");
+    t.mock.timers.tick(1);
+    page = await atOnce(p);
+  } finally {
+    resetTimers(t.mock.timers);
+  }
+  assert.ok(page !== undefined, "answered at INFO_WAIT_MS");
+  const first = JSON.parse(page.body);
   assert.equal(first.row.holders, null);
   release();
   await new Promise((ok) => setTimeout(ok, 10));

@@ -59,6 +59,30 @@ export const WORDS = {
   paused: ok("Paused", "R5 discover-ui.js colHead pause pill"),
   // {n} is data (the count of new tokens held back)
   pausedNew: ok("Paused · {n} new", "R5 discover-390.html S5.8 `Paused · 3 new`; 09-design-brief S5 Pause"),
+  // the column filter panel (card app-discover-filter-panel): CN-137 (09-design-brief §11.1), final as R5 draws it
+  // (owner-decisions.md 8 Nov 19:40Z); each word is R5 discover-ui.js P.filterPanel's, P.FILTERS' or the column head's.
+  // MC, Holders, Launchpad and No results are the entries above.
+  filters: ok("Filters", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel title DV-01, the panel's and the funnel's aria-label"),
+  curve: ok("Curve", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel section DV-03 (Graduating only)"),
+  metrics: ok("Metrics", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel section DV-04"),
+  audit: ok("Audit", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel section DV-05"),
+  onDevice: ok("Filters run on this device", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel foot DV-07"),
+  token: ok("token", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel foot count DV-08 (`1 token`)"),
+  tokens: ok("tokens", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel foot count DV-08 (`12 tokens`)"),
+  reset: ok("Reset", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel foot DV-09"),
+  min: ok("Min", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel box placeholder, tagged CN-93"),
+  max: ok("Max", "8 Nov 19:40Z, kept as drawn; R5 P.filterPanel box placeholder, tagged CN-93"),
+  close: ok("Close", "R5 P.filterPanel close button aria-label (never drawn)"),
+  fCurve: ok("Curve progress", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS curve"),
+  fAge: ok("Age", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS age"),
+  fLiq: ok("Liquidity", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS liq"),
+  fVol5: ok("Volume 5m", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS vol5"),
+  fVol1: ok("Volume 1h", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS vol1"),
+  fTx5: ok("Txns 5m", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS tx5"),
+  fB5: ok("Buys 5m", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS b5"),
+  fS5: ok("Sells 5m", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS s5"),
+  fTop10: ok("Top 10 %", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS top10"),
+  fDev: ok("Dev %", "8 Nov 19:40Z, kept as drawn; R5 P.FILTERS dev"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
