@@ -186,9 +186,32 @@ export type EvmRelease = {
   nullifier: bigint;
   token?: string;
   out?: bigint;
+  /** The log's block hash: two RPCs that name one release in two blocks of one number are not agreeing (review P3-8). */
+  blockHash: string;
 };
-/** One RPC's read: the pool's releases from `from` to its newest block, and that block's number and time (ms). */
-export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; releases: EvmRelease[] };
+/**
+ * One RPC's read: its newest block, its `safe` block, the pool's releases from `from` to `to`, and `stop`: the
+ * lowest safe block past the proof's deadline this RPC has shown (the one it was asked with, or this read's safe block
+ * when that is the first past it), at which the range stops, since a release can only be in a block at or before the
+ * first one past the deadline. `ended`: this read covered every block from `from` to `stop`, so no release in it
+ * is this RPC's word that none ever lands.
+ *
+ * Why `safe` on both chains (review P2-1 b). Base, OP stack: "block.timestamp = prev_l2_timestamp + l2_block_time"
+ * (https://specs.optimism.io/protocol/derivation.html, Overview), so a block's time is its height's, and an unsafe block
+ * rebuilt after a reorg keeps its time, while the release it held may come back in it: only a block no reorg rebuilds
+ * (safe) can say the deadline passed. Robinhood, Arbitrum Nitro: "They are updated every child chain block based on the
+ * sequencer's clock." and "Must always be equal to or greater than the previous child chain block timestamp"
+ * (https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum/block-numbers-and-time); the page does not
+ * say that a release sequenced again after a reorg gets a later time (it allows a time up to 24 hours earlier than
+ * now), so the newest block cannot be taken as final and Robinhood reads `safe` too. The cost: not_landed comes as
+ * late as the safe block trails the newest, read 2026-11-10 06:2xZ at 94 s on Base Sepolia and 835 s on Robinhood
+ * testnet (both pairs the same), 123 s and 838 s on the mainnets at the review's read.
+ */
+export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; safe: { number: bigint; timeMs: bigint }; stop: bigint | null; to: bigint; ended: boolean; releases: EvmRelease[] };
+/** The widest log range a read asks, in blocks: under the smallest cap read on the pairs, robinhood-sepolia-rpc.publicnode.com's
+ *  "exceed maximum block range: 50000" (review read, 2026-11-10); a release past it is read on a later round once the
+ *  range stops at the deadline, and a read cut by it is never `ended`. */
+export const EVM_BUY_LOG_SPAN = 20_000n;
 
 const topicOf = (signature: string): string => `0x${hexOf(keccak_256(enc.encode(signature)))}`;
 const TOPIC_BOUGHT = /* @__PURE__ */ topicOf(EVM_POOL_EVENTS.Bought);
@@ -205,17 +228,28 @@ export async function evmHeadNumber(rpc: EvmRpc): Promise<bigint> {
   return n;
 }
 
-/** One RPC's read of the pool's releases since `from`: its newest block (number and time), then the pool's Bought and
- *  Withdrawn logs from `from` to that block, asked by the pool's address and the two topics only. A log of another
- *  address or topic, a removed one, or one whose fields do not parse is left out; a read that fails throws. */
-export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint): Promise<EvmReleaseRead> {
-  const b = (await rpc("eth_getBlockByNumber", ["latest", false])) as Record<string, unknown> | null;
+const blockOf = async (rpc: EvmRpc, at: "latest" | "safe"): Promise<{ number: bigint; timeMs: bigint }> => {
+  const b = (await rpc("eth_getBlockByNumber", [at, false])) as Record<string, unknown> | null;
   const number = big(b?.number);
   const time = big(b?.timestamp);
   if (number === null || time === null) throw new Error("read-back: not a block");
-  const head = { number, timeMs: time * 1_000n };
-  if (number < from) return { head, releases: [] };
-  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: hexQ(from), toBlock: hexQ(number) }])) as unknown;
+  return { number, timeMs: time * 1_000n };
+};
+
+/** One RPC's read of the pool's releases since `from` (EvmReleaseRead): its newest and safe blocks, then the pool's
+ *  Bought and Withdrawn logs from `from` to the lowest of its newest block, `stop` and EVM_BUY_LOG_SPAN blocks, asked
+ *  by the pool's address and the two topics only. A log of another address or topic, a removed one, or one whose fields
+ *  do not parse is left out; a read that fails throws. */
+export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, deadlineMs: bigint, stopWas: bigint | null): Promise<EvmReleaseRead> {
+  const head = await blockOf(rpc, "latest");
+  const safe = await blockOf(rpc, "safe");
+  const stop = safe.timeMs > deadlineMs && (stopWas === null || safe.number < stopWas) ? safe.number : stopWas;
+  const span = from + EVM_BUY_LOG_SPAN - 1n;
+  const to = [head.number, stop ?? head.number, span].reduce((a, b) => (b < a ? b : a));
+  const ended = stop !== null && to >= stop;
+  if (to < from) return { head, safe, stop, to, ended, releases: [] };
+  const number = to;
+  const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;
   if (!Array.isArray(logs)) throw new Error("read-back: not a log list");
   const releases: EvmRelease[] = [];
   for (const l of logs as Record<string, unknown>[]) {
@@ -225,33 +259,35 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint): P
     const block = big(l.blockNumber);
     const index = big(l.logIndex);
     const tx = typeof l.transactionHash === "string" && HASH.test(lower(l.transactionHash)) ? lower(l.transactionHash) : null;
+    const blockHash = typeof l.blockHash === "string" && HASH.test(lower(l.blockHash)) ? lower(l.blockHash) : null;
     const who = big(topics[1]);
-    if (d === null || block === null || index === null || tx === null || who === null || block < from || block > number) continue;
+    if (d === null || block === null || index === null || tx === null || blockHash === null || who === null || block < from || block > number) continue;
     const recipient = addressOf(who);
     const feeRecipient = addressOf(d[0] ?? U256);
     if (recipient === null || feeRecipient === null) continue;
-    const base = { block, tx, index, recipient, feeRecipient, value: d[1]!, fee: d[2]!, nullifier: d[3]! };
+    const base = { block, blockHash, tx, index, recipient, feeRecipient, value: d[1]!, fee: d[2]!, nullifier: d[3]! };
     if (topics[0] === TOPIC_BOUGHT && d.length === 7) {
       const token = addressOf(d[5]!);
       if (token !== null) releases.push({ kind: "bought", ...base, token, out: d[6]! });
     } else if (topics[0] === TOPIC_WITHDRAWN && d.length === 5) releases.push({ kind: "withdrawn", ...base });
   }
-  return { head, releases };
+  return { head, safe, stop, to, ended, releases };
 }
 
-/** What this buy is, from its two RPCs' reads: the nullifier's release the same on both (one each, the same block,
- *  transaction, index and fields) is this buy's when it pays W and the pinned fee recipient the chunk, at a fee up to the
+/** What this buy is, from its two RPCs' reads: the nullifier's release the same on both (one each, the same block
+ *  number and hash, transaction, index and fields) is this buy's when it pays W and the pinned fee recipient the chunk, at a fee up to the
  *  proof's cap (the sender picks the fee: PrivacyPool.sol _release refuses only one over the relay data's feeCap), as a
  *  Bought of the token at least min out (filled) or a Withdrawn (the swap failed: W holds the ETH); any other release
  *  of the nullifier spent the note elsewhere, so this buy can never land (not_landed). No release on either, and both
- *  RPCs' newest block past the proof's deadline: the pool refuses it from then on (not_landed). Else null: read again. */
+ *  reads `ended` (each covered every block to a safe block past the proof's deadline): the pool refuses it from then
+ *  on (not_landed, on this round; the run asks it of two rounds, src/pool-buy-evm.ts). Else null: read again. */
 export type EvmBuyWant = { nullifier: bigint; w: string; feeRecipient: string; token: string; minOut: bigint; value: bigint; feeCap: bigint; deadlineMs: bigint };
 export type EvmBuyVerdict = { end: "filled"; release: EvmRelease & { out: bigint } } | { end: "withdrawn"; release: EvmRelease } | { end: "not_landed"; release: EvmRelease | null } | null;
 const sameRelease = (a: EvmRelease, b: EvmRelease): boolean =>
-  a.kind === b.kind && a.block === b.block && a.tx === b.tx && a.index === b.index && a.recipient === b.recipient && a.feeRecipient === b.feeRecipient && a.value === b.value && a.fee === b.fee && a.nullifier === b.nullifier && a.token === b.token && a.out === b.out;
+  a.kind === b.kind && a.block === b.block && a.blockHash === b.blockHash && a.tx === b.tx && a.index === b.index && a.recipient === b.recipient && a.feeRecipient === b.feeRecipient && a.value === b.value && a.fee === b.fee && a.nullifier === b.nullifier && a.token === b.token && a.out === b.out;
 export function evmBuyVerdict(reads: readonly [EvmReleaseRead, EvmReleaseRead], want: EvmBuyWant): EvmBuyVerdict {
   const [a, b] = reads.map((r) => r.releases.filter((x) => x.nullifier === want.nullifier)) as [EvmRelease[], EvmRelease[]];
-  if (a.length === 0 && b.length === 0) return reads.every((r) => r.head.timeMs > want.deadlineMs) ? { end: "not_landed", release: null } : null;
+  if (a.length === 0 && b.length === 0) return reads.every((r) => r.ended) ? { end: "not_landed", release: null } : null;
   if (a.length !== 1 || b.length !== 1 || !sameRelease(a[0]!, b[0]!)) return null;
   const x = a[0]!;
   const paid = x.recipient === lower(want.w) && x.feeRecipient === lower(want.feeRecipient) && x.value === want.value && x.fee <= want.feeCap;

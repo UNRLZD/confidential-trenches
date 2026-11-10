@@ -87,7 +87,7 @@ const TX = "0x" + "cd".repeat(32);
 const DEADLINE = NOW + 170_000n;
 const START = 0x100n;
 const OTHER = "0x00000000000000000000000000000000000000aa";
-type Rel = { kind?: "bought" | "withdrawn"; w?: string; feeTo?: string; value?: bigint; fee?: bigint; nullifier?: bigint; token?: string; out?: bigint; block?: bigint; tx?: string; address?: string };
+type Rel = { kind?: "bought" | "withdrawn"; w?: string; feeTo?: string; value?: bigint; fee?: bigint; nullifier?: bigint; token?: string; out?: bigint; block?: bigint; tx?: string; address?: string; blockHash?: string };
 /** A release log of the pool, as eth_getLogs gives it. */
 const release = (o: Rel = {}) => {
   const head = [BigInt(o.feeTo ?? FEE_TO), o.value ?? CHUNK, o.fee ?? FEE, o.nullifier ?? NULLIFIER, 99n];
@@ -99,18 +99,21 @@ const release = (o: Rel = {}) => {
     blockNumber: "0x" + (o.block ?? 0x110n).toString(16),
     transactionHash: o.tx ?? TX,
     logIndex: "0x2",
+    blockHash: o.blockHash ?? "0x" + "be".repeat(32),
     removed: false,
   };
 };
 /** One pool RPC: its newest block at the run's clock (`t`, or `time` for its block time), the releases it shows, and
  *  every call it got. */
-type Side = { logs?: unknown[] | (() => unknown[]); time?: () => bigint; down?: boolean; start?: bigint };
+type Side = { logs?: unknown[] | (() => unknown[]); time?: () => bigint; down?: boolean; start?: bigint; head?: () => bigint; safeTime?: () => bigint };
 type Call = { method: string; params: unknown };
 const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost["rpcs"][0] => async (method, params) => {
   calls.push({ method, params });
   if (side.down) throw new Error("down");
   if (method === "eth_blockNumber") return "0x" + (side.start ?? START).toString(16);
-  if (method === "eth_getBlockByNumber") return { number: "0x" + (START + 0x40n).toString(16), timestamp: "0x" + ((side.time?.() ?? clock.t) / 1000n).toString(16) };
+  // the safe block is the newest one unless the side sets its time (`safeTime`)
+  const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "safe" && side.safeTime !== undefined;
+  if (method === "eth_getBlockByNumber") return { number: "0x" + (side.head?.() ?? START + 0x40n).toString(16), timestamp: "0x" + ((safe ? side.safeTime!() : (side.time?.() ?? clock.t)) / 1000n).toString(16) };
   if (method === "eth_getLogs") return typeof side.logs === "function" ? side.logs() : (side.logs ?? []);
   throw new Error(`no ${method}`);
 };
@@ -226,12 +229,12 @@ test("(ruling 2) the read-back names no W, nullifier or transaction to a public 
   const said = JSON.stringify(seen.calls.map((c) => c.params)).toLowerCase();
   for (const secret of [W.slice(2).toLowerCase(), w32(NULLIFIER), NULLIFIER.toString(16), HELPER_HASH.slice(2), TX.slice(2)]) assert.ok(!said.includes(secret), `no read names ${secret}`);
   const filter = seen.calls.find((c) => c.method === "eth_getLogs")!.params as [Record<string, unknown>];
-  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x100", toBlock: "0x140" }]);
-  // the two RPCs' newest blocks differ: the reads start at the lower, so neither misses the release
+  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x9c", toBlock: "0x140" }]);
+  // the two RPCs' newest blocks differ: the reads start a lag margin (EVM_BUY_LAG_BLOCKS, 100) under the lower, so neither misses the release
   const ahead = host({ a: { logs: [release()], start: START + 9n }, b: { logs: [release()] } });
   await runEvmPoolBuy(ahead.h, ASK);
   const froms = ahead.seen.calls.filter((c) => c.method === "eth_getLogs").map((c) => (c.params as [{ fromBlock: string }])[0].fromBlock);
-  assert.ok(froms.length === 2 && froms.every((f) => f === "0x100"), froms.join(","));
+  assert.ok(froms.length === 2 && froms.every((f) => f === "0x9c"), froms.join(","));
 });
 
 test("(ruling 2) a Bought on one RPC only, or the two differing, is not filled; past the tap's bound the answer is sent, and the end goes out late once both agree", async () => {
@@ -530,4 +533,194 @@ test("a proof whose chunk is not the ask's amount, or an ask on another chain, i
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: CHUNK + 1n }), { error: "not_funded" });
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, chain: "robinhood" }), { error: "not_allowed" });
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, kind: "pool.sell" }), { error: "not_allowed" });
+});
+
+// ---- the second review's fixes (FIX of 39c2ab9c): each fails at 39c2ab9c ----
+// the new names read through the module, so this file loads at 39c2ab9c too and each test below fails there on its own
+const M = (await import("../src/pool-buy-evm.ts")) as Record<string, unknown>;
+const LAG_MS = M.EVM_BUY_LAG_MS as number;
+const turns = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+};
+const logReads = (seen: Seen) => seen.calls.filter((c) => c.method === "eth_getLogs").map((c) => (c.params as { fromBlock: string; toBlock: string }[])[0]!);
+
+test("(P2-1 a, ZZ-N1) both RPCs past the deadline while their logs trail one round: never not_landed on one round; the Bought the round after is filled", async () => {
+  let n = 0;
+  const logs = () => (++n <= 2 ? [] : [release()]);
+  const past = () => DEADLINE + 1_000n;
+  const { h, seen } = host({ a: { logs, time: past }, b: { logs, time: past } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.records.at(-1)![1].state, "filled");
+});
+
+test("(P2-1 a) not_landed with no release needs two rounds of it at least the wallet's lag margin apart (EVM_LAG_TRIES x EVM_LAG_WAIT_MS)", async () => {
+  assert.equal(LAG_MS, 10_000);
+  const past = () => DEADLINE + 1_000n;
+  const { h, seen } = host({ a: { time: past }, b: { time: past } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "not_landed", txs: [] });
+  const rounds = logReads(seen).length / 2;
+  assert.ok(rounds >= 1 + LAG_MS / 2_000, `${rounds} rounds`);
+  // a round between them that is not "none, past the deadline" (one side shows a release) starts the count again
+  let k = 0;
+  const flicker = () => (++k === 3 ? [release()] : []);
+  const again = host({ a: { time: past, logs: flicker }, b: { time: past } });
+  assert.deepEqual(await runEvmPoolBuy(again.h, ASK), { stage: "not_landed", txs: [] });
+  assert.ok(logReads(again.seen).length / 2 >= 4 + LAG_MS / 2_000, "counted again from the round after the release");
+});
+
+test("(P2-1 b) the deadline is judged on the safe block: the newest past it while the safe one is not is never not_landed, and the safe one passing ends it", async () => {
+  let safe = NOW;
+  const side = (): Side => ({ time: () => DEADLINE + 1_000n, safeTime: () => safe });
+  const { h, seen } = host({ a: side(), b: side() });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  await turns(200);
+  assert.deepEqual(seen.late, [], "no end while the safe block is before the deadline");
+  assert.ok(seen.calls.some((c) => c.method === "eth_getBlockByNumber" && (c.params as unknown[])[0] === "safe"));
+  safe = DEADLINE + 1_000n;
+  assert.deepEqual(await lateOf(seen), { stage: "not_landed", txs: [] });
+});
+
+test("(P2-1 c, ZZ-H1) the two RPCs naming the release in blocks of one number and two hashes: never filled", async () => {
+  const { h, seen } = host({ a: { logs: [release({ blockHash: "0x" + "11".repeat(32) })] }, b: { logs: [release({ blockHash: "0x" + "22".repeat(32) })] } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  await turns(50);
+  assert.deepEqual(seen.records.map((r) => r[1].state), ["pending"]);
+  assert.deepEqual(seen.late, []);
+});
+
+test("(P2-2, ZZ-S1) a sign out while a round's logs are read: that round writes nothing and starts no settle", async () => {
+  let n = 0;
+  const logs = () => {
+    n++;
+    if (n === 7) stops.at(-1)!.abort();
+    return n >= 7 ? [release()] : [];
+  };
+  const { h, seen } = host({ a: { logs }, b: { logs } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  await turns(50);
+  assert.deepEqual(seen.records.map((r) => r[1].state), ["pending"]);
+  assert.equal(seen.settles, 0);
+  assert.deepEqual(seen.late, []);
+});
+
+test("(P2-2, ZZ-S2) a sign out during a follow with no end: no settle is started after it", async () => {
+  const { h, seen } = host({ a: { logs: [release()] }, b: { logs: [release({ block: 0x111n })] } });
+  await runEvmPoolBuy(h, ASK);
+  await turns(20);
+  const before = seen.settles;
+  stops.at(-1)!.abort();
+  await turns(50);
+  assert.equal(seen.settles, before);
+});
+
+test("(P2-2, m31) a sign out during the tap's own reads ends them, even on rounds whose reads fail", async () => {
+  const logs = () => {
+    stops.at(-1)!.abort();
+    throw new Error("down");
+  };
+  const { h, seen } = host({ a: { logs }, b: { logs } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  await turns(50);
+  assert.ok(logReads(seen).length <= 4, `${logReads(seen).length} log reads after the sign out`);
+  assert.equal(seen.settles, 0);
+});
+
+test("(P2-3, ZZ-R1) a coded 4xx after a busy answer is no answer: the run follows the chain (the first POST's bytes landed)", async () => {
+  let n = 0;
+  const { h, seen } = host({ ...both([release()]), send: async () => Promise.reject(n++ === 0 ? new EvmSendBusy(1_000) : new EvmSendRefused(422, "simulation_failed")) });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.sends.length, 2);
+  assert.equal(seen.records.at(-1)![1].state, "filled");
+});
+
+test("(P3-4, ZZ-G1) two heads further apart than EVM_BUY_HEAD_SPREAD are refused before W signs; the range starts a lag margin under the lower head and stops at the safe block past the deadline", async () => {
+  const spread = M.EVM_BUY_HEAD_SPREAD as bigint;
+  const apart = host({ a: { start: START + spread + 1n }, b: {} });
+  assert.deepEqual(await runEvmPoolBuy(apart.h, ASK), { error: "failed" });
+  assert.deepEqual([apart.seen.seeds.length, apart.seen.sends.length, apart.seen.takes.length], [0, 0, 0]);
+  // a chain of a block a second; the two RPCs never agree, so the reads go on long past the deadline
+  const head = () => START + (seenOf.clock.t - NOW) / 1_000n;
+  const { h, seen } = host({ a: { logs: [release()], head, start: START + 3n }, b: { logs: [release({ block: 0x111n })], head } });
+  const seenOf = seen;
+  await runEvmPoolBuy(h, ASK);
+  for (let i = 0; i < 2_000 && seen.clock.t < DEADLINE + 600_000n; i++) await turns(1);
+  const ranges = logReads(seen);
+  assert.equal(BigInt(ranges[0]!.fromBlock), START - (M.EVM_BUY_LAG_BLOCKS as bigint), "a lag margin under the lower head");
+  const last = ranges.at(-1)!;
+  assert.ok(BigInt(last.toBlock) <= START + 171n + 1n, `the range stops at the deadline's block, not the head (${BigInt(last.toBlock)})`);
+  assert.ok(head() > BigInt(last.toBlock) + 300n);
+});
+
+test("(P3-5) a sign out started during a busy wait ends it at once: one POST, the run ends sent, nothing read or settled", async () => {
+  let out = false;
+  const { h, seen } = host({ ...both([release()]), send: () => Promise.reject(new EvmSendBusy(60_000)) });
+  h.stopped = () => out || (out = seen.clock.t >= NOW + 1_000n);
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  assert.equal(seen.sends.length, 1);
+  assert.ok(seen.clock.t - NOW < 2_000n, `ended ${seen.clock.t - NOW} ms in, not at the helper's 60 s`);
+  assert.deepEqual([logReads(seen).length, seen.settles, seen.sent], [0, 0, 1]);
+});
+
+// W's key: the test derives W itself (as W's address above), so it knows the key's bytes, and counts every fill(0) of a
+// 32-byte array holding them: the derivation's own wipes (counted on a derivation alone), plus the run's (the review's
+// zz K1 and K2, which hold the run's two zeroings with no hook in the source)
+const fillsOf = async (key: Uint8Array, run: (mark: (s: string) => void) => unknown): Promise<string[]> => {
+  const order: string[] = [];
+  const real = Uint8Array.prototype.fill;
+  Uint8Array.prototype.fill = function (this: Uint8Array, ...a: [number, number?, number?]) {
+    if (a[0] === 0 && this.length === 32 && this.every((x, i) => x === key[i])) order.push("key zeroed");
+    return real.apply(this, a);
+  } as never;
+  try {
+    await run((s) => void order.push(s));
+  } finally {
+    Uint8Array.prototype.fill = real;
+  }
+  return order;
+};
+const zeroings = (order: string[], until?: string) => (until === undefined ? order : order.slice(0, order.indexOf(until))).filter((x) => x === "key zeroed").length;
+test("(keys, zz K1) W's key is zeroed after the signature, before anything is recorded, taken or sent", async () => {
+  const KEY = freshWallet(SEED, "evm", L, 0).secretKey;
+  const alone = zeroings(await fillsOf(KEY, () => void freshWallet(SEED, "evm", L, 0)));
+  const { h } = host(both([release()]));
+  const rec = h.record;
+  const order = await fillsOf(KEY, async (mark) => {
+    h.record = async (w, r) => (mark(`record ${r.state}`), rec(w, r));
+    await runEvmPoolBuy(h, ASK);
+  });
+  assert.equal(zeroings(order, "record pending"), alone + 1);
+});
+test("(keys, zz K2) W's key is zeroed when the run ends between the derive and the signature", async () => {
+  const r0 = readyOf();
+  const KEY = freshWallet(SEED, "evm", L, 1).secretKey;
+  const alone = zeroings(await fillsOf(KEY, () => void freshWallet(SEED, "evm", L, 1)));
+  const { h, seen } = host({ ready: [{ ...r0, wallet: { ...r0.wallet, j: 1 } }] });
+  const order = await fillsOf(KEY, async () => assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "failed" }));
+  assert.equal(zeroings(order), alone + 1);
+  assert.equal(seen.sends.length, 0);
+});
+
+test("(m07) the rule checks the quote's own amount in, never the run's sum: a device quote for another amount than the chunk less the fee is never signed", async () => {
+  // a proof of one wei more than the recording's chunk: the run asks a quote for the recording's amount plus one, and the
+  // kit (here) answers its genuine quote of the recording's amount
+  const r0 = readyOf();
+  const c2 = CHUNK + 1n;
+  const ready = { ...r0, chunk: c2, publicSignals: r0.publicSignals.map((x, i) => (i === 2 ? c2.toString() : x)) };
+  const { h, seen } = host({ ready: [ready] });
+  h.quote = async () => fixtureQuote();
+  assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 }), { error: "quote_check_failed" });
+  assert.deepEqual([seen.seeds.length, seen.sends.length], [0, 0]);
+});
+
+test("(P2-2) a sign out during the follow's own end write: no settle is started after it", async () => {
+  // nothing until past the tap's bound; then the Bought, and the sign out lands while its record is written
+  const late = () => (seenOf.clock.t > NOW + BigInt(EVM_BUY_SETTLE_MS) + 10_000n ? [release()] : []);
+  const { h, seen } = host({ ...both(late), record: async () => void (seenOf.records.length > 0 && stops.at(-1)!.abort()) });
+  const seenOf = seen;
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  const before = seen.settles;
+  await turns(200);
+  assert.deepEqual(seen.records.map((r) => r[1].state), ["pending", "filled"]);
+  assert.equal(seen.settles, before, "the follow's end after a sign out starts no settle");
+  assert.deepEqual(seen.late, []);
 });

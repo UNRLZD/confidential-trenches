@@ -14,6 +14,7 @@ import {
   evmHeadNumber,
   evmPoolSend,
   evmReleaseRead,
+  EVM_BUY_LOG_SPAN,
   EvmSendBusy,
   EvmSendNoAnswer,
   EvmSendRefused,
@@ -202,6 +203,13 @@ test("head: eth_blockNumber's hex is the number; anything else throws", async ()
 const FROM = 0x10n;
 const HEAD = 0x20n;
 const HEAD_TIME = 1_700_000_000n;
+/** The safe block: 8 blocks and 16 s under the head. */
+const SAFE = 0x18n;
+const SAFE_TIME = HEAD_TIME - 16n;
+const BLOCK_HASH = "0x" + "be".repeat(32);
+/** A read with the proof's deadline past neither block (no stop yet), the stop it was asked with null. */
+const READ_DEADLINE = SAFE_TIME * 1_000n;
+const read = (rpc: EvmRpc, deadlineMs = READ_DEADLINE, stop: bigint | null = null, from = FROM) => evmReleaseRead(rpc, POOL, from, deadlineMs, stop);
 type Log = Record<string, unknown>;
 /** The pool's Bought as eth_getLogs carries it: topics[1] the recipient, seven data words. */
 const boughtLog = (o: { block?: bigint; index?: bigint; tx?: string; recipient?: string; out?: bigint; token?: bigint } = {}): Log => ({
@@ -211,6 +219,7 @@ const boughtLog = (o: { block?: bigint; index?: bigint; tx?: string; recipient?:
   blockNumber: "0x" + (o.block ?? 0x18n).toString(16),
   transactionHash: o.tx ?? TX,
   logIndex: "0x" + (o.index ?? 3n).toString(16),
+  blockHash: BLOCK_HASH,
   removed: false,
 });
 /** The pool's Withdrawn: five data words. */
@@ -219,13 +228,14 @@ const withdrawnLog = (): Log => ({
   topics: [TOPIC_WITHDRAWN, "0x" + w32(BigInt(W))],
   data: "0x" + [BigInt(FEE_TO), VALUE, FEE, NULLIFIER + 1n, 98n].map(w32).join(""),
 });
-const BOUGHT: EvmRelease = { kind: "bought", block: 0x18n, tx: TX, index: 3n, recipient: W_LOWER, feeRecipient: FEE_TO, value: VALUE, fee: FEE, nullifier: NULLIFIER, token: TOKEN, out: 40_000_000n };
-const WITHDRAWN: EvmRelease = { kind: "withdrawn", block: 0x18n, tx: OTHER_TX, index: 4n, recipient: W_LOWER, feeRecipient: FEE_TO, value: VALUE, fee: FEE, nullifier: NULLIFIER + 1n };
+const BOUGHT: EvmRelease = { kind: "bought", block: 0x18n, blockHash: BLOCK_HASH, tx: TX, index: 3n, recipient: W_LOWER, feeRecipient: FEE_TO, value: VALUE, fee: FEE, nullifier: NULLIFIER, token: TOKEN, out: 40_000_000n };
+const WITHDRAWN: EvmRelease = { kind: "withdrawn", block: 0x18n, blockHash: BLOCK_HASH, tx: OTHER_TX, index: 4n, recipient: W_LOWER, feeRecipient: FEE_TO, value: VALUE, fee: FEE, nullifier: NULLIFIER + 1n };
 
-function chain(o: { block?: unknown; logs?: unknown } = {}): { rpc: EvmRpc; calls: [string, readonly unknown[]][] } {
+function chain(o: { block?: unknown; safe?: unknown; logs?: unknown } = {}): { rpc: EvmRpc; calls: [string, readonly unknown[]][] } {
   const calls: [string, readonly unknown[]][] = [];
   const rpc: EvmRpc = async (method, params) => {
     calls.push([method, params]);
+    if (method === "eth_getBlockByNumber" && params[0] === "safe") return "safe" in o ? o.safe : { number: "0x" + SAFE.toString(16), timestamp: "0x" + SAFE_TIME.toString(16) };
     if (method === "eth_getBlockByNumber") return "block" in o ? o.block : { number: "0x" + HEAD.toString(16), timestamp: "0x" + HEAD_TIME.toString(16) };
     if (method === "eth_getLogs") return "logs" in o ? o.logs : [];
     throw new Error(`no ${method}`);
@@ -233,36 +243,70 @@ function chain(o: { block?: unknown; logs?: unknown } = {}): { rpc: EvmRpc; call
   return { rpc, calls };
 }
 
-test("release read: asks the newest block, then the pool's Bought and Withdrawn logs by address and topics from `from` to that block", async () => {
+test("release read: asks the newest and the safe block, then the pool's Bought and Withdrawn logs by address and topics from `from` to the newest block while the safe one is not past the deadline", async () => {
   const { rpc, calls } = chain();
-  await evmReleaseRead(rpc, POOL, FROM);
+  const got = await read(rpc);
+  assert.deepEqual([got.stop, got.to, got.ended], [null, HEAD, false]);
   assert.deepEqual(calls, [
     ["eth_getBlockByNumber", ["latest", false]],
+    ["eth_getBlockByNumber", ["safe", false]],
     ["eth_getLogs", [{ address: POOL_LOWER, topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: "0x10", toBlock: "0x20" }]],
   ]);
 });
 
 test("release read: no request names W, a nullifier or a transaction", async () => {
   const { rpc, calls } = chain({ logs: [boughtLog()] });
-  await evmReleaseRead(rpc, POOL, FROM);
+  await read(rpc);
   const asked = JSON.stringify(calls.map(([, p]) => p)).toLowerCase();
   for (const secret of [W_LOWER.slice(2), w32(NULLIFIER), NULLIFIER.toString(16), TX.slice(2)]) assert.ok(!asked.includes(secret), `a request carries ${secret}`);
 });
 
 test("release read: parses a Bought (seven words, topics[1] the recipient) and a Withdrawn (five words)", async () => {
   const { rpc } = chain({ logs: [boughtLog(), withdrawnLog()] });
-  const got = await evmReleaseRead(rpc, POOL, FROM);
+  const got = await read(rpc);
   assert.deepEqual(got.releases, [BOUGHT, WITHDRAWN]);
 });
 
-test("release read: head.timeMs is the newest block's timestamp in ms", async () => {
+test("release read: head and safe are the newest and safe blocks, their timestamps in ms", async () => {
   const { rpc } = chain();
-  assert.deepEqual((await evmReleaseRead(rpc, POOL, FROM)).head, { number: HEAD, timeMs: HEAD_TIME * 1_000n });
+  const got = await read(rpc);
+  assert.deepEqual([got.head, got.safe], [{ number: HEAD, timeMs: HEAD_TIME * 1_000n }, { number: SAFE, timeMs: SAFE_TIME * 1_000n }]);
+});
+
+test("release read: the safe block past the deadline is the stop, the range ends there and the read is ended (review P2-1 b, P3-4)", async () => {
+  const { rpc, calls } = chain({ logs: [boughtLog({ block: SAFE })] });
+  const got = await read(rpc, SAFE_TIME * 1_000n - 1n);
+  assert.deepEqual([got.stop, got.to, got.ended], [SAFE, SAFE, true]);
+  assert.equal((calls[2]![1][0] as { toBlock: string }).toBlock, "0x18");
+  assert.equal(got.releases.length, 1);
+});
+
+test("release read: the newest block past the deadline while the safe one is not: no stop, never ended (review P2-1 b)", async () => {
+  const got = await read(chain().rpc, HEAD_TIME * 1_000n - 1n);
+  assert.deepEqual([got.stop, got.to, got.ended], [null, HEAD, false]);
+});
+
+test("release read: a stop an earlier read set holds, the range never grows past it; a lower safe block past the deadline lowers it", async () => {
+  const kept = await read(chain().rpc, 0n, SAFE - 3n);
+  assert.deepEqual([kept.stop, kept.to, kept.ended], [SAFE - 3n, SAFE - 3n, true]);
+  const lowered = await read(chain().rpc, 0n, SAFE + 3n);
+  assert.deepEqual([lowered.stop, lowered.to, lowered.ended], [SAFE, SAFE, true]);
+});
+
+test("release read: a range is never wider than EVM_BUY_LOG_SPAN blocks, and a read it cuts is not ended (review P3-4)", async () => {
+  const far = 1n;
+  const head = far + EVM_BUY_LOG_SPAN + 10n;
+  const { rpc, calls } = chain({ block: { number: "0x" + head.toString(16), timestamp: "0x" + HEAD_TIME.toString(16) }, safe: { number: "0x" + (head - 1n).toString(16), timestamp: "0x" + HEAD_TIME.toString(16) } });
+  const got = await read(rpc, 0n, null, far);
+  assert.deepEqual([got.stop, got.to, got.ended], [head - 1n, far + EVM_BUY_LOG_SPAN - 1n, false]);
+  const asked = calls[2]![1][0] as { fromBlock: string; toBlock: string };
+  assert.equal(BigInt(asked.toBlock) - BigInt(asked.fromBlock) + 1n, EVM_BUY_LOG_SPAN);
+  assert.ok(EVM_BUY_LOG_SPAN < 50_000n, "under robinhood-sepolia-rpc.publicnode.com's 50,000-block cap");
 });
 
 test("release read: logs at `from` and at the head are kept", async () => {
   const { rpc } = chain({ logs: [boughtLog({ block: FROM }), boughtLog({ block: HEAD, index: 9n })] });
-  const got = await evmReleaseRead(rpc, POOL, FROM);
+  const got = await read(rpc);
   assert.deepEqual(got.releases.map((r) => r.block), [FROM, HEAD]);
 });
 
@@ -283,32 +327,40 @@ const DROPPED: [string, Log][] = [
   ["a short transactionHash", { ...boughtLog(), transactionHash: "0x12" }],
   ["no logIndex", (({ logIndex: _i, ...l }) => l)(boughtLog())],
   ["a logIndex that is not hex", { ...boughtLog(), logIndex: "3" }],
+  ["no blockHash", (({ blockHash: _h, ...l }) => l)(boughtLog())],
+  ["a short blockHash", { ...boughtLog(), blockHash: "0x12" }],
   ["a token word of 2^160", boughtLog({ token: 1n << 160n })],
 ];
 for (const [why, log] of DROPPED) {
   test(`release read: drops ${why}`, async () => {
     const { rpc } = chain({ logs: [log, boughtLog({ index: 7n })] });
-    const got = await evmReleaseRead(rpc, POOL, FROM);
+    const got = await read(rpc);
     assert.deepEqual(got.releases, [{ ...BOUGHT, index: 7n }], why);
   });
 }
 
 test("release read: a head before `from` asks no logs", async () => {
   const { rpc, calls } = chain({ block: { number: "0x0f", timestamp: "0x1" } });
-  assert.deepEqual(await evmReleaseRead(rpc, POOL, FROM), { head: { number: 15n, timeMs: 1_000n }, releases: [] });
-  assert.deepEqual(calls.map(([m]) => m), ["eth_getBlockByNumber"]);
+  const got = await read(rpc);
+  assert.deepEqual([got.head, got.to, got.releases], [{ number: 15n, timeMs: 1_000n }, 15n, []]);
+  assert.deepEqual(calls.map(([m]) => m), ["eth_getBlockByNumber", "eth_getBlockByNumber"]);
 });
 
 test("release read: a log answer that is not a list, or a block with no number, throws", async () => {
-  for (const logs of [null, {}, "0x"]) await assert.rejects(evmReleaseRead(chain({ logs }).rpc, POOL, FROM), /not a log list/);
-  for (const block of [null, { timestamp: "0x1" }, { number: "0x20" }]) await assert.rejects(evmReleaseRead(chain({ block }).rpc, POOL, FROM), /not a block/);
+  for (const logs of [null, {}, "0x"]) await assert.rejects(read(chain({ logs }).rpc), /not a log list/);
+  for (const block of [null, { timestamp: "0x1" }, { number: "0x20" }]) await assert.rejects(read(chain({ block }).rpc), /not a block/);
+  for (const safe of [null, { timestamp: "0x1" }, { number: "0x20" }]) await assert.rejects(read(chain({ safe }).rpc), /not a block/);
 });
 
 // ---- evmBuyVerdict ----
 
 const DEADLINE = 1_700_000_000_000n;
 const WANT: EvmBuyWant = { nullifier: NULLIFIER, w: W, feeRecipient: FEE_TO, token: TOKEN, minOut: MIN_OUT, value: VALUE, feeCap: FEE, deadlineMs: DEADLINE };
-const readOf = (releases: EvmRelease[], timeMs = DEADLINE - 1n): EvmReleaseRead => ({ head: { number: HEAD, timeMs }, releases });
+/** A read whose safe block is at `timeMs`: ended once that is past the deadline. */
+const readOf = (releases: EvmRelease[], timeMs = DEADLINE - 1n): EvmReleaseRead => {
+  const ended = timeMs > DEADLINE;
+  return { head: { number: HEAD, timeMs }, safe: { number: SAFE, timeMs }, stop: ended ? SAFE : null, to: ended ? SAFE : HEAD, ended, releases };
+};
 const both = (a: EvmRelease[], b: EvmRelease[] = a, ta?: bigint, tb?: bigint) => evmBuyVerdict([readOf(a, ta), readOf(b, tb)], WANT);
 
 test("verdict: one Bought the same on both, to W, the fee recipient, the token, the value and fee, out at least min out: filled", () => {
@@ -316,7 +368,7 @@ test("verdict: one Bought the same on both, to W, the fee recipient, the token, 
 });
 
 test("verdict: the two reads differing in any one field of the release: null", () => {
-  const changed: Partial<EvmRelease>[] = [{ block: BOUGHT.block + 1n }, { tx: OTHER_TX }, { index: BOUGHT.index + 1n }, { recipient: OTHER_W }, { feeRecipient: OTHER_FEE_TO }, { value: VALUE + 1n }, { fee: FEE + 1n }, { token: OTHER_TOKEN }, { out: BOUGHT.out! + 1n }];
+  const changed: Partial<EvmRelease>[] = [{ block: BOUGHT.block + 1n }, { blockHash: "0x" + "11".repeat(32) }, { tx: OTHER_TX }, { index: BOUGHT.index + 1n }, { recipient: OTHER_W }, { feeRecipient: OTHER_FEE_TO }, { value: VALUE + 1n }, { fee: FEE + 1n }, { token: OTHER_TOKEN }, { out: BOUGHT.out! + 1n }];
   for (const c of changed) assert.equal(both([BOUGHT], [{ ...BOUGHT, ...c }]), null, JSON.stringify(c, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 });
 
@@ -363,7 +415,7 @@ test("verdict: the release on one side only: null", () => {
   assert.equal(both([], [BOUGHT], DEADLINE + 1n, DEADLINE + 1n), null);
 });
 
-test("verdict: none on both is not_landed only once both heads are past the deadline", () => {
+test("verdict: none on both is not_landed only once both reads are ended (each covered to a safe block past the deadline)", () => {
   assert.deepEqual(both([], [], DEADLINE + 1n, DEADLINE + 1n), { end: "not_landed", release: null });
   assert.equal(both([], [], DEADLINE, DEADLINE), null, "at the deadline is not past it");
   assert.equal(both([], [], DEADLINE + 1n, DEADLINE), null, "one side past");

@@ -683,6 +683,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; testnet build only
   // until the mainnet pins' card (the mainnet build refuses it not_allowed)
   const evmBuyClaims = new Set<string>();
+  // this tab's sign outs (signingOut): a buy's busy wait ends at once on one started after its tap (review P3-5)
+  let signOuts = 0;
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
     if (e === null || !POOL_TESTNET) return null;
@@ -701,11 +703,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         return (await p).queue as ProofQueue<EvmPoolRequest>;
       },
       seed64: page.seed64,
-      store: page.store,
+      // the store only while it is open: a buy's write after a sign out fails, never opens it again (review P2-2)
+      held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
       fetch: over.fetch,
       settle: () => void reserveEvm(chain).catch(() => {}),
       testnet: POOL_TESTNET,
       signal: follows.signal,
+      stopped: ((at) => () => signOuts !== at)(signOuts),
     }));
   };
   // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per
@@ -1299,6 +1303,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      signOuts++;
       stopSolana();
       evmStop.abort();
       evmStop = new AbortController();

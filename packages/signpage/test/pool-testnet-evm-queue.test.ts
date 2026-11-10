@@ -408,6 +408,38 @@ test("the EVM buy's host on the testnet page: the testnet rule, one claim set fo
   await t.signedOut();
 });
 
+test("the EVM buy's host on the testnet page: a sign out reaches its run (the follows' signal at signedOut, the sign-out count at signingOut), and its writes never open the store (review P2-2, P3-5, t02)", async () => {
+  const { w } = await wallet();
+  let opens = 0;
+  const made: EvmPoolBuyHost[] = [];
+  const t = testnetPool({ ...page(w), store: async () => (opens++, w) }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => FREEING }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => () => {
+        made.push(host());
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  t.flow(ask, null as never);
+  const a = made[0]!;
+  assert.deepEqual([a.signal?.aborted, a.stopped?.()], [false, false]);
+  const before = opens;
+  await assert.rejects(a.record("0x" + "11".repeat(20), { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } } } as never));
+  assert.equal(opens, before, "a page with no open store: the write fails, the store is never opened for it");
+  t.signingOut();
+  assert.equal(a.stopped?.(), true, "this tab's sign out started: the run's busy wait ends");
+  t.flow(ask, null as never);
+  assert.equal(made[1]!.stopped?.(), false, "a tap after it counts from there");
+  await t.signedOut();
+  assert.equal(a.signal?.aborted, true, "signed out: the run's reads end");
+});
+
 test("the EVM buy's live check reads what the testnet page reads: its pairs, chain ids, pins, Bought topic and buy selector (scripts/live-checks/signpage-evm-pool-buy.mjs)", async () => {
   const lc = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-buy.mjs", import.meta.url).href)) as {
     RPCS: Record<string, readonly string[]>;

@@ -86,6 +86,7 @@ const BOUGHT_LOG = {
   blockNumber: "0x10",
   transactionHash: HASH,
   logIndex: "0x0",
+  blockHash: "0x" + "be".repeat(32),
   removed: false,
 };
 
@@ -290,7 +291,7 @@ function store(seed: Record<string, unknown> = {}): { store: WalletStore; data: 
 function page(o: { store?: WalletStore; ready?: ReadyProof<EvmPoolRequest>[]; fetch?: typeof fetch } = {}) {
   let refreshes = 0;
   const queue = { ready: () => o.ready ?? [], refresh: async () => (refreshes++, { proved: [], remade: [], failed: [] }), take: async () => assert.fail("no take") } as unknown as ProofQueue<EvmPoolRequest>;
-  const p: EvmBuyPage = { queue: async () => queue, seed64: async () => SEED.slice(), store: async () => o.store ?? store().store, settle: () => {}, testnet: false, fetch: o.fetch };
+  const p: EvmBuyPage = { queue: async () => queue, seed64: async () => SEED.slice(), held: async () => o.store ?? store().store, settle: () => {}, testnet: false, fetch: o.fetch };
   return { p, refreshes: () => refreshes };
 }
 const NO_RPCS: readonly [EvmRpc, EvmRpc] = [async () => null, async () => null];
@@ -303,6 +304,32 @@ test("host: record writes W's holding under EVM_POSITION_COSTS_KEY, keeping anot
   await h.record(W, HOLDING);
   assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [OTHER_W]: other, [W]: HOLDING });
   assert.deepEqual([...s.data.keys()], [`meta/${EVM_POSITION_COSTS_KEY}`]);
+});
+
+test("host (P3-7): the pending write refuses a W that already has a holding (another tab's run of the same note), keeping it; an end's write completes W's own", async () => {
+  const theirs = { ...HOLDING, mint: "0x" + "77".repeat(20) };
+  const s = store({ [`meta/${EVM_POSITION_COSTS_KEY}`]: { [W]: theirs } });
+  const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: s.store }).p);
+  await assert.rejects(h.record(W, HOLDING), /already has a holding/);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: theirs }, "the other run's token kept");
+  const filled = { ...theirs, state: "filled" as const, received: "1" };
+  await h.record(W, filled);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: filled });
+});
+
+test("host (P2-2): record and owe write the store only while it is open (the page's held), never opening it; the page's sign-out signal and sign-out count reach the run (m53)", async () => {
+  let opens = 0;
+  const s = store();
+  const signal = new AbortController().signal;
+  const stopped = () => true;
+  const p: EvmBuyPage = { ...page().p, held: async () => Promise.reject(new Error("no wallet store is open")), signal, stopped };
+  (p as unknown as { store: () => Promise<WalletStore> }).store = async () => (opens++, s.store);
+  const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), p);
+  await assert.rejects(h.record(W, HOLDING), /no wallet store is open/);
+  await assert.rejects(h.owe({ address: W, chain: "base", wei: "1", tx: HASH, block: "1" }), /no wallet store is open/);
+  assert.deepEqual([opens, s.data.size], [0, 0]);
+  assert.equal(h.signal, signal);
+  assert.equal(h.stopped, stopped);
 });
 
 test("host: owe writes W's ETH owed back under EVM_OWED_BACK_KEY, keeping another W's", async () => {

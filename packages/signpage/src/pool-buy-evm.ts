@@ -57,7 +57,7 @@ import { evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } fr
 import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
-import { EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
+import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -125,8 +125,11 @@ export type EvmPoolBuyHost = {
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The notes a run on this page has picked and not finished. */
   claimed?: Set<string>;
-  /** The page's follows: aborted at sign out, which ends the reads. */
+  /** The page's follows: aborted at sign out, which ends the reads; nothing is written or settled after it. */
   signal?: AbortSignal;
+  /** True once this tab has started a sign out since the tap (the page's count of its sign outs): a busy wait ends at
+   *  once, so the sign out never waits on it under the seed's lock. */
+  stopped?(): boolean;
   now?(): bigint;
   wait?(ms: number): Promise<void>;
 };
@@ -138,8 +141,21 @@ export const EVM_BUY_SETTLE_MS = 120_000;
 /** How long past the proof's deadline the reads go on at EVM_BUY_WAIT_MS; then at EVM_BUY_SLOW_WAIT_MS until an end. */
 export const EVM_BUY_FOLLOW_MS = 300_000;
 export const EVM_BUY_SLOW_WAIT_MS = 30_000;
-/** Between two rounds of reads: each is four requests, two on each pool RPC. */
+/** Between two rounds of reads: each is six requests, three on each pool RPC. */
 export const EVM_BUY_WAIT_MS = 2_000;
+/** The wallet's own lag margin (../../wallet/src/pool/evm.ts: an RPC behind is read again EVM_LAG_TRIES times,
+ *  EVM_LAG_WAIT_MS apart, before it fails): not_landed needs "no release, past the deadline" on two rounds at least
+ *  this far apart, so one round of log answers trailing their block headers never answers it (review P2-1 a). */
+export const EVM_BUY_LAG_MS = EVM_LAG_TRIES * EVM_LAG_WAIT_MS;
+/** The same margin in blocks, under the lower head where the read-back starts: EVM_BUY_LAG_MS on the faster chain,
+ *  Robinhood testnet's about 6 blocks a second (5,005 blocks in 835 s, read 2026-11-10 06:2xZ), is 60. */
+export const EVM_BUY_LAG_BLOCKS = 100n;
+/** Two heads further apart than this, read before W signs, refuse the run (nothing signed, the note stays HELD): a low
+ *  head is bounded by the other RPC's, so the read-back's range stays under EVM_BUY_LOG_SPAN (review P3-4). About 14
+ *  minutes of Robinhood blocks, 2.8 hours of Base's. */
+export const EVM_BUY_HEAD_SPREAD = 5_000n;
+/** A busy wait's slices: it ends within one once this tab starts a sign out (\`stopped\`). */
+const STOP_POLL_MS = 250;
 /** The standard v4 (fee, tick spacing) pairs and v3 fee tiers the first quote asks in turn (the kit's own standard set,
  *  checks/evm/quote.ts V4_KEYS and V3_FEES). */
 const V4_FIRST: readonly (readonly [number, number])[] = [[3000, 60], [10000, 200], [500, 10], [100, 1]];
@@ -192,6 +208,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
   const hold = h.hold ?? (<T>(f: () => Promise<T>) => f());
   const clock = (): bigint => h.now?.() ?? BigInt(Date.now());
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const live = (): boolean => h.signal?.aborted !== true;
+  const stopped = (): boolean => h.stopped?.() === true;
   const settle = (): void => {
     try {
       h.settle();
@@ -230,7 +248,9 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       // before W signs, so a read that fails leaves the note HELD: the token's decimals, and where the read-back starts
       const decimals = await h.decimals(token);
       const heads = await Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc)));
-      const from = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
+      const [lo, hi] = heads[0]! < heads[1]! ? [heads[0]!, heads[1]!] : [heads[1]!, heads[0]!];
+      if (hi - lo > EVM_BUY_HEAD_SPREAD) return no();
+      const from = lo > EVM_BUY_LAG_BLOCKS ? lo - EVM_BUY_LAG_BLOCKS : 0n;
       // W, from the seed, right before it signs: the proof's W and the relay data's recipient
       seed = await h.seed64();
       const w = freshWallet(seed, "evm", r.wallet.l, r.wallet.j);
@@ -247,38 +267,49 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const got = await h.take(r.noteId, r.attempt);
       taken = true;
       if (got.attempt !== r.attempt) return no();
-      // the send: a busy helper waited out while the proof has more than the send margin left
+      // the send: a busy helper waited out while the proof has more than the send margin left and no sign out started
       posted = true;
+      let busied = false;
       for (;;) {
         try {
           await h.send({ pool: h.pin.pool, data, epoch: r.epochStartMs });
           break;
         } catch (e) {
-          if (e instanceof EvmSendRefused) return { answer: { stage: "refused", txs: [] } };
-          if (e instanceof EvmSendBusy && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
-            // the helper's own Retry-After (evmPoolSend caps it at EVM_SEND_RETRY_MAX_S), at least 1 s
-            await wait(Math.max(e.retryAfterMs, 1_000));
-            continue;
+          // a coded refusal is one only on the first POST: after a busy answer an earlier POST's bytes may be on their way
+          // (the helper answers 429 when one of its sends took them, then 422 on the spent nullifier), so the chain
+          // decides (review P2-3)
+          if (e instanceof EvmSendRefused && !busied) return { answer: { stage: "refused", txs: [] } };
+          if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
+            busied = true;
+            // the helper's own Retry-After (evmPoolSend caps it at EVM_SEND_RETRY_MAX_S), at least 1 s, in slices a sign
+            // out ends
+            for (let left = Math.max(e.retryAfterMs, 1_000); left > 0 && !stopped(); left -= STOP_POLL_MS) await wait(Math.min(STOP_POLL_MS, left));
+            if (!stopped()) continue;
           }
-          // no answer: the bytes may be on their way
+          // no answer, or a sign out started: the bytes may be on their way
           break;
         }
       }
       h.sent?.();
+      // a sign out started during the busy wait: the run ends "sent", and the settle pass decides at the next sign in
+      if (stopped()) return { answer: { stage: "sent", txs: [] } };
       const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, feeCap: fee, deadlineMs: relay.deadlineMs };
-      return { watch: { want, from, holding, w: w.address } };
+      return { watch: { want, from, holding, w: w.address, stops: [null, null], none: null } };
     });
     if ("answer" in out) return out.answer;
     // the read-back, outside the lock: the tap's part, then on past it with no answer owed
     const sentAt = clock();
-    const live = (): boolean => h.signal?.aborted !== true;
-    const tap = await watch(h, out.watch, () => live() && clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS), wait);
+    const tap = await watch(h, out.watch, () => live() && clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS), wait, clock, live);
     if (tap !== null) return tap;
+    // a sign out ended the tap's reads: no follow
+    if (!live()) return { stage: "sent", txs: [] };
     const slowAt = out.watch.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
-    void watch(h, out.watch, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms))
+    void watch(h, out.watch, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
       .then((a) => {
+        // null: a sign out ended the reads, so nothing is settled after it (review P2-2)
+        if (a === null || !live()) return;
         settle();
-        if (a !== null) h.late?.(a);
+        h.late?.(a);
       })
       .catch(() => {});
     return { stage: "sent", txs: [] };
@@ -293,25 +324,40 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     (seed as Uint8Array | null)?.fill(0);
     (key as Uint8Array | null)?.fill(0);
     if (claim !== null) h.claimed?.delete(claim);
-    // a taken note is ended only by the settle: started on every exit past the take
-    if (taken) settle();
+    // a taken note is ended only by the settle: started on every exit past the take, but never once a sign out has
+    // started (its pass would wait on the seed's lock the sign out takes): the next sign in's settles it
+    if (taken && live() && !stopped()) settle();
   }
 }
 
-type Watch = { want: EvmBuyWant; from: bigint; holding: EvmHolding; w: string };
+/** The read-back's state, the tap's and the follow's: each RPC's `stop` (EvmReleaseRead), and when the first round of
+ *  "no release, past the deadline" in a row was read. */
+type Watch = { want: EvmBuyWant; from: bigint; holding: EvmHolding; w: string; stops: [bigint | null, bigint | null]; none: bigint | null };
 
 /** The read-back's rounds while `more()`: the pool's releases on both RPCs, the verdict on them, and its records: the
- *  end's answer, or null when none came in time. A read that fails is that round's no answer. */
-async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms: number) => Promise<void>): Promise<{ stage: TradeStage; txs: TxRef[] } | null> {
+ *  end's answer, or null when none came in time or a sign out (`live`) ended the reads, after which nothing is
+ *  written. A read that fails is that round's no answer. Not_landed with no release needs two rounds of it at least
+ *  EVM_BUY_LAG_MS apart, with no other verdict between them. */
+async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms: number) => Promise<void>, clock: () => bigint, live: () => boolean): Promise<{ stage: TradeStage; txs: TxRef[] } | null> {
   for (let i = 0; i === 0 || more(); i++) {
     if (i > 0) await wait(EVM_BUY_WAIT_MS);
     let v: EvmBuyVerdict;
     try {
-      const reads = (await Promise.all(h.rpcs.map((rpc) => evmReleaseRead(rpc, h.pin.pool, x.from)))) as [EvmReleaseRead, EvmReleaseRead];
+      const reads = (await Promise.all(h.rpcs.map((rpc, k) => evmReleaseRead(rpc, h.pin.pool, x.from, x.want.deadlineMs, x.stops[k]!)))) as [EvmReleaseRead, EvmReleaseRead];
+      x.stops = [reads[0].stop, reads[1].stop];
       v = evmBuyVerdict(reads, x.want);
     } catch {
       continue;
     }
+    // a sign out while the reads ran: nothing written after it (review P2-2)
+    if (!live()) return null;
+    if (v?.end === "not_landed" && v.release === null) {
+      const at = clock();
+      if (x.none === null) x.none = at;
+      if (at - x.none < BigInt(EVM_BUY_LAG_MS)) continue;
+      return { stage: "not_landed", txs: [] };
+    }
+    x.none = null;
     if (v === null) continue;
     if (v.end === "not_landed") return { stage: "not_landed", txs: [] };
     const txs: TxRef[] = [{ chain: h.chain, hash: v.release.tx }];
@@ -328,17 +374,27 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
   return null;
 }
 
-/** What the page gives an EVM buy (src/pool-testnet.ts): its chain's queue, the seed, the wallet store, the chain's
- *  RESERVED settle. */
+/** What the page gives an EVM buy (src/pool-testnet.ts): its chain's queue, the seed, the wallet store while one is
+ *  open (`held`: never opened by the buy, so a write after a sign out fails), the chain's RESERVED settle, the
+ *  follows' sign-out signal and this tab's count of sign outs (`stopped`). */
 export type EvmBuyPage = {
   queue(): Promise<ProofQueue<EvmPoolRequest>>;
   seed64(): Promise<Uint8Array>;
-  store(): Promise<WalletStore>;
+  held(): Promise<WalletStore>;
   settle(): void;
   testnet: boolean;
   fetch?: typeof fetch;
   signal?: AbortSignal;
+  stopped?(): boolean;
 };
+
+/** A W that already has a holding: the pending write is refused, so nothing is sent (review P3-7). */
+export class EvmHoldingTaken extends Error {
+  constructor() {
+    super("W already has a holding");
+    this.name = "EvmHoldingTaken";
+  }
+}
 
 /** The page's host for one EVM buy run: the kit's quote, build and venue list, the helper's send, the pool's pair for
  *  the token's decimals and the read-back, W's holding and owed ETH in the wallet store's meta. */
@@ -363,16 +419,23 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
     decimals: async (token) => tokenDecimalsOf(chain, await readTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc])),
     send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
     settle: page.settle,
+    // the pending write, before anything leaves, refuses a W that already has a holding (another tab's run of the same
+    // note, whose token it would overwrite); an end's write completes this run's own
     record: async (w, holding) => {
-      const store = await page.store();
-      await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [w]: holding }));
+      const store = await page.held();
+      await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => {
+        const all = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+        if (holding.state === "pending" && all[w] !== undefined) throw new EvmHoldingTaken();
+        return { ...all, [w]: holding };
+      });
     },
     owe: async (o) => {
-      const store = await page.store();
+      const store = await page.held();
       await store.update("meta", EVM_OWED_BACK_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [o.address]: o }));
     },
     claimed,
     signal: page.signal,
+    stopped: page.stopped,
   };
 }
 
