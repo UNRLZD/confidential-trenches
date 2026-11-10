@@ -19,8 +19,9 @@ import type { Pool } from "../../wallet/src/pool/pool.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
-const { EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, TESTNET_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
+const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_POOL_EVENTS, EVM_POOLS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_BUY_SIGNATURE } = await import("../src/evm-send.ts");
 const { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_POOLS, SOL_SEND_MARGIN_MS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 type EvmPoolPin = import("../../wallet/src/pool/evm.ts").EvmPoolPin;
 type EvmPoolEvent = import("../../wallet/src/pool/evm.ts").EvmPoolEvent;
@@ -366,4 +367,20 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
   assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", ready: 1 }], "on the chain's own queue: its landed note's proof");
   assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
   await t.signedOut();
+});
+
+test("the EVM buy's live check reads what the testnet page reads: its pairs, chain ids, pins, Bought topic and buy selector (scripts/live-checks/signpage-evm-pool-buy.mjs)", async () => {
+  const lc = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-buy.mjs", import.meta.url).href)) as {
+    RPCS: Record<string, readonly string[]>;
+    CHAIN_IDS: Record<string, bigint>;
+    PINS_OF: Record<string, string>;
+    BOUGHT: string;
+    BUY_SELECTOR: string;
+  };
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  assert.deepEqual(lc.RPCS, { "base-sepolia": TESTNET_RPCS.base, "robinhood-testnet": TESTNET_RPCS.robinhood });
+  assert.deepEqual(lc.CHAIN_IDS, { "base-sepolia": EVM_CHAIN_IDS["base-sepolia"], "robinhood-testnet": EVM_CHAIN_IDS["robinhood-testnet"] });
+  assert.deepEqual(lc.PINS_OF, { "base-sepolia": EVM_POOLS["base-sepolia"]?.pool, "robinhood-testnet": EVM_POOLS["robinhood-testnet"]?.pool });
+  assert.equal(lc.BOUGHT, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))));
+  assert.equal(lc.BUY_SELECTOR, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_BUY_SIGNATURE)).subarray(0, 4)));
 });
