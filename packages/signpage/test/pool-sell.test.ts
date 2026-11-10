@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_THROTTLE_MAX_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -4394,4 +4394,180 @@ test("card pool-sell-share-across-wallets review P2-1: a sale and its rent back 
   const fresh = await run(false);
   assert.equal(fresh.stage, "filled", JSON.stringify(fresh));
   assert.deepEqual(await run(true), fresh);
+});
+
+// ---- re-review of 29c72ffe: the rate-limit waits, held to what they claim ----
+const rateLimit = (afterMs: number | null) => new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example", afterMs);
+const isSale = (wire: string) => solanaDecodeMessage(base64.decode(wire).subarray(65)).instructions.some((x) => x.data.length === 24);
+/** RPCs that throw `fault()` (once, or always) at the first call of a kind after `armed()`, recording each sale's sent wire. */
+const faulty = (w: World, at: (p: 0 | 1, method: string, params: readonly unknown[]) => Error | null) => {
+  const sales = new Set<string>();
+  const gate = (p: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method === "sendTransaction" && isSale(params[0] as string)) sales.add(params[0] as string);
+      const e = at(p, method, params);
+      if (e) throw e;
+      return rpc(method, params);
+    }) as SolanaRpc;
+  return { rpcs: [gate(0, w.c.rpcs[0]), gate(1, w.c.rpcs[1])] as const, sales };
+};
+
+test("a rate limit thrown once W signed (from its signed hook, at the send on one RPC or both, or on any read after the send) waits nothing and never signs again: one sale signed at most", async () => {
+  for (const mode of ["signed-hook", "send-both", "send-one", "after-send"] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    let sends = 0;
+    const f = faulty(w, (p, method) => {
+      if (method === "sendTransaction") {
+        sends++;
+        return mode === "send-both" || (mode === "send-one" && p === 0) ? rateLimit(2_345) : null;
+      }
+      return mode === "after-send" && sends > 0 ? rateLimit(2_345) : null;
+    });
+    const waits: number[] = [];
+    let signedCalls = 0;
+    const host = {
+      ...w.host,
+      rpcs: f.rpcs,
+      wait: async (ms: number) => void waits.push(ms),
+      signed: async (sig: string) => {
+        signedCalls++;
+        if (mode === "signed-hook") throw rateLimit(2_345);
+        return w.host.signed?.(sig);
+      },
+    };
+    const a = await runPoolSell(host, ASK);
+    assert.equal(signedCalls, 1, `${mode}: W signed once`);
+    assert.ok(f.sales.size <= 1, `${mode}: one sale's bytes sent at most`);
+    assert.deepEqual(waits.filter((x) => x === 2_345), [], `${mode}: no rate-limit wait after the signature`);
+    assert.ok(!("error" in a) || a.error !== "down", `${mode}: never "down" (try again) once signed: ${JSON.stringify(a)}`);
+  }
+});
+
+test("a rate limit before W signs waits the provider's Retry-After, at least 1 s and at most 10 s, then reads again from the first read; the next attempt starts with no rate limit of its own, so a 5xx or a timeout there is down with no further wait", async () => {
+  const baseline = await (async () => {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    const waits: number[] = [];
+    const a = await runPoolSell({ ...w.host, wait: async (ms: number) => void waits.push(ms) }, ASK);
+    assert.equal("stage" in a && a.stage, "filled");
+    return waits;
+  })();
+  const count = (xs: number[], v: number) => xs.filter((x) => x === v).length;
+  // one rate limit at the first simulation, then the sale as usual: the wait is its Retry-After held to [1 s, 10 s]
+  for (const [afterMs, want] of [[null, POOL_SELL_WAIT_MS], [200, POOL_SELL_WAIT_MS], [2_345, 2_345], [60_000, POOL_SELL_THROTTLE_MAX_MS]] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    let fired = false;
+    const f = faulty(w, (p, method) => (!fired && p === 0 && method === "simulateTransaction" ? ((fired = true), rateLimit(afterMs)) : null));
+    const waits: number[] = [];
+    const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK);
+    assert.equal("stage" in a && a.stage, "filled", `${afterMs}: ${JSON.stringify(a)}`);
+    assert.equal(count(waits, want), count(baseline, want) + 1, `${afterMs}: one wait of ${want}`);
+    assert.equal(f.sales.size, 1);
+  }
+  // a rate limit, then on the attempt after its wait a 5xx or a timeout: down, nothing signed, no second wait
+  for (const fault of ["http_5xx", "timeout"] as const) {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    let sims = 0;
+    const f = faulty(w, (p, method) => {
+      if (p !== 0 || method !== "simulateTransaction") return null;
+      sims++;
+      return sims === 1 ? rateLimit(2_345) : sims === 2 ? new SolanaRpcTransportError(fault, fault === "timeout" ? "timed out" : "HTTP 503", 1, "rpc.example", null) : null;
+    });
+    const waits: number[] = [];
+    const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK);
+    assert.deepEqual(a, { error: "down" }, fault);
+    assert.equal(count(waits, 2_345), 1, `${fault}: the rate limit's one wait`);
+    assert.equal(waits.filter((x) => x >= POOL_SELL_WAIT_MS && x !== 2_345).length, 0, `${fault}: no wait for it`);
+    assert.equal(f.sales.size, 0);
+  }
+  // a 5xx alone, before W signs: down at once, no wait, nothing signed
+  {
+    const w = await world({ ataLamports: TOKEN_RENT });
+    const f = faulty(w, (p, method) => (p === 0 && method === "simulateTransaction" ? new SolanaRpcTransportError("http_5xx", "HTTP 503", 1, "rpc.example", null) : null));
+    const waits: number[] = [];
+    assert.deepEqual(await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK), { error: "down" });
+    assert.deepEqual(waits.filter((x) => x >= POOL_SELL_WAIT_MS), []);
+    assert.equal(f.sales.size, 0);
+  }
+});
+
+test("a sign out asked while a rate-limit wait runs, in the plan or in a sale, signs nothing after it", async () => {
+  for (const where of ["plan", "sale"] as const) {
+    const w = await twoBuys({ ataLamports: TOKEN_RENT });
+    let fired = false;
+    let out = false;
+    const f = faulty(w, (p, method, params) => {
+      if (fired || p !== 0) return null;
+      const hit = where === "plan" ? method === "getAccountInfo" && params[0] === ataOfW(W.address) : method === "simulateTransaction";
+      return hit ? ((fired = true), rateLimit(2_345)) : null;
+    });
+    const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, stopped: () => out, wait: async (ms: number) => void (ms === 2_345 && (out = true)) }, share(10_000));
+    assert.ok(fired && out, where);
+    assert.equal(f.sales.size, 0, `${where}: nothing signed after the sign out`);
+    assert.ok(!("stage" in a) || a.stage !== "filled", `${where}: ${JSON.stringify(a)}`);
+  }
+});
+
+test("two RPCs that read the pool at different tree sizes in the deposit's own read, still after its 0.5 s wait, end the sale before W signs", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+  const behindOn1 = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      const out = (await rpc(method, params)) as { value: ({ data: [string, string] } | null)[] };
+      if (method !== "getMultipleAccounts" || (params[0] as string[])[0] !== POOL || out.value[0] === null) return out;
+      const d = base64.decode(out.value[0]!.data[0]);
+      const v = new DataView(d.buffer, d.byteOffset, d.length);
+      for (const at of [49, 49 + 1065]) v.setBigUint64(at, v.getBigUint64(at, true) - 2n, true);
+      return { ...out, value: [{ ...out.value[0]!, data: [base64.encode(d), "base64"] }, ...out.value.slice(1)] };
+    }) as SolanaRpc;
+  const waits: number[] = [];
+  const f = faulty({ ...w, c: { ...w.c, rpcs: [w.c.rpcs[0], behindOn1(w.c.rpcs[1])] } } as World, () => null);
+  const a = await runPoolSell({ ...w.host, rpcs: f.rpcs, wait: async (ms: number) => void waits.push(ms) }, ASK);
+  assert.ok("error" in a, JSON.stringify(a));
+  assert.ok(waits.includes(POOL_SELL_SIZE_RETRY_MS), "the split was read again after its wait");
+  assert.equal(f.sales.size, 0);
+  assert.equal(heldOn(w, W.address) > 0n, true);
+});
+
+test("a dead record whose sale is still landing stays open with its unrun sale refused, then ends at that sale's verdict; a request that starts right after the lock query is never settled as dead (records read first, then the locks)", async () => {
+  const { store } = await notes();
+  const legs = [{ wallet: X.address, units: "3000000", tx: "sigZ", stage: "sent" }, { wallet: W.address, units: "5000000", tx: null, stage: "pending" }];
+  await store.put("ops", "d3", { kind: "sell", pool: "sol", sha: "aa", stage: "sent", txs: [{ chain: "solana", hash: "sigZ" }], created_ms: 1, legs });
+  const base = fakeLocks();
+  // a request that starts just after the query: it takes its lock and writes "pending"
+  const locks = {
+    ...base,
+    query: (async () => {
+      const q = await base.query();
+      void base.request(tradeLock("d4"), { mode: "exclusive" }, () => new Promise<void>(() => {}));
+      await store.put("ops", "d4", { kind: "sell", pool: "sol", sha: "aa", stage: "pending", txs: [], created_ms: 2 });
+      return q;
+    }) as never,
+  };
+  await settleDeadSellOps(store as unknown as TradeStore, locks);
+  const d3 = (await store.get("ops", "d3")) as Rec;
+  assert.equal(d3.stage, "sent");
+  assert.deepEqual(d3.legs.map((l) => l.stage), ["sent", "refused"]);
+  assert.equal(((await store.get("ops", "d4")) as Rec).stage, "pending", "the request that started after the query is live");
+  await settleSellOps(store as unknown as TradeStore, "sigZ", "filled");
+  assert.equal(((await store.get("ops", "d3")) as Rec).stage, "part_filled");
+});
+
+test("an id asked again whose record a closed page left pending ends that record, answered from it, and sells nothing", async () => {
+  const w = await world({ ataLamports: TOKEN_RENT });
+  await w.store.put("ops", "dz", { kind: "sell", pool: "sol", sha: "aa", stage: "pending", txs: [], created_ms: 1 });
+  const a = poolSellKind(kindHost(w), fakeLocks())(ASK, ctxOf("dz", "aa")) as KindAnswer;
+  await a.after;
+  assert.equal(((await w.store.get("ops", "dz")) as Rec).stage, "refused");
+  assert.ok("error" in (a.answer() as object), JSON.stringify(a.answer()));
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction").length, 0);
+});
+
+test("a share sell that left out a wallet both RPCs read frozen writes short on its record, so the record ends part_filled even when every sale it ran filled", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT, mapOn: (_p: 0 | 1, address: string, acc: Acc) => (address === ataOfW(X.address) ? frozenAcc(acc) : acc) });
+  const a = poolSellKind(kindHost(w), fakeLocks())(share(10_000), ctxOf("sh", "aa")) as KindAnswer;
+  await a.after;
+  await until(async () => ["filled", "part_filled", "refused", "not_landed"].includes(((await w.store.get("ops", "sh")) as Rec).stage));
+  const rec = (await w.store.get("ops", "sh")) as Rec & { short?: boolean };
+  assert.equal(rec.short, true);
+  assert.deepEqual(rec.legs.map((l) => l.stage), ["filled"]);
+  assert.equal(rec.stage, "part_filled");
 });
