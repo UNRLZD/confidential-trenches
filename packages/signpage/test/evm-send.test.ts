@@ -326,6 +326,16 @@ test("release read: a range is never wider than EVM_BUY_LOG_SPAN blocks; a read 
   await assert.rejects(read(lying, deadlineMs, null, far), /not a block/);
 });
 
+test("release read: a range the head cut, under a stop kept from an earlier round while this read's safe is before the deadline, is not ended and reads no block by number (review P3-2)", async () => {
+  const stopWas = FROM + 4_000n;
+  const head = FROM + 3_000n;
+  const deadlineMs = HEAD_TIME * 1000n - 5_000n;
+  const { rpc, calls } = chain({ block: { number: "0x" + head.toString(16), timestamp: "0x" + HEAD_TIME.toString(16) }, safe: { number: "0x" + (FROM + 2_000n).toString(16), timestamp: "0x" + (HEAD_TIME - 100n).toString(16) }, at: () => HEAD_TIME });
+  const got = await read(rpc, deadlineMs, stopWas);
+  assert.deepEqual([got.stop, got.to, got.ended], [stopWas, head, false]);
+  assert.equal(calls.filter(([m, p]) => m === "eth_getBlockByNumber" && p[0] !== "latest" && p[0] !== "safe").length, 0);
+});
+
 test("release read: an RPC whose newest block is under `from` (a node gone back) covers nothing, so its read is never ended, even with its safe block past the deadline", async () => {
   const back = FROM - 5n;
   const { rpc, calls } = chain({ block: { number: "0x" + back.toString(16), timestamp: "0x" + HEAD_TIME.toString(16) }, safe: { number: "0x" + (back - 1n).toString(16), timestamp: "0x" + HEAD_TIME.toString(16) } });

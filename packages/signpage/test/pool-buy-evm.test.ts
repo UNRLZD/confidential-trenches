@@ -17,6 +17,7 @@ import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
+import * as R from "../src/rules/pool.ts";
 
 // the pool's testnet run's own encoder (contracts/pool-evm/script/testnet-run-lib.mjs), a plain module with no types
 const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
@@ -900,7 +901,7 @@ test("(pending end, review P3-G) the load's follow: the fee recipient is the pin
   for (const [why, bad] of [
     ["decimals -1", { ...rec, decimals: -1 }],
     ["decimals 1.5", { ...rec, decimals: 1.5 }],
-    ["decimals 37", { ...rec, decimals: 37 }],
+    ["decimals 256", { ...rec, decimals: 256 }],
     ["a start block of 78 digits", { ...rec, buy: { ...rec.buy!, from: "9".repeat(78) } }],
     ["a start block under the pool's deploy", { ...rec, buy: { ...rec.buy!, from: "0" } }],
   ] as [string, EvmHolding][]) {
@@ -911,6 +912,22 @@ test("(pending end, review P3-G) the load's follow: the fee recipient is the pin
     assert.deepEqual(store.get(W), bad, `${why}: left as it is`);
     assert.equal(load.seen.calls.filter((c) => c.method === "eth_getLogs").length, 0, `${why}: unread`);
   }
+});
+
+test("(pending end, review P3-1) the run's own record of a token with 40 decimals (the rule takes up to TOKEN_DECIMALS_MAX) is followed by the load: a Bought on both RPCs fills it", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const tab = host({ holdings: kept });
+  tab.h.decimals = async () => 40;
+  assert.deepEqual(await runEvmPoolBuy(tab.h, ASK), { stage: "sent", txs: [] });
+  stops.at(-1)!.abort();
+  await turns(20);
+  assert.deepEqual([kept.get(W)?.state, kept.get(W)?.decimals], ["pending", 40]);
+  const load = host({ holdings: kept, ...both([release()]) });
+  load.seen.clock.t = NOW + 200_000n;
+  await followPending!(load.h);
+  assert.deepEqual([kept.get(W)?.state, kept.get(W)?.received], ["filled", R.poolUnits(40_000_000n, 40)]);
+  assert.equal(load.seen.settles, 1, "the note's settle runs, so its Bought spends it and the queue proves the next one");
+  assert.equal((R as { TOKEN_DECIMALS_MAX?: number }).TOKEN_DECIMALS_MAX, 255, "one bound, the rule's");
 });
 
 test("(pending end) a removal that fails leaves the pending record: the next buy is refused, nothing is doubled", async () => {
@@ -954,6 +971,6 @@ test("(pending end) the load's follow leaves a W this page follows, a record of 
   for (const [w, r] of others) kept.set(w, r);
   const load = host({ holdings: kept, following: new Set([W.toLowerCase()]), ...pastAll() });
   await followPending!(load.h);
-  assert.equal(logReads(load.seen).length, 0, "nothing read");
+  assert.equal(load.seen.calls.length, 0, "no read at all, not even the newest blocks (review P3-3)");
   assert.equal(kept.size, 4);
 });

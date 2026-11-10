@@ -121,7 +121,7 @@ export async function read(md = readFileSync(RECORD, "utf8"), fetchFn = fetch, h
   for (const { network, hash } of txs)
     for (const rpc of RPCS[network] ?? [])
       // a null for a recorded, landed buy is that backend not holding it (a load-balanced provider, Pocket on
-      // 2026-11-11): read again once, then no answer (INCONCLUSIVE), never a FAIL or a PASS on it
+      // 2026-11-10): read again once, then no answer (INCONCLUSIVE), never a FAIL or a PASS on it
       for (const method of ["eth_getTransactionByHash", "eth_getTransactionReceipt"]) reads.push({ network, hash, rpc, method, answer: await rpcAnswer(rpc, method, [hash], { fetchFn, nullNoAnswer: true }) });
   const sends = [];
   for (const network of Object.keys(RPCS)) {

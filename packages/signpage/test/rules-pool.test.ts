@@ -644,8 +644,9 @@ test("EVM buy: the kit's Buy built from the device's quote of the request's toke
     [() => checkEvmBuy(built, other, P(r), r, ask, evmCtx(), F), "pool"],
     // a quoted build through another venue list's adapter
     [() => checkEvmBuy(quotedBuy(q, other, { base: pin(B, { pool: EVM_POOL, adapters: { v3: other } }) }), EVM_POOL, P(r), r, ask, evmCtx(), F), "adapter"],
-    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, token: other }, evmCtx(), F), "token"],
-    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, amount: 1n }, evmCtx(), F), "amount"],
+    // the build's token and the proof's value, each against an ask the quote agrees with (so only that check refuses)
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, token: other }, evmCtx(), { ...F, token: other }), "token"],
+    [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, amount: ask.amount + 1n }, evmCtx(), agreedOf(q, ask.amount + 1n)), "amount"],
     [() => checkEvmBuy(built, EVM_POOL, P(r), r, { ...ask, chain: "robinhood" }, evmCtx(), F), "chain"],
     [() => checkEvmBuy(built, EVM_POOL, P(relay({ recipient: other })), relay({ recipient: other }), ask, evmCtx(), F), "recipient"],
     [() => checkEvmBuy(built, EVM_POOL, P(relay({ feeRecipient: other })), relay({ feeRecipient: other }), ask, evmCtx(), F), "fee_recipient"],

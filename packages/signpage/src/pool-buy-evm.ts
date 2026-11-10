@@ -61,7 +61,7 @@ import { EVM_LAG_TRIES, EVM_LAG_WAIT_MS, EVM_SEND_MARGIN_MS, type EvmPoolPin, ty
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
-import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, tokenDecimalsOf, type PoolAsk } from "./rules/pool.ts";
+import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, TOKEN_DECIMALS_MAX, tokenDecimalsOf, type PoolAsk } from "./rules/pool.ts";
 import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmBuyVerdict, evmHeadNumber, evmPoolSend, evmReleaseRead, type EvmBuyVerdict, type EvmBuyWant, type EvmReleaseRead } from "./evm-send.ts";
 import { readTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
 import { TRADE_HELPER } from "./trade.ts";
@@ -453,14 +453,15 @@ export async function followPendingEvmBuys(h: EvmPoolBuyHost): Promise<void> {
   for (const [w, v] of Object.entries(all)) {
     const rec = v as Partial<EvmHolding> | null;
     const b = rec?.buy;
-    // a record this device never writes is left as it is, unread (review P3-G): decimals not an integer 0 to 36 (the
-    // run writes the token's own), or a start block under the pool's deploy or past both RPCs' newest (the run writes
-    // the lower newest less EVM_BUY_LAG_BLOCKS), which no read could end
-    if (rec?.state !== "pending" || rec.chain !== h.chain || typeof rec.mint !== "string" || !Number.isInteger(rec.decimals) || rec.decimals! < 0 || rec.decimals! > 36 || b === undefined) continue;
+    // a record this device never writes is left as it is, unread (review P3-G): decimals not an integer 0 to
+    // TOKEN_DECIMALS_MAX (the run writes the token's own, as the rule reads it), or a start block under the pool's
+    // deploy or past both RPCs' newest (the run writes the lower newest less EVM_BUY_LAG_BLOCKS), which no read could end
+    if (rec?.state !== "pending" || rec.chain !== h.chain || typeof rec.mint !== "string" || !Number.isInteger(rec.decimals) || rec.decimals! < 0 || rec.decimals! > TOKEN_DECIMALS_MAX || b === undefined) continue;
     const nullifier = big(b.nullifier), from = big(b.from), deadlineMs = big(b.deadlineMs), minOut = big(b.minOut), value = big(b.value), feeCap = big(b.feeCap);
     if (nullifier === null || from === null || deadlineMs === null || minOut === null || value === null || feeCap === null) continue;
     const key = lower(w);
-    if (from < h.pin.fromBlock) continue;
+    // a W this page follows already: no read at all (review P3-3)
+    if (from < h.pin.fromBlock || h.following?.has(key) || !live()) continue;
     heads ??= Promise.all(h.rpcs.map((rpc) => evmHeadNumber(rpc))).catch(() => null);
     const hs = await heads;
     if (hs === null || hs.some((n) => from > n) || h.following?.has(key) || !live()) continue;

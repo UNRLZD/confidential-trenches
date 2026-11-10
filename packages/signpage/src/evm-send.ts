@@ -249,7 +249,8 @@ export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, de
   // the range cut short of `stop` (safe gone more than EVM_BUY_LOG_SPAN blocks past `from`): its last block, under a
   // safe one, is read by number, and when it too is past the deadline the range stops there, so the read can end
   // (review P1-A; one more read, only then)
-  if (stop !== null && to < stop && to >= from) {
+  // only a range the span cut: a range the head cut ends at no block this read's own safe does not cover (review P3-2)
+  if (stop !== null && to < stop && to >= from && to === span) {
     const last = await blockOf(rpc, to);
     if (last.timeMs > deadlineMs) stop = to;
   }

@@ -96,7 +96,7 @@ test("made from the good run: each break FAILs", async () => {
   }
 });
 
-test("a null for a recorded buy from one RPC (a load-balanced backend that lacks it, read live 2026-11-11 17:1xZ on Pocket) is read again: a later answer PASSes, nulls only leave the run INCONCLUSIVE, never FAIL or PASS", async () => {
+test("a null for a recorded buy from one RPC (a load-balanced backend that lacks it, read live 2026-11-10 17:1xZ on Pocket) is read again: a later answer PASSes, nulls only leave the run INCONCLUSIVE, never FAIL or PASS", async () => {
   const nulls = (n) => {
     let left = n;
     const base = replay(A.good);

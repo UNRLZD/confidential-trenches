@@ -209,6 +209,9 @@ export const POOL_ASSET_DECIMALS_OF: Readonly<Record<PoolChain, number>> = Objec
 /** The most base units an amount may be: a Solana u64; an EVM uint256 (a pool deposit's own bound is the contract's). */
 const AMOUNT_BOUND: Readonly<Record<PoolChain, bigint>> = Object.freeze({ solana: 1n << 64n, base: 1n << 256n, robinhood: 1n << 256n });
 
+/** The most decimals a token may have: decimals() returns a uint8, a mint stores one byte. The run records what this
+ *  allows and the load's follow of a pending buy reads the same (src/pool-buy-evm.ts). */
+export const TOKEN_DECIMALS_MAX = 255;
 /** A token's decimals as two providers answered the device's own read of it (src/pool-reads.ts): the Solana mint
  *  account (getAccountInfo, base64) or the ERC-20's decimals() (eth_call), each answer raw and hostile until parsed. */
 export type TokenDecimalsReads = readonly [unknown, unknown];
@@ -234,7 +237,7 @@ function decimalsAnswer(chain: PoolChain, a: unknown): number {
   // decimals() returns uint8, ABI-encoded as one 32-byte word under 256
   if (typeof a !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(a)) return refuse("decimals");
   const n = BigInt(a);
-  if (n > 255n) return refuse("decimals");
+  if (n > BigInt(TOKEN_DECIMALS_MAX)) return refuse("decimals");
   return Number(n);
 }
 /** The token's decimals: both providers' answers parsed, and the two the same; else refused "decimals". */
