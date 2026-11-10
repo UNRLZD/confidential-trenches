@@ -74,6 +74,7 @@ import {
   solanaPoolPage,
   solanaPoolPriorityBudget,
   SOLANA_POOL_BUY_CU,
+  SolanaPoolBuyError,
   type SolanaPoolBuyRequest,
   type SolanaPoolBuyVenue,
   type SolanaPoolRelease,
@@ -518,6 +519,9 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
+    // a venue our lookup table is not made for (PumpSwap on the mainnet's curve-only table): not open on this page, as a
+    // page with no table answers, never a failure (review P3-4 of a34c1626)
+    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table") return { error: "not_allowed" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     return { error: "failed" };

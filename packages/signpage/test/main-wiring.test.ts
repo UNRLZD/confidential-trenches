@@ -9,6 +9,10 @@
 //   lands is counted in the next state. The state read never writes: pageNotes reads with the wallet's readNotes and
 //   never opens the note store (whose open and list free a dead tab's notes and finish a parent); a third hook records
 //   who calls each of the two. The framed side is test/main-framed-pools.test.ts.
+// - The page's pool pins: a fourth hook loads the wallet's SOL_POOLS with no pool on either cluster, so the pool kinds
+//   and the restore are checked on a network with no pin (the mainnet build pins the Solana pool since card
+//   sol-pools-mainnet-pin; that build's pinned flow is test/main-mainnet-pools.test.ts), and no pool read sits among
+//   the helper's requests this file reads.
 // The scope is mainnet's real one: the v1 deploy record's (contracts/vault/deployments/mainnet-v1.json), which
 // checks.ts's vaultScope answers unhooked for the page's network (the first test holds the two equal). The helper is a fetch that
 // records each request and answers 503, so a quote that reached it answers "down" and carries U in its body.
@@ -30,6 +34,10 @@ const SCOPE = BigInt(JSON.parse(readFileSync(new URL("../../../contracts/vault/d
 // Solana's USDC: this test's helper answers 503, so no 1Click answer is checked and no mock key is needed
 const SOL_USDC = ONECLICK_USDC_ASSETS[1]!;
 const TABLE = 'export const PAGE_POOLS: readonly BalancePool[] = pagePoolsOf(POOL_TESTNET ? "testnet" : "mainnet");';
+// this file plants SOL_POOLS empty: the wiring of a page that pins no pool (every pool kind refused, a restore that reads
+// nothing); the mainnet pin's own wiring, the landing's settle pass beside deposit.quote among it, is
+// test/main-mainnet-pools.test.ts's (card sol-pools-mainnet-pin)
+const SOL_PINS = "export const SOL_POOLS: Readonly<Partial<Record<\"devnet\" | \"mainnet\", SolanaPoolPin>>> = Object.freeze(";
 // each call of the note store's openNoteStore and readNotes, with the stack it was called from
 const calls: { name: string; stack: string }[] = ((globalThis as { __ctNoteCalls?: unknown }).__ctNoteCalls = []) as never;
 const record = (src: string, name: string): string => {
@@ -46,6 +54,11 @@ registerHooks({
       const src = String(r.source);
       if (!src.includes(TABLE)) throw new Error("pools.ts: PAGE_POOLS's line moved; update this test's hook");
       return { ...r, source: src.replace(TABLE, `export const PAGE_POOLS = Object.freeze([{ id: "near:t", chain: "near", scope: ${SCOPE}n, asset: "USDC" }]);`) };
+    }
+    if (url.endsWith("/wallet/src/pool/solana.ts")) {
+      const src = String(r.source);
+      if (!src.includes(SOL_PINS)) throw new Error("solana.ts: SOL_POOLS's line moved; update this test's hook");
+      return { ...r, source: src.replace(SOL_PINS, `export const SOL_POOLS = Object.freeze({});\nconst SOL_POOLS__real = Object.freeze(`) };
     }
     if (url.endsWith("/wallet/src/notes/store.ts")) return { ...r, source: record(record(String(r.source), "openNoteStore"), "readNotes") };
     // card wallet-deposit-follow: the follows' storeClosed and settle calls are recorded, so the test reads what main.ts
@@ -277,7 +290,7 @@ test("main.ts wires the namer: a landing names, a quote waits for it, a notes ch
   other.close();
 });
 
-test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so each is refused not_allowed and nothing is fetched", async () => {
+test("main.ts wires the pool kinds: on a page that pins no pool (this file plants SOL_POOLS empty), each is refused not_allowed and nothing is fetched", async () => {
   const cases = [
     { type: "pool.deposit", chain: "solana", amount: "1" },
     { type: "pool.buy", chain: "base", token: "0xF111111111111111111111111111111111111111", amount: "1", slippage_bps: 100 },
@@ -309,9 +322,10 @@ test("main.ts wires the pool kinds: on the page's mainnet no pool is pinned, so 
 });
 
 // card pool-restore-wired: the app's restore (apps/terminal/src/screens/signin/source.tsx) reaches a kind of the page's
-// own: answered started, then its progress to done; on the page's mainnet no pool is pinned, so it reads nothing.
+// own: answered started, then its progress to done; this file plants SOL_POOLS empty, so it reads nothing (the pinned
+// mainnet page: test/main-mainnet-pools.test.ts and scripts/live-checks/pool-restore-wired.mjs).
 // Signed in again here (the test above ended signed out), as a sign-in from another tab
-test("main.ts wires the restore kind: answered started, its progress reading then done, no fetch on a network with no pin", async () => {
+test("main.ts wires the restore kind: answered started, its progress reading then done, no fetch on a page that pins no pool (planted)", async () => {
   // its own wait, 15 s: a loaded machine runs the store's open, the locks and the run slower than until's 3 s
   const long = async (what: string, ok: () => Promise<boolean>) => {
     for (let t = 0; t < 1500; t++) if (await ok()) return;
