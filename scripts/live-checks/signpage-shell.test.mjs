@@ -280,13 +280,16 @@ test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet 
     assert.ok(m, `${f}: ${re}`);
     return m.slice(1).map((u) => new URL(u).host);
   };
-  const { NEAR_NETWORKS } = await import("../../packages/kit/src/near/networks.ts");
+  // the NEAR pair through the kit's public entry: its rule names the mainnet list in order, fastnear's first and drpc's last
+  const { nearPairRule } = await import("../../packages/kit/src/index.ts");
+  const near = nearPairRule("mainnet").match(/https:\/\/[^\s,]+/g);
+  assert.equal(near.length, 3, nearPairRule("mainnet"));
   const want = [
     ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
     ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
     ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
-    new URL(NEAR_NETWORKS.mainnet.fastnear[0]).host,
-    new URL(NEAR_NETWORKS.mainnet.drpc).host,
+    new URL(near[0]).host,
+    new URL(near[2]).host,
   ];
   assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
   assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(pageRpc\(SOLANA_PROVIDER_A\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER\)\)\];/);
