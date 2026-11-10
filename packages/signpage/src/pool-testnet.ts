@@ -61,10 +61,11 @@ import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } f
 import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
-import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
+import { evmBuyHost, poolBuyEvmKind } from "./pool-buy-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -315,7 +316,7 @@ export type TestnetOver = {
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
   /** The trade kinds (poolBuyKind, poolSellKind otherwise): a test reads the hosts this page wires into them (W's buy
    *  record, written by the buy host and read by the sell host; delta review 8 of 5697d7a1). */
-  tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
+  tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind; evmBuy?: typeof poolBuyEvmKind };
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -626,6 +627,26 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     });
   };
   const evmDeposit = (chain: "base" | "robinhood") => evmKind(chain);
+  // pool.buy on an EVM chain (card signpage-evm-pool-buy, src/pool-buy-evm.ts): the chain's queue, the kit's quote and
+  // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; testnet build only
+  // until the mainnet pins' card (the mainnet build refuses it not_allowed)
+  const evmBuyClaims = new Set<string>();
+  const evmBuy = (chain: "base" | "robinhood") => {
+    const e = evmPool(chain);
+    if (e === null || !POOL_TESTNET) return null;
+    return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, {
+      queue: async () => {
+        let p = evmQueues.get(chain);
+        if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
+        return (await p).queue as ProofQueue<EvmPoolRequest>;
+      },
+      seed64: page.seed64,
+      store: page.store,
+      fetch: over.fetch,
+      settle: () => void reserveEvm(chain).catch(() => {}),
+      testnet: POOL_TESTNET,
+    }));
+  };
   // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per
   // chain at a time: on a signed-in load and on each state read while such a note is open
   const evmSettling = new Map<"base" | "robinhood", Promise<void>>();
@@ -1154,7 +1175,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       ask.chain !== "solana"
         ? ask.kind === "pool.deposit"
           ? (evmDeposit(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
-          : { error: "not_allowed" }
+          : ask.kind === "pool.buy"
+            ? (evmBuy(ask.chain)?.(ask, ctx) ?? { error: "not_allowed" })
+            : { error: "not_allowed" }
         : pin === undefined
         ? { error: "not_allowed" }
         : ask.kind === "pool.deposit"

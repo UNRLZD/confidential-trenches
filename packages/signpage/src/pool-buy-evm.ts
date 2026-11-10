@@ -39,14 +39,18 @@
 //   decimals name the token only.
 // Nothing here logs.
 import type { TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
-import type { EvmPoolBuyQuote, EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
-import { venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolBuyQuote, type EvmPoolBuyQuote, type EvmPoolBuyQuoteRequest } from "../../kit/src/checks/evm/quote.ts";
+import { evmPoolVenues, venuePins, type EvmPoolBuy, type EvmPoolChain, type EvmPoolVenueList, type EvmRoute } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolBuildQuoted } from "../../kit/src/trade/evm/buy.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { EVM_CHAIN_IDS, EVM_SEND_MARGIN_MS, type EvmPoolPin, type EvmPoolRequest, type EvmRpc } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, type PoolAsk } from "./rules/pool.ts";
-import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmReadBack, evmReleaseOutcome, type EvmReadBack, type EvmReleaseOutcome } from "./evm-send.ts";
+import type { ProofQueue } from "../../wallet/src/pool/queue.ts";
+import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
+import { checkEvmBuy, PoolRuleRefused, poolUnits, signEvmBuy, tokenDecimalsOf, type PoolAsk } from "./rules/pool.ts";
+import { EvmSendBusy, EvmSendRefused, evmBuyCalldata, evmPoolSend, evmReadBack, evmReleaseOutcome, type EvmReadBack, type EvmReleaseOutcome } from "./evm-send.ts";
+import { readTokenDecimals, type PoolRpc } from "./pool-kinds.ts";
+import { TRADE_HELPER } from "./trade.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 type Ready = ReadyProof<EvmPoolRequest>;
@@ -257,6 +261,48 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
   }
 }
 const big = (_k: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
+
+/** What the page gives an EVM buy (src/pool-testnet.ts): its chain's queue, the seed, the wallet store, the chain's
+ *  RESERVED settle. */
+export type EvmBuyPage = {
+  queue(): Promise<ProofQueue<EvmPoolRequest>>;
+  seed64(): Promise<Uint8Array>;
+  store(): Promise<WalletStore>;
+  settle(): void;
+  testnet: boolean;
+  fetch?: typeof fetch;
+};
+
+/** The page's host for one EVM buy run: the kit's quote, build and venue list, the helper's send, the pool's pair for
+ *  the token's decimals and the read-back, W's holding in the wallet store's meta. */
+export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], claimed: Set<string>, page: EvmBuyPage): EvmPoolBuyHost {
+  return {
+    chain,
+    testnet: page.testnet,
+    pin,
+    venues: evmPoolVenues(),
+    rpcs,
+    // none ready: a pass starts for the next tap
+    ready: async () => {
+      const q = await page.queue();
+      const list = q.ready();
+      if (list.length === 0) void q.refresh().catch(() => {});
+      return list;
+    },
+    take: async (id, attempt) => (await page.queue()).take(id, attempt),
+    seed64: page.seed64,
+    quote: evmPoolBuyQuote,
+    build: evmPoolBuildQuoted,
+    decimals: async (token) => tokenDecimalsOf(chain, await readTokenDecimals(chain, token, rpcs as readonly [PoolRpc, PoolRpc])),
+    send: (body) => evmPoolSend(TRADE_HELPER, body, page.fetch),
+    settle: page.settle,
+    record: async (w, holding) => {
+      const store = await page.store();
+      await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [w]: holding }));
+    },
+    claimed,
+  };
+}
 
 type Locks = Pick<LockManager, "request">;
 

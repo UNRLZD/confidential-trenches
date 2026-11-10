@@ -331,3 +331,36 @@ test("the EVM part of a state read runs beside the Solana part: a Solana proof i
   t.signingOut();
   await t.signedOut();
 });
+
+test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's queue; a chain with none is refused not_allowed (card signpage-evm-pool-buy)", async () => {
+  const { w, ns } = await wallet();
+  const prover = signalsProver();
+  const hosts: { chain: string; network: string; ready: number }[] = [];
+  const t = testnetPool(page(w), {
+    prover: { vault: prover, stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => (ask) => {
+        const after = (async () => {
+          const h = host();
+          hosts.push({ chain: h.chain, network: h.pin.network, ready: (await h.ready()).length });
+        })();
+        return { running: true, after, answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  await landed(ns);
+  await t.stateRead();
+  // the state read starts the chain's queue pass without waiting for it: its proof made
+  for (let i = 0; i < 200 && ((await t.readyWith(async () => null)).ready?.length ?? 0) === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  const ask = { kind: "pool.buy", chain: "base", token: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  const got = t.flow(ask, null as never);
+  assert.ok("after" in got, "the base buy runs");
+  await got.after;
+  assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", ready: 1 }], "on the chain's own queue: its landed note's proof");
+  assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
+  await t.signedOut();
+});

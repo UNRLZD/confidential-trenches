@@ -15,8 +15,11 @@ import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, t
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { evmBuyCalldata, EvmSendRefused } from "../src/evm-send.ts";
-import { buyData, proofArg } from "../../../contracts/pool-evm/script/testnet-run-lib.mjs";
 import type { PoolAsk } from "../src/rules/pool.ts";
+
+// the pool's testnet run's own encoder (contracts/pool-evm/script/testnet-run-lib.mjs), a plain module with no types
+const LIB = new URL("../../../contracts/pool-evm/script/testnet-run-lib.mjs", import.meta.url).href;
+const { buyData, proofArg } = (await import(LIB)) as { buyData: (...a: unknown[]) => string; proofArg: (...a: unknown[]) => unknown };
 
 // the kit's recorded quote: 0.01 ETH of USDC on Base through a v3 pool (kit test/fixtures/evm-quote.json "base-ok")
 type Exchange = { calls: EvmRpcCall[]; answers: unknown[] };

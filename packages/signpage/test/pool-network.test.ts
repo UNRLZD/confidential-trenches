@@ -13,3 +13,17 @@ test("the mainnet tables: no Solana pool pinned, on mainnet or devnet", () => {
   assert.equal(SOL_POOLS.mainnet, undefined);
   assert.ok(Object.isFrozen(SOL_POOLS));
 });
+
+test("the mainnet build refuses an EVM pool buy by name, whatever pin a chain has (card signpage-evm-pool-buy; its mainnet pins are a later card)", async () => {
+  const { testnetPool } = await import("../src/pool-testnet.ts");
+  const pin = Object.freeze({ network: "base" as const, pool: "0x00000000000000000000000000000000000F0011", feeRecipient: "0x0000000000000000000000000000000000000fee", fromBlock: 1n });
+  const rpcs = ["https://a.example", "https://b.example"].map((url) => Object.assign(async () => assert.fail("no RPC read"), { url }));
+  const t = testnetPool({ store: async () => assert.fail("no store read"), seed64: async () => assert.fail("no seed read") } as never, {
+    evmPin: () => pin,
+    evmRpcs: () => rpcs,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    tradeKinds: { evmBuy: () => () => assert.fail("no EVM buy on mainnet") },
+  });
+  for (const chain of ["base", "robinhood"] as const)
+    assert.deepEqual(t.flow({ kind: "pool.buy", chain, token: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: 10n ** 15n, slippageBps: 100, decimals: 18 }, null as never), { error: "not_allowed" });
+});
