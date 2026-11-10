@@ -1359,10 +1359,9 @@ test("T4 a provider that never answers is a refusal (rpc_error) once the request
     signal = init?.signal ?? undefined;
     return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
   }) as typeof fetch;
-  const t = Date.now();
   await assert.rejects(evmJsonRpc("https://a.example", hung, 1 << 20, 50)([{ method: "eth_blockNumber", params: [] }]));
-  // the request's limit is 50 ms: a request with none would hang to the test's 3 s
-  assert.ok(Date.now() - t < 2_000);
+  // the request's limit is 50 ms: a request with none, or with the default EVM_RPC_TIMEOUT_MS (10 s), runs past the
+  // test's own 3 s timeout and fails it
   // and by default each request carries a signal (EVM_RPC_TIMEOUT_MS)
   signal = undefined;
   void evmJsonRpc("https://a.example", hung)([{ method: "eth_blockNumber", params: [] }]).catch(() => {});
