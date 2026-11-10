@@ -78,8 +78,12 @@ test("right after a swap, with one call free: PUMP's chart (nothing servable) ta
 
 test("a chart whose pool is held waits up to GT_CHART_WAIT_MS for the next free call instead of a 429", async () => {
   const { GT_CHART_WAIT_MS, GT_PAGE_WAIT_MS } = (await import("./token.ts")) as { GT_CHART_WAIT_MS?: number; GT_PAGE_WAIT_MS: number };
+  // the token's clock and its budget wait on the test's own time, so the wait measured is the one asked for, however
+  // busy the machine is
   const start = Date.now();
-  const now = () => Date.now();
+  let at = start;
+  const now = () => at;
+  const sleep = async (ms: number) => void (at += ms);
   const seedAt = start - WINDOW_MS + GT_PAGE_WAIT_MS + 1_000; // the next free call 5 s away: past one call's wait, inside a chart's
   const old = createSolanaToken(unused as never, unused as never, { now, fetch: gecko().fetch as never, gecko: geckoBudget(now) });
   assert.equal((await old.candles(PUMP, "1m", null, 24)).status, 200);
@@ -88,13 +92,13 @@ test("a chart whose pool is held waits up to GT_CHART_WAIT_MS for the next free 
   const budget = geckoBudget(now);
   budget.seed(Array.from({ length: GT_LIMIT_PER_MIN }, (_, i) => seedAt + i * 10));
   const gt = gecko();
-  const fresh = createSolanaToken(unused as never, unused as never, { now, fetch: gt.fetch as never, gecko: budget });
+  const fresh = createSolanaToken(unused as never, unused as never, { now, sleep, fetch: gt.fetch as never, gecko: budget });
   fresh.restore(state);
   const a = await fresh.candles(PUMP, "1m", null, 24);
-  const waited = Date.now() - start;
+  const waited = now() - start;
   assert.equal(a.status, 200, `answered ${a.status} ${a.body} after ${waited} ms`);
   assert.ok(GT_CHART_WAIT_MS! > GT_PAGE_WAIT_MS && GT_CHART_WAIT_MS! <= 8_000, "inside the app's 10 s request with GeckoTerminal's answer");
-  assert.ok(waited >= GT_PAGE_WAIT_MS && waited < GT_CHART_WAIT_MS! + 1_000, `waited ${waited} ms`);
+  assert.ok(waited >= GT_PAGE_WAIT_MS && waited <= GT_CHART_WAIT_MS!, `waited ${waited} ms`);
   assert.equal(gt.urls.length, 1);
 });
 
