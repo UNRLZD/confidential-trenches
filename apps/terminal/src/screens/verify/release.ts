@@ -67,7 +67,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       },
       robinhood: {
         chain: "robinhood",
-        rpcs: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"],
+        rpcs: ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"],
         pin: {
           address: "0x9306359433127c4f3be426f6faeb00a3c41f66db", // gitleaks:allow (a public contract address)
           codeHash: "0x4052383ebda1543cc4e9d8f51a03cdc631f4562d763c60508ef870189f8747c7", // gitleaks:allow (a public code hash)

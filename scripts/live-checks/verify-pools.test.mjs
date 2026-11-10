@@ -56,7 +56,7 @@ test("a row amber or red, another RPC named, an explorer link off, the rows neve
 // "Unknown state"; the page now walks past it to two other operators of the kit's list, and the check holds the row to
 // two operators of the list, each read with every read 200
 test("planted on the good answer: dRPC answering 400 and the Robinhood row ok on two other operators of its list: PASS; ok on dRPC, one operator twice, or a named RPC not all 200: FAIL", () => {
-  const LIST = ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"];
+  const LIST = ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"];
   const walked = (names, also = () => {}) =>
     mutate((r) => {
       r.release.robinhood.rpcs = LIST;
@@ -72,7 +72,7 @@ test("planted on the good answer: dRPC answering 400 and the Robinhood row ok on
     });
   const good = walked(["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"]);
   assert.equal(judge(good).ok, true, judge(good).lines.filter((l) => l.startsWith("BAD")).join("\n"));
-  assert.ok(judge(good).lines.some((l) => /desktop \/verify robinhood: this page read rpc\.mainnet\.chain\.robinhood\.com \d+ time\(s\), all 200 and robinhood\.api\.pocket\.network \d+ time\(s\), all 200; walked past or not asked: robinhood-rpc\.publicnode\.com 0 time\(s\), robinhood\.drpc\.org \d+ time\(s\)/.test(l)));
+  assert.ok(judge(good).lines.some((l) => /desktop \/verify robinhood: this page read rpc\.mainnet\.chain\.robinhood\.com \d+ time\(s\), all 200 and robinhood\.api\.pocket\.network \d+ time\(s\), all 200; walked past or not asked: robinhood\.drpc\.org \d+ time\(s\), robinhood-rpc\.publicnode\.com 0 time\(s\)/.test(l)));
   // ok shown on the host that answered 400
   assert.ok(bad(walked(["robinhood.drpc.org", "robinhood.api.pocket.network"])).length > 0);
   // one operator twice

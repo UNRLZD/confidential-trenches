@@ -3,7 +3,7 @@
 // operator, two answers that differ, one operator alone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, type EvmReadSeat } from "../src/index.ts";
+import { EVM_READ_BUDGET_MS, EVM_READ_CALL_MS, EVM_READ_REST_MS, EvmOperatorsDiffer, EvmOperatorsUnanswered, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, type EvmReadSeat } from "../src/index.ts";
 
 type Fake = { calls: number; answer: (signal: AbortSignal) => Promise<string> };
 const ok = (v: string): Fake => ({ calls: 0, answer: async () => v });
@@ -47,6 +47,22 @@ test("the first operator hangs: its call is cut, the side walks on, and later re
   assert.deepEqual(r.map((x) => x.operator).sort(), ["publicnode.com", "robinhood.com"]);
   await two.read("fee", f, eq);
   assert.equal(h.calls, 1);
+});
+
+test("Robinhood's order, dRPC second: refusing costs side 1 one call and then a rest; hanging, one cut (EVM_READ_CALL_MS) and then a rest", async () => {
+  // refuses: one call, then every read of the rest binds on Robinhood's own and Pocket, dRPC not asked again
+  const [a, d, k, n] = [ok("0xa"), refuses(STATE), ok("0xa"), ok("0xa")];
+  const two = evmTwoOperators(seats([[RH, a], [DR, d], [PK, k], [PN, n]]));
+  for (let i = 0; i < 5; i++) assert.deepEqual((await two.read("fee", f, eq)).map((x) => x.operator), ["robinhood.com", "pocket.network"]);
+  assert.deepEqual([a.calls, d.calls, k.calls, n.calls], [5, 1, 5, 0]);
+  // hangs: the first read waits out one cut (a hang ends only by it, so it answered on Pocket after the cut) (callMs here, EVM_READ_CALL_MS = 4 s live, inside the 8 s budget), and the
+  // next reads never ask it while it rests
+  const [b, h, q, m] = [ok("0xb"), hangs(), ok("0xb"), ok("0xb")];
+  const slow = evmTwoOperators(seats([[RH, b], [DR, h], [PK, q], [PN, m]]), { callMs: 40 });
+  assert.deepEqual((await slow.read("fee", f, eq)).map((x) => x.operator), ["robinhood.com", "pocket.network"]);
+  for (let i = 0; i < 4; i++) await slow.read("fee", f, eq);
+  assert.deepEqual([b.calls, h.calls, q.calls, m.calls], [5, 1, 5, 0]);
+  assert.ok(EVM_READ_CALL_MS < EVM_READ_BUDGET_MS && EVM_READ_REST_MS >= 60_000);
 });
 
 test("the first operator answers HTTP 400 (not a value): the side walks on to the third", async () => {
@@ -159,6 +175,6 @@ test("each venue's read list: two operators at least, one seat each, Base and Ro
     assert.equal(new Set(ops).size, list.length, `${chain}: one seat an operator`);
     assert.ok(list.length >= 2, chain);
   }
-  assert.deepEqual(evmReadProvidersOf(v.robinhood!), [RH, PK, PN, DR]);
+  assert.deepEqual(evmReadProvidersOf(v.robinhood!), [RH, DR, PK, PN]);
   assert.deepEqual(evmReadProvidersOf(v.base!)!.map(evmRpcOperator), ["base.org", "publicnode.com", "pocket.network", "tenderly.co"]);
 });

@@ -389,13 +389,18 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // getL1BaseFeeEstimate, by blockHash) at blocks 5, 60, 120 and 600 s back: Robinhood's own (Offchain Labs) all
       // four, 290-448 ms; publicnode (Allnodes) 5, 60 and 120 s, 232-244 ms, and -32000 "historical state ... is not
       // available" at 600 s; Pocket 5, 120 and 600 s and one HTTP 502 at 60 s; dRPC HTTP 400 {"code":27,"message":
-      // "Unknown state. First available state is 1"} at 5, 60 and 120 s and an answer at 600 s, so it is last.
-      // publicnode's backends differ: 6 of 12 reads at blocks 15, 30, 45 and 55 s back answered -32000 "historical state
-      // ... is not available", Pocket 12 of 12 (21:03Z), so Pocket is second and publicnode third. The walk over this
-      // list at 5, 15, 30 and 55 s into 10 periods (20:52-21:02Z): 39 of 40 bound, the fixed pair [dRPC, Robinhood's
-      // own] 26 of 40, every failure dRPC's code 27.
+      // "Unknown state. First available state is 1"} at 5, 60 and 120 s and an answer at 600 s. publicnode's backends
+      // differ: 6 of 12 reads at blocks 15, 30, 45 and 55 s back answered -32000 "historical state ... is not
+      // available", Pocket 12 of 12 (21:03Z). The walk over this list at 5, 15, 30 and 55 s into 10 periods
+      // (20:52-21:02Z): 39 of 40 bound, the fixed pair [dRPC, Robinhood's own] 26 of 40, every failure dRPC's code 27.
+      // The order is by measured speed among the operators that keep the state: a read costs its slower side, and both
+      // sides ask at once. dRPC about 195 ms and Pocket 1.0 to 1.25 s a read (21:1xZ), so dRPC is second: when it
+      // refuses a block's state it answers in one fast call and then rests EVM_READ_REST_MS, so side 1 walks on to
+      // Pocket at about the cost Pocket alone has; with dRPC answering, the read costs what the fixed pair did. With
+      // Pocket second the walk's p50 was 1244 ms against the pair's 422 (5 periods, 21:03Z). publicnode, whose
+      // backends refuse half of the state 15 to 55 s back, is last. Read the order again whenever the list changes.
       // bloXroute, Globalstake and daybreak answered the same -32000 at every age, 5 s included: none is listed.
-      readProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"]),
+      readProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"]),
       // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
       // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
       // and dRPC named) and the chainid.network and DefiLlama chainlist entries for 4663 name, read 2026-11-07
