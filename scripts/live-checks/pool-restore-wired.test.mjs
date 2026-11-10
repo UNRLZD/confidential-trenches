@@ -7,7 +7,8 @@
 //         no tap: FAIL.
 // Planted from the good run: a run that stalls, one that never ends, a second run with no tap, an answer that is not
 // started, a restore answered while signed out. Card sign-live-checks-read-a-pinned-page: live111 (below), and the
-// pinned hosts' cases planted at the end.
+// pinned hosts' cases planted at the end. Card restore-first-sign-in-under-two-minutes: step 5 after done, planted on
+// live111 at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -77,9 +78,45 @@ test("recorded live run on release 111: the hosts line passes, and it fails on d
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]), [
     "BAD the sign-in on an empty store ran one restore with no tap, and it ended done",
     "BAD its progress reads, then ends done, never stalled",
+    // card restore-first-sign-in-under-two-minutes: on release 111 the run is never done, so no read is after done
+    "BAD after done, step 5 reads on: id reads to both NEAR operators",
   ]);
   assert.ok(r.lines.some((l) => l.startsWith("OK  every request goes to SIGN_HOST, APP_HOST or a pinned pool's host the page's own connect-src names (") && l.includes("rpc.mainnet.fastnear.com")), r.lines.join("\n"));
   const x = structuredClone(ANSWERS.live111);
   x.hosts["api.mainnet-beta.solana.com"] = 1;
   assert.ok(judge(x).lines.some((l) => l.startsWith("BAD every request goes to") && l.includes("stray: api.mainnet-beta.solana.com")));
+});
+
+// Card restore-first-sign-in-under-two-minutes: a restore is done at the walk's end and step 5 reads on after it, so a
+// live run (live111's hosts, made done as this card makes it) passes only with id reads on both NEAR operators after
+// done; the page's `restore ids unread:` lines are printed and fail nothing; a local build is not judged on it.
+test("planted: a live run done with step 5's id reads after it on both NEAR operators: PASS; one operator or none: FAIL", () => {
+  const live = (after) => {
+    const rec = structuredClone(ANSWERS.live111);
+    rec.steps.auto = structuredClone(ANSWERS.good.steps.auto);
+    rec.steps.asked = structuredClone(ANSWERS.good.steps.asked);
+    if (after !== undefined) rec.afterDone = after;
+    return rec;
+  };
+  const ok = judge(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 }));
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11)"), ok.lines.join("\n"));
+  const fail = (rec, re) => {
+    const r = judge(rec);
+    assert.equal(r.ok, false, r.lines.join("\n"));
+    assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]), ["BAD after done, step 5 reads on: id reads to both NEAR operators"]);
+    assert.ok(r.lines.some((l) => re.test(l)), r.lines.join("\n"));
+  };
+  fail(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 0 }), /near\.drpc\.org 0/);
+  fail(live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 4 }), /rpc\.mainnet\.fastnear\.com 0/);
+  fail(live(undefined), /rpc\.mainnet\.fastnear\.com 0, near\.drpc\.org 0/);
+  fail(live({ "rpc.mainnet.fastnear.com": "9", "near.drpc.org": 11 }), /after done/);
+  // a step 5 read asked again is printed with the line and fails nothing
+  const asked = live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 });
+  asked.console = ["warning: restore ids unread: try 1, asked again: solana: lane 2: 1 id unread (HTTP 503)"];
+  const a = judge(asked);
+  assert.equal(a.ok, true, a.lines.join("\n"));
+  assert.ok(a.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), a.lines.join("\n"));
+  // a local build serves no pinned host: not judged there
+  assert.ok(!judge(ANSWERS.good).lines.some((l) => l.includes("after done")));
 });
