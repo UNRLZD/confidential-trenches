@@ -67,3 +67,16 @@ test("APP_HOST: a mark the run drives gone, a wider frame-ancestors, a connect-s
   assert.equal(mut((r) => (r.app.js = [])).ok, false);
   assert.equal(mut((r) => (r.app.status = 404)).ok, false);
 });
+
+test("the helper's devnet RPC giving no answer is INCONCLUSIVE, never PASS; with a wrong answer elsewhere it is FAIL", () => {
+  let v = mut((r) => (r.devnet = { status: 429, cors: null, blockhash: false, noAnswer: "ct-api.unrealized.trade HTTP 429: 429 Too Many Requests" }));
+  assert.equal(v.verdict, "INCONCLUSIVE");
+  assert.equal(v.ok, false);
+  v = mut((r) => {
+    r.devnet = { status: null, cors: null, blockhash: false, noAnswer: "ct-api.unrealized.trade: no answer (TimeoutError)" };
+    r.market.status = 502;
+  });
+  assert.equal(v.verdict, "FAIL");
+  assert.equal(judge(ANSWERS.good).verdict, "PASS");
+  assert.equal(judge(ANSWERS.bad).verdict, "FAIL");
+});

@@ -14,11 +14,13 @@
 // After: app helper
 //   node scripts/live-checks/app-a2-e2e.mjs [--as <origin>] [--record <file>]
 //     --as asks the helper's reads from another origin (the recorded bad answer: an origin the helper does not serve)
-//     PASS exit 0, FAIL exit 1, error exit 2. The record holds statuses, headers, mark counts and field names, never the values.
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper's devnet RPC gave no answer: a 429, a
+//     failed fetch, a body that is no JSON-RPC answer; provider-answer.mjs rpcAnswer, read again once). The record holds statuses, headers, mark counts and field names, never the values.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "app-a2-e2e";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +49,8 @@ export function shapeOf(answer) {
 }
 export const STUB_SHAPE = shapeOf(JSON.parse(readFileSync(STUB, "utf8")));
 
-/** The verdict on a record: { ok, lines }. */
+/** The verdict on a record: { ok, verdict, lines }: PASS, FAIL on any wrong answer, INCONCLUSIVE when the helper's devnet
+ *  RPC gave no answer and nothing else is wrong. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
@@ -72,10 +75,15 @@ export function judge(rec) {
     say(same, `market token ${k} fields as the run's stub${same ? "" : `: ${diff}`}`);
   }
   const r = rec?.devnet ?? {};
-  say(r.status === 200, `devnet RPC answered ${r.status ?? "nothing"}`);
-  say(r.cors === SIGN_ORIGIN, `devnet RPC CORS for SIGN_HOST: ${r.cors ?? "none"}`);
-  say(r.blockhash === true, `devnet RPC gave a blockhash: ${r.blockhash === true}`);
-  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+  const quiet = typeof r.noAnswer === "string";
+  if (quiet) lines.push(`--  devnet RPC: ${r.noAnswer}`);
+  else {
+    say(r.status === 200, `devnet RPC answered ${r.status ?? "nothing"}`);
+    say(r.cors === SIGN_ORIGIN, `devnet RPC CORS for SIGN_HOST: ${r.cors ?? "none"}`);
+    say(r.blockhash === true, `devnet RPC gave a blockhash: ${r.blockhash === true}`);
+  }
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** The two reads, from the shipped origins or both from `as`. */
@@ -93,14 +101,9 @@ export async function collect({ as = null } = {}) {
     const mr = await fetch(`${HELPER}/v1/market/token?chain=solana&token=${LIVE_MINT}`, { headers: { origin: as ?? APP_ORIGIN }, signal: AbortSignal.timeout(20_000) });
     const mj = mr.ok ? await mr.json() : null;
     rec.market = { status: mr.status, cors: mr.headers.get("access-control-allow-origin"), shape: mj ? shapeOf(mj) : null };
-    const rr = await fetch(`${HELPER}/v1/rpc/solana-devnet`, {
-      method: "POST",
-      headers: { origin: as ?? SIGN_ORIGIN, "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] }),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const rj = rr.ok ? await rr.json().catch(() => null) : null;
-    rec.devnet = { status: rr.status, cors: rr.headers.get("access-control-allow-origin"), blockhash: typeof rj?.result?.value?.blockhash === "string" };
+    // asked as SIGN_HOST's page asks (its Origin), so the answer carries its status and CORS header
+    const ra = await rpcAnswer(`${HELPER}/v1/rpc/solana-devnet`, "getLatestBlockhash", [{ commitment: "confirmed" }], { headers: { origin: as ?? SIGN_ORIGIN } });
+    rec.devnet = { status: ra.status ?? null, cors: ra.acao ?? null, blockhash: typeof ra.result?.value?.blockhash === "string", ...(ra.noAnswer === undefined ? {} : { noAnswer: ra.noAnswer }) };
   } catch (e) {
     rec.error = String(e?.message ?? e).slice(0, 200);
   }
@@ -115,8 +118,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 2)}\n`);
     const v = judge(rec);
     for (const l of v.lines) console.log(l);
-    console.log(`CARD ${KEY} / live: ${v.ok ? "PASS" : "FAIL"}`);
-    process.exit(v.ok ? 0 : 1);
+    console.log(`CARD ${KEY} / live: ${v.verdict}`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.error(`error: ${e?.message ?? e}`);
     process.exit(2);
