@@ -49,9 +49,10 @@ const code = (a: { body: string }) => JSON.parse(a.body).error?.code;
 
 test("the allowlist, batch size and body limit are the kit's (a change goes through packages/kit/src/helper/v1.ts)", () => {
   // the kit's chains, then the testnet build's second Solana provider (card pool-buy-send-fast) on the kit's Solana list
-  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet"]);
+  // and the mainnet mark scan's second route (card sol-pools-mainnet-pin, marks.test.ts), getProgramAccounts alone
+  assert.deepEqual([...RPC_CHAINS], [...Object.keys(HELPER_RPC_METHODS), "solana-devnet", "solana-marks"]);
   // solana-devnet adds getGenesisHash alone (card live-check-devnet-pair)
-  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], c === "solana-devnet" ? [...HELPER_RPC_METHODS.solana, "getGenesisHash"] : [...HELPER_RPC_METHODS[c]], c);
+  for (const c of RPC_CHAINS) assert.deepEqual([...RPC_METHODS[c]], c === "solana-devnet" ? [...HELPER_RPC_METHODS.solana, "getGenesisHash"] : c === "solana-marks" ? ["getProgramAccounts"] : [...HELPER_RPC_METHODS[c]], c);
   assert.equal(RPC_BATCH_MAX, HELPER_RPC_BATCH_MAX);
   const row = HELPER_V1_PATHS.find((p) => p.path === "/v1/rpc/{chain}");
   assert.equal(row?.limitBytes, RPC_BODY_MAX);
@@ -117,7 +118,7 @@ test("solana-devnet (card pool-buy-send-fast): the kit's Solana list forwarded t
 
 // review L-2 and its re-review: getProgramAccounts only in the note restore's exact shape, on the route's own pinned
 // pool program; an open or wider scan would spend the keyed provider's quota. SPENT and PRE are the two requests the
-// wallet's solanaMarks sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
+// wallet's lister sends (packages/wallet/src/pool/solana-restore.ts, captured from it on 5 Nov 23:33Z for bucket 0
 // with minContextSlot 7): a 13-byte spent mark and a 17-byte pre-mark, memcmp at 9 on size - 9 bytes ending in tag 1.
 const DEV_PROGRAM = "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8";
 const MAIN_PROGRAM = "11111111111111111111111111111111";
@@ -126,18 +127,20 @@ const SPENT: ScanConfig = { commitment: "finalized", encoding: "base64", withCon
 const PRE: ScanConfig = { commitment: "finalized", encoding: "base64", withContext: true, minContextSlot: 7, filters: [{ dataSize: 17 }, { memcmp: { offset: 9, bytes: "11111112" } }] };
 const scan = (program: string, config: unknown = SPENT, id = 5) => ({ jsonrpc: "2.0", id, method: "getProgramAccounts", params: [program, config] });
 const withFilters = (filters: unknown, from: ScanConfig = SPENT): ScanConfig => ({ ...from, filters });
-test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot", async () => {
+test("getProgramAccounts (review L-2): the restore's two exact shapes on the route's own pinned pool program are forwarded, alone or in a batch, with or without minContextSlot, with or without the lister's empty dataSlice", async () => {
   next = { status: 200, type: JSON_T, body: echo };
   const r = createRpc({ SOLANA_RPC_URL: `${base}/?api-key=${KEY}`, SOLANA_DEVNET_RPC_URL: `${base}/devnet`, POOL_SOLANA_PROGRAM_DEVNET: DEV_PROGRAM, POOL_SOLANA_PROGRAM_MAINNET: MAIN_PROGRAM });
   const { minContextSlot: _m, ...noMin } = SPENT;
   for (const [chain, program] of [["solana-devnet", DEV_PROGRAM], ["solana", MAIN_PROGRAM]] as const) {
     seen.length = 0;
     // and a higher bucket: the counter's bytes 05 01 00 past its low byte, then the tag ("8RGtg", @scure/base)
-    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }])]) {
+    // card sol-pools-mainnet-pin (review of 369a87a8, P1): the wallet's lister (solana-restore.ts solanaMarksListed) asks
+    // for the addresses alone, dataSlice { offset: 0, length: 0 }, and the pair reads each listed mark by address
+    for (const config of [SPENT, PRE, noMin, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "8RGtg" } }]), { ...SPENT, dataSlice: { offset: 0, length: 0 } }, { ...PRE, dataSlice: { offset: 0, length: 0 } }]) {
       assert.equal((await call(r, chain, scan(program, config))).status, 200, `${chain} ${JSON.stringify(config)}`);
     }
     assert.equal((await call(r, chain, [scan(program, PRE)])).status, 200, `${chain} in a batch`);
-    assert.equal(seen.length, 5, chain);
+    assert.equal(seen.length, 7, chain);
   }
 });
 // each case differs from SPENT (or PRE) in one thing only, so removing the one rule that refuses it lets it through
@@ -162,7 +165,10 @@ const ONE_OFF: readonly [string, string, unknown][] = [
   ["bytes off the base58 alphabet", DEV_PROGRAM, withFilters([{ dataSize: 13 }, { memcmp: { offset: 9, bytes: "0OIl" } }])],
   ["encoding base64+zstd", DEV_PROGRAM, { ...SPENT, encoding: "base64+zstd" }],
   ["encoding jsonParsed", DEV_PROGRAM, { ...SPENT, encoding: "jsonParsed" }],
-  ["a dataSlice", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0 } }],
+  ["a dataSlice with data", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 13 } }],
+  ["a dataSlice at another offset", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 8, length: 0 } }],
+  ["a dataSlice with another key", DEV_PROGRAM, { ...SPENT, dataSlice: { offset: 0, length: 0, x: 1 } }],
+  ["a dataSlice not an object", DEV_PROGRAM, { ...SPENT, dataSlice: 0 }],
   ["sortResults", DEV_PROGRAM, { ...SPENT, sortResults: true }],
   ["changedSinceSlot", DEV_PROGRAM, { ...SPENT, changedSinceSlot: 1 }],
   ["commitment processed", DEV_PROGRAM, { ...SPENT, commitment: "processed" }],
@@ -629,10 +635,10 @@ test("each chain is one budget callers draw from fairly: a heavy caller is throt
   assert.ok(RPC_CLIENT_MAX * 6 <= RPC_CHAIN_MAX, "six callers at their full share before anyone else is throttled");
 });
 
-test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet: none, off)", () => {
+test("provider URLs: from the environment, http(s) only; an error names the variable, never the value; a public default (solana-devnet and solana-marks: none, off)", () => {
   const d = readUpstreams({});
   for (const c of RPC_CHAINS) {
-    if (c === "solana-devnet") assert.equal(d[c].off, true, c);
+    if (c === "solana-devnet" || c === "solana-marks") assert.equal(d[c].off, true, c);
     else assert.match(d[c].url, /^https:\/\//);
     assert.deepEqual(d[c].forms, []);
   }
@@ -680,12 +686,14 @@ test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius
 test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller over it gets a 429 with no hold; the public endpoint is not paced", async () => {
   const lines: string[] = [];
   const env = { SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "1000,100" };
-  // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits
-  const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t0 = performance.now();
+  // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits (each wait the client asks for
+  // is recorded, then waited on the real timer)
+  const waits: number[] = [];
+  const sleep = (ms: number) => (waits.push(ms), new Promise((ok) => setTimeout(ok, ms)));
+  const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l), sleep });
   const all = await Promise.all(Array.from({ length: 40 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   assert.equal(all.filter((a) => a.status === 200).length, 40);
-  assert.ok(performance.now() - t0 < 500, "within the plan's second nothing waits");
+  assert.deepEqual(waits, [], "within the plan's second nothing waits");
   const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { fetch: keepsPerSecond(10).fetch as never, log: (l) => lines.push(l) });
   const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   const refused = many.filter((a) => a.status === 429);
@@ -693,10 +701,9 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   assert.equal(refused.length, 20, "the rest are refused, each its own caller's 429");
   for (const a of refused) assert.equal(a.why, "solana pace", "named as the pace, not the provider");
   // the public endpoint (no SOLANA_RPC_URL): its limit is per 10 s, so 20 callers at once all go now
-  const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t1 = performance.now();
+  const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l), sleep });
   const open = await Promise.all(Array.from({ length: 20 }, (_, i) => pub.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `192.0.2.${i}`)));
-  assert.deepEqual([open.filter((a) => a.status === 200).length, performance.now() - t1 < 500], [20, true], "not paced");
+  assert.deepEqual([open.filter((a) => a.status === 200).length, waits], [20, []], "not paced");
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
 });
 
@@ -711,11 +718,13 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const lines: string[] = [];
-  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now() });
+  // each wait the client asks for is recorded, then waited on the real timer
+  const waits: number[] = [];
+  const sleep = (ms: number) => (waits.push(ms), new Promise((ok) => setTimeout(ok, ms)));
+  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now(), sleep });
   const blockNumber = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] });
-  const t0 = performance.now();
   const all = await Promise.all(Array.from({ length: 11 }, (_, i) => r.handle("base", JSON_T, blockNumber(i + 1), `198.51.100.${i}`)));
-  assert.ok(performance.now() - t0 >= 1_000, "the 11th waited for the provider's next second");
+  assert.equal(waits.length, 1, `the 11th alone waited for the provider's next second: ${waits.join(", ")}`);
   assert.equal(sent.length, 10, `${sent.length} sent: the waiting send went out after the provider's 429`);
   const last = all[10]!;
   assert.equal(last.status, 429);

@@ -1,7 +1,9 @@
 // node --test scripts/live-checks/helper-sol-fee-payer-mainnet.test.mjs: the live check replays recorded runs
-// (helper-sol-fee-payer-mainnet.answers.json, whose note says where each was read). good: a local helper on the lines
-// apps/helper/deploy/sol-fee-payer-key.sh wrote (a fresh test key), the rent and a funded balance from two local RPCs:
-// PASS. bad_not_found: today's deployed helper, no mainnet pool: FAIL. bad_unfunded: the same local helper on the real
+// (helper-sol-fee-payer-mainnet.answers.json, whose note says where each was read). good: the deployed helper on the
+// real pair, its fee payer funded, with this checkout's signing page build for the pin (the check's own source now,
+// review P3-3): PASS. bad_sign_no_pin: the same with SIGN_HOST's served /app.js before this card's sign deploy, which
+// carries no mainnet pin: FAIL on the pin lines alone (a fee payer not the pin's is made from the good run below).
+// bad_not_found: today's deployed helper, no mainnet pool: FAIL. bad_unfunded: the same local helper on the real
 // mainnet pair, the new fee payer at 0 lamports: FAIL on its balance only. Made from the good run: each break of the
 // fee, the record, the RPC pair or the balance FAILs. Card live-checks-provider-no-answer: each shared no-answer kind
 // planted on one RPC's rent or balance read is named and the run is INCONCLUSIVE (exit 3), a FAIL beside a wrong
@@ -12,6 +14,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EXIT, judge, loadRecord, read, RPCS } from "./helper-sol-fee-payer-mainnet.mjs";
+
+const SIGN_APP = "https://confidential.unrealized.trade/app.js";
 import { RETRY } from "./provider-answer.mjs";
 import { NO_ANSWERS } from "./provider-answer.plants.mjs";
 
@@ -40,13 +44,25 @@ test("recorded bad run: today's deployed helper answers the mainnet pool 404 not
   assert.deepEqual(bad(d), ["BAD GET /v1/pool/fee?cluster=mainnet&pool=7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8: 404 (the helper carries no mainnet pool: POOL_SOLANA_*_MAINNET not set; run apps/helper/deploy/sol-fee-payer-key.sh, then redeploy) (want 200)"]);
 });
 
-test("recorded bad run: the key step's fee payer before the owner's send holds 0 lamports on both real RPCs: FAIL on that alone", () => {
+test("recorded bad run: the key step's fee payer before the owner's send holds 0 lamports on both real RPCs: FAIL on that, and on no read of the signing page's pin (recorded before this check read one)", () => {
   const u = judge(A.bad_unfunded, loadRecord());
   assert.equal(u.ok, false);
   assert.deepEqual(A.bad_unfunded.rpcs, RPCS);
   const b = bad(u);
-  assert.equal(b.length, 2, b.join("\n"));
-  assert.ok(b.every((l) => / holds 0 lamports, the low mark 2681045: fund it/.test(l)), b.join("\n"));
+  assert.equal(b.length, 5, b.join("\n"));
+  assert.equal(b.filter((l) => / holds 0 lamports, the low mark 2681045: fund it/.test(l)).length, 2, b.join("\n"));
+  assert.ok(b.some((l) => /^BAD the signing page's pin \(none\): not read$/.test(l)), b.join("\n"));
+});
+
+test("recorded bad run: a signing page bundle with no mainnet pin (SIGN_HOST's served one, before this card): FAIL on the pin lines alone", () => {
+  const n = judge(A.bad_sign_no_pin, loadRecord());
+  assert.deepEqual(A.bad_sign_no_pin.rpcs, RPCS);
+  assert.equal(A.bad_sign_no_pin.sign.url, SIGN_APP);
+  assert.deepEqual(bad(n), [
+    `BAD the signing page's pin ("${SIGN_APP}"): SOL_POOLS.mainnet's literal is in the bundle 0 times, not once`,
+    `BAD the helper's fee payer "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU" is the pin's`,
+    `BAD the helper's program "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF" is the pin's`,
+  ]);
 });
 
 test("made from the good run: each break FAILs", () => {
@@ -71,6 +87,12 @@ test("made from the good run: each break FAILs", () => {
     "a 503": { ...g, fee: { ...g.fee, status: 503 } },
     "another origin": { ...g, fee: { ...g.fee, headers: { ...g.fee.headers, "access-control-allow-origin": "*" } } },
     "no commit": { ...g, fee: { ...g.fee, headers: { ...g.fee.headers, "x-helper-commit": null } } },
+    "a fee payer not the pin's": withFee(g, (b) => ({ ...b, fee_payer: "8Rj4ZJubKsa3dB9b63Y4eopdFbuchWPWsjohC8YAnEzL" })),
+    "a pin of another fee payer": { ...g, sign: { ...g.sign, pin: { ...g.sign.pin, feePayer: "631fQArTgRXskKGAjUCxrwd75rFBEygZo2x3EP1AdrDd" } } },
+    "a pin of another program": { ...g, sign: { ...g.sign, pin: { ...g.sign.pin, program: "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8" } } },
+    "a bundle with no pin": { ...g, sign: { ...g.sign, pin: { error: "SOL_POOLS.mainnet's literal is in the bundle 0 times, not once" } } },
+    "a pin read that failed": { ...g, sign: { ...g.sign, status: 404 } },
+    "no read of the pin": (({ sign, ...w }) => w)(g),
   };
   for (const [why, run] of Object.entries(fails)) assert.equal(judge(run, loadRecord()).ok, false, why);
   // at exactly the mark it passes: the mark is the least that carries
@@ -156,4 +178,20 @@ test("planted live read: an RPC that refuses the connection is read again once, 
     return new Response(src.body, { status: src.status });
   }, record, g.rpcs);
   assert.equal(judge(whole, record).verdict, "PASS");
+});
+
+test("the live read takes the pin from this commit's signing page build, never SIGN_HOST, so the helper deploys first with no FAIL (review P3-3)", async () => {
+  const g = A.good;
+  const asked = [];
+  const run = await read(g.base, async (url, init) => {
+    const u = String(url);
+    asked.push(new URL(u).host);
+    if (u.startsWith(g.base)) return new Response(g.fee.body, { status: g.fee.status, headers: Object.fromEntries(Object.entries(g.fee.headers).filter(([, v]) => v !== null)) });
+    const i = g.rpcs.indexOf(u);
+    const src = JSON.parse(init.body).method === "getAccountInfo" ? g.rent[i] : g.balance[i];
+    return new Response(src.body, { status: src.status });
+  }, loadRecord(), g.rpcs);
+  assert.ok(!asked.includes("confidential.unrealized.trade"), `asked ${asked.join(", ")}`);
+  assert.deepEqual(run.sign.pin, g.sign.pin);
+  assert.equal(judge(run, loadRecord()).verdict, "PASS");
 });

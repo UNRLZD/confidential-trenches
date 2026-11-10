@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { HELPER_WITHDRAW_CODES, VAULT_FIELD_P } from "@blindfill/kit";
 import { base58 } from "../bind/checks.ts";
+import { enableTimers, resetTimers } from "../../test/mock-timers.ts";
 import { RpcError, type Rpc } from "../bind/send.ts";
 import {
   INDEX_WAIT_MS,
@@ -298,7 +299,7 @@ test("a malformed page decides nothing, even when both providers answer it alike
   store.close();
 });
 
-test("s5, s6: one provider's final 5 blocks ahead of the other's; the index takes the lower: one block behind it reaches it in the wait, at it sends with no wait, 0 index_behind", async () => {
+test("s5, s6: one provider's final 5 blocks ahead of the other's; the index takes the lower: one block behind it reaches it in the wait, at it sends with no wait, 0 index_behind", async (t) => {
   const store = open();
   const a = prov(17);
   const b = prov(12);
@@ -310,9 +311,16 @@ test("s5, s6: one provider's final 5 blocks ahead of the other's; the index take
   assert.equal(d.index.at(), 11n);
   b.final = 12;
   a.final = 17;
-  const t0 = Date.now();
-  assert.equal(await code(OTHER, d), "ok", "s5: reaches 12 within the wait");
-  assert.ok(Date.now() - t0 < INDEX_WAIT_MS);
+  // on mocked timers and a mocked Date never moved: it reaches 12 with no poll and no part of INDEX_WAIT_MS spent
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: Date.now() });
+  let s5: string | undefined;
+  try {
+    void code(OTHER, d).then((c) => (s5 = c));
+    for (let i = 0; i < 20 && s5 === undefined; i++) await new Promise((r) => setImmediate(r));
+  } finally {
+    resetTimers(t.mock.timers);
+  }
+  assert.equal(s5, "ok", "s5: reaches 12 within the wait, with no wait");
   assert.equal(d.index.at(), 12n);
   // s6: at the lower final already: no page read, every request ok
   const calls = a.calls + b.calls;

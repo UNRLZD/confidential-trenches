@@ -29,6 +29,13 @@ const TESTNET_ONLY = [
   "0x6c830ac1b22d96baf692af4dd17d822ba61c32ec", // the Base Sepolia pool's fee recipient (wallet EVM_POOLS, card evm-pool-pins)
   "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", // the Robinhood testnet pool's fee recipient
 ];
+/** The mainnet pin (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
+ *  sol-pools-mainnet-pin): the testnet build carries none of it. */
+const MAINNET_ONLY = [
+  "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU", // the helper's mainnet fee payer
+  "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", // the mainnet pool program
+  "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ", // its lookup table
+];
 
 test("SIGN_HOST's build is the committed public/app.js, byte for byte, with no testnet pin or provider", async () => {
   assert.deepEqual(NETWORKS, ["mainnet", "testnet"]);
@@ -50,6 +57,7 @@ test("SIGN_HOST's policy lets the mainnet build reach no testnet NEAR RPC (card 
 test("the testnet build carries the devnet pool's pins and the testnet providers", async () => {
   const text = (await bundle(undefined, { network: "testnet" })).js.toString("utf8");
   for (const s of TESTNET_ONLY) assert.ok(text.includes(s), `the testnet bundle lacks ${s}`);
+  for (const s of MAINNET_ONLY) assert.ok(!text.includes(s), `the testnet bundle carries the mainnet pin's ${s}`);
   assert.ok(!text.includes("__SIGN_NETWORK__"));
 });
 

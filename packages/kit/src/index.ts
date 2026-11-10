@@ -59,3 +59,5 @@ export { EVM_SELL_SENT_MAX, type EvmReleasePending, type EvmSellReleases, type E
 export { EVM_7702_AUTH_GAS, EVM_POOL_SELL_GAS, evmPoolSellTip, evmSellRouteOf, type EvmSignedSellCall } from "./trade/evm/sell-unpinned.ts";
 export { nearPairNetwork, nearPairRule, type NearNetwork } from "./near/networks.ts";
 export * from "./price/pool-usd.ts";
+// the held tokens' market read and the value line (card market-token-reads)
+export * from "./market/held.ts";
