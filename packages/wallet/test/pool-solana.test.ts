@@ -11,8 +11,10 @@ import { base58, base64 } from "@scure/base";
 import { SOLANA_ANSWER_MAX_BYTES, VaultTree, solanaJsonRpc, vaultLabelOf, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets } from "../src/notes/secrets.ts";
-import { SOL_MARK_BUCKET, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
+import { SOL_MARK_BUCKET, SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, SOL_MARK_TAG, SOL_PRE_MARK_LEN, SOL_SETTLE_ROUNDS, SOL_SPENT_MARK_LEN, type SolanaPoolCache, type SolanaSettled, solanaMarkOf, solanaMarksListed, solanaMarksUnion, solanaRestore, solanaRestoreNotes, solanaSettleReserved, solanaSettleSpent, type SolanaSpentMark } from "../src/pool/solana-restore.ts";
 import { IDBFactory } from "fake-indexeddb";
+import { createRpc as createHelperRpc } from "../../../apps/helper/src/rpc/rpc.ts";
+import { SOLANA_RPC_WINDOW_RETRY, solanaHelperRpc, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
 import { openNoteStore, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore } from "../src/store/index.ts";
 import { refKey } from "../src/notes/store.ts";
@@ -2775,4 +2777,139 @@ test("review P2-2: a held bucket taken whole still has one counter per mark in i
   await assert.rejects(solanaMarksListed(quiet, pair, PROGRAM, undefined, undefined, undefined, { spent: whole, pre, slot: 1 }), new RegExp(`^Error: held mark ${key(0)}: counter 0 is not its own in bucket 0$`));
   // the spent marks' bucket 1 alone was listed (their bucket 0 whole), never the pre-marks' bucket 0
   assert.deepEqual(asked, ["getProgramAccounts"]);
+});
+
+// review P2-1 of e3489b3b: a cold read of the marks through the helper's own route, as the page reaches it. Seat 1 is the
+// kit's solanaHelperRpc, paced, with the settle's and restore's retry (SOLANA_RPC_WINDOW_RETRY), in front of the helper's
+// own createRpc at its deploy budget (RPC_CLIENT_MAX: 16 calls a caller in a 10 s window, the 17th answered 429 with a
+// Retry-After), its provider a stub answering from the fake chain; it reads SOL_MARK_READ_BATCH_MAX marks a call, seat 0
+// (publicnode's 10) SOL_MARK_READ_BATCH. Real clocks: before, the first window's 429 failed the 3.5 s call, a failed walk
+// kept nothing and every pass began again, so a pool past about 320 marks never closed.
+async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes: number; ms: number; ok: number; throttled: number; marks: number }> {
+  const { chain } = bigPool(nPre, nSpent);
+  const helper = createHelperRpc({ SOLANA_RPC_URL: "https://keyed.example/?api-key=not-a-key" }, {
+    log: () => {},
+    fetch: (async (_u: string, init: RequestInit) => {
+      const q = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: await rpc(chain, MAINNET)(q.method, q.params) }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as never,
+  });
+  const codes: number[] = [];
+  let marks = 0;
+  const seat1 = solanaPacedRpc(solanaHelperRpc(`https://helper-${nPre}-${nSpent}-${Date.now() % 100_000}.example`, {
+    retry: SOLANA_RPC_WINDOW_RETRY,
+    fetch: async (_url, init) => {
+      const q = JSON.parse(String(init.body)) as { method: string; params: unknown[] };
+      if (q.method === "getMultipleAccounts" && !(q.params[0] as string[]).includes(solanaPageOf(PROGRAM, 0, 0))) marks++;
+      const a = await helper.handle("solana", "application/json", String(init.body), "203.0.113.9");
+      codes.push(a.status);
+      return new Response(a.body, { status: a.status, headers: { "content-type": "application/json", ...(a.headers as Record<string, string>) } });
+    },
+  }));
+  const t0 = Date.now();
+  const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain), rpcs: [rpc(chain, { ...MAINNET, url: "https://a.example" }), seat1], gap: 4, markBatches: [SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] });
+  return { notes: r.notes.length, ms: Date.now() - t0, ok: codes.filter((c) => c === 200).length, throttled: codes.filter((c) => c === 429).length, marks };
+}
+
+for (const [nPre, nSpent] of [[80, 80], [200, 200], [500, 500], [2_500, 2_500]] as const)
+  test(`review P2-1 of e3489b3b: a cold restore of ${nPre + nSpent} marks with seat 1 through the helper's own route and limiter closes on its first pass, the helper's mark reads ${SOL_MARK_READ_BATCH_MAX} a call`, { timeout: 240_000 }, async () => {
+    const r = await coldThroughHelper(nPre, nSpent);
+    console.log(`# cold ${nPre + nSpent} marks: ${(r.ms / 1000).toFixed(1)} s; helper calls ${r.ok} answered (${r.marks} of them mark reads), ${r.throttled} answered 429 and waited out`);
+    assert.equal(r.notes, 2);
+    // one mark read a SOL_MARK_READ_BATCH_MAX of each bucket's marks: never above one a 100 marks and one a bucket
+    assert.ok(r.marks <= Math.ceil((nPre + nSpent) / SOL_MARK_READ_BATCH_MAX) + 2 * Math.ceil((nPre + nSpent) / SOL_MARK_BUCKET), `${r.marks} mark reads`);
+  });
+
+test("review P2-1 of e3489b3b: a walk that fails part way keeps every batch both seats read the same, so the next pass reads only the rest and a seat that fails every so often still ends in a restore", { timeout: 60_000 }, async () => {
+  const { chain } = bigPool(500, 500);
+  let served = 0;
+  const seat1: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    // the fourth mark read of each pass fails, as a 429 past the client's retry does
+    if (m === "getMultipleAccounts" && !(p[0] as string[]).includes(solanaPageOf(PROGRAM, 0, 0)) && ++served > 3) throw new Error("RPC transport: http_429 after 3 tries");
+    return rpc(chain, MAINNET)(m, p);
+  }, { url: "https://b.example" });
+  const calls0: string[] = [];
+  const rpcs = [counted(chain, "https://a.example", calls0), seat1] as [SolanaRpc, SolanaRpc];
+  const cache: SolanaPoolCache = {};
+  const kept: number[] = [];
+  let done = false;
+  for (let pass = 1; pass <= 8 && !done; pass++) {
+    served = 0;
+    try {
+      await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain), rpcs, gap: 4, cache, markBatches: [SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] });
+      done = true;
+    } catch (e) {
+      assert.match((e as Error).message, /http_429/);
+    }
+    kept.push((cache.marks?.spent.size ?? 0) + (cache.marks?.pre.size ?? 0));
+  }
+  assert.ok(done, `never restored; kept ${kept.join(", ")}`);
+  // each failed pass kept its 300 marks (three reads of 100 on seat 1) on top of the last
+  for (let k = 1; k < kept.length; k++) assert.ok(kept[k]! > kept[k - 1]!, `kept ${kept.join(", ")}`);
+  assert.ok(kept[0]! >= 3 * SOL_MARK_READ_BATCH_MAX - SOL_MARK_BUCKET, `kept ${kept.join(", ")}`);
+  assert.equal(kept[kept.length - 1], 1000);
+});
+
+const settleOut = (p: Promise<SolanaSettled>): Promise<string> => p.then((r) => r.kind, (e) => `refused: ${(e as Error).message}`);
+const pagesAsked = (m: string, p: readonly unknown[]): boolean => m === "getMultipleAccounts" && (p[0] as string[]).includes(solanaPageOf(PROGRAM, 0, 0));
+const minAsked = (p: readonly unknown[]): number => (p[1] as { minContextSlot?: number } | undefined)?.minContextSlot ?? 0;
+
+test("review P3-1 of e3489b3b: two settles on one cache, every party honest: the second, whose every listed mark the first already holds, reads the pages at or past the held marks' slot, so it waits for them and settles, never refused", { timeout: 20_000 }, async () => {
+  const { chain, l0, withDeposit } = restorePool();
+  const w1 = withDeposit(big(R.deposits[1]!.precommitment), 10_000_000n, chain.slot + 1);
+  let open!: () => void;
+  const gate = new Promise<void>((ok) => (open = ok));
+  let gated = 0;
+  // a read held to w1's slot is answered at w1 (after the gate for the pages), one not held to it at the old slot
+  const seat = (url: string): SolanaRpc => Object.assign(async (m: string, p: readonly unknown[]) => {
+    const min = minAsked(p);
+    if (pagesAsked(m, p) && min >= w1.slot) (gated++, await gate);
+    return rpc(min >= w1.slot ? w1 : chain, MAINNET)(m, p);
+  }, { url });
+  const rpcs = [seat("https://a.example"), seat("https://b.example")] as [SolanaRpc, SolanaRpc];
+  const cache: SolanaPoolCache = {};
+  const a = await reservedDeposit0(l0);
+  assert.equal((await solanaSettleSpent({ seed64: SEED, notes: a.ns, noteId: a.id, program: PROGRAM, lister: lister(chain), rpcs, cache })).kind, "spent");
+  // X reads the new deposit's mark (kept as it is read) and waits for its pages at w1's slot
+  const x = await reservedDeposit0(l0);
+  const X = settleOut(solanaSettleSpent({ seed64: SEED, notes: x.ns, noteId: x.id, program: PROGRAM, lister: lister(w1), rpcs, cache }));
+  while (gated < 2) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(cache.marks!.pre.size, 6);
+  // Y lists every mark held: nothing read on the pair, its pages still asked at w1's slot
+  const y = await reservedDeposit0(l0);
+  let yDone = false;
+  const Y = settleOut(solanaSettleSpent({ seed64: SEED, notes: y.ns, noteId: y.id, program: PROGRAM, lister: lister(w1), rpcs, cache })).finally(() => (yDone = true));
+  while (gated < 4 && !yDone) await new Promise((r) => setTimeout(r, 1));
+  open();
+  assert.deepEqual([await X, await Y], ["spent", "spent"]);
+});
+
+test("review P3-2 of e3489b3b: one page read answered at slot 2^53 - 1 (the data honest) stalls at most the next settle on the same cache: its refusal drops the cache's pages and slot, so every settle after it, every party honest, settles", { timeout: 20_000 }, async () => {
+  const { chain, l0 } = restorePool();
+  let lying = true;
+  const seat1: SolanaRpc = Object.assign(async (m: string, p: readonly unknown[]) => {
+    if (!lying) {
+      // an honest node asked for a slot it has not reached: the RPC's own -32016
+      if (minAsked(p) > chain.slot) throw new Error("RPC error -32016: Minimum context slot has not been reached");
+      return rpc(chain, MAINNET)(m, p);
+    }
+    const r = (await rpc(chain, MAINNET)(m, [p[0], { ...(p[1] as object), minContextSlot: undefined }])) as { context: { slot: number } };
+    if (pagesAsked(m, p)) r.context.slot = Number.MAX_SAFE_INTEGER;
+    return r;
+  }, { url: "https://b.example" });
+  const rpcs = [rpc(chain, { ...MAINNET, url: "https://a.example" }), seat1] as [SolanaRpc, SolanaRpc];
+  const cache: SolanaPoolCache = {};
+  const noWait: SolanaLagWait = async () => {};
+  const settle = async (): Promise<string> => {
+    const n = await reservedDeposit0(l0);
+    return settleOut(solanaSettleSpent({ seed64: SEED, notes: n.ns, noteId: n.id, program: PROGRAM, lister: lister(chain), rpcs, cache, lagWait: noWait }));
+  };
+  // the lie closes its own settle (the data is honest) and leaves seat 1's last slot at 2^53 - 1 in the cache's pages
+  assert.equal(await settle(), "spent");
+  lying = false;
+  // the next asks seat 1 for that slot, which it never reaches: refused, and the cache forgets the pages and the slot
+  assert.match(await settle(), /^refused: .*-32016/);
+  assert.equal(cache.pages, undefined);
+  assert.equal(cache.marks?.slot, 0);
+  assert.deepEqual([await settle(), await settle()], ["spent", "spent"]);
 });

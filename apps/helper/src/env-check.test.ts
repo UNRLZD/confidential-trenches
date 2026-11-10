@@ -366,3 +366,14 @@ test("a keyed Solana URL the helper reads /v1/rpc/solana from, run by the page's
   assert.equal(why({}), null);
   assert.equal(why({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.com/?api-key=${KEY}`, SOLANA_RPC_URL_QUICKNODE: `https://x.solana-mainnet.quiknode.pro/${KEY}/`, SOLANA_RPC_URL_DRPC_1: `https://lb.drpc.live/solana/${KEY}` }), null);
 });
+
+// review P3-4 (W13) of e3489b3b: the start's own run of the check, which is what keeps the page's two Solana seats two
+// operators: deploy/redeploy.sh runs node src/env-check.ts before the swap and stops on its exit 2
+test("node src/env-check.ts exits 2 on a keyed Solana URL of the page's direct seat's operator, naming the variable and never the URL or its key", () => {
+  for (const name of ["SOLANA_RPC_URL", "SOLANA_RPC_URL_DRPC_2"]) {
+    const r = spawnSync(process.execPath, [path.join(import.meta.dirname, "env-check.ts")], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", [name]: "https://solana-rpc.publicnode.com/FAKEKEY123" } });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, new RegExp(`^helper env: ${name}: its operator publicnode\\.com is the signing page's direct Solana seat`, "m"));
+    assert.ok(!(r.stdout + r.stderr).includes("FAKEKEY123"), "the key was printed");
+  }
+});
