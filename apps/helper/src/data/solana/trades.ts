@@ -338,7 +338,7 @@ export function createSolanaTrades(deps: {
   wsUrl?: string;
   source?: (on: SourceEvents) => Source;
   /** Bars before our first, GeckoTerminal's (token.ts candles), or none. */
-  history?: (mint: string, tf: string, to: number | null, limit: number) => Promise<DataAnswer>;
+  history?: (mint: string, tf: string, to: number | null, limit: number, client?: string) => Promise<DataAnswer>;
   /** One line per stream drop and return (the host's log), so a deploy's tape can be read back. */
   log?: (line: string) => void;
   tickMs?: number;
@@ -694,11 +694,11 @@ export function createSolanaTrades(deps: {
       source.close();
     },
     /** 06b Candles for a listed Solana token: our own bars (1s included), and the history source's before our first. */
-    async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
+    async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       const mint = address(token);
       if (mint === null || !(TFS as readonly string[]).includes(tf) || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a mint the lists do not hold has no bars of ours: its candles are the history source's own answer, as before
-      if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit);
+      if (!entries.has(mint) && deps.history !== undefined && (await deps.listed(mint)) !== true) return deps.history(mint, tf, to, limit, client);
       const e = await open(mint);
       if (!("mint" in e)) return e;
       const own: Candle[] = e.book === null ? [] : e.book.candles(tf as Tf, to, limit);
@@ -708,7 +708,7 @@ export function createSolanaTrades(deps: {
       if (own.length < limit && tf !== "1s" && deps.history !== undefined) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
-        const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit).catch(() => UPSTREAM);
+        const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit, client).catch(() => UPSTREAM);
         // nothing of ours and no history to serve: the history's 429 or 503, so the page retries, never an empty chart
         if (own.length === 0 && h.status !== 200 && h.status !== 404) return h;
         const old = h.status === 200 ? ((JSON.parse(h.body) as { candles?: Candle[] }).candles ?? []).filter((c) => c[0] < before) : [];

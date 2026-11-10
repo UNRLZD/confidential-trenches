@@ -29,7 +29,7 @@
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../../kit/src/checks/oneclick.ts";
 import type { DepositRefusal, SignpageResults } from "../../../kit/src/signpage/messages.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../../kit/src/helper/v1.ts";
-import { askDepositQuote, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
+import { askDepositQuoteAgain, depositQuoteRequest } from "../../../wallet/src/deposit/quote.ts";
 import { backupFirst } from "../../../wallet/src/store/index.ts";
 import { checkDepositQuote, DepositRuleRefused, type DepositQuoteContext } from "./deposit.ts";
 import { DEPOSIT_ANSWERED, DEPOSIT_QUOTE_PATH, belowDepositBound, shortOnlyOfMinimum } from "./deposit-dry.ts";
@@ -128,7 +128,8 @@ export async function depositQuoteKind(params: Record<string, unknown>, ctx: Dep
   }
   let reply;
   try {
-    reply = await askDepositQuote(request, ctx.fetch);
+    // on 1Click's no-liquidity answer the same request is asked again inside the one ask's window (card deposit-quote-no-liquidity)
+    reply = await askDepositQuoteAgain(request, ctx.fetch);
   } catch {
     return no("down");
   }

@@ -24,10 +24,10 @@ import { SOLANA_PROVIDER_A } from "../src/trade.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
+const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -103,9 +103,10 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
   assert.deepEqual(k["pool.deposit"]({ chain: "base", amount: "0.01" }, ctx), { error: "not_allowed" });
 });
 
-test("the testnet build pins the devnet pool's lookup table, so its pool.buy runs (card signpage-pool-flow-run)", async () => {
-  // created by devnet tx 4M7F8EG1… for the pool 92YuYhb4…, read back the same on both devnet RPCs at finalized 7 Nov
-  assert.equal(DEVNET_TABLE, "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ");
+test("the testnet build pins the devnet pool's lookup tables by venue, so its pool.buy runs (cards signpage-pool-flow-run, sol-pool-venue-tables)", async () => {
+  // the wallet's SOL_POOL_TABLES.devnet: each venue's generations, as deployments/devnet.json records them
+  assert.equal(PAGE_TABLES, SOL_POOL_TABLES.devnet);
+  assert.ok(PAGE_TABLES["pump-curve"] !== undefined);
   let opened = 0;
   const flow = testnetPool({ store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) }).flow;
   const r = poolKinds(testnetPoolDeps(flow))["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
@@ -549,6 +550,69 @@ test("review P3-3 of e3489b3b: a sign out that comes while the RESERVED pass rea
   assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
+/** A page with one RESERVED Solana note whose pass's settle waits at its lister's first answer until `release`. */
+async function heldPass() {
+  const { w, ns } = await wallet();
+  const gates: (() => void)[] = [];
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    await new Promise<void>((ok) => gates.push(ok));
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const listed = async (k: number) => {
+    while (calls.filter((c) => c === "lister getProgramAccounts").length < k) await new Promise((r) => setTimeout(r, 1));
+  };
+  return { t, ns, calls, listed, release: () => gates.splice(0).forEach((g) => g()) };
+}
+
+test("another tab's sign out (signedOut) stops the Solana RESERVED pass's settle at its next read, as this tab's signingOut does", async () => {
+  const { t, ns, calls, listed, release } = await heldPass();
+  const pass = t.stateRead();
+  await listed(1);
+  const before = calls.length;
+  const out = t.signedOut();
+  release();
+  await pass;
+  await out;
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
+test("a sign out stops only the settles running then: the next pass after it reads again (the stop's controller is a new one)", async () => {
+  const { t, calls, listed, release } = await heldPass();
+  const first = t.stateRead();
+  await listed(1);
+  t.signingOut();
+  release();
+  await first;
+  const second = t.stateRead();
+  // the next pass reaches its lister: a stop that kept the aborted controller would stop it before any read
+  await Promise.race([listed(2), new Promise((_, no) => setTimeout(() => no(new Error(`the pass after the sign out read nothing: ${calls.join(",")}`)), 2_000))]);
+  release();
+  await second;
+});
+
+test("main.ts's sign out stops the pool settles (testnet?.signingOut()) before the store signs out, and closes the pools (signedOut) after", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const body = /async function signOut\(\): Promise<void> \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  const at = (x: string) => body.indexOf(x);
+  assert.ok(at("testnet?.signingOut();") > 0, "signingOut is called");
+  assert.ok(at("testnet?.signingOut();") < at("await s.signOut();"), "before the store's sign out");
+  assert.ok(at("await s.signOut();") < at("await testnet?.signedOut();"), "signedOut after it");
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];
@@ -573,7 +637,7 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
   const page = { store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) };
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const k = poolKinds(testnetPoolDeps(testnetPool(page, { table: base58.encode(new Uint8Array(32).fill(9)), rpcs: [offline("a"), offline("b")] }).flow));
+  const k = poolKinds(testnetPoolDeps(testnetPool(page, { tables: { "pump-curve": [base58.encode(new Uint8Array(32).fill(9))] }, rpcs: [offline("a"), offline("b")] }).flow));
   const r = k["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the buy runs");
   await r.after;
@@ -583,7 +647,7 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
   await new Promise((res) => setTimeout(res, 20));
   assert.deepEqual(reads, [], "no proof ready: no read");
   const before = opened;
-  const none = poolKinds(testnetPoolDeps(testnetPool(page, { table: null }).flow));
+  const none = poolKinds(testnetPoolDeps(testnetPool(page, { tables: {} }).flow));
   assert.deepEqual(none["pool.buy"](buy("solana"), ctx), { error: "not_allowed" });
   await new Promise((res) => setTimeout(res, 20));
   assert.equal(opened, before, "no table: no store opened, no read");

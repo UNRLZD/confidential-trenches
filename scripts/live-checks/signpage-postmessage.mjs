@@ -23,12 +23,18 @@
 // The run records the sha256 of the /app.js SIGN_HOST served, and the deposit run passes only when it is the newest
 // release list's pin for SIGN_HOST's /app.js (packages/signpage/releases): so a host still serving an older release,
 // whose deposit.quote is refused just the same, fails here.
+// Card deposit-quote-no-liquidity: deposit.quote asks the same request again on 1Click's 400 "No liquidity available",
+// three asks at most inside the one ask's 10 s (wallet/src/deposit/quote.ts askDepositQuoteAgain: two at 1Click's 3.6 s
+// refusals), and the run records each helper answer's status and a 400's message. So a signed-in address comes after one
+// to three requests, all one request, each before the last answered that 400; and a signed-in not_available after one to
+// three asks of one request, each answered it, is 1Click's liquidity, not the page's: INCONCLUSIVE (exit 3), never PASS.
+// Any other refusal, status or answer is judged as before.
 // After: sign
 //   node scripts/live-checks/signpage-postmessage.mjs [--url <SIGN_HOST url>] [--record <file>]
 //   node scripts/live-checks/signpage-postmessage.mjs --local [<dir>] [--record <file>]
 //     the same probe with no network: Playwright answers SIGN_HOST from a build dir under that build's own _headers
 //     (default: packages/signpage built as packages/signpage/scripts/deploy.mjs builds it), as frame.e2e.mjs does
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the test can replay it.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes what the run read, so the test can replay it.
 import "../net-window.mjs";
 import { copyFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -54,6 +60,15 @@ export const HELPER_QUOTE = "https://ct-api.unrealized.trade/v1/proxy/oneclick/v
 const SOL_USDC = "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near";
 /** deposit.quote's answer codes (packages/signpage/src/rules/deposit-quote.ts). */
 export const QUOTE_CODES = ["not_allowed", "above_max", "busy", "down", "quote_check_failed", "not_available"];
+/** The most asks the device makes of one quote on no liquidity (wallet/src/deposit/quote.ts NO_LIQUIDITY_PAUSES_MS + 1). */
+export const DEVICE_ASKS = 3;
+const NO_LIQUIDITY = /^No liquidity available\b/;
+const MESSAGE_MAX = 120;
+/** True when a recorded helper answer is 1Click's no-liquidity 400. */
+const noLiquidity = (r) => r?.status === 400 && typeof r.message === "string" && NO_LIQUIDITY.test(r.message);
+const sameRequest = (sent) => sent.every((r) => JSON.stringify(r.body) === JSON.stringify(sent[0].body));
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as scripts/ci/live-rerun.mjs reads them. */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 
 // ------------------------------------------------------------------------------------------------ the verdict
 /** Each parent and the headers it is judged under: APP_HOST as served, every stranger as served and lifted. */
@@ -110,12 +125,17 @@ export function judge(rec, pin = releasePin()) {
       say(n === 0, `${label}: ${n} message(s) reached the parent${n ? ` (${JSON.stringify(s.messages.map((m) => m.data))})` : ""}, want none`);
     }
   }
-  judgeDeposit(rec.deposit, say, pin);
-  return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+  const vendor = [];
+  judgeDeposit(rec.deposit, say, pin, (m) => vendor.push(`INCONCLUSIVE ${m}: 1Click's liquidity, not the page's`));
+  const passed = lines.length > 0 && lines.every((l) => l.startsWith("ok "));
+  const verdict = !passed ? "FAIL" : vendor.length > 0 ? "INCONCLUSIVE" : "PASS";
+  if (verdict === "INCONCLUSIVE") lines.push(...vendor);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
-/** The deposit.quote round trip: one answer; a refusal with a code; an address only after one request to U. */
-function judgeDeposit(d, say, pin) {
+/** The deposit.quote round trip: one answer; a refusal with a code; an address only after the device's asks of one
+ *  request to U, each before the last answered 1Click's no-liquidity 400. */
+function judgeDeposit(d, say, pin, liquidity) {
   if (!d) return say(false, "deposit.quote: no run");
   const got = d.appJs?.sha256 ?? null;
   say(got === pin.sha256, `deposit.quote: SIGN_HOST served /app.js sha256 ${got ?? "(not read)"}, want ${pin.release}'s ${pin.sha256}`);
@@ -132,13 +152,16 @@ function judgeDeposit(d, say, pin) {
     say(QUOTE_CODES.includes(code) && Object.keys(a).sort().join() === "error,id,ok,v", `deposit.quote: refused ${JSON.stringify(code)}, a code and nothing else`);
     if (!signedIn) say(code === "not_allowed", `deposit.quote with no seed stored: ${JSON.stringify(code)}, want not_allowed`);
     if (code === "not_allowed" || code === "above_max") say(sent.length === 0, `deposit.quote refused ${code}: ${sent.length} request(s) to the helper, want none`);
+    if (signedIn && code === "not_available" && sent.length >= 1 && sent.length <= DEVICE_ASKS && sameRequest(sent) && sent.every(noLiquidity))
+      liquidity(`deposit.quote answered not_available after 1Click's no-liquidity 400 to each of the device's ${sent.length} ask(s)`);
     return;
   }
   say(signedIn, `deposit.quote answered ok ${signedIn ? "signed in" : "with no seed stored: an address for a U the store has not recorded"}`);
   const r = a.result ?? {};
   say(typeof r.deposit_address === "string" && r.deposit_address.length > 0 && r.origin_asset === d.asked?.origin_asset, "deposit.quote: an address, for the asset asked");
-  const body = sent.length === 1 ? sent[0].body : null;
-  say(sent.length === 1 && /^[0-9a-f]{64}$/.test(body?.recipient ?? "") && body.refundTo === body.recipient, `deposit.quote: ${sent.length} request(s) to the helper, want 1 naming one id as recipient and refundTo`);
+  const body = sent.length >= 1 ? sent[0].body : null;
+  const asks = sent.length >= 1 && sent.length <= DEVICE_ASKS && sameRequest(sent) && sent.slice(0, -1).every(noLiquidity);
+  say(asks && /^[0-9a-f]{64}$/.test(body?.recipient ?? "") && body.refundTo === body.recipient, `deposit.quote: ${sent.length} request(s) to the helper, want 1 to ${DEVICE_ASKS} of one request naming one id as recipient and refundTo, each before the last answered 1Click's no-liquidity 400`);
 }
 
 // ------------------------------------------------------------------------------------------------ the read
@@ -302,13 +325,30 @@ async function depositRun(browser, { signUrl, dir }) {
       appJs = { status: res.status(), sha256: createHash("sha256").update(await res.body()).digest("hex") };
     } catch {}
   });
+  // each helper answer's status, and a 400's message (bounded), on the request's own entry; never a body
+  const asked = new Map();
+  const reads = [];
   ctx.on("request", (req) => {
     if (!req.url().startsWith(HELPER_QUOTE)) return;
     let body = null;
     try {
       body = JSON.parse(req.postData() ?? "null");
     } catch {}
-    helper.push({ url: req.url(), method: req.method(), body });
+    const entry = { url: req.url(), method: req.method(), body };
+    helper.push(entry);
+    asked.set(req, entry);
+  });
+  ctx.on("response", (res) => {
+    const entry = asked.get(res.request());
+    if (!entry) return;
+    entry.status = res.status();
+    if (res.status() === 400)
+      reads.push(res.text().then((t) => {
+        try {
+          const m = JSON.parse(t)?.message;
+          if (typeof m === "string") entry.message = m.slice(0, MESSAGE_MAX);
+        } catch {}
+      }, () => {}));
   });
   const page = await ctx.newPage();
   const errors = [];
@@ -326,6 +366,7 @@ async function depositRun(browser, { signUrl, dir }) {
   await page.waitForTimeout(SETTLE_MS);
   const f = app();
   if (f) out = await f.evaluate(() => ({ log: window.__log, ids: window.__ids ?? null, asked: window.__asked ?? null })).catch(() => out);
+  await Promise.allSettled(reads);
   await ctx.close();
   return { signUrl, ready: out.log.some((m) => m.fromParent && m.data?.type === "ready"), ...out, helper, appJs, errors };
 }
@@ -364,8 +405,8 @@ async function main() {
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 1)}\n`);
   const r = judge(rec, pin);
   for (const l of r.lines) console.log(l);
-  console.log(`${KEY}: ${r.ok ? "PASS" : "FAIL"} (${rec.source}, Chrome ${rec.browser}, ${rec.at})`);
-  process.exit(r.ok ? 0 : 1);
+  console.log(`${KEY}: ${r.verdict} (${rec.source}, Chrome ${rec.browser}, ${rec.at})`);
+  process.exit(EXIT[r.verdict]);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

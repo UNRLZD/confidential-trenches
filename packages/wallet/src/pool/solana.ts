@@ -193,6 +193,24 @@ export type SolanaPoolPin = { readonly program: string; readonly feePayer: strin
  *  test/pool-sol-mainnet-pin.test.ts fails whenever this differs from the record. */
 export const SOL_MAINNET_DEPLOY: { readonly program: string; readonly table: string } = /* @__PURE__ */ Object.freeze({ program: "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF", table: "BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ" });
 
+/** A venue the pool buy builds (the kit's SOLANA_POOL_BUY_VENUES). */
+export type SolanaPoolVenueName = "pump-curve" | "pumpswap";
+/** The pool buy's frozen lookup tables per venue, by cluster (card sol-pool-venue-tables): a tag 3 loads its accounts
+ *  from one of its venue's own tables, since one table cannot hold every venue and stay under 1,232 bytes (PumpSwap on
+ *  the curve's table is 1,384 B). A venue's tables are generations, oldest first: each covers a range of the trees'
+ *  pages, and the signing page builds on the one that makes the smallest transaction (the kit's
+ *  buildSolanaPoolBuyOnTables). Each list is written here from tables.<venue> of contracts/pool-solana/deployments/
+ *  <cluster>.json, which contracts/pool-solana/scripts/venue-table.mjs writes once both RPCs read the table back frozen;
+ *  test/sol-pool-venue-tables.test.ts fails whenever a pin and its record differ, and the live check
+ *  sol-pool-venue-tables reads these literals (keep each a string literal). A venue with no table here is refused by
+ *  the signing page before anything is signed. Mainnet: the curve's first generation is the pool deploy's own table
+ *  (SOL_MAINNET_DEPLOY.table); PumpSwap's comes with its paste. */
+export const SOL_POOL_TABLES: Readonly<Partial<Record<"devnet" | "mainnet", Readonly<Partial<Record<SolanaPoolVenueName, readonly string[]>>>>>> = Object.freeze(
+  POOL_TESTNET
+    ? { devnet: Object.freeze({ "pump-curve": Object.freeze(["C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ"]), pumpswap: Object.freeze(["4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", "J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU"]) }) }
+    : { mainnet: Object.freeze({ "pump-curve": Object.freeze(["BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"]) }) },
+);
+
 /** The pinned pools by cluster: pool-sol-deploy writes each one (a fresh program id per cluster, lib.rs deploy rule).
  *  Mainnet, in SIGN_HOST's build (card sol-pools-mainnet-pin): SOL_MAINNET_DEPLOY's program (its pool
  *  7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8) and the helper's mainnet fee payer, the one

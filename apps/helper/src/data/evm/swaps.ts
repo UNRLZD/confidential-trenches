@@ -54,10 +54,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, SEED_LANE, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
-import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
+import { isBars, KEPT_HANDOVER_MS, toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
 import { BATCH_MAX, evmAddress, GT_BASE, type EvmChain } from "./lists.ts";
 import { createSwapIndex, toEntryPoint, traderAt, txTraders, type SwapIndex, type Traders } from "./index.ts";
 
@@ -386,6 +386,11 @@ export const OPEN_MAX = 40;
 /** Books read at once in a tick. */
 const READ_PARALLEL = 8;
 const POOLS_MAX = 5_000;
+/** The bytes of GeckoTerminal answers one chain's swap reads hand the next process (data/warm.ts) [design: 2 MB, a
+ *  hundred charts' last bars at about 20 KB each; the warm file's limit counts it, WARM_MAX]. */
+export const EVM_HANDOVER_MAX = 2 * 1024 * 1024;
+/** The most entries of each kind a handed-over state may hold (the bars' maps keep 500, the pools POOLS_MAX). */
+export const HANDOVER_ENTRIES_MAX = 500;
 const ANSWER_MAX = 4 * 1024 * 1024;
 const TIMEOUT_MS = 8_000;
 /** A provider whose post has been out this long, sent and not answered, is left to answer while the next is asked
@@ -774,7 +779,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -1781,7 +1786,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       last = t;
       // the tape's leg is the trader's: the pool's less a hook's cut (hookTakes)
       const got = traderLeg(s, takes.get(`${l.tx}:${l.index}`));
-      events.push({ ...s, t, ...(got === undefined ? {} : { got }) });
+      // a swap the pool's own hook sends (its fees sold in its own pool) is no trader's trade: in the bars, off the tape
+      // (card market-reads-hold-under-load: Base tx 0xa1782de0's log 0x33, the hook 0x0469a4bd selling 555.17 of its
+      // fees after the trader's 69,395.86 sell, was on the tape as a second sell of the trader's)
+      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
+      events.push({ ...s, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     let merged: Event[] = events;
     if (e.pool.quote.kind === "eth") {
@@ -1936,6 +1945,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
   const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
+  /** One GeckoTerminal call in `lane`: a caller's cold read ("pages") waits its turn for the budget's next free call up to
+   *  GT_PAGE_WAIT_MS (../gecko.ts takeOrWait), as the Solana path's and the EVM token info's do; any other lane never
+   *  waits, what is held serves (card market-reads-hold-under-load). */
+  const gtTake = async (lane: string, what: string, client?: string): Promise<boolean> =>
+    (await takeOrWait(deps.gecko!, lane, what, now() + GT_PAGE_WAIT_MS, now, deps.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms))), client)) === null;
   /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
   const empty = (fields: Record<string, unknown>): DataAnswer => {
     const at = now();
@@ -1952,17 +1966,24 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const GT_POOL_FRESH_MS = 600_000;
   /** Its candles: GeckoTerminal's bars of its top pool, src "geckoterminal", dated by their read, as a Solana token off
    *  the lists is served (card app-console-429); an empty chart from our own reads when GeckoTerminal has none to give. */
-  async function noneCandles(token: string, tf: Tf, to: number | null, limit: number): Promise<DataAnswer> {
+  async function noneCandles(token: string, tf: Tf, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
     const none = empty({ tf, candles: [] });
     if (deps.gecko === undefined || !Object.hasOwn(GT_TF, tf)) return none;
     const gecko = deps.gecko;
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      // a held pool's re-read is a refresh: refused, the pool held serves
-      if (gecko.take(p === undefined ? "pages" : "refresh", false, false, `${chain} pool`)) {
+      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused, throttled or
+      // failed read is the 429 or 503, never an empty 200 (card market-reads-hold-under-load)
+      const cold = p === undefined;
+      const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
+      let fail: DataAnswer | undefined = waitOf("geckoterminal budget");
+      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`, client)) {
+        fail = UPSTREAM;
         try {
           const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-          if (r.status === 429) throttledUntil(gecko, r.headers.get("retry-after"), now());
+          if (r.status === 429) fail = (throttledUntil(gecko, r.headers.get("retry-after"), now()), waitOf("geckoterminal 429"));
+          // GeckoTerminal names no such token: nothing to chart, the empty answer below
+          if (r.status === 404) fail = undefined;
           if (r.status === 200 && Number(r.headers.get("content-length") ?? "0") <= ANSWER_MAX) {
             const text = await r.text();
             const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
@@ -1974,9 +1995,10 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // GeckoTerminal did not answer: the pool held, if any
         }
       }
+      if (p === undefined && fail !== undefined) return fail;
     }
     if (p === undefined || p.id === null) return none;
-    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true);
+    const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true, client);
     // GeckoTerminal refused or failed with nothing to serve: its 429 (with the wait) or 503, so the page retries, never
     // an empty 200 for a token it names a pool of (card helper-restart-fresh)
     if (!Array.isArray(got)) return got;
@@ -1995,7 +2017,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
    *  ours after them (noneCandles), so their read is the answer's X-Fetched-At: the newest range is read again after
    *  GT_NEWEST_FRESH_MS and served from what is held only within GT_SERVE_MS (card helper-restart-fresh); before a book
    *  of ours they are history the book's own reads follow, kept GT_FRESH_MS. */
-  async function geckoBars(e: Entry, tf: Tf, before: number | null, alone = false): Promise<Candle[] | DataAnswer> {
+  async function geckoBars(e: Entry, tf: Tf, before: number | null, alone = false, client?: string): Promise<Candle[] | DataAnswer> {
     if (!Object.hasOwn(GT_TF, tf) || deps.gecko === undefined) return [];
     const gecko = deps.gecko;
     const k = `${e.pool.id}:${tf}:${before ?? ""}`;
@@ -2016,8 +2038,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // before a time stays a refresh
     // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
     // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
-    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : "stale";
-    if (!gecko.take(lane, false, false, `${chain} bars`)) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : SEED_LANE;
+    if (!(await gtTake(lane, `${chain} bars`, client))) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
@@ -2150,7 +2172,77 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     );
   }
 
+  /** A GeckoTerminal pool id (a pool's address or a v4 pool id) as gtPools and the bars' keys hold it. */
+  const POOL_ID = /^0x[0-9a-f]{40}([0-9a-f]{24})?$/;
+  const barsKey = (k: string, withBefore: boolean): boolean => {
+    const [id, tf, before, more] = k.split(":");
+    return more === undefined && POOL_ID.test(id ?? "") && Object.hasOwn(GT_TF, tf ?? "") && (withBefore ? before !== undefined && /^(|[1-9]\d{0,10})$/.test(before) : before === undefined);
+  };
+  const timed = (at: unknown, t: number, maxAgeMs: number): at is number => typeof at === "number" && Number.isFinite(at) && at <= t && t - at <= maxAgeMs;
+
   return {
+    /**
+     * What this process holds of GeckoTerminal for the chain, as the next one takes it over (card
+     * market-reads-hold-under-load, as solana/token.ts state does for Solana): the last good bars per pool and tf, the
+     * bars read per range and the top pool of each token our reads find none of, each with its own read time. Newest
+     * first within EVM_HANDOVER_MAX bytes; nothing past the bound its reader serves it within.
+     */
+    state(): { kept: [string, { at: number; bars: Candle[] }][]; history: [string, { at: number; bars: Candle[] }][]; pools: [string, { id: string | null; at: number }][] } {
+      const t = now();
+      let room = EVM_HANDOVER_MAX;
+      const fit = <T>(list: [string, T][]): [string, T][] => {
+        const out: [string, T][] = [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          const n = JSON.stringify(list[i]).length;
+          if (n > room) break;
+          room -= n;
+          out.unshift(list[i]!);
+        }
+        return out;
+      };
+      return {
+        pools: fit([...gtPools].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
+        kept: fit([...kept].filter(([, v]) => t - v.at <= KEPT_HANDOVER_MS).slice(-HANDOVER_ENTRIES_MAX)),
+        history: fit([...history].filter(([, v]) => t - v.at <= GT_FRESH_MS).slice(-HANDOVER_ENTRIES_MAX)),
+      };
+    },
+    /**
+     * A previous process's state (data/warm.ts): hostile input. Every entry is checked as a read of ours would be (its
+     * key, its read time not ahead of now and within its bound, its bars), at most HANDOVER_ENTRIES_MAX of each; a state
+     * with any entry that fails restores nothing. Each entry keeps its own read time, so nothing is served as fresher
+     * than it is (as_of_ms and X-Fetched-At stay the original read's) and the serving rules (GT_SERVE_MS) judge it as
+     * they would have in the old process. Returns whether it restored.
+     */
+    restore(st: unknown): boolean {
+      const o = typeof st === "object" && st !== null && !Array.isArray(st) ? (st as Record<string, unknown>) : null;
+      if (o === null) return false;
+      const t = now();
+      const list = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) && v.length <= HANDOVER_ENTRIES_MAX ? v : null);
+      const [p, k, h] = [list(o.pools), list(o.kept), list(o.history)];
+      if (p === null || k === null || h === null) return false;
+      const pairs = (l: unknown[]) => l.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "object" && e[1] !== null);
+      if (!pairs(p) || !pairs(k) || !pairs(h)) return false;
+      const P = p as [string, { id?: unknown; at?: unknown }][];
+      const K = k as [string, { bars?: unknown; at?: unknown }][];
+      const H = h as [string, { bars?: unknown; at?: unknown }][];
+      if (!P.every(([tk, v]) => evmAddress(tk) === tk && (v.id === null || (typeof v.id === "string" && POOL_ID.test(v.id))) && timed(v.at, t, KEPT_HANDOVER_MS))) return false;
+      if (!K.every(([key, v]) => barsKey(key, false) && timed(v.at, t, KEPT_HANDOVER_MS) && isBars(v.bars) && v.bars.length > 0)) return false;
+      if (!H.every(([key, v]) => barsKey(key, true) && timed(v.at, t, GT_FRESH_MS) && isBars(v.bars))) return false;
+      for (const [tk, v] of P) {
+        const had = gtPools.get(tk);
+        if (had !== undefined && had.at >= (v.at as number)) continue;
+        if (gtPools.size >= POOLS_MAX) gtPools.delete(gtPools.keys().next().value!);
+        gtPools.set(tk, { id: v.id as string | null, at: v.at as number });
+      }
+      for (const [map, entries] of [[kept, K], [history, H]] as const)
+        for (const [key, v] of entries) {
+          const had = map.get(key);
+          if (had !== undefined && had.at >= (v.at as number)) continue;
+          if (map.size >= 500) map.delete(map.keys().next().value!);
+          map.set(key, { at: v.at as number, bars: v.bars as Candle[] });
+        }
+      return true;
+    },
     tick: start,
     stop(): void {
       aheadQueue.clear();
@@ -2174,7 +2266,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       return k?.found != null && now() - k.at < POOL_KEEP_MS ? { pool: k.found.pool.id, decimals: k.found.decimals } : undefined;
     },
     /** 06b Candles for a listed Base token: our own bars, and GeckoTerminal's before our first. */
-    async candles(token: string, tf: string, to: number | null, limit: number): Promise<DataAnswer> {
+    async candles(token: string, tf: string, to: number | null, limit: number, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !(TFS as readonly string[]).includes(tf) || tf === "1s" || !Number.isSafeInteger(limit) || limit < 1 || limit > CANDLES_MAX) return NOT_FOUND;
       // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); its reads are a caller's, in the
@@ -2185,7 +2277,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       const openMs = performance.now() - began;
       const timed = (a: DataAnswer): DataAnswer => withTiming(a, laneTiming(lane, openMs));
       if (e === LATE) return timed(UPSTREAM);
-      if (e === "none") return timed(await noneCandles(t, tf as Tf, to, limit));
+      if (e === "none") return timed(await noneCandles(t, tf as Tf, to, limit, client));
       if (!("book" in e)) return timed(e);
       const own = e.book.candles(tf as Tf, to, limit);
       const ownFrom = e.book.ownFrom(tf as Tf);
@@ -2195,8 +2287,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
-        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed)
-        const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
+        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed).
+        // With no bar of ours to serve, its 429 (with the wait) or 503 is the answer, so the page reads again, never a
+        // 200 with no bars for a token that has them (card market-reads-hold-under-load: Base 0xfbb75a59's 1h answered
+        // 200 [] at 19:55Z on a book opened a minute before, its seed refused by the budget; 356 bars at 20:11Z)
+        const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before, false, client);
+        if (own.length === 0 && !Array.isArray(got)) return timed(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

@@ -51,6 +51,9 @@ export type Swap = {
   /** The token leg the trader got (a buy) or paid (a sell) when a v4 hook's cut makes it differ from the pool's `amt`
    *  (evm/swaps.ts hookTakes): the tape's amount. Bars are priced by the pool's own legs, as every bar is. */
   got?: bigint;
+  /** false: no trader's trade, so off the tape and in the bars, price and volume both (a v4 pool's hook swapping in its
+   *  own pool, evm/swaps.ts apply; card market-reads-hold-under-load). */
+  tape?: false;
 };
 /** ETH's price at a point: USD per ETH times 10^VALUE_SCALE, from the chain's reference pool. */
 export type Ref = { kind: "ref"; block: number; index: number; ethUsd: bigint };
@@ -199,7 +202,7 @@ export function createBook(cfg: BookConfig) {
 
     /** The newest `limit` swaps, newest first; `trader` is filled by the caller (null here). */
     tape(limit: number): (TapeRow & { block: number; index: number })[] {
-      const all = settledTape.concat(tailPriced());
+      const all = settledTape.concat(tailPriced()).filter((p) => p.swap.tape !== false);
       return all
         .slice(-limit)
         .reverse()

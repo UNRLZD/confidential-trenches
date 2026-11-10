@@ -63,6 +63,19 @@ export const GT_SERVE_MS = 600_000;
 
 /** Calls a "stale" read leaves free: one read of a chart nobody can be served (card helper-crowd-429). */
 export const STALE_RESERVE = 1;
+/** The "seed" lane's room (card market-reads-hold-under-load): the EVM history before a book of ours (evm/swaps.ts
+ *  geckoBars), an optional read whose chart answers its own bars without it, takes a call only while COLD_RESERVE stay
+ *  free, as a refresh, and never makes the lists yield. It drew in the "stale" lane, which leaves one: right after a
+ *  start the seeds filled the window to four of five, the lists the fifth, and six cold page reads met a full window
+ *  and answered 429 with no call made (the deployed helper's minute lines, 10 Nov 19:43-19:45Z: "stale base bars 4",
+ *  "window 5 of 5", then "refused: pages 6"). */
+export const SEED_LANE = "optional";
+/** The calls of the window one caller's cold page reads may hold while another's wait (card market-reads-hold-under-load):
+ *  one caller asking five tokens nobody holds otherwise takes the whole window for 75 s, again and again, and every
+ *  other caller's first page meets a full window. [design: two of the five, a token page's cold read (its top pool and
+ *  its bars, or its info), so one caller opens one cold page at a time while the rest serve others; keyed by the
+ *  server's clientOf, the key the held route's share (held.ts DEX_LIMITS) and every other caller share use.] */
+export const PAGE_PER_CLIENT = 2;
 
 /** The lane of a read of the newest data, held since `heldAtMs` (null: nothing held): "pages" for a first read and for
  *  data past GT_SERVE_MS (nothing a caller may be served), "stale" for data REFRESH_URGENT_MS old that is still servable,
@@ -79,12 +92,18 @@ export function refreshLane(heldAtMs: number | null, nowMs: number): "pages" | "
 export type GeckoBudget = {
   /** One call now in `lane`, or false when the minute, a 429 pause or (for "lists") the yield says no. `what` names the
    *  read for the minute's count line (minute()). */
-  take(lane: string, urgent?: boolean, first?: boolean, what?: string): boolean;
+  take(lane: string, urgent?: boolean, first?: boolean, what?: string, by?: { ticket?: number; client?: string }): boolean;
+  /** A place in the queue of cold page reads waiting for a call (takeOrWait): while one waits, no other lane takes a
+   *  freed call and a page read takes one only in queue order (`by.ticket` the queue's first that may take), so a cold
+   *  read waits its turn (card market-reads-hold-under-load). `client`: the caller's key, for PAGE_PER_CLIENT. */
+  queue(client?: string): number;
+  /** Leaves the queue (taken, or given up at its bound). */
+  leave(ticket: number): void;
   /** A 429: no lane calls until `untilMs`. */
   pause(untilMs: number): void;
   /** When a page call can next be taken (now when it can now): the pause's end or the minute's oldest call leaving
    *  the window; what a refused page names as its wait. */
-  retryAt(lane: string): number;
+  retryAt(lane: string, ticket?: number): number;
   /** The calls in the window, oldest first (those of `lane` when it is named): what a restart's next process seeds from
    *  (../data/warm.ts). */
   calls(lane?: string): number[];
@@ -120,13 +139,21 @@ const WAIT_ROUNDS = 8;
  * A "stale", "refresh" or "ahead" read never waits: what is held is served meanwhile. Returns null once a call is taken,
  * else when a page call can next be taken, the wait a refused read names.
  */
-export async function takeOrWait(b: GeckoBudget, lane: string, what: string, untilMs: number, now: () => number, sleep: (ms: number) => Promise<unknown>): Promise<number | null> {
-  for (let round = 0; !b.take(lane, false, false, what); round++) {
-    const at = b.retryAt("pages");
-    if (lane !== "pages" || round >= WAIT_ROUNDS || at > untilMs) return at;
-    await sleep(Math.max(at - now(), 0) + 5);
+export async function takeOrWait(b: GeckoBudget, lane: string, what: string, untilMs: number, now: () => number, sleep: (ms: number) => Promise<unknown>, client?: string): Promise<number | null> {
+  if (b.take(lane, false, false, what, { client })) return null;
+  if (lane !== "pages") return b.retryAt("pages");
+  // card market-reads-hold-under-load: in the queue, its turn first in, first out; its wait the call its place gets
+  const ticket = b.queue(client);
+  try {
+    for (let round = 0; ; round++) {
+      const at = b.retryAt("pages", ticket);
+      if (round >= WAIT_ROUNDS || at > untilMs) return at;
+      await sleep(Math.max(at - now(), 0) + 5);
+      if (b.take(lane, false, false, what, { ticket, client })) return null;
+    }
+  } finally {
+    b.leave(ticket);
   }
-  return null;
 }
 
 /** GeckoTerminal answered 429: pause every lane for its Retry-After (at most 300 s), or WINDOW_MS when it names none or
@@ -140,7 +167,25 @@ export function throttledUntil(b: GeckoBudget, retryAfter: string | null, nowMs:
 
 /** A budget of at most `perMin` calls in any WINDOW_MS, the "lists" lane yielding to every other. */
 export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): GeckoBudget {
-  const calls: { at: number; lane: string; seeded?: true }[] = [];
+  const calls: { at: number; lane: string; seeded?: true; client?: string }[] = [];
+  /** The cold page reads waiting their turn, in order (queue). */
+  const waiting: { ticket: number; client?: string }[] = [];
+  let tickets = 0;
+  const byClient = (client: string | undefined) => (client === undefined ? 0 : calls.filter((c) => c.client === client).length);
+  /** Whether a caller holds more than its PAGE_PER_CLIENT of the window: the last free call is then kept. */
+  const heavy = (): boolean => {
+    const n = new Map<string, number>();
+    for (const c of calls) if (c.client !== undefined) n.set(c.client, (n.get(c.client) ?? 0) + 1);
+    return [...n.values()].some((v) => v > PAGE_PER_CLIENT);
+  };
+  /** A waiter may take the next call: none ahead of it but those whose client holds its PAGE_PER_CLIENT already. */
+  const turnOf = (ticket: number | undefined, client: string | undefined): boolean => {
+    for (const w of waiting) {
+      if (w.ticket === ticket) return true;
+      if (byClient(w.client) < PAGE_PER_CLIENT) return false;
+    }
+    return ticket === undefined;
+  };
   let pausedUntil = 0;
   let held = false;
   // the minute's counts (minute()): `lane what` taken, lanes refused, 429s, calls seeded
@@ -149,14 +194,24 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
   let throttled = 0;
   let seeded = 0;
   const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
-  const allowed = (lane: string, urgent: boolean, first: boolean, t: number): boolean => {
+  const allowed = (lane: string, urgent: boolean, first: boolean, t: number, by: { ticket?: number; client?: string }): boolean => {
     if (held || t < pausedUntil || calls.length >= perMin) return false;
+    // card market-reads-hold-under-load: a caller past its share of the window waits; while a cold page read waits for
+    // a call, no other lane takes one, and a page read takes one only in its turn
+    // a caller past its share leaves the window's last free call for someone else, and while it holds more than its
+    // share no background lane takes that call either: a second caller's first page always finds it. Alone, a caller
+    // takes perMin - 1 at once; with another caller waiting, none past its share
+    const past = byClient(by.client) >= PAGE_PER_CLIENT;
+    if (lane === "pages" && past && (calls.length >= perMin - 1 || waiting.some((w) => w.client !== by.client))) return false;
+    if (lane !== "pages" && calls.length >= perMin - 1 && heavy()) return false;
+    if (waiting.length > 0 && (lane !== "pages" || !turnOf(by.ticket, by.client))) return false;
     if (lane === "refresh" && calls.length >= perMin - COLD_RESERVE) return false;
     if (lane === "stale" && calls.length >= perMin - STALE_RESERVE) return false;
+    if (lane === SEED_LANE && calls.length >= perMin - COLD_RESERVE) return false;
     if (lane === "ahead" && (calls.length >= perMin - COLD_RESERVE || calls.filter((c) => c.lane === "ahead").length >= AHEAD_PER_WINDOW)) return false;
     if (lane === "lists") {
       const floor = urgent && calls.filter((c) => c.lane === "lists").length < LIST_FLOOR;
-      if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && t - c.at < YIELD_MS))) return false;
+      if (!floor && (calls.length >= perMin - PAGE_RESERVE - (first ? 0 : REFRESH_SLOT) || calls.some((c) => c.lane !== "lists" && c.lane !== "seed" && c.lane !== "ahead" && c.lane !== SEED_LANE && t - c.at < YIELD_MS))) return false;
     }
     return true;
   };
@@ -164,14 +219,15 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
     while (calls.length > 0 && t - calls[0]!.at >= WINDOW_MS) calls.shift();
   };
   return {
-    take(lane, urgent = false, first = false, what = "") {
+    take(lane, urgent = false, first = false, what = "", by = {}) {
       const t = now();
       prune(t);
-      if (!allowed(lane, urgent, first, t)) {
+      if (!allowed(lane, urgent, first, t, by)) {
         bump(refused, lane);
         return false;
       }
-      calls.push({ at: t, lane });
+      // only a cold page read counts in its caller's share: a held chart's refresh serves what it holds when refused
+      calls.push({ at: t, lane, ...(by.client === undefined || lane !== "pages" ? {} : { client: by.client }) });
       bump(took, what === "" ? lane : `${lane} ${what}`);
       return true;
     },
@@ -179,13 +235,29 @@ export function geckoBudget(now: () => number, perMin = GT_LIMIT_PER_MIN): Gecko
       if (untilMs > now()) throttled++;
       pausedUntil = Math.max(pausedUntil, untilMs);
     },
-    retryAt() {
+    retryAt(_lane, ticket) {
       const t = now();
       prune(t);
       let at = Math.max(t, pausedUntil);
       if (held) at = Math.max(at, t + WINDOW_MS);
-      if (calls.length >= perMin) at = Math.max(at, calls[calls.length - perMin]!.at + WINDOW_MS);
+      // a waiter's place: the calls the waiters before it take come first
+      const at_ = ticket === undefined ? -1 : waiting.findIndex((w) => w.ticket === ticket);
+      const ahead = Math.max(at_, 0);
+      // a caller past its share is left the window's last call by no one: its next is one more call leaving
+      const cap = at_ !== -1 && byClient(waiting[at_]!.client) >= PAGE_PER_CLIENT ? perMin - 1 : perMin;
+      const need = calls.length + ahead - cap;
+      if (need >= calls.length) at = Math.max(at, t + WINDOW_MS);
+      else if (need >= 0) at = Math.max(at, calls[need]!.at + WINDOW_MS);
       return at;
+    },
+    queue(client) {
+      const ticket = ++tickets;
+      waiting.push({ ticket, ...(client === undefined ? {} : { client }) });
+      return ticket;
+    },
+    leave(ticket) {
+      const i = waiting.findIndex((w) => w.ticket === ticket);
+      if (i !== -1) waiting.splice(i, 1);
     },
     calls(lane) {
       prune(now());

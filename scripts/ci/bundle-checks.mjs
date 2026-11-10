@@ -132,6 +132,7 @@ export const OUT = {
   "signpage-pool-mainnet": "a browser",
   "pool-restore-wired": "a browser",
   "kit-deposit-assets-dry": "a browser",
+  "deposit-quote-no-liquidity": "a browser, and the helper's real answer to the last ask",
   "app-shell": "a browser",
   "app-shell-rpc-outage-judge": "a browser",
   "app-phone-token-taps-and-rows": "a browser",

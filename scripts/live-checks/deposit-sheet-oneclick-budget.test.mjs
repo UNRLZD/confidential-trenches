@@ -14,7 +14,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_USDC_ASSETS } from "../../packages/kit/src/index.ts";
-import { QUOTE, SIGN, TOKENS, judge, read } from "./deposit-sheet-oneclick-budget.mjs";
+import { EXIT, NO_LIQUIDITY_MESSAGE_MAX, QUOTE, SIGN, TOKENS, judge, messageOf, read } from "./deposit-sheet-oneclick-budget.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "deposit-sheet-oneclick-budget.answers.json"), "utf8"));
@@ -80,4 +80,45 @@ test("read(): the sheet's five calls as the page sends them, then five list read
     assert.equal(q.refundTo, DEPOSIT_DRY_PLACEHOLDER);
   }
   assert.ok(seen.filter((s) => s.path === TOKENS).every((s) => s.body === undefined));
+});
+
+// Card deposit-quote-no-liquidity: the sheet's 25 USDC quote answered 1Click's 400 "No liquidity available" went through the
+// helper's budget and back: 1Click's liquidity, not the helper's: INCONCLUSIVE (exit 3), never FAIL; any other 400 stays FAIL.
+test("recorded: 1Click had no liquidity for the sheet's 25 USDC quote, every other call answered: INCONCLUSIVE, exit 3, no BAD line", () => {
+  const v = judge(A.no_liquidity);
+  assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
+  assert.equal(v.ok, false);
+  assert.deepEqual(v.lines, ["INCONCLUSIVE sheet: quote 4 (25 USDC from Solana) answered 400 No liquidity available: 1Click's own, not the helper's budget"]);
+  assert.equal(EXIT[v.verdict], 3);
+});
+
+test("planted: a 400 of another message, a no-liquidity message on a list read or another status, and beside a 429 past the share: FAIL", () => {
+  const nl = (f) => {
+    const a = structuredClone(A.no_liquidity);
+    f(a);
+    return judge(a);
+  };
+  assert.equal(nl((a) => (a.sheet[4].message = "Amount is too low for bridge")).verdict, "FAIL");
+  assert.equal(nl((a) => delete a.sheet[4].message).verdict, "FAIL", "a 400 with no message");
+  assert.equal(nl((a) => (a.sheet[4].status = 503)).verdict, "FAIL", "the message under the helper's 503");
+  assert.equal(nl((a) => Object.assign(a.sheet[0], { status: 400, message: "No liquidity available" })).verdict, "FAIL", "the list never answers no liquidity");
+  const both = nl((a) => Object.assign(a.sheet[2], { status: 429, retryAfter: "8" }));
+  assert.equal(both.verdict, "FAIL");
+  assert.deepEqual(both.lines, [`BAD sheet: ${A.good.sheet[2].what} answered 429, Retry-After 8, want 200 or 201`]);
+});
+
+test("read() keeps a 400's message, bounded, and nothing of any other answer's body", async () => {
+  const NL = JSON.stringify({ message: "No liquidity available", correlationId: "2357c43d-9fdf-4c05-9732-edaa447fcb6a", timestamp: "2026-11-10T19:06:57.250Z", path: "/v0/quote" });
+  const f = async (url, init) => {
+    const q = init.body === undefined ? null : JSON.parse(init.body);
+    if (q?.amount === "25000000") return new Response(NL, { status: 400, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ message: "kept nowhere" }), { status: url.endsWith("/quote") ? 201 : 200, headers: { "content-type": "application/json" } });
+  };
+  const a = await read("https://helper.test", f, async () => {});
+  assert.equal(judge(a).verdict, "INCONCLUSIVE", judge(a).lines.join("\n"));
+  assert.equal(a.sheet[4].message, "No liquidity available");
+  assert.ok([...a.sheet.slice(0, 4), ...a.share].every((c) => !("message" in c)));
+  assert.equal(messageOf(JSON.stringify({ message: "x".repeat(500) })).length, NO_LIQUIDITY_MESSAGE_MAX);
+  assert.equal(messageOf("<html>"), null);
+  assert.equal(messageOf(JSON.stringify({ message: 5 })), null);
 });

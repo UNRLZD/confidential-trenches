@@ -50,7 +50,7 @@ const BLOCK_MS = NOW - 2_000;
 const SALT = "252812b3";
 
 /** The run's parties: the helper (quote proxy and /v1/intents) as a fetch, U's key behind openKey, the record. */
-function harness(o: { held?: bigint; answer?: (req: OneClickRequest) => Answer; status?: number } = {}) {
+function harness(o: { held?: bigint; answer?: (req: OneClickRequest) => Answer; status?: number; noLiquidity?: number } = {}) {
   const held = o.held ?? AMOUNT;
   const log: string[] = [];
   const posted: { url: string; body: any }[] = [];
@@ -62,6 +62,8 @@ function harness(o: { held?: bigint; answer?: (req: OneClickRequest) => Answer; 
     posted.push({ url, body });
     log.push(url === DEPOSIT_QUOTE_URL ? "quote" : url === RELEASE_INTENTS_URL ? "send" : `?${url}`);
     if (url === DEPOSIT_QUOTE_URL) {
+      // card deposit-quote-no-liquidity: the first noLiquidity asks answer 1Click's 400 for a size no solver quoted
+      if (log.filter((x) => x === "quote").length <= (o.noLiquidity ?? 0)) return Response.json({ message: "No liquidity available", path: "/v0/quote" }, { status: 400 });
       const a = o.answer ? o.answer(body) : liveAnswer(body, NOW - 500);
       if (!o.answer) {
         a.quote.depositAddress = DEPOSIT;
@@ -120,6 +122,31 @@ test("a refund is moved: the quote asked as §2.4 point 8 names it, checked, the
   assert.equal(Buffer.from(n.subarray(0, 9)).toString("hex"), `5628f6c600${SALT}`, "a V1 nonce under the read salt");
   assert.deepEqual(h.records, [{ nonce: p.nonce, deadline_ms: BLOCK_MS + 120_000, asset: SOL_USDC, amount: AMOUNT.toString(), height: 223_478_949 }]);
   assert.ok(h.keys.every((k) => k.every((b) => b === 0)), "U's key zeroed");
+});
+
+// Card deposit-quote-no-liquidity: the refund move's quote is a committed ask: on 1Click's no-liquidity answer the same
+// request is asked again, and the answer that follows is checked as one is, before U's key opens.
+test("no liquidity, then the quote: the same request asked again, then checked, signed, recorded and sent", async () => {
+  const h = harness({ noLiquidity: 1 });
+  const out = await h.run();
+  assert.equal(out.kind, "sent", JSON.stringify(out));
+  assert.deepEqual(h.log, ["quote", "quote", "key", "record", "send"], "the key opens only after the re-asked quote is checked");
+  assert.deepEqual(h.posted[1]!.body, h.posted[0]!.body);
+  assert.deepEqual(JSON.parse(h.posted[2]!.body.signed_intent.payload).intents, [{ intent: "transfer", receiver_id: DEPOSIT, tokens: { [SOL_USDC]: AMOUNT.toString() } }]);
+});
+
+test("review d: no liquidity, then a 1Click-signed quote for another amount: refused on the request echo, no key opened, nothing sent", async () => {
+  const h = harness({ noLiquidity: 1, answer: (req) => {
+    // whole for 24 USDC (its echo, amountIn and minAmountIn), so only the echo against the held 25 refuses it
+    const a = liveAnswer({ ...req, amount: (AMOUNT - 1_000_000n).toString() }, NOW - 500);
+    a.quote.depositAddress = DEPOSIT;
+    a.quote.amountInFormatted = "24.0";
+    signAnswer(a, mockKey.privateKey);
+    return a;
+  } });
+  const out = await h.run();
+  assert.equal(out.kind, "refused", JSON.stringify(out));
+  assert.deepEqual(h.log, ["quote", "quote"]);
 });
 
 test("one under MIN_DEPOSIT is held: nothing asked, signed or sent", async () => {

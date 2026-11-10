@@ -13,6 +13,10 @@
 // A 503 whose cause is 1Click's own (VENDOR_CAUSES: it sent nothing in the helper's 8 s, failed twice, or was never
 // reached) is not the helper's budget: with no other refusal the run is INCONCLUSIVE (exit 3, said on its own line, as
 // solana-jupiter-build's), never PASS (review LOW 6 of 429d0a63: 1Click's 02:07-02:31Z slowdown read as a FAIL of ours).
+// Card deposit-quote-no-liquidity: a dry quote 1Click answers 400 "No liquidity available" (no solver quoted that size at
+// that second: 25 USDC from Solana on 10 Nov 07:04-07:43Z, quoted again at 18:59Z) went through the helper's budget and
+// back, so it is 1Click's liquidity, not the helper's: INCONCLUSIVE the same way, never FAIL. The run keeps a 400's
+// message (NO_LIQUIDITY_MESSAGE_MAX characters at most) to tell it from any other 400, which stays the helper's.
 // The quotes are dry: nothing is signed, nothing of anyone's is named, no money moves.
 // After: helper
 //   node scripts/live-checks/deposit-sheet-oneclick-budget.mjs [--base <helper url>] [--record <file>]
@@ -51,6 +55,21 @@ export const VENDOR_CAUSES = Object.freeze(["timeout", "5xx", "send"]);
 /** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2). */
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 const causeOf = (timing) => /cause;desc="([a-z0-9]+)"/.exec(timing ?? "")?.[1] ?? null;
+/** 1Click's own answer when no solver quoted the size (its 400 body's message, read through the helper 10 Nov 19:06Z). */
+const NO_LIQUIDITY = /^No liquidity available\b/;
+/** The most of a 400's message a run keeps. */
+export const NO_LIQUIDITY_MESSAGE_MAX = 120;
+/** A 400's message from its body text, bounded; null when there is none. */
+export function messageOf(text) {
+  try {
+    const m = JSON.parse(text)?.message;
+    return typeof m === "string" ? m.slice(0, NO_LIQUIDITY_MESSAGE_MAX) : null;
+  } catch {
+    return null;
+  }
+}
+/** True when a call is a quote 1Click answered 400 No liquidity available: its solvers, not the helper. */
+const noLiquidity = (c) => c.status === 400 && typeof c.what === "string" && c.what.startsWith("quote") && typeof c.message === "string" && NO_LIQUIDITY.test(c.message);
 
 /** The verdict on an answer { base, sheet: [call], share: [call] }, each call { what, status, cause, retryAfter }:
  *  { verdict, ok, lines }. */
@@ -58,8 +77,8 @@ export function judge(a) {
   const lines = [];
   const vendor = [];
   const bad = (m) => lines.push(`BAD ${m}`);
-  const ours = (c) => !(c.status === 503 && VENDOR_CAUSES.includes(c.cause));
-  const named = (c) => `${c.what} answered ${c.status}${c.cause ? ` (cause ${c.cause})` : ""}${c.retryAfter ? `, Retry-After ${c.retryAfter}` : ""}`;
+  const ours = (c) => !(c.status === 503 && VENDOR_CAUSES.includes(c.cause)) && !noLiquidity(c);
+  const named = (c) => `${c.what} answered ${c.status}${noLiquidity(c) ? " No liquidity available" : ""}${c.cause ? ` (cause ${c.cause})` : ""}${c.retryAfter ? `, Retry-After ${c.retryAfter}` : ""}`;
   const sheet = Array.isArray(a?.sheet) ? a.sheet : [];
   const share = Array.isArray(a?.share) ? a.share : [];
   if (sheet.length !== SHEET_CALLS) bad(`sheet: ${sheet.length} calls recorded, want ${SHEET_CALLS}`);
@@ -82,9 +101,10 @@ async function call(base, what, path, body, fetchFn) {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(20_000),
     });
-    await r.arrayBuffer();
+    const text = await r.text();
     const timing = r.headers.get("server-timing");
-    return { what, status: r.status, ms: Math.round(performance.now() - t0), cause: causeOf(timing), retryAfter: r.headers.get("retry-after") };
+    const message = r.status === 400 ? messageOf(text) : null;
+    return { what, status: r.status, ms: Math.round(performance.now() - t0), cause: causeOf(timing), retryAfter: r.headers.get("retry-after"), ...(message === null ? {} : { message }) };
   } catch (e) {
     return { what, status: `threw ${e?.name ?? "error"}`, ms: Math.round(performance.now() - t0), cause: null, retryAfter: null };
   }
