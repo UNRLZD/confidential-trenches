@@ -124,10 +124,10 @@ const SELL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const mintData = new Uint8Array(82);
 mintData[44] = 6;
 mintData[45] = 1;
-/** While set, every Solana read but the Rent's and the sold mint's answers after this many ms (review P3-3): the
- *  landing's settle pass's reads, slow, as a provider that is down and retried makes them. */
-const SLOW_MS = 2000;
-gl.__ctSlowMs = 0;
+/** While set, every Solana read but the Rent's and the sold mint's waits on it until the test releases it (review P3-3):
+ *  the landing's settle pass's reads, held, as a provider that is down and retried holds them; heldReads counts them. */
+let hold: Promise<void> | undefined;
+let heldReads = 0;
 g.fetch = async (url: unknown, init?: RequestInit) => {
   let body: { id?: unknown; method?: string; params?: unknown[] } = {};
   try {
@@ -135,9 +135,11 @@ g.fetch = async (url: unknown, init?: RequestInit) => {
   } catch {}
   const id = body.id ?? 1;
   calls.push({ url: String(url), method: String(body.method) });
-  const slow = gl.__ctSlowMs as number;
   const rentOrMint = body.method === "getAccountInfo" && (body.params?.[0] === "SysvarRent111111111111111111111111111111111" || body.params?.[0] === SELL_MINT);
-  if (slow > 0 && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) await new Promise((ok) => setTimeout(ok, slow));
+  if (hold && typeof body.method === "string" && !rentOrMint && !String(url).includes("/oneclick/")) {
+    heldReads++;
+    await hold;
+  }
   if (body.method === "getAccountInfo" && body.params?.[0] === "SysvarRent111111111111111111111111111111111") {
     rentReads.push(String(url));
     const value = { owner: "Sysvar1111111111111111111111111111111111111", data: [base64.encode(rentData), "base64"], lamports: 1009200, executable: false, rentEpoch: 0, space: 17 };
@@ -201,16 +203,20 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   // review P3-3 (card sol-pools-mainnet-pin): the landing's settle pass (src/pool-testnet.ts settle, a pool.deposit run)
   // holds the seed lock shared across its Solana reads, and a deposit.quote waits for the landing's naming, whose write
   // takes that lock exclusive: the pass starts only once the naming is written, so a slow provider never holds the quote
-  gl.__ctSlowMs = SLOW_MS;
+  // proven by order, not by a clock: the settle pass's Solana reads are held until the quote has answered, so a quote
+  // that waits for them never answers
+  let release!: () => void;
+  hold = new Promise((ok) => (release = ok));
   await import("../src/main.ts");
   const app = doc.body.children.find((c) => c.tagName === "iframe");
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
-  const t0 = performance.now();
-  await askQuote();
-  const quoteMs = performance.now() - t0;
-  gl.__ctSlowMs = 0;
-  assert.ok(quoteMs < SLOW_MS / 2, `deposit.quote at boot answered after ${Math.round(quoteMs)} ms, behind the settle pass's Solana reads (${SLOW_MS} ms each)`);
+  const quoted = await askQuote().then(() => true, () => false);
+  const heldAtAnswer = heldReads;
+  hold = undefined;
+  release();
+  assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldReads} held): it waits behind them`);
+  assert.ok(heldAtAnswer > 0, "the settle pass's Solana reads were held when the quote answered, so the quote did not wait for them");
 
   const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
