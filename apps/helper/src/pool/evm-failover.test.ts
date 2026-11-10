@@ -111,9 +111,36 @@ test("a read only one operator can answer: the fee route still fails (503 upstre
   assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
 });
 
-test("the start's check reads the configured pair alone: a first provider that cannot answer the fee's state reads is refused though a spare could", async (t) => {
-  stub(t, (host, method) => (host === "robinhood.drpc.org" && method === "eth_call" ? UNKNOWN_STATE : null));
-  await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async () => {}), (e: Error) => /^POOL_EVM_RPCS_ROBINHOOD: robinhood\.drpc\.org: no answer to 0x4a2b75c8 .*RPC error 27/.test(e.message));
+// card helper-evm-ready-holds-a-fee: the start's check reads the seat list as the fee does. Before, it read the
+// configured pair alone, so a start in one of dRPC's "Unknown state" periods (3 of 7 measured, 10 Nov) exited 2 and
+// stopped the whole helper, though other operators held the state.
+/** The block the start's check reads at: a proof's life back from now, on this chain of 1 s blocks. */
+const OLD = block(HEAD - evm.POOL_LIFE_MAX_MS / 1000).hash;
+const atOld = (calls: Call[]) => calls.filter((c) => c.method === "eth_call" && (c.params[1] as { blockHash: string }).blockHash === OLD);
+test("(1) the configured pair's first operator refuses the state a proof's life back: the start passes on two other operators at once, with no wait", async (t) => {
+  const DRPC_HOSTS = new Set(["robinhood.drpc.org", "lb.drpc.live"]);
+  const calls = stub(t, (host, method) => (DRPC_HOSTS.has(host) && method === "eth_call" ? UNKNOWN_STATE : null));
+  const waits: number[] = [];
+  for (const env of [ENV, { POOL_EVM_ADDRESS_ROBINHOOD: PIN, POOL_EVM_SENDER_KEY_ROBINHOOD: KEY }]) {
+    const n = calls.length;
+    await evm.evmPoolSendersFromEnv(env, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async (ms) => void waits.push(ms));
+    const answered = new Set(atOld(calls.slice(n)).map((c) => c.host).filter((h) => !DRPC_HOSTS.has(h)));
+    // each of the depth and the chain fee read on side B's own operator and on one past dRPC on side A
+    assert.ok(answered.has("rpc.mainnet.chain.robinhood.com") && answered.size === 2, [...answered].join(", "));
+  }
+  assert.deepEqual(waits, []);
+});
+
+test("(3) one operator alone holds the state a proof's life back: the start asks again for its bound, then is refused, naming the variable, every seat and its answer, never a key", async (t) => {
+  stub(t, (host, method) => (host !== "rpc.mainnet.chain.robinhood.com" && method === "eth_call" ? UNKNOWN_STATE : null));
+  const waits: number[] = [];
+  await assert.rejects(evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), undefined, undefined, () => {}).get(PIN)!.ready(async (ms) => void waits.push(ms)), (e: Error) => {
+    assert.match(e.message, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block 99400, 600 s old \(a proof's fee is read up to 600 s back\), 14 tries over 87 s: HTTP 400: RPC error 27: Unknown state\. First available state is 1 \(eth_call 0x4a2b75c8 .*robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\): HTTP 400[^;]*; robinhood-rpc\.publicnode\.com: HTTP 400[^;]*; robinhood\.rpc\.blxrbdn\.com: HTTP 400[^;]*; rpc-robinhood\.globalstake\.io: HTTP 400/);
+    assert.ok(!e.message.includes(FAKE), e.message);
+    return true;
+  });
+  assert.equal(waits.reduce((x, y) => x + y), 87_000);
+  assert.ok(waits.length === 13 && waits.every((w, i) => w === Math.min(1_000 * 2 ** i, 8_000)), waits.join(","));
 });
 
 test("one list of seats, each with its operator: the pair, the keyed URLs, the kit's quote providers, a URL listed before dropped; dRPC's keyed seats are dRPC's", () => {

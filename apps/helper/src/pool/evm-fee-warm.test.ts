@@ -235,3 +235,70 @@ test("a request's read that failed half a second into the period is kept for cal
   assert.ok(calls.length > n);
   assert.equal((await s.fee(at.T))?.fee, feeOf("robinhood").toString());
 });
+
+// card helper-evm-ready-holds-a-fee: a new helper says ready only once every pool's fee for the period it starts in, or
+// the next one's, is in memory, so a deploy's old helper serves until then. The chain: dRPC refuses every state of one
+// period's blocks (as it did for whole periods, 3 of 7 read 10 Nov), the public operators but Robinhood's own keep 12 s,
+// Robinhood's own keeps all. A start 30 s into that period passes the start's state check (a proof's life back, two
+// operators: dRPC and Robinhood's own), but the period's fee has one operator left.
+const GONE: Refuse = (host, method, ageS, T) => {
+  if (method !== "eth_call" || host === OWN) return null;
+  const blockS = T / 1000 - ageS;
+  if (host === "robinhood.drpc.org") return blockS >= E / 1000 && blockS < E / 1000 + 60 ? { status: 400, body: { code: 27, message: "Unknown state. First available state is 1" } } : null;
+  return host.includes("robinhood") && ageS >= 12 ? PRUNED(ageS) : null;
+};
+
+test("(2) a start 30 s into a period whose fee's state is gone says ready at the next period's read, not before: the period's fee is never in memory, the next one's is, read once", async (t) => {
+  const at = { T: E + 30_000 };
+  const calls = chain(t, GONE, at);
+  const lines: string[] = [];
+  const s = sendersOf(ENV_RH, lines).get(RH)!;
+  const waits: number[] = [];
+  let readyAt: number | null = null;
+  await s.ready(async (ms) => {
+    assert.equal(readyAt, null);
+    waits.push(ms);
+    at.T += ms;
+  }).then(() => void (readyAt = at.T));
+  // no wait in the start's state check; one wait, to the next period's read at its second 1, and ready there
+  assert.deepEqual(waits, [31_000]);
+  assert.equal(readyAt, E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS);
+  assert.deepEqual(lines.filter((l) => l.includes("read ahead")).map((l) => l.slice(0, 48)), ["evm robinhood: fee read ahead failed (read on de"]);
+  // the next period's fee answers from memory all period; the timer's warm of it reads nothing more (one read a period)
+  const n = calls.length;
+  await s.warm(E + 60_000);
+  for (const sec of [1, 30, 59]) assert.equal((await s.fee(E + 60_000 + sec * 1000))?.fee, feeOf("robinhood").toString(), `second ${sec}`);
+  assert.equal(calls.length, n);
+});
+
+test("(4) /v1/health's ready stays false while any pool has no fee for the period the start is in or the next: Base's fee read at once, Robinhood's only at the next period's read", async (t) => {
+  const S = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, GONE, at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const done: string[] = [];
+  const pools = new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep).then(() => void done.push(s.network)) }]));
+  const refused: string[] = [];
+  const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), pools, (e: Error) => void refused.push(e.message)));
+  for (let i = 0; i < 10_000 && pending.length === 0; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual([done, pending.map((p) => p.ms)], [["base"], [31_000]], "Base ready, Robinhood waiting for the next period");
+  assert.equal(gate.ready(), false);
+  const w = pending.shift()!;
+  at.T += w.ms;
+  w.go();
+  await gate.warmed;
+  assert.equal(gate.ready(), true);
+  assert.deepEqual([done.sort(), refused, at.T], [["base", "robinhood"], [], E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS]);
+});
+
+test("the start's waits, a period and the read ahead's window fit under the deploy's wait for ready, with room for the reads: redeploy.sh's REDEPLOY_READY_S default and compose's start_period", async () => {
+  const { readFileSync } = await import("node:fs");
+  const deploy = new URL("../../deploy/", import.meta.url);
+  const wait = Number(/REDEPLOY_READY_S:-(\d+)/.exec(readFileSync(new URL("redeploy.sh", deploy), "utf8"))?.[1]);
+  const start = Number(/start_period: (\d+)s/.exec(readFileSync(new URL("compose.yaml", deploy), "utf8"))?.[1]);
+  const ours = evm.EVM_READY_MISS_MS + fee.POOL_EPOCH_MS + evm.EVM_FEE_WARM_WINDOW_MS;
+  assert.equal(ours, 160_000);
+  for (const bound of [wait, start]) assert.ok(Number.isInteger(bound) && bound * 1000 - ours >= 120_000, `${bound} s`);
+});
