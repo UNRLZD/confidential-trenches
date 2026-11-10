@@ -122,6 +122,13 @@ test("send: a 4xx with no body, a malformed code or a code that is not a string 
   await assert.rejects(send(json(400, { error: { code: 5 } })), noAnswer(400));
 });
 
+test("send: a 2xx other than 200, or a 3xx, is no answer even with a hash", async () => {
+  for (const status of [201, 202, 204, 302]) {
+    const f = async () => new Response(status === 204 ? null : JSON.stringify({ hash: "0x" + "ab".repeat(32) }), { status });
+    await assert.rejects(evmPoolSend(HELPER, { pool: POOL, data: new Uint8Array([1]), epoch: 1n }, f as typeof fetch), (e) => e instanceof EvmSendNoAnswer, String(status));
+  }
+});
+
 test("send: a 5xx, with or without a code, is no answer", async () => {
   for (const status of [500, 502, 503, 504]) {
     await assert.rejects(send(empty(status)), noAnswer(status));

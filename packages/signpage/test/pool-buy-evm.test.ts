@@ -32,6 +32,11 @@ const replay = (ex: Exchange[]): QuoteRpc => async (sent) => {
 const AMOUNT_IN = BigInt(QF.request.amountIn as string);
 const TOKEN = QF.request.buys as string;
 const FIXTURE_ROUTE = QF.request.route as EvmPoolBuyQuote["route"];
+/** The kit's own quote of the recording at another slippage than the request's: a device quote whose min out is looser. */
+const quoteAt = (slippageBps: number) => {
+  const { buys, amountIn, ...rest } = QF.request;
+  return evmPoolBuyQuoteWith({ ...(rest as object), slippageBps, token: buys as string, amountIn: BigInt(amountIn as string) } as never, [replay(QF.exchanges[0]), replay(QF.exchanges[1])], QF.now);
+};
 let quoted: Promise<EvmPoolBuyQuote> | null = null;
 const fixtureQuote = () =>
   (quoted ??= (() => {
@@ -99,12 +104,12 @@ const release = (o: Rel = {}) => {
 };
 /** One pool RPC: its newest block at the run's clock (`t`, or `time` for its block time), the releases it shows, and
  *  every call it got. */
-type Side = { logs?: unknown[] | (() => unknown[]); time?: () => bigint; down?: boolean };
+type Side = { logs?: unknown[] | (() => unknown[]); time?: () => bigint; down?: boolean; start?: bigint };
 type Call = { method: string; params: unknown };
 const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost["rpcs"][0] => async (method, params) => {
   calls.push({ method, params });
   if (side.down) throw new Error("down");
-  if (method === "eth_blockNumber") return "0x" + START.toString(16);
+  if (method === "eth_blockNumber") return "0x" + (side.start ?? START).toString(16);
   if (method === "eth_getBlockByNumber") return { number: "0x" + (START + 0x40n).toString(16), timestamp: "0x" + ((side.time?.() ?? clock.t) / 1000n).toString(16) };
   if (method === "eth_getLogs") return typeof side.logs === "function" ? side.logs() : (side.logs ?? []);
   throw new Error(`no ${method}`);
@@ -209,6 +214,7 @@ test("filled: one Bought for the nullifier, the same on both RPCs, paying W the 
   assert.equal(seen.sent, 1, "told sent once the bytes left");
   // the kit refused the first standard shape below its own best, and the device asked that best route once
   assert.deepEqual(seen.quotes.at(-1), FIXTURE_ROUTE);
+  assert.equal(seen.quotes.length, 2, "the first standard shape, then the kit's best route once");
   const route = { venue: "uniswap-v3", adapter: A_V3, path: FIXTURE_ROUTE };
   assert.deepEqual(seen.records, [
     [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "pending", route }],
@@ -226,6 +232,11 @@ test("(ruling 2) the read-back names no W, nullifier or transaction to a public 
   for (const secret of [W.slice(2).toLowerCase(), w32(NULLIFIER), NULLIFIER.toString(16), HELPER_HASH.slice(2), TX.slice(2)]) assert.ok(!said.includes(secret), `no read names ${secret}`);
   const filter = seen.calls.find((c) => c.method === "eth_getLogs")!.params as [Record<string, unknown>];
   assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x100", toBlock: "0x140" }]);
+  // the two RPCs' newest blocks differ: the reads start at the lower, so neither misses the release
+  const ahead = host({ a: { logs: [release()], start: START + 9n }, b: { logs: [release()] } });
+  await runEvmPoolBuy(ahead.h, ASK);
+  const froms = ahead.seen.calls.filter((c) => c.method === "eth_getLogs").map((c) => (c.params as [{ fromBlock: string }])[0].fromBlock);
+  assert.ok(froms.length === 2 && froms.every((f) => f === "0x100"), froms.join(","));
 });
 
 test("(ruling 2) a Bought on one RPC only, or the two differing, is not filled; past the tap's bound the answer is sent, and the end goes out late once both agree", async () => {
@@ -239,6 +250,7 @@ test("(ruling 2) a Bought on one RPC only, or the two differing, is not filled; 
   lagging = false;
   assert.deepEqual(await lateOf(seen), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.equal(seen.records.at(-1)![1].state, "filled");
+  assert.equal(seen.settles, 2, "the settle pass at the tap's answer, and again at the late end");
   for (const differ of [{ block: 0x111n }, { tx: "0x" + "ef".repeat(32) }, { out: 40_000_001n }]) {
     const r = host({ a: { logs: [release()] }, b: { logs: [release(differ)] } });
     assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "sent", txs: [] }, JSON.stringify(differ, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
@@ -325,6 +337,14 @@ test("(ruling 1) the helper's 5xx, a coded-less 4xx, a timeout or a fault after 
   }
 });
 
+test("(ruling 1) a fault of the page past the post is never an error: the stage is sent", async () => {
+  const { h } = host(both([release()]));
+  h.sent = () => {
+    throw new Error("the page's answer failed");
+  };
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+});
+
 test("(ruling 1) only the helper's own 4xx naming a code is a refusal: refused, the note taken and settled, nothing read", async () => {
   const { h, seen } = host({ send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")) });
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [] });
@@ -374,15 +394,13 @@ test("(ruling 2) the read-back has a wall-clock bound however slow each read is,
   assert.ok(during.length < 20, `the tap's reads end at the bound: ${during.length}`);
 });
 
-test("(ruling 6) a quote whose min out is under the ask's own slippage of the agreed output is never signed", async () => {
-  // the kit's quote asked at another slippage: its min out under the ask's floor
+test("(ruling 6) a device quote whose min out is under the ask's own slippage of its agreed output is never signed (the floor is the rule's, never the quote's)", async () => {
+  const loose = await quoteAt(5_000);
   const q = await fixtureQuote();
-  const loose = { ...q, minOut: (q.amountOut * 5_000n) / 10_000n };
+  assert.ok(loose.minOut < q.minOut && loose.amountOut === q.amountOut, "the same route's output, a looser min out");
   const { h, seen } = host({ quote: async () => loose });
-  h.build = (adapter, x) => evmQuotedBuy(VENUES, adapter, q, QF.now) && evmQuotedBuy(VENUES, adapter, x, QF.now);
-  const got = await runEvmPoolBuy(h, ASK);
-  assert.ok("error" in got, JSON.stringify(got));
-  assert.deepEqual([seen.seeds.length, seen.takes.length, seen.sends.length], [0, 0, 0]);
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length], [0, 0, 0, 0]);
 });
 
 test("(ruling 6) the relay data's fee cap is held to the device's binding fee: a proof whose relay data commits more is never signed", async () => {
@@ -400,6 +418,12 @@ test("a quote that fails checkEvmBuy is never signed: no seed read, no record, n
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
   assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0, 0]);
   assert.equal(claimed.size, 0, "the proof is released for the next tap");
+  // a quote the providers fail: the search stops there, never on to the next shape
+  for (const code of ["rpc_error", "rpc_disagree", "stale_quote"] as const) {
+    const r = host({ quote: () => Promise.reject(new EvmQuoteError(code, "x")) });
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { error: "quote_check_failed" }, code);
+    assert.equal(r.seen.quotes.length, 1, code);
+  }
   // a quote the kit refuses: never signed either
   const r2 = host({ quote: () => Promise.reject(new EvmQuoteError("stale_quote", "old")) });
   assert.deepEqual(await runEvmPoolBuy(r2.h, ASK), { error: "quote_check_failed" });
@@ -431,6 +455,22 @@ test("(ruling 7) keys: the seed is zeroed once W is derived and W's key once it 
   await runEvmPoolBuy(ok.h, ASK);
   assert.ok(ok.seen.seeds.length === 1 && zero(ok.seen.seeds[0]!), "the seed");
   assert.ok(ok.seen.keys.length === 1 && zero(ok.seen.keys[0]!), "W's key");
+  // already zero when the bytes are made: the record before the take sees both zeroed
+  const at = host(both([release()]));
+  const zeroAt: boolean[] = [];
+  at.h.record = async (w, rec) => {
+    if (rec.state === "pending") zeroAt.push(zero(at.seen.seeds[0]!), zero(at.seen.keys[0]!));
+    at.seen.records.push([w, rec]);
+  };
+  await runEvmPoolBuy(at.h, ASK);
+  assert.deepEqual(zeroAt, [true, true], "the seed zeroed once W is derived, W's key once it signed");
+  // a derive that throws: the seed zeroed all the same
+  const thrown = host();
+  thrown.h.derive = () => {
+    throw new Error("derive");
+  };
+  assert.deepEqual(await runEvmPoolBuy(thrown.h, ASK), { error: "failed" });
+  assert.ok(zero(thrown.seen.seeds[0]!));
   // W is not the proof's: refused before it signs, the seed and the key zeroed, nothing taken or sent
   const r = readyOf();
   const other = host({ ready: [{ ...r, wallet: { ...r.wallet, j: 1 } }] });
