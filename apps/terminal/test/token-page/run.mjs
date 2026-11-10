@@ -546,9 +546,10 @@ try {
         const tabs = await f.$$eval(`${lp} [data-testid^="lower-tab-"]`, (els) => els.map((e) => e.textContent.trim()));
         const row = live(s.top);
         const count = s.holders === "chain" ? "2,703" : "2,680";
-        const wantTabs = phone ? ["Trades", `Holders${count}`] : [`Holders(${count})`, "Trades"];
+        // My orders last (card app-orders-coming-soon: its tab says Coming soon, test/orders-soon)
+        const wantTabs = phone ? ["Trades", `Holders${count}`, "My orders"] : [`Holders(${count})`, "Trades", "My orders"];
         // the tab's count comes from the token row until the Holders tab has read
-        const rowTabs = phone ? ["Trades", "Holders2,680"] : ["Holders(2,680)", "Trades"];
+        const rowTabs = phone ? ["Trades", "Holders2,680", "My orders"] : ["Holders(2,680)", "Trades", "My orders"];
         check(JSON.stringify(tabs) === JSON.stringify(rowTabs), `${tag}: the tabs read ${JSON.stringify(tabs)}, want ${JSON.stringify(rowTabs)}`);
         if (s.lower === "trades") {
           if (s.tape) {

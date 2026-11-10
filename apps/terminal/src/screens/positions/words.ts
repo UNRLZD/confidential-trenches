@@ -25,6 +25,7 @@ export const WORDS = {
   market: TR.market,
   limit: TR.limit,
   tpsl: TR.tpsl,
+  soon: TR.soon,
   receive: TR.receive,
   route: TR.route,
   slippage: TR.slippage,

@@ -95,6 +95,7 @@ export const CHILD_RUNS = [
   { key: "app-toast-clears-sheet-head", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-chart-controls", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "app-header-first-paint-auth", host: "app", args: ["--root", "apps/terminal/dist"] },
+  { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
 ];

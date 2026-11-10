@@ -80,6 +80,9 @@ export function expectedCells(read) {
   return CELLS.map(([id, label], i) => ({ id, label, ...by[id], cross: by[id].cross ?? false, tone: i < 3 && by[id].tone === "plain" ? "good" : by[id].tone }));
 }
 
+/** The exit plan block's two lines (R5 token.js U.exitBlock). */
+export const EXIT_TEXT = "Exit plan Sells automatically once this buy fills";
+
 /** The faults of one box and its grid as the page drew them (m) against the token read (read): [] when none. */
 export function boxFaults(m, read) {
   const bad = [];
@@ -88,8 +91,11 @@ export function boxFaults(m, read) {
   if (b.state !== "S8.1") bad.push(`the box's state is ${b.state ?? "none"}, not S8.1`);
   if (b.balance !== "Bal —") bad.push(`the balance reads ${JSON.stringify(b.balance)}, not "Bal —"`);
   if (/available/i.test(b.text ?? "")) bad.push('the box says "available"');
-  if (b.exit?.text !== "Exit plan Sells automatically once this buy fills") bad.push(`the exit plan block reads ${JSON.stringify(b.exit?.text)}`);
-  if (b.exit?.pressed !== "false" || b.exit?.on !== "false") bad.push("the exit plan is not off");
+  // the block drawn off with its switch, or (card app-orders-coming-soon: orders are out of the plan for now) with
+  // `Coming soon` where the switch was and no switch at all
+  const soon = b.exit?.text === `${EXIT_TEXT} Coming soon`;
+  if (b.exit?.text !== EXIT_TEXT && !soon) bad.push(`the exit plan block reads ${JSON.stringify(b.exit?.text)}`);
+  if (b.exit?.pressed !== (soon ? null : "false") || b.exit?.on !== "false") bad.push("the exit plan is not off");
   if (b.cta?.text !== "Sign in to trade") bad.push(`the main button reads ${JSON.stringify(b.cta?.text)}, not "Sign in to trade"`);
   else if (b.cta.disabled) bad.push("the main button is disabled");
   if (!(b.gridTop >= b.lineBottom - 0.5)) bad.push(`the grid is not under the Route & fees line (grid top ${b.gridTop}, line bottom ${b.lineBottom})`);
