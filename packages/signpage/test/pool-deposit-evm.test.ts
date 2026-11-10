@@ -408,9 +408,10 @@ test("evm-deposit-note-stays-incoming review 1: the end's reads tell filled whil
   const rec = (await ns.get(planned.id))!;
   const left = { notes: [{ precommitment: rec.precommitment, value: RUNG, nonce: 0n, u: uOf(rec) }], landed: false, whole: true };
   const rpcs = refusing(ch, 1, NO_HEADER);
-  let cut = 0;
-  const open = await followPoolDepositEvm({ ...hostOf(ch, ns, { rpcs }), records: async () => [rec], wait: async () => { if (++cut > 2) throw new Error("cut"); } }, left).catch((e: Error) => e.message);
+  const waits: number[] = [];
+  const open = await followPoolDepositEvm({ ...hostOf(ch, ns, { rpcs }), records: async () => [rec], wait: async (ms: number) => { if (waits.push(ms) > 2) throw new Error("cut"); } }, left).catch((e: Error) => e.message);
   assert.equal(open, "cut", "no Deposited: no end told");
+  assert.deepEqual(waits.slice(0, 2), [10_000, 20_000], "a failed read: backed off, never read as a send that may land");
   ch.land(ch.c.sent[0]!);
   assert.equal(await followPoolDepositEvm({ ...hostOf(ch, ns, { rpcs }), records: async () => [rec], wait: () => Promise.reject(new Error("cut")) }, left), "filled");
 });

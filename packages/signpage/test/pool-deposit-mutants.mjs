@@ -84,7 +84,7 @@ export const MUTANTS = [
   [EVM, [['return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";', 'return rec.state === "PLANNED" ? null : "landed";']], "pool-deposit-sent-end fold review 4 X1 (EVM)"],
   [EVM, [["      if (h.signal?.aborted) return null;\n      // a send not read before", "      // a send not read before"]], "pool-deposit-sent-end review 4 (EVM)"],
   [SOL, [['      const e = await noteEnd(h, sync, scope, n, wait, seen).catch(() => "fault" as const);', "      const e = await noteEnd(h, sync, scope, n, wait, seen).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14:"],
-  [EVM, [['      const e = await noteEndEvm(h, n, seen).catch(() => "fault" as const);', "      const e = await noteEndEvm(h, n, seen).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14 (EVM)"],
+  [EVM, [['      const e = await noteEndEvm(h, n, seen, kept).catch(() => "fault" as const);', "      const e = await noteEndEvm(h, n, seen, kept).catch(() => null);"]], "pool-deposit-sent-end fold review 4 X14 (EVM)"],
   // fold review 5 (EVM): the give-up back in
   [EVM, [["    await wait(gap);\n    waited += gap;\n", "    if (waited + gap > 3_600_000) return null;\n    await wait(gap);\n    waited += gap;\n"]], "pool-deposit-sent-end review 4 (EVM)"],
   // fold review 6: the follower opens the note store (whose open and list settle, and may write) again
