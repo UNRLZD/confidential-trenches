@@ -427,7 +427,7 @@ test("a venue with no pinned table is refused venue_not_pinned once the referenc
   assert.equal(new Set(w.multi.map((l) => l.join())).size, 2);
 });
 test("no table pinned, or a pin that is not a list of addresses: refused not_allowed before any read (mutant A2)", async () => {
-  for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }]) {
+  for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }, { "pump-curve": [s0.tableAddr], pumpswap: [] }]) {
     const w = await world({ tables: tables as never });
     assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" }, JSON.stringify(tables));
     assert.ok(!w.log.some((x) => /^[01]:/.test(x)), w.log.join(","));
@@ -548,6 +548,16 @@ test("fold 1 (1): a take whose attempt a remake swapped out is refused inside th
   assert.equal(w.state(), "HELD", "never RESERVED for bytes no one sends");
   assert.ok(w.log.includes("take:note-1"));
   assert.equal(w.sentTx(), null);
+});
+
+test("a take that hands back another attempt's proof, or other proof bytes, is refused by the page itself: nothing leaves", async () => {
+  for (const other of [readyProof({ attempt: "attempt-2" }), { ...readyProof(), proof: { ...readyProof().proof, pi_a: [...readyProof().proof.pi_a].reverse() } }]) {
+    const w = await world();
+    w.host.take = async (id: string) => (w.log.push(`take:${id}`), other as never);
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
+    assert.ok(w.log.includes("take:note-1"));
+    assert.equal(w.sentTx(), null);
+  }
 });
 
 test("fold 1 (6): the pick reads the ready proofs again after the quote: a proof remade during the reads is the one bought", async () => {
