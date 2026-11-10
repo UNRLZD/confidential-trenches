@@ -35,7 +35,7 @@ import { signBuilt } from "../signpage-built.mjs";
 const KEY = "signpage-state-holdings";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** This card's commit: its fix (positions.ts's looked-for rule, the stops), which a release's commit must hold. */
-export const CARD_COMMIT = "e24c15fb0bdb47464e1407232880842c50b6c71a";
+export const CARD_COMMIT = "afda031fe2eb4e2bb824551fcd7b6fcefb4e9c71";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const RELEASES = path.join(ROOT, "packages/signpage/releases");
 const SHA = /^[0-9a-f]{40}$/;
