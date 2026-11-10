@@ -24,7 +24,10 @@
 //     size the smaller of the two reads; the kit's solanaPoolNextTableRange for those sizes. The list: the kit's
 //     readSolanaPoolTableVenue (the venue's global account at finalized on both RPCs, the same bytes) and
 //     solanaPoolVenueTableList for the record's program, pool and that range: what the builder loads
-//     (packages/kit/test/solana-pool-venue-tables.test.ts). Refused "nothing to add" when the newest generation's range
+//     (packages/kit/test/solana-pool-venue-tables.test.ts). A venue whose buy fits at any tree size (the pump curve: not
+//     in the kit's SOLANA_POOL_TABLE_GROWS) is refused "nothing to add" by name while its newest generation holds the
+//     kit's list for its range: its next range is its first, so only changed venue accounts make one. Else refused
+//     "nothing to add" when the newest generation's range
 //     holds every page of it in both trees and its addresses are the kit's list for its own range (a changed fee
 //     recipient is a reason for a new generation). A resume takes its range and sizes from its journal.
 //  3. The cost: rent of the table (56 + 32 per address, the Rent sysvar read on both RPCs) and every transaction's fee
@@ -192,6 +195,10 @@ export async function plan(cluster, venue, { fetchFn = fetch, dir = DEPLOYMENTS,
     if (at >= 0) generation = at + 1;
   } else {
     const newest = gens.at(-1);
+    const same = (g) => JSON.stringify(g.addresses) === JSON.stringify(kit.solanaPoolVenueTableList(cfg, tv, g.pages));
+    if (newest && !kit.SOLANA_POOL_TABLE_GROWS.includes(venue) && same(newest)) {
+      throw new Error(`nothing to add: ${venue}'s buy fits 1,232 bytes at any tree size on its generation ${gens.length} (${newest.table}): a new generation is made for it only when the venue's accounts change`);
+    }
     if (newest && holds(newest.pages, range) && JSON.stringify(newest.addresses) === JSON.stringify(kit.solanaPoolVenueTableList(cfg, tv, newest.pages))) {
       throw new Error(`nothing to add: ${venue}'s generation ${gens.length} (${newest.table}, ${pagesText(newest.pages)}) holds every page of the next range (${pagesText(range)}, for trees of ${sizes.state} and ${sizes.label} entries) and the venue's accounts are unchanged`);
     }

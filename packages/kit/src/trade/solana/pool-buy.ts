@@ -979,6 +979,11 @@ export type SolanaPoolPageRange = { readonly state: readonly [number, number]; r
 export const SOLANA_LOOKUP_TABLE_MAX = 256;
 /** The first generation of the mainnet pump curve table (BShWZ8Fb…, frozen 8 Nov): pages 0 and 1 of each tree. */
 export const SOLANA_POOL_CURVE_FIRST_RANGE: SolanaPoolPageRange = Object.freeze({ state: Object.freeze([0, 1] as const), label: Object.freeze([0, 1] as const) });
+/** The venues whose buy outgrows a table generation as the trees grow, so they get generations by tree size. The pump
+ *  curve's buy fits 1,232 bytes at any tree size on its first range, every page past it a static key (at most 1,137 B:
+ *  packages/kit/test/solana-pool-venue-tables.test.ts), so its next range is always its first and a new generation is
+ *  made for it only when the venue's accounts change. */
+export const SOLANA_POOL_TABLE_GROWS: readonly SolanaPoolTableVenue["kind"][] = Object.freeze(["pumpswap"]);
 /** A range's pages in table order: the state tree's, then the label tree's. */
 export function solanaPoolRangePages(program: string, range: SolanaPoolPageRange): string[] {
   const one = (tree: 0 | 1, [from, to]: readonly [number, number]): string[] => {
@@ -1003,6 +1008,7 @@ export const SOLANA_POOL_STATE_SHARE = 3;
  *  trees. A slower tree is never left with its live pages in an older generation only. */
 export function solanaPoolNextTableRange(cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue, sizes: { readonly state: number; readonly label: number }): SolanaPoolPageRange {
   for (const n of [sizes.state, sizes.label]) if (!Number.isSafeInteger(n) || n < 0 || n > 0xffff_ffff) throw new Error("a tree size is a u32");
+  if (!SOLANA_POOL_TABLE_GROWS.includes(venue.kind)) return SOLANA_POOL_CURVE_FIRST_RANGE;
   const head = new Set(solanaPoolBuyTableAccounts(cfg, venue, [])).size;
   const slots = SOLANA_LOOKUP_TABLE_MAX - head;
   const state = Math.ceil((slots * SOLANA_POOL_STATE_SHARE) / 5);

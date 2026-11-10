@@ -53,6 +53,8 @@ const tvOf = (kind, edit = (d) => d) => {
 };
 /** pump Global with another fee recipient (at 41): the venue's accounts changed. */
 const newFeeRecipient = (d) => (Buffer.from(d).fill(5, 41, 73));
+/** PumpSwap GlobalConfig with another protocol fee recipient (its first, at 57). */
+const newProtocolFeeRecipient = (d) => (Buffer.from(d).fill(5, 57, 89));
 /** The pool account (2,179 bytes, "bfpool01", the two tree sizes at 49 and 1,114) owned by `owner`. */
 function poolData({ state, label }) {
   const d = Buffer.alloc(2179);
@@ -288,6 +290,9 @@ function recordDir(tables) {
   writeFileSync(path.join(dir, "mainnet.json"), JSON.stringify(tables === undefined ? MAINNET : { ...MAINNET, tables }, null, 2) + "\n");
   return dir;
 }
+/** PumpSwap's narrow first generation (pages 0 and 1, as devnet's 4kG4g4fb… holds), so a run makes its generation 2. */
+const SWAP_G1 = { table: b58encode(new Uint8Array(32).fill(8)), pages: { state: [0, 1], label: [0, 1] }, made_at: { state: 0, label: 0 }, txs: [] };
+const withSwapG1 = () => recordDir({ ...MAINNET.tables, pumpswap: [{ ...SWAP_G1, addresses: kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap"), SWAP_G1.pages) }] });
 const keyBase = () => mkdtempSync(path.join(tmpdir(), "venue-table-keys-"));
 const recOf = (dir) => JSON.parse(readFileSync(path.join(dir, "mainnet.json"), "utf8"));
 const planOn = (k, venue, dir, extra = {}) => plan("mainnet", venue, { fetchFn: k.fetchFn, dir, wait: k.wait, ...extra });
@@ -308,7 +313,7 @@ const fund = (k, id, lamports) => k.set(id, { owner: SYSTEM, data: Buffer.alloc(
 test("the list is the kit's own for the record's program and pool and the next range, and exactly what the builder loads", async () => {
   for (const kind of ["pump-curve", "pumpswap"]) {
     const k = fakeCluster();
-    const p = await planOn(k, kind, recordDir());
+    const p = await planOn(k, kind, recordDir({})); // no generation yet: a first one
     const tv = tvOf(kind);
     const range = kit.solanaPoolNextTableRange(CFG, tv, { state: 0, label: 0 });
     assert.deepEqual(p.range, range, kind);
@@ -334,36 +339,53 @@ test("the list is the kit's own for the record's program and pool and the next r
 
 test("generations: the trees' sizes are the smaller of the two finalized pool reads; the generation counts the record's", async () => {
   const k = fakeCluster({ sizes: [{ state: 5_000, label: 2_900 }, { state: 5_100, label: 2_800 }] });
-  const p = await planOn(k, "pump-curve", recordDir());
+  const g1 = { table: b58encode(new Uint8Array(32).fill(8)), pages: { state: [0, 1], label: [0, 1] }, made_at: { state: 0, label: 0 }, addresses: kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap"), { state: [0, 1], label: [0, 1] }), txs: [] };
+  const p = await planOn(k, "pumpswap", recordDir({ ...MAINNET.tables, pumpswap: [g1] }));
   assert.deepEqual(p.sizes, { state: 5_000, label: 2_800 });
-  assert.deepEqual(p.range, kit.solanaPoolNextTableRange(CFG, tvOf("pump-curve"), { state: 5_000, label: 2_800 }));
+  assert.deepEqual(p.range, kit.solanaPoolNextTableRange(CFG, tvOf("pumpswap"), { state: 5_000, label: 2_800 }));
   assert.equal(p.range.state[0], 3, "from the page before the state tree's end");
   assert.equal(p.range.label[0], 1);
-  assert.equal(p.generation, 2, "the record holds the curve's first generation");
+  assert.equal(p.generation, 2, "the record holds PumpSwap's first generation");
   const q = await planOn(fakeCluster(), "pumpswap", recordDir());
   assert.equal(q.generation, 1, "no pumpswap table yet");
 });
 
+test("refused by name: a venue whose buy fits at any tree size (the pump curve) never gets a generation for its trees; only changed venue accounts make one, on its first range", async () => {
+  assert.deepEqual(kit.SOLANA_POOL_TABLE_GROWS, ["pumpswap"]);
+  // the mainnet curve table (generation 1, pages 0 and 1) at small and at huge trees: refused, nothing read about a key
+  for (const sizes of [{ state: 0, label: 0 }, { state: 5_000, label: 2_800 }, { state: 0xffff_fff0, label: 0xffff_fff0 }])
+    await assert.rejects(planOn(fakeCluster({ sizes: [sizes, sizes] }), "pump-curve", recordDir()), /^Error: nothing to add: pump-curve's buy fits 1,232 bytes at any tree size on its generation 1 \(BShWZ8Fb\S+\): a new generation is made for it only when the venue's accounts change$/);
+  // a changed fee recipient: generation 2, on the first range again (25 addresses), never a 256-address table
+  const changed = await planOn(fakeCluster({ sizes: [{ state: 9_000, label: 3_000 }, { state: 9_000, label: 3_000 }], kinds: { "pump-curve": newFeeRecipient } }), "pump-curve", recordDir());
+  assert.equal(changed.generation, 2);
+  assert.deepEqual(changed.range, kit.SOLANA_POOL_CURVE_FIRST_RANGE);
+  assert.equal(changed.list.length, 25);
+  // no curve table at all (a new cluster): its first, on the first range
+  const first = await planOn(fakeCluster({ sizes: [{ state: 9_000, label: 3_000 }, { state: 9_000, label: 3_000 }] }), "pump-curve", recordDir({}));
+  assert.deepEqual([first.generation, first.range, first.list.length], [1, kit.SOLANA_POOL_CURVE_FIRST_RANGE, 25]);
+});
+
 test("refused: nothing to add when the newest generation holds every page of the next range and the venue's accounts", async () => {
   const sizes = { state: 5_000, label: 3_000 };
-  const tv = tvOf("pump-curve");
+  const tv = tvOf("pumpswap");
   const range = kit.solanaPoolNextTableRange(CFG, tv, sizes);
   const gen = (r, t = tv) => ({ table: b58encode(new Uint8Array(32).fill(8)), pages: r, made_at: sizes, addresses: kit.solanaPoolVenueTableList(CFG, t, r), txs: [] });
-  const tables = { "pump-curve": [MAINNET.tables["pump-curve"][0], gen(range)] };
+  const g1 = gen({ state: [0, 1], label: [0, 1] });
+  const tables = { ...MAINNET.tables, pumpswap: [g1, gen(range)] };
   const k = () => fakeCluster({ sizes: [sizes, sizes] });
-  await assert.rejects(planOn(k(), "pump-curve", recordDir(tables)), /nothing to add/);
+  await assert.rejects(planOn(k(), "pumpswap", recordDir(tables)), /^Error: nothing to add: pumpswap's generation 2/);
   // a newest generation whose recorded addresses are not the kit's for its pages: a new generation
-  const off = await planOn(k(), "pump-curve", recordDir({ "pump-curve": [{ ...gen(range), addresses: gen(range).addresses.slice(1) }] }));
+  const off = await planOn(k(), "pumpswap", recordDir({ ...MAINNET.tables, pumpswap: [{ ...gen(range), addresses: gen(range).addresses.slice(1) }] }));
   assert.equal(off.generation, 2);
   // the trees grew past the newest's start: a new generation
-  const grown = await planOn(fakeCluster({ sizes: [{ state: 9_000, label: 3_000 }, { state: 9_000, label: 3_000 }] }), "pump-curve", recordDir(tables));
+  const grown = await planOn(fakeCluster({ sizes: [{ state: 9_000, label: 3_000 }, { state: 9_000, label: 3_000 }] }), "pumpswap", recordDir(tables));
   assert.equal(grown.generation, 3);
   // a changed fee recipient: the newest generation's accounts are not the venue's now, so a new generation
-  const changed = await planOn(fakeCluster({ sizes: [sizes, sizes], kinds: { "pump-curve": newFeeRecipient } }), "pump-curve", recordDir(tables));
+  const changed = await planOn(fakeCluster({ sizes: [sizes, sizes], kinds: { pumpswap: newProtocolFeeRecipient } }), "pumpswap", recordDir(tables));
   assert.equal(changed.generation, 3);
-  assert.deepEqual(changed.list, kit.solanaPoolVenueTableList(CFG, tvOf("pump-curve", newFeeRecipient), range));
-  // the other venue is its own list
-  assert.equal((await planOn(k(), "pumpswap", recordDir(tables))).generation, 1);
+  assert.deepEqual(changed.list, kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap", newProtocolFeeRecipient), range));
+  // the other venue is its own list: the curve's generation 1 is the record's, unchanged, so nothing to add there
+  await assert.rejects(planOn(k(), "pump-curve", recordDir(tables)), /nothing to add: pump-curve's buy fits/);
 });
 
 test("each built transaction fits 1,232 B; the create comes first, the freeze last; the extends hold exactly the list", () => {
@@ -446,12 +468,12 @@ test("regression (devnet 9 Nov 23:12Z): the need keeps the funder's rent floor; 
 
 test("--dry-run: the generation, its range, the entries it covers and where it warns, the list, each send's size and the cost", async () => {
   const k = fakeCluster({ sizes: [{ state: 5_000, label: 3_000 }, { state: 5_000, label: 3_000 }] });
-  const p = await planOn(k, "pump-curve", recordDir());
+  const p = await planOn(k, "pumpswap", withSwapG1());
   const out = [];
   await vt.dryRun(p, { say: (s) => out.push(s) });
   const text = out.join("\n");
   const end = kit.solanaPoolRangeEnd(p.range), warn = kit.solanaPoolRangeWarn(p.range);
-  assert.match(text, new RegExp(`generation 2 of the pump-curve table: state pages ${p.range.state[0]} to ${p.range.state[1]}, label pages ${p.range.label[0]} to ${p.range.label[1]}`));
+  assert.match(text, new RegExp(`generation 2 of the pumpswap table: state pages ${p.range.state[0]} to ${p.range.state[1]}, label pages ${p.range.label[0]} to ${p.range.label[1]}`));
   assert.match(text, new RegExp(`up to entry ${end.state - 1} of the state tree and ${end.label - 1} of the label tree`));
   assert.match(text, new RegExp(`warns once the state tree holds ${warn.state} or the label tree ${warn.label}`));
   assert.match(text, /the trees hold 5000 and 3000 entries/);
@@ -467,7 +489,7 @@ test("--dry-run: the generation, its range, the entries it covers and where it w
 test("run: a record with one generation and grown trees makes generation 2 with the right range, read back frozen, recorded, swept", async () => {
   const sizes = [{ state: 5_000, label: 3_000 }, { state: 5_200, label: 3_100 }];
   const k = fakeCluster({ sizes });
-  const dir = recordDir();
+  const dir = withSwapG1();
   const base = keyBase();
   const repoBefore = readFileSync(MAINNET_FILE);
   let atFunding = null;
@@ -476,20 +498,21 @@ test("run: a record with one generation and grown trees makes generation 2 with 
     const folder = readdirSync(base).map((n) => path.join(base, n))[0];
     atFunding = { logs: [...k.logs], folder, dirMode: statSync(folder).mode & 0o777, keyMode: statSync(path.join(folder, "funder.json")).mode & 0o777 };
   };
-  const p = await planOn(k, "pump-curve", dir);
+  const p = await planOn(k, "pumpswap", dir);
   await runOn(k, p, base);
   // the resume line and the key folder were said before the funding wait, the folder 0700 and the key 0600
   assert.ok(atFunding.logs.some((l) => l.includes(atFunding.folder) && l.includes(`--resume ${atFunding.folder} --return ${RETURN}`)), "the resume line before the funding wait");
   assert.equal(atFunding.dirMode, 0o700);
   assert.equal(atFunding.keyMode, 0o600);
   const rec = recOf(dir);
-  const gens = rec.tables["pump-curve"];
+  const gens = rec.tables.pumpswap;
   assert.equal(gens.length, 2);
-  assert.deepEqual(gens[0], MAINNET.tables["pump-curve"][0], "the first generation is kept as it was");
-  const want = kit.solanaPoolNextTableRange(CFG, tvOf("pump-curve"), { state: 5_000, label: 3_000 });
+  assert.deepEqual(gens[0], JSON.parse(readFileSync(path.join(dir, "mainnet.json"), "utf8")).tables.pumpswap[0], "the first generation is kept as it was");
+  assert.deepEqual(rec.tables["pump-curve"], MAINNET.tables["pump-curve"], "the other venue's generations are untouched");
+  const want = kit.solanaPoolNextTableRange(CFG, tvOf("pumpswap"), { state: 5_000, label: 3_000 });
   assert.deepEqual(gens[1].pages, { state: [...want.state], label: [...want.label] });
   assert.deepEqual(gens[1].made_at, { state: 5_000, label: 3_000 });
-  assert.deepEqual(gens[1].addresses, kit.solanaPoolVenueTableList(CFG, tvOf("pump-curve"), want));
+  assert.deepEqual(gens[1].addresses, kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap"), want));
   assert.equal(gens[1].addresses.length, 256);
   // the chain holds it frozen with exactly the list; the record's txs are the table's own, landed, create first
   const onChain = k.get(gens[1].table, "finalized");
@@ -603,8 +626,8 @@ test("P2-2 end to end: an extend that never lands stops the run; a resume before
   let drop = true;
   const k = fakeCluster({ fin: 200_000, onSend: ({ kinds }) => (drop && kinds.includes("extend") && !kinds.includes("create") ? "drop" : "land") });
   const base = keyBase();
-  const dir = recordDir();
-  const p = await planOn(k, "pump-curve", dir); // 256 addresses: create and extend, then extends
+  const dir = withSwapG1();
+  const p = await planOn(k, "pumpswap", dir); // 256 addresses: create and extend, then extends
   await assert.rejects(runOn(k, p, base), /not confirmed/);
   const [name] = readdirSync(base);
   const kd = path.join(base, name);
@@ -614,14 +637,14 @@ test("P2-2 end to end: an extend that never lands stops the run; a resume before
   assert.equal(sent(k, "create").length, 1);
   // at once: the create landed but is not final, so neither RPC reads the table at finalized: stop, no second create
   drop = false;
-  await assert.rejects(runOn(k, await planOn(k, "pump-curve", dir, { journal: j1 }), base, { keyDir: kd }), /landed/);
+  await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir, { journal: j1 }), base, { keyDir: kd }), /landed/);
   assert.equal(sent(k, "create").length, 1);
   assert.equal(JSON.parse(readFileSync(path.join(kd, "journal.json"), "utf8")).table, j1.table);
   // once final (and finality back to its usual seconds): it extends the funder's prefix, freezes and records the one table
   k.advance(210_000);
   k.setFin(3_000);
-  await runOn(k, await planOn(k, "pump-curve", dir, { journal: j1 }), base, { keyDir: kd });
-  const g = recOf(dir).tables["pump-curve"];
+  await runOn(k, await planOn(k, "pumpswap", dir, { journal: j1 }), base, { keyDir: kd });
+  const g = recOf(dir).tables.pumpswap;
   assert.equal(g.length, 2);
   assert.equal(g[1].table, j1.table);
   assert.equal(sent(k, "create").length, 1);
@@ -641,7 +664,7 @@ test("a fresh run that finds a kept folder for the same cluster and venue stops 
   assert.equal(k.sends.length, 0);
   // another venue's folder does not stop it
   const k2 = fakeCluster();
-  const p2 = await planOn(k2, "pump-curve", recordDir());
+  const p2 = await planOn(k2, "pump-curve", recordDir({}));
   await runOn(k2, p2, base);
 });
 

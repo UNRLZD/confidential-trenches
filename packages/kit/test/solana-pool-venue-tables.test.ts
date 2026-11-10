@@ -12,6 +12,7 @@ import {
   SOLANA_TOKEN_2022_PROGRAM,
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_POOL_CURVE_FIRST_RANGE,
+  SOLANA_POOL_TABLE_GROWS,
   solanaPoolRangeWarn,
   SOLANA_SYSTEM_PROGRAM,
   buildSolanaPoolBuy,
@@ -121,11 +122,15 @@ test("generations: PumpSwap's first fills its table, 136 state pages and 90 labe
   const [, g2] = await generations("pumpswap", [FIRST, { state: 111_412, label: 5_000 }]);
   assert.deepEqual(g2!.range, { state: [107, 242], label: [3, 92] });
   assert.equal(g2!.list.length, 256);
-  // the curve: its first generation is the frozen mainnet table's (pages 0 and 1, 25 addresses); a next fills 256
-  const [c1, c2] = await generations("pump-curve", [null, { state: 1_500, label: 1_500 }]);
+  // the curve: its first generation is the frozen mainnet table's (pages 0 and 1, 25 addresses); it fits at any tree
+  // size (below), so its next range is its first at every size: a generation only for changed venue accounts
+  const [c1, c2, c3] = await generations("pump-curve", [null, { state: 1_500, label: 1_500 }, { state: 0xffff_ffff, label: 0xffff_ffff }]);
   assert.equal(c1!.list.length, 25);
-  assert.deepEqual(c2!.range, { state: [0, 140], label: [0, 93] });
-  assert.equal(c2!.list.length, 256);
+  for (const c of [c2!, c3!]) {
+    assert.deepEqual(c.range, SOLANA_POOL_CURVE_FIRST_RANGE);
+    assert.equal(c.list.length, 25);
+  }
+  assert.deepEqual(SOLANA_POOL_TABLE_GROWS, ["pumpswap"]);
   for (const g of [g1!, g2!, c1!, c2!]) {
     assert.equal(new Set(g.list).size, g.list.length);
     assert.equal(g.list[0], cfg.pool);

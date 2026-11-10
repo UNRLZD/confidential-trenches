@@ -134,8 +134,9 @@ export function parsePins(text) {
   return out;
 }
 
-/** Venues whose buy outgrows a table generation as the trees grow: the tree alarm applies to them. */
-export const GROWS = Object.freeze(["pumpswap"]);
+/** Venues whose buy outgrows a table generation as the trees grow (the kit's SOLANA_POOL_TABLE_GROWS): the tree alarm
+ *  applies to them. */
+export const GROWS = kit.SOLANA_POOL_TABLE_GROWS;
 const PAGES_OK = (p) => p && typeof p === "object" && ["state", "label"].every((t) => Array.isArray(p[t]) && p[t].length === 2 && p[t].every((n) => Number.isSafeInteger(n) && n >= 0) && p[t][0] <= p[t][1]);
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 
