@@ -54,7 +54,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createBook, TFS, type Book, type Candle, type Event, type Ref, type Swap, type Tf } from "../candles.ts";
-import { GT_SERVE_MS, refreshLane, throttledUntil, type GeckoBudget } from "../gecko.ts";
+import { GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { CALLER_ROOM, evmThrottleS, LOGS_REFUSED, providerHolds, RETRY_AFTER_MAX_S, upstreamRetryAfterS, type ProviderHolds } from "../../limits/limits.ts";
 import { operatorOf } from "../../rpc/rpc.ts";
 import { toCandles, TF as GT_TF, type DataAnswer } from "../solana/token.ts";
@@ -774,7 +774,7 @@ const isRevert = (e: unknown): boolean => {
  *  no value (undefined), as a call not agreed is. */
 const REVERTED = "reverted";
 
-export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
+export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => number; listed: (token: string) => Promise<boolean>; hint?: (token: string) => Promise<string | null>; gecko?: GeckoBudget; sleep?: (ms: number) => Promise<unknown>; rpcs?: readonly string[]; headerTimed?: ReadonlySet<string>; pools?: ReadonlyMap<string, { pool: Pool; decimals: number }>; tickMs?: number; holds?: ProviderHolds; index?: readonly string[] }) {
   const now = deps.now ?? Date.now;
   const doFetch = deps.fetch ?? fetch;
   const rpcs = deps.rpcs ?? SWAP_RPCS[chain];
@@ -1781,7 +1781,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       last = t;
       // the tape's leg is the trader's: the pool's less a hook's cut (hookTakes)
       const got = traderLeg(s, takes.get(`${l.tx}:${l.index}`));
-      events.push({ ...s, t, ...(got === undefined ? {} : { got }) });
+      // a swap the pool's own hook sends (its fees sold in its own pool) is no trader's trade: in the bars, off the tape
+      // (card market-reads-hold-under-load: Base tx 0xa1782de0's log 0x33, the hook 0x0469a4bd selling 555.17 of its
+      // fees after the trader's 69,395.86 sell, was on the tape as a second sell of the trader's)
+      const own = e.pool.hook !== undefined && l.topics.length === 3 && addrOf(l.topics[2]!.slice(2)) === e.pool.hook;
+      events.push({ ...s, t, ...(got === undefined ? {} : { got }), ...(own ? { tape: false as const } : {}) });
     }
     let merged: Event[] = events;
     if (e.pool.quote.kind === "eth") {
@@ -1936,6 +1940,11 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
   const NOT_FOUND = err(404, "not_found");
   const UPSTREAM = err(503, "upstream");
   const limited = (s: number, why: string): DataAnswer => ({ ...err(429, "rate_limited"), retryAfterS: s, why });
+  /** One GeckoTerminal call in `lane`: a caller's cold read ("pages") waits its turn for the budget's next free call up to
+   *  GT_PAGE_WAIT_MS (../gecko.ts takeOrWait), as the Solana path's and the EVM token info's do; any other lane never
+   *  waits, what is held serves (card market-reads-hold-under-load). */
+  const gtTake = async (lane: string, what: string): Promise<boolean> =>
+    (await takeOrWait(deps.gecko!, lane, what, now() + GT_PAGE_WAIT_MS, now, deps.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms))))) === null;
   /** A listed token with no pool our reads find: an empty answer from our own reads, timed now. */
   const empty = (fields: Record<string, unknown>): DataAnswer => {
     const at = now();
@@ -1958,11 +1967,18 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     const gecko = deps.gecko;
     let p = gtPools.get(token);
     if (p === undefined || now() - p.at >= GT_POOL_FRESH_MS) {
-      // a held pool's re-read is a refresh: refused, the pool held serves
-      if (gecko.take(p === undefined ? "pages" : "refresh", false, false, `${chain} pool`)) {
+      // a held pool's re-read is a refresh: refused, the pool held serves. With none held, a refused, throttled or
+      // failed read is the 429 or 503, never an empty 200 (card market-reads-hold-under-load)
+      const cold = p === undefined;
+      const waitOf = (why: string) => limited(Math.min(Math.max(Math.ceil((gecko.retryAt("pages") - now()) / 1000), 1), RETRY_AFTER_MAX_S), why);
+      let fail: DataAnswer | undefined = waitOf("geckoterminal budget");
+      if (await gtTake(cold ? "pages" : "refresh", `${chain} pool`)) {
+        fail = UPSTREAM;
         try {
           const r = await doFetch(`${GT_BASE}/networks/${chain}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-          if (r.status === 429) throttledUntil(gecko, r.headers.get("retry-after"), now());
+          if (r.status === 429) fail = (throttledUntil(gecko, r.headers.get("retry-after"), now()), waitOf("geckoterminal 429"));
+          // GeckoTerminal names no such token: nothing to chart, the empty answer below
+          if (r.status === 404) fail = undefined;
           if (r.status === 200 && Number(r.headers.get("content-length") ?? "0") <= ANSWER_MAX) {
             const text = await r.text();
             const id = text.length > ANSWER_MAX ? undefined : (JSON.parse(text) as { data?: { attributes?: { address?: unknown } }[] })?.data?.[0]?.attributes?.address;
@@ -1974,6 +1990,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
           // GeckoTerminal did not answer: the pool held, if any
         }
       }
+      if (p === undefined && fail !== undefined) return fail;
     }
     if (p === undefined || p.id === null) return none;
     const got = await geckoBars({ pool: { id: p.id, token } } as Entry, tf, to, true);
@@ -2017,7 +2034,7 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     // the history before a book of ours (not `alone`) is an optional seed, the answer our chain bars without it: a stale
     // read, so it never takes the call a chart with nothing to serve needs (card helper-crowd-429)
     const lane = before === null ? refreshLane(kept.get(`${e.pool.id}:${tf}`)?.at ?? fresh?.at ?? null, now()) : fresh !== undefined ? "refresh" : alone ? "pages" : "stale";
-    if (!gecko.take(lane, false, false, `${chain} bars`)) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
+    if (!(await gtTake(lane, `${chain} bars`))) return fallback(wait(lane === "pages" ? undefined : `geckoterminal ${lane}`));
     try {
       const g = GT_TF[tf as keyof typeof GT_TF];
       const url = `${GT_BASE}/networks/${chain}/pools/${e.pool.id}/ohlcv/${g.period}?aggregate=${g.aggregate}&limit=1000&currency=usd&token=${e.pool.token}${before === null ? "" : `&before_timestamp=${before}`}`;
@@ -2195,8 +2212,12 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
       if (own.length < limit) {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // GeckoTerminal's history is an optional seed (card helper-crowd-429): refused or failed, the answer is our
-        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed)
+        // chain bars alone, never its 429 (index-evm-swaps at 22:12Z: a Robinhood 1m chart answered 429 for the seed).
+        // With no bar of ours to serve, its 429 (with the wait) or 503 is the answer, so the page reads again, never a
+        // 200 with no bars for a token that has them (card market-reads-hold-under-load: Base 0xfbb75a59's 1h answered
+        // 200 [] at 19:55Z on a book opened a minute before, its seed refused by the budget; 356 bars at 20:11Z)
         const got = await geckoBars(e, tf as Tf, ownFrom === null ? to : before);
+        if (own.length === 0 && !Array.isArray(got)) return timed(got);
         const old = (Array.isArray(got) ? got : []).filter((c) => c[0] < before);
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);
