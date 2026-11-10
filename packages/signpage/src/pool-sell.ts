@@ -858,16 +858,8 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     // venue the coin can reach, the buy's rule (solanaPoolBuySellNeed: a curve coin's PumpSwap need, cashback accounts
     // included), so no sell leaves tokens on a W that cannot pay to sell them (the re-review of 40cdc3e)
     const keeps = tokens.amount > amount;
-    // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
-    // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
-    // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
-    // does not; the size does not depend on the value), and on a partial sell only when both trees sit within
-    // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
-    // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
-    const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
     // the lamports the deposit's mark and both pages hold, read on both RPCs with the pool's tree sizes in one call: the
-    // same for either form; with them, W's
-    // volume accounts owed a claim after the sell (review L3 of 38faee89): each pump program's whose claim pays out on
+    // same for either form; with them, W's volume accounts owed a claim after the sell (review L3 of 38faee89): each pump program's whose claim pays out on
     // either RPC's read (solanaVolumeClaimable: one RPC's word that nothing is owed never lowers what W keeps), or the
     // venue's own on a cashback coin, whose sell earns cashback there
     const venueProgram = venue.kind === "pumpswap" ? SOLANA_PUMP_AMM_PROGRAM : SOLANA_PUMP_PROGRAM;
@@ -877,13 +869,20 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       return reads.some((a) => !("none" in a) && a.owner === vp && solanaVolumeClaimable(vp, a.data) > 0n);
     };
     const [deposit, owed] = await Promise.all([depositHeld(rpcs, program, pool, sizes, pre, wait), Promise.all([SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].map(owesOn)).then((o) => o.filter(Boolean).length)]);
-    const holds = deposit.held;
-    sizes = deposit.sizes;
-    const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
-    const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
     // sol-w-sweep): every lamport over it goes into this sell's note
     const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    const holds = deposit.held;
+    sizes = deposit.sizes;
+    // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
+    // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
+    // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
+    // does not; the size does not depend on the value), and on a partial sell only when both trees sit within
+    // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
+    // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
+    const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
+    const fits = wireOf(solanaCompileV0(w.address, [...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
+    const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
     // the smallest note the deposit back makes (the kit's solanaPoolNoteFloor at the rent both RPCs read, card
     // sol-sell-deposit-back-floor): under it, no deposit, the sale's lamports stay on W
