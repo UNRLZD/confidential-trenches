@@ -1,16 +1,16 @@
 // node --test apps/helper/src/data/held.test.ts: GET /v1/market/held, the batch read of the tokens a device holds
 // (symbol, name, USD price) on Solana, Base and Robinhood (card market-token-reads), with fakes for the Solana token
-// page, the chain's lists and GeckoTerminal's tokens/multi. Red before held.ts exists: the module is missing and the
-// route answers 404 for every request.
+// page, the chain's lists and DexScreener's tokens/v1. Red before held.ts exists: the module is missing and the route
+// answers 404 for every request.
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { start } from "../server.ts";
-import { geckoBudget, GT_PAGE_WAIT_MS, type GeckoBudget } from "./gecko.ts";
-import { GT_BASE } from "./evm/lists.ts";
-import { createHeld, HELD_FRESH_MS, HELD_MAX, HELD_SERVE_MS, parseHeld } from "./held.ts";
+import { geckoBudget } from "./gecko.ts";
+import { createHeld, DEX_BASE, DEX_LIMITS, HELD_FRESH_MS, HELD_MAX, HELD_SERVE_MS, parseHeld } from "./held.ts";
+import { upstreamBudget, type BudgetLimits } from "../limits/limits.ts";
 import { createEvmToken } from "./evm/token.ts";
 import { NOT_FOUND, UPSTREAM, type DataAnswer } from "./solana/token.ts";
 
@@ -30,28 +30,39 @@ const listsOf = (chain: "base" | "robinhood", tokens: string[], status = 200) =>
     body: JSON.stringify({ chain, as_of_ms: NOW - 5_000, lists: { new: tokens.map((token) => ({ chain, token, symbol: "LST", name: "Listed token", price_usd: "0.5", src: "geckoterminal" })) } }),
   }),
 });
-const gt = (address: string, extra: Record<string, unknown> = {}) => ({ id: `base_${address}`, type: "token", attributes: { address, name: "Gecko name", symbol: "GKO", decimals: 18, price_usd: "0.0123", ...extra } });
+/** A DexScreener pair whose base token is `address` (tokens/v1's form, live read 2026-11-10 05:39Z). */
+const pair = (address: string, extra: Record<string, unknown> = {}, base: Record<string, unknown> = {}) => ({
+  chainId: "base",
+  dexId: "uniswap",
+  pairAddress: "0x0e635f8eeed4f7279d56692d552f034ece136019",
+  baseToken: { address, name: "Dex name", symbol: "DXS", ...base },
+  quoteToken: { address: "0x4200000000000000000000000000000000000006", name: "Wrapped Ether", symbol: "WETH" },
+  priceUsd: "0.0123",
+  liquidity: { usd: 1000 },
+  ...extra,
+});
 type Hit = { url: string };
-/** A fake fetch answering tokens/multi with `data`, recording each call. */
-function fakeFetch(hits: Hit[], answer: (addresses: string[]) => unknown, status = 200) {
+/** A fake fetch answering tokens/v1 with `answer`'s pairs, recording each call. */
+function fakeFetch(hits: Hit[], answer: (addresses: string[], chainId: string) => unknown, status = 200) {
   return async (url: string): Promise<Response> => {
     hits.push({ url });
-    const m = /\/tokens\/multi\/([^/?]+)$/.exec(url);
+    const m = /\/tokens\/v1\/(\w+)\/([^/?]+)$/.exec(url);
     if (m === null) throw new Error(`unexpected ${url}`);
-    return new Response(JSON.stringify({ data: answer(m[1]!.split(",")) }), { status });
+    return new Response(JSON.stringify(answer(m[2]!.split(","), m[1]!)), { status });
   };
 }
+/** A DexScreener budget on `now` with these limits. */
+const dexOf = (now: () => number, lim: BudgetLimits = DEX_LIMITS) => upstreamBudget(() => lim, now);
 const solanaPage = (rows: Record<string, DataAnswer>) => ({
   page: async (mint: string): Promise<DataAnswer> => rows[mint] ?? NOT_FOUND,
 });
 const ok = (row: Record<string, unknown>): DataAnswer => ({ status: 200, body: JSON.stringify({ row }), src: "jupiter", asOfMs: NOW - 2_000 });
-const held = (over: Partial<Parameters<typeof createHeld>[0]> & { hits?: Hit[]; answer?: (a: string[]) => unknown; status?: number; gecko?: GeckoBudget; now?: () => number } = {}) => {
+const held = (over: Partial<Parameters<typeof createHeld>[0]> & { hits?: Hit[]; answer?: (a: string[], chainId: string) => unknown; status?: number; now?: () => number } = {}) => {
   const hits = over.hits ?? [];
   return createHeld({
     solana: solanaPage({}),
     lists: { base: listsOf("base", []), robinhood: listsOf("robinhood", []) },
-    gecko: over.gecko ?? geckoBudget(over.now ?? (() => NOW)),
-    fetch: fakeFetch(hits, over.answer ?? ((a) => a.map((x) => gt(x))), over.status),
+    fetch: fakeFetch(hits, over.answer ?? ((a, chainId) => a.map((x) => pair(x, { chainId }))), over.status),
     now: over.now ?? (() => NOW),
     sleep: async () => {},
     ...over,
@@ -80,15 +91,15 @@ test("solana: every page failing answers 503 upstream; a page answering 404 for 
   assert.equal((await body(a)).tokens[0]!.src, "none");
 });
 
-test("base: a token in the lists rows costs no GeckoTerminal call; the one not in them is one tokens/multi call naming only it; a second read within 60 s makes no call", async () => {
+test("base: a token in the lists rows costs no call; the one not in them is one DexScreener tokens/v1 call naming only it; a second read within 60 s makes no call", async () => {
   const hits: Hit[] = [];
   let t = NOW;
   const h = held({ hits, now: () => t, lists: { base: listsOf("base", [A]), robinhood: listsOf("robinhood", []) } });
   const first = await body(await h.read("base", [A, B]));
   assert.equal(hits.length, 1);
-  assert.equal(hits[0]!.url, `${GT_BASE}/networks/base/tokens/multi/${B}`);
+  assert.equal(hits[0]!.url, `${DEX_BASE}/tokens/v1/base/${B}`);
   assert.deepEqual(first.tokens[0], { token: A, symbol: "LST", name: "Listed token", price_usd: "0.5", src: "geckoterminal" });
-  assert.deepEqual(first.tokens[1], { token: B, symbol: "GKO", name: "Gecko name", price_usd: "0.0123", src: "geckoterminal" });
+  assert.deepEqual(first.tokens[1], { token: B, symbol: "DXS", name: "Dex name", price_usd: "0.0123", src: "dexscreener" });
   t += HELD_FRESH_MS - 1;
   const again = await body(await h.read("base", [A, B]));
   assert.equal(hits.length, 1, "a refresh inside a minute makes no call");
@@ -103,14 +114,18 @@ test("base: tokens asked in capitals are read by their lowercase address and ans
   const h = held({ hits });
   const asked = "0x2DF14792E7B9C5CC8E9A1EB37140533B32FB8D99";
   const j = await body(await h.read("base", [asked]));
-  assert.equal(hits[0]!.url, `${GT_BASE}/networks/base/tokens/multi/${A}`);
+  assert.equal(hits[0]!.url, `${DEX_BASE}/tokens/v1/base/${A}`);
   assert.equal(j.tokens[0]!.token, asked);
-  assert.equal(j.tokens[0]!.symbol, "GKO");
+  assert.equal(j.tokens[0]!.symbol, "DXS");
 });
 
-test("base: an answer whose attributes.address is another token leaves the entry null; a price '1e5' is refused; a 300-char name is bounded; a token GeckoTerminal does not name stays null", async () => {
+test("base: a pair whose base token is another (or the asked token as its quote) leaves the entry null; a price '1e5' is refused; a 300-char name is bounded; a token DexScreener does not name stays null", async () => {
   const h = held({
-    answer: () => [gt(C, { name: "Impostor" }), gt(B, { price_usd: "1e5", name: "n".repeat(300), symbol: "s".repeat(100) })],
+    answer: () => [
+      pair(C, {}, { name: "Impostor" }),
+      { ...pair(C), quoteToken: { address: A, symbol: "QUO", name: "Quoted" } },
+      pair(B, { priceUsd: "1e5" }, { name: "n".repeat(300), symbol: "s".repeat(100) }),
+    ],
   });
   const j = await body(await h.read("base", [A, B]));
   assert.deepEqual(j.tokens[0], { token: A, symbol: null, name: null, price_usd: null, src: "none" });
@@ -121,28 +136,43 @@ test("base: an answer whose attributes.address is another token leaves the entry
 
 test("base: a price that is not a plain decimal is refused whatever its form", async () => {
   for (const price of ["-1", "NaN", "Infinity", "0x10", "1.", ".5", "1e-7", 5, null, "9".repeat(80)]) {
-    const h = held({ answer: () => [gt(A, { price_usd: price })] });
+    const h = held({ answer: () => [pair(A, { priceUsd: price })] });
     const j = await body(await h.read("base", [A]));
     assert.equal(j.tokens[0]!.price_usd, null, String(price));
   }
 });
 
-test("robinhood: the call names the robinhood network; a budget that refuses leaves the entry null with a 200", async () => {
+test("robinhood: the call names DexScreener's robinhood chain and takes only its pairs; a budget that refuses leaves the entry null with a 200", async () => {
   const hits: Hit[] = [];
-  const h = held({ hits, answer: (a) => a.map((x) => ({ ...gt(x), id: `robinhood_${x}` })) });
+  const h = held({ hits, answer: (a, chainId) => [...a.map((x) => pair(x, { chainId: "base", priceUsd: "9" }, { symbol: "WRONG" })), ...a.map((x) => pair(x, { chainId }))] });
   const j = await body(await h.read("robinhood", [B]));
-  assert.equal(hits[0]!.url, `${GT_BASE}/networks/robinhood/tokens/multi/${B}`);
-  assert.equal(j.tokens[0]!.symbol, "GKO");
+  assert.equal(hits[0]!.url, `${DEX_BASE}/tokens/v1/robinhood/${B}`);
+  assert.equal(j.tokens[0]!.symbol, "DXS", "a pair of another chain is not this chain's");
 
-  const spent = geckoBudget(() => NOW);
-  for (let i = 0; i < 20; i++) spent.take("pages");
   const hits2: Hit[] = [];
-  const refused = held({ hits: hits2, gecko: spent });
+  const refused = held({ hits: hits2, dex: dexOf(() => NOW, { total: 0, perClient: 0, windowMs: 60_000 }) });
   const a = await refused.read("robinhood", [B]);
   assert.equal(a.status, 200);
   assert.deepEqual((await body(a)).tokens, [{ token: B, symbol: null, name: null, price_usd: null, src: "none" }]);
   assert.equal(hits2.length, 0);
-  assert.ok(GT_PAGE_WAIT_MS > 0);
+});
+
+test("base: of the pairs naming a token, the deepest liquidity's price is taken", async () => {
+  const h = held({ answer: () => [pair(A, { priceUsd: "5", liquidity: { usd: 10 } }), pair(A, { priceUsd: "1.0001", liquidity: { usd: 9_000_000 } }), pair(A, { priceUsd: "7", liquidity: { usd: "1e99" } })] });
+  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.price_usd, "1.0001");
+});
+
+test("base: DexScreener's 429 holds its budget for the wait it names; the next read makes no call", async () => {
+  let t = NOW;
+  const hits: Hit[] = [];
+  const h = held({ hits, now: () => t, status: 429, dex: dexOf(() => t) });
+  assert.equal((await h.read("base", [A])).status, 200);
+  t += 1_000;
+  await h.read("base", [B]);
+  assert.equal(hits.length, 1, "held for DEX_LIMITS.windowMs with no Retry-After");
+  t += DEX_LIMITS.windowMs!;
+  await h.read("base", [B]);
+  assert.equal(hits.length, 2, "read again once the hold ends");
 });
 
 test("base: a failed call with nothing else named answers 503 upstream; with another token named from the lists it is a 200", async () => {
@@ -154,12 +184,12 @@ test("base: a failed call with nothing else named answers 503 upstream; with ano
   assert.equal((await body(a)).tokens[1]!.src, "none");
 });
 
-test("base: the lists never having answered sends every token to the one GeckoTerminal call", async () => {
+test("base: the lists never having answered sends every token to the one DexScreener call", async () => {
   const hits: Hit[] = [];
   const h = held({ hits, lists: { base: listsOf("base", [A], 503), robinhood: listsOf("robinhood", []) } });
   await h.read("base", [A, B]);
   assert.equal(hits.length, 1);
-  assert.equal(hits[0]!.url, `${GT_BASE}/networks/base/tokens/multi/${A},${B}`);
+  assert.equal(hits[0]!.url, `${DEX_BASE}/tokens/v1/base/${A},${B}`);
 });
 
 test("base: a lists row of another chain, a row with a hostile symbol and an oversize answer name nothing", async () => {
@@ -258,37 +288,37 @@ test("server: without a held reader the route answers 404", async () => {
   }
 });
 
-// Card market-token-reads (abuse): a stranger sending 30 fresh random addresses on every call. Through the real
-// GeckoTerminal budget (gecko.ts, GT_LIMIT_PER_MIN calls in WINDOW_MS shared by every user): the held read may never
-// take the calls a cold token page, a chart's first bars or the lists' urgent refresh need, and a user whose held token
-// was named keeps it while the stranger runs. Compared with GET /v1/market/token, which reads nothing for an address no
-// list holds.
-test("abuse: a stranger's held reads of random addresses never take the calls a cold page, a chart or the lists' urgent read need; a named token stays named", async () => {
+// Card market-token-reads (abuse): a stranger sending 30 fresh random addresses on every call. The held read takes no
+// GeckoTerminal call (its 5 calls in 75 s are the token page's and the charts'); on DexScreener's budget the stranger
+// draws only its share, so another device's held read still makes its call, and a user whose held token was named
+// keeps it while the stranger runs. Compared with GET /v1/market/token, which reads nothing for an address no list holds.
+test("abuse: a stranger's held reads of random addresses take no GeckoTerminal call and only their own DexScreener share; another device still reads; a named token stays named", async () => {
   let t = NOW;
   const clock = () => t;
   const gecko = geckoBudget(clock);
   const hits: Hit[] = [];
-  const h = held({ hits, gecko, now: clock, sleep: async (ms: number) => void (t += ms) });
+  const h = held({ hits, now: clock, dex: dexOf(clock), gecko } as never);
+  const USER = "203.0.113.9";
+  const STRANGER = "198.51.100.66";
   // a user's off-list Base token, named once before the stranger starts
-  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, "GKO");
+  assert.equal((await body(await h.read("base", [A], USER))).tokens[0]!.symbol, "DXS");
   const rand = () => `0x${Array.from({ length: 40 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("")}`;
   const before = hits.length;
   for (let i = 0; i < 40; i++) {
-    await h.read(i % 2 === 0 ? "base" : "robinhood", Array.from({ length: HELD_MAX }, rand));
-    t += 2_000;
+    await h.read(i % 2 === 0 ? "base" : "robinhood", Array.from({ length: HELD_MAX }, rand), STRANGER);
+    t += 200;
   }
   const strangerCalls = hits.length - before;
-  // 80 s later than the user's read: its token is past HELD_FRESH_MS, and the stranger holds the window
-  const user = (await body(await h.read("base", [A]))).tokens[0]!;
-  const window = gecko.calls().length;
-  // the two calls the held reads leave go to the first cold reads, as they did before any held read: here a cold
-  // token page (or a chart's first bars) and the lists' urgent read
-  const page = gecko.take("pages");
-  const lists = gecko.take("lists", true);
-  console.log(`stranger: 40 reads, ${strangerCalls} GeckoTerminal calls; window ${window} of 5 when the user reads; user's token ${user.symbol}; then a cold page ${page}, the lists' urgent read ${lists}`);
-  assert.ok(window <= 3, `the held reads left ${5 - window} calls free, COLD_RESERVE needs 2`);
-  assert.ok(page && lists, "a cold token page and the lists' urgent read still find their calls");
-  assert.equal(user.symbol, "GKO", "the user's named token is served while the stranger runs");
+  // past HELD_FRESH_MS the user's token is read again: its own call, with the stranger's share spent
+  t += HELD_FRESH_MS;
+  const user = (await body(await h.read("base", [A], USER))).tokens[0]!;
+  const other = (await body(await h.read("base", [B], "192.0.2.1"))).tokens[0]!;
+  console.log(`stranger: 40 reads in 8 s, ${strangerCalls} DexScreener calls (share ${DEX_LIMITS.perClient} a 10 s); GeckoTerminal window ${gecko.calls().length} of 5; user's token ${user.symbol}, another device's ${other.symbol}`);
+  assert.ok(strangerCalls <= DEX_LIMITS.perClient, `the stranger made ${strangerCalls} calls, its share is ${DEX_LIMITS.perClient}`);
+  assert.equal(gecko.calls().length, 0, "no GeckoTerminal call");
+  assert.equal(user.symbol, "DXS", "the user's named token is read again while the stranger runs");
+  assert.equal(other.symbol, "DXS", "another device's first read makes its call");
+  assert.ok(hits.every((x) => x.url.startsWith(`${DEX_BASE}/tokens/v1/`)));
 
   // GET /v1/market/token today: an address no list holds is 404 with no GeckoTerminal call
   const evmHits: Hit[] = [];
@@ -300,15 +330,13 @@ test("abuse: a stranger's held reads of random addresses never take the calls a 
 test("a name read within HELD_SERVE_MS is served, dated, while the budget refuses; past it the entry is null", async () => {
   let t = NOW;
   const clock = () => t;
-  const gecko = geckoBudget(clock);
-  const h = held({ gecko, now: clock });
-  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, "GKO");
+  // one call in the hour: the first read takes it, every later one is refused
+  const h = held({ now: clock, dex: dexOf(clock, { total: 1, perClient: 1, windowMs: 3_600_000 }) });
+  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, "DXS");
   t += 2 * HELD_FRESH_MS;
-  for (let i = 0; i < 20; i++) gecko.take("pages");
   const j = await body(await h.read("base", [A]));
-  assert.equal(j.tokens[0]!.symbol, "GKO");
+  assert.equal(j.tokens[0]!.symbol, "DXS");
   assert.equal(j.as_of_ms, NOW, "dated by its read");
   t = NOW + HELD_SERVE_MS + 1;
-  for (let i = 0; i < 20; i++) gecko.take("pages");
   assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, null);
 });

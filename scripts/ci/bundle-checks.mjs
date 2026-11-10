@@ -58,6 +58,7 @@ export const IN_PROCESS = [
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
+  { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),
@@ -111,7 +112,7 @@ export const OUT = {
   "signpage-pool-flow": "devnet RPC reads",
   "signpage-pool-notes": "devnet RPC reads of the run",
   "signpage-pool-withdraw-form": "devnet RPC reads of the run",
-  "signpage-pool-pins": "devnet RPC reads",
+  "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
   "pool-deposits": "devnet RPC reads of the run",
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",

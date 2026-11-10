@@ -193,6 +193,19 @@ test("restore: answered started at once; every pinned pool read; the notes writt
   assert.deepEqual(await listed(w.store), want);
 });
 
+// review of 369a87a8, P1: the Solana walk lists its marks on the pool's lister (the helper's marks route on mainnet) and
+// reads each on the pair; a pool with no lister walks on its pair's first RPC, as the wallet's default
+test("restore: a Solana pool's lister reaches the walk; a pool with none passes none", async () => {
+  const lister = (async () => null) as never;
+  const got: unknown[] = [];
+  const walk = (async (a: { lister?: unknown }) => (got.push("lister" in a ? a.lister : "none"), { notes: [], spends: [] })) as never;
+  const listed = await world({ pools: () => [{ ...POOLS[0]!, lister: () => lister } as RestorePool], solana: walk });
+  await listed.r.auto();
+  const bare = await world({ pools: () => [POOLS[0]!], solana: walk });
+  await bare.r.auto();
+  assert.deepEqual(got, [lister, "none"]);
+});
+
 test("restore: progress says reading at least every beat while a pool reads; the kit's 10 s holds", async () => {
   assert.ok(RESTORE_BEAT_MS <= 10_000);
   let release: () => void = () => {};
@@ -273,8 +286,13 @@ test("signed out mid-run: the run stops, its seed zeroed, nothing written after"
   assert.equal((await opOf(w.store, k!))?.stage, "reading");
 });
 
-test("pagePools: the mainnet build pins no pool today, so a restore there reads nothing and ends done", () => {
-  assert.deepEqual(pagePools(), []);
+test("pagePools: the mainnet build pins the Solana pool (card sol-pools-mainnet-pin), read on the page's Solana pair; no EVM pool yet", async () => {
+  const { SOL_POOLS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
+  const { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, pageSolanaLister, pageSolanaSettleRpcs } = await import("../src/pool-testnet.ts");
+  const pin = SOL_POOLS.mainnet!;
+  assert.deepEqual(pagePools(), [{ chain: "solana", program: pin.program, scope: solanaPoolOf(pin.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES }]);
+  // the restore reads on the same cache as every settle of the page (review P2-2 of a34c1626): one object, not a copy
+  assert.equal((pagePools()[0] as { cache?: unknown }).cache, PAGE_SOL_CACHE);
 });
 
 // review M1: a page closed or reloaded mid-run leaves its record running; the next signed-in load reads it stalled, so
