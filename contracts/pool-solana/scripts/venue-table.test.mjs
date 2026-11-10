@@ -1205,6 +1205,49 @@ test("the extend guard refuses a table both RPCs read at confirmed with the land
   assert.equal(sent(k, "freeze").length, 0);
 });
 
+/** A run whose table both RPCs (or one, `only`) read at confirmed, from its second extend on, as `seen` makes it. */
+async function guardCase(seen, { only = null } = {}) {
+  let table = null, funderId = null, extendsSent = 0, on = false;
+  const k = fakeCluster({
+    view: (i, a, cm, v) => (a === table && on && cm === "confirmed" && v && (only === null || i === only) ? seen(v, funderId) : v),
+    onSend: ({ kinds, tx }) => {
+      if (kinds.includes("create")) (table = tx.ixs.find((x) => x.prog === ALT).acc[0]), (funderId = tx.keys[0]);
+      if (kinds.includes("extend") && ++extendsSent === 2) on = true;
+      return "land";
+    },
+  });
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", recordDir());
+  return { k, base, p, run: () => runOn(k, p, base, { say: k.say }) };
+}
+
+test("the extend guard refuses a table both RPCs read at confirmed with more addresses than the landed sends, though the list's prefix: stopped by name with the recovery, no further extend", async () => {
+  const c = await guardCase((v, f) => ({ ...v, data: tableData(f, c.p.list.slice(0, 57 + 29)) }));
+  await assert.rejects(c.run(), (e) => /holds 86 addresses where the journal's landed sends put in 57: no extend is sent/.test(e.message) && !/resume again/.test(e.message));
+  assert.ok(c.k.logs.some((l) => /cannot be finished by a resume/.test(l)), "the recovery is said");
+  assert.equal(sent(c.k, "extend").length, 2);
+  assert.equal(sent(c.k, "freeze").length, 0);
+});
+
+test("the extend guard refuses a table both RPCs read at confirmed under another authority: no further extend, nothing frozen", async () => {
+  const c = await guardCase((v) => {
+    const d = Buffer.from(v.data);
+    d.set(new Uint8Array(32).fill(6), 22);
+    return { ...v, data: d };
+  });
+  await assert.rejects(c.run(), /holds 57 addresses where the journal's landed sends put in 57, not under the funder: no extend is sent/);
+  assert.equal(sent(c.k, "extend").length, 2);
+  assert.equal(sent(c.k, "freeze").length, 0);
+});
+
+test("the extend guard needs both RPCs' reads at confirmed the same: one RPC behind holds the next extend, and after 90 s the run stops with the key kept", async () => {
+  let prev = null;
+  const c = await guardCase((v) => (prev ??= v, { ...prev, data: Buffer.from(prev.data).subarray(0, 56 + 32 * 28) }), { only: 1 });
+  await assert.rejects(c.run(), /the two RPCs' reads at confirmed are not the same: no extend is sent and the key is kept; resume again in a minute/);
+  assert.equal(sent(c.k, "extend").length, 2);
+  assert.equal(sent(c.k, "freeze").length, 0);
+});
+
 test("an extend that lands between a guard read and the run's next extend, sent by no run of this folder: no further extend goes, nothing is frozen, and the recovery is said with the kept key", async () => {
   let table = null, n = 0, funderId = null;
   const k = fakeCluster({
