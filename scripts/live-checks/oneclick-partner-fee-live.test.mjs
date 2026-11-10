@@ -43,7 +43,7 @@ export const ONECLICK_SIGNING_KEYS = Object.freeze([...PINNED, ${JSON.stringify(
     return { format: "module", source, shortCircuit: true };
   },
 });
-const { judge, read, PATH, ROUTES } = await import("./oneclick-partner-fee-live.mjs");
+const { EXIT, judge, read, PATH, ROUTES } = await import("./oneclick-partner-fee-live.mjs");
 const { DEPOSIT_DRY_PLACEHOLDER, ONECLICK_SIGNING_KEYS } = await import("../../packages/kit/src/index.ts");
 // the hook took: the check trusts the harness key, and the key set is still frozen
 assert.ok(ONECLICK_SIGNING_KEYS.includes(HARNESS_KEY) && Object.isFrozen(ONECLICK_SIGNING_KEYS));
@@ -70,7 +70,8 @@ const signed = (rec) => {
   return r;
 };
 const RAW = JSON.parse(readFileSync(path.join(HERE, "oneclick-partner-fee-live.answers.json"), "utf8"));
-const A = { good: signed(RAW.good), main_pin: signed(RAW.main_pin), bad_key_refused: RAW.bad_key_refused };
+const A = { good: signed(RAW.good), main_pin: signed(RAW.main_pin), bad_key_refused: RAW.bad_key_refused,
+  no_liquidity: signed(RAW.no_liquidity), other_400: signed(RAW.other_400) };
 
 test("the recorded answers carry no 1Click signature (the secret scan refuses its shape); unsigned, the check refuses them", () => {
   assert.doesNotMatch(readFileSync(path.join(HERE, "oneclick-partner-fee-live.answers.json"), "utf8"), /ed25519:/);
@@ -164,4 +165,32 @@ test("read() asks each quote once, as the device asks: POST its body to the prox
   }
   assert.deepEqual(sent.map((s) => JSON.parse(s.init.body).dry), [false, true, true]);
   assert.deepEqual(Object.keys(rec.answers), ["live", "usdc", "pair"]);
+});
+
+// Card deposit-quote-no-liquidity: 1Click's 400 "No liquidity available" on the 25 USDC quotes is 1Click's liquidity, not the
+// helper's or the kit's fee: INCONCLUSIVE (exit 3, run again by live-rerun), never PASS and never FAIL.
+test("recorded: 1Click had no liquidity for the 25 USDC live and dry quotes, the pair passes: INCONCLUSIVE, exit 3, no BAD line", () => {
+  const r = judge(A.no_liquidity);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  assert.equal(bads(r).length, 0);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("INCONCLUSIVE")).map((l) => l.split(":")[0]), ["INCONCLUSIVE live", "INCONCLUSIVE usdc"]);
+  assert.equal(EXIT[r.verdict], 3);
+  assert.equal(EXIT[judge(A.good).verdict], 0);
+  assert.equal(judge(A.good).verdict, "PASS");
+});
+
+test("planted: a no-liquidity quote never hides a BAD one, and a 400 of another message or status stays a FAIL", () => {
+  const hidden = judge(withFee(A.no_liquidity, "pair", 1));
+  assert.equal(hidden.verdict, "FAIL");
+  assert.match(bads(hidden)[0], /^BAD pair: .*\(app-fees\)/);
+  const other = judge(A.other_400);
+  assert.equal(other.verdict, "FAIL");
+  assert.deepEqual(bads(other), ["BAD usdc: HTTP 400, want 1Click's 200 or 201"]);
+  // the no-liquidity body under a status that is not 400, or not JSON, is judged as any answer
+  const s503 = structuredClone(A.no_liquidity); s503.answers.live.status = 503;
+  assert.deepEqual(bads(judge(s503)), ["BAD live: HTTP 503, want 1Click's 200 or 201"]);
+  const text = structuredClone(A.no_liquidity); text.answers.live.body = "No liquidity available";
+  assert.deepEqual(bads(judge(text)), ["BAD live: HTTP 400, want 1Click's 200 or 201"]);
+  assert.equal(EXIT[hidden.verdict], 1);
 });

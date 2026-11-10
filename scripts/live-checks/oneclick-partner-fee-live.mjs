@@ -18,14 +18,18 @@
 //     to $1 (a floor of about $0.10 on what 1Click prices near $19, so the price floor does not refuse it: this check
 //     holds the fee entry, not the price, which the device reads on its own).
 // A kit that pins another fee for a route than 1Click charges a keyed partner fails here ("app-fees").
+// Card deposit-quote-no-liquidity: a quote 1Click answers 400 "No liquidity available" (no solver quoted that size at that
+// second: 25 USDC from Solana on 10 Nov 07:04-07:43Z, quoted again at 18:59Z) says nothing of the helper or the kit's
+// fee, so with no BAD line the run is INCONCLUSIVE (exit 3, run again by scripts/ci/live-rerun.mjs), never PASS or FAIL.
 // After: helper
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/oneclick-partner-fee-live.mjs --answer <file>     judge a recorded answer, no network
 // --record writes what the run read (the requests, each answer's status and body, the time), so the test can replay it,
 // with 1Click's signature left out of each body: an "ed25519:" signature has a NEAR secret key's shape, which the secret
 // scan refuses (.gitleaks.toml), and the test signs each recorded answer again with a throwaway key it pins itself.
-// PASS exit 0, FAIL exit 1, error exit 2; the last line is "live-check oneclick-partner-fee-live: PASS" or "...: FAIL",
-// each failure a "BAD ..." line.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3; the last line is "live-check oneclick-partner-fee-live:
+// PASS", "...: FAIL" or "...: INCONCLUSIVE", each failure a "BAD ..." line, each quote 1Click had no liquidity for an
+// "INCONCLUSIVE ..." line.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { DEPOSIT_DRY_PLACEHOLDER, checkOneClickQuote } from "../../packages/kit/src/index.ts";
@@ -90,14 +94,31 @@ export function unsigned(rec) {
   return r;
 }
 
-/** The verdict on a record: { ok, lines }. */
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as scripts/ci/live-rerun.mjs reads them. */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+/** 1Click's own answer when no solver quoted the size (its 400 body's message, read through the helper 10 Nov 19:06Z). */
+const NO_LIQUIDITY = /^No liquidity available\b/;
+/** True when a recorded answer is 1Click's no-liquidity 400: 1Click's liquidity, not the helper's. */
+export function noLiquidity(a) {
+  if (a?.status !== 400 || typeof a.body !== "string") return false;
+  try {
+    const m = JSON.parse(a.body)?.message;
+    return typeof m === "string" && NO_LIQUIDITY.test(m);
+  } catch {
+    return false;
+  }
+}
+
+/** The verdict on a record: { verdict, ok, lines }; ok only on PASS. */
 export function judge(rec) {
   const lines = [];
+  const vendor = [];
   let ok = true;
   const bad = (m) => { ok = false; lines.push(`BAD ${m}`); };
   for (const route of Object.keys(ROUTES)) {
     const a = rec?.answers?.[route];
     if (!a) { bad(`${route}: no answer recorded`); continue; }
+    if (noLiquidity(a)) { vendor.push(`INCONCLUSIVE ${route}: 1Click answered 400 No liquidity available: its solvers, not the helper`); continue; }
     if (a.status !== 200 && a.status !== 201) { bad(`${route}: HTTP ${a.status}, want 1Click's 200 or 201`); continue; }
     if (a.body === null) { bad(`${route}: an answer over ${ANSWER_MAX} B`); continue; }
     let body;
@@ -110,7 +131,9 @@ export function judge(rec) {
       bad(`${route}: the device's partner-path check refuses it: ${e?.message ?? e}`);
     }
   }
-  return { ok, lines };
+  const verdict = !ok ? "FAIL" : vendor.length > 0 ? "INCONCLUSIVE" : "PASS";
+  if (verdict === "INCONCLUSIVE") lines.push(...vendor);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -119,11 +142,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const rec = opt("--answer") ? JSON.parse(readFileSync(opt("--answer"), "utf8")) : await read(opt("--base") ?? BASE);
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(unsigned(rec), null, 1)}\n`);
-    const { ok, lines } = judge(rec);
+    const { verdict, lines } = judge(rec);
     for (const l of lines) console.log(l);
     for (const [route, a] of Object.entries(rec.answers ?? {})) if (a.ms !== undefined) console.log(`    ${route}: ${a.ms} ms`);
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"} (${rec.base})`);
-    process.exit(ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${verdict} (${rec.base})`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: error: ${e?.message ?? e}`);
     process.exit(2);

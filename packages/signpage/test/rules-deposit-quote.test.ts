@@ -235,3 +235,29 @@ test("an amount past 2^53 base units is sent exactly, never through a float", as
   assert.equal(m.sent.length, 1);
   assert.equal(m.sent[0].request.amount, "9007199254740993");
 });
+
+// Card deposit-quote-no-liquidity: 25 USDC from Solana answered 1Click's 400 "No liquidity available" through the helper on
+// 10 Nov 07:04-07:43Z and quoted at 18:59Z. The device asks the same request again; the quote that follows is checked
+// exactly as one quote is, so it gives the address, and a bad one after the re-ask is refused as ever.
+test("no liquidity twice, then a quote: the same request three times, and the checked address", async () => {
+  const m = h1c({ noLiquidity: 2 });
+  const a = await depositQuoteKind(PARAMS, ctx(m.fetch));
+  assert.equal(m.sent.length, 3);
+  assert.deepEqual(m.sent[1].request, m.sent[0].request);
+  assert.deepEqual(m.sent[2].request, m.sent[0].request);
+  assert.equal(a.ok, true);
+  assert.equal(a.ok && a.result.deposit_address, ADDRESS);
+  assert.equal(a.ok && a.result.amount_in, "25");
+});
+
+test("no liquidity, then a quote that fails a check: refused, no address", async () => {
+  const mock = h1c({ noLiquidity: 1, after: (a) => { a.quote.depositAddress = ATTACKER; } });
+  refusedWith(await depositQuoteKind(PARAMS, ctx(mock.fetch)), "quote_check_failed");
+  assert.equal(mock.sent.length, 2);
+});
+
+test("no liquidity on every ask: three asks, then not_available, no address", async () => {
+  const mock = h1c({ noLiquidity: 99 });
+  refusedWith(await depositQuoteKind(PARAMS, ctx(mock.fetch)), "not_available");
+  assert.equal(mock.sent.length, 3);
+});

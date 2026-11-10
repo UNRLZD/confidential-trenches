@@ -62,13 +62,14 @@ interface Net {
   tokens?: { status?: number; body?: unknown; throws?: boolean; response?: () => Response };
   /** Every request waits until its signal aborts (`deaf`: forever, its signal unheard). */
   hang?: "heard" | "deaf";
-  quote?: { status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
+  quote?: { noLiquidity?: number; status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
   /** Per-origin overrides of `quote`. */
   by?: Record<string, Net["quote"]>;
 }
 /** The helper's 1Click proxy, as data: every request it got. */
 function helper(net: Net = {}) {
   const sent: { url: string; method: string; body?: OneClickRequest }[] = [];
+  const asked = new Map<string, number>();
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? "GET";
@@ -91,6 +92,10 @@ function helper(net: Net = {}) {
     sent.push({ url: u, method, body });
     const q = net.by?.[body.originAsset] ?? net.quote ?? {};
     if (q.throws) throw new TypeError("fetch failed");
+    // card deposit-quote-no-liquidity: 1Click's 400 for a size no solver quoted at that second, the first noLiquidity asks of an origin
+    const k = asked.get(body.originAsset) ?? 0;
+    asked.set(body.originAsset, k + 1);
+    if (k < (q.noLiquidity ?? 0)) return new Response(JSON.stringify({ message: "No liquidity available" }), { status: 400, headers: { "content-type": "application/json" } });
     if (q.status !== undefined && q.status !== 200) return new Response("{}", { status: q.status, headers: { "content-type": "application/json" } });
     const a = dryAnswer(body, q.w, q.spread, q.fee);
     q.before?.(a);
@@ -321,6 +326,39 @@ test("deposit.dry: an answer that fails a check is quote_check_failed, never bel
 test("deposit.dry: the helper's codes, busy and down not kept", async () => {
   for (const [q, code] of [[{ status: 429 }, "busy"], [{ status: 503 }, "down"], [{ throws: true }, "down"], [{ status: 400 }, "not_available"]] as const)
     assert.deepEqual((await frame({ quote: q }).ask(dry("25"))).error, { code }, code);
+});
+
+// Card deposit-quote-no-liquidity: 1Click answered 25 USDC from Solana 400 "No liquidity available" through the helper (10
+// Nov 07:04-07:43Z). The dry read and the asset list's probes ask the same request again, the answer that follows is
+// checked as one is, and the whole ask fits inside the page's read deadline and the kit client's window.
+test("deposit.dry and deposit.assets: no liquidity twice, then a quote: the lines and the list, each request asked three times", async () => {
+  const f = frame({ quote: { noLiquidity: 2 } });
+  const d = await f.ask(dry("25"));
+  assert.equal(d.ok, true, JSON.stringify(d));
+  const quotes = f.sent.filter((x) => x.body !== undefined);
+  assert.equal(quotes.length, 3);
+  assert.deepEqual(quotes[2]!.body, quotes[0]!.body);
+  const a = frame({ quote: { noLiquidity: 2 } });
+  const list = await a.ask(ASSETS);
+  assert.equal(list.ok, true, JSON.stringify(list));
+  assert.equal((list.result as { assets: unknown[] }).assets.length, ONECLICK_USDC_ASSETS.length);
+  assert.equal(a.sent.filter((x) => x.body !== undefined).length, 3 * ONECLICK_USDC_ASSETS.length);
+  // no liquidity on every ask: three asks, then Not available, as one refused ask was
+  const never = frame({ quote: { noLiquidity: 99 } });
+  assert.deepEqual((await never.ask(dry("25"))).error, { code: "not_available" });
+  assert.equal(never.sent.filter((x) => x.body !== undefined).length, 3);
+  // a bad answer after the re-ask is refused as ever
+  const bad = frame({ quote: { noLiquidity: 1, after: (x) => void (x.quote.amountOut = "1") } });
+  assert.deepEqual((await bad.ask(dry("25"))).error, { code: "quote_check_failed" });
+});
+
+test("the no-liquidity re-asks fit inside the page's read deadline and the kit client's window for every quoting kind", async () => {
+  const { NO_LIQUIDITY_SPAN_MS } = await import("../../wallet/src/deposit/quote.ts");
+  const { DEPOSIT_READ_DEADLINE_MS } = await import("../src/deposit-wire.ts");
+  const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
+  assert.ok(NO_LIQUIDITY_SPAN_MS + 2_000 <= DEPOSIT_READ_DEADLINE_MS);
+  for (const kind of ["deposit.quote", "deposit.dry", "deposit.assets", "pool.address"] as const)
+    assert.ok(NO_LIQUIDITY_SPAN_MS + 3_000 <= SIGNPAGE_TIMEOUT_MS[kind]!, kind);
 });
 
 // ------------------------------------------------------------------------------------------------ deposit.quote

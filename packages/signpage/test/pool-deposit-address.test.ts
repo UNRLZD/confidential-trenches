@@ -48,7 +48,7 @@ function answerFor(req: Record<string, string | number | boolean>, decimalsOut: 
   return a;
 }
 
-function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet"; floor?: bigint | null | "throws" | "none" } = {}) {
+function world(o: { records?: Record<string, unknown>; status?: unknown; status_code?: number; throws?: boolean; change?: (a: Answer) => void; checked?: boolean; priced?: boolean; moveAfter?: boolean; network?: "mainnet" | "testnet"; floor?: bigint | null | "throws" | "none"; noLiquidity?: number } = {}) {
   const sent: Record<string, string | number | boolean>[] = [];
   const took: unknown[] = [];
   let reads = 0;
@@ -72,6 +72,8 @@ function world(o: { records?: Record<string, unknown>; status?: unknown; status_
       if (o.throws) throw new TypeError("fetch failed");
       const req = JSON.parse(String(init?.body));
       sent.push(req);
+      // card deposit-quote-no-liquidity: 1Click's 400 for a size no solver quoted at that second, the first noLiquidity asks
+      if (sent.length <= (o.noLiquidity ?? 0)) return new Response(JSON.stringify({ message: "No liquidity available" }), { status: 400, headers: { "content-type": "application/json" } });
       if (o.status_code !== undefined) return new Response("{}", { status: o.status_code, headers: { "content-type": "application/json" } });
       const a = answerFor(req, req.destinationAsset === "nep141:sol.omft.near" ? 9 : 18, o.change);
       return new Response(JSON.stringify(a), { status: 201, headers: { "content-type": "application/json" } });
@@ -254,4 +256,25 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", null)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
+});
+
+// Card deposit-quote-no-liquidity: a pool's quote asks again on 1Click's no-liquidity answer, as the vault's does (one
+// shared ask, wallet/src/deposit/quote.ts askDepositQuote); the quote that follows is checked as one quote is.
+test("no liquidity twice, then a quote: the same request three times, checked, handed to the follow, then answered", async () => {
+  for (const chain of ["solana", "base"] as const) {
+    const w = world({ noLiquidity: 2 });
+    const a = await ask(w, { chain, origin_asset: BASE_USDC, amount: "25" });
+    assert.ok(a !== null && "result" in a, `${chain}: ${JSON.stringify(a)}`);
+    assert.equal((a as { result: { quote: { deposit_address: string } } }).result.quote.deposit_address, ADDRESS);
+    assert.equal(w.sent.length, 3, chain);
+    assert.deepEqual(w.sent[2], w.sent[0], chain);
+    assert.equal(w.took.length, 1, chain);
+  }
+  const bad = world({ noLiquidity: 1, change: (x: Answer) => { x.quoteRequest.refundTo = "ab".repeat(32); } });
+  assert.deepEqual(await ask(bad, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "quote_check_failed" });
+  assert.equal(bad.took.length, 0);
+  const never = world({ noLiquidity: 99 });
+  assert.deepEqual(await ask(never, { chain: "solana", origin_asset: BASE_USDC, amount: "25" }), { error: "not_available" });
+  assert.equal(never.sent.length, 3);
+  assert.equal(never.took.length, 0);
 });

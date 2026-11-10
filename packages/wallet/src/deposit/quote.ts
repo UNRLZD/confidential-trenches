@@ -156,17 +156,71 @@ export interface DepositQuoteReply {
 }
 
 /**
- * POSTs `request` as it is to the helper's 1Click proxy, with no cookie and no referrer. Returns the status and the
- * parsed body; throws when the helper does not answer in time, answers over DEPOSIT_QUOTE_ANSWER_MAX or not in JSON.
+ * 1Click's answer when no solver quoted this size at this second: HTTP 400 with `message` "No liquidity available"
+ * (read 10 Nov 07:04-07:43Z through the helper, card deposit-quote-no-liquidity: Solana USDC into NEAR USDC refused at 18
+ * to 150 USDC and quoted at 3.4 to 15, 75 and 250; the same 25 quoted at 18:59Z; research
+ * proofs/p3-coverage/results/oneclick-sweep.json holds the same message). The answer is the helper's to pass, so a forged
+ * one can only cost a re-ask (bounded below), never an address.
  */
-export async function askDepositQuote(request: OneClickRequest, fetchFn: typeof fetch = fetch): Promise<DepositQuoteReply> {
+const NO_LIQUIDITY = /^No liquidity available\b/;
+/**
+ * The pauses before each re-ask of the same request after a NO_LIQUIDITY answer: two re-asks, three asks in all. A
+ * no-liquidity answer creates no deposit address, so a live request is asked again as it is, and the answer that comes
+ * back is checked by its caller exactly as one answer is.
+ */
+export const NO_LIQUIDITY_PAUSES_MS: readonly number[] = Object.freeze([500, 1_000]);
+/**
+ * The whole ask, re-asks and pauses in, ends inside this time past the first send: each re-ask's timeout is what is
+ * left of it, so a deposit waits seconds, never minutes. 12 s sits inside the signing page's read deadline (14 s,
+ * src/deposit-wire.ts DEPOSIT_READ_DEADLINE_MS) and the kit client's 15 s for deposit.quote, deposit.dry and
+ * pool.address, with room for the steps around the ask. 1Click's no-liquidity answer takes some 3.6 s (research
+ * docs/research/intents-confidential.md C37) and a quote 0.7 to 1.4 s (18:59Z), so three asks fit.
+ */
+export const NO_LIQUIDITY_SPAN_MS = 12_000;
+/** No re-ask starts with less than this left of NO_LIQUIDITY_SPAN_MS: a quote's own answer time, 1.4 s at most read. */
+export const NO_LIQUIDITY_ASK_MIN_MS = 2_000;
+
+/** True when a reply is 1Click's no-liquidity answer: 400 with that message. */
+export function noLiquidity(reply: DepositQuoteReply): boolean {
+  const b = reply.body;
+  return reply.status === 400 && typeof b === "object" && b !== null && typeof (b as { message?: unknown }).message === "string" &&
+    NO_LIQUIDITY.test((b as { message: string }).message);
+}
+
+/**
+ * POSTs `request` as it is to the helper's 1Click proxy, with no cookie and no referrer. Returns the status and the
+ * parsed body; throws when the helper does not answer in time, answers over DEPOSIT_QUOTE_ANSWER_MAX or not in JSON. On
+ * 1Click's no-liquidity answer the same request is asked again after each of NO_LIQUIDITY_PAUSES_MS, each re-ask cut at
+ * what is left of NO_LIQUIDITY_SPAN_MS; a re-ask that fails in any way leaves the no-liquidity answer standing. The last
+ * reply comes back, and every caller checks it as it checks one answer.
+ */
+export async function askDepositQuote(request: OneClickRequest, fetchFn: typeof fetch = fetch, sleep: (ms: number) => Promise<void> = pause, clock: () => number = () => performance.now()): Promise<DepositQuoteReply> {
+  const start = clock();
+  let reply = await askOnce(request, fetchFn, DEPOSIT_QUOTE_TIMEOUT_MS);
+  for (const ms of NO_LIQUIDITY_PAUSES_MS) {
+    if (!noLiquidity(reply)) break;
+    const left = NO_LIQUIDITY_SPAN_MS - (clock() - start) - ms;
+    if (left < NO_LIQUIDITY_ASK_MIN_MS) break;
+    await sleep(ms);
+    try {
+      reply = await askOnce(request, fetchFn, Math.min(DEPOSIT_QUOTE_TIMEOUT_MS, left));
+    } catch {
+      break;
+    }
+  }
+  return reply;
+}
+
+const pause = (ms: number): Promise<void> => new Promise((ok) => setTimeout(ok, ms));
+
+async function askOnce(request: OneClickRequest, fetchFn: typeof fetch, timeoutMs: number): Promise<DepositQuoteReply> {
   const res = await fetchFn(DEPOSIT_QUOTE_URL, {
     ...HELPER_FETCH_INIT,
     redirect: "error",
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
-    signal: AbortSignal.timeout(DEPOSIT_QUOTE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const bytes = await readCapped(res, DEPOSIT_QUOTE_ANSWER_MAX);
   let body: unknown;
