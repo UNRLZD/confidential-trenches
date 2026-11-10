@@ -1,0 +1,172 @@
+{
+ "good": {
+  "check": "evm-device-reads-need-no-old-state",
+  "at": "2026-11-10T23:35:39.190Z",
+  "sign": {
+   "bytes": 883644,
+   "marker": true,
+   "source": "the local build of this branch (packages/signpage/public/app.js)"
+  },
+  "chains": {
+   "base": {
+    "start": "2026-11-10T23:35:00.000Z",
+    "hold": {
+     "ok": true,
+     "atMs": 8264,
+     "block": "55816622",
+     "depth": 0,
+     "chainFee": "8909173992",
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ]
+    },
+    "bind": {
+     "ok": true,
+     "sameHash": true,
+     "stateReads": 0
+    },
+    "times": {
+     "ok": true,
+     "empty": true,
+     "root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "value": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ]
+    }
+   },
+   "robinhood": {
+    "start": "2026-11-10T23:35:00.000Z",
+    "hold": {
+     "ok": true,
+     "atMs": 9217,
+     "block": "111267203",
+     "depth": 0,
+     "chainFee": "0",
+     "hosts": [
+      "rpc.mainnet.chain.robinhood.com",
+      "robinhood.drpc.org"
+     ],
+     "operators": [
+      "robinhood.com",
+      "drpc.org"
+     ]
+    },
+    "bind": {
+     "ok": true,
+     "sameHash": true,
+     "stateReads": 0
+    },
+    "times": {
+     "ok": true,
+     "empty": true,
+     "root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "value": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "hosts": [
+      "rpc.mainnet.chain.robinhood.com",
+      "robinhood.drpc.org"
+     ],
+     "operators": [
+      "robinhood.com",
+      "drpc.org"
+     ]
+    }
+   }
+  }
+ },
+ "bad": {
+  "check": "evm-device-reads-need-no-old-state",
+  "at": "2026-11-10T23:36:39.720Z",
+  "sign": {
+   "bytes": 877928,
+   "marker": false,
+   "source": "https://confidential.unrealized.trade/app.js as deployed"
+  },
+  "chains": {
+   "base": {
+    "start": "2026-11-10T23:36:00.000Z",
+    "hold": {
+     "ok": true,
+     "atMs": 7227,
+     "block": "55816922",
+     "depth": 0,
+     "chainFee": "9021722579",
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ]
+    },
+    "bind": {
+     "ok": true,
+     "sameHash": true,
+     "stateReads": 0
+    },
+    "times": {
+     "ok": true,
+     "empty": true,
+     "root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "value": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ]
+    }
+   },
+   "robinhood": {
+    "start": "2026-11-10T23:36:00.000Z",
+    "hold": {
+     "ok": true,
+     "atMs": 8480,
+     "block": "111267780",
+     "depth": 0,
+     "chainFee": "0",
+     "hosts": [
+      "rpc.mainnet.chain.robinhood.com",
+      "robinhood.drpc.org"
+     ],
+     "operators": [
+      "robinhood.com",
+      "drpc.org"
+     ]
+    },
+    "bind": {
+     "ok": true,
+     "sameHash": true,
+     "stateReads": 0
+    },
+    "times": {
+     "ok": true,
+     "empty": true,
+     "root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "value": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "hosts": [
+      "rpc.mainnet.chain.robinhood.com",
+      "robinhood.drpc.org"
+     ],
+     "operators": [
+      "robinhood.com",
+      "drpc.org"
+     ]
+    }
+   }
+  }
+ }
+}
