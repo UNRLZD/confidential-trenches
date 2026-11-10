@@ -294,6 +294,25 @@ test("upstream: two providers on different chains, or holding different blocks; 
   assert.equal(sends(b).length, 0);
 });
 
+// review of 686dda50: a send both sides answer "already known" (a first seat timed out after passing it on, or a
+// repeat of a send the node holds) is the send accepted: the caller gets 200 and the transaction's hash, and the lane
+// watches it as any send
+test("a withdraw whose send every provider answers 'already known' is sent: 200 with its hash", async () => {
+  const known = (r: EvmRpc): EvmRpc => async (m, p) => {
+    if (m === "eth_sendRawTransaction") {
+      await r(m, p);
+      throw new Error("RPC error -32000: already known");
+    }
+    return r(m, p);
+  };
+  const a: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log: () => {} }, [known(rpc(a)), known(rpc([]))], () => NOW);
+  const r = await s.carry(req());
+  assert.equal(code(r), "ok");
+  assert.equal(sends(a).length, 1);
+  assert.match(String((r.body as { hash?: string }).hash), /^0x[0-9a-f]{64}$/);
+});
+
 // card helper-pool-fee-one-read-fails, helper-evm-read-two-operators: the send routes read through the same pair as the
 // fee (evmReadPair), so a read one operator fails is asked of the next operator the other side did not ask; with none
 // left the answer is 503 upstream and one log line names it

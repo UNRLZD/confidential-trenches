@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
-import { throttleOf } from "../limits/limits.ts";
+import { providerHolds, throttleOf } from "../limits/limits.ts";
 import * as evm from "./evm.ts";
 
 const KEY = "0x" + createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest("hex");
@@ -299,4 +299,123 @@ test("a test network reads past its pair too: Base Sepolia's first provider refu
 test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
   chainStub(t, (host, method) => (method !== "eth_call" ? null : host === "rpc.mainnet.chain.robinhood.com" ? { status: 429, body: { code: -32005, message: "too many requests" } } : { status: 502, body: { code: -32603, message: "bad gateway" } }));
   await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) > 0);
+});
+
+// review of 686dda50 (F1): which block is the period's first, and its base fee, are never one operator's word. Each
+// plant answers through a public quote seat (publicnode) while dRPC's node is behind (its block reads null), so the
+// search walks to publicnode
+const DRPC_BEHIND = (host: string, method: string, params: unknown[]): Plant => (DRPC_HOSTS.has(host) && method === "eth_getBlockByNumber" && params[0] !== "latest" ? { result: null } : null);
+test("F1: a seat naming the period's first block's true hash with a base fee 1000 times the chain's is refused (two operators agree on the hash, number, time and base fee), never published", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") return { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), baseFeePerGas: `0x${(1000n * GWEI).toString(16)}` } };
+    return DRPC_BEHIND(host, method, params);
+  });
+  const lines: string[] = [];
+  await assert.rejects(sendersOf(ENV, lines).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+test("F1b: a seat naming an earlier real block with a time 7 s late is refused: the block before the one named must be before the period on two operators", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") {
+      const n = params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string));
+      return { result: { ...block(n), timestamp: `0x${(S + n + 7).toString(16)}` } };
+    }
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(ENV, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+test("F1c: every operator honest, the fee reads the period's first block on two operators, the one before it on two as well", async (t) => {
+  const calls = chainStub(t, () => null);
+  const f = await sendersOf(ENV, []).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+  for (const n of [FIRST, FIRST - 1]) {
+    const by = new Set(calls.filter((c) => c.method === "eth_getBlockByNumber" && c.params[0] === `0x${n.toString(16)}`).map((c) => c.host));
+    assert.ok(by.size >= 2, `block ${n} on ${[...by].join(",")}`);
+  }
+});
+
+// review of 686dda50 (F2): a revert is the chain's answer whatever its reason says: never a walk, never a hold
+test("F2: a code-3 revert or a -32000 'execution reverted' whose reason names a limit or a rate is the chain's answer: asked on one seat, no provider held; a real throttle still holds", async () => {
+  const holds = providerHolds(() => 0, {});
+  for (const err of ["RPC error 3: execution reverted: Max wallet limit exceeded", "RPC error 3: execution reverted: rate limit", "RPC error -32000: execution reverted: too many requests"]) {
+    const asked: string[] = [];
+    const names = [["a1", "a"], ["b1", "b"], ["c1", "c"], ["a2", "a"], ["d1", "d"]] as const;
+    const seats: evm.EvmSeat[] = names.map(([name, operator]) => {
+      const url = `https://${name}-${err.length}.example`;
+      return { name, url, operator, rpc: evm.pacedEvmRpc(url, async () => (asked.push(name), Promise.reject(new Error(err))), holds, async () => {}) };
+    });
+    const e = await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_call", [{}, "pending"]).then(() => null, (x: Error) => x);
+    assert.equal(e?.message, err);
+    assert.deepEqual(asked, ["a1"], err);
+    assert.deepEqual(seats.filter((s) => holds.heldMs(s.url) > 0).map((s) => s.name), [], err);
+  }
+  // a provider's throttle, HTTP 429 or -32005 with no revert: held, and the walk goes on
+  for (const err of ["HTTP 429: Too Many Requests", "RPC error -32005: project ID request rate exceeded"]) {
+    const asked: string[] = [];
+    const url = `https://t-${err.length}.example`;
+    const seats: evm.EvmSeat[] = [
+      { name: "t", url, operator: "a", rpc: evm.pacedEvmRpc(url, async () => (asked.push("t"), Promise.reject(new Error(err))), holds, async () => {}) },
+      { name: "u", url: "https://u.example", operator: "c", rpc: async () => (asked.push("u"), "0x1") },
+    ];
+    assert.equal(await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_blockNumber", []), "0x1");
+    assert.deepEqual(asked, ["t", "u"]);
+    assert.ok(holds.heldMs(url) > 0, err);
+  }
+});
+test("F2 at the route: a sale's simulation reverting 'Max wallet limit exceeded' is the chain's answer, failedInExecution, never the provider's", () => {
+  assert.equal(evm.evmChainAnswered(new Error("RPC error 3: execution reverted: Max wallet limit exceeded")), true);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: execution reverted: rate limit")), true);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: header not found")), false);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32005: limit exceeded")), false);
+  assert.equal(evm.evmChainAnswered(new Error("RPC error -32000: rate limit exceeded")), false);
+});
+
+// review of 686dda50 (F3): a held seat, the first included, is passed over while another unclaimed operator can answer
+test("F3: a first seat held 8 s is passed over: the side asks the next operator at once, and asks the held seat only when no other answered", async () => {
+  let t = 0;
+  const now = () => t;
+  const holds = providerHolds(now, {});
+  const PAIR = "https://pair.example";
+  holds.hold(PAIR, 8);
+  const asked: string[] = [];
+  const skip = () => holds.heldMs(PAIR) > 0;
+  const pairRpc = evm.pacedEvmRpc(PAIR, async () => (asked.push("pair"), "0x9"), holds, async (ms) => void (t += ms));
+  const seats = (third: boolean): evm.EvmSeat[] => [
+    { name: "pair", url: PAIR, operator: "x", rpc: pairRpc, skip },
+    { name: "other", url: "https://other.example", operator: "y", rpc: async () => "0x0" },
+    ...(third ? [{ name: "keyed", url: "https://keyed.example", operator: "z", rpc: async () => (asked.push("keyed"), "0x1") }] : []),
+  ];
+  const [p, q] = await evm.evmReadPair(seats(true), ["x", "y"], { log: () => {}, now }).both("eth_blockNumber", []);
+  assert.ok(p.ok && p.operator === "z" && q.ok && q.operator === "y");
+  assert.deepEqual(asked, ["keyed"]);
+  assert.equal(t, 0, "no hold waited out");
+  // no other operator: the held seat is asked last, its hold waited out
+  asked.length = 0;
+  const [p2] = await evm.evmReadPair(seats(false), ["x", "y"], { log: () => {}, now }).both("eth_blockNumber", []);
+  assert.ok(p2.ok && p2.operator === "x");
+  assert.deepEqual(asked, ["pair"]);
+});
+test("F3: a side's read is bounded at EVM_READ_BUDGET_MS from its start, checked before each next seat; the first seat is never cut", async () => {
+  let t = 0;
+  const now = () => t;
+  const slow = (name: string, ms: number, asked: string[]): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator: name, rpc: async () => (asked.push(name), (t += ms), Promise.reject(new Error("HTTP 502"))) });
+  // each seat fails 4 s in: the first (0-4 s) and the second (4-8 s, started inside the 6 s) are asked, never the third
+  const asked: string[] = [];
+  const pair = evm.evmReadPair([slow("a", 4_000, asked), slow("c", 4_000, asked), slow("d", 4_000, asked), slow("b", 0, [])], ["a", "b"], { log: () => {}, now });
+  await assert.rejects(pair.one(0, "eth_blockNumber", []));
+  assert.deepEqual(asked, ["a", "c"]);
+  // the first seat answering after the budget's time is never cut: its answer stands
+  const late: evm.EvmSeat = { name: "l", url: "https://l.example", operator: "l", rpc: () => new Promise((ok) => setTimeout(() => ok("0x5"), 40)) };
+  assert.equal(await evm.evmReadPair([late, slow("m", 0, [])], ["l", "m"], { log: () => {}, budgetMs: 5 }).one(0, "eth_blockNumber", []), "0x5");
+});
+
+// review of 686dda50: "already known" on a send is the send accepted (the node holds the transaction: a first seat that
+// timed out after it passed it on, or the other side's), never a refusal
+test("a send every seat answers 'already known' is the send accepted: the caller gets 200 and its hash", async () => {
+  const send = (await import("./evm.ts")).evmSendAccepted;
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32000: already known") }), true);
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32010: Transaction with the same hash was already imported.") }), true);
+  assert.equal(send({ status: "rejected", reason: new Error("RPC error -32000: nonce too low") }), false);
+  assert.equal(send({ status: "rejected", reason: new Error("HTTP 502") }), false);
+  assert.equal(send({ status: "fulfilled", value: "0xab" }), true);
 });
