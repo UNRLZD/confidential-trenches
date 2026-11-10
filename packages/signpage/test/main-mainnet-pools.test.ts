@@ -309,3 +309,31 @@ test("the mainnet build's pool reads on the network's own pair and fee route: SI
   await assert.rejects(poolRelayFee(pool, 1_800_000_000_000n, undefined, fetchFn), /HTTP 404/);
   assert.equal(asked[0], `https://ct-api.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=${pool}&epoch=1800000000000`);
 });
+
+test("pool.address's quote reads the price for the origin asked (main.ts pricedFor, review of eb2dfdc5 W2): USDC goes on to the floor read; any other origin gets no price, refused not_allowed with no read", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  // the page names U_X under the pinned pool's scope, and holds its own price
+  let named: { ok?: boolean } = {};
+  for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
+  assert.equal(named.ok, true, JSON.stringify(named));
+  assert.ok((await askState()).pools?.find((p) => p.chain === "solana")?.price, "the page holds its price");
+  // USDC: priced, so the quote goes on to the floor read on the page's pair, which this test's RPCs refuse: down
+  const usdc = await ask({ chain: "solana", origin_asset: ONECLICK_USDC_ASSETS[1], amount: "25" });
+  assert.equal(usdc.error?.code, "down", JSON.stringify(usdc));
+  // another origin: no price for it, so no floor read and no quote asked
+  const from = calls.length;
+  const other = await ask({ chain: "solana", origin_asset: "nep141:wrap.near", amount: "25" });
+  assert.equal(other.error?.code, "not_allowed", JSON.stringify(other));
+  assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
+});

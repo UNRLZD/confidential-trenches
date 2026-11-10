@@ -73,13 +73,26 @@ export const MUTANTS = [
   [PRICE, "const lo = x < y ? x : y;", "const lo = x < y ? y : x;", AGREE],
   [PRICE, 'if (chain !== "robinhood") return chainlinkPrice', 'if (chain !== "robinhood" || args.baseRpcs === undefined) return chainlinkPrice', AGREE],
   // staleness: the age against the device's clock, both ways, and each bound
-  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(", "if (false) fail(", STALE],
-  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) fail(", "if (nowS >= goodUntil(publishedS, nowS, maxAgeS)) fail(", STALE],
+  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", "if (false) throw new PoolUsdStale(", STALE],
+  [PRICE, "if (nowS > goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", "if (nowS >= goodUntil(publishedS, nowS, maxAgeS)) throw new PoolUsdStale(", STALE],
   [PRICE, "Math.min(publishedS, readS) + maxAgeS", "publishedS + maxAgeS", STALE],
   [PRICE, "if (publishedS - nowS > POOL_USD_MAX_AHEAD_S) fail(", "if (false) fail(", STALE],
   [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain: \"solana\"", "return { chain: \"solana\"", STALE],
   [PRICE, "checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  return { chain, asset", "return { chain, asset", STALE],
-  [PRICE, "    maxAgeS: 60,", "    maxAgeS: 600,", STALE],
+  // card pool-usd-price-never-stale: Pyth's bound, its heartbeat and 15 s; a refusal for age alone named so, with the
+  // feed's time; Base's late price never named as Robinhood's
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 600,", STALE],
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 60,", STALE],
+  [PRICE, "    maxAgeS: 60 + 15,", "    maxAgeS: 60 + 16,", STALE],
+  [PRICE, 'override readonly name = "PoolUsdStale";', 'override readonly name = "Error";', STALE],
+  [PRICE, "    this.publishedS = publishedS;", "    this.publishedS = 0;", STALE],
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', 'if (rb.status === "rejected") throw rb.reason;', STALE],
+  // review of eb2dfdc5, K1-K3: the age is told after every other check, so a late price with another fault is no late tag
+  [PRICE, "  if (conf * 10_000n > price", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (conf * 10_000n > price", STALE],
+  [PRICE, "  for (const r of reads) if (BigInt(r.slot) < posted)", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  for (const r of reads) if (BigInt(r.slot) < posted)", STALE],
+  [PRICE, "  if (price <= 0n) fail(`the price ${price} is not positive`);\n  const publishedS = Number(updatedAt);\n", "  const publishedS = Number(updatedAt);\n  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (price <= 0n) fail(`the price ${price} is not positive`);\n", STALE],
+  // review of eb2dfdc5, P3: Robinhood's late tag only once Base's read is whole and agreeing
+  [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;\n  if (rp.status === "rejected") throw rp.reason;', 'if (rp.status === "rejected") throw rp.reason;\n  if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', STALE],
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],
   [PRICE, "maxAgeS: 86_700 }", "maxAgeS: 867_000 }", STALE],
   [PRICE, "if (updatedAt === 0n || updatedAt >= U64) fail(", "if (updatedAt >= U64) fail(", STALE],

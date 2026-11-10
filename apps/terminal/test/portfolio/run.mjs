@@ -52,6 +52,8 @@ const STATES = [
   ["notrades", "S10.14", ["390", "1440"], false],
   ["activity-empty", "S14.1", ["390", "1440"], true],
   ["activity", "S14.2", ["390", "1440"], true],
+  ["failed", "S14.2", ["390", "1440"], true],
+  ["zeroprice", "S10.4", ["390", "1440"], true],
   ["restored", "S14.3", ["390", "1440"], true],
   ["exported", "S14.4", ["390", "1440"], true],
   ["filtered", "S14.5", ["390", "1440"], true],
@@ -153,6 +155,20 @@ try {
       for (const d of await page.$$eval("[data-draft-copy]", (els) => els.filter((e) => e.getClientRects().length).map((e) => e.getAttribute("data-draft-copy")))) {
         if (!drafts.has(d)) drafts.set(d, new Set());
         drafts.get(d).add(want);
+      }
+      // the owner's labels (owner 10 Nov 18:12Z): each failed trade's row its red Transaction failed tag, the reason on
+      // hover as the trade box words it (none for a code it has no words for), never a kit code; no tag on another row
+      if (f === "failed") {
+        const tags = await page.$$eval(".pf [data-row]", (rs) => rs.filter((r) => r.getClientRects().length).map((r) => { const t = r.querySelector("[data-failed]"); return `${r.getAttribute("data-row")}:${t ? `${t.textContent}|${t.getAttribute("title") ?? ""}|${t.className}` : "-"}`; }));
+        const want = ["f1:Transaction failed|Price check failed|tag sell", "f2:Transaction failed|Unavailable|tag sell", "f3:Transaction failed||tag sell", "f4:Transaction failed|Not landed|tag sell"];
+        check(JSON.stringify(tags.slice(0, 4)) === JSON.stringify(want), `${tag}: failed rows ${tags.slice(0, 4).join(" ")}`);
+        check(tags.slice(4).length > 0 && tags.slice(4).every((t) => t.endsWith(":-")), `${tag}: a tag on a row that did not fail ${tags.slice(4).join(" ")}`);
+        check(!/_/.test(await page.locator(".pf [data-row]").allInnerTexts().then((a) => a.join(" "))), `${tag}: a kit code drawn`);
+      }
+      // a price that reads zero: KINU's value is the dash, on the desktop table and the phone card, never $0.00
+      if (f === "zeroprice") {
+        const v = await page.$$eval('.pf [data-value]', (cs) => cs.filter((c) => c.getClientRects().length && c.closest("[data-pos]")?.getAttribute("data-pos")?.endsWith(":KINU")).map((c) => `${c.textContent.trim()}|${c.getAttribute("data-unread")}`));
+        check(v.length === 1 && v[0] === "—|true", `${tag}: KINU's value ${JSON.stringify(v)}, want the dash, marked unread`);
       }
       if (POOLS[f] && (f !== "rows" || want === "S10.3")) {
         // the pool block of the form on screen: its view, its rows as drawn, inside its panel, no clipped text

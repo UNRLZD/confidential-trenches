@@ -11,6 +11,8 @@ import { signBuilt } from "../../../scripts/signpage-built.mjs";
 
 const PKG = signBuilt(); // the page's build, made from this tree's sources first (card signpage-generated-merge-free)
 const TESTNET_ONLY = [
+  "buy((address,bytes),", // the EVM pool buy's signature, testnet only until the mainnet pins' card (src/evm-send.ts)
+  "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
   "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
   "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", // the devnet pool's curve table (wallet SOL_POOL_TABLES.devnet)

@@ -51,7 +51,7 @@ import type { HelperSignedIntent } from "../../kit/src/helper/v1.ts";
 import { depositId } from "../../wallet/src/derive/keys.ts";
 import { type MoveRecord, poolRefundMoveRequest, runRefundMove } from "../../wallet/src/deposit/refund.ts";
 import { DEPOSIT_QUOTE_PATH } from "./rules/deposit-dry.ts";
-import { checkIdTransferIntent, checkPoolRefundQuote, signIdIntent, type IdIntent, type RefundQuote } from "./rules/refund.ts";
+import { checkIdTransferIntent, checkPoolRefundQuote, RefundRuleRefused, signIdIntent, type IdIntent, type RefundQuote } from "./rules/refund.ts";
 
 /** What a reload needs to follow the quote again (written in the op under `follow`; nothing secret). */
 export interface PoolFollowRecord {
@@ -648,8 +648,13 @@ export function poolRefundMover(h: PoolRefundHost): PoolRefundMover {
       {
         request: (u, asset, amount, at) => poolRefundMoveRequest(f.chain, f.u, u, asset, amount, at),
         check: {
-          quote: (request, answer) =>
-            checkPoolRefundQuote(request, answer, { network: "mainnet", signer, origin: f.origin, chain: f.chain, wallet: f.u, floor, check: { path: DEPOSIT_QUOTE_PATH, pricing: priced.pricing, decimalsIn: priced.decimalsIn, decimalsOut, now: now() } }),
+          quote: (request, answer) => {
+            // the price as it is at the check (card pool-usd-price-never-stale, review P1): the floor read and the quote took
+            // seconds, and the price taken before them may be past its bound by now. None, or other decimals: refused
+            const atCheck = h.priced(f);
+            if (atCheck === null || atCheck.decimalsIn !== priced.decimalsIn) throw new RefundRuleRefused("price");
+            return checkPoolRefundQuote(request, answer, { network: "mainnet", signer, origin: f.origin, chain: f.chain, wallet: f.u, floor, check: { path: DEPOSIT_QUOTE_PATH, pricing: atCheck.pricing, decimalsIn: atCheck.decimalsIn, decimalsOut, now: now() } });
+          },
           read: (q) => ({ depositAddress: q.depositAddress as string, amountIn: q.amountIn, deadlineMs: Date.parse(q.deadline as string) }),
           intent: (payload, q, reads, priorDeadline) => checkIdTransferIntent(payload, q, { network: "mainnet", signer, reads, priorDeadline }),
           sign: (secretKey, intent) => signIdIntent(secretKey, intent) as HelperSignedIntent,

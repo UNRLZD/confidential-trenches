@@ -214,7 +214,7 @@ import {
   type EvmPoolChain,
   type EvmPoolVenue,
 } from "@blindfill/kit";
-import { epochStartOf, POOL_EPOCH_MS } from "./fee.ts";
+import { epochStartOf, everyEpoch, POOL_EPOCH_MS, type EpochTimer } from "./fee.ts";
 import { oncePerNullifier, POOL_SEND_MEMORY } from "./once.ts";
 import { heldPerClient, RETRY_AFTER_MAX_S, throttleOf, type ProviderHolds } from "../limits/limits.ts";
 import { companyOf, KEYED_PROVIDER, readUpstreams } from "../rpc/rpc.ts";
@@ -491,6 +491,20 @@ const EPOCH_MEMORY = 64;
  *  time, never one per request [design: a request's own round trip, about 1 s, twice]. */
 export const EVM_FEE_MISS_MS = 2_000;
 /**
+ * The fee read at each period's start (card helper-evm-fee-at-epoch-start), so a request answers from memory. The
+ * public operators keep a block's state only so long: read 10 Nov 05:45-05:50Z, an eth_call at a block hash 2 to 66 s
+ * back, robinhood-rpc.publicnode.com, robinhood.rpc.blxrbdn.com and rpc-robinhood.globalstake.io answered at 14 s and
+ * refused at 24 s ("historical state ... is not available"), robinhood.drpc.org at 24 s and not at 45 s, and
+ * rpc.mainnet.chain.robinhood.com at 66 s; robinhood-sepolia-rpc.publicnode.com at 14 s, not 23 s; every Base and Base
+ * Sepolia seat at 64 s. Read on demand up to a minute after the period's first block, the fee had one operator left
+ * whenever dRPC refused (10 Nov 05:15-05:22Z, 16 of 84 samples failed). So it is read EVM_FEE_WARM_DELAY_MS into the
+ * period and, while it fails or the chain has no block in the period yet, again every EVM_FEE_WARM_EVERY_MS until
+ * EVM_FEE_WARM_WINDOW_MS, inside every seat's held state.
+ */
+export const EVM_FEE_WARM_DELAY_MS = 1_000;
+export const EVM_FEE_WARM_EVERY_MS = 2_000;
+export const EVM_FEE_WARM_WINDOW_MS = 10_000;
+/**
  * The least time, ms, between now and a request's deadline for the helper to send it (M356 (1)): a send needs time to
  * be mined before the pool's deadline check, or the sender pays for a revert. It moves to the kit with the fee file.
  */
@@ -756,6 +770,12 @@ export type EvmPoolSender = {
   readonly sellSender: string | null;
   /** GET /v1/pool/fee: the epoch's fee (the epoch holding `atMs`), in wei; null while the chain has no block in it yet. */
   fee(atMs: number): Promise<EvmFeeAnswer | null>;
+  /**
+   * The period's fee read ahead of any request, into the cache fee() and the sends answer from: tried until it reads or
+   * EVM_FEE_WARM_WINDOW_MS into the period, each period once (`sleep` is the wait, a test's own). Never rejects: a period
+   * it could not read writes one log line, and fee() reads it on demand as before.
+   */
+  warm(epochStartMs: number, sleep?: (ms: number) => Promise<void>): Promise<void>;
   /**
    * The start's check (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): each provider answers every state read the
    * fee makes (the pool's tree depth, the chain fee) at the block POOL_LIFE_MAX_MS old, the oldest epoch a proof's fee
@@ -1038,9 +1058,10 @@ export function evmPoolSender(
    * binds. A read that failed answers its period's callers for EVM_FEE_MISS_MS (A-4).
    */
   const DIFFERENT = "the providers hold different blocks";
-  const feeOf = (epochStartMs: number): Promise<{ block: EvmBlock; fee: bigint } | null> => {
+  const feeOf = (epochStartMs: number, fresh = false): Promise<{ block: EvmBlock; fee: bigint } | null> => {
     const known = fees.get(epochStartMs);
-    if (known && (known.until === undefined || now() < known.until)) return known.p;
+    // `fresh` (the read ahead) reads again past a kept failure: a caller's failed read never costs it a try
+    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;
     fees.delete(epochStartMs);
     const p = (async () => {
       const seconds = BigInt(Math.ceil(epochStartMs / 1000));
@@ -1077,6 +1098,27 @@ export function evmPoolSender(
     p.then((v) => v === null && fees.get(epochStartMs) === entry && fees.delete(epochStartMs), () => void (entry.until = now() + EVM_FEE_MISS_MS));
     while (fees.size > EPOCH_MEMORY) fees.delete(fees.keys().next().value as number);
     return p;
+  };
+  // the periods warm() has taken, so a period is read ahead once whatever calls it
+  const warmed = new Set<number>();
+  const warm = async (epochStartMs: number, sleep = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms).unref())): Promise<void> => {
+    if (warmed.has(epochStartMs)) return;
+    warmed.add(epochStartMs);
+    while (warmed.size > EPOCH_MEMORY) warmed.delete(warmed.keys().next().value as number);
+    let failed: unknown = null;
+    for (;;) {
+      try {
+        if ((await feeOf(epochStartMs, true)) !== null) return;
+        failed = null; // the chain has no block in the period yet: a quiet period stays quiet (card evm-fee-quiet-epoch)
+      } catch (e) {
+        failed = e;
+      }
+      if (now() + EVM_FEE_WARM_EVERY_MS > epochStartMs + EVM_FEE_WARM_WINDOW_MS) break;
+      await sleep(EVM_FEE_WARM_EVERY_MS);
+    }
+    if (failed !== null) log(`evm ${cfg.network}: fee read ahead failed (read on demand): ${String((failed as Error | undefined)?.message ?? failed).slice(0, 1_200)}`);
+    // review of d190f62f (B-2): a window with no block in the period (the chain stalled, or every seat behind) says so once
+    else log(`evm ${cfg.network}: fee read ahead: no block in the period by second ${Math.floor((now() - epochStartMs) / 1000)} (read on demand)`);
   };
   // M374 (5): the requests each client holds open, the queue's wait included
   const held = heldPerClient(EVM_IN_FLIGHT_MAX);
@@ -1812,6 +1854,7 @@ export function evmPoolSender(
       if (f === null) return null;
       return { chain: "evm", network: cfg.network, pool, fee_recipient: feeRecipient, sell_sender: sellSender, fee_collector: feeCollector ?? null, epoch_ms: POOL_EPOCH_MS, epoch_start_ms: epoch, block: tag(f.block.number), fee: f.fee.toString(), step: EVM_FEE_STEP.toString() };
     },
+    warm,
     carry,
     sell,
     async ready(sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) {
@@ -2123,6 +2166,20 @@ export function evmReadPair(seats: readonly EvmSeat[], first: readonly [string, 
  *  variable; a test network has none. */
 const keyedOf = (env: Record<string, string | undefined>, network: string): { url: string; name: string }[] =>
   network === "base" || network === "robinhood" ? readUpstreams(env)[network].keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined).map((k) => ({ url: k.url, name: `${companyOf(k.host)} (${k.env})` })) : [];
+
+/**
+ * Reads every pool's fee at each period's start (EVM_FEE_WARM_DELAY_MS in), each sender on its own, until the returned
+ * stop; the timer never holds the process open. The cost, per pool, is one fee read a period, at most
+ * EVM_FEE_WARM_WINDOW_MS / EVM_FEE_WARM_EVERY_MS of them when it fails, whatever the number of users: a read is the
+ * first-block search (8 to 10 block reads at Robinhood's 0.1 s blocks, on one side) and, on each of two operators, the
+ * block by number, the block before it, the tree depth and the chain fee (evm-fee-warm.test.ts counts them).
+ */
+export function evmFeeWarm(senders: Iterable<Pick<EvmPoolSender, "warm">>, timer?: EpochTimer, sleep?: (ms: number) => Promise<void>): () => void {
+  const all = [...senders];
+  return everyEpoch((start) => {
+    for (const s of all) void s.warm(start, sleep).catch(() => undefined);
+  }, EVM_FEE_WARM_DELAY_MS, timer);
+}
 
 /**
  * The EVM pool senders the host's environment sets, by pool address; a network with none of its names set is off (a

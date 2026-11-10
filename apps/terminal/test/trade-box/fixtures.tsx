@@ -105,7 +105,7 @@ const kit: TradeKit = {
     window.__calls.push({ kind, params, id });
     const emit = (stage: Stage) => listeners.forEach((l) => l(id, stage));
     const outcome = new Promise<SignpageOutcome<"buy">>((resolve) => {
-      const code = { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed" }[f];
+      const code = { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed", unavailable: "venue_not_pinned", "unavailable-fit": "no_table_fits" }[f];
       if (code) {
         setTimeout(() => resolve({ ok: false, error: { code } }), 300);
         return;

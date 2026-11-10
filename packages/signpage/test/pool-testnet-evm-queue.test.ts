@@ -16,11 +16,15 @@ import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
+import type { EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
-const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
-const { EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, TESTNET_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
+const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_POOL_EVENTS, EVM_POOLS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_BUY_SIGNATURE } = await import("../src/evm-send.ts");
+// loaded after the network is set (a static import would load the wallet's network module first, as mainnet)
+const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
 const { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_POOLS, SOL_SEND_MARGIN_MS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 type EvmPoolPin = import("../../wallet/src/pool/evm.ts").EvmPoolPin;
 type EvmPoolEvent = import("../../wallet/src/pool/evm.ts").EvmPoolEvent;
@@ -330,4 +334,162 @@ test("the EVM part of a state read runs beside the Solana part: a Solana proof i
   assert.equal(slow.started(), 1);
   t.signingOut();
   await t.signedOut();
+});
+
+// Circle's testnet USDC on Base Sepolia, a public address (contracts/pool-evm/script/testnet-run.mjs)
+const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+
+test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's queue; a chain with none is refused not_allowed (card signpage-evm-pool-buy)", async () => {
+  const { w, ns } = await wallet();
+  const prover = signalsProver();
+  const hosts: { chain: string; network: string; ready: number }[] = [];
+  const t = testnetPool(page(w), {
+    prover: { vault: prover, stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => (ask) => {
+        const after = (async () => {
+          const h = host();
+          hosts.push({ chain: h.chain, network: h.pin.network, ready: (await h.ready()).length });
+        })();
+        return { running: true, after, answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  await landed(ns);
+  await t.stateRead();
+  // the state read starts the chain's queue pass without waiting for it: its proof made
+  for (let i = 0; i < 200 && ((await t.readyWith(async () => null)).ready?.length ?? 0) === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  const got = t.flow(ask, null as never);
+  assert.ok("after" in got, "the base buy runs");
+  await got.after;
+  assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", ready: 1 }], "on the chain's own queue: its landed note's proof");
+  assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
+  await t.signedOut();
+});
+
+test("the EVM buy's host on the testnet page: the testnet rule, one claim set for every tap, its settle the chain's RESERVED pass, and a queue that could not open is opened again on the next tap (review P3-8, t02-t04)", async () => {
+  const { w, ns } = await wallet();
+  let signedIn = false;
+  let reads = 0;
+  const made: EvmPoolBuyHost[] = [];
+  const t = testnetPool(page(w, () => signedIn), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => (reads++, FREEING) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => () => {
+        made.push(host());
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  t.flow(ask, null as never);
+  t.flow(ask, null as never);
+  assert.equal(made.length, 2);
+  const [a, b] = made as [EvmPoolBuyHost, EvmPoolBuyHost];
+  assert.equal(a.testnet, true, "the testnet build checks the buy by the testnet rule");
+  assert.ok(a.claimed instanceof Set && a.claimed === b.claimed, "two taps share one claim set");
+  // signed out: the queue cannot open; the tap fails, and the next tap, signed in, opens it
+  await assert.rejects(a.ready());
+  signedIn = true;
+  assert.deepEqual(await b.ready(), [], "opened again once the seed is there");
+  // the settle runs the chain's RESERVED pass: a note past its deadline with no release is freed
+  const id = await reserved(ns);
+  a.settle();
+  await until(() => reads > 0);
+  for (let i = 0; i < 200 && (await ns.get(id))!.state === "RESERVED"; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.notEqual((await ns.get(id))!.state, "RESERVED");
+  await t.signedOut();
+});
+
+test("the EVM buy's host on the testnet page: a sign out reaches its run (the follows' signal at signedOut, the sign-out count at signingOut), and its writes never open the store (review P2-2, P3-5, t02)", async () => {
+  const { w } = await wallet();
+  let opens = 0;
+  const made: EvmPoolBuyHost[] = [];
+  const t = testnetPool({ ...page(w), store: async () => (opens++, w) }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => FREEING }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => () => {
+        made.push(host());
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  t.flow(ask, null as never);
+  const a = made[0]!;
+  assert.deepEqual([a.signal?.aborted, a.stopped?.()], [false, false]);
+  const before = opens;
+  await assert.rejects(a.record("0x" + "11".repeat(20), { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } } } as never));
+  assert.equal(opens, before, "a page with no open store: the write fails, the store is never opened for it");
+  t.signingOut();
+  assert.equal(a.stopped?.(), true, "this tab's sign out started: the run's busy wait ends");
+  t.flow(ask, null as never);
+  assert.equal(made[1]!.stopped?.(), false, "a tap after it counts from there");
+  await t.signedOut();
+  assert.equal(a.signal?.aborted, true, "signed out: the run's reads end");
+});
+
+test("a state read follows a buy whose tab ended before its end, from its pending record: past its deadline with no release on either RPC's safe block, removed (the pending end's dead-tab rule)", { timeout: 60_000 }, async () => {
+  const { w } = await wallet();
+  const W = "0x" + "4b".repeat(20);
+  const deadlineMs = BigInt(Date.now()) - 60_000n;
+  const buy = { nullifier: "123", from: "16", deadlineMs: deadlineMs.toString(), minOut: "1", value: RUNG.toString(), feeCap: "1", feeRecipient: PIN.feeRecipient.toLowerCase() };
+  const pending = { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy };
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: pending }));
+  const asked: string[] = [];
+  // two pool RPCs whose newest and safe blocks are past the deadline, with no release of the nullifier
+  const rpcs = (): readonly EvmRpc[] =>
+    ["https://a.example", "https://b.example"].map((url) =>
+      Object.assign(
+        async (method: string, params: readonly unknown[]) => {
+          asked.push(`${method} ${String(params[0] && typeof params[0] === "string" ? params[0] : "")}`);
+          if (method === "eth_getBlockByNumber") return { number: "0x40", timestamp: "0x" + (BigInt(Date.now()) / 1000n).toString(16) };
+          if (method === "eth_getLogs") return [];
+          if (method === "eth_blockNumber") return "0x40";
+          throw new Error(`no ${method}`);
+        },
+        { url },
+      ),
+    );
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: (c) => (c === "base" ? rpcs() : null),
+    evmSync: () => ({ events: async () => FREEING }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+  });
+  await t.stateRead();
+  for (let i = 0; i < 400 && ((await w.get("meta", EVM_POSITION_COSTS_KEY)) as Record<string, unknown>)[W] !== undefined; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(await w.get("meta", EVM_POSITION_COSTS_KEY), {}, "never landed: removed, so the note can buy again");
+  assert.ok(asked.includes("eth_getBlockByNumber safe"), "judged on the safe block");
+  await t.signedOut();
+});
+
+test("the EVM buy's live check reads what the testnet page reads: its pairs, chain ids, pins, Bought topic and buy selector (scripts/live-checks/signpage-evm-pool-buy.mjs)", async () => {
+  const lc = (await import(new URL("../../../scripts/live-checks/signpage-evm-pool-buy.mjs", import.meta.url).href)) as {
+    RPCS: Record<string, readonly string[]>;
+    CHAIN_IDS: Record<string, bigint>;
+    PINS_OF: Record<string, string>;
+    BOUGHT: string;
+    BUY_SELECTOR: string;
+  };
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  assert.deepEqual(lc.RPCS, { "base-sepolia": TESTNET_RPCS.base, "robinhood-testnet": TESTNET_RPCS.robinhood });
+  assert.deepEqual(lc.CHAIN_IDS, { "base-sepolia": EVM_CHAIN_IDS["base-sepolia"], "robinhood-testnet": EVM_CHAIN_IDS["robinhood-testnet"] });
+  assert.deepEqual(lc.PINS_OF, { "base-sepolia": EVM_POOLS["base-sepolia"]?.pool, "robinhood-testnet": EVM_POOLS["robinhood-testnet"]?.pool });
+  assert.equal(lc.BOUGHT, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))));
+  assert.equal(lc.BUY_SELECTOR, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_BUY_SIGNATURE)).subarray(0, 4)));
 });
