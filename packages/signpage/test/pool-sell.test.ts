@@ -4082,12 +4082,16 @@ test("card pool-sell-share-across-wallets review P2-3: when one wallet holds at 
 });
 
 test("card pool-sell-share-across-wallets review P2-3: three wallets: a walk that reaches the units ends there, a wallet reading 0 is never a sale, a W listed twice is read once", async () => {
-  // X 3, Y 3, W 5: 6 needs two (no one covers it), X and Y by address order, W untouched
-  const w = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: T3 }] }, [listedW(T5), walletX(T3), walletY(T3), walletX(T3), listedW(T5)]);
-  const a = await runPoolSell(w.host, { ...ASK, amount: 2n * T3 });
+  // X 3, Y 3, W 5: 6 needs two (no one covers it), X and Y by address order whatever the list's order, W untouched
   const xy = [X.address, Y.address].sort();
-  assert.deepEqual(soldBy(w, saleSigs(a)).map((s) => s.signer), xy);
-  assert.equal(heldOn(w, W.address), T5);
+  for (const list of [[listedW(T5), walletX(T3), walletY(T3), walletX(T3), listedW(T5)], [walletY(T3), listedW(T5), walletX(T3), walletY(T3)]]) {
+    const w = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: T3 }] }, list);
+    const a = await runPoolSell(w.host, { ...ASK, amount: 2n * T3 });
+    assert.deepEqual(soldBy(w, saleSigs(a)).map((s) => s.signer), xy);
+    assert.deepEqual("legs" in a && a.legs!.map((l) => [l.wallet, l.stage]), xy.map((x) => [x, "filled"]));
+    assert.equal("stage" in a && a.stage, "filled");
+    assert.equal(heldOn(w, W.address), T5);
+  }
   // a W the list shows but that reads 0 on both RPCs: never a sale; 100 percent sells the other two
   const z = await world({ held: T5, ataLamports: TOKEN_RENT, others: [{ l: 8n, j: 0, held: T3 }, { l: 9n, j: 0, held: 0n }] }, [listedW(T5), walletX(T3), walletY(T3)]);
   const b = await runPoolSell(z.host, share(10_000));
@@ -4167,6 +4171,8 @@ test("card pool-sell-share-across-wallets review P3-1: a sale's live settle is t
   await new Promise((res) => setTimeout(res, 1_200));
   const rec = (await w.store.get("ops", "m1")) as Rec;
   assert.deepEqual(rec.legs.map((l) => [who(l.wallet), l.stage]), [["X", "filled"], ["W", "signed"]]);
+  // the second sale's signature never moves the record back from sent
+  assert.equal(rec.stage, "sent");
 });
 
 test("card pool-sell-share-across-wallets review P3-2: a settle treats only the running request's record as live; any other record's leg that never ran is refused", async () => {
@@ -4251,4 +4257,46 @@ test("card pool-sell-share-across-wallets review P2-2: a full sale's page closed
   await resumeRentBacks(load, fresh);
   assert.deepEqual((await ours(w.ns)).filter((n) => n.ref.kind === "return").map((n) => n.state), ["UNSPENT"]);
   assert.equal(((await w.store.get("ops", "b1")) as Rec).stage, "filled");
+});
+
+test("card pool-sell-share-across-wallets review: a load's settle of a sale that never landed, beside a sale that never ran, ends the record refused", async () => {
+  const { store } = await notes();
+  await store.put("ops", "r1", { kind: "sell", pool: "sol", sha: "aa", stage: "sent", txs: [{ chain: "solana", hash: "sigX" }], created_ms: 1, legs: [{ wallet: X.address, units: "3000000", tx: "sigX", stage: "sent" }, { wallet: W.address, units: "5000000", tx: null, stage: "pending" }] });
+  await settleSellOps(store as unknown as TradeStore, "sigX", "not_landed");
+  assert.equal(((await store.get("ops", "r1")) as Rec).stage, "refused");
+});
+
+test("card pool-sell-share-across-wallets review: a sale whose record cannot name its signature sends nothing, and the answer names no signature for it", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  let n = 0;
+  const host = { ...w.host, signed: () => { if (++n === 2) throw new Error("record write failed"); } };
+  const a = await runPoolSell(host, share(10_000));
+  assert.equal("stage" in a && a.stage, "part_filled");
+  assert.deepEqual("legs" in a && a.legs!.map((l) => [who(l.wallet), l.tx === null, l.stage ?? l.error]), [["X", false, "filled"], ["W", true, "failed"]]);
+  assert.equal("txs" in a && a.txs.length, 1);
+  assert.equal(heldOn(w, W.address), T5);
+});
+
+test("card pool-sell-share-across-wallets review: the next sale starts once the one before it was sent, never waiting for its verdict", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  let wSent!: () => void;
+  const second = new Promise<void>((r) => (wSent = r));
+  let first: string | null = null;
+  const gate = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method === "sendTransaction") {
+        const wire = base64.decode(params[0] as string);
+        const sig = base58.encode(wire.subarray(1, 65));
+        const payer = solanaDecodeMessage(wire.subarray(65)).staticKeys[0];
+        if (payer === X.address) first = sig;
+        if (payer === W.address) wSent();
+      } else if (first !== null && JSON.stringify(params).includes(first)) await second;
+      return rpc(method, params);
+    }) as SolanaRpc;
+  (w.host as { rpcs: unknown }).rpcs = [gate(w.c.rpcs[0]), gate(w.c.rpcs[1])];
+  const done = runPoolSell(w.host, share(10_000));
+  const ended = await Promise.race([done.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 5_000))]);
+  assert.ok(ended, "the second sale waited for the first one's verdict");
+  const a = await done;
+  assert.equal("stage" in a && a.stage, "filled");
 });
