@@ -117,6 +117,7 @@ export const CHANGED = [
   "scripts/live-checks/market-data-push.mjs",
   "scripts/live-checks/market-data-solana-lists.mjs",
   "scripts/live-checks/market-data-solana-token.mjs",
+  "scripts/live-checks/market-token-reads.mjs",
   "scripts/live-checks/money-gate-testnet.mjs",
   "scripts/live-checks/near-rpc-operators.mjs",
   "scripts/live-checks/notes-per-pool-evm.mjs",

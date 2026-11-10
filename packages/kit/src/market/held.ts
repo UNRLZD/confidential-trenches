@@ -15,7 +15,7 @@ import type { Chain } from "../orders/record.ts";
 import type { Operation } from "../signpage/messages.ts";
 
 /** The chains the helper reads market data for. NEAR holds no traded token (its money is the vault's USDC). */
-export const HELD_MARKET_CHAINS = ["solana", "base", "robinhood"] as const satisfies readonly Chain[];
+export const HELD_MARKET_CHAINS: readonly Chain[] = Object.freeze(["solana", "base", "robinhood"] as const);
 /** The most tokens one request names (the helper's HELD_MAX). */
 export const HELD_MARKET_MAX = 30;
 /** The history read: hourly bars, 500 of them (the helper's CANDLES_MAX), about 20 days; one shape for every token and
@@ -42,7 +42,7 @@ export interface HeldMarket {
 export type HeldBar = readonly [number, string];
 
 export const heldKey = (chain: Chain, token: string): string => `${chain}:${token}`;
-const served = (c: Chain): boolean => (HELD_MARKET_CHAINS as readonly Chain[]).includes(c);
+const served = (c: Chain): boolean => HELD_MARKET_CHAINS.includes(c);
 const obj = (v: unknown): Record<string, unknown> | null => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 const text = (v: unknown, max: number): string | null => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
 const price = (v: unknown): string | null => (typeof v === "string" && PRICE.test(v) ? v : null);
