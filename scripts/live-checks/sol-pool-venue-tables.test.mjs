@@ -162,6 +162,33 @@ test("a table both RPCs read the same, owned by another program, fails: only the
   assert.match(failLines(r), /^FAIL mainnet pump-curve g1: the table is the lookup table program's: 11111111111111111111111111111111$/m);
 });
 
+test("--alarm (the nightly run): the pins, each cluster's genesis and pool only, no table or tx read; a tree past 80 percent still fails", async () => {
+  const methods = [];
+  const fetchFn = replay(A.answers);
+  const reads = new Set();
+  const seen = (f) => async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    methods.push(method);
+    reads.add(`${url} ${method} ${JSON.stringify(params)}`);
+    return f(url, init);
+  };
+  const r = await checkTables({ records: REC, pins: PINS, fetchFn: seen(fetchFn), alarm: true });
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.deepEqual([...new Set(methods)].sort(), ["getAccountInfo", "getGenesisHash"]);
+  // two clusters, each its genesis and its pool on both RPCs: 8 reads in all (the recording's one 429 asked again)
+  assert.equal(reads.size, 8);
+  const answers = structuredClone(A.answers);
+  for (const a of answers)
+    if (a.method === "getAccountInfo" && a.params[0] === REC.devnet.pool && a.url === CLUSTERS.devnet.rpcs[1] && a.json?.result) {
+      const d = Buffer.from(a.json.result.value.data[0], "base64");
+      d.writeBigUInt64LE(111_411n, 49);
+      a.json.result.value.data[0] = d.toString("base64");
+    }
+  const bad = await checkTables({ records: REC, pins: PINS, fetchFn: replay(answers), alarm: true });
+  assert.equal(bad.verdict, "FAIL");
+  assert.match(failLines(bad), /^FAIL devnet pumpswap: the state tree at 111411 is past 80 percent of generation 2/m);
+});
+
 test("a provider's no-answer (a 429, an empty body) is INCONCLUSIVE on its own line, never a FAIL and never a PASS", async () => {
   for (const [status, json] of [[429, { jsonrpc: "2.0", id: 1, error: { code: 429, message: "Too many requests" } }], [200, null]]) {
     const answers = structuredClone(A.answers);

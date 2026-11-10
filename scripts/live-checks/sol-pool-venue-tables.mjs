@@ -31,7 +31,10 @@
 //     answer, and no row failing). The last line names the counts:
 //     `live-check sol-pool-venue-tables: PASS (3 deployed, 1 not deployed yet, 0 not pinned yet)`.
 // --record writes every RPC answer read, with the records and pins they were read for, to <file>.
-// Runs: once, a contract deploy's read-back (each venue's frozen lookup tables, made by venue-table.mjs on the owner's paste or a devnet run); no host deploy changes it
+// --alarm: the tree alarm alone (the pins against the record, each cluster's genesis and pool), no table or tx read.
+// Runs: once, a contract deploy's read-back (each venue's frozen lookup tables, made by venue-table.mjs on the owner's paste or a devnet run); no host deploy changes it.
+// Nightly with --alarm: ci.yml's schedule (the venue-table-alarm job), so a PumpSwap tree past 80 percent of its newest
+// pinned generation fails a run with no person watching.
 import "../net-window.mjs";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -212,9 +215,11 @@ async function checkRow({ cluster, venue, k, newest, rec, fetchFn, call }) {
 /**
  * The check on `records` ({ mainnet, devnet }, each a parsed deploy record or null) and `pins` (parsePins of the
  * wallet's source). Rows run in order, cluster then venue then generation. Returns { ok, verdict, lines, deployed,
- * failed, unanswered, notDeployed, notPinned, summary }: `summary` is the verdict line.
+ * failed, unanswered, notDeployed, notPinned, summary }: `summary` is the verdict line. `alarm`: the nightly run (ci.yml's
+ * schedule), the tree alarm alone: the pins against the record, each cluster's genesis and its pool's tree sizes, and
+ * no table or tx read.
  */
-export async function checkTables({ records, pins, fetchFn = fetch }) {
+export async function checkTables({ records, pins, fetchFn = fetch, alarm = false }) {
   const lines = [];
   let deployed = 0, failed = 0, notDeployed = 0, unanswered = 0, notPinned = 0;
   for (const cluster of Object.keys(CLUSTERS)) {
@@ -276,10 +281,11 @@ export async function checkTables({ records, pins, fetchFn = fetch }) {
         if (r.quiet) quiet = true;
         if (r.ok && !r.quiet) {
           for (let k = 0; k < gens.length; k++) {
-            if (k >= pin.length) {
+            if (k >= pin.length && !alarm) {
               row.push(`${at} g${k + 1}: deployed, not pinned yet (${String(gens[k]?.table).slice(0, 44)})`);
               notPinned++;
             }
+            if (alarm) continue;
             const c = await checkRow({ cluster, venue, k, newest: k === gens.length - 1, rec, fetchFn, call: r.call });
             row.push(...c.lines);
             ok &&= c.ok;
@@ -320,7 +326,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const records = Object.fromEntries(Object.keys(CLUSTERS).map((c) => [c, readRecord(c, dir)]));
     const pins = parsePins(readFileSync(PINS_SOURCE, "utf8"));
     const rec = recorder();
-    const r = await checkTables({ records, pins, fetchFn: opt("--record") ? rec.fetchFn : fetch });
+    const r = await checkTables({ records, pins, fetchFn: opt("--record") ? rec.fetchFn : fetch, alarm: args.includes("--alarm") });
     if (opt("--record")) writeFileSync(opt("--record"), JSON.stringify({ records, pins, answers: rec.answers }) + "\n");
     for (const l of r.lines) console.log(`live-check ${KEY}: ${l}`);
     console.log(`live-check ${KEY}: ${r.summary}`);
