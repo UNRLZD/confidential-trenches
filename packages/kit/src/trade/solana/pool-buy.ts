@@ -269,8 +269,8 @@ const AMM_GLOBAL_BUYBACK_RECIPIENTS = 643;
 const AMM_POOL_CASHBACK = 244;
 const DEFAULT_KEY = SOLANA_SYSTEM_PROGRAM;
 
-/** The pool's pages up to the one holding entry `size` of each tree: shared by every release, so they sit in our table
- * (which gains a page when one opens, once every 1,024 entries). */
+/** The pool's pages up to the one holding entry `size` of each tree: shared by every release. A frozen table holds the
+ * pages of its generation's range only (SolanaPoolPageRange); a page past it is named as a static key, 31 bytes more. */
 export const solanaPoolPages = (program: string, stateSize: number, labelSize: number): string[] => [
   ...Array.from({ length: Math.floor(stateSize / SOLANA_POOL_PAGE_ENTRIES) + 1 }, (_, i) => solanaPoolPage(program, 0, i * SOLANA_POOL_PAGE_ENTRIES)),
   ...Array.from({ length: Math.floor(labelSize / SOLANA_POOL_PAGE_ENTRIES) + 1 }, (_, i) => solanaPoolPage(program, 1, i * SOLANA_POOL_PAGE_ENTRIES)),
@@ -816,6 +816,30 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
   return { wire, message, size: wire.length, lastValidBlockHeight: chain.lastValidBlockHeight, cuLimit: perVenue(SOLANA_POOL_BUY_CU, venue.kind), instructions };
 }
 
+/** The buy on whichever of the venue's frozen table generations makes the smallest transaction (the last of equals, in
+ *  the order given: the newest generation, which stays live longest): every table is tried with one tip account. None fits 1,232 bytes: refused `no_table_fits`, with
+ *  the smallest size; no table: refused the same. */
+export function buildSolanaPoolBuyOnTables(
+  cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: Omit<SolanaPoolBuyChain, "table">,
+  tables: readonly SolanaPoolBuyChain["table"][], opts: SolanaPoolBuyOptions = {},
+): SolanaPoolBuyBuilt & { readonly table: SolanaPoolBuyChain["table"] } {
+  const at = (opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length);
+  let best: (SolanaPoolBuyBuilt & { table: SolanaPoolBuyChain["table"] }) | null = null;
+  let smallest = Infinity;
+  for (const table of tables) {
+    try {
+      const b = buildSolanaPoolBuy(cfg, release, venue, req, { ...chain, table }, { pick: () => at });
+      if (best === null || b.size <= best.size) best = { ...b, table };
+    } catch (e) {
+      const m = /^too_large: (\d+) bytes/.exec(String((e as Error)?.message));
+      if (!m) throw e;
+      smallest = Math.min(smallest, Number(m[1]));
+    }
+  }
+  if (best === null) throw new Error(`no_table_fits: ${tables.length === 0 ? "no table" : `the smallest is ${smallest} bytes > ${SOLANA_MAX_TX_BYTES}`}`);
+  return best;
+}
+
 // ------------------------------------------------------------------------------------------------- the reads
 
 const READ_TIMEOUT_MS = 5_000;
@@ -948,10 +972,54 @@ export async function readSolanaPoolTableVenue(providers: readonly [SolanaRpc, S
  *  step 6m, card pool-sol-deploy-mainnet). */
 export const readSolanaPumpCurveTableVenue = (providers: readonly [SolanaRpc, SolanaRpc]): Promise<SolanaPoolTableVenue> => readSolanaPoolTableVenue(providers, "pump-curve");
 
-/** The addresses a venue's frozen table holds: the kit's solanaPoolBuyTableAccounts for that venue, the pool and its
- *  pages up to entry 2,047 of each tree, each once in first-seen order (what the deploy scripts extend with). */
-export const solanaPoolVenueTableList = (cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue): string[] =>
-  [...new Set(solanaPoolBuyTableAccounts(cfg, venue, solanaPoolPages(cfg.program, 1024, 1024)))];
+/** A table generation's pages: page numbers [from, to] of each tree, both ends included (page p holds entries
+ *  p * 1,024 to p * 1,024 + 1,023). */
+export type SolanaPoolPageRange = { readonly state: readonly [number, number]; readonly label: readonly [number, number] };
+/** An address lookup table holds at most 256 addresses. */
+export const SOLANA_LOOKUP_TABLE_MAX = 256;
+/** The first generation of the mainnet pump curve table (BShWZ8Fb…, frozen 8 Nov): pages 0 and 1 of each tree. */
+export const SOLANA_POOL_CURVE_FIRST_RANGE: SolanaPoolPageRange = Object.freeze({ state: Object.freeze([0, 1] as const), label: Object.freeze([0, 1] as const) });
+/** A range's pages in table order: the state tree's, then the label tree's. */
+export function solanaPoolRangePages(program: string, range: SolanaPoolPageRange): string[] {
+  const one = (tree: 0 | 1, [from, to]: readonly [number, number]): string[] => {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from || to > 0x3f_ffff) throw new Error("a page range is two page numbers, from <= to");
+    return Array.from({ length: to - from + 1 }, (_, i) => solanaPoolPage(program, tree, (from + i) * SOLANA_POOL_PAGE_ENTRIES));
+  };
+  return [...one(0, range.state), ...one(1, range.label)];
+}
+/** The addresses one generation of a venue's frozen table holds: the kit's solanaPoolBuyTableAccounts for that venue
+ *  with the range's pages, each once in first-seen order (what venue-table.mjs extends with). */
+export function solanaPoolVenueTableList(cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue, range: SolanaPoolPageRange): string[] {
+  const list = [...new Set(solanaPoolBuyTableAccounts(cfg, venue, solanaPoolRangePages(cfg.program, range)))];
+  if (list.length > SOLANA_LOOKUP_TABLE_MAX) throw new Error(`a table holds at most ${SOLANA_LOOKUP_TABLE_MAX} addresses, not ${list.length}`);
+  return list;
+}
+/** Of a generation's page slots, the state tree's share, in parts of 5: 3 state to 2 label. A buy and its sell add 3
+ *  state entries (the deposit, the release's change note, the return note) for 2 label entries (the two deposits). */
+export const SOLANA_POOL_STATE_SHARE = 3;
+/** The range of a venue's next table generation, made when the trees hold `sizes` entries: each tree from the page
+ *  before the one its next entry goes on (a buy names roots of proofs at most two epochs old, so on that page or
+ *  later: pool/queue.ts), forward as many pages as fill the table after the venue's own accounts, 3 to 2 between the
+ *  trees. A slower tree is never left with its live pages in an older generation only. */
+export function solanaPoolNextTableRange(cfg: SolanaPoolConfig, venue: SolanaPoolTableVenue, sizes: { readonly state: number; readonly label: number }): SolanaPoolPageRange {
+  for (const n of [sizes.state, sizes.label]) if (!Number.isSafeInteger(n) || n < 0 || n > 0xffff_ffff) throw new Error("a tree size is a u32");
+  const head = new Set(solanaPoolBuyTableAccounts(cfg, venue, [])).size;
+  const slots = SOLANA_LOOKUP_TABLE_MAX - head;
+  const state = Math.ceil((slots * SOLANA_POOL_STATE_SHARE) / 5);
+  const label = slots - state;
+  if (label < 2) throw new Error("no room for the pages");
+  const from = (size: number): number => Math.max(0, Math.floor(size / SOLANA_POOL_PAGE_ENTRIES) - 1);
+  const s0 = from(sizes.state);
+  const l0 = from(sizes.label);
+  return { state: [s0, s0 + state - 1], label: [l0, l0 + label - 1] };
+}
+/** The tree sizes past which a generation warns: 80 percent of the way through each tree's range. */
+export const solanaPoolRangeWarn = (range: SolanaPoolPageRange): { state: number; label: number } => {
+  const at = ([a, b]: readonly [number, number]): number => a * SOLANA_POOL_PAGE_ENTRIES + Math.floor(((b - a + 1) * SOLANA_POOL_PAGE_ENTRIES * 4) / 5);
+  return { state: at(range.state), label: at(range.label) };
+};
+/** The entries a range's last page of each tree ends before: a tree at or past it is beyond the generation. */
+export const solanaPoolRangeEnd = (range: SolanaPoolPageRange): { state: number; label: number } => ({ state: (range.state[1] + 1) * SOLANA_POOL_PAGE_ENTRIES, label: (range.label[1] + 1) * SOLANA_POOL_PAGE_ENTRIES });
 
 // ------------------------------------------------------------------------------------------------- the check
 
