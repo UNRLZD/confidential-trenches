@@ -1,7 +1,7 @@
 {
  "good": {
   "source": "a local build read from dist",
-  "at": "2026-11-10T18:54:29.153Z",
+  "at": "2026-11-10T18:59:13.565Z",
   "pageStatus": 200,
   "js": [
    {
@@ -28,7 +28,7 @@
   ],
   "css": [
    {
-    "url": "/assets/style-DCZ9xpEg.css",
+    "url": "/assets/style-CiU3Q6lX.css",
     "status": 200,
     "rule": true
    }
