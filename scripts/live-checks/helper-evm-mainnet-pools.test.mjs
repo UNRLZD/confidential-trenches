@@ -123,3 +123,60 @@ test("pins the kit writes in upper case are judged as the same addresses", () =>
   const upper = Object.fromEntries(MAINNETS.map((c) => [c, { ...kit[c], pool: up(kit[c].pool), feeCollector: up(kit[c].feeCollector), sellSender: up(kit[c].sellSender), sellDelegate: up(kit[c].sellDelegate) }]));
   assert.equal(judge(A.good, pinsOf({ ...kit, ...upper })).verdict, "PASS");
 });
+
+// card evm-fee-quiet-epoch: the helper has no block yet in the first moment of a minute: 503 index_behind (404 not_found
+// before its change). The fee is read through evm-pool-fee-epoch.mjs: that 503 is stepped back to the previous minute's
+// epoch, never retried as an upstream 503 (the same epoch would answer it again), and a chain with no block for a minute
+// is INCONCLUSIVE.
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+async function planted(first, second) {
+  const pins = pinsOf();
+  const HOST = "http://helper.test";
+  const asked = [];
+  const fetchFn = async (url, init) => {
+    const u = new URL(String(url));
+    if (u.origin === HOST) {
+      asked.push(u.search);
+      const pool = u.searchParams.get("pool");
+      const c = A.good.chains.find((x) => pins[x.chain].pool === pool);
+      const headers = { "x-helper-commit": "a".repeat(40) };
+      if (c === undefined) return new Response(NOT_FOUND[1], { status: 404, headers });
+      const a = u.searchParams.get("epoch") === null ? first : second;
+      return a === "good" ? new Response(c.fee.body, { status: 200, headers }) : new Response(a[1], { status: a[0], headers });
+    }
+    const { method } = JSON.parse(init.body);
+    const result = method === "eth_getCode" ? "0x6080" : { hash: "0x" + "ab".repeat(32) };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), { status: 200 });
+  };
+  const run = await read(HOST, fetchFn, pins);
+  return { run, asked, r: judge(run) };
+}
+
+test("a first fee answer 503 index_behind is asked at the previous epoch once each, not retried, and the 200 passes", async () => {
+  const t0 = Date.now();
+  const { asked, r } = await planted(NO_BLOCK, "good");
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.ok(Date.now() - t0 < 1_500, "no upstream-retry pause");
+  const pools = asked.filter((q) => new URLSearchParams(q).get("epoch") === null && MAINNETS.every((c) => !q.includes(pinsOf()[c].sellDelegate)));
+  assert.equal(pools.length, MAINNETS.length, `each pool asked the helper's now once: ${asked.join(" ")}`);
+  assert.equal(asked.filter((q) => q.includes("&epoch=")).length, MAINNETS.length);
+});
+
+test("a first fee answer 404 not_found and the epoch before's 200 passes", async () => {
+  const { r } = await planted(NOT_FOUND, "good");
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+});
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why", async () => {
+  const { r } = await planted(NO_BLOCK, NO_BLOCK);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  for (const chain of MAINNETS) assert.ok(r.lines.some((l) => l.startsWith(`QUIET [${chain} fee]`) && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { r } = await planted(NOT_FOUND, NOT_FOUND);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  for (const chain of MAINNETS) assert.ok(bad(r).some((l) => l.startsWith(`BAD [${chain} fee]`) && l.includes("answers 404")), bad(r).join("\n"));
+});

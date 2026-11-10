@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { HOOK, judge, plants } from "./evm-sell-hook-converge.mjs";
+import { HOOK, judge, plants, read } from "./evm-sell-hook-converge.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-sell-hook-converge.answers.json", import.meta.url), "utf8"));
 
@@ -45,4 +45,51 @@ test("the hooked plant routes through HOOK and the listed one through no hook, e
   // the Sell's data holds the swap's bytes: the hook's word only in the hooked plant
   assert.ok(p.hooked_deadline_near.data.includes(hookWord));
   assert.ok(!p.listed_deadline_near.data.includes(hookWord));
+});
+
+// card evm-fee-quiet-epoch: the fee read goes through evm-pool-fee-epoch.mjs. The helper has no block yet in the first
+// moment of a minute (503 index_behind; 404 not_found before its change): the epoch before is asked, and a chain with no
+// block for a minute is INCONCLUSIVE, never PASS.
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+const goodFee = A.good.pools[0].reads.find((r) => r.asked === "fee");
+const goodPlants = A.good.pools[0].reads.filter((r) => r.asked !== "fee");
+/** read() against a fake helper: `first` answers the fee asked for the helper's now, `second` the one with &epoch=. */
+async function planted(first, second) {
+  const asked = [];
+  let post = 0;
+  const answer = (status, body) => new Response(body, { status, headers: { "x-helper-commit": goodFee.headers["x-helper-commit"] } });
+  const fetchFn = async (url, init = {}) => {
+    asked.push(`${init.method ?? "GET"} ${url}`);
+    if (init.method === "POST") {
+      const r = goodPlants[post++ % goodPlants.length];
+      return answer(r.status, r.body);
+    }
+    const a = url.includes("&epoch=") ? second : first;
+    return a === "good" ? answer(200, goodFee.body) : answer(a[0], a[1]);
+  };
+  const run = await read("https://helper.test", fetchFn);
+  return { run, asked, r: judge(run) };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`the first fee answer ${name} and the epoch before's 200 passes, both asks recorded`, async () => {
+    const { run, asked, r } = await planted(first, "good");
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.equal(asked.filter((u) => u.startsWith("GET ")).length, 2 * run.pools.length);
+    for (const p of run.pools) assert.deepEqual(p.reads.slice(0, 2).map((x) => [x.asked, x.status]), [["fee_first", first[0]], ["fee", 200]]);
+  });
+}
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS; no plant is sent", async () => {
+  const { asked, r } = await planted(NO_BLOCK, NO_BLOCK);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("QUIET") && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+  assert.ok(asked.every((u) => u.startsWith("GET ")), "no POST");
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { r } = await planted(NOT_FOUND, NOT_FOUND);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("BAD") && /\[[a-z-]+ fee\] GET \/v1\/pool\/fee answers 404/.test(l)));
 });

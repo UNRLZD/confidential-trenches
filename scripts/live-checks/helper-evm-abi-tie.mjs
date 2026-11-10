@@ -19,7 +19,8 @@
 // are this file's strings, which contracts/pool-evm/test/abi-tie.test.mjs holds to contracts/pool-evm/abi.json.
 // After: helper
 //   node scripts/live-checks/helper-evm-abi-tie.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before:
+//   the fee is read through evm-pool-fee-epoch.mjs, and a pool with no fee to read has no plant sent).
 // --in-process answers the fee read and the three POSTs from this checkout's apps/helper/src/pool/evm.ts
 // evmPoolSender() (fee() on the kit's feeProviders, carry()), with a throwaway sender key holding nothing and the host's
 // fee recipient, instead of the host: a constructed answer, marked so in the record, for a helper not deployed. Once the
@@ -31,7 +32,9 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { poolRecordName } from "./pool-evm-deploy.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 import { RPCS } from "./pool-evm-testnet-run.mjs";
 
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -86,6 +89,7 @@ export function bodiesOf(input, pool, feeTo, epoch) {
 export function judge(run, { venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const pools = run.pools ?? [];
   say(NETWORKS.every((n) => pools.some((p) => p.network === n && p.pool === venues[n]?.pool)) && pools.length === NETWORKS.length, `pools read: ${show(pools.map((p) => `${p.network} ${p.pool}`))}, want the kit's pins on ${show(NETWORKS)}`);
   for (const p of pools) {
@@ -101,17 +105,24 @@ export function judge(run, { venues = evmPoolVenues() } = {}) {
     say(l.reads?.length === 2 && l.reads.every((r) => RPCS[n].includes(r.url) && lower(r.to) === p.pool && r.status === "0x1") && lower(l.reads[0].input) === lower(l.reads[1].input) && lower(l.reads[0].input).startsWith(`0x${selector(WITHDRAW)}`), `[${n} landed] ${l.hash}: to the pool, status 1, input 0x${lower(l.reads?.[0]?.input ?? "").slice(2, 10)} on both RPCs`);
     const f = p.reads?.find((r) => r.asked === "fee");
     const fee = json(f?.body ?? "");
-    say(f?.status === 200 && fee?.pool === p.pool && ADDRESS.test(fee?.fee_recipient ?? ""), `[${n} fee] GET /v1/pool/fee answers ${f?.status}, fee_recipient ${show(fee?.fee_recipient)}`);
-    for (const [asked, status, code] of PLANTS) {
-      const r = p.reads?.find((x) => x.asked === asked);
-      const e = json(r?.body ?? "");
-      say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${n} ${asked}] POST /v1/pool/evm/send answers ${r?.status} ${r?.body?.slice(0, 120)} (want ${status} ${code})`);
+    if (noBlockYet(f)) {
+      // the chain made no block for over a minute: no fee to read, so no plant was sent
+      quiet = true;
+      lines.push(`QUIET [${n} fee] the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${f.status} index_behind)`);
+    } else {
+      say(f?.status === 200 && fee?.pool === p.pool && ADDRESS.test(fee?.fee_recipient ?? ""), `[${n} fee] GET /v1/pool/fee answers ${f?.status}, fee_recipient ${show(fee?.fee_recipient)}`);
+      for (const [asked, status, code] of PLANTS) {
+        const r = p.reads?.find((x) => x.asked === asked);
+        const e = json(r?.body ?? "");
+        say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${n} ${asked}] POST /v1/pool/evm/send answers ${r?.status} ${r?.body?.slice(0, 120)} (want ${status} ${code})`);
+      }
     }
     for (const r of p.reads ?? []) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${n} ${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
   }
   const commits = [...new Set(pools.flatMap((p) => (p.reads ?? []).map((r) => r.headers?.["x-helper-commit"] ?? null)))];
   say(commits.length === 1, `one X-Helper-Commit across the run: ${show(commits)}`);
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 // ---- The reads ----
@@ -147,6 +158,18 @@ export function landedOf(network, dir = HERE) {
   return w.hash;
 }
 
+/** The host's fee for `pool`: { reads, answer }, `reads` the asks as the judge reads them (the epoch before's answer is
+ *  "fee", the first answer, when it was asked, "fee_first"), `answer` the one to judge (evm-pool-fee-epoch.mjs). */
+export async function readFee(base, pool, fetchFn = fetch) {
+  const ask = async (url) => {
+    const get = await fetchFn(url, { signal: AbortSignal.timeout(20_000) });
+    return { asked: "fee", status: get.status, headers: { "x-helper-commit": get.headers.get("x-helper-commit") }, body: await get.text() };
+  };
+  const { answer, first } = await evmPoolFeeAsk(ask, base, pool);
+  if (first) first.asked = "fee_first";
+  return { reads: first ? [first, answer] : [answer], answer };
+}
+
 async function collect(base, inProcess) {
   const venues = evmPoolVenues();
   const commit = inProcess ? execFileSync("git", ["rev-parse", "HEAD"], { cwd: HERE, encoding: "utf8" }).trim() : undefined;
@@ -158,18 +181,22 @@ async function collect(base, inProcess) {
     for (const what of Object.keys(CALLS)) p.code[what] = await Promise.all(RPCS[network].map(async (url) => ({ url, code: await rpc(url, "eth_getCode", [v[what], "latest"]) })));
     const hash = landedOf(network);
     p.landed = { hash, reads: await Promise.all(RPCS[network].map(async (url) => { const tx = await rpc(url, "eth_getTransactionByHash", [hash]); const rc = await rpc(url, "eth_getTransactionReceipt", [hash]); return { url, to: tx.to, input: tx.input, status: rc.status }; })) };
-    const get = await fetch(`${base}/v1/pool/fee?pool=${v.pool}`, { signal: AbortSignal.timeout(20_000) });
-    const hostFee = { status: get.status, headers: { "x-helper-commit": get.headers.get("x-helper-commit") }, body: await get.text() };
+    const { reads: feeReads, answer: hostFee } = await readFee(base, v.pool);
     const feeTo = json(hostFee.body)?.fee_recipient ?? `0x${"0".repeat(40)}`;
     const epoch = Math.floor(Date.now() / 60_000) * 60_000;
     const bodies = bodiesOf(p.landed.reads[0].input, v.pool, feeTo, epoch);
     // in-process: the branch's sender on the kit's fee providers, a throwaway key (no gas: nothing it signs could land)
     const sender = carryOf?.({ network, pool: v.pool, senderKey: new Uint8Array(32).fill(7), feeRecipient: feeTo }, v.feeProviders.map((url) => (method, params) => rpc(url, method, params)));
     if (sender) {
-      p.feeRecipientFrom = { base, ...hostFee };
+      p.feeRecipientFrom = { base, status: hostFee.status, headers: hostFee.headers, body: hostFee.body };
       const a = await sender.fee(Date.now());
       p.reads.push({ asked: "fee", status: a === null ? 503 : 200, headers: { "x-helper-commit": commit }, body: JSON.stringify(a) });
-    } else p.reads.push({ asked: "fee", ...hostFee });
+    } else p.reads.push(...feeReads);
+    // no fee to read (no block in the epoch or the one before): no plant is sent
+    if (!inProcess && noBlockYet(hostFee)) {
+      pools.push(p);
+      continue;
+    }
     for (const [asked] of PLANTS) {
       if (sender) {
         const a = await sender.carry(bodies[asked]);
@@ -190,10 +217,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const run = await collect(opt("--base") ?? BASE, args.includes("--in-process"));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
-    const { ok, lines } = judge(run);
+    const { verdict, lines } = judge(run);
     console.log(lines.join("\n"));
-    console.log(ok ? "PASS" : "FAIL");
-    process.exit(ok ? 0 : 1);
+    console.log(verdict);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`error: ${e.message}`);
     process.exit(2);

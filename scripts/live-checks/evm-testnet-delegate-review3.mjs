@@ -27,7 +27,8 @@
 //     that sold through the helper after its redeploy.
 // After: helper
 //   node scripts/live-checks/evm-testnet-delegate-review3.mjs [--base <url>] [--record <file>] [--write-record]
-//     PASS exit 0, FAIL exit 1, error exit 2
+//     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before:
+//     the fee is read through evm-pool-fee-epoch.mjs, and every other check still ran and passed)
 // --record writes { notes, rpcs, deployments, good, bad, helper, runs } to <file> (evm-testnet-delegate-review3.answers.json,
 // which the test replays), keeping the file's recorded bad answers (main 0628a2d5's pins); --write-record, on PASS,
 // writes the run record evm-testnet-delegate-review3.md (Money path: yes, one Tx line per transaction of the redeploys,
@@ -39,10 +40,12 @@ import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } fr
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { check as sellCheck, runRecordFor } from "./evm-sell-v4.mjs";
 import { BASE, checkSells } from "./helper-evm-sender.mjs";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
 import { keccak, recorder as deployRecorder, rpc } from "./pool-evm-deploy.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 import { RPCS as RUN_RPCS, SELL_SELECTOR, SELL_SELECTOR_10, runRecord as runLinesOf, sellSelectorOf, spoil } from "./pool-evm-testnet-run.mjs";
 
 export const KEY = "evm-testnet-delegate-review3";
@@ -164,6 +167,12 @@ export function checkHelper(answers, venues = evmPoolVenues()) {
   const senders = {};
   for (const c of CHAINS) {
     const a = (answers ?? []).find((x) => x.network === c);
+    if (noBlockYet(a)) {
+      // the chain made no block for over a minute: no fee answer to read, so neither pin is judged
+      lines.push(`QUIET ${c}: the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${a.status} index_behind)`);
+      senders[c] = null;
+      continue;
+    }
     let b = null;
     try {
       b = a && a.status === 200 ? JSON.parse(a.body) : null;
@@ -175,7 +184,8 @@ export function checkHelper(answers, venues = evmPoolVenues()) {
     lines.push(`${ADDRESS.test(snd) && snd === lower(v.sellSender) ? "ok  " : "FAIL"} ${c}: the helper's fee answer names the sell sender ${b?.sell_sender ?? "(none)"}, the kit's pin ${v.sellSender ?? "(none)"}`);
     senders[c] = ADDRESS.test(snd) ? snd : null;
   }
-  return { ok: lines.every((l) => l.startsWith("ok")), lines, senders };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("FAIL")), lines.some((l) => l.startsWith("QUIET")));
+  return { ok: verdict === "PASS", verdict, lines, senders };
 }
 
 /** Whether receipt `r` carries `collector`'s Paid(W, exactly the fee), not removed: FeeCollector emits msg.value */
@@ -228,13 +238,18 @@ export async function checkRuns(runs, transportOf, deployments, senders = RUN_SE
   return { ok, lines, paid };
 }
 
-/** HELPER_HOST's fee answer for each chain's pool (the kit's pinned pool) */
+/** HELPER_HOST's fee answer for each chain's pool (the kit's pinned pool): the epoch's, or, when the helper has no block
+ *  in it yet, the one before's (evm-pool-fee-epoch.mjs), with the first answer kept as `first`. */
 export async function readHelper(base, fetchFn = fetch, venues = evmPoolVenues()) {
   const out = [];
   for (const c of CHAINS) {
     const pool = venues[c]?.pool;
-    const r = await fetchFn(`${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`, { redirect: "error", signal: AbortSignal.timeout(15_000) });
-    out.push({ network: c, pool, status: r.status, body: (await r.text()).slice(0, 2_000), commit: r.headers.get("x-helper-commit") });
+    const ask = async (url) => {
+      const r = await fetchFn(url, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+      return { status: r.status, body: (await r.text()).slice(0, 2_000), commit: r.headers.get("x-helper-commit") };
+    };
+    const { answer, first } = await evmPoolFeeAsk(ask, base, pool);
+    out.push({ network: c, pool, ...answer, ...(first ? { first } : {}) });
   }
   return out;
 }
@@ -245,6 +260,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     const out = { notes: [], rpcs: {}, deployments: {}, good: {}, helper: [], runs: [] };
     let ok = true;
+    let quiet = false;
     for (const c of CHAINS) {
       if (!existsSync(deployFile(c))) throw new Error(`no record ${path.basename(deployFile(c))}`);
       const d = JSON.parse(readFileSync(deployFile(c), "utf8"));
@@ -260,7 +276,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     out.helper = await readHelper(opt("--base") ?? BASE);
     const h = checkHelper(out.helper);
     for (const l of h.lines) console.log(`live-check ${KEY}: ${l}`);
-    ok &&= h.ok;
+    ok &&= h.verdict !== "FAIL";
+    quiet ||= h.verdict === "INCONCLUSIVE";
     const recs = new Map();
     const runs = CHAINS.flatMap((c) => runFiles(c).map((f) => ({ record: JSON.parse(readFileSync(f, "utf8")), urls: RUN_RPCS[c] })));
     const r = await checkRuns(runs, (run) => {
@@ -280,12 +297,13 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       out.notes.push(`Recorded ${new Date().toISOString()} by: node scripts/live-checks/${KEY}.mjs --record; the redeploys at the kit's pins, HELPER_HOST's fee answers (commit ${out.helper.map((x) => x.commit).join(", ")}) and the runs through the delegate; each run's bad answers are pool-evm-testnet-run's spoil (a spent nullifier the pool never marked).`, ...(prev.notes ?? []).filter((n) => n.startsWith("bad: ")));
       writeFileSync(opt("--record"), JSON.stringify(out) + "\n");
     }
-    console.log(`live-check ${KEY}: ${ok ? "PASS" : "FAIL"}`);
-    if (ok && args.includes("--write-record")) {
+    const verdict = verdictOf(!ok, quiet);
+    console.log(`live-check ${KEY}: ${verdict}`);
+    if (verdict === "PASS" && args.includes("--write-record")) {
       writeFileSync(RUN_RECORD, runRecord(CHAINS.map((c) => out.deployments[c]), runs.map((x) => x.record), RUN_FUNDINGS, r.paid));
       console.log(`live-check ${KEY}: wrote ${path.relative(process.cwd(), RUN_RECORD)}`);
     }
-    process.exit(ok ? 0 : 1);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${String(e.message).split("\n")[0]}`);
     process.exit(2);

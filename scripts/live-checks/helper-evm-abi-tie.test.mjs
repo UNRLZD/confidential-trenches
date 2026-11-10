@@ -16,7 +16,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { evmPoolRecords, FIRST_SET } from "./helper-evm-sender.mjs";
-import { bodiesOf, judge, landedOf, NETWORKS, runRecordName } from "./helper-evm-abi-tie.mjs";
+import { bodiesOf, judge, landedOf, NETWORKS, readFee, runRecordName } from "./helper-evm-abi-tie.mjs";
 import { poolFile } from "./pool-evm-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./helper-evm-abi-tie.answers.json", import.meta.url), "utf8"));
@@ -153,4 +153,53 @@ test("the bodies: the landed calldata with the fee answer's recipient, its three
   assert.equal((b.three_argument.data.length - 2) / 2, 4 + 32 * 27, "the three-argument withdraw: 868 bytes");
   assert.equal(b.three_argument.data.slice(2, 10), "8a3bff22");
   assert.equal(b.trailing_byte.data, `${b.landed_withdraw.data}00`);
+});
+
+// card evm-fee-quiet-epoch: the host's fee is read through evm-pool-fee-epoch.mjs (readFee). The helper has no block yet in
+// the first moment of a minute (503 index_behind; 404 not_found before its change): the epoch before is asked, and a chain
+// with no block for a minute is INCONCLUSIVE, never PASS (the pool's plants are then not sent).
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+const goodFee = (pool) => A.good.pools.find((p) => p.pool === pool).reads.find((r) => r.asked === "fee");
+/** The good run with each pool's fee read through readFee against a fake helper (`first` for the epoch asked, `second`
+ *  for the one before); a pool with no fee to read keeps no plants, as collect() sends none. */
+async function planted(first, second) {
+  const asked = [];
+  const fetchFn = async (url) => {
+    asked.push(url);
+    const a = url.includes("&epoch=") ? second : first;
+    const good = goodFee(new URL(url).searchParams.get("pool"));
+    const [status, body] = a === "good" ? [200, good.body] : a;
+    return new Response(body, { status, headers: { "x-helper-commit": good.headers["x-helper-commit"] } });
+  };
+  const run = structuredClone(A.good);
+  for (const p of run.pools) {
+    const { reads, answer } = await readFee("https://helper.test", p.pool, fetchFn);
+    p.reads = [...reads, ...(answer.status === 200 ? p.reads.filter((r) => r.asked !== "fee") : [])];
+    p.fee = reads;
+  }
+  return { run, asked, r: judge(run) };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`the first fee answer ${name} and the epoch before's 200 passes, both asks recorded`, async () => {
+    const { run, asked, r } = await planted(first, "good");
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.equal(asked.length, 2 * run.pools.length);
+    for (const p of run.pools) assert.deepEqual(p.fee.map((x) => [x.asked, x.status]), [["fee_first", first[0]], ["fee", 200]]);
+  });
+}
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why", async () => {
+  const { r } = await planted(NO_BLOCK, NO_BLOCK);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith("QUIET") && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.startsWith("BAD")), r.lines.join("\n"));
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { r } = await planted(NOT_FOUND, NOT_FOUND);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("BAD") && /\[[a-z-]+ fee\] GET \/v1\/pool\/fee answers 404/.test(l)));
 });
