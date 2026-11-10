@@ -93,11 +93,17 @@ const line = (v) => `{\n  "addresses": [\n    "${v}",\n    "11111111111111111111
 test('the frozen devnet page address that starts with EAAA passes in the deploy record', () => {
   assert.deepEqual(scan(RECORD, line(PAGE)), []);
 });
-for (const [what, value] of [['another EAAA value', `EAAA${PAGE.slice(4, -1)}z`], ['the page address with a character more', `${PAGE}x`]]) {
+// each a value an allow wider than the one exact value would pass: the same length and last character (k), one
+// character short, another first character after EAAA
+for (const [what, value] of [['another EAAA value', `EAAA${PAGE.slice(4, -1)}z`], ['the page address with a character more', `${PAGE}x`], ['another 44-character EAAA value that ends in k', `EAAA${PAGE.slice(4, -2)}Zk`], ['the page address one character short', PAGE.slice(0, -1)], ['another EAAA value with the page address\'s tail', `EAAAX${PAGE.slice(5)}`]]) {
   test(`${what} in the deploy record is found`, () => {
     assert.deepEqual(scan(RECORD, line(value)), ['square-access-token']);
   });
 }
+// the allow is the Square rule's alone: the same value under a key's name is still found by generic-api-key
+test('the frozen devnet page address under a key name is still found by generic-api-key', () => {
+  assert.deepEqual(scan('apps/helper/src/x.ts', `export const api_key = "${PAGE}";\n`), ['generic-api-key']);
+});
 test('a NEAR secret key is still found in the deploy record beside the page address', () => {
   assert.deepEqual(scan(RECORD, `${line(PAGE)}${SIG}\n`), ['near-ed25519-secret-key']);
 });
