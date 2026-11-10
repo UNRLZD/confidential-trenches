@@ -101,7 +101,7 @@ import type { Deferred, KindContext } from "./api.ts";
 import { askOf, solanaPoolFollowDeps, type PoolUx, type PoolUxReads } from "./pool-deposit-follow.ts";
 import { pageRpc } from "./page-rpc.ts";
 import { solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { PAGE_SOL_CACHE, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaRpcs } from "./pool-testnet.ts";
+import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pageEvmHold, pageEvmPoolRpcs, pageSolanaLister, pageSolanaSettleRpcs } from "./pool-testnet.ts";
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
@@ -113,7 +113,7 @@ export const RESTORE_BEAT_MS = 5_000;
  *  run ends stalled); a Solana pool's `lister` names its marks for the pair to read (the pair's first RPC when none), and
  *  its `cache` holds the marks and pages the page's settles already read on that pair (pool-testnet.ts PAGE_SOL_CACHE). */
 export type RestorePool =
-  | { chain: "solana"; program: string; scope: bigint; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null; lister?: () => SolanaRpc | undefined; cache?: SolanaPoolCache }
+  | { chain: "solana"; program: string; scope: bigint; rpcs: (() => readonly [SolanaRpc, SolanaRpc]) | null; lister?: () => SolanaRpc | undefined; cache?: SolanaPoolCache; markBatches?: readonly [number, number] }
   | { chain: "evm"; pin: EvmPoolPin; scope: bigint; rpcs: (() => readonly EvmRpc[]) | null };
 
 /** Step 5's reads: the NEAR pair, the readers' options and each scope's answer (tests only, both). */
@@ -359,7 +359,7 @@ const EVM_PAGE: Readonly<Record<"base" | "robinhood", EvmNetwork>> = POOL_TESTNE
  *  `evmPins` is EVM_POOLS unless a test plants pins (as pools.ts's pagePoolsOf). */
 export function pagePools(evmPins: Readonly<Partial<Record<EvmNetwork, EvmPoolPin>>> = EVM_POOLS): RestorePool[] {
   const out: RestorePool[] = [];
-  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE });
+  if (PAGE_SOL_PIN !== undefined) out.push({ chain: "solana", program: PAGE_SOL_PIN.program, scope: solanaPoolOf(PAGE_SOL_PIN.program).scope, rpcs: pageSolanaSettleRpcs, lister: pageSolanaLister, cache: PAGE_SOL_CACHE, markBatches: PAGE_SOL_MARK_BATCHES });
   for (const chain of ["base", "robinhood"] as const) {
     const pin = evmPins[EVM_PAGE[chain]];
     if (pin === undefined) continue;
@@ -479,7 +479,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (p.rpcs === null) throw new Error("no reads on this page");
           if (p.chain === "solana") {
             const lister = p.lister?.();
-            return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), signal })).notes;
+            return (await solana({ seed64: seed, program: p.program, rpcs: p.rpcs(), ...(lister ? { lister } : {}), ...(p.cache ? { cache: p.cache } : {}), ...(p.markBatches ? { markBatches: p.markBatches } : {}), signal })).notes;
           }
           // the notes only: no W is read or named to a provider for a record the page keeps none of
           // the page's hold (the deposit's sync's too) and its history sources (card evm-pool-leaves-any-source)

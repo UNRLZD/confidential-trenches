@@ -27,7 +27,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, DEVNET_TABLE, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -493,11 +493,49 @@ test("review P2-1 of a34c1626: a sign out stops the Solana RESERVED pass's settl
   assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
-test("review P2-1 and P2-2 of a34c1626: every Solana settle on the page passes the sign-out stop and the page's cache, in every path (buy, reserved pass, owed finish, withdraw)", () => {
+test("review P2-1 and P2-2 of a34c1626, P2-1 and P3-3 of e3489b3b: every Solana settle on the page reads on the settle pair with the page's batches, and passes the sign-out stop's signal taken before its first wait and the page's cache, in every path (buy, reserved pass, owed finish, withdraw)", () => {
   const src = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   const calls = [...src.matchAll(/solanaSettle(?:Spent|Reserved)\(\{[^}]*\}\)/g)].map((m) => m[0]);
   assert.equal(calls.length, 4);
-  for (const c of calls) assert.match(c, /, signal: solanaStop\.signal, cache \}\)$/, c);
+  for (const c of calls) assert.match(c, /, rpcs: settleRpcs\(\), lister: lister\(\), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES \}\)$/, c);
+  // each site's signal is the stop's when the call began: four takes, and the stop read nowhere else
+  assert.equal([...src.matchAll(/const signal = solanaStop\.signal;/g)].length, 4);
+  assert.equal([...src.matchAll(/solanaStop\.signal/g)].length, 4);
+  // the settle pair: the page's two seats, the helper's with the window-long retry
+  assert.match(src, /solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER, SOLANA_RPC_WINDOW_RETRY\)\)\]/);
+  assert.match(src, /solanaPacedRpc\(testnetRpc\(TESTNET_RPCS\.solana\[1\], SOLANA_RPC_WINDOW_RETRY\)\)\]/);
+  assert.deepEqual(PAGE_SOL_MARK_BATCHES, [10, 100]);
+});
+
+test("review P3-3 of e3489b3b: a sign out that comes while the RESERVED pass reads its seed stops the pass before any read", async () => {
+  const { w, ns } = await wallet();
+  let letSeed!: () => void;
+  const seedGate = new Promise<void>((ok) => (letSeed = ok));
+  let seedAsked = 0;
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => (seedAsked++, await seedGate, SEED64.slice()) }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const pass = t.stateRead();
+  while (seedAsked === 0) await new Promise((r) => setTimeout(r, 1));
+  const before = calls.length;
+  t.signingOut();
+  letSeed();
+  await pass;
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
