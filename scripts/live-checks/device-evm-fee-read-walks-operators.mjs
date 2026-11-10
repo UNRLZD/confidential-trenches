@@ -35,7 +35,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const CHILD = path.join(REPO, "packages/wallet/scripts/bind-fee-live.ts");
 export const childArgs = () => ["--import", pathToFileURL(path.join(REPO, "scripts/net-window.mjs")).href, CHILD];
 const CHAINS = { base: 8453, robinhood: 4663 };
-export const ORIGINS = Object.freeze([new URL(PAGES.sign).origin, new URL(PAGES.app).origin]);
+/** The origins the device reads from: SIGN_HOST's (the bind) and APP_HOST's (Verify), each equal to PAGES' (the test
+ *  holds it), named here as the deploys they follow. */
+export const ORIGINS = Object.freeze(["https://confidential.unrealized.trade", "https://ct-app.unrealized.trade"]);
+if (ORIGINS[0] !== new URL(PAGES.sign).origin || ORIGINS[1] !== new URL(PAGES.app).origin) throw new Error(`${"device-evm-fee-read-walks-operators"}: ORIGINS are not PAGES'`);
 const AGE_S = 60;
 const EPOCH_MS = 60_000;
 const hostOf = (u) => new URL(u).host;
