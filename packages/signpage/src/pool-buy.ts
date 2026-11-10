@@ -37,7 +37,8 @@
 //   send the helper refused or never answered, a signature that is not one, another transaction under it on both RPCs,
 //   or none read back: the signed transaction may still land, so the answer is not_landed only once both RPCs'
 //   finalized height is past the blockhash's last valid one (the higher of RPC 0's word and RPC 1's height + 151) and
-//   the note's settle still finds no spend; past the reads it is "sent".
+//   the note's settle, read at or past each RPC's slot of that height read (pastAt), returns no spend; a settle that
+//   throws says nothing (card sol-settle-failed-is-not-unspent). Past the reads it is "sent".
 // - What the app is told (card signpage-sent-read-back): the helper's signature is a name to read back, never a fact.
 //   The kind answers "sent" with it, and an answer's txs name it, only once each RPC read this very transaction's
 //   bytes under it. Before that the app has no answer and no transaction id; one read as another transaction, or on
@@ -124,8 +125,9 @@ export type PoolBuyHost = {
   seed64(): Promise<Uint8Array>;
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
   send(pool: string, tx: Uint8Array): Promise<unknown>;
-  /** The wallet's solanaSettleSpent for this note: "spent" once its change is written and the note is SPENT. */
-  settle(noteId: string): Promise<{ kind: "spent" | "unspent" }>;
+  /** The wallet's solanaSettleSpent for this note: "spent" once its change is written and the note is SPENT. minSlots:
+   *  each RPC's reads at or past it (the not_landed verdict's, pastAt's slots). A throw is no answer, never "unspent". */
+  settle(noteId: string, minSlots?: readonly [number, number]): Promise<{ kind: "spent" | "unspent" }>;
   /** The device's clock, ms. */
   now?(): bigint;
   /** Read-back reads and the wait between them. */
@@ -338,6 +340,21 @@ export async function pastOnBoth(rpcs: readonly [SolanaRpc, SolanaRpc], last: nu
     return hs.every((x) => int(x) > last);
   } catch {
     return false;
+  }
+}
+
+/** Each RPC's finalized slot once both are past `last`: one getEpochInfo at finalized per RPC, so the block height and
+ *  the slot are one node's, of one block; null while either is not past, or a read fails. A read held to these slots
+ *  (minContextSlot) holds every transaction of that blockhash that ever landed. */
+export async function pastAt(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<[number, number] | null> {
+  try {
+    const got = await Promise.all(rpcs.map(async (r) => {
+      const e = (await r("getEpochInfo", [{ commitment: "finalized" }])) as { blockHeight?: unknown; absoluteSlot?: unknown } | null;
+      return int(e?.blockHeight) > last ? int(e?.absoluteSlot) : null;
+    }));
+    return got[0] !== null && got[1] !== null ? [got[0], got[1]] : null;
+  } catch {
+    return null;
   }
 }
 
@@ -559,9 +576,15 @@ export async function sendAndSettle(
   const clock = (): number => Number(h.now?.() ?? BigInt(Date.now()));
   const signedAt = clock();
   const inTime = (): boolean => clock() - signedAt < POOL_BUY_SETTLE_MS;
-  // the settle (solanaSettleSpent: the note SPENT, its change written), asked until it finds the spend, then never again
+  // the settle (solanaSettleSpent: the note SPENT, its change written), asked until it finds the spend, then never again.
+  // A settle that throws (a lister that refuses, a 429 past the retry, a stop) is not known yet (null), never "unspent"
   let settled = false;
-  const spent = async (): Promise<boolean> => settled || (settled = (await h.settle(r.noteId).catch(() => ({ kind: "unspent" as const }))).kind === "spent");
+  const spent = async (minSlots?: readonly [number, number]): Promise<boolean | null> => {
+    if (settled) return true;
+    const s = await h.settle(r.noteId, minSlots).then((x) => x.kind === "spent", () => null);
+    settled = s === true;
+    return s;
+  };
   // whose spend it is, on both RPCs at finalized (spendOwner), read at or past both RPCs' finalized slot read after
   // the settle found it; W's history read on across the reads of this run from where each RPC stopped. The pin is the
   // proof's own, which releaseOf held to the page's. `hint`: the helper's signature, read first (it may be another's:
@@ -588,19 +611,21 @@ export async function sendAndSettle(
   };
   // the chain's word on the note (its spent mark and change on both RPCs, then whose spend it is) over the helper's or
   // one RPC's: this attempt's spend is filled, named by the signature both RPCs read it under. not_landed once
-  // another's spend is read, or once both RPCs' finalized height is past the blockhash's last one and the settle still
-  // finds no spend (the kit's rule: never not_landed while the transaction may still land,
+  // another's spend is read, or once both RPCs' finalized height is past the blockhash's last one and the settle, read at
+  // or past each RPC's slot of that read, returns no spend (a settle that throws decides nothing; the kit's rule: never
+  // not_landed while the transaction may still land,
   // packages/kit/src/trade/solana/flow.ts finishSolanaSet); until then the reads go on, and past them the answer is
   // "sent", the note RESERVED (or SPENT with its change, whose spend not read yet) for the state reads' pass. `txs`
   // names the helper's signature only once both RPCs read this very transaction under it.
   const unlanded = async (txs: TxRef[], hint?: string): Promise<PoolBuyAnswer> => {
     for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
       if (i > 0) await wait(POOL_BUY_WAIT_MS);
-      const past = await pastOnBoth(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
-      if (await spent()) {
+      const past = await pastAt(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
+      const s = await spent(past ?? undefined);
+      if (s) {
         const a = await spentBy(hint, txs);
         if (a) return a;
-      } else if (past) return { stage: "not_landed", txs };
+      } else if (s === false && past !== null) return { stage: "not_landed", txs };
     }
     return { stage: "sent", txs };
   };
