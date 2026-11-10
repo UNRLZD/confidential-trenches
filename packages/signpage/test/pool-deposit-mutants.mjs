@@ -60,8 +60,8 @@ export const MUTANTS = [
   [SOL, [["      if (h.signal?.aborted) return null;\n      // a send not read before", "      // a send not read before"]], "pool-deposit-sent-end review 4: the end's reads stop"],
   // delta review 2 of release-86: the stop read before the wait for an RPC behind, not after it
   [SOL, [["    await pause(ms);\n    stopped(h);\n", "    stopped(h);\n    await pause(ms);\n"]], "pool-deposit-sent-end review 2 M1"],
-  // E1: the follower's round read before U's finalized nonce
-  [EVM, [['  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n  stopped(h);\n  const round = await h.round(h.signal);\n', '  const round = await h.round(h.signal);\n  const fin = await both(h.rpcs, async (rpc, k) => quantity(await rpc("eth_getTransactionCount", [n.u, "finalized"]), `rpc ${k} finalized nonce`));\n']], "review 8 E1:"],
+  // E1: the follower's round read before U's nonce (spentFinal)
+  [EVM, [['  const spent = await spentFinal(h.rpcs, n.u, nonce, sleepOf(h), () => stopped(h));\n  stopped(h);\n  const round = await h.round(h.signal);\n', '  stopped(h);\n  const round = await h.round(h.signal);\n  const spent = await spentFinal(h.rpcs, n.u, nonce, sleepOf(h), () => stopped(h));\n']], "review 8 E1:"],
   // E4: a take read from a Deposited not final yet; E5: a Deposited at another value read as landed
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.value !== n.value ? "dead" : d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],
@@ -70,7 +70,7 @@ export const MUTANTS = [
   // E8: the first send's nonce, not the highest
   [EVM, [["  const nonce = (rec?.evmSends ?? []).reduce((m, x) => (x.nonce > m ? x.nonce : m), n.nonce);", "  const nonce = rec?.evmSends?.[0]?.nonce ?? n.nonce;"]], "review 8 E8:"],
   // review 1 (EVM): every send dead read as an end; the pass not started
-  [EVM, [['  return fin[0] > nonce && fin[1] > nonce ? "expired" : null;', '  return fin[0] > nonce && fin[1] > nonce ? "dead" : null;']], "pool-deposit-sent-end review 1 (EVM)"],
+  [EVM, [['  return spent !== null && round.finalBlock >= spent ? "expired" : null;', '  return spent !== null && round.finalBlock >= spent ? "dead" : null;']], "pool-deposit-sent-end review 1 (EVM)"],
   [EVM, [["    if (kick) h.settle?.();\n", ""]], "pool-deposit-sent-end review 1 (EVM)"],
   // review 3 (EVM)
   [EVM, [['(a.stage === "part_filled" && (l === null || l.notes.length === 0))', 'a.stage === "part_filled"']], "pool-deposit-sent-end review 3 (EVM)"],
@@ -121,7 +121,7 @@ export const MUTANTS = [
   [TESTNET, [["      records: async () => readNotes(await page.store()),\n      seed64", "      records: async () => [],\n      seed64"]], "pool-deposit-sent-end low 3"],
   // low 4: no stop before each read; the end's wait not ended by the sign out, or not given its signal
   [SOL, [['  if (h.signal?.aborted) throw new Error("signed out");\n', ""]], "pool-deposit-sent-end low 4: a sign out during"],
-  [EVM, [["  stopped(h);\n  const fin", "  const fin"], ["  stopped(h);\n  const round", "  const round"]], "pool-deposit-sent-end low 4 (EVM, REV E3)"],
+  [EVM, [["sleepOf(h), () => stopped(h));", "sleepOf(h));"], ["  stopped(h);\n  const round", "  const round"]], "pool-deposit-sent-end low 4 (EVM, REV E3)"],
   [SOL, [['    signal?.addEventListener("abort", done, { once: true });\n', ""]], "pool-deposit-sent-end low 4: the end's own wait"],
   [SOL, [["  const pause = h.wait ?? ((ms: number) => followWait(ms, h.signal));", "  const pause = h.wait ?? ((ms: number) => followWait(ms));"]], "pool-deposit-sent-end low 4: the end's own wait"],
   // delta review 2 M1: a wait inside a note's reads not ended in the stop, so the mark's reads again go out after it
@@ -129,6 +129,16 @@ export const MUTANTS = [
   [EVM, [["  const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));", "  const wait = h.wait ?? ((ms: number) => followWait(ms));"]], "pool-deposit-sent-end low 4 (EVM): the end's own wait"],
   // low 5: a hand-off whose store read fails hands no note over (part_filled told unproved, or nothing after "sent")
   [EVM, [["        notes = [...askNotes.values()];\n", "        notes = [];\n"]], "pool-deposit-sent-end low 5 (EVM)"],
+  // card evm-deposit-note-stays-incoming: U's nonce read at the newest block, its block kept until final on both RPCs
+  // with its hash, and within the round's final events. The verdict's read after the round; one RPC's word for the
+  // nonce, the finalized header or the kept hash; no hash check; no round bound
+  [EVM, [["  const spent = last === undefined ? null : await spentFinal(r.h.rpcs, id.address, last.nonce, sleepOf(r.h));\n  const round = await r.h.round();\n", "  const round = await r.h.round();\n  const spent = last === undefined ? null : await spentFinal(r.h.rpcs, id.address, last.nonce, sleepOf(r.h));\n"]], "pool-deposit-sent-end fold: the verdict reads U's nonce"],
+  [EVM, [["    if (at[0] <= nonce || at[1] <= nonce) return null;", "    if (at[0] <= nonce) return null;"]], "evm-deposit-note-stays-incoming: one RPC behind or lying"],
+  [EVM, [["  if (fin[0].number < blk.number || fin[1].number < blk.number) return null;", "  if (fin[0].number < blk.number) return null;"]], "evm-deposit-note-stays-incoming: one RPC behind or lying"],
+  [EVM, [["  if (fin[0].number < blk.number || fin[1].number < blk.number) return null;", "  if (fin[1].number < blk.number) return null;"]], "evm-deposit-note-stays-incoming: one RPC behind or lying"],
+  [EVM, [["  if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || ", "  if (at[0].hash !== blk.hash || "]], "evm-deposit-note-stays-incoming: one RPC behind or lying"],
+  [EVM, [["  if (at[0].hash !== blk.hash || at[1].hash !== blk.hash || at[0].number !== blk.number || at[1].number !== blk.number) {", "  if (false) {"]], "evm-deposit-note-stays-incoming: a reorg between"],
+  [EVM, [["  if (spent !== null && round.finalBlock >= spent) return { kind: \"dead\" };", "  if (spent !== null) return { kind: \"dead\" };"]], "evm-deposit-note-stays-incoming: one RPC behind or lying"],
   // card kit-sol-pool-deposit-floor (S-01 review): the deposit hands the kit's builder the rent both RPCs read
   [SOL, [["{ value, precommitment }, st.sizes, blockhash, st.rent);", "{ value, precommitment }, st.sizes, blockhash, { lamportsPerByte: 0n, factor: 1n });"]], "H1 (probe B):"],
   [SOL, [["{ value, precommitment }, st.sizes, blockhash, st.rent);", "{ value, precommitment }, st.sizes, blockhash, { lamportsPerByte: 5_080n, factor: 1n });"]], "S-01 review:"],
