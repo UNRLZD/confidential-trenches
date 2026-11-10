@@ -251,3 +251,26 @@ test("never a pass on nothing: one head, two heads over a minute apart, or no bl
   const r = judge(await collect(feeOf, cases[0][1], ONE_POOL, at));
   assert.deepEqual(noAnswerHosts(r.lines.join("\n")), HOSTS.slice(1).sort(), r.lines.join("\n"));
 });
+
+// card evm-fee-quiet-epoch, real runs of this check against the deployed helper (https://ct-api.unrealized.trade,
+// helper at f8945cd4): `live` 10 Nov 00:40:41Z, every pool; `turn` 00:41:00.9Z, robinhood-testnet asked a second into
+// the minute, the heads at 00:40:59 and 00:41:00, so the epoch 00:40 judged (the epoch 00:41 is the one the deployed
+// helper answered 404 in the first 0.06 to 0.32 s of 00:37 and 00:38, read the same hour); `notCarried` 00:40:06Z,
+// robinhood-testnet's fee recipient asked as a pool: 404 for the epoch and for the one before.
+test("real runs: every pool PASSes; at the turn the epoch both heads hold is judged; an address the helper does not carry FAILs", () => {
+  const live = judge(A.live.runs);
+  assert.equal(live.verdict, "PASS", live.lines.join("\n"));
+  assert.equal(A.live.runs.length, 4);
+  const turn = judge(A.turn.runs);
+  assert.equal(turn.verdict, "PASS", turn.lines.join("\n"));
+  const r = A.turn.runs[0];
+  assert.ok(r.epochMs < r.nowMs - (r.nowMs % 60_000), "the epoch judged is before the epoch now");
+  assert.ok(r.heads.some((h) => Number(BigInt(h.timestamp)) * 1000 < r.nowMs - (r.nowMs % 60_000)), "a head was still before the minute");
+  const nc = judge(A.notCarried.runs);
+  assert.equal(nc.verdict, "FAIL", nc.lines.join("\n"));
+  assert.ok(nc.lines.some((l) => l.startsWith("BAD robinhood-testnet ") && l.includes('{"status":404,"body":{"error":{"code":"not_found"}}}')), nc.lines.join("\n"));
+  // the turn's run with its heads moved into the epoch now no longer matches the epoch it asked: never judged good
+  const moved = structuredClone(A.turn.runs);
+  for (const h of moved[0].heads) h.timestamp = `0x${Math.ceil(moved[0].nowMs / 60_000 * 60).toString(16)}`;
+  assert.equal(judge(moved).verdict, "INCONCLUSIVE");
+});
