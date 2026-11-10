@@ -144,6 +144,8 @@ type Plant = {
   extraTables?: Readonly<Record<string, (fixture: readonly string[]) => readonly string[]>>;
   /** the coin: pump's curve (the default) or a graduated PumpSwap coin, as the LiteSVM run recorded each */
   coin?: "pump" | "pumpswap";
+  /** RPC 1 reads this table otherwise: no account, its last byte flipped, or owned by another program */
+  tableOff?: { address: string; how: "gone" | "bytes" | "owner" };
 };
 const OTHER_TABLE = base58.encode(new Uint8Array(32).fill(8));
 /** The fixture's table address (solana-pool-buy-fx.ts setup). */
@@ -234,7 +236,9 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         return venue(method, params);
       }
       if (method === "getAccountInfo") {
-        const a = accounts(p)[params[0] as string];
+        const a0 = accounts(p)[params[0] as string];
+        const off = plant.tableOff && p === 1 && params[0] === plant.tableOff.address ? plant.tableOff.how : null;
+        const a = !a0 || off === null ? a0 : off === "gone" ? undefined : off === "owner" ? { owner: PROGRAM, data: a0.data } : { owner: a0.owner, data: Uint8Array.from(a0.data, (x, i) => (i === a0.data.length - 1 ? x ^ 1 : x)) };
         if (plant.sizeSkewOnce && p === 1 && params[0] === POOL && !skewed) {
           skewed = true;
           const d = poolAccount();
@@ -376,6 +380,20 @@ test("a curve buy loads the curve's pinned table, never another venue's", async 
   const w = await world({ tables: { pumpswap: [OTHER_TABLE], "pump-curve": [s0.tableAddr] } });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
   assert.deepEqual(loadedTables(w), [s0.tableAddr]);
+});
+test("a buy reads its own venue's tables only: a curve buy fills whatever the PumpSwap table reads (gone, other bytes, another owner on RPC 1)", async () => {
+  for (const how of ["gone", "bytes", "owner"] as const) {
+    const w = await world({ tables: { pumpswap: [OTHER_TABLE], "pump-curve": [s0.tableAddr] }, tableOff: { address: OTHER_TABLE, how } });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, how);
+    assert.deepEqual(loadedTables(w), [s0.tableAddr], how);
+  }
+});
+test("the venue's own table read otherwise on RPC 1 (gone, other bytes, another owner) refuses the buy before the claim: nothing claimed, taken, seeded or sent", async () => {
+  for (const how of ["gone", "bytes", "owner"] as const) {
+    const w = await world({ tableOff: { address: s0.tableAddr, how } });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" }, how);
+    nothingMoved(w);
+  }
 });
 test("a PumpSwap buy with both venues pinned loads PumpSwap's table (mutant A4: always the curve's)", async () => {
   const w = await world({ coin: "pumpswap", tables: { "pump-curve": [OTHER_TABLE], pumpswap: [s0.tableAddr] } });
@@ -777,6 +795,17 @@ test("fold 1 (M1): a buy the check refuses inside checkSolanaBuy (a quote 100 sl
   assert.ok(w.log.includes("0:getLatestBlockhash"), "the run reached the check");
   assert.ok(!w.log.includes("seed"));
   assert.deepEqual(told, []);
+});
+
+test("a buy refused after its claim (the check, or a seed whose W is not the proof's recipient) releases the claim: no note stays held from the next tap", async () => {
+  for (const plant of [{ slotAhead: 100 }, { seedOther: true }] as const) {
+    const w = await world(plant);
+    const a = await runPoolBuy(w.host, ASK);
+    assert.ok("error" in a, JSON.stringify(a));
+    assert.ok(w.log.some((x) => x.startsWith("claim:")), `the run reached the claim: ${w.log.join(",")}`);
+    assert.equal(w.host.claimed?.size, 0, `${JSON.stringify(plant)}: the claim is released`);
+    assert.equal(w.state(), "HELD");
+  }
 });
 
 test("fold 1 (M1): a seed whose W is not the proof's recipient tells nothing: nothing taken or sent", async () => {

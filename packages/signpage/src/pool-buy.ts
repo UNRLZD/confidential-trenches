@@ -470,8 +470,11 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     // the reads that do not age, each on both RPCs
     const rent: SolanaRent = await readSolanaRent(h.rpcs);
     const feeCap = solanaPoolFee(rent);
-    const tableReads = new Map<SolanaPoolBuyVenue["kind"], { address: string; table: SolanaLookupTable; reads: Awaited<ReturnType<typeof tableOf>>["reads"] }[]>();
-    for (const [v, t] of await Promise.all(pinned!.map(async ([v, address]) => [v, { address, ...(await tableOf(h, address)) }] as const))) tableReads.set(v, [...(tableReads.get(v) ?? []), t]);
+    // each venue's pinned tables, read here with the other reads that do not age, each venue's on its own: a buy fails
+    // on its own venue's tables only, so another venue's unreadable table never stops it
+    const tableReads = new Map<SolanaPoolBuyVenue["kind"], Promise<{ address: string; table: SolanaLookupTable; reads: Awaited<ReturnType<typeof tableOf>>["reads"] }[]>>();
+    for (const v of new Set(pinned!.map(([v]) => v))) tableReads.set(v, Promise.all(pinned!.filter(([x]) => x === v).map(async ([, address]) => ({ address, ...(await tableOf(h, address)) }))));
+    await Promise.allSettled(tableReads.values());
     const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
@@ -496,8 +499,10 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       // own accounts are read and before the pick, so no note is claimed (the reads before the reference stand: it is
       // read last, as the quote's age counts from it)
       const kind = best.venue as "pump-curve" | "pumpswap";
-      const own = tableReads.get(kind);
-      if (own === undefined || own.length === 0) return no("venue_not_pinned");
+      const ownRead = tableReads.get(kind);
+      if (ownRead === undefined) return no("venue_not_pinned");
+      const own = await ownRead;
+      if (own.length === 0) return no("venue_not_pinned");
       const venue: SolanaPoolBuyVenue = await readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
       const bh = await blockhashOf(h.rpcs);
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
