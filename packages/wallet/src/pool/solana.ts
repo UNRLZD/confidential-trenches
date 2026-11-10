@@ -207,7 +207,7 @@ export type SolanaPoolVenueName = "pump-curve" | "pumpswap";
  *  (SOL_MAINNET_DEPLOY.table); PumpSwap's comes with its paste. */
 export const SOL_POOL_TABLES: Readonly<Partial<Record<"devnet" | "mainnet", Readonly<Partial<Record<SolanaPoolVenueName, readonly string[]>>>>>> = Object.freeze(
   POOL_TESTNET
-    ? { devnet: Object.freeze({ "pump-curve": Object.freeze(["C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ"]), pumpswap: Object.freeze(["4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT"]) }) }
+    ? { devnet: Object.freeze({ "pump-curve": Object.freeze(["C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ"]), pumpswap: Object.freeze(["4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", "J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU"]) }) }
     : { mainnet: Object.freeze({ "pump-curve": Object.freeze(["BShWZ8FbDPYGpoc1ebj4TiELvVFmBQwW4XMYuLtQoHYZ"]) }) },
 );
 
