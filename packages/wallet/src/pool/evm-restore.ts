@@ -375,7 +375,14 @@ export async function evmRestoreNotes(a: EvmRestoreNotesArgs): Promise<{ notes: 
     if (r.anchor.timestamp * 1000n + EVM_EPOCH_MS < high) throw new EvmLagError(`the newest agreed block ${r.anchor.number} is more than an epoch behind an RPC's latest block`);
     return r;
   }, sleep, a.signal);
-  const { notes, spends, elsewhere } = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
+  const whole = await withSeed(a.seed64, (seed64) => evmRestore({ seed64, scope, events: r.events, ...(a.gap === undefined ? {} : { gap: a.gap }) }));
+  // a note only from a block that never moves, as the deposit path takes one (evmNextNote's finalBlock): a note whose
+  // leaf is above the round's finalized anchor is left, with its spend, to a later restore, so the page never lands a
+  // PLANNED note on a block a reorg can drop (review P3-4 of 53f5e92f)
+  const kept = new Set(whole.notes.filter((n) => r.events[Number(n.leaf.leafIndex)]!.block <= r.fin.number).map((n) => refKey(n.ref)));
+  const notes = whole.notes.filter((n) => kept.has(refKey(n.ref)));
+  const spends = whole.spends.filter((x) => kept.has(x.note));
+  const elsewhere = whole.elsewhere.filter((x) => kept.has(x.note));
   if (a.wallets === false) return { notes, spends, elsewhere, wallets: [], block: r.anchor.number };
   const order = spends.map((_, k) => k);
   for (let i = order.length - 1; i > 0; i--) {

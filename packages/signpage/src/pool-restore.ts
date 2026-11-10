@@ -42,10 +42,12 @@
 //     it held reads no id beside it (review P2-4 of 53f5e92f: a second tab's restore or Sync waited out step 5).
 //   - Each scope's lanes are read from this store's own lane first; once that lane is read its counter goes past the
 //     lane's highest with any history plus two of the lane (step 7's again; a counter only goes up). No deposit waits
-//     for it. The residual, in plain words: a restored account that asks a deposit quote in the first minutes (about
-//     162 s for an empty lane), on a lane the lost store left an unfunded quote on, names that same one-time id again,
-//     so 1Click sees one id quoted twice and, if both quotes are funded, the two outside sends share it. Never a loss:
-//     the second deposit on the precommitment goes in as the id's next note (src/pool-deposit.ts, taken).
+//     for it. The residual, in plain words: the raise moves only an index planned after it. The index the page plans
+//     and names at the sign-in (src/deposit-name.ts, before step 5 reads the lane) stays the one every quote names
+//     until money reaches it, even when step 5 reads its id as used (review P3-1 of 53f5e92f, its probe zz1). So a
+//     restored account whose lost store left a quote on that index names that same one-time id again, 1Click sees one
+//     id quoted twice, and if both quotes are funded the two outside sends share it. Never a loss: the second deposit
+//     on the precommitment goes in as the id's next note (src/pool-deposit.ts, taken).
 //   - Each try's reasons are of two kinds (Step5Reasons). A read that did not answer (`retry`: an id unread on both
 //     providers or read apart by them, the lane reading on past it; a pass the providers refuse; any read that throws)
 //     writes nothing the user sees on the tries before the last: step 5 is asked again by itself after
