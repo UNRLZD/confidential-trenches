@@ -22,6 +22,10 @@
 // - After the run's end, once every transaction the page sent reads finalized on api.devnet.solana.com (90 s at most):
 //   each W, its token account and both volume accounts at finalized; every transaction read back on both RPCs.
 // - FLOW_SWEEP_F_TO=<address> with FLOW_FUNDER=<F's file>: no run; F pays its whole balance less its fee to <address>.
+// - The sell's timeline, from its tap: each sale's send (its signature on a devnet RPC) and the device's record as the app
+//   reads it (state.ops: the stage, and each leg's), read every 200 ms; each provider's JSON-RPC calls while the sell
+//   runs, against the page's limit (the kit's SOLANA_KEYLESS_RPC_LIMIT per provider, which these RPCs are paced by, as
+//   the page's are: pageSolanaRpcs); and any sale refused for its quote (quote_check_failed).
 // - It writes the answers, the stages, the notes, each leg, the times and every tx to <out.json>; exit 0 only when every
 //   deposit landed, every buy filled, the sell answered sent and ended filled with a leg per W and its return notes.
 import { randomBytes, createHash } from "node:crypto";
@@ -46,6 +50,7 @@ const { solanaDecodeMessage, solanaAta } = await import("../../kit/src/checks/so
 const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
 const { TESTNET_RPCS, testnetPool, testnetPoolDeps, testnetRpc } = await import("../src/pool-testnet.ts");
+const { solanaPacedRpc, SOLANA_KEYLESS_RPC_LIMIT } = await import("../../kit/src/trade/solana/send.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { WALLET_SEED_LOCK } = await import("@blindfill/wallet/store");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
@@ -62,14 +67,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RPC_HOSTS = new Set(Object.values(TESTNET_RPCS).flat().map((u) => new URL(u).host));
 // every transaction the page sends on a devnet RPC, by its first signature, in order; public bytes only
 const sentTxs = [];
+// each JSON-RPC call on a devnet RPC: its host, method and time (performance.now()); each send's first time, by signature
+const calls = [];
+const sentAt = new Map();
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
   if (RPC_HOSTS.has(new URL(String(u)).host)) {
     try {
-      const b = JSON.parse(String(init?.body ?? ""));
-      if (b?.method === "sendTransaction") {
-        const sig = base58.encode(Buffer.from(String(b.params?.[0]), "base64").subarray(1, 65));
-        if (!sentTxs.includes(sig)) sentTxs.push(sig);
+      const body = JSON.parse(String(init?.body ?? ""));
+      for (const b of Array.isArray(body) ? body : [body]) {
+        calls.push({ host: new URL(String(u)).host, method: String(b?.method), t: performance.now() });
+        if (b?.method === "sendTransaction") {
+          const sig = base58.encode(Buffer.from(String(b.params?.[0]), "base64").subarray(1, 65));
+          if (!sentTxs.includes(sig)) sentTxs.push(sig);
+          if (!sentAt.has(sig)) sentAt.set(sig, performance.now());
+        }
       }
     } catch {}
   }
@@ -77,7 +89,8 @@ globalThis.fetch = async (u, init) => {
   if (RPC_HOSTS.has(new URL(String(u)).host) && (r.status === 429 || r.status >= 500)) log(`rpc ${new URL(String(u)).host}: HTTP ${r.status} from the provider`);
   return r;
 };
-const rpcs = TESTNET_RPCS.solana.slice(0, 2).map((u) => testnetRpc(u));
+// paced as the page's pair is (pool-testnet.ts pageSolanaRpcs)
+const rpcs = TESTNET_RPCS.solana.slice(0, 2).map((u) => solanaPacedRpc(testnetRpc(u)));
 /** This script's own reads after the run (never the page's): a provider's 429 is read again, 10 tries 3 s apart. */
 const again = async (f) => {
   for (let i = 0; ; i++) {
@@ -156,12 +169,28 @@ const once = async (kind, params) => {
     },
   });
   if ("error" in r) return { answer: r, times };
+  // the device's record as the app reads it, every 200 ms from the tap: each change of its stage or a leg's, with its time
+  const timeline = [];
+  let last = "";
+  const look = async () => {
+    const rec = await w.get("ops", id);
+    const now = JSON.stringify({ stage: rec?.stage ?? null, legs: (rec?.legs ?? []).map((l) => [l.wallet, l.stage, l.code ?? null]) });
+    if (now !== last) {
+      last = now;
+      timeline.push({ ms: Math.round(performance.now() - tap), ...JSON.parse(now) });
+    }
+  };
+  const poll = setInterval(() => void look().catch(() => {}), 200);
   await r.after;
   const answer = r.answer();
   times.answer = Math.round(performance.now() - tap);
   log(`${kind} answered ${JSON.stringify(answer)}; waiting for its run to end`);
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   times.ended = Math.round(performance.now() - tap);
+  clearInterval(poll);
+  await look();
+  times.tap = tap;
+  times.timeline = timeline;
   // the kind answers once, at its first send; the end, every sale's signature and each leg are the device's record
   // (state.ops), which the app reads
   return { answer, record: await w.get("ops", id), times, notes: await noteList() };
@@ -276,6 +305,36 @@ if (ok) {
   for (const { W } of rounds) after.push({ W, tokenAccount: await left(solanaAta(W, MINT, program)), pumpVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_PROGRAM)), ammVolume: await left(solanaVolumeAccumulator(W, SOLANA_PUMP_AMM_PROGRAM)), w: await left(W) });
   log(`after the run ${JSON.stringify(after)}`);
 }
+// the sell's numbers: each sale's send and end from the tap, each provider's calls against the page's limit
+let report = null;
+if (sell?.times?.tap !== undefined) {
+  const tap = sell.times.tap;
+  const end = tap + sell.times.ended;
+  const legs = (sell.record?.legs ?? []).map((l, i) => {
+    const endAt = sell.times.timeline.find((x) => x.legs[i] && x.legs[i][1] !== "pending" && x.legs[i][1] !== "signed" && x.legs[i][1] !== "sent");
+    return { leg: i + 1, wallet: l.wallet, units: l.units, tx: l.tx, stage: l.stage, code: l.code ?? null, sentMs: l.tx && sentAt.has(l.tx) ? Math.round(sentAt.get(l.tx) - tap) : null, endedMs: endAt?.ms ?? null };
+  });
+  const during = calls.filter((c) => c.t >= tap && c.t <= end);
+  const perHost = {};
+  for (const host of new Set(during.map((c) => c.host))) {
+    const mine = during.filter((c) => c.host === host);
+    let maxTotal = 0;
+    let maxMethod = 0;
+    for (const c of mine) {
+      const win = mine.filter((d) => d.t >= c.t && d.t < c.t + SOLANA_KEYLESS_RPC_LIMIT.windowMs);
+      maxTotal = Math.max(maxTotal, win.length);
+      const by = {};
+      for (const d of win) by[d.method] = (by[d.method] ?? 0) + 1;
+      maxMethod = Math.max(maxMethod, ...Object.values(by));
+    }
+    const methods = {};
+    for (const c of mine) methods[c.method] = (methods[c.method] ?? 0) + 1;
+    perHost[host] = { calls: mine.length, maxIn10s: maxTotal, maxOneMethodIn10s: maxMethod, limit: SOLANA_KEYLESS_RPC_LIMIT, methods };
+  }
+  const quoteAge = legs.filter((l) => l.code === "quote_check_failed").map((l) => l.leg);
+  report = { legs, timeline: sell.times.timeline, perHost, quoteAgeRefused: quoteAge };
+  log(`sell report ${JSON.stringify(report)}`);
+}
 // every transaction, F's payments, the page's own sends and each buy (sent through the helper), read back on both RPCs
 const all = [...new Set([...fundTxs, ...sentTxs, ...rounds.map((r) => r.buy?.answer?.result?.txs?.[0]?.hash).filter(Boolean)])];
 const readBack = {};
@@ -302,7 +361,7 @@ const filled =
 log(`notes ${JSON.stringify(notes)}; sell times ${JSON.stringify(sell?.times ?? null)}; filled ${filled}`);
 seed64.fill(0);
 fKey.fill(0);
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, sell, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: "devnet", program: SOL_POOLS.devnet.program, table: TABLE, mint: MINT, n: N, share_bps: SHARE, F, need: String(NEED), fundTxs, rounds, sell, report, after, sentTxs, readBack, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();
