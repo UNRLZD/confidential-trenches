@@ -28,6 +28,9 @@
 //   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant free|no-buy|no-sell]
 //     PASS exit 0, FAIL exit 1, error exit 2. --plant free stops once U is answered, before the fund line (the free
 //     part: no money); no-buy stops before the buy's tap, no-sell before the sell's (the red runs).
+//     It prints two verdicts: BUY (every line but the sell's: what card app-a2-e2e proves) and SELL (PASS, or NOT PROVEN
+//     naming each sell line that is not ok); the exit code is the whole run's, a buy and a sell. Recorded on 10 Nov
+//     (run.answers.json): the buy filled in runs 1, 2 and 4; no run sold (run 4's sell was refused, nothing signed or sent).
 // Needs the terminal's build (pnpm --filter terminal build) and the installed Chrome (scripts/browsers.mjs).
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -55,10 +58,18 @@ const FUND_MS = 10 * 60_000;
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 
 // ------------------------------------------------------------------------------------------------ the verdict
-/** The run's verdict lines from its record. */
+/** The run's verdict from its record: { ok, lines, buy: { ok }, sell: { ok, notProven } }. `ok` is the whole run, a buy
+ *  and a sell; `buy.ok` is every line but the sell's (what card app-a2-e2e proves: no recorded run has sold, run 4's sell
+ *  was refused with nothing signed); `sell.notProven` names each sell line that is not ok. */
 export function judge(rec) {
   const lines = [];
-  const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  const sellLines = [];
+  let part = "buy";
+  const say = (ok, text) => {
+    const line = `${ok ? "ok " : "BAD"} ${text}`;
+    lines.push(line);
+    if (part === "sell") sellLines.push(line);
+  };
   if (rec.error) say(false, `error: ${rec.error}`);
   say(rec.signedIn === true, `signed in the no-PRF way, 12 words kept: ${rec.words ?? 0}`);
   say(typeof rec.u === "string" && rec.u.length >= 32, `pool.address answered U for Solana: ${rec.u ?? "none"}`);
@@ -74,19 +85,27 @@ export function judge(rec) {
   say(buyTxs.length >= 1, `the buy's transactions sent: ${buyTxs.length}`);
   const [a, b] = rec.heldAfterBuy ?? [];
   say(typeof rec.w === "string" && a === b && /^\d+$/.test(a ?? "") && BigInt(a) > 0n, `the buy's wallet ${rec.w ?? "none"} holds ${a ?? "-"} / ${b ?? "-"} of the coin on the two RPCs`);
+  part = "sell";
   say(rec.sell?.taps === 1, `the sell tapped once: ${rec.sell?.taps ?? 0}`);
   say(rec.sell?.asks === 1, `one sell sent: ${rec.sell?.asks ?? 0} ${rec.sell?.kind ?? ""}`);
   say(/^Filled\b/.test(rec.sell?.end ?? ""), `the sell box ended "${rec.sell?.end ?? "none"}"`);
   const sellTxs = txs.filter((t) => t.step === "sell");
   say(sellTxs.length >= 1, `the sell's transactions sent: ${sellTxs.length}`);
   say(Array.isArray(rec.heldAfterSell) && rec.heldAfterSell.length === 2 && rec.heldAfterSell.every((x) => x === "0"), `after the sell W holds ${(rec.heldAfterSell ?? ["-", "-"]).join(" / ")} on the two RPCs`);
+  part = "run";
   say(txs.length > 0 && txs.every((t) => t.reads?.length === 2 && t.reads.every((r) => r.err === null && (r.status === "confirmed" || r.status === "finalized"))), `every transaction read back ok on both RPCs: ${txs.map((t) => `${t.step} ${t.sig.slice(0, 8)} ${(t.reads ?? []).map((r) => r.status ?? "none").join("/")}`).join(", ") || "none"}`);
   say(rec.pages === 1, `one page from first frame to last: ${rec.pages}`);
   say((rec.readErrors ?? []).length === 0, `the run's own reads: ${(rec.readErrors ?? []).join("; ") || "all answered"}`);
   say((rec.dialogs ?? 0) === 0, `no dialog: ${rec.dialogs ?? 0}`);
   say((rec.csp ?? []).length === 0, `CSP violations: ${(rec.csp ?? []).join("; ") || "none"}`);
   say((rec.hosts ?? []).every((h) => ALLOWED.has(h)), `hosts reached: ${(rec.hosts ?? []).join(", ")}`);
-  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+  const notProven = sellLines.filter((l) => l.startsWith("BAD")).map((l) => l.slice(4));
+  return {
+    ok: !lines.some((l) => l.startsWith("BAD")),
+    lines,
+    buy: { ok: !lines.some((l) => l.startsWith("BAD") && !sellLines.includes(l)) },
+    sell: { ok: notProven.length === 0, notProven },
+  };
 }
 const ALLOWED = new Set([REAL.app, REAL.sign, REAL.api, new URL(DEVNET_RPC).hostname]);
 
@@ -554,6 +573,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const t of rec.txs) console.log(`Tx: solana-devnet ${t.sig} (${t.step})`);
     for (const side of ["buy", "sell"]) if (rec[side]?.timing) console.log(`timing ${side}: ${JSON.stringify({ ...rec[side].timing, seen: rec[side].seen })}`);
     for (const l of netTable(rec.net ?? [])) console.log(l);
+    console.log(`BUY: ${v.buy.ok ? "PASS a pool buy end to end in H-app on devnet" : "FAIL"}`);
+    console.log(`SELL: ${v.sell.ok ? "PASS a pool sell end to end in H-app on devnet" : `NOT PROVEN (${v.sell.notProven.join("; ")})`}`);
     console.log(v.ok ? "PASS a pool buy and sell end to end in H-app on devnet" : "FAIL");
     process.exit(v.ok ? 0 : 1);
   } catch (e) {

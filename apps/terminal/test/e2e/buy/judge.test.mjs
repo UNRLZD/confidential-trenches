@@ -58,6 +58,30 @@ test("run 4: every buy line and the sell's one tap and one pool.sell are ok; the
   assert.match(bad(v), /after the sell W holds 974924498778 \/ 974924498778/);
 });
 
+test("run 4 is a buy proof and not a sell proof: BUY passes, SELL is NOT PROVEN by name", () => {
+  const v = judge(answers.run4);
+  assert.equal(v.buy.ok, true, bad(v));
+  assert.equal(v.sell.ok, false);
+  assert.deepEqual(v.sell.notProven, ['the sell box ended "Retry"', "the sell's transactions sent: 0", "after the sell W holds 974924498778 / 974924498778 on the two RPCs"]);
+  assert.equal(v.ok, false, "the whole run, a buy and a sell, still fails");
+});
+
+test("no recorded run proves a sell; only run 4 proves the buy whole", () => {
+  for (const k of ["free", "run2", "run3", "run4"]) assert.equal(judge(answers[k]).sell.ok, false, k);
+  assert.deepEqual(["free", "run2", "run3", "run4"].filter((k) => judge(answers[k]).buy.ok), ["run4"]);
+});
+
+test("a buy line that is not ok fails the buy verdict; a sell line never does", () => {
+  const four = (f) => {
+    const rec = structuredClone(answers.run4);
+    f(rec);
+    return judge(rec);
+  };
+  assert.equal(four((r) => (r.buy.end = "Slow 89.9s")).buy.ok, false);
+  assert.equal(four((r) => (r.hosts = [...r.hosts, "api.mainnet-beta.solana.com"])).buy.ok, false);
+  assert.equal(four((r) => (r.sell = { taps: 0, asks: 0 })).buy.ok, true);
+});
+
 test("W read apart on the two RPCs, or none after the buy, fails", () => {
   assert.match(bad(mut((r) => (r.heldAfterBuy = ["977526752591", "1"]))), /the buy's wallet/);
   assert.match(bad(mut((r) => (r.heldAfterBuy = ["0", "0"]))), /the buy's wallet/);
