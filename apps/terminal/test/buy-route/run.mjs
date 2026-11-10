@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "trade-box");
 const args = process.argv.slice(2);
@@ -82,7 +83,7 @@ async function settle(read, want) {
 const dir = await build();
 const server = await serve(dir);
 const BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const [name, f, ms, steps, values, pool, button, toast] of ROWS) {

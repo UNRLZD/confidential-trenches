@@ -15,8 +15,8 @@ const bars: Bar[] = [
 ];
 const good = () => ({
   trades: [
-    { t_ms: T0 + 1000, side: "buy", usd: "100.50", amt: "50", trader: "TraderAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", tx: "tx1" },
-    { t_ms: T0 + 500, side: "sell", usd: "20", amt: "40", trader: null, tx: "tx2" },
+    { t_ms: T0 + 1000, side: "b", usd: "100.50", amt: "50", trader: "TraderAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", tx: "tx1" },
+    { t_ms: T0 + 500, side: "s", usd: "20", amt: "40", trader: null, tx: "tx2" },
   ],
   src: "chain",
   as_of_ms: T0 + 2000,
@@ -64,6 +64,10 @@ test("planted bad answers: each refused whole", () => {
     ["tx missing", gone("tx")],
     ["side sell-ish", row("side", "SELL")],
     ["side other", row("side", "swap")],
+    // card market-data-push: the helper's sides are "b" and "s" (06b Trades); the words spelled out are not its shape
+    ["side spelled out, buy", row("side", "buy")],
+    ["side spelled out, sell", row("side", "sell")],
+    ["side an inherited name", row("side", "toString")],
     ["usd a number", row("usd", 5)],
     ["usd zero", row("usd", "0")],
     ["usd negative", row("usd", "-1")],

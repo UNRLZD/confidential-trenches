@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -101,7 +102,7 @@ async function open(browser, w, f) {
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const [f, sid, state, code, funds, checks, pools = OK3] of STATES) {

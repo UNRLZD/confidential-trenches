@@ -1,0 +1,213 @@
+{
+ "_note": "good: apps/helper at the card branch run locally (node src/server.ts with no vendor key, keyless plans, public Solana RPC), read by this check with --record at 2026-11-09 21:48Z: APP_HOST upgraded and sent a tape of 6 trades (the polled route held 1 for the token), every other Origin and none refused 403. bad_any_origin: the same helper with the push socket's Origin check replaced by one that admits every Origin (allowed: () => true), run and read the same way: SIGN_HOST, https://example.com, '*', 'null' and no Origin are upgraded and sent the tape. bad_pre_card: the deployed helper at fc76a9fb (before the card), read by this check: no push socket (404 to every handshake).",
+ "good": {
+  "base": "http://127.0.0.1:18941",
+  "mint": "Cm6fNnMk7NfzStP9CZpsQA2v3jjzbcYGAxdJySmHpump",
+  "held": 1,
+  "app": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 101,
+   "headers": {
+    "sec-websocket-accept": "SjTiPIIWPF4S7yBU29Pq+L60Eo8=",
+    "upgrade": "websocket"
+   },
+   "acceptOk": true,
+   "frame": "{\"trades\":[{\"t_ms\":1794260854000,\"side\":\"s\",\"usd\":\"0.33023323422386\",\"amt\":\"57.752752\",\"trader\":\"CEFDj7FiCySR6hnTyJ51LFuCHgMUFbgFEnoiDfW69sWu\",\"tx\":\"2hKQ3d9J9e3WKsiUBFsJynnmXUPRf2CFtTb86WmncXdRtyBwAENKT7hpV8kjYp8iiSwLVCGndbnuivcQkuAxLQFT\"},{\"t_ms\":1794260854000,\"side\":\"s\",\"usd\":\"1.3086862345590451\",\"amt\":\"228.867831\",\"trader\":\"Dt73Jbqt35xYScr2bMyvrv56bjJva2S8PGq98gAPmWTU\",\"tx\":\"3tsSwg47JaFHTDG1potX8wWErxdimkdQXMzemtjtmemC9KYCktk1qtgCHeMCMoCy9rWtJD2xhvLSJxDBVv3andFz\"},{\"t_ms\":1794260829000,\"side\":\"s\",\"usd\":\"13.6323460541931078\",\"amt\":\"2383.944911\",\"trader\":\"DQQwEVAdtwK4BtMCskbk8ARqYZTsPFVuEz8vTy8ukram\",\"tx\":\"C9cHvhacCypcwVYbJ5yBt4RjnhTgxbbKz1JLyC4zri2WFP2BCmXMVijnsxYzEw8WkAdE2MnkN9Sy4NbVouji1cR\"},{\"t_ms\":1794260819000,\"side\":\"s\",\"usd\":\"8.8180546181189705\",\"amt\":\"1541.92379\",\"trader\":\"29eV5LuZwwVaoufKr5ShBejYVP6N4JZ14U3M5rffXsjp\",\"tx\":\"24SbnDMVWfaZGc7qoXqBqdXW7Zn4FoJfQQe3K2H9VtQ5AY1Dm27KkwDCjsnibtvxqwgTVGs8rjfs9JTEixaUMzi6\"},{\"t_ms\":1794260819000,\"side\":\"s\",\"usd\":\"8.821718463685349\",\"amt\":\"1542.465438\",\"trader\":\"DcQNaByvstRZCERvb9UJHgHiQe8YX2FMdPptM86psQyz\",\"tx\":\"2Pp2QCcugqdqLeZTuFBFwmsjVGg53D9ngLEuTyedBUiCTFjS7bjpo7yhL5oHgwNYHZmhRJUAmKEHKpQs9PYaeZDX\"},{\"t_ms\":1794260789000,\"side\":\"s\",\"usd\":\"8.8186666816482262\",\"amt\":\"1541.832857\",\"trader\":\"3yZVBT1EJdoFJUShFmb1B6cJS1K7x5NpZjjEKGwa6NjL\",\"tx\":\"2pe9m4g21PxSyi7H22Z9CcGF3edKZKGwJpbzbgNjfpnz623ZKtx3QULMwQcr6ky1xBEJanUZEwZ6Wnbs3yfFpTe5\"}],\"src\":\"chain\",\"as_of_ms\":1794260923846}",
+   "frames": 1
+  },
+  "refused": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "298cca3143f6046d7de9aaf579826ef87a331a4e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "https://example.com",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "298cca3143f6046d7de9aaf579826ef87a331a4e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "*",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "298cca3143f6046d7de9aaf579826ef87a331a4e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "null",
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "298cca3143f6046d7de9aaf579826ef87a331a4e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": null,
+    "status": 403,
+    "headers": {
+     "x-helper-commit": "298cca3143f6046d7de9aaf579826ef87a331a4e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   }
+  ]
+ },
+ "bad_any_origin": {
+  "base": "http://127.0.0.1:18932",
+  "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+  "held": 0,
+  "app": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 101,
+   "headers": {
+    "sec-websocket-accept": "eQq+So+rIukF1uc5OPf1AmJzLMo=",
+    "upgrade": "websocket"
+   },
+   "acceptOk": true,
+   "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257368299}",
+   "frames": 1
+  },
+  "refused": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 101,
+    "headers": {
+     "sec-websocket-accept": "xACHMFeMwQexabKHxzCRPSiB3QI=",
+     "upgrade": "websocket"
+    },
+    "acceptOk": true,
+    "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257388311}",
+    "frames": 1
+   },
+   {
+    "origin": "https://example.com",
+    "status": 101,
+    "headers": {
+     "sec-websocket-accept": "7NRUKom7VXDG0byCOXFvFmKNWWY=",
+     "upgrade": "websocket"
+    },
+    "acceptOk": true,
+    "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257391313}",
+    "frames": 1
+   },
+   {
+    "origin": "*",
+    "status": 101,
+    "headers": {
+     "sec-websocket-accept": "QS+na8cURLTo7G8Y3kTuBsIonaQ=",
+     "upgrade": "websocket"
+    },
+    "acceptOk": true,
+    "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257394315}",
+    "frames": 1
+   },
+   {
+    "origin": "null",
+    "status": 101,
+    "headers": {
+     "sec-websocket-accept": "DptZG9J+LD6WZhczFaG8IdqkAw8=",
+     "upgrade": "websocket"
+    },
+    "acceptOk": true,
+    "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257397317}",
+    "frames": 1
+   },
+   {
+    "origin": null,
+    "status": 101,
+    "headers": {
+     "sec-websocket-accept": "AiyOjVi7K7f9yznytLLIwXi6edE=",
+     "upgrade": "websocket"
+    },
+    "acceptOk": true,
+    "frame": "{\"trades\":[],\"src\":\"chain\",\"as_of_ms\":1794257400318}",
+    "frames": 1
+   }
+  ]
+ },
+ "bad_pre_card": {
+  "base": "https://ct-api.unrealized.trade",
+  "mint": "HsprHxBRgiVaQdRf3TnKNuZZtaX9JUSPgMFdAkk6pump",
+  "held": 1,
+  "app": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 404,
+   "headers": {
+    "access-control-allow-origin": "https://ct-app.unrealized.trade",
+    "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+   },
+   "acceptOk": null,
+   "frame": null,
+   "frames": 0
+  },
+  "refused": [
+   {
+    "origin": "https://confidential.unrealized.trade",
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://confidential.unrealized.trade",
+     "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "https://example.com",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "*",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": "null",
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   },
+   {
+    "origin": null,
+    "status": 404,
+    "headers": {
+     "x-helper-commit": "fc76a9fbb1ee8cdc4a6a76e2f6cd17eff196534e"
+    },
+    "acceptOk": null,
+    "frame": null,
+    "frames": 0
+   }
+  ]
+ }
+}

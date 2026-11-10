@@ -14,9 +14,11 @@
   "dependencies": {
     "@blindfill/kit": "workspace:*",
     "@noble/curves": "2.4.0",
-    "@noble/hashes": "2.4.0"
+    "@noble/hashes": "2.4.0",
+    "ws": "8.17.1"
   },
   "devDependencies": {
-    "@types/node": "24.10.1"
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.1"
   }
 }

@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-footer-bar";
@@ -119,7 +120,8 @@ export async function nearFinal(url = NEAR_RPCS[0]) {
 /** Every request in Chromium answered by `route` (the harness), or the deployed hosts when null. `near` reads the chain. */
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route = null, near = nearFinal, source = "live" } = {}) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // a run with `route` is the harness's: its browser routes every socket too (scripts/harness-sockets.mjs)
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { check: KEY, at: new Date().toISOString(), source, browser: browser.version(), shots, framed: false, top: null, header: null, reads: [], links: [] };
   try {
     const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });

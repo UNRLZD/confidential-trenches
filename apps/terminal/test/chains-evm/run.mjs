@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { columnRows } from "../../src/screens/discover/model.ts";
 
@@ -88,7 +89,7 @@ async function build() {
 
 const dir = opt("--build") ?? (await build());
 const route = await harnessRoute(dir, "signed");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 
 const appFrame = async (page, tries = 80) => {
   for (let i = 0; i < tries; i++) {
