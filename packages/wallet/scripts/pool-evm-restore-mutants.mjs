@@ -8,6 +8,10 @@ const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
   // the restore's checks on the pool's events
+  // review P3-4 of 53f5e92f and its delta P3-E (card restore-first-sign-in-under-two-minutes): the restore of the chain
+  // at its finalized block, the events cut before it: up to the newest agreed block, or one block short of the finalized
+  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block <= r.anchor.number);", T, "P3-"],
+  [R, "const final = r.events.filter((e) => e.block <= r.fin.number);", "const final = r.events.filter((e) => e.block < r.fin.number);", T, "P3-E"],
   [R, "if (leaves.has(e.state)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byPre.has(e.precommitment!)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byNull.has(e.nullifier!)) throw", "if (false) throw", T, "evmRestore refuses"],

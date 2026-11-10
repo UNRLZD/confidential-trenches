@@ -166,6 +166,13 @@ const restore = !framed
       // note amounts (an EVM release's "withdrew X of Y", ../../wallet/src/pool/evm-restore.ts), a one-time wallet U_X
       // and its balance; no key, no words
       ended: (stage, why) => void (stage === "stalled" && console.warn(`restore stalled: ${why.join("; ")}`)),
+      // step 5's tries after the walk's end, the same reasons: a finding the user is told of (on the last try, what is
+      // still unread too) in the `restore stalled:` shape; a read asked again as `restore ids unread:`
+      step5: (e) => {
+        if (e.named.length > 0) console.warn(`restore stalled: ${e.named.join("; ")}`);
+        const unread = [...e.held, ...e.retry];
+        if (unread.length > 0) console.warn(`restore ids unread: try ${e.tries}, asked again: ${unread.join("; ")}`);
+      },
     })
   : null;
 // a deposit carried from its checked address to its note with no tap (src/deposit-follow.ts, card wallet-deposit-follow):
@@ -801,8 +808,9 @@ async function landed(l: Landing): Promise<void> {
   void settleWithdraws().catch(() => {});
   // a held deposit's move out a reload cut short (src/withdraw/held.ts)
   void settleHeld().catch(() => {});
-  // a restore a closed or reloaded page left running reads stalled, so the app offers Retry (src/pool-restore.ts)
-  void restore?.settle().catch(() => {});
+  // a restore a closed or reloaded page left running reads stalled, so the app offers Retry; then step 5, when a page
+  // closed before it read every id, is read again with no tap and no sheet (src/pool-restore.ts RESTORE_IDS_KEY)
+  void restore?.settle().then(() => restore?.resume()).catch(() => {});
   // a buy or sell a closed or reloaded page left open is settled from its wallets' marks, or refused when it sent
   // nothing (src/trade.ts settleTradeOps): the app's Sell never waits on an op no page will end
   void settleTrades();

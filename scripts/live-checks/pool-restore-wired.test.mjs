@@ -7,13 +7,14 @@
 //         no tap: FAIL.
 // Planted from the good run: a run that stalls, one that never ends, a second run with no tap, an answer that is not
 // started, a restore answered while signed out. Card sign-live-checks-read-a-pinned-page: live111 (below), and the
-// pinned hosts' cases planted at the end.
+// pinned hosts' cases planted at the end. Card restore-first-sign-in-under-two-minutes: step 5 after done, planted on
+// live111 at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { judge } from "./pool-restore-wired.mjs";
+import { FIRST_PAUSE_MS, idReadOf, judge } from "./pool-restore-wired.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "pool-restore-wired.answers.json"), "utf8"));
@@ -77,9 +78,78 @@ test("recorded live run on release 111: the hosts line passes, and it fails on d
   assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]), [
     "BAD the sign-in on an empty store ran one restore with no tap, and it ended done",
     "BAD its progress reads, then ends done, never stalled",
+    // card restore-first-sign-in-under-two-minutes: on release 111 the run is never done, so no read is after done
+    "BAD after done, step 5 reads on: id reads to both NEAR operators",
   ]);
   assert.ok(r.lines.some((l) => l.startsWith("OK  every request goes to SIGN_HOST, APP_HOST or a pinned pool's host the page's own connect-src names (") && l.includes("rpc.mainnet.fastnear.com")), r.lines.join("\n"));
   const x = structuredClone(ANSWERS.live111);
   x.hosts["api.mainnet-beta.solana.com"] = 1;
   assert.ok(judge(x).lines.some((l) => l.startsWith("BAD every request goes to") && l.includes("stray: api.mainnet-beta.solana.com")));
+});
+
+// Card restore-first-sign-in-under-two-minutes: a restore is done at the walk's end and step 5 reads on after it, so a
+// live run (live111's hosts, made done as this card makes it) passes only with id reads on both NEAR operators after
+// done; the page's `restore ids unread:` lines are printed and fail nothing; a local build is not judged on it.
+test("planted: a live run done with step 5's id reads after it on both NEAR operators: PASS; one operator or none: FAIL", () => {
+  const live = (after) => {
+    const rec = structuredClone(ANSWERS.live111);
+    rec.steps.auto = structuredClone(ANSWERS.good.steps.auto);
+    rec.steps.asked = structuredClone(ANSWERS.good.steps.asked);
+    if (after !== undefined) rec.afterDone = after;
+    return rec;
+  };
+  const ok = judge(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 }));
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  assert.ok(ok.lines.includes("OK  after done, step 5 reads on: id reads to both NEAR operators (rpc.mainnet.fastnear.com 9, near.drpc.org 11)"), ok.lines.join("\n"));
+  const fail = (rec, re) => {
+    const r = judge(rec);
+    assert.equal(r.ok, false, r.lines.join("\n"));
+    assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]), ["BAD after done, step 5 reads on: id reads to both NEAR operators"]);
+    assert.ok(r.lines.some((l) => re.test(l)), r.lines.join("\n"));
+  };
+  fail(live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 0 }), /near\.drpc\.org 0/);
+  fail(live({ "rpc.mainnet.fastnear.com": 0, "near.drpc.org": 4 }), /rpc\.mainnet\.fastnear\.com 0/);
+  fail(live(undefined), /rpc\.mainnet\.fastnear\.com 0, near\.drpc\.org 0/);
+  fail(live({ "rpc.mainnet.fastnear.com": "9", "near.drpc.org": 11 }), /after done/);
+  // a step 5 read asked again is printed with the line and fails nothing
+  const asked = live({ "rpc.mainnet.fastnear.com": 9, "near.drpc.org": 11 });
+  asked.console = ["warning: restore ids unread: try 1, asked again: solana: lane 2: 1 id unread (HTTP 503)"];
+  const a = judge(asked);
+  assert.equal(a.ok, true, a.lines.join("\n"));
+  assert.ok(a.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), a.lines.join("\n"));
+  // a local build serves no pinned host: not judged there
+  assert.ok(!judge(ANSWERS.good).lines.some((l) => l.includes("after done")));
+  // delta review P3-C: a told try is never a read. The recorded shapes: a first try that ended on a read to retry, its
+  // pause, and the second try's reads on both operators: PASS; told with no id read, or with one operator's: FAIL
+  const planted = (k) => Object.assign(live(), structuredClone(ANSWERS.afterDonePlanted[k]));
+  const p = judge(planted("pausedHealthy"));
+  assert.equal(p.ok, true, p.lines.join("\n"));
+  assert.ok(p.lines.some((l) => l.startsWith("OK  after done") && l.includes("restore ids unread: try 1")), p.lines.join("\n"));
+  fail(planted("toldNoReads"), /rpc\.mainnet\.fastnear\.com 0, near\.drpc\.org 0/);
+  fail(planted("toldOneOp"), /near\.drpc\.org 0/);
+});
+
+// delta review P3-C: the check waits for step 5's reads through its first pause, the page's own
+test("the wait after done covers step 5's first pause as the page has it", () => {
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage/src/pool-restore.ts"), "utf8");
+  const m = /export const STEP5_PAUSES_MS: readonly number\[\] = Object\.freeze\(\[([\d_]+),/.exec(src);
+  assert.ok(m, "STEP5_PAUSES_MS read");
+  assert.equal(FIRST_PAUSE_MS, Number(m[1].replaceAll("_", "")));
+});
+
+// review P3-7 of 53f5e92f: only a step 5 id read counts: a `query` naming a 64-hex implicit id, in view_account or in a
+// call's args, never the pass's own view of intents.near, a block read or any other body
+test("idReadOf counts a step 5 id read alone", () => {
+  const ID = "ab".repeat(32);
+  const q = (params) => JSON.stringify({ jsonrpc: "2.0", id: "1", method: "query", params });
+  const call = (method_name, args) => q({ request_type: "call_function", finality: "final", account_id: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", method_name, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") });
+  assert.equal(idReadOf(q({ request_type: "view_account", block_id: 1, account_id: ID })), true);
+  assert.equal(idReadOf(call("storage_balance_of", { account_id: ID })), true);
+  assert.equal(idReadOf(call("mt_tokens_for_owner", { account_id: ID })), true);
+  assert.equal(idReadOf(q({ request_type: "view_account", finality: "final", account_id: "intents.near" })), false, "the pass's own view");
+  assert.equal(idReadOf(q({ request_type: "view_account", account_id: ID.toUpperCase() })), false);
+  assert.equal(idReadOf(call("ft_metadata", {})), false);
+  assert.equal(idReadOf(JSON.stringify({ jsonrpc: "2.0", id: "1", method: "block", params: { finality: "final" } })), false);
+  assert.equal(idReadOf("not json"), false);
+  assert.equal(idReadOf(undefined), false);
 });

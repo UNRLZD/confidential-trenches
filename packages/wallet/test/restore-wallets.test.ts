@@ -389,3 +389,59 @@ test("step 5: each seed use derives at most margin ids of a lane, the lane read 
   await restoreDepositIds(SEED, SCOPE, far, bytes.holds);
   assert.deepEqual(log, bytes.log);
 });
+
+// card restore-first-sign-in-under-two-minutes: the device's own lane is read first (`first`), the others in lane
+// order, and the caller hears each lane once read (`laneRead`) before the next lane's first id is asked, so step 7's
+// counter on the device's own lane is known before any other lane is read; the result keeps lane order
+test("step 5: the lane `first` names is read first, the others in order; laneRead hears each lane before the next is asked", async () => {
+  const { holds, log } = idReader([at(5, 10)]);
+  const heard: { lane: number; asked: number; highest: number | null }[] = [];
+  const got = await restoreDepositIds(SEED, SCOPE, LANES, holds, { first: 5, laneRead: async (x) => void heard.push({ lane: x.lane, asked: log.length, highest: x.highest }) });
+  assert.deepEqual(got.map((x) => x.lane), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(heard.map((x) => x.lane), [5, 0, 1, 2, 3, 4, 6, 7]);
+  // the first ids asked are lane 5's, every one of them before lane 0's first
+  const lane5 = got[5]!;
+  const n5 = (lane5.readTo - 5) / 8 + 1;
+  assert.deepEqual(log.slice(0, n5), Array.from({ length: n5 }, (_, k) => id(at(5, k))));
+  assert.equal(log[n5], id(at(0, 0)));
+  // each lane heard when its last id was answered, before the next lane's first is asked
+  assert.deepEqual(heard[0], { lane: 5, asked: n5, highest: at(5, 10) });
+  let total = 0;
+  for (const h of heard) {
+    total += (got[h.lane]!.readTo - h.lane) / 8 + 1;
+    assert.equal(h.asked, total, `lane ${h.lane}`);
+  }
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, LANES, holds, { first: 8 }), /first is a lane, 0-7/);
+});
+
+test("step 5: a lane `done` names is not read while the index it read to is at or past the lane's bound now; past it, the lane is read whole", async () => {
+  // LANES' own notes give each lane its bound: its walk's highest plus the margin
+  const whole = await restoreDepositIds(SEED, SCOPE, LANES, idReader([]).holds);
+  const to = new Map(whole.map((x) => [x.lane, x.readTo]));
+  {
+    const { holds, log } = idReader([]);
+    const got = await restoreDepositIds(SEED, SCOPE, LANES, holds, { done: new Map([[2, to.get(2)!], [6, to.get(6)! + 8]]) });
+    assert.deepEqual(got.map((x) => x.lane), [0, 1, 3, 4, 5, 7]);
+    for (const l of [2, 6]) for (let k = 0; at(l, k) <= to.get(l)!; k++) assert.ok(!log.includes(id(at(l, k))), `lane ${l}: index ${at(l, k)} not read`);
+  }
+  {
+    // read to one index short of its bound now: read whole again
+    const { holds, log } = idReader([]);
+    const got = await restoreDepositIds(SEED, SCOPE, LANES, holds, { done: new Map([[2, to.get(2)! - 8]]) });
+    assert.deepEqual(got.map((x) => x.lane), [0, 1, 2, 3, 4, 5, 6, 7]);
+    assert.equal(got[2]!.readTo, to.get(2));
+    assert.ok(log.includes(id(at(2, 0))));
+  }
+});
+
+test("step 5: a read that throws once the run's signal ended stops the lanes with that throw, never an id counted unread", async () => {
+  const ac = new AbortController();
+  let n = 0;
+  const holds: Parameters<typeof restoreDepositIds>[3] = async () => {
+    if (++n === 3) ac.abort(new Error("signed out"));
+    if (n >= 3) throw new Error("the read stopped");
+    return "unused";
+  };
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, LANES, holds, { signal: ac.signal }), /^Error: the read stopped$/);
+  assert.equal(n, 3, "no read after the signal ended");
+});
