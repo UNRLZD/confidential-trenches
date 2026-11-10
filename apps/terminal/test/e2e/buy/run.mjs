@@ -227,6 +227,19 @@ const PROBE = ({ app, sign }) => {
   });
 };
 
+/** One trade's timing from the run's own clock: the tap, its first send leaving the page, each answer SIGN_HOST posted
+ *  (its stage, ms after the tap), and when the run read the end label; the transaction's block time is added from the
+ *  chain after the run (blockTime, in seconds). */
+function timing(tapAt, sentAt, answers, end) {
+  return {
+    sentMs: sentAt ? sentAt - tapAt : null,
+    answers: answers.filter((e) => e.kind === "answer").map((e) => ({ ms: e.at - tapAt, type: e.type, stage: e.stage, ok: e.ok })),
+    endMs: Date.now() - tapAt,
+    end,
+    tapAt: new Date(tapAt).toISOString(),
+  };
+}
+
 export async function run({ plant = null, shots = null } = {}) {
   const rec = { started: new Date().toISOString(), plant, txs: [], csp: [], hosts: [], dialogs: 0 };
   devnetOnly(await both("getGenesisHash", []));
@@ -245,7 +258,7 @@ export async function run({ plant = null, shots = null } = {}) {
     const market = readFileSync(path.join(HERE, "market-token.json"), "utf8").trim().replaceAll("<mint>", MINT);
     const { context } = await h.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
     await context.route(`https://${REAL.api}/v1/market/token?chain=solana&token=${MINT}`, (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": `https://${REAL.app}` }, body: market }));
-    await context.exposeBinding("__ct", (_s, e) => events.push(e));
+    await context.exposeBinding("__ct", (_s, e) => events.push({ ...e, at: Date.now() }));
     await context.addInitScript(PROBE, { app: REAL.app, sign: REAL.sign });
     // a host counts as reached once it answered (the footer's NEAR RPCs are asked and fail as not found)
     context.on("response", (r) => {
@@ -256,12 +269,16 @@ export async function run({ plant = null, shots = null } = {}) {
     // a transaction sent to an RPC is named by its first signature, as sent; one the helper carries (POST
     // /v1/pool/solana/send: slot 0, the fee payer's, is zero until the helper signs) by the signature its 200 answers
     const add = (sig) => sig && !/^1+$/.test(sig) && !sent.some((x) => x.sig === sig) && sent.push({ step, sig });
+    // when each step's first send left the page (an RPC sendTransaction or the helper's pool send), for the timing split
+    const sentAt = {};
+    const mark = () => (sentAt[step] ??= Date.now());
     const isPoolSend = (r) => r.method() === "POST" && new URL(r.url()).hostname === REAL.api && new URL(r.url()).pathname === "/v1/pool/solana/send";
     context.on("request", (r) => {
-      if (r.method() !== "POST" || isPoolSend(r)) return;
+      if (r.method() !== "POST") return;
+      if (isPoolSend(r)) return void mark();
       try {
         const b = JSON.parse(r.postData() ?? "");
-        if (b?.method === "sendTransaction" && typeof b.params?.[0] === "string") add(b58(Buffer.from(b.params[0], "base64").subarray(1, 65)));
+        if (b?.method === "sendTransaction" && typeof b.params?.[0] === "string") mark(), add(b58(Buffer.from(b.params[0], "base64").subarray(1, 65)));
       } catch {}
     });
     context.on("response", (r) => {
@@ -386,7 +403,9 @@ export async function run({ plant = null, shots = null } = {}) {
     if (plant === "no-buy") throw new Error("planted: the buy is cut (no tap)");
     step = "buy";
     const asksBefore = events.filter((e) => e.kind === "ask").length;
+    const answersBefore = events.length;
     await vis('[data-testid="trade-cta"]').click();
+    const tapAt = Date.now();
     rec.buy.taps = 1;
     const cta = vis('[data-testid="trade-cta"]');
     const end = Date.now() + FILL_MS;
@@ -397,6 +416,7 @@ export async function run({ plant = null, shots = null } = {}) {
       await page.waitForTimeout(250);
     }
     rec.buy.end = label;
+    rec.buy.timing = timing(tapAt, sentAt.buy, events.slice(answersBefore), label);
     const asks = events.filter((e) => e.kind === "ask").slice(asksBefore).filter((e) => e.type.startsWith("pool.buy") || e.type === "buy");
     rec.buy.asks = asks.length;
     rec.buy.kind = asks[0]?.type ?? null;
@@ -424,7 +444,9 @@ export async function run({ plant = null, shots = null } = {}) {
     if (plant === "no-sell") throw new Error("planted: the sell is cut (no tap)");
     step = "sell";
     const sellAsksBefore = events.filter((e) => e.kind === "ask").length;
+    const sellAnswersBefore = events.length;
     await sellCta.click();
+    const sellTapAt = Date.now();
     rec.sell.taps = 1;
     const sellEnd = Date.now() + FILL_MS;
     let sellLabel = "";
@@ -434,6 +456,7 @@ export async function run({ plant = null, shots = null } = {}) {
       await page.waitForTimeout(250);
     }
     rec.sell.end = sellLabel;
+    rec.sell.timing = timing(sellTapAt, sentAt.sell, events.slice(sellAnswersBefore), sellLabel);
     const sellAsks = events.filter((e) => e.kind === "ask").slice(sellAsksBefore).filter((e) => e.type === "pool.sell" || (e.type === "buy" && e.side === "sell"));
     rec.sell.asks = sellAsks.length;
     rec.sell.kind = sellAsks[0]?.type ?? null;
@@ -471,6 +494,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(rec.stub);
     for (const l of v.lines) console.log(l);
     for (const t of rec.txs) console.log(`Tx: solana-devnet ${t.sig} (${t.step})`);
+    for (const side of ["buy", "sell"]) if (rec[side]?.timing) console.log(`timing ${side}: ${JSON.stringify(rec[side].timing)}`);
     console.log(v.ok ? "PASS a pool buy and sell end to end in H-app on devnet" : "FAIL");
     process.exit(v.ok ? 0 : 1);
   } catch (e) {
