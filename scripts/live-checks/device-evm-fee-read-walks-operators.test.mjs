@@ -1,6 +1,7 @@
-// Replays of live check device-evm-fee-read-walks-operators: the recorded good run (10 Nov 21:48Z: both binds bound in
-// their period, Pocket lacking the Robinhood state 60 s back on its one ask) passes; the bad one (every Robinhood seat
-// but one lacking the state, in this period and the next) fails; and each rule alone on the good run.
+// Replays of live check device-evm-fee-read-walks-operators: the recorded good run (10 Nov 21:53Z: Base bound in its
+// period; Robinhood's bind found three of four operators without the state about 40 s back and bound at the next
+// period's first block, as the queue's next pass does) passes; the bad one (every Robinhood seat but one lacking the
+// state, in this period and the next) fails; and each rule alone on the good run.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -14,10 +15,11 @@ const one = (f) => {
   return judge(g);
 };
 
-test("the recorded good answer passes, the seat lacking the state named", () => {
+test("the recorded good answer passes: the next period's bind named, the seats lacking the state named", () => {
   const r = judge(A.good);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.ok(r.lines.some((l) => /^-- {2}robinhood: 60 s back .* 3 of 4 operators held the state on one ask; lacking: robinhood\.api\.pocket\.network/.test(l)));
+  assert.ok(r.lines.some((l) => /^ok {2}robinhood: the bind read the chain fee at block \d+ \(the period from .*, the next period, as the queue's next pass\)/.test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => /^-- {2}robinhood: 60 s back .* 1 of 4 operators held the state on one ask; lacking: robinhood\.drpc\.org, robinhood\.api\.pocket\.network, robinhood-rpc\.publicnode\.com/.test(l)));
 });
 
 test("the recorded bad answer (no two operators keep the block's state, this period or the next) fails", () => {
@@ -36,12 +38,13 @@ test("each rule alone on the good answer", () => {
   assert.equal(one((g) => (g.chains.base.seats[2].cors[0] = { status: 204, acao: "https://other.example", allowHeaders: "content-type" })).verdict, "FAIL", "a page origin refused");
   assert.equal(one((g) => (g.chains.base.seats[3].fee = { result: ["0x" + "0".repeat(63) + "1", "0x" + "0".repeat(64)] })).verdict, "FAIL", "two seats that differ 60 s back");
   assert.equal(one((g) => (g.chains.robinhood.bind.tries = [{ start: "x", ok: false, name: "EvmOperatorsDiffer", error: "the chain fee at block 1: a and b answered differently" }])).verdict, "FAIL", "two operators that differ on the bind");
-  assert.equal(one((g) => (g.chains.robinhood.bind.tries[0].operators = ["robinhood.com", "robinhood.com"])).verdict, "FAIL", "a bind on one operator twice");
+  assert.equal(one((g) => (g.chains.robinhood.bind.tries.find((t) => t.ok).operators = ["robinhood.com", "robinhood.com"])).verdict, "FAIL", "a bind on one operator twice");
   assert.equal(one((g) => (g.chains.robinhood.seats = g.chains.robinhood.seats.slice(0, 2))).verdict, "FAIL", "a list of two operators: no spare");
   // the next period's bind, as the queue's next pass: a pass
-  const next = one((g) => g.chains.robinhood.bind.tries.unshift({ start: "2026-11-10T21:47:00.000Z", ok: false, name: "EvmLagError", error: "one operator alone never passes" }));
-  assert.equal(next.verdict, "PASS");
-  assert.ok(next.lines.some((l) => /the next period, as the queue's next pass/.test(l)));
+  // the bind in its own period: a pass with no next-period words
+  const own = one((g) => g.chains.robinhood.bind.tries.shift());
+  assert.equal(own.verdict, "PASS");
+  assert.ok(!own.lines.some((l) => /^ok {2}robinhood: .*the next period/.test(l)));
   // the walk 60 s back not bound while the bind bound: a WARN naming who held the state, never silent, never a FAIL
   const warn = one((g) => {
     g.chains.robinhood.walk = { error: "one operator alone never passes" };

@@ -1,7 +1,7 @@
 {
  "good": {
   "check": "device-evm-fee-read-walks-operators",
-  "at": "2026-11-10T21:48:56.980Z",
+  "at": "2026-11-10T21:54:12.842Z",
   "chains": {
    "base": {
     "list": [
@@ -11,9 +11,9 @@
      "https://base.gateway.tenderly.co"
     ],
     "block": {
-     "number": "0x35333aa",
-     "hash": "0x0135fc516e9fdc18efeb8e1760c91f8407ee2f3dd2671c9b65b5c38abec291fb",
-     "timestamp": "0x6af390f0"
+     "number": "0x35339a8",
+     "hash": "0xc7db9f953036387b1fa4ca1040057bb81c0f1e19af2091d706e1f94f5ecee06e",
+     "timestamp": "0x6af39222"
     },
     "seats": [
      {
@@ -36,7 +36,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -61,7 +61,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -86,7 +86,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -111,7 +111,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -131,11 +131,11 @@
     "bind": {
      "tries": [
       {
-       "start": "2026-11-10T21:48:00.000Z",
+       "start": "2026-11-10T21:53:00.000Z",
        "ok": true,
-       "block": "55784522",
+       "block": "55786022",
        "depth": 0,
-       "chainFee": "14983183290",
+       "chainFee": "13493765184",
        "hosts": [
         "mainnet.base.org",
         "base-rpc.publicnode.com"
@@ -156,9 +156,9 @@
      "https://robinhood-rpc.publicnode.com"
     ],
     "block": {
-     "number": "0x6a0e10b",
-     "hash": "0x79fcd1b10ec7436d37273369c6a23178bb8bfa2dd0571ce791370e2615378711",
-     "timestamp": "0x6af390fd"
+     "number": "0x6a0ec3d",
+     "hash": "0x89d899d5467810c42237cdfdf0179f38389d495cd66c1203a2c6361046d479df",
+     "timestamp": "0x6af3922a"
     },
     "seats": [
      {
@@ -204,9 +204,10 @@
        }
       ],
       "fee": {
-       "result": [
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-       ]
+       "error": {
+        "message": "Unknown state. First available state is 1",
+        "code": 27
+       }
       }
      },
      {
@@ -230,7 +231,7 @@
       "fee": {
        "error": {
         "code": -32000,
-        "message": "historical state efbb343bd117286ef7d91e156116a9982745607c981e27440aab26ada6c609d4 is not available"
+        "message": "historical state a0c471ac9fb917239651002542446b03ba77a6a09131ad55068f0d5927c8e59b is not available"
        }
       }
      },
@@ -253,29 +254,36 @@
        }
       ],
       "fee": {
-       "result": [
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-       ]
+       "error": {
+        "code": -32000,
+        "message": "historical state a0c471ac9fb917239651002542446b03ba77a6a09131ad55068f0d5927c8e59b is not available"
+       }
       }
      }
     ],
     "walk": {
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
-      "robinhood.drpc.org"
+      "robinhood-rpc.publicnode.com"
      ],
      "operators": [
       "robinhood.com",
-      "drpc.org"
+      "publicnode.com"
      ],
      "agree": true
     },
     "bind": {
      "tries": [
       {
-       "start": "2026-11-10T21:48:00.000Z",
+       "start": "2026-11-10T21:53:00.000Z",
+       "ok": false,
+       "name": "EvmOperatorsUnanswered",
+       "error": "robinhood currentTreeSize() at block 111209695: one operator alone never passes (side 1: robinhood.drpc.org: HTTP 400: RPC error 27: Unknown state. First available state is 1; robinhood.api.pocket.network: RPC error -32000: historical state 665036f0d11d211f69e334f5bbd99c1a831c83de218604f13ada089eb42"
+      },
+      {
+       "start": "2026-11-10T21:54:00.000Z",
        "ok": true,
-       "block": "111206843",
+       "block": "111210234",
        "depth": 0,
        "chainFee": "0",
        "hosts": [
@@ -294,7 +302,7 @@
  },
  "bad": {
   "check": "device-evm-fee-read-walks-operators",
-  "at": "2026-11-10T21:48:56.980Z",
+  "at": "2026-11-10T21:54:12.842Z",
   "chains": {
    "base": {
     "list": [
@@ -304,9 +312,9 @@
      "https://base.gateway.tenderly.co"
     ],
     "block": {
-     "number": "0x35333aa",
-     "hash": "0x0135fc516e9fdc18efeb8e1760c91f8407ee2f3dd2671c9b65b5c38abec291fb",
-     "timestamp": "0x6af390f0"
+     "number": "0x35339a8",
+     "hash": "0xc7db9f953036387b1fa4ca1040057bb81c0f1e19af2091d706e1f94f5ecee06e",
+     "timestamp": "0x6af39222"
     },
     "seats": [
      {
@@ -329,7 +337,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -354,7 +362,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -379,7 +387,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -404,7 +412,7 @@
       ],
       "fee": {
        "result": [
-        "0x0000000000000000000000000000000000000000000000000000000367507360",
+        "0x00000000000000000000000000000000000000000000000000000003060a9904",
         "0x0000000000000000000000000000000000000000000000000000000000000000"
        ]
       }
@@ -424,11 +432,11 @@
     "bind": {
      "tries": [
       {
-       "start": "2026-11-10T21:48:00.000Z",
+       "start": "2026-11-10T21:53:00.000Z",
        "ok": true,
-       "block": "55784522",
+       "block": "55786022",
        "depth": 0,
-       "chainFee": "14983183290",
+       "chainFee": "13493765184",
        "hosts": [
         "mainnet.base.org",
         "base-rpc.publicnode.com"
@@ -449,9 +457,9 @@
      "https://robinhood-rpc.publicnode.com"
     ],
     "block": {
-     "number": "0x6a0e10b",
-     "hash": "0x79fcd1b10ec7436d37273369c6a23178bb8bfa2dd0571ce791370e2615378711",
-     "timestamp": "0x6af390fd"
+     "number": "0x6a0ec3d",
+     "hash": "0x89d899d5467810c42237cdfdf0179f38389d495cd66c1203a2c6361046d479df",
+     "timestamp": "0x6af3922a"
     },
     "seats": [
      {
@@ -560,21 +568,21 @@
     "bind": {
      "tries": [
       {
-       "start": "2026-11-10T21:48:00.000Z",
+       "start": "2026-11-10T21:53:00.000Z",
        "ok": false,
-       "name": "EvmLagError",
-       "error": "the chain fee at block 111206843 (0x…): one operator alone never passes (side 1: robinhood.drpc.org: HTTP 400 {\"code\":27,\"message\":\"Unknown state. First available state is 1\"}; robinhood.api.pocket.network: RPC error -32000: historical state … is not available; robinhood-rpc.publicnode.com: RPC error -32000: historical state … is not available; no operator left that the other side did not ask)"
+       "name": "EvmOperatorsUnanswered",
+       "error": "robinhood currentTreeSize() at block 111209695: one operator alone never passes (side 1: robinhood.drpc.org: HTTP 400: RPC error 27: Unknown state. First available state is 1; robinhood.api.pocket.network: RPC error -32000: historical state 665036f0d11d211f69e334f5bbd99c1a831c83de218604f13ada089eb42"
       },
       {
-       "start": "2026-11-10T21:49:00.000Z",
+       "start": "2026-11-10T21:54:00.000Z",
        "ok": false,
-       "name": "EvmLagError",
-       "error": "the chain fee at block 111206843 (0x…): one operator alone never passes (side 1: robinhood.drpc.org: HTTP 400 {\"code\":27,\"message\":\"Unknown state. First available state is 1\"}; robinhood.api.pocket.network: RPC error -32000: historical state … is not available; robinhood-rpc.publicnode.com: RPC error -32000: historical state … is not available; no operator left that the other side did not ask)"
+       "name": "EvmOperatorsUnanswered",
+       "error": "robinhood currentTreeSize() at block 111209695: one operator alone never passes (side 1: robinhood.drpc.org: HTTP 400: RPC error 27: Unknown state. First available state is 1; robinhood.api.pocket.network: RPC error -32000: historical state 665036f0d11d211f69e334f5bbd99c1a831c83de218604f13ada089eb42"
       }
      ]
     }
    }
   },
-  "note": "planted on the good run: every Robinhood seat but Robinhood`s own lacks the state, in this period and the next (dRPC`s code 27 of 10 Nov 20:44Z on all three): the bind cannot bind"
+  "note": "planted on the good run: every Robinhood seat but Robinhood`s own lacks the state, in this period and the next (the first period`s own refusal, recorded, again at the next): the bind cannot bind"
  }
 }

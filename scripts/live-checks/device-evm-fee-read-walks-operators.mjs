@@ -4,7 +4,8 @@
 // operator that lacks a block's state, hangs or errs is walked past. Read now, for each mainnet:
 //   - every list seat answers eth_chainId with the chain's id, and its CORS preflight admits both pages' origins (the
 //     signing page's and the app's, page-evm-rpc-csp.mjs PAGES), since the device reads from both;
-//   - the bind, as the device runs it: the wallet's own functions in bind's order (packages/wallet/src/pool/evm.ts:
+//   - the bind, as the device runs it (CHILD, packages/wallet/scripts/bind-fee-live.ts): the wallet's own functions in
+//     bind's order (packages/wallet/src/pool/evm.ts:
 //     evmEpochBlock on the pool's pair, the tree depth there, evmBindChainFee on the walk), under the wallet's lag
 //     retries (evmRetryLag), at the current period's first block; when that fails, again at the next period's first
 //     block, as the proof queue's next pass does while the period's proof still lives (a proof bound in one period is
@@ -21,11 +22,18 @@
 //   node scripts/live-checks/device-evm-fee-read-walks-operators.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 import "../net-window.mjs";
+import { execFile } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { PAGES } from "./page-evm-rpc-csp.mjs";
 import { EXIT, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "device-evm-fee-read-walks-operators";
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+/** The wallet's own bind reads, run as a child (the kit's entry is this file's only reach into Blindfill). */
+export const CHILD = path.join(REPO, "packages/wallet/scripts/bind-fee-live.ts");
+export const childArgs = () => ["--import", pathToFileURL(path.join(REPO, "scripts/net-window.mjs")).href, CHILD];
 const CHAINS = { base: 8453, robinhood: 4663 };
 export const ORIGINS = Object.freeze([new URL(PAGES.sign).origin, new URL(PAGES.app).origin]);
 const AGE_S = 60;
@@ -81,10 +89,10 @@ export function judge(run) {
 
 /** The run: the kit's lists and the wallet's bind functions, read now. */
 export async function read(fetchFn = fetch) {
-  const { evmPoolVenues, evmReadProvidersOf, evmPoolProvidersOf, evmRpcOperator, evmTwoOperators, evmPoolChainFeeReads, evmPoolGas, solanaJsonRpc } = await import("../../packages/kit/src/index.ts");
-  const { evmBindChainFee, evmEpochBlock, evmRetryLag } = await import("../../packages/wallet/src/pool/evm.ts");
+  const { evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, evmPoolChainFeeReads, evmPoolGas } = await import("../../packages/kit/src/index.ts");
   const v = evmPoolVenues();
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // the bind's own reads run in the wallet's child (CHILD), both chains at once beside the reads below
+  const child = new Promise((res, no) => execFile(process.execPath, childArgs(), { cwd: REPO, timeout: 300_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => (e ? no(new Error(`${KEY}: the bind child failed: ${String(stderr).slice(-300)}`)) : res(stdout))));
   const chains = {};
   for (const chain of Object.keys(CHAINS)) {
     const list = [...evmReadProvidersOf(v[chain])];
@@ -120,42 +128,10 @@ export async function read(fetchFn = fetch) {
     } catch (e) {
       walk = { error: String(e?.message ?? e).slice(0, 300) };
     }
-    // the bind, as the device runs it: this period's first block, else the next period's
-    const client = (url, answered) => Object.assign(async (method, params) => {
-      const r = await solanaJsonRpc(url, { fetch: fetchFn })(method, params);
-      if (method === "eth_call" && answered) answered.add(url);
-      return r;
-    }, { url });
-    const pair = evmPoolProvidersOf(v[chain]).slice(0, 2).map((u) => client(u));
-    const tries = [];
-    const start0 = Math.floor(Date.now() / EPOCH_MS) * EPOCH_MS;
-    for (const start of [start0, start0 + EPOCH_MS]) {
-      if (Date.now() < start + 5_000) await sleep(start + 5_000 - Date.now());
-      const answered = new Set();
-      const walkFee = evmTwoOperators(list.map((url) => ({ url, rpc: client(url, answered) })));
-      try {
-        const got = await evmRetryLag(async () => {
-          const b = await evmEpochBlock(pair, BigInt(start));
-          // the pool's public tree size there, on two operators of the list (the device counts its sync's leaves instead:
-          // no state read, so a pair seat lacking this block's state is not the bind's fault)
-          const [{ value: sizeWord }] = await walkFee.read(`${chain} currentTreeSize() at block ${b.number}`, (rpc) => rpc("eth_call", [{ to: v[chain].pool, data: "0xa8f0f95a" }, { blockHash: b.hash }]), (x, y) => x === y);
-          const size = Number(BigInt(sizeWord));
-          let depth = 0;
-          while (2 ** depth < size) depth++;
-          answered.clear();
-          const chainFee = await evmBindChainFee(walkFee, chain, b, depth);
-          return { block: b.number.toString(), depth, chainFee: chainFee.toString() };
-        }, sleep);
-        const hosts = list.filter((u) => answered.has(u)).map(hostOf);
-        tries.push({ start: new Date(start).toISOString(), ok: true, ...got, hosts, operators: list.filter((u) => answered.has(u)).map(evmRpcOperator) });
-        break;
-      } catch (e) {
-        const noAnswer = /no answer in \d+ ms|HTTP 429|rate limit/i.test(String(e?.message)) && !/answered differently/.test(String(e?.message));
-        tries.push({ start: new Date(start).toISOString(), ok: false, name: noAnswer ? "noAnswer" : (e?.name ?? "Error"), error: String(e?.message ?? e).slice(0, 300) });
-      }
-    }
-    chains[chain] = { list, block: { number: block.number, hash: block.hash, timestamp: block.timestamp }, seats, walk, bind: { tries } };
+    chains[chain] = { list, block: { number: block.number, hash: block.hash, timestamp: block.timestamp }, seats, walk };
   }
+  const binds = JSON.parse(String(await child).trim().split("\n").at(-1));
+  for (const chain of Object.keys(chains)) chains[chain].bind = binds[chain] ?? { tries: [] };
   return { check: KEY, at: new Date().toISOString(), chains };
 }
 
