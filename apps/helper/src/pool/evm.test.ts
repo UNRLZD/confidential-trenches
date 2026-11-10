@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
 import { providerHolds, type ProviderHolds } from "../limits/limits.ts";
 import { signRelease, W } from "../../test/pool-evm/release-sign.ts";
-import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_EVM_ENV, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
+import { EVM_FEE_STEP, EVM_GAS_MAX, evmAddressOf, evmFailoverRpc, evmFirstBlockAtOrAfter, evmPoolSender, evmPoolSendersFromEnv, pacedEvmRpc, evmReadWithdraw, POOL_EVM_ENV, POOL_LIFE_MAX_MS, rlp, signEvmTx, WITHDRAW_SELECTOR, WITHDRAW_SIGNATURE, type EvmRpc } from "./evm.ts";
 
 const KEY = new Uint8Array(createHash("sha256").update("helper-pool-senders/test-key/EVM_SENDER").digest());
 const POOL = "0x00000000000000000000000000000000b1f1f001";
@@ -292,6 +292,30 @@ test("upstream: two providers on different chains, or holding different blocks; 
   const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO }, [rpc([]), rpc(b, {}, other)], () => NOW);
   assert.equal(code(await t.carry(req())), "upstream");
   assert.equal(sends(b).length, 0);
+});
+
+// card helper-pool-fee-one-read-fails: the send routes read through the same sides as the fee (evmFailoverRpc), so a read
+// one provider fails is asked of its side's next; with none left the answer is 503 upstream and one log line names it
+test("a withdraw whose read one provider fails is read on its side's spare and sent; with no spare, 503 upstream and one log line naming the read, the host and its answer", async () => {
+  const lines: string[] = [];
+  const log = (l: string) => void lines.push(l);
+  const down = (r: EvmRpc): EvmRpc => async (m, p) => {
+    if (m === "eth_getTransactionCount") throw new Error("HTTP 502");
+    return r(m, p);
+  };
+  const side = (rs: EvmRpc[]) => evmFailoverRpc(rs.map((r, i) => ({ name: `p${i}.example`, url: `https://p${i}.example`, rpc: r })), { log });
+  const b: Calls = [];
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log }, [side([down(rpc([])), rpc([])]), rpc(b)], () => NOW);
+  assert.equal(code(await s.carry(req())), "ok");
+  assert.equal(sends(b).length, 1);
+  assert.deepEqual(lines, ["eth_getTransactionCount failed at p0.example: HTTP 502; p1.example answered", "eth_getTransactionCount failed at p0.example: HTTP 502; p1.example answered"]);
+  lines.length = 0;
+  const b2: Calls = [];
+  const t = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, feeRecipient: FEE_TO, log }, [side([down(rpc([]))]), rpc(b2)], () => NOW);
+  assert.equal(code(await t.carry(req())), "upstream");
+  assert.equal(sends(b2).length, 0);
+  assert.equal(lines.length, 1, lines.join("\n"));
+  assert.match(lines[0]!, /^evm base-sepolia: upstream: HTTP 502 \(eth_getTransactionCount: p0\.example: HTTP 502\)$/);
 });
 
 test("one send per nullifier: a repeat in flight or landed, even as other bytes, gets the first hash and sends nothing", async () => {
