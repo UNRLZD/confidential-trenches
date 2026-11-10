@@ -26,7 +26,7 @@ const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-state-holdings
 const BAD = (rec, o) => judge(rec, o).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
 const LEDGER = `/app.js is a release whose commit holds ${CARD_COMMIT.slice(0, 8)}, a build of the source this card's tests hold`;
 /** The release lists in this tree, each judged by whether its commit holds the card's (no git here: no list written
- *  today does, every one cut from a main before it; the CO's run on SIGN_HOST after the release reads git). */
+ *  today does, every one cut from a main before it; the run on SIGN_HOST after the release reads git). */
 const TODAY = { released: releasedAppJs(undefined, () => false) };
 /** The good answer's ledger: the real one once it is SIGN_HOST's record, else one naming its bundle (see the header). */
 const goodLedger = answers.good.url === SIGN_ORIGIN ? {} : { released: new Map([[answers.good.app.sha384, "the card's release"]]) };
