@@ -536,6 +536,36 @@ test("HOLDINGS_RPC_LIMIT is the measured pace: a Solana round's three calls star
   assert.ok(evm.starts[3]![0] - evm.starts[0]![0] >= HOLDINGS_RPC_LIMIT.windowMs, `EVM: the fourth call waits the window`);
 });
 
+test("a read stopped while its calls wait their turn on the paced route sends none of them: no W of a stopped read is named after the stop", async () => {
+  const bodies: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const url = String(u);
+    if (!url.startsWith("https://stop-sol.example") && !url.startsWith("https://stop-evm.example")) return real(u, init);
+    bodies.push(String(init?.body));
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    return url.startsWith("https://stop-sol.example") ? solOk(q.method, q.id) : evmOk(q.method, q.id);
+  }) as typeof fetch;
+  try {
+    const sol = solanaHelperHoldings("https://stop-sol.example");
+    const evm = evmHelperHoldings("https://stop-evm.example", "base", []);
+    // the first read takes the window's turns; the second's calls wait theirs, and it is stopped while they do
+    const first = [sol.read(solW(0)), evm.read(evmW(L, 0)), evm.read(evmW(L, 1))];
+    const stop = new AbortController();
+    const second = [sol.read(solW(1), stop.signal), evm.read(evmW(L, 2), stop.signal)].map((p) => p.then(() => "read", (e: unknown) => (stop.signal.aborted && e === stop.signal.reason ? "stopped" : `failed: ${String(e)}`)));
+    await new Promise((r) => setTimeout(r, 50));
+    stop.abort();
+    await Promise.all(first);
+    assert.deepEqual(await Promise.all(second), ["stopped", "stopped"]);
+    // past the window the queued calls would have gone out in
+    await new Promise((r) => setTimeout(r, HOLDINGS_RPC_LIMIT.windowMs + 500));
+    assert.equal(bodies.filter((b) => b.includes(solW(1)) || b.toLowerCase().includes(evmW(L, 2).slice(2).toLowerCase())).length, 0, "a stopped read's W named after its stop");
+    assert.ok(bodies.some((b) => b.includes(solW(0))), "the first read went out");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test("a chain whose finalized slot moves every 400 ms: every W's round answers at one slot, so each is read", async () => {
   // as Solana's does; a minContextSlot past the slot is refused with -32016, as the RPC does
   const t0 = Date.now();
