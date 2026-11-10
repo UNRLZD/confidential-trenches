@@ -203,7 +203,7 @@ export const MUTANTS = [
   [EVM, "    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;", "    if (known) return known.p;", T4, "A-4: 30 requests"],
   [EVM, "() => void (entry.until = now() + EVM_FEE_MISS_MS));", "() => fees.delete(epochStartMs));", T4, "A-4: 30 requests"],
   // card helper-evm-fee-at-epoch-start: the read ahead reads past a kept failure, and a window with no block says so
-  [EVM, "        if ((await feeOf(epochStartMs, true)) !== null) return;", "        if ((await feeOf(epochStartMs)) !== null) return;", T6, "a request's read that failed half a second into the period"],
+  [EVM, "        if ((await feeOf(epochStartMs, true)) !== null) return true;", "        if ((await feeOf(epochStartMs)) !== null) return true;", T6, "a request's read that failed half a second into the period"],
   [EVM, "    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;", "    if (known && (known.until === undefined || now() < known.until)) return known.p;", T6, "a request's read that failed half a second into the period"],
   [EVM, "    else log(`evm ${cfg.network}: fee read ahead: no block in the period", "    else (`evm ${cfg.network}: fee read ahead: no block in the period", T6, "a read ahead that fails is tried again inside the window"],
 ];
