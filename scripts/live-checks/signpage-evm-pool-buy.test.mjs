@@ -96,6 +96,25 @@ test("made from the good run: each break FAILs", async () => {
   }
 });
 
+test("a null for a recorded buy from one RPC (a load-balanced backend that lacks it, read live 2026-11-11 17:1xZ on Pocket) is read again: a later answer PASSes, nulls only leave the run INCONCLUSIVE, never FAIL or PASS", async () => {
+  const nulls = (n) => {
+    let left = n;
+    const base = replay(A.good);
+    return async (url, init) => {
+      const body = init?.body ? JSON.parse(init.body) : null;
+      if (url.includes("pocket") && body?.method === "eth_getTransactionReceipt" && left > 0) {
+        left--;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: null }), { status: 200 });
+      }
+      return base(url, init);
+    };
+  };
+  const once = judge({ ...(await read(mdOf(A.good), nulls(1))), page: A.good.page });
+  assert.equal(once.verdict, "PASS", once.lines.join("\n"));
+  const always = judge({ ...(await read(mdOf(A.good), nulls(1_000))), page: A.good.page });
+  assert.equal(always.verdict, "INCONCLUSIVE", always.lines.join("\n"));
+});
+
 test("a pool RPC with no answer leaves the run INCONCLUSIVE, never PASS; a wrong answer beside it is still FAIL", async () => {
   const quiet = editRead(A.good, (x) => (x.rpc.includes("pocket") ? { ...x, answer: { noAnswer: "base-testnet.api.pocket.network: HTTP 429" } } : undefined));
   const r = await run(quiet);
