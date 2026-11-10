@@ -23,6 +23,8 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { testnetPool, TESTNET_EVM_FEE_RPCS, MAINNET_EVM_FEE_RPCS, TESTNET_RPCS, evmEpochFee, evmPoolRelayFee } = await import("../src/pool-testnet.ts");
 const { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_LADDER, EVM_LIFE_MS, EVM_POOL_EVENTS, EVM_POOLS, EVM_SEND_MARGIN_MS, evmPoolScopeOf } = await import("../../wallet/src/pool/evm.ts");
 const { EVM_BUY_SIGNATURE } = await import("../src/evm-send.ts");
+// loaded after the network is set (a static import would load the wallet's network module first, as mainnet)
+const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
 const { SOL_EPOCH_MS, SOL_LADDER, SOL_LIFE_MS, SOL_POOLS, SOL_SEND_MARGIN_MS, solanaPoolOf } = await import("../../wallet/src/pool/solana.ts");
 type EvmPoolPin = import("../../wallet/src/pool/evm.ts").EvmPoolPin;
 type EvmPoolEvent = import("../../wallet/src/pool/evm.ts").EvmPoolEvent;
@@ -438,6 +440,41 @@ test("the EVM buy's host on the testnet page: a sign out reaches its run (the fo
   assert.equal(made[1]!.stopped?.(), false, "a tap after it counts from there");
   await t.signedOut();
   assert.equal(a.signal?.aborted, true, "signed out: the run's reads end");
+});
+
+test("a state read follows a buy whose tab ended before its end, from its pending record: past its deadline with no release on either RPC's safe block, removed (the pending end's dead-tab rule)", { timeout: 60_000 }, async () => {
+  const { w } = await wallet();
+  const W = "0x" + "4b".repeat(20);
+  const deadlineMs = BigInt(Date.now()) - 60_000n;
+  const buy = { nullifier: "123", from: "16", deadlineMs: deadlineMs.toString(), minOut: "1", value: RUNG.toString(), feeCap: "1", feeRecipient: PIN.feeRecipient.toLowerCase() };
+  const pending = { mint: SEPOLIA_USDC, decimals: 6, chain: "base", state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy };
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: pending }));
+  const asked: string[] = [];
+  // two pool RPCs whose newest and safe blocks are past the deadline, with no release of the nullifier
+  const rpcs = (): readonly EvmRpc[] =>
+    ["https://a.example", "https://b.example"].map((url) =>
+      Object.assign(
+        async (method: string, params: readonly unknown[]) => {
+          asked.push(`${method} ${String(params[0] && typeof params[0] === "string" ? params[0] : "")}`);
+          if (method === "eth_getBlockByNumber") return { number: "0x40", timestamp: "0x" + (BigInt(Date.now()) / 1000n).toString(16) };
+          if (method === "eth_getLogs") return [];
+          throw new Error(`no ${method}`);
+        },
+        { url },
+      ),
+    );
+  const t = testnetPool({ ...page(w), held: async () => w }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: (c) => (c === "base" ? rpcs() : null),
+    evmSync: () => ({ events: async () => FREEING }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+  });
+  await t.stateRead();
+  for (let i = 0; i < 400 && ((await w.get("meta", EVM_POSITION_COSTS_KEY)) as Record<string, unknown>)[W] !== undefined; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(await w.get("meta", EVM_POSITION_COSTS_KEY), {}, "never landed: removed, so the note can buy again");
+  assert.ok(asked.includes("eth_getBlockByNumber safe"), "judged on the safe block");
+  await t.signedOut();
 });
 
 test("the EVM buy's live check reads what the testnet page reads: its pairs, chain ids, pins, Bought topic and buy selector (scripts/live-checks/signpage-evm-pool-buy.mjs)", async () => {

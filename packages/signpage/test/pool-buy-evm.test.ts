@@ -119,7 +119,7 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
 };
 
 type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
-type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void> };
+type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void>; holdings?: Map<string, EvmHolding>; unrecord?: () => Promise<void>; following?: Set<string>; take?: () => Promise<void> };
 /** Every host's sign out, aborted after each test: the reads a test leaves following end with it. */
 const stops: AbortController[] = [];
 afterEach(() => void stops.splice(0).forEach((c) => c.abort()));
@@ -128,6 +128,7 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
   const clock = { t: NOW };
   const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
+  const kept = o.holdings ?? new Map<string, EvmHolding>();
   const h: EvmPoolBuyHost = {
     chain: "base",
     testnet: false,
@@ -137,6 +138,7 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
     ready: async () => ready,
     take: async (id, attempt) => {
       seen.order.push("take");
+      if (o.take) await o.take();
       seen.takes.push(id);
       const r = ready.find((x) => x.noteId === id && x.attempt === attempt);
       if (!r) throw new Error("taken by another attempt");
@@ -165,11 +167,22 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
       return o.send ? o.send() : HELPER_HASH;
     },
     settle: () => void seen.settles++,
+    // W's holdings as the page's host keeps them (evmBuyHost): a pending write refuses a W that has one; the removal
+    // takes only that W's pending record of the nullifier given
     record: async (w, rec) => {
       seen.order.push(`record ${rec.state}`);
       if (o.record) await o.record();
+      if (rec.state === "pending" && kept.has(w)) throw new Error("W already has a holding");
+      kept.set(w, structuredClone(rec));
       seen.records.push([w, structuredClone(rec)]);
     },
+    unrecord: async (w, n) => {
+      if (o.unrecord) await o.unrecord();
+      const mine = kept.get(w);
+      if (mine?.state === "pending" && mine.buy?.nullifier === n.toString()) kept.delete(w);
+    },
+    holdings: async () => Object.fromEntries(kept),
+    following: o.following ?? new Set(),
     owe: async (x) => void seen.owed.push(x),
     sent: () => void seen.sent++,
     late: (x) => void seen.late.push(x),
@@ -214,9 +227,14 @@ test("filled: one Bought for the nullifier, the same on both RPCs, paying W the 
   assert.deepEqual(seen.quotes.at(-1), FIXTURE_ROUTE);
   assert.equal(seen.quotes.length, 2, "the first standard shape, then the kit's best route once");
   const route = { venue: "uniswap-v3", adapter: A_V3, path: FIXTURE_ROUTE };
+  // what the chain is asked to end the buy, with the pending record: the nullifier, the read-back's first block, the
+  // deadline, W's signed min out, the chunk, the fee cap and the fee recipient
+  const minOut = seen.records[0]![1].buy?.minOut ?? "";
+  assert.ok(/^[1-9][0-9]*$/.test(minOut), minOut);
+  const buy = { nullifier: NULLIFIER.toString(), from: (START - 100n).toString(), deadlineMs: DEADLINE.toString(), minOut, value: CHUNK.toString(), feeCap: FEE.toString(), feeRecipient: FEE_TO };
   assert.deepEqual(seen.records, [
-    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "pending", route }],
-    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "40", route: { ...route, tx: TX, block: "272" } }],
+    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "pending", route, buy }],
+    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "40", route: { ...route, tx: TX, block: "272" }, buy }],
   ]);
   assert.equal(EVM_POSITION_COSTS_KEY, "owed/cost-evm");
   assert.equal(seen.settles, 1, "the settle pass ends the RESERVED note");
@@ -723,4 +741,102 @@ test("(P2-2) a sign out during the follow's own end write: no settle is started 
   assert.deepEqual(seen.records.map((r) => r[1].state), ["pending", "filled"]);
   assert.equal(seen.settles, before, "the follow's end after a sign out starts no settle");
   assert.deepEqual(seen.late, []);
+});
+
+// ---- the pending record's end (the coordinator's ruling on P3-7): each fails at e5978942 ----
+const followPending = M.followPendingEvmBuys as ((h: EvmPoolBuyHost) => Promise<void>) | undefined;
+const pastAll = (): Pick<HostOpts, "a" | "b"> => ({ a: { time: () => DEADLINE + 1_000n }, b: { time: () => DEADLINE + 1_000n } });
+
+test("(pending end 1) a coded refusal on the first POST removes this run's pending record before it answers: the same note's next buy signs and sends", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")) });
+  assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "refused", txs: [] });
+  assert.equal(kept.has(W), false, "no pending left");
+  const next = host({ holdings: kept, ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(next.seen.sends.length, 1);
+});
+
+test("(pending end 2) not_landed by the two-round safe rule removes this run's pending record with the verdict: the same note's next buy signs and sends", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, ...pastAll() });
+  assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "not_landed", txs: [] });
+  assert.equal(kept.has(W), false, "no pending left");
+  const next = host({ holdings: kept, ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(next.seen.sends.length, 1);
+});
+
+test("(pending end 3, 4) withdrawn keeps the owed record; every end where bytes may have left with no verdict keeps the pending one, and the same note's next buy is refused with nothing sent", async () => {
+  const cases: [string, HostOpts, (h: EvmPoolBuyHost) => void][] = [
+    ["withdrawn", both([release({ kind: "withdrawn" })]), () => {}],
+    ["sent, the follow still running", {}, () => {}],
+    ["every read failing", {}, () => {}],
+    ["a failed take", { take: () => Promise.reject(new Error("taken by another attempt")) }, () => {}],
+    ["a busy answer, then a coded refusal", { send: (() => { let n = 0; return () => Promise.reject(n++ === 0 ? new EvmSendBusy(1_000) : new EvmSendRefused(422, "simulation_failed")); })() }, () => {}],
+    ["a sign out during the reads", { a: { logs: () => (stops.at(-1)!.abort(), []) }, b: {} }, () => {}],
+  ];
+  for (const [why, o] of cases) {
+    const kept = new Map<string, EvmHolding>();
+    const first = host({ ...o, holdings: kept });
+    if (why === "every read failing") {
+      // the heads are read before W signs: down only once the bytes have left
+      let sentYet = false;
+      const send = first.h.send;
+      first.h.send = async (b) => ((sentYet = true), send(b));
+      const [a, b] = first.h.rpcs;
+      first.h.rpcs = [async (m, p) => (sentYet && m !== "eth_blockNumber" ? Promise.reject(new Error("down")) : a(m, p)), async (m, p) => (sentYet && m !== "eth_blockNumber" ? Promise.reject(new Error("down")) : b(m, p))];
+    }
+    const end = await runEvmPoolBuy(first.h, ASK);
+    assert.ok(kept.has(W), `${why}: W's record kept (${JSON.stringify(end)})`);
+    assert.equal(kept.get(W)!.state, why === "withdrawn" ? "withdrawn" : "pending", why);
+    const next = host({ holdings: kept, ...both([release()]) });
+    assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { error: "failed" }, why);
+    assert.deepEqual([next.seen.takes.length, next.seen.sends.length], [0, 0], why);
+  }
+});
+
+test("(pending end) a removal that fails leaves the pending record: the next buy is refused, nothing is doubled", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const first = host({ holdings: kept, unrecord: () => Promise.reject(new Error("store closed")), ...pastAll() });
+  assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "not_landed", txs: [] });
+  assert.equal(kept.get(W)?.state, "pending");
+  const next = host({ holdings: kept, ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { error: "failed" });
+  assert.equal(next.seen.sends.length, 0);
+});
+
+test("(pending end, dead tab) a pending record whose tab died before its end is followed at the next load from the record's own block range: not_landed removes it, a Bought fills it", async () => {
+  assert.equal(typeof followPending, "function", "followPendingEvmBuys");
+  for (const landed of [false, true]) {
+    const kept = new Map<string, EvmHolding>();
+    // the tab sends, answers sent at its bound, and dies (its signal aborted) while its follow reads on
+    const tab = host({ holdings: kept });
+    assert.deepEqual(await runEvmPoolBuy(tab.h, ASK), { stage: "sent", txs: [] });
+    stops.at(-1)!.abort();
+    await turns(20);
+    assert.equal(kept.get(W)?.state, "pending");
+    assert.equal(kept.get(W)!.buy!.nullifier, NULLIFIER.toString());
+    // the next load: another tab, its own clock from the send
+    const load = host({ holdings: kept, ...(landed ? both([release()]) : {}) });
+    load.seen.clock.t = NOW + 200_000n;
+    await followPending!(load.h);
+    if (landed) assert.deepEqual([kept.get(W)?.state, kept.get(W)?.received, kept.get(W)?.route.tx], ["filled", "40", TX]);
+    else assert.equal(kept.has(W), false, "never landed: removed, so the note can buy again");
+    assert.ok(logReads(load.seen).every((r) => BigInt(r.fromBlock) === START - 100n), "from the record's own block");
+    assert.equal(load.seen.settles, 1, "the settle pass ends the note");
+  }
+});
+
+test("(pending end) the load's follow leaves a W this page follows, a record of another chain, a filled one or one without its buy", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const tab = host({ holdings: kept });
+  await runEvmPoolBuy(tab.h, ASK);
+  const rec = kept.get(W)!;
+  const others: [string, EvmHolding][] = [["0x" + "01".repeat(20), { ...rec, chain: "robinhood" }], ["0x" + "02".repeat(20), { ...rec, state: "filled" }], ["0x" + "03".repeat(20), (({ buy: _b, ...r }) => r)(rec)]];
+  for (const [w, r] of others) kept.set(w, r);
+  const load = host({ holdings: kept, following: new Set([W.toLowerCase()]), ...pastAll() });
+  await followPending!(load.h);
+  assert.equal(logReads(load.seen).length, 0, "nothing read");
+  assert.equal(kept.size, 4);
 });

@@ -84,7 +84,13 @@ export type EvmHolding = {
   state: "pending" | "filled" | "withdrawn";
   received?: string;
   route: { venue: EvmRoute["venue"]; adapter: string; path: EvmRoute; tx?: string; block?: string };
+  /** What the chain is asked to end this buy, written with the pending record (decimal strings): the proof's
+   *  nullifier, the block the read-back starts at, the proof's deadline, the min out W signed, the chunk, the fee cap
+   *  and the pinned fee recipient. A load whose tab did not follow this buy to its end reads the chain from it
+   *  (followPendingEvmBuys); the run that wrote it removes it by its nullifier (unrecord). */
+  buy?: EvmPendingBuy;
 };
+export type EvmPendingBuy = { nullifier: string; from: string; deadlineMs: string; minOut: string; value: string; feeCap: string; feeRecipient: string };
 /** ETH a release paid W with no swap (a Withdrawn), owed back to the user, by W's address: the chunk less the fee, in
  *  wei, and the release that paid it. The pool sell and withdraw cards read it to return it. */
 export const EVM_OWED_BACK_KEY = "owed/back-evm";
@@ -115,6 +121,13 @@ export type EvmPoolBuyHost = {
   settle(): void;
   /** Writes W's holding (EVM_POSITION_COSTS_KEY): before the send (a failure sends nothing) and on its end. */
   record(w: string, h: EvmHolding): Promise<void>;
+  /** Removes W's holding only when it is this run's pending one (state pending, its buy's nullifier the one given):
+   *  at an end where the helper or the chain said the buy did not happen. A removal that fails leaves it pending. */
+  unrecord(w: string, nullifier: bigint): Promise<void>;
+  /** Every W's holding (EVM_POSITION_COSTS_KEY), for the load's follow of pending buys. */
+  holdings(): Promise<Record<string, unknown>>;
+  /** The Ws whose buy this page is following now: the load's follow skips them. */
+  following?: Set<string>;
   /** Writes W's ETH owed back (EVM_OWED_BACK_KEY). */
   owe(o: EvmOwedBack): Promise<void>;
   /** Runs the part up to the send under the seed's lock (the kind's); the read-back runs outside it. */
@@ -205,6 +218,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
   let claim: string | null = null;
   let taken = false;
   let posted = false;
+  // the W this run follows until its reads end (h.following)
+  let followed: string | null = null;
   const hold = h.hold ?? (<T>(f: () => Promise<T>) => f());
   const clock = (): bigint => h.now?.() ?? BigInt(Date.now());
   const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -261,7 +276,12 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       key.fill(0);
       const data = evmBuyCalldata(h.pin.pool, relay, r.proof, r.publicSignals, fee, built, signature);
       // W's holding, pending, before anything leaves: a write that fails sends nothing
-      const holding: EvmHolding = { mint: lower(token), decimals, chain: h.chain, state: "pending", route: { venue: q.route.venue, adapter: lower(adapter), path: q.route } };
+      const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, feeCap: fee, deadlineMs: relay.deadlineMs };
+      const buy: EvmPendingBuy = { nullifier: want.nullifier.toString(), from: from.toString(), deadlineMs: want.deadlineMs.toString(), minOut: want.minOut.toString(), value: want.value.toString(), feeCap: want.feeCap.toString(), feeRecipient: lower(want.feeRecipient) };
+      const holding: EvmHolding = { mint: lower(token), decimals, chain: h.chain, state: "pending", route: { venue: q.route.venue, adapter: lower(adapter), path: q.route }, buy };
+      // this page follows W from here: the load's follow leaves it to this run until the run's own reads end
+      h.following?.add(lower(w.address));
+      followed = lower(w.address);
       await h.record(w.address, holding);
       // the take, awaited before anything leaves: this very attempt, or refused with the note HELD
       const got = await h.take(r.noteId, r.attempt);
@@ -278,7 +298,12 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
           // a coded refusal is one only on the first POST: after a busy answer an earlier POST's bytes may be on their way
           // (the helper answers 429 when one of its sends took them, then 422 on the spent nullifier), so the chain
           // decides (review P2-3)
-          if (e instanceof EvmSendRefused && !busied) return { answer: { stage: "refused", txs: [] } };
+          if (e instanceof EvmSendRefused && !busied) {
+            // nothing left the device: this run's pending record is removed before it answers (a removal that fails
+            // leaves it, and the note's next buy is refused until the load's follow ends it)
+            await h.unrecord(w.address, binding.nullifier).catch(() => {});
+            return { answer: { stage: "refused", txs: [] } };
+          }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
             busied = true;
             // the helper's own Retry-After (evmPoolSend caps it at EVM_SEND_RETRY_MAX_S), at least 1 s, in slices a sign
@@ -293,7 +318,6 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       h.sent?.();
       // a sign out started during the busy wait: the run ends "sent", and the settle pass decides at the next sign in
       if (stopped()) return { answer: { stage: "sent", txs: [] } };
-      const want: EvmBuyWant = { nullifier: binding.nullifier, w: w.address, feeRecipient: h.pin.feeRecipient, token, minOut: built.minOut, value: r.chunk, feeCap: fee, deadlineMs: relay.deadlineMs };
       return { watch: { want, from, holding, w: w.address, stops: [null, null], none: null } };
     });
     if ("answer" in out) return out.answer;
@@ -304,7 +328,10 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     // a sign out ended the tap's reads: no follow
     if (!live()) return { stage: "sent", txs: [] };
     const slowAt = out.watch.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
+    const mine = followed;
+    followed = null;
     void watch(h, out.watch, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
+      .finally(() => void (mine !== null && h.following?.delete(mine)))
       .then((a) => {
         // null: a sign out ended the reads, so nothing is settled after it (review P2-2)
         if (a === null || !live()) return;
@@ -324,6 +351,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     (seed as Uint8Array | null)?.fill(0);
     (key as Uint8Array | null)?.fill(0);
     if (claim !== null) h.claimed?.delete(claim);
+    // no follow of this run's own goes on: a pending it left is the load's follow's (followPendingEvmBuys)
+    if (followed !== null) h.following?.delete(followed);
     // a taken note is ended only by the settle: started on every exit past the take, but never once a sign out has
     // started (its pass would wait on the seed's lock the sign out takes): the next sign in's settles it
     if (taken && live() && !stopped()) settle();
@@ -355,6 +384,9 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
       const at = clock();
       if (x.none === null) x.none = at;
       if (at - x.none < BigInt(EVM_BUY_LAG_MS)) continue;
+      // the chain said it never landed: this run's pending record is removed with the verdict, so the note can buy
+      // again (a removal that fails leaves it: the next buy is refused and the next load's follow tries again)
+      await h.unrecord(x.w, x.want.nullifier).catch(() => {});
       return { stage: "not_landed", txs: [] };
     }
     x.none = null;
@@ -374,10 +406,52 @@ async function watch(h: EvmPoolBuyHost, x: Watch, more: () => boolean, wait: (ms
   return null;
 }
 
+const big = (v: unknown): bigint | null => (typeof v === "string" && /^[0-9]{1,78}$/.test(v) ? BigInt(v) : null);
+
+/**
+ * The load's follow of pending buys (the tab that sent one may have closed before its end): each W's holding on this
+ * chain still pending with its buy written, that no run of this page follows, is read on the chain from the record's
+ * own block range until an end, as the run's own follow reads it (watch): filled or withdrawn completes it, not_landed
+ * by the two-round safe rule removes it, so a pending never stays for good and the note can buy again. Runs once per W
+ * at a time (h.following); a sign out (h.signal) ends it with nothing written. Started on each state read
+ * (src/pool-testnet.ts); never awaited.
+ */
+export async function followPendingEvmBuys(h: EvmPoolBuyHost): Promise<void> {
+  const all = await h.holdings();
+  const live = (): boolean => h.signal?.aborted !== true;
+  const clock = (): bigint => h.now?.() ?? BigInt(Date.now());
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const runs: Promise<unknown>[] = [];
+  for (const [w, v] of Object.entries(all)) {
+    const rec = v as Partial<EvmHolding> | null;
+    const b = rec?.buy;
+    if (rec?.state !== "pending" || rec.chain !== h.chain || typeof rec.mint !== "string" || typeof rec.decimals !== "number" || b === undefined) continue;
+    const nullifier = big(b.nullifier), from = big(b.from), deadlineMs = big(b.deadlineMs), minOut = big(b.minOut), value = big(b.value), feeCap = big(b.feeCap);
+    if (nullifier === null || from === null || deadlineMs === null || minOut === null || value === null || feeCap === null || typeof b.feeRecipient !== "string") continue;
+    const key = lower(w);
+    if (h.following?.has(key) || !live()) continue;
+    h.following?.add(key);
+    const want: EvmBuyWant = { nullifier, w, feeRecipient: b.feeRecipient, token: rec.mint, minOut, value, feeCap, deadlineMs };
+    const x: Watch = { want, from, holding: rec as EvmHolding, w, stops: [null, null], none: null };
+    const slowAt = deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
+    runs.push(
+      watch(h, x, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
+        .then((a) => {
+          if (a !== null && live()) h.settle();
+        })
+        .catch(() => {})
+        .finally(() => h.following?.delete(key)),
+    );
+  }
+  await Promise.all(runs);
+}
+
 /** What the page gives an EVM buy (src/pool-testnet.ts): its chain's queue, the seed, the wallet store while one is
  *  open (`held`: never opened by the buy, so a write after a sign out fails), the chain's RESERVED settle, the
  *  follows' sign-out signal and this tab's count of sign outs (`stopped`). */
 export type EvmBuyPage = {
+  /** The page's Ws whose buy a run or the load's follow is following now (one set for the page). */
+  following?: Set<string>;
   queue(): Promise<ProofQueue<EvmPoolRequest>>;
   seed64(): Promise<Uint8Array>;
   held(): Promise<WalletStore>;
@@ -429,6 +503,21 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
         return { ...all, [w]: holding };
       });
     },
+    // only this run's own pending record, by W and its buy's nullifier; never another holding on that W
+    unrecord: async (w, nullifier) => {
+      const store = await page.held();
+      await store.update("meta", EVM_POSITION_COSTS_KEY, (v) => {
+        const all = typeof v === "object" && v !== null ? { ...(v as Record<string, unknown>) } : {};
+        const mine = all[w] as Partial<EvmHolding> | undefined;
+        if (mine?.state === "pending" && mine.buy?.nullifier === nullifier.toString()) delete all[w];
+        return all;
+      });
+    },
+    holdings: async () => {
+      const v = await (await page.held()).get("meta", EVM_POSITION_COSTS_KEY);
+      return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+    },
+    following: page.following,
     owe: async (o) => {
       const store = await page.held();
       await store.update("meta", EVM_OWED_BACK_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [o.address]: o }));

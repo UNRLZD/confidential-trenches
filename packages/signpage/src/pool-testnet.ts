@@ -65,7 +65,7 @@ import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolSco
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
-import { evmBuyHost, poolBuyEvmKind } from "./pool-buy-evm.ts";
+import { evmBuyHost, followPendingEvmBuys, poolBuyEvmKind, type EvmBuyPage } from "./pool-buy-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
 import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
@@ -685,32 +685,43 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const evmBuyClaims = new Set<string>();
   // this tab's sign outs (signingOut): a buy's busy wait ends at once on one started after its tap (review P3-5)
   let signOuts = 0;
+  // the Ws whose buy a run or the load's follow of this page is following now (followPendingEvmBuys skips them)
+  const evmBuyFollowing = new Set<string>();
+  const evmBuyPage = (chain: "base" | "robinhood"): EvmBuyPage => ({
+    following: evmBuyFollowing,
+    // the chain's queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it
+    // again
+    queue: async () => {
+      let p = evmQueues.get(chain);
+      if (p === undefined) {
+        const opening = openEvmQueue(chain);
+        evmQueues.set(chain, (p = opening));
+        opening.catch(() => {
+          if (evmQueues.get(chain) === opening) evmQueues.delete(chain);
+        });
+      }
+      return (await p).queue as ProofQueue<EvmPoolRequest>;
+    },
+    seed64: page.seed64,
+    // the store only while it is open: a buy's write after a sign out fails, never opens it again (review P2-2)
+    held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
+    fetch: over.fetch,
+    settle: () => void reserveEvm(chain).catch(() => {}),
+    testnet: POOL_TESTNET,
+    signal: follows.signal,
+    stopped: ((at) => () => signOuts !== at)(signOuts),
+  });
   const evmBuy = (chain: "base" | "robinhood") => {
     const e = evmPool(chain);
     if (e === null || !POOL_TESTNET) return null;
-    return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, {
-      // the chain's queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it
-      // again
-      queue: async () => {
-        let p = evmQueues.get(chain);
-        if (p === undefined) {
-          const opening = openEvmQueue(chain);
-          evmQueues.set(chain, (p = opening));
-          opening.catch(() => {
-            if (evmQueues.get(chain) === opening) evmQueues.delete(chain);
-          });
-        }
-        return (await p).queue as ProofQueue<EvmPoolRequest>;
-      },
-      seed64: page.seed64,
-      // the store only while it is open: a buy's write after a sign out fails, never opens it again (review P2-2)
-      held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
-      fetch: over.fetch,
-      settle: () => void reserveEvm(chain).catch(() => {}),
-      testnet: POOL_TESTNET,
-      signal: follows.signal,
-      stopped: ((at) => () => signOuts !== at)(signOuts),
-    }));
+    return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain)));
+  };
+  // a buy whose tab ended before its end (the pending record's own follow died with it): followed from its record at
+  // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); testnet build only
+  const evmBuyFollow = (chain: "base" | "robinhood"): void => {
+    const e = evmPool(chain);
+    if (e === null || !POOL_TESTNET) return;
+    void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
   };
   // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per
   // chain at a time: on a signed-in load and on each state read while such a note is open
@@ -788,6 +799,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     await settleEvmOpen().catch(() => {});
     const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
     if (chains.length === 0) return;
+    // each chain's buys whose tab ended before their end, from their pending records (never awaited)
+    for (const chain of chains) evmBuyFollow(chain);
     const all = await readNotes(await page.store());
     await Promise.all(
       chains.map(async (chain) => {

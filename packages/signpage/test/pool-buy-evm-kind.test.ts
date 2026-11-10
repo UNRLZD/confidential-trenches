@@ -130,6 +130,8 @@ function unfunded(): EvmPoolBuyHost & { end(): void; ends: number } {
     settle: () => {},
     record: async () => {},
     owe: async () => {},
+    unrecord: async () => {},
+    holdings: async () => ({}),
     claimed: new Set<string>(),
     now: () => NOW,
     wait: async () => {},
@@ -173,6 +175,8 @@ function sending(o: { logs?: (round: number) => unknown[]; gate?: Promise<void>;
     settle: () => {},
     record: async () => {},
     owe: async () => {},
+    unrecord: async () => {},
+    holdings: async () => ({}),
     claimed: o.claimed ?? new Set(),
     now: o.now ?? (() => NOW),
     wait: async () => {},
@@ -330,6 +334,24 @@ test("host (P2-2): record and owe write the store only while it is open (the pag
   assert.deepEqual([opens, s.data.size], [0, 0]);
   assert.equal(h.signal, signal);
   assert.equal(h.stopped, stopped);
+});
+
+test("host (pending end): unrecord removes only W's own pending record (the nullifier given), never another W's or another buy's, and holdings reads them from the open store", async () => {
+  const buy = { nullifier: "77", from: "1", deadlineMs: "2", minOut: "3", value: "4", feeCap: "5", feeRecipient: "0x" + "0f".repeat(20) };
+  const mine = { ...HOLDING, buy };
+  const other = { ...HOLDING, mint: "x" };
+  const s = store({ [`meta/${EVM_POSITION_COSTS_KEY}`]: { [W]: mine, [OTHER_W]: other } });
+  const h = evmBuyHost("base", PIN, NO_RPCS, new Set(), page({ store: s.store }).p);
+  assert.deepEqual(await h.holdings(), { [W]: mine, [OTHER_W]: other });
+  await h.unrecord(W, 78n);
+  await h.unrecord(OTHER_W, 77n);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [W]: mine, [OTHER_W]: other }, "another nullifier, or a W with no pending buy of it: kept");
+  await h.record(W, { ...mine, state: "filled", received: "1" });
+  await h.unrecord(W, 77n);
+  assert.equal((s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`) as Record<string, EvmHolding>)[W]!.state, "filled", "a filled record is never removed");
+  s.data.set(`meta/${EVM_POSITION_COSTS_KEY}`, { [W]: mine, [OTHER_W]: other });
+  await h.unrecord(W, 77n);
+  assert.deepEqual(s.data.get(`meta/${EVM_POSITION_COSTS_KEY}`), { [OTHER_W]: other });
 });
 
 test("host: owe writes W's ETH owed back under EVM_OWED_BACK_KEY, keeping another W's", async () => {
