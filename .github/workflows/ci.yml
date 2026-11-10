@@ -580,7 +580,7 @@ jobs:
       # deployment record's commitment is Poseidon(value, label, precommitment); the owner's mainnet paste refuses before
       # deploy.mjs runs (card pool-sol-deploy-mainnet)
       - name: the Solana pool's deploy script's own tests, and its mutation list still names its source and tests
-        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs contracts/pool-solana/scripts/mainnet-deploy.test.mjs
+        run: node --test contracts/pool-solana/scripts/deploy.test.mjs contracts/pool-solana/scripts/mutants.test.mjs contracts/pool-solana/scripts/pin.test.mjs contracts/pool-solana/scripts/mainnet-deploy.test.mjs contracts/pool-solana/scripts/venue-table.test.mjs
       # The EVM pool (contracts/pool-evm): forge-std from its submodule (v1.9.7, pinned by commit), Foundry v1.7.1 (the
       # version its tests were first run with, released 2026-05-08; its sha256 as the header reads it), solc 0.8.28 as
       # its foundry.toml pins. The forge tests run the kit's real proofs through the verifiers the pool deploys;
@@ -904,6 +904,30 @@ jobs:
           if [ "$BUILD" != success ]; then echo "the wasm build ended $BUILD"; exit 1; fi
           if [ "$SHARDS" != success ]; then echo "a shard ended $SHARDS"; exit 1; fi
           echo "every shard passed"
+
+  # Nightly on main (card sol-pool-venue-tables): the venue tables' tree alarm, with no person watching. A PumpSwap tree
+  # past 80 percent of its newest pinned generation (about 9,200 buys before that generation's end) exits 1 and fails
+  # the run. --alarm reads only each cluster's genesis and pool on its two RPCs (8 reads), no table or tx. A provider's
+  # no-answer or an error (exit 3 or 2) is read once more a minute later, then fails the run too, so a dark alarm is
+  # never a green one.
+  venue-table-alarm:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: each pinned PumpSwap generation's trees are under 80 percent
+        run: |
+          rc=0; node scripts/live-checks/sol-pool-venue-tables.mjs --alarm || rc=$?
+          if [ "$rc" = 2 ] || [ "$rc" = 3 ]; then sleep 60; rc=0; node scripts/live-checks/sol-pool-venue-tables.mjs --alarm || rc=$?; fi
+          exit "$rc"
 
   # The Solana pool program (contracts/pool-solana): its host unit tests (the vault's vectors and real proof), its
   # build with cargo-build-sbf, then its LiteSVM tests on that build (svm-tests/: deposits, then releases with real

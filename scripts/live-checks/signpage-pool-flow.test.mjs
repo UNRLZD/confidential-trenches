@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { PIN, RUN, check, getRead } from "./signpage-pool-flow.mjs";
+import { DEVNET_TABLES, PIN, RUN, RUN_TABLE, TESTNET_ONLY, check, getRead } from "./signpage-pool-flow.mjs";
 import { REREADS, account, answerOf, b58decode, behindOf, devnetPin, onTwoOperators, retryAfterMs } from "./pool-sol-deploy.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./signpage-pool-flow.answers.json", import.meta.url), "utf8"));
@@ -195,7 +195,9 @@ test("the pin is today's: the good recording names today's program, pool and tab
   const now = devnetPin();
   assert.equal(A.good.deployment.program_id, now.program);
   assert.equal(A.good.deployment.pool, now.pool);
-  assert.equal(A.good.pin_table, PIN.table);
+  assert.equal(A.good.pin_table, RUN_TABLE);
+  // the retired table is not in the testnet-only list: the build pins the devnet record's generations
+  assert.ok(!TESTNET_ONLY.includes(RUN_TABLE) && DEVNET_TABLES.length >= 2 && DEVNET_TABLES.every((t) => TESTNET_ONLY.includes(t)));
   assert.equal(PIN.program, now.program);
   assert.equal(PIN.pool, now.pool);
   // the same answers with every transaction on the pool before the re-pin (2S5wpE7U, its program 5V9iJECf): the keys in

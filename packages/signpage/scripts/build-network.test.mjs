@@ -15,7 +15,9 @@ const TESTNET_ONLY = [
   "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
   "9Z6Yi2VcXkFWgAV6Nb6kMei78vAAVUEMTqzvFiUZcvG8", // the devnet pool's program (pool-sol-deploy.devnet.json)
   "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb", // the helper's devnet fee payer
-  "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", // the devnet pool's lookup table (src/pool-testnet.ts DEVNET_TABLE)
+  "C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ", // the devnet pool's curve table (wallet SOL_POOL_TABLES.devnet)
+  "4kG4g4fbSbwkxxdqT4G3cLeEbnvcbZTmBwJExK3ZGGAT", // the devnet pool's PumpSwap table, generation 1 (wallet SOL_POOL_TABLES.devnet)
+  "J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU", // the devnet pool's PumpSwap table, generation 2
   "api.devnet.solana.com",
   "/v1/rpc/solana-devnet", // the helper's devnet route, the second devnet provider (card pool-buy-send-fast)
   "base-sepolia-rpc.publicnode.com",
