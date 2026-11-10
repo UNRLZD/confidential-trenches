@@ -1055,3 +1055,26 @@ test("card wallet-restore-reads-ux review P3: the testnet build's restore reads 
     store.close();
   }
 });
+
+// Review P2-2 and P3-5 of 77055f4e (card pool-sell-share-across-wallets): the page's sell host writes a sale settled
+// outside a request's run (the load's rent back) to the record that names it, and stops its sales at a sign out
+test("the page's sell host settles a sale's record by its signature, and a sign out asked after it stops its sales; a host made after the sign out is not stopped", async () => {
+  const { w } = await wallet();
+  const { poolSellKind } = await import("../src/pool-sell.ts");
+  let sellHost: Parameters<typeof poolSellKind>[0] | undefined;
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { tradeKinds: { sell: (mk) => ((sellHost = mk), poolSellKind(mk)) } });
+  const s = sellHost!();
+  try {
+    await w.put("ops", "op-s", { kind: "sell", pool: "sol", sha: "00", stage: "sent", txs: [{ chain: "solana", hash: "sigS" }], created_ms: 1 });
+    await s.settled!("sigS", "filled");
+    assert.equal(((await w.get("ops", "op-s")) as { stage: string }).stage, "filled");
+    assert.equal(s.stopped!(), false);
+    t.signingOut();
+    assert.equal(s.stopped!(), true);
+    const after = sellHost!();
+    assert.equal(after.stopped!(), false);
+    (after as { end?: () => void }).end?.();
+  } finally {
+    (s as { end?: () => void }).end?.();
+  }
+});

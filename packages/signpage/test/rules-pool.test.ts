@@ -702,6 +702,8 @@ test("EVM sell and authorization: W's own Sell, built from the device's sell quo
     [() => checkEvmSell(built, ask, { ...ctx, wallet: other }, 1n), "wallet"],
     [() => checkEvmSell(built, { ...ask, token: other }, ctx, 1n), "token"],
     [() => checkEvmSell(built, { ...ask, amount: 1n }, ctx, 1n), "amount"],
+    // a share is turned into units before any sale is built (card pool-sell-share-across-wallets): a share ask is refused
+    [() => checkEvmSell(built, { ...ask, shareBps: 10_000 }, ctx, 1n), "amount"],
     [() => checkEvmSell(built, ask, { ...ctx, feeCap: req.feeCap - 1n }, 1n), "fee_cap_over_device_cap"],
     [() => checkEvmSell(built, ask, { ...ctx, nowMs: req.deadline * 1000n }, 1n), "deadline_past"],
     [() => checkEvmSell(built, ask, { ...ctx, evm: { venues: { base: pin(B, { pool: other }) }, feeRecipient: FEE_TO } }, 1n), "pool"],
