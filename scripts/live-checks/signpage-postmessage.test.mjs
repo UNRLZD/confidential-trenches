@@ -57,7 +57,7 @@ test("recorded bad run: an address answered with no seed stored and no request s
   assert.equal(r.ok, false);
   const b = r.lines.filter((l) => l.startsWith("BAD"));
   assert.ok(b.includes("BAD deposit.quote answered ok with no seed stored: an address for a U the store has not recorded"), r.lines.join("\n"));
-  assert.ok(b.includes("BAD deposit.quote: 0 request(s) to the helper, want 1 naming one id as recipient and refundTo"), r.lines.join("\n"));
+  assert.ok(b.includes("BAD deposit.quote: 0 request(s) to the helper, want 1 to 3 of one request naming one id as recipient and refundTo, each before the last answered 1Click's no-liquidity 400"), r.lines.join("\n"));
   // judged against its own build's /app.js, those two lines alone
   const own = judgeAt(ANSWERS.plantedDeposit, { release: "planted", sha256: ANSWERS.plantedDeposit.deposit.appJs?.sha256 ?? "" });
   assert.equal(own.lines.filter((l) => l.startsWith("BAD")).length, ANSWERS.plantedDeposit.deposit.appJs ? 2 : 3);
@@ -99,6 +99,59 @@ test("deposit.quote: the good run with one change each: FAIL; a signed-in addres
     change(rec);
     assert.equal(judgeAt(rec, pin).ok, false, name);
   }
+});
+
+// Card deposit-quote-no-liquidity: the device asks again on 1Click's 400 "No liquidity available", three asks at most. The
+// no-liquidity answers here are planted (status and message as the deployed helper passed one real body, 10 Nov 19:06:57Z).
+test("deposit.quote signed in, planted no-liquidity answers: an address after re-asks of one request PASS; not_available after them INCONCLUSIVE; anything else FAIL", () => {
+  const quoteAnswer = (rec) => rec.deposit.log.find((m) => m.data?.id === rec.deposit.ids.quote);
+  const signIn = (rec) => (rec.deposit.log.find((m) => m.data?.id === rec.deposit.ids.state).data.result.signed_in = true);
+  const U = "5d".repeat(32);
+  const ask = (over = {}, body = {}) => ({ url: "https://ct-api.unrealized.trade/v1/proxy/oneclick/v0/quote", method: "POST", body: { recipient: U, refundTo: U, ...body }, ...over });
+  const NL = { status: 400, message: "No liquidity available" };
+  const address = (rec, sent) => {
+    signIn(rec);
+    quoteAnswer(rec).data = { v: 1, id: rec.deposit.ids.quote, ok: true, result: { deposit_address: "addr", origin_asset: rec.deposit.asked.origin_asset, amount_in: "25", min_amount_out: "24.7", deadline: "2026-11-05T00:00:00.000Z", time_estimate_s: 20 } };
+    rec.deposit.helper.push(...sent);
+  };
+  const refused = (rec, sent, code = "not_available") => {
+    signIn(rec);
+    quoteAnswer(rec).data = { v: 1, id: rec.deposit.ids.quote, ok: false, error: { code } };
+    rec.deposit.helper.push(...sent);
+  };
+  const pin = releasePin(GOOD.pin.release);
+  const verdict = (f) => {
+    const rec = clone(GOOD);
+    f(rec);
+    return judgeAt(rec, pin);
+  };
+  for (const sent of [[ask({ status: 201 })], [ask(NL), ask({ status: 201 })], [ask(NL), ask(NL), ask({ status: 201 })]])
+    assert.equal(verdict((r) => address(r, sent)).verdict, "PASS", `${sent.length} asks`);
+  for (const n of [1, 2, 3]) {
+    const v = verdict((r) => refused(r, Array.from({ length: n }, () => ask(NL))));
+    assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
+    assert.ok(v.lines.includes(`INCONCLUSIVE deposit.quote answered not_available after 1Click's no-liquidity 400 to each of the device's ${n} ask(s): 1Click's liquidity, not the page's`));
+  }
+  const fail = {
+    "an address after a re-ask the helper refused 503": (r) => address(r, [ask({ status: 503 }), ask({ status: 201 })]),
+    "an address after a re-ask of another request": (r) => address(r, [ask(NL), ask({ status: 201 }, { refundTo: "ab".repeat(32) })]),
+    "an address after four asks": (r) => address(r, [ask(NL), ask(NL), ask(NL), ask({ status: 201 })]),
+    "an address after a 400 of another message": (r) => address(r, [ask({ status: 400, message: "Amount is too low" }), ask({ status: 201 })]),
+    "not_available after three, beside another /app.js": (r) => (refused(r, [ask(NL), ask(NL), ask(NL)]), (r.deposit.appJs.sha256 = "0".repeat(64))),
+  };
+  for (const [name, f] of Object.entries(fail)) {
+    const got = verdict(f);
+    assert.equal(got.verdict, "FAIL", `${name}: ${got.lines.filter((l) => !l.startsWith("ok")).join(" | ")}`);
+  }
+  // a signed-in refusal with one of the kind's codes was never a FAIL here (the codes are the page's to give), and is not
+  // INCONCLUSIVE unless each of the three asks answered 1Click's no-liquidity 400: as before this card, PASS
+  const kept = {
+    "not_available after a no-liquidity ask and the helper's 503": (r) => refused(r, [ask(NL), ask({ status: 503 })]),
+    "not_available after four no-liquidity asks": (r) => refused(r, [ask(NL), ask(NL), ask(NL), ask(NL)]),
+    "not_available after no-liquidity asks of two requests": (r) => refused(r, [ask(NL), ask(NL, { refundTo: "ab".repeat(32) })]),
+    "busy after no-liquidity asks": (r) => refused(r, [ask(NL), ask(NL)], "busy"),
+  };
+  for (const [name, f] of Object.entries(kept)) assert.equal(verdict(f).verdict, "PASS", name);
 });
 
 test("recorded bad run: SIGN_HOST before card signpage-shell, framed by APP_HOST: FAIL, the frame loads and its ready arrives", () => {
