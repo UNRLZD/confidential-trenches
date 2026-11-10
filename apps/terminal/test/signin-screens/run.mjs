@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -91,7 +92,7 @@ let BASE = "";
 const dir = await build();
 const server = await serve(dir);
 BASE = `http://127.0.0.1:${server.address().port}`;
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 try {
   for (const w of WIDTHS) {
     for (const scheme of SCHEMES) {

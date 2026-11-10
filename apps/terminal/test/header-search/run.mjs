@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { columnRows } from "../../src/screens/discover/model.ts";
 
@@ -194,7 +195,7 @@ const read = (f) =>
   });
 
 const dir = await build();
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const v of VIEWS) {

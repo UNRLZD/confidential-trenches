@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 import { downNote, footerEvidence, outages, rpcRows, verifyEvidence, VERIFY_RELEASES } from "./rpc-outage.mjs";
 
@@ -242,7 +243,8 @@ export async function open(page, url, origin) {
 export async function collect({ url = APP_HOST, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), fetchFn = fetch, route = null, source = "live", prepare = null, network = "mainnet" } = {}) {
   const origin = new URL(url).origin;
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // a run with `route` is the harness's: its browser routes every socket too (scripts/harness-sockets.mjs)
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   const rec = { url: origin, network, source, at: new Date().toISOString(), browser: browser.version(), headers: null, scripts: [], loadedScripts: [], loads: [], inShell: [] };
   const seen = new Map();
   try {

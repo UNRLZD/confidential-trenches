@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { ACCOUNT } from "./app-portfolio-mount.mjs";
 
@@ -173,7 +174,8 @@ async function entryOf(build) {
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source }) {
   mkdirSync(shots, { recursive: true });
   const entry = await entryOf(build);
-  const browser = await launchBrowser("chromium");
+  // the harness's browser (a build) routes every socket too (scripts/harness-sockets.mjs); the deployed run reaches the hosts
+  const browser = await (build ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const shell = await harnessRoute(build ?? path.join(REPO, "apps/terminal/public"), "signed", { state: STATE });
     // the deployed run reads only the shell from the stand-in; APP_HOST and the helper as served

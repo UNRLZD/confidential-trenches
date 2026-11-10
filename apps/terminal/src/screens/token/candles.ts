@@ -226,6 +226,13 @@ export interface FollowDeps {
   later?: (fn: () => void, ms: number) => () => void;
   /** The page is out of sight (document.hidden): no read is made, and the first read back covers the time away. */
   hidden?: () => boolean;
+  /** Takes the follow's wake and returns its removal (card market-data-push): the page calls the wake on each tape the
+   *  helper's push socket sends (trades.ts followTape), and the follow reads its newest bars at once instead of at its
+   *  next LIVE_MS. The tape and the bars are the same book on the helper (data/solana/trades.ts, data/evm/swaps.ts), so
+   *  a pushed tape means bars to read. The wake only shortens a wait: it reads nothing while a read is out (that read is
+   *  followed by one at once), while the chart waits AWAY_MS or backs off after a failed read, or once stopped. The
+   *  timer goes on as before, so a dropped socket leaves the chart live (card app-chart-live-stall). */
+  wake?: (fn: () => void) => () => void;
 }
 
 const laterReal = (fn: () => void, ms: number): (() => void) => {
@@ -256,11 +263,15 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
   let fails = 0;
   let stopped = false;
   let cancel: () => void = () => undefined;
+  /** A read is out; `woken`: a wake came while it was, so the next read is at once. */
+  let reading = false;
+  let woken = false;
   const next = (ms: number) => {
     if (!stopped) cancel = later(() => void step(), ms);
   };
   const failed = (waitMs: number | null) => {
     fails++;
+    woken = false;
     next(Math.min(LIVE_BACKOFF_MAX_MS, waitMs ?? LIVE_MS * 2 ** fails));
   };
   async function step(): Promise<void> {
@@ -268,7 +279,9 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
     if (hidden()) return next(LIVE_MS);
     const sent = now();
     const full = fails > 0 || away || sent - lastFull >= RESYNC_MS;
+    reading = true;
     const got = await readNewest(chain, token, cur.tf, full ? CANDLES_LIMIT : cur.tf === "1s" ? LIVE_LIMIT_1S : LIVE_LIMIT, deps.fetchFn);
+    reading = false;
     if (stopped) return;
     if ("failed" in got) return failed(got.waitMs);
     const bars = foldBars(cur.bars, got.bars, cur.tf);
@@ -280,12 +293,22 @@ export function followCandles(chain: MarketChain, token: string, ready: ReadyCan
       onBars(cur);
     }
     away = !got.own;
-    next(away ? AWAY_MS : LIVE_MS);
+    const again = woken && !away;
+    woken = false;
+    next(away ? AWAY_MS : again ? 0 : LIVE_MS);
   }
+  const unwake =
+    deps.wake?.(() => {
+      if (stopped || away || fails > 0) return;
+      if (reading) return void (woken = true);
+      cancel();
+      void step();
+    }) ?? (() => undefined);
   next(away ? AWAY_MS : LIVE_MS);
   return () => {
     stopped = true;
     cancel();
+    unwake();
   };
 }
 

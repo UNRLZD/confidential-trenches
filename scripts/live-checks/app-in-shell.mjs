@@ -43,6 +43,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleLine } from "./console-errors.mjs";
 import { downNote, footerEvidence, outages } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
@@ -628,8 +629,9 @@ async function main() {
   const shots = opt("--shots") ?? path.join(tmpdir(), `${KEY}-${Date.now()}`);
   const engines = (opt("--engines") ?? ENGINES.join(",")).split(",");
   if (!engines.every((e) => ENGINES.includes(e))) throw new Error(`--engines takes ${ENGINES.join(",")}`);
-  const launchers = engines.map((e) => [e, () => launchBrowser(e)]);
   const harness = args.includes("--harness");
+  // the harness's browser routes every socket too (scripts/harness-sockets.mjs): no page reaches a real host
+  const launchers = engines.map((e) => [e, () => (harness ? launchHarnessBrowser(e) : launchBrowser(e))]);
   const build = path.resolve(opt("--build") ?? path.join(REPO, "apps/terminal/dist"));
   const routes = harness ? Object.fromEntries(await Promise.all(KINDS.map(async (k) => [k, await harnessRoute(build, k)]))) : null;
   const expect = opt("--expect") ?? (harness ? "in" : "out");

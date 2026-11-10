@@ -37,6 +37,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkOf, operatorOf } from "../ci/near-rpc-operators.mjs";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { isFooterUrl, watchErrors } from "./console-errors.mjs";
 import { confirmDown, downNote, footerEvidence, footerReadCap, isHeightRead, outages, readAnswered, readCap, releaseOrigins, verifyEvidence, watchPreflights } from "./rpc-outage.mjs";
 import { named } from "./record-names.mjs";
@@ -392,7 +393,8 @@ export async function collect({ shots, route = null, network, source, beforeReop
   const release = VERIFY_RELEASES[network];
   if (!release) throw new Error(`network takes ${Object.keys(VERIFY_RELEASES).join(", ")}`);
   if (shots) mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // a run with `route` is the harness's: its browser routes every socket too (scripts/harness-sockets.mjs)
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const w of WIDTHS) runs.push(await runOne({ browser, w, shots, route, beforeReopen, duringReopen }));

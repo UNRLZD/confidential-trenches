@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 
 const KEY = "app-no-blank-pages";
@@ -208,7 +209,8 @@ async function runOne(browser, w, shots, route) {
 /** Every width in Chromium. `route`: the harness's answers for the hosts' real names, or null for the deployed hosts. */
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), route = null, source = "live" } = {}) {
   mkdirSync(shots, { recursive: true });
-  const browser = await launchBrowser("chromium");
+  // a run with `route` is the harness's: its browser routes every socket too (scripts/harness-sockets.mjs)
+  const browser = await (route ? launchHarnessBrowser : launchBrowser)("chromium");
   try {
     const runs = [];
     for (const w of WIDTHS) runs.push(await runOne(browser, w, shots, route));
