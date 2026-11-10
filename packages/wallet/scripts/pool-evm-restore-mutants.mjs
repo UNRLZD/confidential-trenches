@@ -8,6 +8,9 @@ const T = "test/pool-evm-restore.test.ts", TE = "test/pool-evm.test.ts";
 // [file, find, replace, test file, test name pattern]
 const M = [
   // the restore's checks on the pool's events
+  // review P3-4 of 53f5e92f (card restore-first-sign-in-under-two-minutes): a note only from a final block, with its spend
+  [R, "]!.block <= r.fin.number)", "]!.block <= r.anchor.number)", T, "P3-4"],
+  [R, "const spends = whole.spends.filter((x) => kept.has(x.note));", "const spends = whole.spends;", T, "P3-4"],
   [R, "if (leaves.has(e.state)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byPre.has(e.precommitment!)) throw", "if (false) throw", T, "evmRestore refuses"],
   [R, "if (byNull.has(e.nullifier!)) throw", "if (false) throw", T, "evmRestore refuses"],

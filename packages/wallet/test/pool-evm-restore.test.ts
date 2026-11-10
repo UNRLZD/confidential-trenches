@@ -1290,14 +1290,17 @@ test("card helper-evm-range-cap-walk: a read no provider refuses pages at its wi
 // anchor is left to a later restore with its spend, so the page never lands a PLANNED note on a block a reorg can drop
 test("P3-4: a note whose leaf is in a block above the finalized anchor is not restored this round, nor its spend; once final it is", async () => {
   const { world } = seeded();
-  const fin = 30;
-  const low = { ...world, finalized: fin };
   const all = await clean();
-  const r = await restore(pair(low, low), wpair(low));
-  const final = all.notes.filter((n) => world.pool[Number(n.leaf.leafIndex)]!.block <= fin);
-  assert.ok(final.length > 0 && final.length < all.notes.length, `${final.length} of ${all.notes.length} final`);
-  assert.deepEqual(r.notes.map((n) => refKey(n.ref)), final.map((n) => refKey(n.ref)));
-  const kept = new Set(final.map((n) => refKey(n.ref)));
-  assert.deepEqual(r.spends.map((s) => s.note), all.spends.filter((s) => kept.has(s.note)).map((s) => s.note));
-  assert.deepEqual(r.wallets.map((s) => s.note), r.spends.map((s) => s.note));
+  // at 30 every spent note's leaf is final; at 15 the buy's change note (its leaf at block 20) is not, nor its spend
+  for (const [fin, spent] of [[30, 2], [15, 1]] as const) {
+    const low = { ...world, finalized: fin };
+    const r = await restore(pair(low, low), wpair(low));
+    const final = all.notes.filter((n) => world.pool[Number(n.leaf.leafIndex)]!.block <= fin);
+    assert.ok(final.length > 0 && final.length < all.notes.length, `${fin}: ${final.length} of ${all.notes.length} final`);
+    assert.deepEqual(r.notes.map((n) => refKey(n.ref)), final.map((n) => refKey(n.ref)), String(fin));
+    const kept = new Set(final.map((n) => refKey(n.ref)));
+    assert.deepEqual(r.spends.map((s) => s.note), all.spends.filter((s) => kept.has(s.note)).map((s) => s.note), String(fin));
+    assert.equal(r.spends.length, spent, String(fin));
+    assert.deepEqual(r.wallets.map((s) => s.note), r.spends.map((s) => s.note), String(fin));
+  }
 });

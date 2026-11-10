@@ -43,7 +43,14 @@ const M = [
   ["no hop target read", WAL, [["await readAll(hops.flat());", ""]], RW, "step 4"],
   ["one arm per label", WAL, [["    const k = `${s.l}:${s.j}`;", "    const k = `${s.l}`;"]], RW, "step 4"],
   ["the deposit ids read one short of the margin", WAL, [["(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * margin);", "(highest ?? lane - RESTORE_LANES) + RESTORE_LANES * (margin - 1));"]], RW, "step 5"],
-  ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: why(e) });"]], RW, "step 5"],
+  ["a failed id read is not money", WAL, [["        unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });\n        highest = Math.max(highest ?? i, i);", "        unread.push({ i, id, error: e instanceof PairDisagrees ? `${e.message}, read again` : why(e) });"]], RW, "step 5"],
+  // review P2-2 of 53f5e92f: a pair that disagrees on an id is that id unread, the lane reading on past it; the run's
+  // signal ended stops the lanes
+  ["a pair disagreeing on an id is taken as unused", WAL, [["        unread.push({ i, id, error: e instanceof PairDisagrees", "        if (e instanceof PairDisagrees) continue;\n        unread.push({ i, id, error: e instanceof PairDisagrees"]], ["wallet", "test/restore-id-reader.test.ts"], "a faked money on a used, empty id is that id unread"],
+  ["a read after the run's signal ended is counted unread", WAL, [["        if (opts.signal?.aborted) throw e;\n", ""]], RW, "once the run's signal ended"],
+  // review P2-3 of 53f5e92f: a lane an earlier run read whole is skipped only while its read reaches the bound now
+  ["a lane kept is skipped past its bound", WAL, [["    if (was !== undefined && was >= bound()) continue;", "    if (was !== undefined) continue;"]], RW, "step 5"],
+  ["a lane kept is never skipped", WAL, [["    if (was !== undefined && was >= bound()) continue;", "    void was;"]], RW, "step 5"],
   ["history does not move the lane's highest", WAL, [['      (state === "money" ? money : used).push(i);\n      highest = Math.max(highest ?? i, i);', '      (state === "money" ? money : used).push(i);']], RW, "step 5"],
   ["a used id does not reset the margin (review: money past 21 used ids)", WAL, [['      if (state === "unused") continue;', '      if (state !== "money") continue;']], RW, "step 5"],
   ["failed id reads never end a lane (review: a reader that always rejects)", WAL, [["if (++failed >= margin) throw", "if (++failed >= Infinity) throw"]], RW, "step 5"],

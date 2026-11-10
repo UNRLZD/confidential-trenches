@@ -1494,3 +1494,65 @@ test("review P2-3: the marker keeps each lane read whole with nothing to tell; t
   await r4.idle();
   assert.deepEqual(lanesAsked(c4.asked), [...Array(8).keys()]);
 });
+
+// ---------- review P3-6 of 53f5e92f: a test for each mutant that passed every test ----------
+test("review P3-6 (1): a sign out during a pause ends it at once: no second try, nothing read after it", { timeout: 10_000 }, async () => {
+  const down = idOf(SOL_SCOPE, 43);
+  const n = nearOf(new Map<string, As>([[down, "down"]]));
+  let r: ReturnType<typeof poolRestore> | null = null;
+  let at = -1;
+  // the sign out 50 ms into the 60 s pause, so it is the pause's own abort listener that ends it
+  const w = await world({ ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, pausesMs: [60_000], step5: () => void ((at = n.log.length), setTimeout(() => r!.signedOut(), 50)) });
+  r = w.r;
+  assert.equal(await w.r.auto(), "done");
+  const t0 = performance.now();
+  await w.r.idle();
+  assert.ok(performance.now() - t0 < 5_000, `the pause ended at the sign out (${Math.round(performance.now() - t0)} ms)`);
+  assert.equal(n.log.length, at, "no id read after the sign out");
+});
+
+test("review P3-6 (2): a pool whose walk failed keeps the marker though every id step 5 read was read", async () => {
+  const w = await world({ ids: nearOf().ids, ux: () => uxOf(new Map()).reads, evm: (async () => { throw new Error("HTTP 503"); }) as never });
+  assert.equal(await w.r.auto(), "stalled");
+  await w.r.idle();
+  assert.deepEqual(w.steps.map((s) => [s.retry.length, s.held.length]), [[0, 0]], JSON.stringify(w.steps));
+  assert.notEqual(await w.store.get("meta", IDS_KEY()), undefined, "the next load walks the failed pool and reads its ids");
+});
+
+test("review P3-6 (3): a load's rerun checks the marker again under the restore lock: removed meanwhile, it walks nothing", async () => {
+  const probe = await world({ ids: nearOf().ids, ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY });
+  await probe.store.put("meta", IDS_KEY(), { scopes: [SOL_SCOPE.toString()] });
+  let open!: () => void;
+  const held = new Promise<void>((r) => (open = r));
+  void navigator.locks.request(RESTORE_LOCK, { mode: "exclusive" }, () => held);
+  await until("held", async () => ((await navigator.locks.query()).held ?? []).some((l) => l.name === RESTORE_LOCK));
+  let walks = 0;
+  const r = poolRestore({ ...probe.host, solana: (async () => (walks++, { notes: [], spends: [] })) as never });
+  const run = r.resume();
+  await until("waiting on the lock", async () => ((await navigator.locks.query()).pending ?? []).some((l) => l.name === RESTORE_LOCK));
+  // another tab's step 5 read every id and removed the marker while this load waited
+  await probe.store.delete("meta", IDS_KEY());
+  open();
+  assert.equal(await run, "done");
+  await r.idle();
+  assert.equal(walks, 0);
+});
+
+test("review P3-6 (4): the marker is written only while the run's seed is the one stored: other words signed in before it, no marker", async () => {
+  let other = false;
+  const w = await world({ ids: nearOf().ids, ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY, seed64: async () => new Uint8Array(64).fill(other ? 9 : 7), written: () => void (other = true) });
+  assert.equal(await w.r.auto(), "stalled");
+  await w.r.idle();
+  assert.equal(await w.store.get("meta", IDS_KEY()), undefined);
+  assert.deepEqual(w.steps, [], "no step 5 for words no longer stored");
+});
+
+test("review P3-6 (5): a finding's stalled op is written only while the run's seed is the one stored", async () => {
+  let other = false;
+  const held = idOf(SOL_SCOPE, 3);
+  const w = await world({ ids: nearOf().ids, ux: () => uxOf(new Map<string, UxAs>([[solUx(held), "held"]])).reads, pools: () => SOL_ONLY, solana: emptyWalk, seed64: async () => new Uint8Array(64).fill(other ? 9 : 7), step5: (e) => void (e.named.length > 0 && (other = true)) });
+  assert.equal(await w.r.auto(), "done");
+  await w.r.idle();
+  assert.deepEqual((await restoreOps(w.store)).map((x) => x.stage), ["done"]);
+});
+

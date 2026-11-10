@@ -433,3 +433,15 @@ test("step 5: a lane `done` names is not read while the index it read to is at o
     assert.ok(log.includes(id(at(2, 0))));
   }
 });
+
+test("step 5: a read that throws once the run's signal ended stops the lanes with that throw, never an id counted unread", async () => {
+  const ac = new AbortController();
+  let n = 0;
+  const holds: Parameters<typeof restoreDepositIds>[3] = async () => {
+    if (++n === 3) ac.abort(new Error("signed out"));
+    if (n >= 3) throw new Error("the read stopped");
+    return "unused";
+  };
+  await assert.rejects(restoreDepositIds(SEED, SCOPE, LANES, holds, { signal: ac.signal }), /^Error: the read stopped$/);
+  assert.equal(n, 3, "no read after the signal ended");
+});

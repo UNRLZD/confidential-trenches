@@ -45,7 +45,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { signBuilt } from "../signpage-built.mjs";
-import { countOf, judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
+import { countOf, IDS_END_TRY, IDS_TELL, IDS_WALK_END, judge, judgeBundle, localFetch, MARK, MARKERS, PAIR, PLACES, probe, readBundle, REGISTERED, SIGN_ORIGIN, USDC } from "./wallet-restore-id-reader.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -219,7 +219,7 @@ const treeRecord = async (fetchFn = localFetch) => ({ ...answers.good, url: "loc
 // rate (paceOf), step 5's PairDisagrees rethrow (`${e.message}, to be retried`), step 5's read through keptIdReader
 // (`let{rpcs:s,pass:c,reader:l}=await JV(`, its pair and pass the held reader's: card wallet-restore-reads-ux) and signedOut's new keep; each zeroes its own marker and no other (measured on the
 // merged build at 124994e7)
-const RULE_OF = { busy_wait: "perSec:.39,burst:8", pair_wrong: ".message}, read again`", id_keep: "let{rpcs:", id_signout: "signedOut:()=>{" };
+const RULE_OF = { busy_wait: "perSec:.39,burst:8", pair_wrong: ".message}, read again`", id_keep: "let{rpcs:", id_signout: "signedOut:()=>{", ids_end: "?`stalled`:`done`" };
 const ruleOf = (m) => (typeof MARK[m] === "function" ? RULE_OF[m] : MARK[m]);
 
 test("the committed build in this tree passes the live rule, with the recorded providers' reads", async () => {
@@ -317,7 +317,8 @@ test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s 
 // restore-first-sign-in-under-two-minutes made each try of step 5 end on its own lists (retry, held, named) after the
 // walk's end, the seed gone passed on (SeedGone, sG here) and the unread chain a finding (`named`).
 test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never a stage that drops reasons, another constant or a run-long lock", () => {
-  const n = (text, k) => [...text.matchAll(MARK[k])].length;
+  // ids_end's try line (IDS_END_TRY; ids_end needs it with the walk's end and the finding's op, review P3-5)
+  const n = (text, k) => [...text.matchAll(k === "ids_end" ? IDS_END_TRY : MARK[k])].length;
   const good5 = {
     pass: "if(e instanceof sG||t.aborted)throw e;",
     to: "r",
@@ -325,10 +326,11 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
     last: "a=i||n>x.length",
     told: "a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}",
     gone: "!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}",
+    pause: "if(a)return;await mG(x[n-1],t)}",
   };
   const end = (o = {}) => {
     const x = { ...good5, ...o };
-    return `.catch(e=>{${x.pass}${x.to}.retry.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)}),t.throwIfAborted();let i=${x.answered},${x.last};if(await v(${x.told}),i){${x.gone}`;
+    return `.catch(e=>{${x.pass}${x.to}.retry.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)}),t.throwIfAborted();let i=${x.answered},${x.last};if(await v(${x.told}),i){${x.gone}${x.pause}`;
   };
   assert.equal(n(end(), "ids_end"), 1);
   assert.equal(n(end({ pass: "" }), "ids_end"), 0, "a seed gone retried");
@@ -343,6 +345,8 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end({ told: "a?{retry:[],held:r.held,named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
   assert.equal(n(end({ gone: "!g&&await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
   assert.equal(n(end({ gone: "await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed after a failed walk");
+  assert.equal(n(end({ pause: "return}" }), "ids_end"), 0, "no retry: no pause before the next try (review P3-5)");
+  assert.equal(n(end({ pause: "if(a)return;await mG(x[0],t)}" }), "ids_end"), 0, "the pauses not growing");
   assert.equal(n(end({ told: "{...r,tries:n,last:a}" }), "ids_end"), 0, "held never a finding");
   // the branch of a pool whose chain has no U_X reads (its `ux` null): its ids' reasons through the helper by kind, then
   // the unread chain on `named`, with nothing between them, then the next pool
@@ -494,8 +498,9 @@ test("busy waited out, the pair's disagreement, the keep and the sign-out drop: 
 // apart left (`held`), drops `held` from the last try's findings, throws a plain Error at the seed lock (which the catch
 // would then retry), or puts the unread pool chain on the retry list, fails on that one marker alone.
 test("a build of this tree whose step 5 end loses a list or retries a seed gone fails, on that marker alone", async () => {
+  const RE = { ids_end: IDS_END_TRY, ids_walk_end: IDS_WALK_END, ids_tell: IDS_TELL };
   const within = (marker, from, to) => (js) => {
-    const hit = js.match(new RegExp(MARK[marker].source));
+    const hit = js.match(new RegExp((RE[marker] ?? MARK[marker]).source));
     assert.ok(hit, `${marker} found in the build`);
     const planted = hit[0].replace(from, to);
     assert.notEqual(planted, hit[0], `${marker}: ${from} planted`);
@@ -507,13 +512,17 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     ["ids_end", /,\.\.\.[\w$]+\.held,/, ","],
     ["ids_end", /,\.\.\.[\w$]+\.retry\]/, "]"],
     ["ids_end", /&&[\w$]+\.named\.length===0&&await/, "&&await"],
+    // review P3-5 of 53f5e92f: the walk's end always done, a finding written done, no retry at all
+    ["ids_walk_end", /\?`stalled`:`done`/, "?`done`:`done`"],
+    ["ids_tell", /stage:`stalled`,txs/, "stage:`done`,txs"],
+    ["ids_end", /if\(([\w$]+)\)return;await [\w$]+\([\w$]+\[[\w$]+-1\],[\w$]+\)\}$/, "return}"],
     ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
     ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],
     ["ids_ux_push", /\.named\.push\(`\$\{[\w$]+\.label\}: \$\{[\w$]+\}`\);continue\}$/, (s) => s.replace(".named.", ".retry.")],
   ];
   for (const [m, from, to] of cases) {
     const rec = await treeRecord(plantedFetch(localFetch, within(m, from, to)));
-    assert.deepEqual(MARKERS.filter((o) => rec.app.markers[o] !== answers.good.app.markers[o]), [m], String(from));
+    assert.deepEqual(MARKERS.filter((o) => rec.app.markers[o] !== answers.good.app.markers[o]), [RE[m] === undefined || m === "ids_end" ? m : "ids_end"], String(from));
     assert.deepEqual(BAD(rec), [MARKS], String(from));
   }
 });

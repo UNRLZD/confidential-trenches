@@ -196,6 +196,21 @@ export const ID_SIGNOUT = (text) => {
   const [a, o] = [init[0].groups.a, init[0].groups.o].map(esc);
   return all(text, rx(String.raw`signedOut:\(\)=>\{${a}\?\.abort\(\),${o}=${k.IK}\(\)\}`)).length === 1 ? 1 : 0;
 };
+/**
+ * ids_end, three lines of the build each exactly once (review P3-5 of 53f5e92f: a build whose walk's end is always done,
+ * whose finding writes done, or that never retries, passed the one-line marker):
+ * - IDS_END_TRY, each try's end of step 5 (below, at MARK.ids_end), through its pause before the next try
+ *   (`if(u)return;await mG(c[n-1],t)}`): a build with no retry has no pause;
+ * - IDS_WALK_END, the walk's end told off its reasons (`let S=f.length>0?`stalled`:`done`;m(S),`);
+ * - IDS_TELL, a finding that marks the run and writes a stalled restore op when the newest is not one, under the seed
+ *   lock (`t.named.length!==0&&(s.finding=!0,await _(async()=>{...!==`stalled`&&await t.put(`ops`,crypto.randomUUID(),
+ *   {kind:`restore`,stage:`stalled`,txs:[],created_ms:n()})}))`).
+ * The count is 1 when all three hold, else 0.
+ */
+export const IDS_END_TRY = /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{![\w$]+&&\4\.named\.length===0&&await [\w$]+\(async\(\)=>\(await [\w$]+\.store\(\)\)\.delete\(`meta`,[\w$]+\)\);return\}if\(\6\)return;await [\w$]+\(\8\[\7-1\],\3\)\}/g;
+export const IDS_WALK_END = /let ([\w$]+)=([\w$]+)\.length>0\?`stalled`:`done`;([\w$]+)\(\1\),/g;
+export const IDS_TELL = /\.named\.length!==0&&\(([\w$]+)\.finding=!0,await ([\w$]+)\(async\(\)=>\{[\s\S]{0,400}?!==`stalled`&&await ([\w$]+)\.put\(`ops`,crypto\.randomUUID\(\),\{kind:`restore`,stage:`stalled`,txs:\[\],created_ms:[\w$]+\(\)\}\)\}\)\)/g;
+export const IDS_END = (text) => ([IDS_END_TRY, IDS_WALK_END, IDS_TELL].every((re) => [...text.matchAll(re)].length === 1) ? 1 : 0);
 /** The card's strings in the bundle, as the minifier writes them. The four functions bind the minifier's names. */
 export const MARK = Object.freeze({
   reach_error: "reach: not an index of lane",
@@ -236,7 +251,7 @@ export const MARK = Object.freeze({
   // found nothing (review P2-1: a finding keeps step 5 owed) (an end that drops a list, calls a try answered with
   // reasons left, or removes the marker with a finding, holds none),
   // `.catch(e=>{if(e instanceof sG||t.aborted)throw e;r.retry.push(`step 5 did not finish: ${...}`)}),t.throwIfAborted();let i=r.retry.length===0&&r.held.length===0,a=i||n>x.length;if(await v(a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}),i){!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}`
-  ids_end: /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{![\w$]+&&\4\.named\.length===0&&await [\w$]+\(async\(\)=>\(await [\w$]+\.store\(\)\)\.delete\(`meta`,[\w$]+\)\);return\}/g,
+  ids_end: IDS_END,
   // each pool scope whose chain has no U_X reads on the page (its walked entry's `ux` null; card
   // wallet-restore-reads-ux) pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
   // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between
