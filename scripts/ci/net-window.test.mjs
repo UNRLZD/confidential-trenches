@@ -189,6 +189,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-sell-deposit-back-floor.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
   "scripts/live-checks/solana-release-reads-paced.mjs",
+  "scripts/live-checks/portfolio-one-balance.mjs",
   "scripts/live-checks/token-page-fills-after.mjs",
   "scripts/live-checks/trade-box-bal-cash.mjs",
   "scripts/live-checks/trade-box-pool.mjs",

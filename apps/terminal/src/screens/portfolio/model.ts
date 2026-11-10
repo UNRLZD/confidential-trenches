@@ -10,8 +10,9 @@
 // from `PortfolioData` (source.tsx), a local type the card's report names as missing kit calls: a token's symbol, name
 // and price and whether a route sells it; a position's bought, sold and realized, its open time, its TP/SL and its held
 // or reverted mark; the closed positions; the value series; and the fees paid.
-import { moneyWallets, POOL_ASSET_DECIMALS } from "@blindfill/kit";
+import { moneyWallets, POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
 import { small } from "../discover/format.ts";
+import { statePoolPrice, unitsToCents } from "../trade/model.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -171,8 +172,26 @@ export interface Row {
   selling: { stage: "sending" | "landing"; ms: number } | null;
 }
 
+/** One chain's part of Cash (card portfolio-one-balance): NEAR's is the vault's USDC, a pool chain's its pool at the
+ *  signing page's price, each with the READY wallets on that chain. */
+export interface CashPart {
+  chain: Chain;
+  /** Null: a pool that holds something the page has no fresh price for. It is left out of Cash, never priced here (the
+   *  chain's other money still counts in Cash). */
+  cents: bigint | null;
+  /** A deposit of this chain's money is between its source and the vault or pool (CASH_MOVING): its amount is on
+   *  neither side yet, and the kit carries none for it. */
+  moving: boolean;
+}
+
 export interface Totals {
+  /** The vault, every pool priced and the READY wallets, each once. */
   cash: bigint;
+  /** Each chain's part of `cash`, NEAR first, then the pool chains in the kit's order: a chain with nothing and no
+   *  deposit moving is left out, NEAR never. */
+  parts: CashPart[];
+  /** Cash less the SOL and ETH pools: what a chain the trade box buys on with no pool spends (the vault path). */
+  offPool: bigint;
   onWay: bigint;
   inPos: bigint;
   total: bigint;
@@ -248,18 +267,81 @@ export function realized30(rows: readonly Row[], closed: readonly ClosedTrade[],
   return r;
 }
 
-export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
-  // Cash: the vault's USDC, each pool held in USDC and the READY wallets, each source counted once. A SOL or ETH pool
-  // has no dollar value until a price read exists, so it never joins Cash: no dollar figure is invented. The vault's
-  // USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/signpage
-  // test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
-  let cash = cents(s.vault_balance) ?? 0n;
-  for (const p of s.pools ?? []) if (p.asset === "USDC") cash += cents(p.balance) ?? 0n;
-  let onWay = 0n;
-  for (const w of s.wallets) {
-    if (w.state === "READY") cash += cents(w.size) ?? 0n;
-    else if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
+/**
+ * Money between its source and a side of Cash (card portfolio-one-balance): the stages at which a deposit's money has
+ * been sent and is on neither side. The rule, from the kit's stages:
+ * - Cash counts the kit's two totals and nothing else: vault_balance (the vault's notes) and each pool's balance (its
+ *   notes, read back at finalized). An op's own amount never joins Cash: a deposit's amount_usd is what those totals
+ *   already hold once it is done, and a trade's is its ask, so adding it would count the note twice.
+ * - So a note is counted on the side whose total holds it, once: a vault deposit's note from "done" (vault_balance), a
+ *   pool deposit's from "in_pool" (state.pools), never before, and never on the side it left.
+ * - At these stages the money has left its source and is in neither total; the kit sends no amount for it (a pool
+ *   deposit never carries amount_usd, a vault deposit only on done), so it cannot be counted without making one up.
+ *   Its chain's part is marked moving instead, so the breakdown shows it and the money is never silently gone.
+ * - Before the send (quote_checked), after a send that never happened (expired) and once landed (done, in_pool), nothing
+ *   is moving. held and halted are money waiting under an id (state.held), not moving to a side.
+ */
+export const CASH_MOVING: { readonly deposit: ReadonlySet<string>; readonly pool_deposit: ReadonlySet<string> } = {
+  deposit: new Set(["waiting", "in_transit", "into_vault", "refunded", "refund_move", "failed", "short"]),
+  pool_deposit: new Set(["waiting", "in_transit", "refunded", "refund_move", "failed", "short"]),
+};
+
+/** The chain whose part an op moves money into: a vault deposit's is NEAR (the vault's chain), a pool deposit's its
+ *  pool's; null for any other op or stage. */
+export function movingChain(o: Operation): Chain | null {
+  if (o.kind === "deposit") return CASH_MOVING.deposit.has(o.stage) ? "near" : null;
+  if (o.kind === "pool_deposit") return CASH_MOVING.pool_deposit.has(o.stage) ? o.chain : null;
+  return null;
+}
+
+/** The parts of Cash per chain: the vault on NEAR, each pool in dollars at the signing page's own price while it is
+ *  fresh on this device's clock (trade model statePoolPrice, the trade box's one rule), each READY wallet on its chain. */
+function cashParts(s: SignpageState, now: number): { cash: bigint; parts: CashPart[]; offPool: bigint } {
+  const at = new Map<Chain, CashPart>();
+  const part = (chain: Chain): CashPart => at.get(chain) ?? (at.set(chain, { chain, cents: 0n, moving: false }).get(chain)!);
+  let cash = 0n;
+  const add = (chain: Chain, c: bigint | null) => {
+    const p = part(chain);
+    p.cents = p.cents === null || c === null ? null : p.cents + c;
+    cash += c ?? 0n;
+  };
+  // The vault's USDC is vault_balance alone: the signing page's pool table never holds the vault's scope (packages/
+  // signpage test/pools.test.ts), so a USDC pool is other money and the vault's USDC never counts twice.
+  let offPool = cents(s.vault_balance) ?? 0n;
+  add("near", offPool);
+  for (const p of s.pools ?? []) {
+    if (p.asset === "USDC") {
+      const c = cents(p.balance) ?? 0n;
+      offPool += c;
+      add(p.chain, c);
+      continue;
+    }
+    const units = baseUnits(p.balance, POOL_ASSET_DECIMALS[p.asset]) ?? 0n;
+    const price = statePoolPrice(s.pools, p.chain, now);
+    // a pool with nothing is $0 at any price; one with something and no fresh price has no dollar figure: none is made up
+    add(p.chain, units === 0n ? 0n : price ? unitsToCents(units, price) : null);
   }
+  for (const w of s.wallets) {
+    if (w.state !== "READY") continue;
+    const c = cents(w.size) ?? 0n;
+    offPool += c;
+    add(w.chain, c);
+  }
+  for (const o of s.ops) {
+    const c = movingChain(o);
+    if (c) part(c).moving = true;
+  }
+  const order = (c: Chain) => (c === "near" ? -1 : (POOL_CHAINS as readonly Chain[]).indexOf(c) >>> 0);
+  const parts = [...at.values()].filter((p) => p.chain === "near" || p.cents !== 0n || p.moving).sort((a, b) => order(a.chain) - order(b.chain));
+  return { cash, parts, offPool };
+}
+
+export function totals(s: SignpageState, rows: readonly Row[], closed: readonly ClosedTrade[], now: number): Totals {
+  // Cash: the vault's USDC, each pool in dollars and the READY wallets, each source counted once (cashParts; the
+  // in-flight rule is CASH_MOVING's).
+  const { cash, parts, offPool } = cashParts(s, now);
+  let onWay = 0n;
+  for (const w of s.wallets) if (w.state === "ARMING" || w.state === "RETURNING") onWay += cents(w.size) ?? 0n;
   let inPos = 0n;
   let unreal = 0n;
   let partial = false;
@@ -272,7 +354,7 @@ export function totals(s: SignpageState, rows: readonly Row[], closed: readonly 
       unreal += r.pnl!;
     }
   }
-  return { cash, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
+  return { cash, parts, offPool, onWay, inPos, total: cash + onWay + inPos, unreal, realized30: realized30(rows, closed, now), partial };
 }
 
 /** The screen's state from the signing page's snapshot and the local data. */

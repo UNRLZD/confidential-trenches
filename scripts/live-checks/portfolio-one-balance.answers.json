@@ -1,0 +1,106 @@
+{
+ "good": {
+  "check": "portfolio-one-balance",
+  "at": "2026-11-09T23:36:57.538Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the vault and three pools",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-DJtPPxca.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "portfolio",
+    "screen": "portfolio",
+    "cash": "$145.50",
+    "header": "$145.50",
+    "hiddenBefore": true,
+    "parts": [
+     [
+      "near",
+      "4050",
+      false
+     ],
+     [
+      "solana",
+      "7500",
+      false
+     ],
+     [
+      "base",
+      "3000",
+      false
+     ],
+     [
+      "robinhood",
+      "0",
+      true
+     ]
+    ],
+    "shot": "desktop.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "portfolio",
+    "screen": "portfolio",
+    "cash": "$145.50",
+    "header": "$145.50",
+    "hiddenBefore": true,
+    "parts": [
+     [
+      "near",
+      "4050",
+      false
+     ],
+     [
+      "solana",
+      "7500",
+      false
+     ],
+     [
+      "base",
+      "3000",
+      false
+     ],
+     [
+      "robinhood",
+      "0",
+      true
+     ]
+    ],
+    "shot": "phone.png"
+   }
+  ]
+ },
+ "bad": {
+  "check": "portfolio-one-balance",
+  "at": "2026-11-09T23:37:09.140Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the vault and three pools",
+  "browser": "157.0.8103.38",
+  "entry": "/assets/index-XvbkxnaR.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "framed": true,
+    "route": "portfolio",
+    "screen": "portfolio",
+    "cash": "$40.50",
+    "header": "$40.50",
+    "hiddenBefore": true,
+    "parts": null,
+    "shot": "desktop.png"
+   },
+   {
+    "width": "phone",
+    "framed": true,
+    "route": "portfolio",
+    "screen": "portfolio",
+    "cash": "$40.50",
+    "header": "$40.50",
+    "hiddenBefore": true,
+    "parts": null,
+    "shot": "phone.png"
+   }
+  ]
+ }
+}

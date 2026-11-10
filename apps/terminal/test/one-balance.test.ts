@@ -2,8 +2,9 @@
 // Portfolio's Cash tile all draw one number, the cash in Portfolio's totals() (the design-lock-r5 header shows Cash), so
 // they can never differ. Held two ways: no file but the portfolio model sums the signing page's balances, and the
 // header's model given that number draws exactly Portfolio's Cash on states where a second sum would differ (a USDC
-// pool, money on the way, a priced position). The trade box's Bal is that same number on a chain with no pool, and the
-// chain's pool balance on a chain with one (card trade-box-bal-cash); tradeBal names which.
+// pool, money on the way, a priced position). Cash holds every pool at the signing page's price (card
+// portfolio-one-balance). The trade box's Bal is the vault path's part of it (Totals.offPool) on a chain with no pool, and
+// the chain's pool balance on a chain with one (card trade-box-bal-cash); tradeBal names which.
 //   node --test apps/terminal/test/one-balance.test.ts
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -87,9 +88,11 @@ test("the restore screen counts the same number", () => {
   assert.equal(restoreModel(s, balanceOf(snap(s), NO_DATA, NOW))!.cents, 6787n);
 });
 
-test("the trade box's Bal: the header's Cash on a chain with no pool, the pool's balance on a chain with one", () => {
+test("the trade box's Bal: the vault path's part of Cash on a chain with no pool, the pool's balance on a chain with one", () => {
   const s = state();
-  const cash = balanceOf(snap(s), NO_DATA, NOW);
+  const cash = portfolio(snap(s), NO_DATA, NOW).totals!.offPool;
+  // with no price for the SOL pool, the vault path's part is the whole of Cash
+  assert.equal(cash, balanceOf(snap(s), NO_DATA, NOW));
   assert.equal(cash, 6787n);
   // Solana's pool is in the state but cannot be priced here (no price read): no pool view, so no Bal, never the Cash
   assert.deepEqual(tradeBal(false, null, cash), { from: "cash", cents: 6787n });
@@ -100,4 +103,21 @@ test("the trade box's Bal: the header's Cash on a chain with no pool, the pool's
   assert.deepEqual(tradeBal(true, pv, cash), { from: "pool", cents: 93n });
   // signed out or before the first state: no Cash, no Bal
   assert.deepEqual(tradeBal(false, null, null), { from: "cash", cents: null });
+});
+
+test("the trade box's Bal and Cash with a priced pool: Cash is the vault path's part plus the pool's, each drawn once", () => {
+  const price = { price: "15000000000", expo: -8, published_s: Math.floor(NOW / 1000) - 5, read_ms: NOW - 1000 };
+  const s = state({ pools: [{ chain: "near", asset: "USDC", balance: "7.25" }, { chain: "solana", asset: "SOL", balance: "0.5", ready: "0.5", tap_max: "0.5", price }] });
+  const t = portfolio(snap(s), NO_DATA, NOW).totals!;
+  // 0.5 SOL at $150 is $75.00; the rest (40.50 + 7.25 + 20.12) is the vault path's
+  assert.equal(t.offPool, 6787n);
+  assert.equal(t.cash, 6787n + 7500n);
+  assert.equal(balanceOf(snap(s), NO_DATA, NOW), t.cash);
+  assert.equal(headerModel(snap(s), t.cash).cents, t.cash);
+  // NEAR's Bal is the vault path's, never the pools' too; Solana's is its pool's
+  assert.deepEqual(tradeBal(false, null, t.offPool), { from: "cash", cents: 6787n });
+  const pv = poolView(s.pools, "solana", { price: 15_000_000_000n, expo: -8, decimals: 9 });
+  assert.deepEqual(tradeBal(true, pv, t.offPool), { from: "pool", cents: 7500n });
+  // Solana's part of Cash: its pool and the READY Solana wallet's 20.12
+  assert.equal(t.parts.find((p) => p.chain === "solana")!.cents, pv!.balance + 2012n);
 });
