@@ -1,10 +1,10 @@
 {
  "good": {
   "check": "app-sell-mount",
-  "at": "2026-11-09T06:27:17.381Z",
+  "at": "2026-11-10T00:28:44.527Z",
   "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with app-portfolio-mount's account and 1000 DJT held",
   "browser": "157.0.8103.38",
-  "entry": "/assets/index-Dlhrxsxp.js",
+  "entry": "/assets/index-t5OTnw0w.js",
   "runs": [
    {
     "width": "desktop",
@@ -21,7 +21,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "250",
+       "share_bps": 2500,
        "slippage_bps": 1000
       }
      },
@@ -30,7 +30,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "1000",
+       "share_bps": 10000,
        "slippage_bps": 1000
       }
      }
@@ -56,7 +56,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "250",
+       "share_bps": 2500,
        "slippage_bps": 1000
       }
      },
@@ -65,7 +65,7 @@
       "params": {
        "chain": "solana",
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-       "amount": "1000",
+       "share_bps": 10000,
        "slippage_bps": 1000
       }
      }

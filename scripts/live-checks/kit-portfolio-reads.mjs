@@ -30,8 +30,10 @@ export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** opOf's walk over the detail keys, each copied when the record holds it and the op still fits with it:
  *  `K=[\`created_ms\`,...];...for(let e of K)t[e]===void 0||Object.hasOwn(r,e)||i({...r,[e]:t[e]})&&(r[e]=t[e])`. */
 export const FILL = /([\w$]+)=\[`created_ms`,`chain`,`token`,`units`,`amount_usd`\][^]{0,4000}?for\(let ([\w$]+) of \1\)([\w$]+)\[\2\]===void 0\|\|Object\.hasOwn\(([\w$]+),\2\)\|\|[\w$]+\(\{\.\.\.\4,\[\2\]:\3\[\2\]\}\)&&\(\4\[\2\]=\3\[\2\]\)/g;
-/** A pool sell's record: `chain:\`solana\`,token:n.token,units:f(n.amount,n.decimals)`. */
-export const SELL = /chain:`solana`,token:([\w$]+)\.token,units:[\w$]+\(\1\.amount,\1\.decimals\)/g;
+/** A pool sell's record: `chain:\`solana\`,token:n.token,units:f(n.amount,n.decimals)`; since card
+ *  pool-sell-share-across-wallets, the units of a sell by amount there (`...n.shareBps===void 0?{units:f(n.amount,
+ *  n.decimals)}:{}`), a sell by share's written once the page has read them. */
+export const SELL = /chain:`solana`,token:([\w$]+)\.token,(?:units:[\w$]+\(\1\.amount,\1\.decimals\)|\.\.\.\1\.shareBps===void 0\?\{units:[\w$]+\(\1\.amount,\1\.decimals\)\}:\{\})/g;
 /** A trade-box trade's record: `created_ms:n(),chain:\`solana\`,token:s,...o===\`buy\`?{amount_usd:c}:{}`. */
 export const TRADE = /created_ms:[\w$]+\(\),chain:`solana`,token:[\w$]+,\.\.\.[\w$]+===`buy`\?\{amount_usd:[\w$]+\}:\{\}/g;
 const countOf = (text, re) => [...text.matchAll(re)].length;

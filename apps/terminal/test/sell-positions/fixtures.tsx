@@ -11,8 +11,9 @@
 // Every position names the token's 6 decimals in the signing page's state (positions[].decimals, kit 1.8), the one
 // source a sell is sized from, but the two nodec (a page of an earlier release).
 // The stub answers as the signing page does: the vault's `buy` side sell takes whole base units only (trade.ts UNITS),
-// pool.sell a fraction no longer than the token's 6 (rules/pool.ts checkPoolRequest); any other is refused not_allowed at
-// 300 ms (pool-kinds.ts). The trade states (app-trade-box-states), on up's
+// pool.sell a share of the whole holding (share_bps 1 to 10,000, which the page turns into units from its own reads,
+// floored at the base unit; card pool-sell-share-across-wallets) or an amount with a fraction no longer than the token's
+// 6 (rules/pool.ts checkPoolRequest); any other is refused not_allowed at 300 ms (pool-kinds.ts). The trade states (app-trade-box-states), on up's
 // position: notsent (signpage_down) and other (not_allowed) refusals, slow (filled at 8 s), notlanded (not_landed at 3 s),
 // partial (part_filled, the kit's count 1 of 2) and partial-nocount. Every request is recorded in window.__calls; every Share
 // tap in window.__shares. ?pool=sol puts the devnet Solana pool in the state (card trade-box-pool: the 0.01 SOL note of
@@ -93,6 +94,14 @@ const DATA: PortfolioData = {
 };
 let snapshot: SignpageClientSnapshot = { status: "ready", release: "signpage-v1", state: STATE, stale: false };
 let setSnapshot: (s: SignpageClientSnapshot) => void = () => {};
+/** A token amount's base units at the token's decimals. */
+const unitsOf = (s: string): bigint => BigInt(s.replace(".", "").replace(/^0+(?=\d)/, "")) * 10n ** BigInt(TOKEN_DECIMALS - (s.split(".")[1]?.length ?? 0));
+/** `bps` of `amount` as the signing page sells it, floored at the base unit, as a decimal string. */
+function shareOf(amount: string, bps: number): string {
+  const n = (unitsOf(amount) * BigInt(bps)) / 10_000n;
+  const s = n.toString().padStart(TOKEN_DECIMALS + 1, "0");
+  return `${s.slice(0, -TOKEN_DECIMALS)}.${s.slice(-TOKEN_DECIMALS)}`.replace(/\.?0+$/, "") || "0";
+}
 /** The device's record as the signing page keeps it: the sell's op at each stage, and the position less what a fill
  *  sold (all of the ask; half of it, floored to the base unit, on a part fill), in the same state. */
 function record(id: string, stage: string, ask: string, pooled: boolean): void {
@@ -121,7 +130,9 @@ const kit: TradeKit = {
   request: ((kind: string, params: unknown) => {
     const id = `sell-${++n}`;
     window.__calls.push({ kind, params, id });
-    const ask = String((params as { amount?: unknown }).amount ?? "");
+    const share = (params as { share_bps?: unknown }).share_bps;
+    // a share sells its part of the position as the page reads it, floored at the base unit (all of it at 10,000)
+    const ask = typeof share === "number" ? shareOf(snapshot.state!.positions.find((p) => p.token === MINT)!.amount, share) : String((params as { amount?: unknown }).amount ?? "");
     const emit = (stage: Stage) => {
       record(id, stage, ask, kind === "pool.sell");
       listeners.forEach((l) => l(id, stage));
@@ -129,7 +140,7 @@ const kit: TradeKit = {
     const outcome = new Promise<SignpageOutcome<"buy">>((resolve) => {
       const amount = String((params as { amount?: unknown }).amount ?? "");
       const frac = /\.(\d+)$/.exec(amount)?.[1] ?? "";
-      const bad = kind === "pool.sell" ? frac.length > TOKEN_DECIMALS : !UNITS.test(amount);
+      const bad = kind === "pool.sell" ? (typeof share === "number" ? !(Number.isInteger(share) && share >= 1 && share <= 10_000) || ask === "0" : frac.length > TOKEN_DECIMALS) : !UNITS.test(amount);
       const code = bad ? "not_allowed" : { refuse: "quote_check_failed", notsent: "signpage_down", other: "not_allowed" }[f];
       if (code) {
         setTimeout(() => {

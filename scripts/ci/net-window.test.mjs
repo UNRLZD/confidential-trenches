@@ -185,6 +185,7 @@ export const CHANGED = [
   "scripts/live-checks/sol-rent-back-dust-burn.mjs",
   "scripts/live-checks/kit-sol-pool-deposit-floor.mjs",
   "scripts/live-checks/sol-sell-deposit-back-floor.mjs",
+  "scripts/live-checks/pool-sell-share-across-wallets.mjs",
   "scripts/live-checks/solana-mint-supply-moves.mjs",
   "scripts/live-checks/solana-release-reads-paced.mjs",
   "scripts/live-checks/token-page-fills-after.mjs",

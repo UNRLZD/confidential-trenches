@@ -104,14 +104,17 @@ export function useSell(chain: Chain, token: string, slippageBps = 1000, units: 
     bps,
     ready,
     locked,
-    pool: poolSellAsk(src.snapshot.state?.pools, chain, token, "0", slippageBps) !== null,
+    pool: poolSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: 10_000 }, slippageBps) !== null,
     part: phase.k === "ended" ? (kit.part?.(phase.id) ?? null) : null,
     now: src.now,
     sell(amount, b, decimals = null) {
       if (!ready || amount === null || busy(ref.current)) return;
       // a chain whose pool the signing page reports sells into it: the proceeds go back into the pool in the same
-      // transaction (card trade-box-pool); other chains keep the vault's sell, in whole base units (trade.ts UNITS)
-      const ask = poolSellAsk(src.snapshot.state?.pools, chain, token, amount, slippageBps);
+      // transaction (card trade-box-pool), asked as the share `b` of the whole holding, which the signing page turns
+      // into units from its own reads of every wallet that holds the token, never this row's amount (a server's read
+      // on mainnet; card pool-sell-share-across-wallets); other chains keep the vault's sell, in whole base units
+      // (trade.ts UNITS)
+      const ask = poolSellAsk(src.snapshot.state?.pools, chain, token, { share_bps: b }, slippageBps);
       const base = baseUnits(amount, decimals);
       if (!ask && base === null) {
         // no decimals read (or a share finer than the token's): the vault would refuse it, so nothing is sent

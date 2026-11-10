@@ -48,9 +48,10 @@ const NOW = Date.parse("2026-11-02T06:00:00Z");
 const MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
 const sellOf = (amount) => JSON.stringify({ chain: "solana", token: MINT, side: "sell", amount, slippage_bps: 1000 });
 /** The request a tap sends: the vault's sell (`buy`, side sell, whole base units at the token's 6 decimals, trade.ts
- *  UNITS), or pool.sell (the token amount) on a chain with a pool. */
+ *  UNITS), or pool.sell (the share of the whole holding in basis points, card pool-sell-share-across-wallets) on a chain
+ *  with a pool. */
 const vault = (units) => JSON.stringify({ kind: "buy", params: JSON.parse(sellOf(units)) });
-const pool = (amount) => JSON.stringify({ kind: "pool.sell", params: { chain: "solana", token: MINT, amount, slippage_bps: 1000 } });
+const pool = (share_bps) => JSON.stringify({ kind: "pool.sell", params: { chain: "solana", token: MINT, share_bps, slippage_bps: 1000 } });
 const sent = (c) => JSON.stringify({ kind: c?.kind, params: c?.params });
 const WIDTHS = [
   { name: "390", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
@@ -63,8 +64,9 @@ const HALF = vault("617283945617");
 const QUARTER = vault("308641972808");
 const INITIALS = vault("563827155926");
 const ALL = vault("1234567891234");
-// nodec (no decimals read): 25% floors at the string's scale plus 4, 308641.9728085, which the token's 6 decimals refuse
-const QUARTER_NODEC = pool("308641.9728085");
+// nodec (no decimals read): 25% asks its share, which the signing page sizes at the decimals it reads itself, so it
+// sells (before card pool-sell-share-across-wallets it asked 308641.9728085, which the token's 6 decimals refused)
+const QUARTER_NODEC = pool(2500);
 
 // name, fixture, what is tapped (cta, a quick sell, or none), ms after it, the box's state, its button, the sent amount,
 // the presets on (25 50 75 100), the quick sells on (25 50 All Initials)
@@ -84,7 +86,7 @@ const STATES = [
   ["S8.33", "noroute", null, 0, "S8.33", "No route", null, "0000", "0000"],
   ["down", "down", null, 0, "S8.29", "Sell 50%", null, "1111", "1110"],
   ["dust", "dust", null, 0, "S8.29", "Sell 50%", null, "0111", "0110"],
-  ["nodec-25", "nodec", '[data-quick="2500"]', 400, "S8.32", "Retry", QUARTER_NODEC, "1111", "1111"],
+  ["nodec-25", "nodec", '[data-quick="2500"]', 400, "S8.30", "Landing 0.4s", QUARTER_NODEC, "0000", "0000"],
   // no decimals on the vault's path: refused here, nothing sent (re-check 2 P3-3)
   ["nodec-vault-25", "nodec-vault", '[data-quick="2500"]', 400, "S8.32", "Retry", null, "1111", "1111"],
   // a box mounted while the device's record holds an open sell: every sell button locked (re-check 2 P2)
@@ -199,9 +201,10 @@ try {
       check(lab === label, `${tag}: button "${lab}", want "${label}"`);
       const got = await settle(() => box.getAttribute("data-state"), want);
       check(got === want, `${tag}: state ${got}, want ${want}`);
-      // an ended sell's one line above the button (app-trade-box-states), empty otherwise
-      const END = { refuse: "Price check failed", notsent: "Not sent", other: "Failed", nodec: "Failed", "nodec-vault": "Failed", notlanded: "Not landed", partial: "1/2 sold", "partial-nocount": "Part sold" };
-      const STAGE = { refuse: "refused", notsent: "refused", other: "refused", nodec: "refused", "nodec-vault": "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" };
+      // an ended sell's one line above the button (app-trade-box-states), a pool sell's on its way (nodec's chain has a
+      // pool: its share sells, card pool-sell-share-across-wallets), empty otherwise
+      const END = { refuse: "Price check failed", notsent: "Not sent", other: "Failed", nodec: "Back to Cash", "nodec-vault": "Failed", notlanded: "Not landed", partial: "1/2 sold", "partial-nocount": "Part sold" };
+      const STAGE = { refuse: "refused", notsent: "refused", other: "refused", "nodec-vault": "refused", notlanded: "not_landed", partial: "part_filled", "partial-nocount": "part_filled" };
       const line = await settle(async () => norm(await page.locator('[data-testid="sell-line"]').innerText()), END[f] ?? "");
       check(line === (END[f] ?? ""), `${tag}: the line above the button "${line}", want "${END[f] ?? ""}"`);
       if (STAGE[f]) check((await box.getAttribute("data-stage")) === STAGE[f], `${tag}: the end's stage`);

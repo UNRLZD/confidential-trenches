@@ -342,10 +342,12 @@ export function presetsOf(chain: Chain, pool: PoolView | null): readonly (Cents 
 /** Cents as the amount box takes them: "25" for whole dollars, "3.50" otherwise. */
 export const amountText = (c: Cents): string => (c % 100n === 0n ? String(c / 100n) : centsToDecimal(c));
 
-/** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. */
-export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, amount: string, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
+/** The sell's pool.sell (the proceeds go back into the chain's pool in the same transaction); null with no pool. `size`:
+ *  a share of the whole holding in basis points (a percent, All: the signing page turns it into units from its own reads
+ *  of every wallet that holds the token, card pool-sell-share-across-wallets), or a token amount in whole units. */
+export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: string, size: { share_bps: number } | { amount: string }, slippageBps: number): { kind: "pool.sell"; params: SignpageParams["pool.sell"] } | null {
   const p = poolOf(pools, chain);
-  return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, amount, slippage_bps: slippageBps } } : null;
+  return p ? { kind: "pool.sell", params: { chain: p.chain as PoolChain, token, ...size, slippage_bps: slippageBps } as SignpageParams["pool.sell"] } : null;
 }
 
 /**

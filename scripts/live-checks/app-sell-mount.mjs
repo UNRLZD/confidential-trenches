@@ -6,9 +6,11 @@
 // token route) at 1440 x 900 (the box in the right column; the switch's Sell) and 390 x 844 (dpr 2; the phone bar's
 // Sell opens the trade sheet), double-taps 25%, then taps 100%, and reads:
 //   - the switch's Sell is on, and Sell draws the sell side (sell-box), ready (S8.29), `1K DJT held`;
-//   - the double tap asks the shell for exactly one pool.sell, on solana, of the token, for 250 (25% of 1000), and no
-//     other trade kind; the box then draws a state of trade/States.tsx's (the shell refuses the sell: S8.32 with Retry);
-//   - a refused sell sold nothing, so 100% then asks one more pool.sell, for the kit's own string 1000.
+//   - the double tap asks the shell for exactly one pool.sell, on solana, of the token, for a share of 2,500 basis points
+//     (25% of the whole holding, which the signing page turns into units from its own reads of every wallet that holds
+//     the token; card pool-sell-share-across-wallets), and no other trade kind; the box then draws a state of
+//     trade/States.tsx's (the shell refuses the sell: S8.32 with Retry);
+//   - a refused sell sold nothing, so 100% then asks one more pool.sell, for all of it (10,000).
 // Node reads the served / first and records the build's entry script, so a run names the build it judged.
 // After: app
 //   node scripts/live-checks/app-sell-mount.mjs [--shots <dir>] [--record <file>]
@@ -35,11 +37,12 @@ const HELPER_HOST = "https://ct-api.unrealized.trade";
 const READ = JSON.parse(readFileSync(path.join(REPO, "apps/terminal/test/token-source/helper-token-2026-11-03.json"), "utf8"));
 export const MINT = READ.row[READ.fields.indexOf("token")];
 export const HELD = "1000";
-/** What a 25% tap must ask: 25% of 1000 in the token's units, at the box's 10% slippage. A record names the request's
- *  `token` as `mint`: gitleaks' generic-api-key reads a "token" key with a base58 value as a secret. */
-export const WANT = { chain: "solana", mint: MINT, amount: "250", slippage_bps: 1000 };
-/** What the 100% tap after it must ask: the position's own string. */
-export const WANT_ALL = { ...WANT, amount: HELD };
+/** What a 25% tap must ask: 25% of the whole holding as a share (card pool-sell-share-across-wallets: never the row's
+ *  amount, a server's read on mainnet), at the box's 10% slippage. A record names the request's `token` as `mint`:
+ *  gitleaks' generic-api-key reads a "token" key with a base58 value as a secret. */
+export const WANT = { chain: "solana", mint: MINT, share_bps: 2500, slippage_bps: 1000 };
+/** What the 100% tap after it must ask: all of it. */
+export const WANT_ALL = { ...WANT, share_bps: 10_000 };
 /** The account: app-portfolio-mount's (its Solana pool kept) with 1000 of the route's token held on Solana. */
 export const STATE = { ...ACCOUNT, positions: [...ACCOUNT.positions, { chain: "solana", token: MINT, amount: HELD, cost: "4.20", wallets: [ACCOUNT.wallets[0].address] }] };
 export const WIDTHS = [
@@ -80,7 +83,7 @@ export function judge(rec) {
     }
     if (b && !SELL_STATES.has(r.after?.state)) bad.push(`after the tap the box is ${r.after?.state ?? "gone"}, not a state of States.tsx's sell side`);
     if (!r.shot) bad.push("no screenshot");
-    say(bad.length === 0, `${r.width}: ${bad.length ? bad.join("; ") : `Sell drew the sell side (${b.held}), 25% twice asked one pool.sell ${sells[0].params.amount} on ${sells[0].params.chain}, then ${r.after.state}; 100% asked ${sells[1].params.amount}`}`);
+    say(bad.length === 0, `${r.width}: ${bad.length ? bad.join("; ") : `Sell drew the sell side (${b.held}), 25% twice asked one pool.sell of ${sells[0].params.share_bps} bps on ${sells[0].params.chain}, then ${r.after.state}; 100% asked ${sells[1].params.share_bps} bps`}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
@@ -155,7 +158,7 @@ async function runOne(browser, w, shots, route) {
     }
     // what the app asked the shell: every kind that trades or moves money (a buy, a sell, an order, a withdraw), each with
     // its params (an envelope carries them beside its type)
-    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => /buy|sell|order|withdraw/.test(m.type)).map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, slippage_bps: m.slippage_bps } })));
+    run.asked = await page.evaluate(() => (window.__ctShellAsked ?? []).filter((m) => /buy|sell|order|withdraw/.test(m.type)).map((m) => ({ type: m.type, params: { chain: m.chain, mint: m.token, amount: m.amount, share_bps: m.share_bps, slippage_bps: m.slippage_bps } })));
     run.shot = `${w.name}-sold.png`;
     await page.screenshot({ path: path.join(shots, run.shot) });
     return run;

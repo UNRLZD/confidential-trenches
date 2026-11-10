@@ -62,7 +62,7 @@ test("a rebuilt bundle with an unrelated copy change passes with no re-record; o
   assert.equal(none.app.marks.fill, 0);
   assert.deepEqual(BAD(none), [FILL_LINE]);
   // a pool sell's record with no units, a trade's with no USD size
-  const sell = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(/,units:[\w$]+\(([\w$]+)\.amount,\1\.decimals\)/, "")));
+  const sell = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(/([,{])units:[\w$]+\(([\w$]+)\.amount,\2\.decimals\)/, "$1")));
   assert.deepEqual(BAD(sell), [SELL_LINE]);
   const trade = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(/,\.\.\.[\w$]+===`buy`\?\{amount_usd:[\w$]+\}:\{\}/, "")));
   assert.deepEqual(BAD(trade), [TRADE_LINE]);

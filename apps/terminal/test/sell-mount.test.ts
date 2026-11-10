@@ -39,14 +39,12 @@ test("the Sell side's position: this chain's row of this token, holding more tha
   assert.equal(heldOf(rows, "solana", ""), null);
 });
 
-test("a partial sell asks pool.sell for the exact share of the row's own amount, on the row's chain, nothing else", () => {
+test("a partial sell asks pool.sell for its share of the whole holding (card pool-sell-share-across-wallets), on the row's chain, nothing else", () => {
   const pools = [{ chain: "solana" as const, asset: "SOL" as const, balance: "1" }, { chain: "base" as const, asset: "ETH" as const, balance: "1" }];
-  const amount = sellAmount("1234.567891", 2500, 6)!;
-  assert.equal(amount, "308.641972");
-  assert.deepEqual(poolSellAsk(pools, "solana", MINT, amount, 1000), { kind: "pool.sell", params: { chain: "solana", token: MINT, amount, slippage_bps: 1000 } });
-  assert.deepEqual(poolSellAsk(pools, "base", EVM, "2", 1000)?.params.chain, "base");
+  assert.deepEqual(poolSellAsk(pools, "solana", MINT, { share_bps: 2500 }, 1000), { kind: "pool.sell", params: { chain: "solana", token: MINT, share_bps: 2500, slippage_bps: 1000 } });
+  assert.deepEqual(poolSellAsk(pools, "base", EVM, { share_bps: 10_000 }, 1000)?.params.chain, "base");
   // no pool on the chain: no pool.sell
-  assert.equal(poolSellAsk(pools, "robinhood", EVM, "2", 1000), null);
+  assert.equal(poolSellAsk(pools, "robinhood", EVM, { share_bps: 10_000 }, 1000), null);
 });
 
 test("a percent floors at the token's own decimals, not the trimmed string's (review P1); 100% sends the kit's string", () => {
@@ -106,7 +104,7 @@ test("the switch's Sell is live: on with a held position, it draws SellBox from 
 
 test("the sell asks pool.sell on a pool chain, from useSell only, and draws States.tsx's states", () => {
   const sell = src("screens/positions/source.tsx");
-  assert.match(sell, /const ask = poolSellAsk\(src\.snapshot\.state\?\.pools, chain, token, amount, slippageBps\);/);
+  assert.match(sell, /const ask = poolSellAsk\(src\.snapshot\.state\?\.pools, chain, token, \{ share_bps: b \}, slippageBps\);/);
   assert.match(sell, /if \(!ready \|\| amount === null \|\| busy\(ref\.current\)\) return;/, "a double tap can send two sells");
   const sb = src("screens/positions/SellBox.tsx");
   assert.match(sb, /import \{ EndLine, hasRunLabel, RunLabel, stateId \} from "\.\.\/trade\/States\.tsx";/);
