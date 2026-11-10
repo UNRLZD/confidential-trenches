@@ -9,6 +9,9 @@
 // good_per_read, robinhood_good_per_read (card helper-restart-fresh): the deployed helper read at 2026-11-06 06:51Z with
 // each answer's request time and the heads' read time: PASS; made from the good answers in the shape of live run
 // 42163488602 (the judged token read 20.6 s into the run): PASS, and a stale, a future-dated or a late-heads read: FAIL.
+// robinhood_routed_v4 (card index-evm-swaps-check-reads-the-pool-leg): live run 42908764691's two routed v4 trades, no
+// Transfer of their amt in either receipt, each its pool's own Swap leg: PASS; an amt one unit off the leg, a sender's
+// one swap whose Transfer does not match, two providers' differing legs: each FAIL by name.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -271,7 +274,8 @@ test("card helper-robinhood-swaps: a hooked v4 pool's buys on the tape as the po
   const b = judge(A.robinhood_bad_hooked_buys);
   assert.equal(b.ok, false);
   assert.equal(A.robinhood_bad_hooked_buys.coin, "0xe23c6618091c137f56d8486d25492311ccf33ab8");
-  assert.deepEqual(bad(b).map((l) => l.replace(/\d+ of 5/, "n of 5").replace(/"[bs]+"/, "")), ["BAD n of 5 sampled trades carry a Transfer of the token for exactly their amt,  against the pool"], b.lines.join("\n"));
+  // the buy whose sender's move is read fails by its pool leg less the hook's cut; the run by the Transfers asked
+  assert.deepEqual(bad(b).map((l) => l.replace(/\d+ of 5/, "n of 5").replace(/"[bs]+"/, "")), ["BAD trade 0xe07604eb: amt 500967.19699094996313226 is not the 487190.599073698839146124 its sender, whose one swap this is, moved with the PoolManager (a Transfer or claims of the token; this pool's Swap leg 500967.19699094996313226, read on two providers)", "BAD n of 5 sampled trades carry a Transfer of the token for exactly their amt,  against the pool"], b.lines.join("\n"));
   assert.ok(b.lines.filter((l) => /^-- {2}trade 0x[0-9a-f]{8}: no Transfer of exactly [\d.]+ from the pool/.test(l)).length >= 3);
   const g = judge(A.robinhood_good_hooked);
   assert.ok(g.ok, bad(g).join("\n"));
@@ -280,7 +284,10 @@ test("card helper-robinhood-swaps: a hooked v4 pool's buys on the tape as the po
   for (const rec of [A.robinhood_bad_hooked_buys, A.robinhood_good_hooked]) assert.ok(Object.values(rec.chain.receipts).some((r) => r.logs.some((l) => l.address === HOOK)), rec.coin);
   const sides = JSON.parse(A.robinhood_good_hooked.reads.trades.body).trades.slice(0, 5).map((t) => t.side);
   assert.ok(sides.filter((s) => s === "b").length >= 2, `the sample holds buys: ${sides.join("")}`);
-  assert.ok(g.lines.includes(`ok  5 of 5 sampled trades carry a Transfer of the token for exactly their amt, ${JSON.stringify(sides.join(""))} against the pool`), g.lines.join("\n"));
+  // its two routed buys (0x8b878e95, 0x18df736c: the router swaps more than once) are judged by their pool's leg less
+  // the hook's take; the three of a sender's one swap are asked their Transfer
+  const asked = sides.filter((_, i) => i !== 3 && i !== 4).join("");
+  assert.ok(g.lines.includes(`ok  3 of 3 sampled trades carry a Transfer of the token for exactly their amt, ${JSON.stringify(asked)} against the pool; 2 routed v4 trades judged by the pool's Swap leg alone`), g.lines.join("\n"));
 });
 
 test("card helper-deploy-reads-fast: a FAIL names each read the helper answered, its status, time and Server-Timing; a PASS prints none (made from the good answer in the shape of live run 42122733397 attempt 1: the judged token's candles 23 s after the read, two listed tokens tried before it)", () => {
@@ -453,4 +460,109 @@ test("card helper-restart-fresh: good_per_read and robinhood_good_per_read, the 
     delete early.chain.headsAt;
     assert.ok(bad(run(early)).some((l) => l.includes("X-Fetched-At")), rec.net ?? "base");
   }
+});
+
+// Card index-evm-swaps-check-reads-the-pool-leg: robinhood_routed_v4 is live run 42908764691's Robinhood read (helper
+// 2736dbef): its two trades are routers' v4 routes whose swaps net the token inside the PoolManager, so no Transfer of
+// the token is either trade's. Main's check (2736dbef) FAILs them ("0 of 2 sampled trades carry a Transfer"); judged by
+// their pool's own Swap leg they PASS. Made from it and from robinhood_good: a tape amount one unit off the pool's leg,
+// a sender's one swap whose Transfer does not match, and two providers whose receipts give the pool different legs:
+// each FAILs, naming the trade and the fault.
+const routed = () => structuredClone(A.robinhood_routed_v4);
+const ROUTED_POOL = "0x8366a39cc670b4001a1121b8f6a443a643e40951:0x1fa1e9b5a8b2101da19bcc91428885ff92b35028c5e9400267f504dd0d7c12a2";
+const BUY = "0x2c7930a7f2ff1c0731505eaa43afa5b6c7cd217a75a299a59ef7c202df39439f";
+const SELL = "0xcdc53645a2b06c7193110bedc56423e1301acbd8ab3c0b6b25d44df498067fb4";
+
+test("card index-evm-swaps-check-reads-the-pool-leg: live run 42908764691's two routed v4 trades PASS, each its pool's own Swap leg; main's check failed them for want of a Transfer", () => {
+  const rec = A.robinhood_routed_v4;
+  assert.deepEqual(JSON.parse(rec.reads.trades.body).trades.map((t) => [t.tx, t.side, t.amt]), [
+    [SELL, "s", "106651.292978592276941884"],
+    [BUY, "b", "476.842127889091326311"],
+  ]);
+  // neither receipt holds a Transfer of the token for its trade's amt: the PoolManager nets each route
+  for (const [tx, amt] of [[SELL, 106651292978592276941884n], [BUY, 476842127889091326311n]]) assert.ok(!rec.chain.receipts[tx].logs.some((l) => l.address === rec.coin && l.topics[0] === TOPIC.transfer && BigInt(l.data) === amt), tx);
+  const r = judge(rec);
+  assert.deepEqual(bad(r), [], r.lines.join("\n"));
+  assert.equal(r.ok, true);
+  assert.ok(r.lines.includes(`ok  the sampled trades share a pool: ${JSON.stringify([ROUTED_POOL])}`));
+  assert.ok(r.lines.includes("ok  trade 0xcdc53645: amt 106651.292978592276941884 is this pool's Swap leg 106651.292978592276941884, read on two providers (its sender's 8 swaps net the token in the PoolManager)"), r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  trade 0x2c7930a7: amt 476.842127889091326311 is this pool's Swap leg 476.842127889091326311, read on two providers (its sender's 3 swaps net the token in the PoolManager)"), r.lines.join("\n"));
+  assert.ok(r.lines.includes("ok  no sampled trade is asked a Transfer of the token for its amt: 2 routed v4 trades judged by the pool's Swap leg alone"));
+  assert.ok(!r.lines.some((l) => /fee on transfer/.test(l)));
+});
+
+test("card index-evm-swaps-check-reads-the-pool-leg: a tape amount one unit off its pool's Swap leg FAILs, named, on a buy and on a sell", () => {
+  for (const [i, amt, line] of [
+    [1, "476.842127889091326312", "BAD trade 0x2c7930a7: amt 476.842127889091326312 is not this pool's Swap leg 476.842127889091326311, read on two providers, nor that leg less one take of the token out of the PoolManager by an address that sent no swap (its sender's 3 swaps net the token in the PoolManager)"],
+    [0, "106651.292978592276941883", "BAD trade 0xcdc53645: amt 106651.292978592276941883 is not this pool's Swap leg 106651.292978592276941884, read on two providers, nor that leg less one take of the token out of the PoolManager by an address that sent no swap (its sender's 8 swaps net the token in the PoolManager)"],
+  ]) {
+    const rec = routed();
+    body(rec, "trades", (b) => (b.trades[i].amt = amt));
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.deepEqual(bad(r), [line], r.lines.join("\n"));
+  }
+});
+
+test("card index-evm-swaps-check-reads-the-pool-leg: a sender's one swap whose Transfer does not match its amt FAILs, named (one unit less, and one unit more than the pool's leg)", () => {
+  const first = JSON.parse(A.robinhood_good.reads.trades.body).trades[0];
+  assert.equal(first.side, "s");
+  for (const [delta, line] of [
+    // a seller that paid less than the pool took: no hook's cut, a wrong leg
+    [-1n, `BAD trade ${first.tx.slice(0, 10)}: its sender's move of the token with the PoolManager, 1500860.40017870957016451, is less than this pool's Swap leg ${first.amt}, read on two providers`],
+    // a seller that paid more: the amt is not what it paid
+    [1n, `BAD trade ${first.tx.slice(0, 10)}: amt ${first.amt} is not the 1500860.400178709570164512 its sender, whose one swap this is, moved with the PoolManager (a Transfer or claims of the token; this pool's Swap leg ${first.amt}, read on two providers)`],
+  ]) {
+    const rec = structuredClone(A.robinhood_good);
+    const rc = rec.chain.receipts[first.tx];
+    // the sell's Transfer of the token to the PoolManager
+    const l = rc.logs.find((x) => x.address === rec.coin && x.topics[0] === TOPIC.transfer && BigInt(x.data) === units(first.amt, rec.chain.decimals));
+    assert.ok(l, "the sell's Transfer");
+    l.data = `0x${(BigInt(l.data) + delta).toString(16).padStart(64, "0")}`;
+    const r = judge(rec);
+    assert.equal(r.ok, false);
+    assert.deepEqual(bad(r), [line], r.lines.join("\n"));
+    assert.ok(r.lines.includes(`--  trade ${first.tx.slice(0, 10)}: no Transfer of exactly ${first.amt} to the pool`));
+  }
+});
+
+test("card index-evm-swaps-check-reads-the-pool-leg: two providers whose receipts give the pool different Swap legs FAIL, naming both legs; receipts that differ elsewhere FAIL as differing", () => {
+  const rec = routed();
+  const a = rec.chain.receipts[BUY];
+  const b = structuredClone(a);
+  const s = b.logs.find((l) => l.topics[0] === TOPIC.swap4 && l.topics[1] === ROUTED_POOL.split(":")[1]);
+  // amount1, the token's leg of this buy: one unit more on the second provider
+  s.data = `${s.data.slice(0, 66)}${(BigInt(`0x${s.data.slice(66, 130)}`) + 1n).toString(16).padStart(64, "0")}${s.data.slice(130)}`;
+  rec.chain.receipts[BUY] = { differ: [a, b] };
+  const r = judge(rec);
+  assert.equal(r.ok, false);
+  assert.deepEqual(bad(r), ["BAD trade 0x2c7930a7: this pool's Swap leg differs on the two providers: 476.842127889091326311 on one, 476.842127889091326312 on the other"], r.lines.join("\n"));
+  const other = routed();
+  const c = structuredClone(other.chain.receipts[BUY]);
+  c.status = "0x0";
+  other.chain.receipts[BUY] = { differ: [other.chain.receipts[BUY], c] };
+  assert.deepEqual(bad(judge(other)), ["BAD trade 0x2c7930a7: the two providers' receipts differ"]);
+});
+
+test("card index-evm-swaps-check-reads-the-pool-leg: read() keeps both receipts when two providers answer and differ, and the run FAILs naming the pool's two legs", async () => {
+  const rec = A.good;
+  const t0 = JSON.parse(rec.reads.trades.body).trades[0];
+  const tx = t0.tx;
+  const second = structuredClone(rec.chain.receipts[tx]);
+  const s = second.logs.find((l) => l.topics[0] === TOPIC.swap4 && `${l.address}:${l.topics[1]}` === "0x498581ff718922c3f8e6a244956af099b2652b2b:0x943fceb1290dfe98944bc71d7780ce8fc9d233b6f0e2e72a4a32e8631594ed91");
+  // the token's word of the Swap (a buy's: the amt, positive), one unit more on the second provider
+  const k = [0, 1].find((i) => BigInt(`0x${s.data.slice(2 + 64 * i, 66 + 64 * i)}`) === units(t0.amt, rec.chain.decimals));
+  assert.ok(k !== undefined && t0.side === "b");
+  s.data = `0x${s.data.slice(2, 2 + 64 * k)}${(units(t0.amt, rec.chain.decimals) + 1n).toString(16).padStart(64, "0")}${s.data.slice(66 + 64 * k)}`;
+  const base = replay(rec);
+  const fetchFn = async (url, init) => {
+    const req = init?.body ? JSON.parse(init.body) : null;
+    if (req?.method === "eth_getTransactionReceipt" && req.params[0] === tx && SWAP_RPCS.base.indexOf(url) === 1) return new Response(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: second }), { status: 200 });
+    return base(url, init);
+  };
+  const again = asRecorded(await read("https://ct-api.unrealized.trade", rec.coin, fetchFn), rec);
+  assert.deepEqual(again.chain.receipts[tx], { differ: [rec.chain.receipts[tx], second] });
+  const r = judge(again);
+  assert.equal(r.ok, false);
+  assert.ok(bad(r).some((l) => l.startsWith(`BAD trade ${tx.slice(0, 10)}: this pool's Swap leg differs on the two providers: `)), r.lines.join("\n"));
 });
