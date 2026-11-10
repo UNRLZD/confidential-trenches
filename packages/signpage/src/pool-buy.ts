@@ -140,6 +140,9 @@ export type PoolBuyHost = {
    *  passed and W derived to the proof's recipient, then the amount W received once the transaction read back on both
    *  RPCs as the same. Each once, in that order; a throw here never stops the buy. */
   route?(r: BuyRoute): void;
+  /** W's address and the decimals of the token it received, read with that amount on both RPCs: told just before the
+   *  route's amount, for the device's buy record (src/positions.ts); a throw here never stops the buy. */
+  outDecimals?(wallet: string, decimals: number): void;
   /** The notes a run on this page has picked and not finished: a second tap picks another ready proof. */
   claimed?: Set<string>;
   /** Tests only: the venue's fee recipient and the Jito tip account, else random. */
@@ -513,7 +516,14 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const bound: readonly BuyRoute[] = [{ wallet: w.address }, { venue: venue.kind, pool: venue.kind === "pump-curve" ? venue.curve : venue.pool }];
       // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
       await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
-      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound });
+      const decimals = (d: number): void => {
+        try {
+          h.outDecimals?.(w.address, d);
+        } catch {
+          /* a record's decimals never stop a buy */
+        }
+      };
+      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals });
     }
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
@@ -534,7 +544,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
   h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "named" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
-  fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[] },
+  fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void },
 ): Promise<PoolBuyAnswer> {
   // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
   const taken = await h.take(r.noteId, r.attempt);
@@ -652,7 +662,10 @@ export async function sendAndSettle(
       const [a, b] = outs;
       const out = a && b && a.raw === b.raw && a.decimals === b.decimals && a.raw >= fill.minOut ? unitsOf(a.raw, a.decimals) : null;
       // never an amount past the kit's bound (SIGNPAGE_ROUTE_OUT: 78 digits each side), which a client refuses
-      if (out !== null && ROUTE_OUT.test(out)) fill.tell({ out });
+      if (out !== null && ROUTE_OUT.test(out)) {
+        fill.decimals?.(a!.decimals);
+        fill.tell({ out });
+      }
     }
   }
   if (!landed) return unlanded(ours ? txs : [], signature);

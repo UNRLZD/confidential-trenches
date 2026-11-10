@@ -129,8 +129,16 @@ const randomIndex = (n: number): number => {
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Every W the pools' spent notes paid, with its holdings. The Ws are read in a random order (`pick`: tests only). */
-export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], opts: { signal?: AbortSignal; pick?: (n: number) => number } = {}): Promise<BuyWallets> {
-  const pick = opts.pick ?? randomIndex;
+export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], opts: BuyWalletsRead = {}): Promise<BuyWallets> {
+  return derivedBuyWallets(seed64, pools).read(opts);
+}
+
+/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given. */
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string> };
+
+/** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
+ *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
+export function derivedBuyWallets(seed64: Uint8Array, pools: readonly BuyPool[]): { read(opts?: BuyWalletsRead): Promise<BuyWallets> } {
   const failed = new Map<number, string>();
   const found: (BuyWallet | undefined)[][] = pools.map(() => []);
   const jobs: { p: number; k: number; address: string }[] = [];
@@ -153,6 +161,16 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
       failed.set(pi, msg(e));
     }
   });
+  return { read: (opts = {}) => readDerived(pools, found, jobs, new Map(failed), opts) };
+}
+
+async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWallet | undefined)[][], all: readonly { p: number; k: number; address: string }[], failed: Map<number, string>, opts: BuyWalletsRead): Promise<BuyWallets> {
+  const pick = opts.pick ?? randomIndex;
+  const only = opts.only;
+  const kept = (w: BuyWallet | undefined): w is BuyWallet => w !== undefined && (only === undefined || only.has(w.address));
+  // each read's own copies: a read again starts from no holdings
+  const found = derived.map((ws) => ws.map((w): BuyWallet | undefined => (w === undefined ? undefined : { ...w, holdings: { native: 0n, tokens: new Map(), unreadable: [] } })));
+  const jobs = all.filter((j) => only === undefined || only.has(j.address));
   // Fisher-Yates over every pool's Ws
   for (let i = jobs.length - 1; i > 0; i--) {
     const r = pick(i + 1);
@@ -170,7 +188,7 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
     }
   }
   return {
-    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : (ws as BuyWallet[]))),
+    wallets: found.flatMap((ws, p) => (failed.has(p) ? [] : ws.filter(kept))),
     failed: [...failed].sort(([a], [b]) => a - b).map(([p, error]) => ({ pool: pools[p]!.id, error })),
   };
 }
