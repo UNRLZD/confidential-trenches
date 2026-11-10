@@ -47,7 +47,7 @@ const RUNG = 10_000_000n;
 const FEE = 5_000n;
 const WAIT_MS = 20_000;
 const PROOF_MS = 6 * 60_000;
-const FILL_MS = 90_000;
+const END_MS = 5 * 60_000;
 const PRICE_MS = 7 * 60_000;
 const HELD_MS = 60_000;
 const FUND_MS = 10 * 60_000;
@@ -243,6 +243,20 @@ function timing(tapAt, sentAt, answers, end) {
   };
 }
 
+/** The network log as one line per step, host and method: how many requests, and how each was answered (HTTP status,
+ *  the JSON-RPC error code after a slash when there was one, or the failure). */
+export function netTable(net) {
+  const rows = new Map();
+  for (const e of net) {
+    const k = `${e.step} ${e.host}${e.method ? ` ${e.method}` : ` ${e.path}`}`;
+    const a = e.failed ? `failed:${e.failed}` : e.status === undefined ? "no answer" : `${e.status}${e.code !== undefined && e.code !== null ? `/${e.code}` : ""}`;
+    const row = rows.get(k) ?? new Map();
+    row.set(a, (row.get(a) ?? 0) + 1);
+    rows.set(k, row);
+  }
+  return [...rows].map(([k, row]) => `net ${k}: ${[...row].map(([a, n]) => `${a} x${n}`).join(", ")}`);
+}
+
 export async function run({ plant = null, shots = null } = {}) {
   const rec = { started: new Date().toISOString(), plant, txs: [], csp: [], hosts: [], dialogs: 0 };
   devnetOnly(await both("getGenesisHash", []));
@@ -279,6 +293,20 @@ export async function run({ plant = null, shots = null } = {}) {
     // the page's requests from the buy's tap on (host, path, JSON-RPC method, time), for the timing split's reading of
     // where a trade's wait is spent; names and times only, never a body
     rec.net = [];
+    // each logged request's answer: its HTTP status and, for a JSON-RPC answer, its error code when it has one (the code
+    // only, never a body); a request that got no answer, the failure's text
+    const netOf = new WeakMap();
+    context.on("response", (r) => {
+      const entry = netOf.get(r.request());
+      if (!entry) return;
+      entry.status = r.status();
+      entry.ms = Date.now() - entry.at;
+      if (entry.method) answers.push(r.json().then((j) => (entry.code = Array.isArray(j) ? j.map((x) => x?.error?.code ?? null).join("+") : (j?.error?.code ?? null)), () => (entry.code = "unread")));
+    });
+    context.on("requestfailed", (r) => {
+      const entry = netOf.get(r);
+      if (entry) entry.failed = String(r.failure()?.errorText ?? "failed").slice(0, 60);
+    });
     context.on("request", (r) => {
       if (["buy", "held", "sell"].includes(step) && rec.net.length < 4000) {
         const u = new URL(r.url());
@@ -287,7 +315,9 @@ export async function run({ plant = null, shots = null } = {}) {
           const b = JSON.parse(r.postData() ?? "null");
           method = Array.isArray(b) ? b.map((x) => x?.method).join("+") : (b?.method ?? null);
         } catch {}
-        rec.net.push({ step, at: Date.now(), host: u.hostname, path: u.pathname, method });
+        const entry = { step, at: Date.now(), host: u.hostname, path: u.pathname, method };
+        rec.net.push(entry);
+        netOf.set(r, entry);
       }
       if (r.method() !== "POST") return;
       if (isPoolSend(r)) return void mark();
@@ -308,6 +338,20 @@ export async function run({ plant = null, shots = null } = {}) {
     const vis = (sel) => app.locator(`${sel} >> visible=true`).first();
     const top = (sel) => page.locator(sel).first();
     const shot = async (name) => shots && (await page.screenshot({ path: path.join(shots, `a2e-${name}-1440.png`) }));
+    // a trade's end label (Filled, Failed, Not landed), waited for up to END_MS; a label on the way (Slow, Stuck, ...) is
+    // recorded once with the ms after the tap it was first read at, and the wait goes on; only no end label stops it
+    const endLabel = async (cta, tapAt) => {
+      const seen = [];
+      let label = "";
+      while (Date.now() - tapAt < END_MS) {
+        label = (await cta.innerText()).replace(/\s+/g, " ").trim();
+        if (/^(Filled|Failed|Not landed)\b/.test(label)) break;
+        const word = label.split(" ")[0];
+        if (/^(Slow|Stuck)$/.test(word) && !seen.some((x) => x.word === word)) seen.push({ word, label, ms: Date.now() - tapAt });
+        await page.waitForTimeout(250);
+      }
+      return { label, seen };
+    };
 
     // 1. sign in, the words kept for the sell's card
     await page.goto(`https://${REAL.app}/token/solana/${MINT}`, { waitUntil: "commit" });
@@ -422,15 +466,9 @@ export async function run({ plant = null, shots = null } = {}) {
     await vis('[data-testid="trade-cta"]').click();
     const tapAt = Date.now();
     rec.buy.taps = 1;
-    const cta = vis('[data-testid="trade-cta"]');
-    const end = Date.now() + FILL_MS;
-    let label = "";
-    while (Date.now() < end) {
-      label = (await cta.innerText()).replace(/\s+/g, " ").trim();
-      if (/^(Filled|Failed|Not landed)/.test(label) || (await vis(".trb-state, [data-testid='trade-state']").count()) > 0 && /Failed|Not landed/.test(label)) break;
-      await page.waitForTimeout(250);
-    }
+    const { label, seen } = await endLabel(vis('[data-testid="trade-cta"]'), tapAt);
     rec.buy.end = label;
+    rec.buy.seen = seen;
     rec.buy.timing = timing(tapAt, sentAt.buy, events.slice(answersBefore), label);
     const asks = events.filter((e) => e.kind === "ask").slice(asksBefore).filter((e) => e.type.startsWith("pool.buy") || e.type === "buy");
     rec.buy.asks = asks.length;
@@ -468,14 +506,9 @@ export async function run({ plant = null, shots = null } = {}) {
     await sellCta.click();
     const sellTapAt = Date.now();
     rec.sell.taps = 1;
-    const sellEnd = Date.now() + FILL_MS;
-    let sellLabel = "";
-    while (Date.now() < sellEnd) {
-      sellLabel = (await sellCta.innerText()).replace(/\s+/g, " ").trim();
-      if (/^(Filled|Failed|Not landed)/.test(sellLabel)) break;
-      await page.waitForTimeout(250);
-    }
+    const { label: sellLabel, seen: sellSeen } = await endLabel(sellCta, sellTapAt);
     rec.sell.end = sellLabel;
+    rec.sell.seen = sellSeen;
     rec.sell.timing = timing(sellTapAt, sentAt.sell, events.slice(sellAnswersBefore), sellLabel);
     const sellAsks = events.filter((e) => e.kind === "ask").slice(sellAsksBefore).filter((e) => e.type === "pool.sell" || (e.type === "buy" && e.side === "sell"));
     rec.sell.asks = sellAsks.length;
@@ -518,7 +551,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(rec.stub);
     for (const l of v.lines) console.log(l);
     for (const t of rec.txs) console.log(`Tx: solana-devnet ${t.sig} (${t.step})`);
-    for (const side of ["buy", "sell"]) if (rec[side]?.timing) console.log(`timing ${side}: ${JSON.stringify(rec[side].timing)}`);
+    for (const side of ["buy", "sell"]) if (rec[side]?.timing) console.log(`timing ${side}: ${JSON.stringify({ ...rec[side].timing, seen: rec[side].seen })}`);
+    for (const l of netTable(rec.net ?? [])) console.log(l);
     console.log(v.ok ? "PASS a pool buy and sell end to end in H-app on devnet" : "FAIL");
     process.exit(v.ok ? 0 : 1);
   } catch (e) {

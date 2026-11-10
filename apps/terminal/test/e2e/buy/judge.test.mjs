@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { b58, DEVNET_GENESIS, devnetOnly, judge, rpc, unb58 } from "./run.mjs";
+import { b58, DEVNET_GENESIS, devnetOnly, judge, netTable, rpc, unb58 } from "./run.mjs";
 
 const SRC = readFileSync(new URL("./run.mjs", import.meta.url), "utf8");
 const answers = JSON.parse(readFileSync(new URL("./run.answers.json", import.meta.url), "utf8"));
@@ -105,4 +105,19 @@ test("a rate-limited read is asked again, a bounded number of times; any other e
   f = answers([{ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "bad" } }]);
   await assert.rejects(rpc("https://x.test", "getBalance", [], { pauseMs: 0, fetchFn: f.fetchFn }), /-32602/);
   assert.equal(f.calls(), 1);
+});
+
+test("the network table counts each answer by step, host and method: status, JSON-RPC code, failure, none", () => {
+  const e = (x) => ({ step: "buy", host: "api.devnet.solana.com", method: "getProgramAccounts", ...x });
+  assert.deepEqual(netTable([e({ status: 200, code: -32016 }), e({ status: 200, code: -32016 }), e({ status: 429 }), e({ status: 200, code: null }), e({ failed: "net::ERR_ABORTED" }), e({})]), [
+    "net buy api.devnet.solana.com getProgramAccounts: 200/-32016 x2, 429 x1, 200 x1, failed:net::ERR_ABORTED x1, no answer x1",
+  ]);
+  assert.deepEqual(netTable([{ step: "sell", host: "ct-api.unrealized.trade", path: "/v1/pool/solana/send", method: null, status: 200 }]), ["net sell ct-api.unrealized.trade /v1/pool/solana/send: 200 x1"]);
+});
+
+test("the run waits up to 5 minutes for a trade's end label and records Slow or Stuck on the way", () => {
+  assert.match(SRC, /const END_MS = 5 \* 60_000;/);
+  assert.equal(/FILL_MS/.test(SRC), false);
+  assert.match(SRC, /\^\(Filled\|Failed\|Not landed\)\\b/);
+  assert.match(SRC, /\^\(Slow\|Stuck\)\$/);
 });
