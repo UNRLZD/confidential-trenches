@@ -42,6 +42,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileS
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { launchBrowser } from "../browsers.mjs";
 import { launchHarnessBrowser } from "../harness-sockets.mjs";
 import { consoleLine } from "./console-errors.mjs";
@@ -567,7 +568,35 @@ const footerRead = (body) => {
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json" };
 
+/** Why the kit's own client (its public entry, in parent mode, as the terminal runs it) would not keep `state` whole as
+ *  a shell's answer to its handshake `state` request: it refuses it (the kit's state schema), or it leaves part of it out
+ *  (an op it cannot read); null when it keeps exactly `state`. */
+export async function kitRefuses(state) {
+  const { createSignpageClient } = await import("../../packages/kit/src/index.ts");
+  const heard = [];
+  const asked = [];
+  const parent = { postMessage: (m) => asked.push(m) };
+  const host = { window: { addEventListener: (t, f) => t === "message" && heard.push(f), removeEventListener: () => {} }, document: null, mount: null, parent };
+  const client = createSignpageClient({ url: `${SIGN_HOST}/`, host, mode: "parent", retryMs: 0 });
+  try {
+    const q = asked.find((m) => m?.type === "state" && typeof m.id === "string");
+    if (!q) return "the kit's client asked the shell for no state";
+    const data = JSON.parse(JSON.stringify({ v: 1, id: q.id, ok: true, result: state }));
+    for (const f of heard) f({ origin: SIGN_HOST, source: parent, data });
+    await new Promise((r) => setTimeout(r, 0));
+    const got = client.snapshot().state;
+    if (got === null) return "the kit's client refuses it (packages/kit/src/signpage/schema.ts)";
+    if (!isDeepStrictEqual(got, data.result)) return "the kit's client keeps only part of it (an op it cannot read is left out)";
+    return null;
+  } finally {
+    client.destroy();
+  }
+}
+
 export async function harnessRoute(appBuild, kind = "signed", { state = null, opens = [], answers = {}, near = nearChain() } = {}) {
+  // the state the shell sends, as the kit's client reads it: a fixture the real app would drop fails here, by name
+  const why = await kitRefuses(state ?? (kind === "tap" ? SIGNED_OUT : SIGNED_IN));
+  if (why) throw new Error(`${KEY}: the planted state: ${why}`);
   const { parseHeadersFile } = await import("../../apps/terminal/scripts/check-deploy.ts");
   const { headersFor } = await import("../../apps/terminal/test/harness/server.mjs");
   const rulesOf = (text) => {

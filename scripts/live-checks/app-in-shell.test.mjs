@@ -299,3 +299,38 @@ test("planted on the good answer: a failed footer read of a release NEAR RPC pas
   // beside the footer outage, a page error still fails
   assert.match(plant([tagged, "Uncaught boom"], on).join("\n"), /: Uncaught boom$/);
 });
+
+// Every state a check plants in the stand-in shell goes through the kit's own client first (its public entry), so a
+// fixture the real app would drop or cut fails at the fixture, never as a screen that draws no account.
+test("harness: a planted state the kit's client refuses or cuts throws at harnessRoute, naming why; a valid one, and none, pass", async () => {
+  const { mkdtempSync, copyFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { harnessRoute, kitRefuses } = await import("./app-in-shell.mjs");
+  const { ACCOUNT } = await import("./app-portfolio-mount.mjs");
+  const { STATE } = await import("./app-sell-mount.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "app-in-shell-state-"));
+  copyFileSync(path.join(HERE, "../../apps/terminal/public/_headers"), path.join(dir, "_headers"));
+  try {
+    assert.equal(await kitRefuses(ACCOUNT), null);
+    assert.equal(await kitRefuses(STATE), null);
+    await harnessRoute(dir, "signed");
+    await harnessRoute(dir, "tap");
+    await harnessRoute(dir, "signed", { state: STATE });
+    const p = STATE.positions.at(-1);
+    for (const [why, state] of [
+      ["a position's decimals past a u8", { ...STATE, positions: [{ ...p, decimals: 300 }] }],
+      ["an amount finer than its decimals", { ...STATE, positions: [{ ...p, amount: "1.5", decimals: 0 }] }],
+      ["a position with no cost", { ...STATE, positions: [{ chain: p.chain, token: p.token, amount: p.amount, wallets: p.wallets }] }],
+      ["a field the kit does not know", { ...STATE, positions: [{ ...p, units: "1000" }] }],
+      ["no positions", { ...STATE, positions: undefined }],
+    ]) {
+      assert.match(await kitRefuses(state), /refuses/, why);
+      await assert.rejects(harnessRoute(dir, "signed", { state }), /the planted state: the kit's client refuses it/, why);
+    }
+    const cut = { ...STATE, ops: [{ id: "x", kind: "teleport", stage: "done", txs: [] }] };
+    assert.match(await kitRefuses(cut), /keeps only part of it/);
+    await assert.rejects(harnessRoute(dir, "signed", { state: cut }), /keeps only part of it/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
