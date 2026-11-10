@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mutantCommands } from "./test-shards.mjs";
+import { mutantCommands, packageItems, packagesPart } from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -90,6 +90,17 @@ export function unrun(root) {
     const m = /\bpnpm\b.*\brun\s+([^\s'"]+)/.exec(seg);
     return m ? [{ script: m[1], pick: selects(seg) }] : [];
   });
+  // a ci.yml line that runs `node scripts/ci/test-shards.mjs packages tests` runs every package's test script but the
+  // wallet's, in the part its matrix lists (card ci-mutant-shards-true-times; scripts/ci/test-shards.test.mjs holds that the
+  // parts together hold each package once, for every count of parts)
+  const packagesSplit = (seg) => /^\s*(\w+=\S*\s+)*node\s+scripts\/ci\/test-shards\.mjs\s+packages\s+tests(\s|$)/.test(seg);
+  if (lines.flatMap((l) => l.split(/&&|\|\||[;|\n]/)).some(packagesSplit)) {
+    const ci = read(".github/workflows/ci.yml");
+    const total = /\n {2}test-packages:\n(?:.*\n)*? {8}part:\s*\[([^\]]*)\]/.exec(ci)?.[1].split(",").length ?? 1;
+    const items = packageItems(root);
+    const names = new Set(Array.from({ length: total }, (_, i) => packagesPart(items, i, total)).flat().filter((i) => i.kind === "tests").map((i) => i.name));
+    selections.push({ script: "test", pick: (n) => names.has(n) });
+  }
   if (selections.length) {
     const globs = [...read("pnpm-workspace.yaml").matchAll(/^\s+-\s+["']?([^"'\s]+)["']?\s*$/gm)].map((m) => m[1]);
     for (const pkg of globs.flatMap((g) => globSync(`${g}/package.json`, { cwd: root }))) {
@@ -264,6 +275,45 @@ test("planted: a sweep in test:mutants that no ci.yml line runs fails; run by -r
     assert.deepEqual(unrunWith(ci(tests, "pnpm --filter @blindfill/wallet run test:mutants")), ["packages/k/test/mutants/m.test.mjs"]);
     assert.deepEqual(unrunWith(ci(tests, `echo ${shard}`)), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
     assert.deepEqual(unrunWith(ci(tests, "node scripts/ci/test-shards.mjs e2e \"$INDEX\" \"$TOTAL\"")), ["packages/k/test/mutants/m.test.mjs", "packages/w/test/mutants/wm.test.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// card ci-mutant-shards-true-times: test-packages runs each package's tests through `node scripts/ci/test-shards.mjs packages
+// tests`, which this reads as every package but the wallet's; the line missing, inside an echo or for another step leaves them unrun
+test("planted: the packages split runs every package's test script but the wallet's; without its line they are unrun", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tests-run-packages-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    const ci = (matrix, ...runs) => ["jobs:", "  test-packages:", "    strategy:", "      matrix:", `        part: [${matrix}]`, ...runs.flatMap((r) => ["    steps:", `      - run: ${r}`]), ""].join("\n");
+    put("package.json", JSON.stringify({ scripts: {} }));
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    put("packages/w/package.json", JSON.stringify({ name: "@blindfill/wallet", scripts: { test: 'node --test "test/*.test.ts"' } }));
+    put("packages/v/package.json", JSON.stringify({ name: "@x/v", scripts: { test: 'node --test "test/*.test.ts"' } }));
+    put("packages/u/package.json", JSON.stringify({ name: "@x/u", scripts: { test: 'node --test "test/*.test.ts"' } }));
+    for (const f of ["packages/w/test/a.test.ts", "packages/v/test/b.test.ts", "packages/u/test/c.test.ts"]) put(f, "");
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "."], { cwd: dir });
+    const unrunWith = (yml) => {
+      put(".github/workflows/ci.yml", yml);
+      return unrun(dir);
+    };
+    const split = 'node scripts/ci/test-shards.mjs packages tests "$INDEX" "$TOTAL"';
+    // the split runs both packages in some part; the wallet's own job runs its tests
+    assert.deepEqual(unrunWith(ci("1, 2, 3", split, "pnpm --filter @blindfill/wallet run test")), []);
+    assert.deepEqual(unrunWith(ci("1", split, "pnpm --filter @blindfill/wallet run test")), []);
+    // the wallet is the split's to leave out: its line dropped leaves its file unrun
+    assert.deepEqual(unrunWith(ci("1, 2, 3", split)), ["packages/w/test/a.test.ts"]);
+    // the split line missing, in an echo, or for the typecheck step alone: the packages' tests run nowhere
+    const all = ["packages/u/test/c.test.ts", "packages/v/test/b.test.ts"];
+    assert.deepEqual(unrunWith(ci("1, 2, 3", "pnpm --filter @blindfill/wallet run test")), all);
+    assert.deepEqual(unrunWith(ci("1, 2, 3", `echo ${split}`, "pnpm --filter @blindfill/wallet run test")), all);
+    assert.deepEqual(unrunWith(ci("1, 2, 3", 'node scripts/ci/test-shards.mjs packages typecheck "$INDEX" "$TOTAL"', "pnpm --filter @blindfill/wallet run test")), all);
+    assert.deepEqual(unrunWith(ci("1, 2, 3", 'node scripts/ci/test-shards.mjs mutants "$INDEX" "$TOTAL"', "pnpm --filter @blindfill/wallet run test")), all);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
