@@ -12,7 +12,8 @@
 // or reverted mark; the closed positions; the value series; and the fees paid.
 import { moneyWallets, POOL_ASSET_DECIMALS, POOL_CHAINS } from "@blindfill/kit";
 import { small } from "../discover/format.ts";
-import { statePoolPrice, unitsToCents } from "../trade/model.ts";
+import { reasonOf, statePoolPrice, unitsToCents } from "../trade/model.ts";
+import type { Reason } from "../trade/model.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
 
 // ---------------------------------------------------------------------------------------------------- exact decimals
@@ -219,7 +220,8 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   const m = d.market(p.chain, p.token);
   const x = d.extra(p.chain, p.token) ?? {};
   const cost = cents(p.cost) ?? 0n;
-  const value = m?.price != null ? mulCents(p.amount, m.price) : null;
+  // a zero price is no read (no route quoted it): the value is the dash, never $0.00 (owner 10 Nov 18:12Z)
+  const value = m?.price != null && /[1-9]/.test(m.price) ? mulCents(p.amount, m.price) : null;
   const pnl = value === null ? null : value - cost;
   let selling: Row["selling"] = null;
   for (const o of ops) {
@@ -611,6 +613,10 @@ export interface ActRow {
   txs: readonly TxRef[];
   /** S14.4: the address whose key was exported. */
   address: string | null;
+  /** A buy or sell that did not happen (refused, not landed): its row's Transaction failed tag, with the trade box's
+   *  reason for the kit's code on hover when the app has words for it (notLanded for a trade that did not land); null
+   *  for any other row. Never the kit's code itself. */
+  failed: { reason: Reason | "notLanded" | null } | null;
 }
 
 export interface ActGroup {
@@ -633,6 +639,13 @@ const SHOWN = new Set(["buy", "sell", "deposit", "withdraw"]);
  *  amount_usd and units are the request's ask (kit OpDetail), and only a done op's amount is what moved. */
 const NOT_MOVED = new Set(["refused", "not_landed", "part_filled"]);
 
+/** A trade op's failure as its row draws it: refused (with the reason for its code) or not landed; null otherwise. */
+function failedOf(o: Operation): ActRow["failed"] {
+  if (o.kind !== "buy" && o.kind !== "sell") return null;
+  if (o.stage === "not_landed") return { reason: "notLanded" };
+  return o.stage === "refused" ? { reason: reasonOf(o.code) } : null;
+}
+
 /** Every row Activity lists: the kit's deposits, withdrawals, buys and sells, each with what its op carries (kit OpDetail:
  *  time, USD size, units, chain, token; a deposit's USD is its amount_usd), and the exported keys. Newest first; rows
  *  with no time last, in the kit's order. */
@@ -641,9 +654,9 @@ export function activity(ops: readonly Operation[] | null | undefined, d: Portfo
   for (const o of ops ?? []) {
     if (!SHOWN.has(o.kind)) continue;
     const moved = !NOT_MOVED.has(o.stage);
-    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null });
+    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null, failed: failedOf(o) });
   }
-  for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address });
+  for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address, failed: null });
   const timed = rows.filter((r) => r.at !== null).sort((a, b) => b.at! - a.at!);
   return [...timed, ...rows.filter((r) => r.at === null)];
 }

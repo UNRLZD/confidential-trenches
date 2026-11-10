@@ -40,6 +40,7 @@ export const CHANGED = [
   "scripts/live-checks/app-release-sri.mjs",
   "scripts/live-checks/app-sell-mount.mjs",
   "scripts/live-checks/app-shell.mjs",
+  "scripts/live-checks/app-three-owner-labels.mjs",
   "scripts/live-checks/app-toast-clears-sheet-head.mjs",
   "scripts/live-checks/app-token-chart.mjs",
   "scripts/live-checks/app-token-lower-panel.mjs",
