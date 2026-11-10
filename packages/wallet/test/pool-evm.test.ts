@@ -134,6 +134,9 @@ type Over = {
   /** a keyless seat's window: a block below it, by number or by hash, refused as base-rpc.publicnode.com refuses it
    *  (HTTP 403 "Archive requests require a personal token", read 2026-11-09 19:30Z) */
   windowFrom?: number;
+  /** a keyless seat that keeps only the newest `stateKeep` blocks' state (the chain's head read live): a pool view at
+   *  an older block refused as geth words it (card evm-device-reads-need-no-old-state) */
+  stateKeep?: number;
 };
 const ARCHIVE_403 = "HTTP 403: RPC error -32602: Archive requests require a personal token";
 /** A block hash that is its number + 1 (a long chain's hashOf), as that number; -1 for any other. */
@@ -189,6 +192,7 @@ function rpc(c: Chain, o: Over = {}): EvmRpc {
         assert.equal(to, POOL.toLowerCase());
         o.call?.(data);
         if (n < 0) throw new Error("RPC error -32000: header not found");
+        if (o.stateKeep !== undefined && n < c.head - o.stateKeep) throw new Error(`RPC error -32000: missing trie node ${w64(BigInt(n))} (path ) state ${w64(BigInt(n))} is not available`);
         const v = viewsAt(c, n);
         const s = data.slice(2, 10), arg = data.length > 10 ? BigInt(`0x${data.slice(10)}`) : 0n;
         const out: [string, bigint] =
@@ -268,6 +272,49 @@ test("trees: the device's roots from the pool's logs are the roots the forge pro
   assert.equal(all.stateTree.size, 5);
   assert.equal(all.labelRoot.toString(), PP.relayed.proof.pubSignals[5]);
   await assert.rejects(s.trees(after(9)), /no leaf before/);
+});
+
+// card evm-device-reads-need-no-old-state: a cold sync pages the pool's logs for minutes, so the anchor its views were
+// read at (fresh, before the paging) is minutes old once the trees' root times are read, and a keyless seat keeps a
+// block's state seconds to minutes. The pool writes a root's time once and never deletes it (State.sol:63-65, 172,
+// 188), so the times are read at the newest agreed block once the anchor still holds its height on both seats.
+test("trees after a long paging read the root times at a fresh block, the anchor checked first; the proof inputs are the anchor's", async () => {
+  const mk = () => chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }, { block: 60, kind: "wd", leaf: 998n }], 100, 90);
+  // the keeper: one seat pair that keeps every block's state and never moves, the inputs as the anchor gives them
+  const k = mk();
+  const want = await Promise.all([after(12), after(20), after(70)].map((b) => sync(pair(k, k)).trees(b)));
+  // seats that keep 5 blocks of state, the head 20 blocks on by each page of logs
+  const c = mk();
+  const log: string[] = [];
+  const moves: Over = { stateKeep: 5, getLogs: () => void (c.head += 20), log };
+  const got = [];
+  for (const b of [after(12), after(20), after(70)]) got.push(await sync(pair(c, c, moves, { stateKeep: 5, getLogs: () => void (c.head += 20) })).trees(b));
+  for (let i = 0; i < want.length; i++) {
+    assert.equal(got[i]!.stateRoot, want[i]!.stateRoot, `cut ${i}: the state root`);
+    assert.equal(got[i]!.labelRoot, want[i]!.labelRoot, `cut ${i}: the label root`);
+    assert.equal(got[i]!.stateTree.size, want[i]!.stateTree.size, `cut ${i}: the cut`);
+    assert.equal(got[i]!.labelTree.size, want[i]!.labelTree.size, `cut ${i}: the label cut`);
+  }
+  // the order: the newest agreed block, then the anchor's height on the seat, then the times at the newest block's hash
+  const last = log.map((x, i) => [x, i] as const);
+  const times = last.filter(([x]) => x.includes(sel("stateRootTimes(uint256)")));
+  assert.ok(times.length > 0);
+  const t0 = times[0]![1];
+  const anchorCheck = last.filter(([x, i]) => i < t0 && x.startsWith("eth_getBlockByNumber") && !x.includes('"latest"') && !x.includes('"finalized"')).at(-1)!;
+  const newest = last.filter(([x, i]) => i < anchorCheck[1] && x.includes('"latest"')).at(-1)!;
+  assert.ok(newest[1] < anchorCheck[1] && anchorCheck[1] < t0, "F, then the anchor's canonicity, then the times");
+  assert.ok(times.every(([x]) => !x.includes(c.hashOf(100))), "no root time at the old anchor's hash");
+});
+
+test("trees: an anchor reorged away during the paging is a retry, then the new chain's times", async () => {
+  const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
+  const hashOf = c.hashOf;
+  let pages = 0;
+  const reorg: Over = { getLogs: () => void (pages++ === 0 && (c.hashOf = (n) => (n >= 95 ? h32(`reorged ${n}`) : hashOf(n)))) };
+  const waits: number[] = [];
+  const t = await evmTreeSync({ rpcs: pair(c, c, reorg, {}), pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(20));
+  assert.equal(t.stateTree.size, 4);
+  assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
 });
 
 // ---- the two-RPC sync's refusals ----
@@ -857,9 +904,11 @@ test("one RPC behind what is already cached (its finalized and latest below it) 
   const waits: number[] = [];
   const s = evmTreeSync({ rpcs: pair(c, c, {}, { finalized: () => finB, latest: (k) => latB(k) }), pin: PIN, sleep: async (ms) => void waits.push(ms) });
   assert.equal((await s.trees(after(89))).stateTree.size, 5); // the cache is at 90, the leaf at 88 in it
-  // RPC b's finalized stays at 80; its latest is 85 for one read
+  // RPC b's finalized stays at 80; its latest is 85 for one read, the next round's anchor (by a flag, not a call count:
+  // trees() reads latest again for its root times, card evm-device-reads-need-no-old-state)
   finB = 80;
-  latB = (k) => (k === 1 ? 85 : 100);
+  let low = true;
+  latB = () => (low ? ((low = false), 85) : 100);
   assert.equal((await s.trees(after(89))).stateTree.size, 5);
   assert.deepEqual(waits, [2000]);
 });

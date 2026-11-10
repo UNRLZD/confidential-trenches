@@ -1679,6 +1679,24 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   }
 
   /** The number of events whose block's time * 1000 (leafTime) is below beforeMs: times never go back, so a search. */
+  /**
+   * The block the trees' root times are read at (card evm-device-reads-need-no-old-state): the newest agreed block,
+   * once the round's anchor still holds its height on both RPCs. The round's views are read at its anchor before the
+   * paging, while it is fresh; a cold sync's paging takes minutes, and a keyless seat keeps a block's state seconds to
+   * minutes (Pocket refused 4 of 10 pool reads at 28-242 s back, read 2026-11-10 22:30Z). The pool writes a root's
+   * time once, in the block that made it, and never deletes it (State.sol:63-65, 172, 188), so on the anchor's chain
+   * every root of its leaves has the same time at any later block: the trees, their roots and the cut are the anchor's.
+   * In that order: the newest block first, then the anchor's height (a reorg after it is a retry), then the times.
+   */
+  async function timesAt(anchor: EvmBlock, signal?: AbortSignal): Promise<string> {
+    const top = await anchorAt(EVM_NEWEST_TAG, signal);
+    if (top.hash === anchor.hash) return anchor.hash;
+    if (top.number < anchor.number) return lag(`the newest agreed block ${top.number} is below the anchor ${anchor.number}`);
+    const now = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig, sleep), signal);
+    if (now.some((b) => b === null || b.hash !== anchor.hash)) lag(`block ${anchor.number} moved under the read (a reorg)`);
+    return top.hash;
+  }
+
   async function cutOf(events: Ev[], prefix: bigint[], beforeMs: bigint, h: string, signal?: AbortSignal): Promise<number> {
     let lo = 0, hi = events.length;
     while (lo < hi) {
@@ -1699,8 +1717,9 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
         // a root's time is read again each call: a reorg may make the same leaves' roots in another block
         rootTimes.clear();
+        const h = await timesAt(r.anchor, signal);
         const prefix: bigint[] = [];
-        const n = await cutOf(r.events, prefix, beforeMs, r.anchor.hash, signal);
+        const n = await cutOf(r.events, prefix, beforeMs, h, signal);
         const cut = r.events.slice(0, n);
         const labels = cut.flatMap((e) => (e.label === null ? [] : [e]));
         if (n === 0 || labels.length === 0) throw new Error(`no leaf before ${beforeMs}`);
@@ -1709,10 +1728,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         // the pool's own record of each epoch root: the time of the block that made it (State.sol:63-65, 172, 188); the
         // cut's state root is its n-th leaf's (read by the search, leafTime), its label root the last label's leaf's
         const lastLabel = labels[labels.length - 1]!;
-        const st = await leafTime(r.events, prefix, n, r.anchor.hash, signal);
-        const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), r.anchor.hash, "labelRootTimes(root)", signal);
+        const st = await leafTime(r.events, prefix, n, h, signal);
+        const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), h, "labelRootTimes(root)", signal);
         const labelAt = cut.lastIndexOf(lastLabel) + 1;
-        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, r.anchor.hash, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
+        if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },
