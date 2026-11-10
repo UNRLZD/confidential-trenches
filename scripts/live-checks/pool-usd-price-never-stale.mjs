@@ -15,7 +15,7 @@
 //      after it landed.
 //   2. SIGN_HOST's served /app.js is the one its index.html pins, a released build (a packages/signpage/releases/
 //      release-<N>.json names its sha384), and in it, as minified (review of eb2dfdc5, P2-3): the kit's Solana bound
-//      (maxAgeS beside Pyth's account) is BOUND_S; the page's schedule constants (refresh, retry, Retry-After cap, lead,
+//      (maxAgeS beside Pyth's account) is BOUND_S; the page's schedule constants (refresh, retry, Retry-After cap, ahead,
 //      poll, before wakeWhenShown) are SCHEDULE's; each timer makes its own read due; and a late feed is told by the kit's
 //      PoolUsdStale. So part 1's replay of the schedule in Node holds only for a page that carries it: a page of an
 //      earlier release, under any release number, the 60 s bound or the 15 s schedule each fail. The release list's
@@ -67,7 +67,7 @@ const N = "[\\w$]+";
 const NUM = "(\\d+(?:\\.\\d+)?(?:e\\d+)?)";
 // the kit's Pyth feed entry, as minified: its account, then its maxAgeS
 const BOUND = /7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE[^}]{0,400}?maxAgeS:(\d+(?:e\d+)?)/;
-// pool-price.ts's constants, in their order, then wakeWhenShown: refresh, retry, the Retry-After cap, lead, poll
+// pool-price.ts's constants, in their order, then wakeWhenShown: refresh, retry, the Retry-After cap, ahead (of the end), poll
 const CONSTS = new RegExp(`var ${N}=${NUM},${N}=${NUM},${N}=${NUM},${N}=${NUM},${N}=${NUM};function ${N}\\(${N},${N}\\)\\{${N}\\.addEventListener\\(\`visibilitychange\``);
 // the timer makes its own read due: `due.get(chain) === mine && due.set(chain, Math.min(mine, now()))`
 const REARM = new RegExp(`(${N})\\.get\\((${N})\\)===(${N})&&\\1\\.set\\(\\2,Math\\.min\\(\\3,${N}\\(\\)\\)\\)`);
@@ -189,9 +189,9 @@ export function judge(rec, { ledger = true, folded = ledger ? foldedReleases() :
   if (POOL_USD_FEEDS.solana.maxAgeS !== BOUND_S) bad(`this checkout's kit holds Solana's price ${POOL_USD_FEEDS.solana.maxAgeS} s, not ${BOUND_S} s`);
   if (sign.boundS !== BOUND_S) bad(`SIGN_HOST's page holds Solana's price ${sign.boundS ?? "(no mark)"} s, not ${BOUND_S} s: a price between writes runs out`);
   const sc = sign.schedule;
-  const want = `refresh ${SCHEDULE.refreshMs}, retry ${SCHEDULE.retryMs}, Retry-After cap ${SCHEDULE.retryAfterMaxMs}, lead ${SCHEDULE.leadMs}, poll ${SCHEDULE.pollMs}`;
+  const want = `refresh ${SCHEDULE.refreshMs}, retry ${SCHEDULE.retryMs}, Retry-After cap ${SCHEDULE.retryAfterMaxMs}, ahead ${SCHEDULE.leadMs}, poll ${SCHEDULE.pollMs}`;
   if (!sc) bad(`SIGN_HOST's page reads on no schedule at the write (no mark): the old every-15-s reads, not ${want}`);
-  else if (Object.keys(SCHEDULE).some((k) => sc[k] !== SCHEDULE[k])) bad(`SIGN_HOST's page reads on refresh ${sc.refreshMs}, retry ${sc.retryMs}, Retry-After cap ${sc.retryAfterMaxMs}, lead ${sc.leadMs}, poll ${sc.pollMs}, not ${want}`);
+  else if (Object.keys(SCHEDULE).some((k) => sc[k] !== SCHEDULE[k])) bad(`SIGN_HOST's page reads on refresh ${sc.refreshMs}, retry ${sc.retryMs}, Retry-After cap ${sc.retryAfterMaxMs}, ahead ${sc.leadMs}, poll ${sc.pollMs}, not ${want}`);
   if (sign.rearm !== true) bad("SIGN_HOST's page's timer does not make its own read due: a timer a hair early ends the reads for good");
   if (sign.late !== true) bad("SIGN_HOST's page does not tell a late feed by the kit's PoolUsdStale: a late write waits out the failure backoff");
   return { ok: lines.length === 0, lines };

@@ -300,7 +300,7 @@ test("card pool-usd-price-never-stale, review D1: poolQuotePricing writes the pr
   assert.equal(at("150", 0), "150");
 });
 
-// review of eb2dfdc5, P1 (the reviewer's probe, flipped): the price was taken once, before the floor read and the quote,
+// review of eb2dfdc5, P1 (the review's probe, flipped): the price was taken once, before the floor read and the quote,
 // and used after them with no second look at its bound
 test("card pool-usd-price-never-stale, review P1: the quote is checked at the price as it is at the check: a price 74 s old at the ask and past its bound by the answer refuses the quote (not_allowed, nothing to the follow); a newer price then is the one checked", async () => {
   const { poolPrices } = await import("../src/pool-price.ts");

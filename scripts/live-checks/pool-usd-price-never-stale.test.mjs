@@ -97,10 +97,10 @@ test("planted on this tree's own signing page build (review P2-3): release-110's
   };
   // the 60 s bound
   on((j) => j.replace(/(7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE[^}]{0,400}?maxAgeS:)75/, "$160"), /^BAD SIGN_HOST's page holds Solana's price 60 s, not 75 s/);
-  // the 15 s schedule: no lead or poll before wakeWhenShown
+  // the 15 s schedule: no read ahead of the end, no poll, before wakeWhenShown
   on((j) => j.replace(/(var [\w$]+=15e3,[\w$]+=1e3,[\w$]+=6e4),[\w$]+=2e4,[\w$]+=3e3;/, "$1;"), /^BAD SIGN_HOST's page reads on no schedule at the write/);
   // the as-built 1 s poll from publish + 50 s
-  on((j) => j.replace(/(var [\w$]+=15e3,[\w$]+=1e3,[\w$]+=6e4,[\w$]+=)2e4,([\w$]+=)3e3;/, "$125e3,$21e3;"), /^BAD SIGN_HOST's page reads on refresh 15000, retry 1000, Retry-After cap 60000, lead 25000, poll 1000/);
+  on((j) => j.replace(/(var [\w$]+=15e3,[\w$]+=1e3,[\w$]+=6e4,[\w$]+=)2e4,([\w$]+=)3e3;/, "$125e3,$21e3;"), /^BAD SIGN_HOST's page reads on refresh 15000, retry 1000, Retry-After cap 60000, ahead 25000, poll 1000/);
   // the timer that does not make its own read due
   on((j) => j.replace(/([\w$]+)\.get\(([\w$]+)\)===([\w$]+)&&\1\.set\(\2,Math\.min\(\3,[\w$]+\(\)\)\),/, ""), /^BAD SIGN_HOST's page's timer does not make its own read due/);
   // no late tag
