@@ -822,7 +822,7 @@ const qty = (v: unknown): bigint => {
 const failedInExecution = (e: unknown): boolean => {
   if (evmChainAnswered(e)) return true;
   const m = String((e as Error | undefined)?.message ?? e);
-  return /^RPC error (3|-32000|-32003): /.test(m) && !/rate|limit exceeded|too many|capacity/i.test(m) && !(/^RPC error -32000: (?!execution reverted)/i.test(m) && STATE_MISS.test(m));
+  return /^RPC error (3|-32000|-32003): /.test(m) && !/rate|limit exceeded|too many|capacity/i.test(m) && !(/^RPC error -32000: /.test(m) && STATE_MISS.test(m));
 };
 /**
  * A revert: code 3, or a -32000 whose message starts "execution reverted" (geth's words). The chain's own answer before

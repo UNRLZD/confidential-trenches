@@ -490,3 +490,13 @@ test("a seat's words are cleared of every URL's secret part before a log line or
     assert.ok(!l.includes(FAKE) && l.includes("<key>"), l);
   }
 });
+test("F1e: a search that lands past the period's first block (a seat naming the three blocks before it with a time before the period, their true hashes) is refused: the block before the one named is in the period on the other operator", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber" && params[0] !== "latest") {
+      const n = Number(BigInt(params[0] as string));
+      if (n >= FIRST && n <= FIRST + 2) return { result: { ...block(n), timestamp: `0x${(S + FIRST - 1).toString(16)}` } };
+    }
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
