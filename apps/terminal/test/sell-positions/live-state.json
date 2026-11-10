@@ -1,0 +1,23 @@
+{
+  "release": "sp-1",
+  "api": 1,
+  "signed_in": true,
+  "code_saved": true,
+  "vault_balance": "0",
+  "wallets": [],
+  "positions": [
+    {
+      "chain": "solana",
+      "token": "11111111111111111111111111111118",
+      "amount": "1081590.213565",
+      "cost": "0",
+      "wallets": [
+        "5KWWcnta5aTAnCLgtPUCpyCu1D3spPzGr7x7thJWSyry"
+      ],
+      "decimals": 6
+    }
+  ],
+  "orders": [],
+  "held": [],
+  "ops": []
+}

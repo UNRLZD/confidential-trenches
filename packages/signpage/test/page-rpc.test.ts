@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageRpc } from "../src/page-rpc.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
 import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
@@ -161,6 +161,42 @@ test("card solana-release-reads-paced: the page's Solana pair waits its turn beh
         assert.ok(next.at - full.at >= 390, `${name} provider ${p}: went out ${Math.round(next.at - full.at)} ms after the full pace's call, inside its 400 ms window`);
       }
     }
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("pageHelperRpcStopped: a call the stop came before is never sent, whether it waited its turn in the route's queue or a try again after a throttle", async () => {
+  const real = globalThis.fetch;
+  const sent: string[] = [];
+  let throttle = true;
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    const q = JSON.parse(String(init?.body)) as { id: number; params: unknown[] };
+    sent.push(String(q.params[0]));
+    if (throttle) return new Response("slow", { status: 429, headers: { "retry-after": "0" } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: null }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    // a try again: the first answer is a 429, the stop comes before the page's retry
+    const a = new AbortController();
+    const p = pageHelperRpcStopped("https://stop-retry.example", a.signal)("getAccountInfo", ["RETRIED"]);
+    await new Promise((r) => setTimeout(r, 0));
+    a.abort();
+    await assert.rejects(p);
+    await new Promise((r) => setTimeout(r, 600));
+    assert.deepEqual(sent, ["RETRIED"], "no try again after the stop");
+    // a queued call: one call a window on the route's queue, the second waits its turn and is stopped while it does
+    throttle = false;
+    sent.length = 0;
+    const b = new AbortController();
+    const limit = { windowMs: 1_000, total: 1, perMethod: 1 };
+    const first = solanaPacedRpc(pageHelperRpcStopped("https://stop-queue.example", new AbortController().signal), limit)("getAccountInfo", ["FIRST"]);
+    const queued = solanaPacedRpc(pageHelperRpcStopped("https://stop-queue.example", b.signal), limit)("getAccountInfo", ["QUEUED"]);
+    await first;
+    b.abort();
+    await assert.rejects(queued);
+    await new Promise((r) => setTimeout(r, 1_200));
+    assert.deepEqual(sent, ["FIRST"], "the queued call is not sent after its stop");
   } finally {
     globalThis.fetch = real;
   }

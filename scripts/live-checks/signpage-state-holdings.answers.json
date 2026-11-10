@@ -2,28 +2,67 @@
  "good": {
   "key": "signpage-state-holdings",
   "url": "local build",
-  "at": "2026-11-09T12:24:26.007Z",
+  "at": "2026-11-10T08:04:53.779Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "integrity": "sha384-NOqqiIsnqs1KcZeGZjFu8YGtu+pACAIC8zcf2KktIFeW0qNQcaoERmRwtdXSFn9b",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 812949,
-   "sha384": "sha384-jbXFowup0+ZDXdbd/aHTFirKctCCgLZ3waYMvLhq+BwnkWBDM8chGIE8q4CbhpjU",
+   "bytes": 871259,
+   "sha384": "sha384-NOqqiIsnqs1KcZeGZjFu8YGtu+pACAIC8zcf2KktIFeW0qNQcaoERmRwtdXSFn9b",
    "marks": {
     "sum": 1,
-    "fill": 1
+    "fill": 1,
+    "set": 1,
+    "pass": 1,
+    "costs": 2,
+    "kept": 1,
+    "sold": 1,
+    "first": 1,
+    "run": 1,
+    "records": 1,
+    "preempt": 1
+   }
+  }
+ },
+ "bad_release_110": {
+  "key": "signpage-state-holdings",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-10T03:38:53.965Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 853801,
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+   "marks": {
+    "sum": 1,
+    "fill": 1,
+    "set": 0,
+    "pass": 0,
+    "costs": 0,
+    "kept": 0,
+    "sold": 0,
+    "first": 0,
+    "run": 0,
+    "records": 0,
+    "preempt": 0
    }
   }
  },
  "bad_live_before": {
   "key": "signpage-state-holdings",
   "url": "https://confidential.unrealized.trade",
-  "at": "2026-11-09T12:24:26.421Z",
+  "at": "2026-11-09T22:58:44.208Z",
   "index": {
    "status": 200,
    "scripts": 1,
@@ -37,7 +76,42 @@
    "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "marks": {
     "sum": 0,
-    "fill": 0
+    "fill": 0,
+    "set": 0,
+    "pass": 0,
+    "costs": 0,
+    "kept": 0,
+    "sold": 0
+   }
+  }
+ },
+ "bad_review_build": {
+  "key": "signpage-state-holdings",
+  "url": "local build at d50dd0ce (the reviewed build, merged with main)",
+  "at": "2026-11-10T00:28:31.850Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-1IplXTCe9YoWx6e5C3Q9amONjseYvPycDuHXjVkZiGuVmse17rIsUc+AOvtQHaU/",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 861146,
+   "sha384": "sha384-1IplXTCe9YoWx6e5C3Q9amONjseYvPycDuHXjVkZiGuVmse17rIsUc+AOvtQHaU/",
+   "marks": {
+    "sum": 1,
+    "fill": 1,
+    "set": 1,
+    "pass": 1,
+    "costs": 1,
+    "kept": 1,
+    "sold": 1,
+    "first": 1,
+    "run": 0,
+    "records": 0,
+    "preempt": 0
    }
   }
  }

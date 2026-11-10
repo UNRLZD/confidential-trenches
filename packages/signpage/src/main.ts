@@ -71,7 +71,8 @@ import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type 
 import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
-import { POOL_ASSET_DECIMALS } from "../../kit/src/signpage/messages.ts";
+import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
+import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
 import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
@@ -79,6 +80,7 @@ import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { frameState } from "./state.ts";
 import { withVaultBalance } from "./vault-balance.ts";
+import { withPositions } from "./positions.ts";
 import { mountShell, type Shell } from "./shell.ts";
 import { drawBackdrop } from "./backdrop.ts";
 import { afterSaved, pageFor, takes, takesParams, type AccountKind } from "./pages/open.ts";
@@ -139,7 +141,9 @@ let shell: Shell | null = null;
 // the page's one prover (src/prover-host.ts: one prover-worker per page, the CSP allows no second), shared by the pool
 // flow's proofs and the withdraw form's hand-off (src/withdraw/handoff.ts), top-level only
 const prover = !framed ? proverHost() : null;
-const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id) }, { prover }) : null;
+// the page's own pool price reads (src/pool-price.ts), set once they are made below: a pool buy's cost reads them
+let pagePrice: ((chain: PoolChain) => PoolStatePrice | null) | null = null;
+const testnet = !framed && prover ? testnetPool({ store: () => open(), held: () => opened(), seed64: () => openSeed64(), openWithdraw: (chain, ctx) => openPoolWithdraw(chain, ctx.id), price: (chain) => pagePrice?.(chain) ?? null }, { prover }) : null;
 // the restore kind (src/pool-restore.ts, card pool-restore-wired): every pool the page's network pins read from the
 // words, what it finds written to the note store, the proof queue's pass after; top-level only, as the pool flow
 const restore = !framed
@@ -197,6 +201,7 @@ else {
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
   wakeWhenShown(document, prices);
+  pagePrice = (chain) => prices.get(chain);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
   const told = new Set<() => void>();
@@ -274,9 +279,11 @@ else {
         let read: Promise<NoteRecord[]> | null = null;
         const shared = () => (read ??= notes());
         const withVault = await withVaultBalance(s, shared, pageScope());
-        const out = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open);
-        prices.refresh((out.pools ?? []).map((p) => p.chain));
-        return out;
+        const pooled = await withPools(withVault, shared, r === null ? PAGE_POOLS : withSolanaRent(PAGE_POOLS, r), both?.ready, prices.get, both?.open);
+        prices.refresh((pooled.pools ?? []).map((p) => p.chain));
+        // the tokens the pool's buys hold (src/positions.ts, card signpage-state-holdings): the last whole pass, never a
+        // chain read inside this state read; the first signed-in read starts one, and a buy's or sell's end the next
+        return withPositions(pooled, s.signed_in && testnet ? await testnet.positions() : null);
       }),
     // a store change, a new price read (or its next one due), the Rent read landing and a proof made
     watch: (fn) => {
