@@ -484,7 +484,7 @@ async function follow(r: Run, n: NoteRecord, reads: number, wait: (ms: number) =
  *  so a send final by its nonce is in the round's events. A final Deposited at its value: landed; at another value: dead (taken: the pool
  *  refuses a used precommitment, so it is never built again). U's nonce past every send at a block final on both RPCs with no
  *  Deposited naming it: "expired", no end, since the pass builds the note again at U's new nonce from U's money. */
-async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number], seen: (send: string) => void, mine: Map<string, Spent>): Promise<"landed" | "dead" | "expired" | null> {
+async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][number], seen: (send: string) => void, mine: Map<string, Spent | undefined>): Promise<"landed" | "dead" | "expired" | null> {
   const scope = evmPoolScopeOf(h.pin.pool, EVM_CHAIN_IDS[h.pin.network]);
   const rec = (await h.records()).find((x) => x.scope === scope && x.precommitment === n.precommitment);
   if (rec !== undefined && rec.state !== "INCOMING") return rec.state === "PLANNED" ? null : rec.leaf?.value === n.value ? "landed" : "dead";
@@ -492,16 +492,16 @@ async function noteEndEvm(h: PoolDepositEvmHost, n: PoolDepositEvmLeft["notes"][
   const newest = rec?.evmSends?.[rec.evmSends.length - 1];
   if (newest !== undefined) seen(newest.hash);
   // the sign out read before each read, so no read naming U goes out after it (delta review low 4), and it ends the lag
-  // waits (review 5). The kept block: the note's record's (the pass keeps it there), else this follow's own, nothing
-  // written. A read that fails is held while the round is judged: a landed note is told whatever a node refuses (review 1)
+  // waits (review 5). The kept block: on the follow's first read of the note its record's (the pass keeps it there),
+  // then the follow's own (so a record's block a reorg dropped is read past at once), nothing written. A read that fails is held while the round is judged: a landed note is told whatever a node refuses (review 1)
   const rk = rec?.evmSpent !== undefined && rec.evmSpent.nonce === nonce ? { number: rec.evmSpent.number, hash: rec.evmSpent.hash } : undefined;
   let spent: bigint | null = null;
   let fault: { e: unknown } | null = null;
   try {
-    const s = await spentFinal(h.rpcs, n.u, nonce, rk ?? mine.get(`${n.precommitment}:${nonce}`), (ms) => (h.wait ?? ((x: number) => followWait(x, h.signal)))(ms), h.signal, () => stopped(h));
+    const key = `${n.precommitment}:${nonce}`;
+    const s = await spentFinal(h.rpcs, n.u, nonce, mine.has(key) ? mine.get(key) : rk, (ms) => (h.wait ?? ((x: number) => followWait(x, h.signal)))(ms), h.signal, () => stopped(h));
     spent = s.final;
-    if (s.kept === undefined) mine.delete(`${n.precommitment}:${nonce}`);
-    else mine.set(`${n.precommitment}:${nonce}`, s.kept);
+    mine.set(key, s.kept);
   } catch (e) {
     fault = { e };
   }
@@ -523,7 +523,7 @@ export async function followPoolDepositEvm(h: PoolDepositEvmHost, left: PoolDepo
   const wait = h.wait ?? ((ms: number) => followWait(ms, h.signal));
   const ends: ("landed" | "dead" | null)[] = left.notes.map(() => null);
   // each note's kept block by its precommitment and nonce, for this follow's life only (spentFinal)
-  const kept = new Map<string, Spent>();
+  const kept = new Map<string, Spent | undefined>();
   // the ms the end's reads have waited, each note's newest send read, and its landing window's start on that count
   let waited = 0;
   const last: (string | undefined)[] = left.notes.map(() => undefined);

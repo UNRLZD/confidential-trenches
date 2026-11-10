@@ -61,7 +61,7 @@ export const MUTANTS = [
   // delta review 2 of release-86: the stop read before the wait for an RPC behind, not after it
   [SOL, [["    await pause(ms);\n    stopped(h);\n", "    stopped(h);\n    await pause(ms);\n"]], "pool-deposit-sent-end review 2 M1"],
   // E1: the follower's round read before U's nonce (spentFinal)
-  [EVM, [["  let fault: { e: unknown } | null = null;\n  try {\n    const s = await spentFinal(h.rpcs, n.u,", "  const round = await h.round(h.signal);\n  let fault: { e: unknown } | null = null;\n  try {\n    const s = await spentFinal(h.rpcs, n.u,"], ["  stopped(h);\n  const round = await h.round(h.signal);\n  const d = ", "  stopped(h);\n  const d = "]], "review 8 E1:"],
+  [EVM, [["  let fault: { e: unknown } | null = null;\n  try {\n    const key = `${n.precommitment}:${nonce}`;\n    const s = await spentFinal(h.rpcs, n.u,", "  const round = await h.round(h.signal);\n  let fault: { e: unknown } | null = null;\n  try {\n    const key = `${n.precommitment}:${nonce}`;\n    const s = await spentFinal(h.rpcs, n.u,"], ["  stopped(h);\n  const round = await h.round(h.signal);\n  const d = ", "  stopped(h);\n  const d = "]], "review 8 E1:"],
   // E4: a take read from a Deposited not final yet; E5: a Deposited at another value read as landed
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.value !== n.value ? "dead" : d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],
   [EVM, [['  if (d !== undefined) return d.block > round.finalBlock ? null : d.value === n.value ? "landed" : "dead";', '  if (d !== undefined) return d.block > round.finalBlock ? null : "landed";']], "review 8 E4 and E5:"],
@@ -155,7 +155,8 @@ export const MUTANTS = [
   // review 2: the kept block with the note's record (written, handed back between reads, read by the end's reads)
   [EVM, [["kept(await r.store.keepEvmSpent(n.id, s.kept === undefined ? null : { nonce: last.nonce, ...s.kept }));", "void 0;"]], "evm-deposit-note-stays-incoming review 2: a reloaded page"],
   [EVM, [["const v = await verdictOf(r, note, (x) => void (x.state === \"INCOMING\" && x.evmSends?.length === note.evmSends?.length && (note = x)));", "const v = await verdictOf(r, note);"]], "evm-deposit-note-stays-incoming review 2: within one run"],
-  [EVM, [["rk ?? mine.get(", "mine.get("]], "evm-deposit-note-stays-incoming review 4: the end's reads keep nothing"],
+  [EVM, [["mine.has(key) ? mine.get(key) : rk", "mine.get(key)"]], "evm-deposit-note-stays-incoming review 4: the end's reads keep nothing"],
+  [EVM, [["mine.has(key) ? mine.get(key) : rk", "rk ?? mine.get(key)"]], "evm-deposit-note-stays-incoming review 2: the end's reads read past a record's block a reorg dropped"],
   // review 4: the lag waits end with the sign out (the run's and the end's)
   [EVM, [["evmAgreedBlock(rpcs, \"latest\", signal, sleep), sleep, signal)", "evmAgreedBlock(rpcs, \"latest\", undefined, sleep), sleep)"]], "evm-deposit-note-stays-incoming review 4: a sign out during a lag wait"],
   [EVM, [["sleepOf(r.h), r.h.signal);", "sleepOf(r.h));"]], "evm-deposit-note-stays-incoming review 4: a sign out during a lag wait"],

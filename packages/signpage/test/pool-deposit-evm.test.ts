@@ -559,6 +559,23 @@ test("evm-deposit-note-stays-incoming review 4: the end's reads keep nothing of 
   assert.deepEqual([settled, byHash], [1, 0], "the record's block, final: the pass started, no nonce read");
 });
 
+test("evm-deposit-note-stays-incoming review 2: the end's reads read past a record's block a reorg dropped: U's nonce read again at the newest block, and the pass started once that one is final", async () => {
+  const { ch, ns, planned } = await funded(RUNG + FEE);
+  await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), ASK);
+  ch.c.nonce = 1n; // nonce 0 used, no Deposited
+  ch.c.fin = 90n;
+  await runPoolDepositEvm(hostOf(ch, ns), null); // the pass keeps block 100 with the note
+  const rec = (await ns.get(planned.id))!;
+  assert.equal(rec.evmSpent?.number, 100n);
+  // a reorg: both name another block at 100; the newest block (also 100) and final
+  ch.c.hashes = [new Map([[100n, `0x${"44".repeat(32)}`]]), new Map([[100n, `0x${"44".repeat(32)}`]])];
+  ch.c.fin = 100n;
+  let settled = 0;
+  let waits = 0;
+  await followPoolDepositEvm({ ...hostOf(ch, ns), records: async () => [rec], settle: () => void settled++, wait: async () => { if (++waits > 2) throw new Error("cut"); } }, { notes: [{ precommitment: rec.precommitment, value: RUNG, nonce: 0n, u: uOf(rec) }], landed: false, whole: true }).catch(() => null);
+  assert.equal(settled > 0, true, "the dropped block read past: the pass started");
+});
+
 test("evm-deposit-note-stays-incoming review 4: a sign out during a lag wait of U's nonce read sends no header read after it (the end's reads and the run's)", async () => {
   for (const end of [true, false]) {
     const { ch, ns, planned } = await funded(RUNG + FEE);
