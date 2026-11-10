@@ -156,6 +156,8 @@ type Plant = {
   finalSlot?: (p: 0 | 1) => number;
   /** the spend's slot: a settle not held to a slot at or past it on both RPCs answers from before it ("unspent") */
   spendSlot?: number;
+  /** RPC 1's getTransaction names no slot for the buy's transaction */
+  noTxSlotOn1?: boolean;
   /** RPC 1 reads the device's blockhash as not valid */
   blockhashInvalid?: boolean;
   /** RPC 1's pool account always a leaf short on the state tree (not a slot apart: another tree) */
@@ -287,14 +289,14 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
         const tx = sent.slice();
         tx.set(base58.decode(SIG), 1);
         if (how === "other" || (how === "lieOne" && p === 1)) tx[tx.length - 1]! ^= 1;
-        if (how === "metaJunk") return { slot: TX_SLOT, transaction: [base64.encode(tx), "base64"], meta: "x" };
+        if (how === "metaJunk") return { slot: plant.noTxSlotOn1 && p === 1 ? undefined : TX_SLOT, transaction: [base64.encode(tx), "base64"], meta: "x" };
         const err = how === "failed" ? { InstructionError: [2, { Custom: 6 }] } : null;
-        if (!plant.received) return { slot: TX_SLOT, transaction: [base64.encode(tx), "base64"], meta: { err } };
+        if (!plant.received) return { slot: plant.noTxSlotOn1 && p === 1 ? undefined : TX_SLOT, transaction: [base64.encode(tx), "base64"], meta: { err } };
         const dp = plant.decimals ?? 6;
         const bal = (owner: string, mint: string, amount: bigint) => ({ accountIndex: 3, mint, owner, programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", uiTokenAmount: { amount: amount.toString(), decimals: dp, uiAmount: Number(amount) / 10 ** dp, uiAmountString: String(Number(amount) / 10 ** dp) } });
         const other = base58.encode(new Uint8Array(32).fill(3));
         return {
-          slot: TX_SLOT,
+          slot: plant.noTxSlotOn1 && p === 1 ? undefined : TX_SLOT,
           transaction: [base64.encode(tx), "base64"],
           meta: {
             err,
@@ -1337,4 +1339,48 @@ test("card pool-buy-filled-2s: two RPCs on two state tree sizes after the read a
   const w = await world({ sizeSkewAlways: true });
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "failed" });
   nothingMoved(w);
+});
+
+test("card pool-buy-filled-2s: the finality wait reads both RPCs' slot, then waits the gap: 32 slots behind, at most 4 getSlot a provider before the settle, asked within a second of both reaching it", async () => {
+  const w = await world();
+  let t = 0;
+  const behind = 32;
+  // each RPC's finalized slot, a slot every 400 ms of the run's clock from 32 behind the transaction's at the send
+  let sentAt: number | null = null;
+  const slotsBefore = [0, 0];
+  let settledAt: number | null = null;
+  const inner = w.host.rpcs;
+  const at = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getSlot" && sentAt !== null && settledAt === null) {
+      slotsBefore[p]!++;
+      return TX_SLOT - behind + Math.floor((t - sentAt) / 400);
+    }
+    return inner[p](method, params);
+  }) as SolanaRpc;
+  const host: PoolBuyHost = { ...w.host, rpcs: [at(0), at(1)], reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms),
+    send: async (pool, tx) => ((sentAt = t), w.host.send(pool, tx)),
+    settle: async (id, m) => ((settledAt ??= t), w.host.settle(id, m)) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  assert.ok(slotsBefore.every((n) => n <= 4), `getSlot calls before the settle: ${slotsBefore.join(", ")}`);
+  const reached = sentAt! + behind * 400;
+  assert.ok(settledAt! >= reached && settledAt! - reached <= 1_000, `the settle at ${settledAt! - sentAt!} ms, both reached at ${reached - sentAt!} ms`);
+});
+
+test("card pool-buy-filled-2s: a lying slot (far ahead) keeps the settle unasked until the bound: sent, the note left for the load's settle", async () => {
+  const w = await world({ finalizedSlot: () => 1 });
+  let t = 0;
+  const a = await runPoolBuy({ ...w.host, reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms) }, ASK);
+  assert.deepEqual(a, { stage: "sent", txs: [{ chain: "solana", hash: SIG }] });
+  assert.equal(w.log.filter((x) => x === "settle:note-1").length, 0);
+  assert.equal(w.state(), "RESERVED", "left for the load's settle");
+  assert.ok(t <= POOL_BUY_SETTLE_MS, `${t} ms`);
+  assert.ok(w.log.filter((x) => x === "1:getSlot").length <= 20, "the wait caps at the back-off's most, never the pace");
+});
+
+test("card pool-buy-filled-2s: an RPC that names no slot for the transaction opens its gate, and the settle's own slots still hold it: an early settle answers unspent, the spend final later fills", async () => {
+  // the spend at the transaction's slot: a settle held to a slot below it on either RPC answers unspent. RPC 1 names no
+  // slot, so its gate is open while its finalized slot (390 at first) is below the spend's; RPC 0's is past it (405)
+  const w = await world({ noTxSlotOn1: true, spendSlot: TX_SLOT, finalizedSlot: (p, i) => (p === 0 ? TX_SLOT + 5 : i < 1 ? TX_SLOT - 10 : TX_SLOT + 10) });
+  assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
+  assert.deepEqual(w.settleSlots, [[TX_SLOT + 5, TX_SLOT - 10], [TX_SLOT + 5, TX_SLOT + 10]], "one early settle, held to the slots read, then the spend's");
 });

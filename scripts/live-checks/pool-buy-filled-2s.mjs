@@ -5,11 +5,12 @@
 //   - the read-back's pace starts at a slot (400 ms) and only a throttle or a settle that threw doubles it, up to a cap,
 //     or the provider's Retry-After when longer: `g=400,_=e=>{let t=e instanceof Ry&&e.afterMs!==null?Math.min(...):0;
 //     g=Math.max(Math.min(g*2,_V),t)}`;
-//   - after `named`, every wait of the read-back and of the settle's loop is that pace (`t>0&&await h(g)`), never a
-//     fixed second;
+//   - after `named`, the read-back's wait is that pace (`t>0&&await h(g)`), never a fixed second, and the finality
+//     wait's is the gap at a slot's time each, at least that pace (`t>0&&await h(Math.max(g,Math.min(F*400,_V)))`);
 //   - once the transaction read back on both RPCs, the settle (the function that calls the host's `.settle(`) is asked
 //     only behind both RPCs' finalized getSlot reaching each one's slot of this transaction, and held to those slots:
-//     `if(n.some((e,t)=>e<(N[t]??0))||!await b([n[0],n[1]]))continue`, and nowhere else past the read-back.
+//     `if(F=Math.max(...n.map((e,t)=>(P[t]??0)-e)),F>0||!await x([n[0],n[1]]))continue`, and nowhere else past the
+//     read-back.
 // A pace of a fixed second, a settle asked before the finality gate, or a gate missing each FAIL.
 // It reads two stretches of the minified bundle, so it does not prove the whole rule (the three rounds of the checks'
 // reads, the back-off's numbers): packages/signpage/test/pool-buy.test.ts holds those, red on main 2736dbef.
@@ -56,10 +57,12 @@ function problems(head, stretch) {
   const pace = PACE.exec(head)?.[1];
   if (pace === undefined) return ["the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles"];
   const waits = [...stretch.matchAll(/[\w$]+>0&&await [\w$]+\(([^()]*)\)/g)].map((x) => x[1]);
-  if (waits.length < 2 || waits.some((w) => w !== pace)) out.push(`the bundle's read-back and settle waits are not its pace (${waits.join(", ") || "none"}): a fixed wait asks a throttled provider again at once`);
+  if (waits.length !== 1 || waits[0] !== pace) out.push(`the bundle's read-back wait is not its pace (${waits.join(", ") || "none"}): a fixed wait asks a throttled provider again at once`);
   const settle = SETTLE.exec(head)?.[1];
   if (settle === undefined) return [...out, "the bundle's settle function is not read"];
-  const gate = new RegExp(`\`getSlot\`,\\[\\{commitment:\`finalized\`\\}\\]\\)\\)\\)\\)\\.map\\([\\w$]+\\)\\}catch\\([\\w$]+\\)\\{[^{}]*continue\\}if\\(([\\w$]+)\\.some\\(\\(([\\w$]+),([\\w$]+)\\)=>\\2<\\([\\w$]+\\[\\3\\]\\?\\?0\\)\\)\\|\\|!await ${esc(settle)}\\(\\[\\1\\[0\\],\\1\\[1\\]\\]\\)\\)continue`);
+  // the finality wait: the gap (group 1) waited at a slot's time each, at least the pace, then both RPCs' finalized slot
+  // (group 2) read; the settle only once neither is short, held to those slots
+  const gate = new RegExp(String.raw`[\w$]+>0&&await [\w$]+\(Math\.max\(${esc(pace)},Math\.min\(([\w$]+)\*400,[\w$]+\)\)\),\1=0;let ([\w$]+);try\{\2=\(await Promise\.all\([\w$]+\.rpcs\.map\(([\w$]+)=>\3\(\x60getSlot\x60,\[\{commitment:\x60finalized\x60\}\]\)\)\)\)\.map\([\w$]+\)\}catch\([\w$]+\)\{[^{}]*continue\}if\(\1=Math\.max\(\.\.\.\2\.map\(\(([\w$]+),([\w$]+)\)=>\([\w$]+\[\5\]\?\?0\)-\4\)\),\1>0\|\|!await ${esc(settle)}\(\[\2\[0\],\2\[1\]\]\)\)continue`);
   const g = gate.exec(stretch);
   if (!g) return [...out, "the bundle asks the settle with no gate on both RPCs' finalized slot reaching the transaction's: it lists every mark of the pool before the chain can answer it"];
   // past the read-back (its `return E(...)` for a transaction not landed), the gate's is the only settle call

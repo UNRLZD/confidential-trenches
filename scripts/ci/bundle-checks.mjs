@@ -34,6 +34,7 @@ export const IN_PROCESS = [
   viaRead("signpage-withdraw-own-spend", () => import("../live-checks/signpage-withdraw-own-spend.mjs")),
   viaRead("signpage-buy-own-spend", () => import("../live-checks/signpage-buy-own-spend.mjs")),
   viaRead("signpage-sent-read-back", () => import("../live-checks/signpage-sent-read-back.mjs")),
+  viaRead("pool-buy-filled-2s", () => import("../live-checks/pool-buy-filled-2s.mjs")),
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),

@@ -674,9 +674,11 @@ export async function sendAndSettle(
   // the settle (solanaSettleSpent: the note SPENT, its change written), asked until it finds the spend, then never again.
   // A settle that throws (a lister that refuses, a 429 past the retry, a stop) is not known yet (null), never "unspent"
   let settled = false;
+  // the host's settle as asked here: a throw slows the next read too (card pool-buy-filled-2s), and is still no answer
+  const settler = { settle: (id: string, minSlots?: readonly [number, number]) => h.settle(id, minSlots).catch((e: unknown) => (slow(e), Promise.reject(e))) };
   const spent = async (minSlots?: readonly [number, number]): Promise<boolean | null> => {
     if (settled) return true;
-    const s = await h.settle(r.noteId, minSlots).then((x) => x.kind === "spent", (e: unknown) => (slow(e), null));
+    const s = await settler.settle(r.noteId, minSlots).then((x) => x.kind === "spent", () => null);
     settled = s === true;
     return s;
   };
@@ -795,9 +797,14 @@ export async function sendAndSettle(
   // only now: the note SPENT, its change written (solanaSettleSpent reads the spent mark at finalized), then filled
   // only once both RPCs read the spend as this attempt's. The settle lists every mark of the pool, so it is asked only
   // once each RPC's finalized slot reaches the slot it read this transaction at (card pool-buy-filled-2s: run 3 asked
-  // it every second for 85 s before), and held to those slots; until then only the two slots are read, at the pace
+  // it every second for 85 s before), and held to those slots. Until then only the two slots are read, each read once
+  // and then the gap waited out: the most slots either RPC is short, at a slot's time each (at least the pace, at most
+  // POOL_BUY_BACKOFF_MAX_MS), so a buy reads them a few times, never every slot (on mainnet one seat is the helper's
+  // keyed route, whose budget every user shares)
+  let gap = 0;
   for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
-    if (i > 0) await waitIn(pace);
+    if (i > 0) await waitIn(Math.max(pace, Math.min(gap * POOL_BUY_POLL_MS, POOL_BUY_BACKOFF_MAX_MS)));
+    gap = 0;
     let fin: number[];
     try {
       fin = (await Promise.all(h.rpcs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])))).map(int);
@@ -805,7 +812,8 @@ export async function sendAndSettle(
       if (throttled(e)) slow(e);
       continue;
     }
-    if (fin.some((x, k) => x < (txSlots[k] ?? 0))) continue;
+    gap = Math.max(...fin.map((x, k) => (txSlots[k] ?? 0) - x));
+    if (gap > 0) continue;
     if (!(await spent([fin[0]!, fin[1]!]))) continue;
     const a = await spentBy(signature, txs);
     if (a) return a;
