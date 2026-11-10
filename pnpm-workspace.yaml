@@ -3,3 +3,7 @@ packages:
   - "packages/*"
 # a package version must be a week old before it installs (minutes)
 minimumReleaseAge: 10080
+# ethers 6.13.5 (under @zk-kit/utils) pins ws 8.17.1, the release before ws's fragment and chunk bounds (ws 8.21.0,
+# 2b2abd45; 8.21.1, a2f4e7c0): its copy is the helper's, so the tree holds one ws, the fixed one
+overrides:
+  "ethers>ws": 8.22.1

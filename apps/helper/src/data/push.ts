@@ -15,8 +15,9 @@
  *
  * Every input is hostile and bounded: the query is exactly one chain the helper reads and exactly one token the reads
  * know (their first answer is not a 404), a client holds at most PUSH_CLIENT_MAX sockets and opens at most its API
- * window's, the helper at most PUSH_MAX, a socket's own messages are ignored and capped at PUSH_IN_MAX bytes, one that
- * cannot take its frames (PUSH_BUFFER_MAX unsent) or answer a ping within PUSH_PING_MS is cut.
+ * window's, the helper at most PUSH_MAX, a socket's own messages are ignored and capped at PUSH_IN_MAX bytes, in at
+ * most PUSH_IN_FRAGMENTS pieces and PUSH_IN_CHUNKS reads held at once (else ws closes it 1008), one that cannot take its
+ * frames (PUSH_BUFFER_MAX unsent) or answer a ping within PUSH_PING_MS is cut.
  */
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -34,6 +35,14 @@ export const PUSH_CLIENT_MAX = 8;
 export const PUSH_BUFFER_MAX = 1_000_000;
 /** The largest message the helper takes from a socket, which it then ignores [design: it reads none]. */
 export const PUSH_IN_MAX = 1_024;
+/** The frames one message may come in, past which ws closes the socket 1008 (ws 8.21.0 maxFragments, fix 2b2abd45: each
+ *  held fragment costs the helper about 170 bytes for 7 sent) [design: the helper reads no message and a browser sends
+ *  each as one frame; RFC 6455 5.4 lets a client split one, and 16 is far above any client's split of 1 KiB]. */
+export const PUSH_IN_FRAGMENTS = 16;
+/** The reads of a socket ws holds before they make a whole frame, past which it closes the socket 1008 (ws 8.21.0
+ *  maxBufferedChunks: each held read of 1 byte costs the helper about 240 bytes) [design: a frame the helper takes is at
+ *  most PUSH_IN_MAX + 14 bytes, two TCP segments at the 536-byte minimum (RFC 9293 3.7.1); 64 is far above that]. */
+export const PUSH_IN_CHUNKS = 64;
 /** The ping every socket answers within, else it is cut [design: under Caddy's and Cloudflare's idle cuts]. */
 export const PUSH_PING_MS = 30_000;
 /** The tape's length a socket is sent: the trades route's longest (data/solana/trades.ts TRADES_MAX). */
@@ -81,7 +90,7 @@ function rowsOf(body: string): string | null {
 }
 
 export function attachPush(server: Server, deps: PushDeps): Push {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: PUSH_IN_MAX, perMessageDeflate: false, clientTracking: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: PUSH_IN_MAX, maxFragments: PUSH_IN_FRAGMENTS, maxBufferedChunks: PUSH_IN_CHUNKS, perMessageDeflate: false, clientTracking: true });
   const groups = new Map<string, Group>();
   const perClient = new Map<string, number>();
   const alive = new WeakSet<WebSocket>();
@@ -170,7 +179,10 @@ export function attachPush(server: Server, deps: PushDeps): Push {
         alive.add(ws);
         ws.on("pong", () => alive.add(ws));
         ws.on("message", () => undefined); // a socket's own messages are not read
-        ws.on("error", () => ws.terminate());
+        // ws closes a socket on its own error itself: its close frame with the error's code (1008 past PUSH_IN_FRAGMENTS or
+        // PUSH_IN_CHUNKS, 1009 past PUSH_IN_MAX), then FIN, the peer's further bytes dropped unread, cut at its closeTimeout.
+        // Cutting it here instead resets a peer still sending, and the reset can lose that close frame.
+        ws.on("error", () => undefined);
         ws.on("close", () => {
           release();
           g.sockets.delete(ws);

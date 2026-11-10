@@ -1,0 +1,71 @@
+{
+ "good": {
+  "base": "http://127.0.0.1:18781",
+  "mint": "So11111111111111111111111111111111111111112",
+  "held": null,
+  "sent": 32,
+  "flood": {
+   "status": 101,
+   "sent": 230,
+   "tapes": 1,
+   "end": 1008
+  },
+  "sub": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 101,
+   "headers": {
+    "sec-websocket-accept": "h2BemrvlTSb3hWJs1wm1yNZjodc=",
+    "upgrade": "websocket"
+   },
+   "acceptOk": true,
+   "frame": "{\"trades\":[{\"t_ms\":1794257000000,\"side\":\"b\",\"usd\":\"12.5\",\"amt\":\"1000\",\"trader\":null,\"tx\":\"5tx\"}],\"src\":\"chain\",\"as_of_ms\":1794257000001}",
+   "frames": 1
+  }
+ },
+ "bad_base": {
+  "base": "http://127.0.0.1:18782",
+  "mint": "So11111111111111111111111111111111111111112",
+  "held": null,
+  "sent": 32,
+  "flood": {
+   "status": 101,
+   "sent": 230,
+   "tapes": 1,
+   "end": "pong"
+  },
+  "sub": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 101,
+   "headers": {
+    "sec-websocket-accept": "HVE2iEZRHoaDiYtLg8t/aRLly+k=",
+    "upgrade": "websocket"
+   },
+   "acceptOk": true,
+   "frame": "{\"trades\":[{\"t_ms\":1794257000000,\"side\":\"b\",\"usd\":\"12.5\",\"amt\":\"1000\",\"trader\":null,\"tx\":\"5tx\"}],\"src\":\"chain\",\"as_of_ms\":1794257000001}",
+   "frames": 1
+  }
+ },
+ "bad_pre_push": {
+  "base": "https://ct-api.unrealized.trade",
+  "mint": "F2xQeTCTqnczXxXQaBWAfDpUnpxn4wQHRPSqvUYJpump",
+  "held": 1,
+  "sent": 32,
+  "flood": {
+   "status": 404,
+   "sent": 0,
+   "tapes": 0,
+   "end": null
+  },
+  "sub": {
+   "origin": "https://ct-app.unrealized.trade",
+   "status": 404,
+   "headers": {
+    "access-control-allow-origin": "https://ct-app.unrealized.trade",
+    "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+   },
+   "acceptOk": null,
+   "frame": null,
+   "frames": 0
+  }
+ }
+}
