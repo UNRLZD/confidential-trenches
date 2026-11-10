@@ -32,7 +32,9 @@
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run, and as the bad run a real run of the read the path made before
 // (U's nonce at "finalized"), which Robinhood's providers refuse; a bundle's facts (bundleFacts) are recorded, not its
-// 850 KB of text. --bundle <file> judges that file in place of SIGN_HOST's (a local build before its deploy).
+// 850 KB of text. --bundle <file> judges that file in place of SIGN_HOST's (a local build before its deploy). The bundle
+// half alone (readBundle, judgeBundleOnly: the script the index pins, its old state reads and its seats) reads nothing
+// past what SIGN_HOST serves, so scripts/ci/bundle-checks.mjs runs it on a pull request's build.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -54,7 +56,7 @@ export function bundleFacts(text, pairs) {
     seats: Object.fromEntries(pairs.flatMap((p) => p.seats).map((u) => [u, text.includes(u)])),
   };
 }
-/** SIGN_HOST's bundle: its page's script, fetched (status, text). */
+/** SIGN_HOST's bundle: its page (html) and the page's script, fetched (url, text). */
 export async function signBundle(fetchFn = fetch) {
   const page = await fetchFn(SIGN_HOST);
   const html = await page.text();
@@ -63,7 +65,7 @@ export async function signBundle(fetchFn = fetch) {
   const url = new URL(src, SIGN_HOST).href;
   const js = await fetchFn(url);
   if (js.status !== 200) throw new Error(`SIGN_HOST's script ${url} answered ${js.status}`);
-  return { url, text: await js.text() };
+  return { url, html, text: await js.text() };
 }
 /** The bundle's verdict lines: throws on an old state read or a seat the bundle does not name. */
 function judgeBundle(b, pairs) {
@@ -71,6 +73,23 @@ function judgeBundle(b, pairs) {
   const missing = pairs.flatMap((p) => p.seats).filter((u) => b.seats[u] !== true);
   if (missing.length) throw new Error(`the bundle ${b.url} names no ${missing.join(", ")}: not the page's pairs`);
   return `the bundle ${b.url} (${b.sha256.slice(0, 16)}, ${b.bytes} bytes): no state read at an old block's tag; it names every seat (${Object.keys(b.seats).length})`;
+}
+/** The bundle half alone, which reads only what SIGN_HOST serves (scripts/ci/bundle-checks.mjs runs it on a pull
+ *  request's build): its index, the script it names and that script's sha384 against the index's pin. */
+export async function readBundle(fetchFn = fetch, pairs = pagePairs()) {
+  const got = await signBundle(fetchFn);
+  return { index: got.html, sha384: `sha384-${createHash("sha384").update(got.text).digest("base64")}`, url: got.url, ...bundleFacts(got.text, pairs) };
+}
+/** The bundle half's verdict: { ok, lines }. */
+export function judgeBundleOnly(b, pairs = pagePairs()) {
+  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(b?.index ?? "")?.[1];
+  if (!pin) return { ok: false, lines: ["BAD SIGN_HOST's index.html pins no /app.js"] };
+  if (pin !== b.sha384) return { ok: false, lines: ["BAD SIGN_HOST's served /app.js is not the one index.html pins"] };
+  try {
+    return { ok: true, lines: [judgeBundle(b, pairs)] };
+  } catch (e) {
+    return { ok: false, lines: [`BAD ${e?.message ?? e}`] };
+  }
 }
 export const CHAINS = Object.freeze({ base: "0x2105", robinhood: "0x1237" });
 const TRIES = 3;
