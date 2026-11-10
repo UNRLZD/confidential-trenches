@@ -1,4 +1,4 @@
-CARD evm-deposit-note-stays-incoming / testnet run
+CARD evm-deposit-note-stays-incoming / live: PASS
 Money path: yes
 Tx: base-sepolia 0x562c88473b847c52a868044f08da72c60b2ecdf39a70d07589e6eec000991494
 Tx: base-sepolia 0xe0154593805c6d719b5ba362b8d905263b97dd5174c8f44dfa571cc6936e6757
