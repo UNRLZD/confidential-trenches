@@ -304,14 +304,14 @@ test("a read each side fails, one side on a throttle: the answer stays a throttl
 // review of 686dda50 (F1): which block is the period's first, and its base fee, are never one operator's word. Each
 // plant answers through a public quote seat (publicnode) while dRPC's node is behind (its block reads null), so the
 // search walks to publicnode
+const PUBLIC = { POOL_EVM_ADDRESS_ROBINHOOD: PIN, POOL_EVM_SENDER_KEY_ROBINHOOD: KEY }; // no keyed seat: the public operators alone
 const DRPC_BEHIND = (host: string, method: string, params: unknown[]): Plant => (DRPC_HOSTS.has(host) && method === "eth_getBlockByNumber" && params[0] !== "latest" ? { result: null } : null);
 test("F1: a seat naming the period's first block's true hash with a base fee 1000 times the chain's is refused (two operators agree on the hash, number, time and base fee), never published", async (t) => {
   chainStub(t, (host, method, params) => {
     if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber") return { result: { ...block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))), baseFeePerGas: `0x${(1000n * GWEI).toString(16)}` } };
     return DRPC_BEHIND(host, method, params);
   });
-  const lines: string[] = [];
-  await assert.rejects(sendersOf(ENV, lines).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
 });
 test("F1b: a seat naming an earlier real block with a time 7 s late is refused: the block before the one named must be before the period on two operators", async (t) => {
   chainStub(t, (host, method, params) => {
@@ -321,7 +321,7 @@ test("F1b: a seat naming an earlier real block with a time 7 s late is refused: 
     }
     return DRPC_BEHIND(host, method, params);
   });
-  await assert.rejects(sendersOf(ENV, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
 });
 test("F1c: every operator honest, the fee reads the period's first block on two operators, the one before it on two as well", async (t) => {
   const calls = chainStub(t, () => null);
@@ -392,7 +392,7 @@ test("F3: a first seat held 8 s is passed over: the side asks the next operator 
   // no other operator: the held seat is asked last, its hold waited out
   asked.length = 0;
   const [p2] = await evm.evmReadPair(seats(false), ["x", "y"], { log: () => {}, now }).both("eth_blockNumber", []);
-  assert.ok(p2.ok && p2.operator === "x");
+  assert.ok(p2.ok && p2.operator === "x", p2.ok ? p2.operator : String(p2.error));
   assert.deepEqual(asked, ["pair"]);
 });
 test("F3: a side's read is bounded at EVM_READ_BUDGET_MS from its start, checked before each next seat; the first seat is never cut", async () => {
@@ -418,4 +418,75 @@ test("a send every seat answers 'already known' is the send accepted: the caller
   assert.equal(send({ status: "rejected", reason: new Error("RPC error -32000: nonce too low") }), false);
   assert.equal(send({ status: "rejected", reason: new Error("HTTP 502") }), false);
   assert.equal(send({ status: "fulfilled", value: "0xab" }), true);
+});
+test("F1d: the confirm reads both sides: a seat that names the true block to the search and another base fee when the block is read again is refused", async (t) => {
+  let asked = 0;
+  chainStub(t, (host, method, params) => {
+    if (host === "robinhood-rpc.publicnode.com" && method === "eth_getBlockByNumber" && params[0] === `0x${FIRST.toString(16)}` && asked++ > 0) return { result: { ...block(FIRST), baseFeePerGas: `0x${(7n * GWEI).toString(16)}` } };
+    return DRPC_BEHIND(host, method, params);
+  });
+  await assert.rejects(sendersOf(PUBLIC, []).get(PIN)!.fee(EPOCH + 1), /different blocks/);
+});
+
+// review of 686dda50, the survivors: each wording of a missing block or state walks on (geth's "header not found" is
+// Robinhood's live wording); a revert never does, in any case of its words; in code 3 or -32003 nothing is a miss
+test("each wording of a block or state the node lacks walks to the next operator; the same words in a revert, a code 3 or a -32003 answer are the chain's", async () => {
+  const run = async (err: string) => {
+    const asked: string[] = [];
+    const seats: evm.EvmSeat[] = [
+      { name: "a1", url: "https://a1.example", operator: "a", rpc: async () => (asked.push("a1"), Promise.reject(new Error(err))) },
+      { name: "c1", url: "https://c1.example", operator: "c", rpc: async () => (asked.push("c1"), "0x1") },
+    ];
+    const v = await evm.evmReadPair(seats, ["a", "b"], { log: () => {} }).one(0, "eth_call", [{}, { blockHash: "0x01" }]).then((x) => x, () => "thrown");
+    return { v, asked };
+  };
+  for (const words of ["header not found", "missing trie node 0b1e (path )", "unknown block", "unknown state", "archive requests require a paid plan", "block 0x5 not found", "historical state ab is not available"]) {
+    assert.deepEqual(await run(`RPC error -32000: ${words}`), { v: "0x1", asked: ["a1", "c1"] }, words);
+  }
+  for (const err of ["RPC error -32000: execution reverted: header not found", "RPC error -32000: Execution reverted: unknown block", "RPC error 3: header not found", "RPC error -32003: missing trie node"]) {
+    assert.deepEqual(await run(err), { v: "thrown", asked: ["a1"] }, err);
+  }
+});
+
+test("a null receipt or transaction is an answer (not mined, not known), never a walk; a block read answered null or not an object walks on; a side with no operator left says so", async () => {
+  const asked: string[] = [];
+  const seat = (name: string, op: string, v: unknown): evm.EvmSeat => ({ name, url: `https://${name}.example`, operator: op, rpc: async () => (asked.push(name), v) });
+  const pair = evm.evmReadPair([seat("a1", "a", null), seat("c1", "c", { hash: "0x" })], ["a", "b"], { log: () => {} });
+  for (const m of ["eth_getTransactionReceipt", "eth_getTransactionByHash"]) {
+    asked.length = 0;
+    assert.equal(await pair.one(0, m, ["0x01"]), null, m);
+    assert.deepEqual(asked, ["a1"], m);
+  }
+  for (const v of [null, "0x5", 7]) {
+    asked.length = 0;
+    const p2 = evm.evmReadPair([seat("a1", "a", v), seat("c1", "c", { hash: "0x" })], ["a", "b"], { log: () => {} });
+    assert.deepEqual(await p2.one(0, "eth_getBlockByNumber", ["0x1", false]), { hash: "0x" }, String(v));
+    assert.deepEqual(asked, ["a1", "c1"]);
+  }
+  const lone = evm.evmReadPair([seat("b1", "b", "0x1")], ["a", "b"], { log: () => {} });
+  const [x] = await lone.both("eth_blockNumber", []);
+  assert.ok(!x.ok && /no operator left apart from the other side's/.test(String((x.error as Error).message)));
+});
+
+test("the env's seats: the pair and the keyed URLs draw on the sender's reserve, the kit's quote providers do not; every seat, the pair's included, is passed over while held", async (t) => {
+  chainStub(t, () => null);
+  const real = providerHolds(() => 0, {});
+  const reserved: string[] = [];
+  const holds = { ...real, reserve: (u: string) => (reserved.push(u), real.reserve(u)) };
+  const waits: number[] = [];
+  const s = evm.evmPoolSendersFromEnv(ENV, evmPoolVenues(), holds, async (ms) => void waits.push(ms), () => {}).get(PIN)!;
+  assert.deepEqual(reserved.map((u) => new URL(u).host).sort(), ["lb.drpc.live", "made-up.robinhood-mainnet.quiknode.pro", "robinhood.drpc.org", "rpc.mainnet.chain.robinhood.com"]);
+  real.hold(DRPC!, 30);
+  assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.deepEqual(waits.filter((w) => w >= 1_000), [], "no hold waited out");
+});
+
+test("a seat's words are cleared of every URL's secret part before a log line or an error holds them, though the provider echoes its URL", async (t) => {
+  chainStub(t, (host, method) => (method === "eth_call" && DRPC_HOSTS.has(host) ? { status: 400, body: { code: -32602, message: `bad request to ${SPARE_DRPC} (key ${FAKE})` } } : null));
+  const lines: string[] = [];
+  assert.equal((await sendersOf(ENV, lines).get(PIN)!.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.ok(lines.length > 0);
+  for (const l of lines) {
+    assert.ok(!l.includes(FAKE) && l.includes("<key>"), l);
+  }
 });
