@@ -580,6 +580,18 @@ test("the page: a reload with a kept pass answers the first state read with no c
   assert.equal(await tp.positions(), null, "sign out: the kept pass went with the store");
 });
 
+test("the page: a pass kept before the rule, naming a token this device did not buy, answers the first state read without it", async () => {
+  const w = await spentWallet();
+  await recorded(w, { [solanaWallet()]: rec(MINT, "9") });
+  const kept: KeptPass = { positions: [{ chain: "solana", token: MINT, amount: "9", cost: "0", wallets: [solanaWallet()], decimals: 6 }, { chain: "solana", token: STRANGER, amount: "1", cost: "0", wallets: [solanaWallet()], decimals: 6 }], held: {}, listed: [] };
+  await w.put("meta", POSITIONS_KEPT_KEY, kept);
+  const never: HoldingsReader = { chain: "sol", read: () => new Promise(() => {}) };
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs as never, holdings: () => never, positions: { setTimer: () => {}, clearTimer: () => {} } } as never);
+  assert.deepEqual((await tp.positions())!.map((p) => p.token), [MINT]);
+  await w.signOut();
+  await tp.signedOut();
+});
+
 test("the page: a record from before decimals were kept reads its mint on both of the page's RPCs, once; the next load asks none", async () => {
   const w = await spentWallet();
   await recorded(w, { [solanaWallet()]: rec(MINT, "3", { decimals: null }) });

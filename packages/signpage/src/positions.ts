@@ -130,10 +130,14 @@ export type PassResult = { positions: Position[]; whole: boolean };
 
 const KEY = (w: string, m: string): string => `${w} ${m}`;
 const BASE = /^\d{1,78}$/;
-/** A kept pass's positions, or null when it is not one (the kit's schema checks them again on the way out). */
-export function keptPositions(v: unknown): Position[] | null {
+/** A kept pass's positions, or null when it is not one (the kit's schema checks them again on the way out); with the
+ *  buy records, only the tokens they name (a pass kept before the rule took any token the finder listed). */
+export function keptPositions(v: unknown, costs?: unknown): Position[] | null {
   const k = v as Partial<KeptPass> | null;
-  return typeof k === "object" && k !== null && Array.isArray(k.positions) ? (k.positions as Position[]) : null;
+  if (typeof k !== "object" || k === null || !Array.isArray(k.positions)) return null;
+  if (costs === undefined) return k.positions as Position[];
+  const bought = new Set(typeof costs === "object" && costs !== null ? Object.values(costs).map((c) => (c as { mint?: unknown } | null)?.mint) : []);
+  return (k.positions as Position[]).filter((p) => bought.has(p?.token));
 }
 function loadMemo(memo: PassMemo, v: unknown): void {
   const k = v as Partial<KeptPass> | null;

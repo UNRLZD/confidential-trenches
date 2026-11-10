@@ -833,7 +833,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
       }, memo);
     },
-    { ...over.positions, kept: async () => (scope === null ? null : keptPositions(await (await page.store()).get("meta", POSITIONS_KEPT_KEY))) },
+    {
+      ...over.positions,
+      kept: async () => {
+        if (scope === null) return null;
+        const st = await page.store();
+        return keptPositions(await st.get("meta", POSITIONS_KEPT_KEY), (await st.get("meta", POSITION_COSTS_KEY)) ?? {});
+      },
+    },
   );
   // The Ws of `only` as the finder reads them. Derived under the seed's shared lock, the seed copy zeroed as soon as
   // they are (a sign out waits only for that derive, never for a read), then read with the pass's stop: one W's failed
