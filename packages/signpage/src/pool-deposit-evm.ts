@@ -590,11 +590,13 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
     const busy = new Set<number>();
     const pending = new Set<number>(); // the U of a note still landing (not one stuck on its top-up)
     let stuck = false;
+    let passFault: { e: unknown } | null = null;
     for (const n of (await mine()).filter((x) => x.state === "INCOMING")) {
       const i = firstOf(n.ref, scope)!.i;
-      // an ask is never refused for an earlier note's read that fails: that note is held open (never dead, never built
-      // again in this run) and its U is no source; with no ask the failure is the pass's answer (review 1)
-      const end: End = await follow(r, n, 1, wait, () => void (passSent = true)).catch((e: unknown) => (ask === null ? Promise.reject(e) : { kind: "pending" as const }));
+      // a note whose read fails is held open (never dead, never built again in this run) and its U is no source, so the
+      // pass reads every other note (one that landed settles) and an ask is never refused for it; with no ask the first
+      // failure is the pass's answer, after the loop (review 1, delta review P2-1)
+      const end: End = await follow(r, n, 1, wait, () => void (passSent = true)).catch((e: unknown) => (ask === null && (passFault ??= { e }), { kind: "pending" as const }));
       if (end.kind === "landed") continue;
       busy.add(i);
       if (end.kind === "pending") pending.add(i);
@@ -603,6 +605,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
         h.short?.(end.u, end.short);
       }
     }
+    if (passFault !== null) throw (passFault as { e: unknown }).e;
     if (ask === null) return busy.size === 0 ? { stage: "filled", txs: [] } : stuck && !passSent ? { error: "not_funded" } : { stage: "not_landed", txs: [] };
 
     // a U still landing a note holds `value` once that note lands. Per RPC: U's balance at the newest block both hold,

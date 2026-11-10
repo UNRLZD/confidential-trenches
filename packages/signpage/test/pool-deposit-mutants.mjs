@@ -150,8 +150,10 @@ export const MUTANTS = [
   [EVM, [["  if (fault !== null) throw fault.e;\n  // dead only when", "  // dead only when"]], "evm-deposit-note-stays-incoming review 1: a new ask is never refused"],
   [EVM, [["    fault = { e };\n  }\n  stopped(h);", "    throw e;\n  }\n  stopped(h);"]], "evm-deposit-note-stays-incoming review 1: the end's reads tell filled"],
   [EVM, [["  if (fault !== null) throw fault.e;\n  return spent", "  return spent"]], "evm-deposit-note-stays-incoming review 1: the end's reads tell filled"],
-  [EVM, [["(ask === null ? Promise.reject(e) : { kind: \"pending\" as const })", "Promise.reject(e)"]], "evm-deposit-note-stays-incoming review 1: a new ask is never refused"],
-  [EVM, [["(ask === null ? Promise.reject(e) : { kind: \"pending\" as const })", "({ kind: \"pending\" as const })"]], "evm-deposit-note-stays-incoming review 1: a new ask is never refused"],
+  [EVM, [["(ask === null && (passFault ??= { e }), { kind: \"pending\" as const })", "Promise.reject(e)"]], "evm-deposit-note-stays-incoming review 1 (P2-1)"],
+  [EVM, [["ask === null && (passFault ??= { e })", "(passFault ??= { e })"]], "evm-deposit-note-stays-incoming review 1: a new ask is never refused"],
+  [EVM, [["    if (passFault !== null) throw (passFault as { e: unknown }).e;\n", ""]], "evm-deposit-note-stays-incoming review 1 (P2-1)"],
+  [EVM, [["    if (passFault !== null) throw (passFault as { e: unknown }).e;\n", ""]], "evm-deposit-note-stays-incoming review 1: a new ask is never refused"],
   // review 2: the kept block with the note's record (written, handed back between reads, read by the end's reads)
   [EVM, [["kept(await r.store.keepEvmSpent(n.id, s.kept === undefined ? null : { nonce: last.nonce, ...s.kept }));", "void 0;"]], "evm-deposit-note-stays-incoming review 2: a reloaded page"],
   [EVM, [["const v = await verdictOf(r, note, (x) => void (x.state === \"INCOMING\" && x.evmSends?.length === note.evmSends?.length && (note = x)));", "const v = await verdictOf(r, note);"]], "evm-deposit-note-stays-incoming review 2: within one run"],

@@ -428,6 +428,27 @@ test("evm-deposit-note-stays-incoming review 1: a new ask is never refused for a
   assert.notEqual(sentOf(ch.c.sent[1]!).pre, sentOf(ch.c.sent[0]!).pre);
 });
 
+test("evm-deposit-note-stays-incoming review 1 (P2-1): with no ask, a note whose nonce read is refused never keeps the pass from settling a later note that landed; the pass still answers failed", async () => {
+  const { ch, ns } = await funded(2n * (RUNG + FEE));
+  await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), ASK);
+  await runPoolDepositEvm(hostOf(ch, ns, { reads: 1 }), ASK); // a second open note, on its own U
+  const open = (await ours(ns)).filter((n) => n.state === "INCOMING");
+  assert.equal(open.length, 2);
+  // the pass reads them in the store's order: the first one's read refused, the second one landed and final
+  const [first, second] = open as [NoteRecord, NoteRecord];
+  assert.notEqual(uOf(first), uOf(second));
+  ch.land(ch.c.sent.find((raw) => sentOf(raw).pre === second.precommitment)!);
+  const u = uOf(first).toLowerCase();
+  const rpcs = ch.rpcs.map((rpc, k) => async (m: string, p: readonly unknown[]) => {
+    if (k === 1 && m === "eth_getTransactionCount" && typeof p[1] === "object" && String(p[0]).toLowerCase() === u) throw new Error("RPC error -32000: header not found");
+    return rpc(m, p);
+  }) as unknown as readonly [Rpc, Rpc];
+  assert.deepEqual(await runPoolDepositEvm(hostOf(ch, ns, { rpcs }), null), { error: "failed" }, "the refused read is the pass's answer");
+  assert.equal((await ns.get(second.id))!.state, "UNSPENT", "the landed note settled all the same");
+  assert.equal((await ns.get(first.id))!.state, "INCOMING");
+  assert.equal(ch.c.sent.length, 2, "nothing built again");
+});
+
 test("evm-deposit-note-stays-incoming review 2: a reloaded page (a new RPC pair, the same store) rebuilds a dead send at the same pass as the page that stayed open; the kept block lives in the note's record until the next send", async () => {
   const kept = async (reload: boolean) => {
     const { ch, ns, planned } = await funded(RUNG + FEE);
