@@ -54,13 +54,18 @@
 //     sends the funder's lamports back when it can, says how otherwise, and keeps the folder and its journal. A funder
 //     left with one fee or less is said so with what to do; that folder does not stop a later paste unless its journal
 //     names a table the chain holds or may still make.
-//  A resume whose journal names a table goes on only when every journaled send to it (create, extend or freeze) that is
-//  not landed can no longer land (an error status, or no status and its last valid block height passed on both RPCs at
-//  finalized) and both RPCs read that same lookup table at confirmed and at
-//  finalized, all four the same bytes (a prefix of the list under the funder: extend the rest and freeze; the list
-//  frozen: record, nothing sent), or all read nothing and no create of it landed or can still land; anything else stops
-//  with the table named, nothing sent and the key kept ("resume again in a minute"), and the journal's table is never
-//  replaced while a create of it may have landed.
+//  A resume whose journal names a table first reads every journaled send to it (create, extend or freeze) that is not
+//  landed, and goes on only when each can no longer land (an error status, or no status and its last valid block height
+//  passed on both RPCs at finalized); then both RPCs must read that same lookup table at confirmed and at finalized, all
+//  four the same bytes, holding exactly the addresses the journal's landed sends put in it (a prefix of the list under
+//  the funder: extend the rest and freeze; the list frozen: record, nothing sent), or all read nothing and no create of
+//  it landed. Reads behind the landed sends, or a send that may still land, stop with nothing sent and the key kept
+//  ("resume again in a minute"); the journal's table is never replaced while a create of it may have landed. Every
+//  extend, in a run or a resume, goes only after both RPCs read the table at confirmed holding exactly the landed count
+//  (the extend instruction appends wherever the table ends, so this read is what keeps an extend from a stale start).
+//  Recovery: a table that holds more than its landed sends explain, or is not the list's prefix under the funder, stops
+//  by name with its recovery printed (recoveryLines): send the funder two fees, `solana address-lookup-table deactivate`
+//  with the kept key, `close` to --return some 4 minutes later, sweep the funder, remove the folder, paste again.
 //  A mainnet run or resume (not --dry-run) first passes the source gate (sourceProblems): HEAD on REPO's main as git
 //  ls-remote answers it now, and the record, this script and the kit's pool-buy.ts each main's blob and uncommitted
 //  nowhere, so a paste from a stale checkout never plans a generation the record already holds.
@@ -305,29 +310,81 @@ async function sendMayLand(p, jr, table) {
   return null;
 }
 
+/** The addresses the journal's landed sends put in `table`: the sum of each landed create's and extend's "with N
+ *  addresses" (the journal holds every send before it goes, so this is what the table holds once the reads catch up). */
+const landedOf = (jr, table) => jr.j.txs.filter((x) => x.table === table && x.state === "landed").reduce((s, x) => s + Number(/ with (\d+) addresses$/.exec(x.step)?.[1] ?? 0), 0);
+const countOf = (acc) => (acc.data.length - TABLE_META) / 32;
+/** A table no resume can finish (more addresses than the journal's landed sends explain, or not the list's prefix under
+ *  the funder): the run stops by name, and its catch says the recovery with the kept key. */
+const stranded = (msg) => Object.assign(new Error(msg), { stranded: true });
+
 /** What the chain holds of the journal's table: null (none, and no create of it landed or can still land) or the
- *  account both RPCs read at confirmed and at finalized, all four the same bytes, a lookup table. Anything else stops
- *  with nothing sent and the key kept: a finalized read behind the confirmed one (an extend landed a moment ago) would
- *  extend from a shorter prefix and put addresses in the table twice. */
+ *  account both RPCs read at confirmed and at finalized, all four the same bytes, a lookup table holding exactly the
+ *  addresses the journal's landed sends put in it. The statuses come first: every journaled send to the table (create,
+ *  extend or freeze) not landed must be past landing (one refused by this node may be taken by another while its
+ *  blockhash lives) before the table is read, so a send that lands between the reads and the statuses is never taken
+ *  as the table's. Then the table must hold what the landed sends say: fewer (the reads are behind a landed send) stops
+ *  with "resume again in a minute", more is not explainable and stops by name; either way nothing is sent and the key
+ *  is kept. An extend from a stale count would put addresses in the table twice. */
 async function journalTable(p, jr) {
   const T = jr.j.table;
   if (!T) return null;
+  const may = await sendMayLand(p, jr, T);
+  if (may) throw new Error(`lookup table ${T}: ${may}: nothing is sent and the key is kept; resume again in a minute`);
   const [cf, fin] = await Promise.all([read2(p, T, "confirmed"), read2(p, T)]);
+  const create = jr.j.txs.find((x) => x.table === T && x.state === "landed" && /^lookup table: create/.test(x.step));
   if (!fin[0] && !fin[1]) {
-    const why = await createMayHaveLanded(p, jr, T);
-    if (why) throw new Error(`lookup table ${T}: ${why}, and neither RPC reads it at finalized yet: nothing is sent and the key is kept; resume again in a minute`);
+    if (create) throw new Error(`lookup table ${T}: its create ${create.signature} landed, and neither RPC reads it at finalized yet: nothing is sent and the key is kept; resume again in a minute`);
     if (!cf[0] && !cf[1]) return null;
   }
-  // every journaled send to the table (create, extend or freeze) not landed must be past landing: one refused by this
-  // node may be taken by another while its blockhash lives, and an extend that lands after these reads would put its
-  // addresses in the table a second time beside the resume's own
-  const why = await sendMayLand(p, jr, T);
-  if (why) throw new Error(`lookup table ${T}: ${why}: nothing is sent and the key is kept; resume again in a minute`);
   const r = [...cf, ...fin];
-  if (r[0] && r[0].owner === ALT_PROGRAM && same2(r)) return fin[0];
-  const what = (x) => (!x ? "nothing" : x.owner !== ALT_PROGRAM ? `an account of ${x.owner}` : `a table of ${(x.data.length - TABLE_META) / 32} addresses, authority ${x.data[21] === 1 ? b58encode(x.data.subarray(22, 54)) : "none"}`);
-  const reads = ["confirmed", "finalized"].flatMap((c, k) => p.c.rpcs.map((u, i) => `${u} at ${c}: ${what(r[2 * k + i])}`));
-  throw new Error(`the two RPCs do not read lookup table ${T} the same at confirmed and at finalized (${reads.join("; ")}): nothing is sent and the key is kept; resume again in a minute`);
+  if (!(r[0] && r[0].owner === ALT_PROGRAM && same2(r))) {
+    const what = (x) => (!x ? "nothing" : x.owner !== ALT_PROGRAM ? `an account of ${x.owner}` : `a table of ${countOf(x)} addresses, authority ${x.data[21] === 1 ? b58encode(x.data.subarray(22, 54)) : "none"}`);
+    const reads = ["confirmed", "finalized"].flatMap((c, k) => p.c.rpcs.map((u, i) => `${u} at ${c}: ${what(r[2 * k + i])}`));
+    throw new Error(`the two RPCs do not read lookup table ${T} the same at confirmed and at finalized (${reads.join("; ")}): nothing is sent and the key is kept; resume again in a minute`);
+  }
+  const n = countOf(fin[0]), want = landedOf(jr, T);
+  if (n < want) throw new Error(`lookup table ${T}: both RPCs read ${n} addresses, and the journal's landed sends put in ${want}: the reads are behind; nothing is sent and the key is kept; resume again in a minute`);
+  if (n > want) throw stranded(`lookup table ${T} holds ${n} addresses, more than the ${want} the journal's landed sends put in: nothing is sent and the key is kept`);
+  return fin[0];
+}
+
+/** Before each extend: both RPCs read the table at confirmed, the same bytes, holding exactly the journal's landed
+ *  count, the list's prefix under the funder; reads behind are read again for 90 s, then the run stops ("resume again
+ *  in a minute"); a table past the count or off the list stops by name. The extend instruction appends wherever the table
+ *  ends (no expected length in it), so this read is what keeps an extend from a stale start. */
+async function extendGuard(p, jr, T, list, funderId, { wait, now }) {
+  const want = landedOf(jr, T);
+  let last = "not read";
+  for (const until = now() + 90_000; ; await wait(2_000)) {
+    const r = await read2(p, T, "confirmed").catch((e) => ((last = `not read: ${e.message}`), null));
+    if (r && r[0] && r[0].owner === ALT_PROGRAM && same2(r)) {
+      const v = r[0], n = countOf(v);
+      const got = [];
+      for (let i = TABLE_META; i < v.data.length; i += 32) got.push(b58encode(v.data.subarray(i, i + 32)));
+      if (n > want || got.some((a, i) => a !== list[i]) || v.data[21] !== 1 || b58encode(v.data.subarray(22, 54)) !== funderId) {
+        throw stranded(`lookup table ${T} holds ${n} addresses where the journal's landed sends put in ${want}${got.some((a, i) => a !== list[i]) ? ", not the list's prefix" : ""}${v.data[21] !== 1 || b58encode(v.data.subarray(22, 54)) !== funderId ? ", not under the funder" : ""}: no extend is sent`);
+      }
+      if (n === want) return;
+      last = `both RPCs read ${n} addresses, the journal's landed sends put in ${want}`;
+    } else if (r) last = "the two RPCs' reads at confirmed are not the same";
+    if (now() >= until) throw new Error(`lookup table ${T}: ${last}: no extend is sent and the key is kept; resume again in a minute`);
+  }
+}
+
+/** The recovery of a table no resume can finish: its rent back to `returnTo` with the kept key, by the solana CLI
+ *  (agave v4.4.0, as mainnet-deploy.sh fetches it: `address-lookup-table deactivate` and `close`, the funder the fee
+ *  payer), then the folder removed by hand; a fresh paste then makes the generation again. */
+export function recoveryLines(url, table, keyDir, funderId, returnTo) {
+  const k = path.join(keyDir, "funder.json");
+  return [
+    `lookup table ${table} cannot be finished by a resume; its rent comes back to ${returnTo} with the kept key:`,
+    `  1. send 10000 lamports (two fees) to the funder ${funderId}`,
+    `  2. solana address-lookup-table deactivate ${table} --authority ${k} --keypair ${k} --url ${url} --bypass-warning`,
+    `  3. some 4 minutes later (512 slots after the deactivation): solana address-lookup-table close ${table} --recipient ${returnTo} --authority ${k} --keypair ${k} --url ${url}`,
+    `  4. solana transfer --url ${url} --keypair ${k} --fee-payer ${k} ${returnTo} ALL --allow-unfunded-recipient`,
+    `  5. once neither RPC reads the table and the funder holds nothing: rm -r ${keyDir}; then paste the run's line again`,
+  ];
 }
 
 /** Why the journal's table needs its folder kept (a reason), or null: no RPC reads it at confirmed or finalized and no
@@ -518,6 +575,8 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     if (jr.j.funder !== funder.id) throw new Error(`${keyDir}: the journal's funder ${jr.j.funder} is not the key file's ${funder.id}`);
     if (JSON.stringify(jr.j.list) !== JSON.stringify(list)) throw new Error(`the kit's list now differs from the stopped run's (${keyDir}/journal.json): nothing is sent to a table`);
     const sc = (table, step, ixs) => sendAndConfirm(p.fetchFn, c.rpcs[0], ixs, funder, [funder], { step, journal: jr.on(table), wait, now });
+    // every extend goes only once both RPCs read the table holding exactly what the journal's landed sends put in it
+    const extend = async (table, s) => (await extendGuard(p, jr, table, list, funder.id, o), sc(table, s.step, s.ixs));
     // the table: the journal's when both RPCs read it, else a new one; what it holds decides where the run goes on:
     // nothing (create), a prefix of the list under the funder (extend the rest), the list under the funder (freeze),
     // the list frozen (record); anything else stops with the table named
@@ -527,7 +586,7 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     if (held) for (let i = TABLE_META; i < held.data.length; i += 32) got.push(b58encode(held.data.subarray(i, i + 32)));
     const have2 = !held ? "none" : tableProblems(held, list, null).length === 0 ? "frozen" : "partial";
     if (have2 === "partial" && (held.data[21] !== 1 || b58encode(held.data.subarray(22, 54)) !== funder.id || got.length > list.length || got.some((a, i) => a !== list[i]))) {
-      throw new Error(`lookup table ${t.address} is not the funder's or not a prefix of the list: ${tableProblems(held, list, funder.id).join("; ")}`);
+      throw stranded(`lookup table ${t.address} is not the funder's or not a prefix of the list: ${tableProblems(held, list, funder.id).join("; ")}`);
     }
     const P0 = "11111111111111111111111111111111";
     const left = have2 === "frozen" ? [] : tableSteps(funder.id, t?.address ?? P0, t?.slot ?? 0n, t?.bump ?? 255, list.slice(got.length), c.price, { create: have2 === "none" });
@@ -583,9 +642,9 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
       }
       const n0 = tableSteps(funder.id, t.address, t.slot, t.bump, list, c.price)[0].ixs.find((x) => x.data[0] === 2);
       const done = n0 ? Number(Buffer.from(n0.data).readBigUInt64LE(4)) : 0;
-      for (const s of tableSteps(funder.id, t.address, t.slot, t.bump, list.slice(done), c.price, { create: false }).slice(0, -1)) await sc(t.address, s.step, s.ixs);
+      for (const s of tableSteps(funder.id, t.address, t.slot, t.bump, list.slice(done), c.price, { create: false }).slice(0, -1)) await extend(t.address, s);
     } else if (have2 === "partial") {
-      for (const s of left.slice(0, -1)) await sc(t.address, s.step, s.ixs);
+      for (const s of left.slice(0, -1)) await extend(t.address, s);
     }
     if (have2 !== "frozen") {
       await readBack(p, t.address, list, funder.id, o);
@@ -633,7 +692,9 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     if (most !== null && most <= FEE_PER_SIGNATURE && !table) {
       say(`the funder ${funder.id} holds ${most} lamports, too little to send back: nothing is left to do, unless SOL sent to it is still on its way; once that lands, go on with: ${resume}. This folder does not stop a fresh paste.`);
     }
-    say(`the key folder ${keyDir} is kept, the funder's key and the journal in it. Go on with: ${resume}`);
+    // a table no resume can finish: its recovery, said last (after the sweep, which it does not need)
+    if (e?.stranded) for (const l of recoveryLines(c.rpcs[0], jr.j.table, keyDir, funder.id, returnTo)) say(l);
+    else say(`the key folder ${keyDir} is kept, the funder's key and the journal in it. Go on with: ${resume}`);
     throw e;
   }
 }

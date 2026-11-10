@@ -640,9 +640,10 @@ test("P2-2 end to end: an extend that never lands stops the run; a resume before
   assert.ok(j1.table && j1.txs.some((x) => /create/.test(x.step) && x.state === "landed" && x.table === j1.table));
   assert.ok(k.logs.some((l) => l.includes(`--resume ${kd} --return ${RETURN}`)));
   assert.equal(sent(k, "create").length, 1);
-  // at once: the create landed but is not final, so neither RPC reads the table at finalized: stop, no second create
+  // at once: the statuses come first, and the dropped extend's blockhash still lives (the create landed but is not final
+  // either): stop, no second create
   drop = false;
-  await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir, { journal: j1 }), base, { keyDir: kd }), /landed/);
+  await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir, { journal: j1 }), base, { keyDir: kd }), /extend with \d+ addresses \w+ may still land/);
   assert.equal(sent(k, "create").length, 1);
   assert.equal(JSON.parse(readFileSync(path.join(kd, "journal.json"), "utf8")).table, j1.table);
   // once final (and finality back to its usual seconds): it extends the funder's prefix, freezes and records the one table
@@ -968,6 +969,174 @@ test("a journaled extend with no status and a live blockhash stops a resume even
   const got = addressesOf(k.get(T, "finalized"));
   assert.deepEqual([new Set(got).size, got.length], [256, 256]);
   assert.equal(recOf(dir).tables.pumpswap.length, 1);
+});
+
+// ------------------------------------------------------------------------------------------------ a resume's table count
+// A stopped run's journal: the create with 28 landed, then the given extends; the table on chain holds `held` of the list.
+function countCase({ extends: ext = [{ n: 29, state: "sent" }], held = 28, view } = {}) {
+  const k = fakeCluster(view ? { view } : {});
+  const base = keyBase();
+  const dir = recordDir();
+  return (async () => {
+    const p = await planOn(k, "pumpswap", dir);
+    const T = b58encode(new Uint8Array(32).fill(4));
+    const txs = [{ step: "lookup table: create and extend with 28 addresses", signature: sigOf(1), state: "landed", table: T, last_valid: 1 }];
+    ext.forEach((x, i) => txs.push({ step: `lookup table: extend with ${x.n} addresses`, signature: sigOf(2 + i), state: x.state, table: T, last_valid: k.heightAt() + 100 }));
+    const { dir: kd, funder } = keptFolder(base, p, { table: T, txs });
+    fund(k, funder.id, 50_000_000n);
+    k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, held)), lamports: rentMin(56 + 32 * held) }, 0);
+    const land = (n) => k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, n)), lamports: rentMin(56 + 32 * n) });
+    const toTable = () => sent(k, "extend").length + sent(k, "create").length + sent(k, "freeze").length;
+    const finished = () => {
+      const v = k.get(T, "finalized");
+      const got = addressesOf(v);
+      assert.deepEqual(got, p.list, "the table holds exactly the list");
+      assert.equal(new Set(got).size, 256);
+      assert.equal(v.data[21], 0, "frozen");
+      assert.equal(recOf(dir).tables.pumpswap.length, 1);
+      assert.deepEqual(readdirSync(base), [], "the folder removed");
+    };
+    return { k, base, dir, p, T, kd, funder, land, toTable, finished };
+  })();
+}
+
+test("a journaled extend that lands after the resume's table reads and before its status read: the statuses come first, so the resume extends from what landed and the table is the list once (reviewer's probe F: 231 addresses, 202 distinct, stranded)", async () => {
+  const c = await countCase();
+  const S = sigOf(2);
+  let landed = false;
+  const fetchFn = async (url, init) => {
+    const b = JSON.parse(init.body);
+    if (!landed && b.method === "getSignatureStatuses" && b.params[0].includes(S)) {
+      landed = true;
+      c.land(57);
+      c.k.statuses.set(S, { at: c.k.now(), slot: c.k.slotAt() });
+    }
+    return c.k.fetchFn(url, init);
+  };
+  const q = await plan("mainnet", "pumpswap", { fetchFn, dir: c.dir, wait: c.k.wait, journal: journalAt(c.kd) });
+  // the statuses read first see it landed; the table's finalized reads are not there yet: stop, nothing sent
+  await assert.rejects(runOn(c.k, q, c.base, { keyDir: c.kd }), /resume again in a minute/);
+  assert.ok(landed);
+  assert.equal(c.toTable(), 0, "nothing sent to the table");
+  assert.equal(journalAt(c.kd).txs.find((x) => x.signature === S).state, "landed");
+  c.k.advance(60_000);
+  await resumeOn(c.k, c.dir, c.kd, c.base);
+  c.finished();
+});
+
+test("a journaled extend that landed while both RPCs' account reads are a moment behind their statuses: the resume stops, nothing sent; a later one finishes (reviewer's probe G)", async () => {
+  let stale = null;
+  const c = await countCase({ view: (i, a, cm, v) => (stale && a === stale.T && stale.left-- > 0 ? stale.v : v) });
+  const old = c.k.get(c.T);
+  c.land(57);
+  c.k.statuses.set(sigOf(2), { at: c.k.now(), slot: c.k.slotAt() });
+  c.k.advance(1_200);
+  const q = await planOn(c.k, "pumpswap", c.dir, { journal: journalAt(c.kd) });
+  stale = { T: c.T, v: old, left: 4 };
+  await assert.rejects(runOn(c.k, q, c.base, { keyDir: c.kd }), (e) => /read 28 addresses, and the journal's landed sends put in 57/.test(e.message) && /resume again in a minute/.test(e.message));
+  assert.equal(c.toTable(), 0, "nothing sent to the table");
+  assert.ok(existsSync(path.join(c.kd, "funder.json")));
+  c.k.advance(60_000);
+  await resumeOn(c.k, c.dir, c.kd, c.base);
+  c.finished();
+});
+
+test("an extend whose status reads landed on one RPC only, the table still read without it: the resume stops, nothing sent; once the reads catch up it finishes", async () => {
+  const c = await countCase();
+  const S = sigOf(2);
+  c.k.statuses.set(S, { at: c.k.now(), slot: c.k.slotAt() });
+  // the first RPC answers its status (a node ahead); the second has none yet; neither account read shows it yet
+  const fetchFn = async (url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.method === "getSignatureStatuses" && url === RPC1) return answer({ context: { slot: 1 }, value: b.params[0].map(() => null) });
+    return c.k.fetchFn(url, init);
+  };
+  const q = await plan("mainnet", "pumpswap", { fetchFn, dir: c.dir, wait: c.k.wait, journal: journalAt(c.kd) });
+  await assert.rejects(runOn(c.k, q, c.base, { keyDir: c.kd }), /put in 57: the reads are behind.*resume again in a minute/);
+  assert.equal(c.toTable(), 0, "nothing sent to the table");
+  c.land(57);
+  c.k.advance(60_000);
+  await resumeOn(c.k, c.dir, c.kd, c.base);
+  c.finished();
+});
+
+test("two journaled extends open at once: the resume stops while either can land; both landed or one landed and one expired, it finishes from what landed", async () => {
+  for (const [name, after] of [
+    ["both landed", (c) => (c.land(86), c.k.statuses.set(sigOf(2), { at: c.k.now(), slot: c.k.slotAt() }), c.k.statuses.set(sigOf(3), { at: c.k.now(), slot: c.k.slotAt() }))],
+    ["the first landed, the second expired", (c) => (c.land(57), c.k.statuses.set(sigOf(2), { at: c.k.now(), slot: c.k.slotAt() }))],
+  ]) {
+    const c = await countCase({ extends: [{ n: 29, state: "sent" }, { n: 29, state: "sent" }] });
+    await assert.rejects(resumeOn(c.k, c.dir, c.kd, c.base), (e) => e.message.includes(sigOf(2)) && /may still land/.test(e.message), name);
+    assert.equal(c.toTable(), 0, `${name}: nothing sent`);
+    after(c);
+    c.k.advance(200_000); // past both blockhashes at finalized
+    await resumeOn(c.k, c.dir, c.kd, c.base);
+    c.finished();
+  }
+});
+
+test("a run whose own landed extend shows in the account reads only after a while: the next extend waits for both RPCs to read it, and the table is the list once", async () => {
+  let table = null, lag = 0, prev = null;
+  const k = fakeCluster({
+    view: (i, a, cm, v) => (a === table && lag > 0 ? (lag--, prev) : v),
+    onSend: ({ kinds, tx }) => {
+      if (kinds.includes("create")) table = tx.ixs.find((x) => x.prog === ALT).acc[0];
+      if (kinds.includes("extend") && table) (prev = k.get(table)), (lag = 6);
+      return "land";
+    },
+  });
+  const dir = recordDir();
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", dir);
+  await runOn(k, p, base);
+  const got = addressesOf(k.get(table, "finalized"));
+  assert.deepEqual(got, p.list);
+  assert.equal(sent(k, "extend").length, 9, "the create's extend and eight more, each once");
+  assert.deepEqual(readdirSync(base), []);
+});
+
+test("an extend that lands between a guard read and the run's next extend, sent by no run of this folder: no further extend goes, nothing is frozen, and the recovery is said with the kept key", async () => {
+  let table = null, n = 0, funderId = null;
+  const k = fakeCluster({
+    onSend: ({ kinds, tx }) => {
+      if (kinds.includes("create")) (table = tx.ixs.find((x) => x.prog === ALT).acc[0]), (funderId = tx.keys[0]);
+      return "land";
+    },
+  });
+  const dir = recordDir();
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", dir);
+  // just before the run's third extend goes (its guard read passed), another send puts the next 29 of the list in
+  let stray = 0;
+  const fetchFn = async (url, init) => {
+    const b = JSON.parse(init.body);
+    if (b.method === "sendTransaction" && decodeTx(Buffer.from(b.params[0], "base64")).ixs.map(kindOf).includes("extend") && !decodeTx(Buffer.from(b.params[0], "base64")).ixs.map(kindOf).includes("create") && ++n === 3 && !stray) {
+      const v = k.get(table);
+      const have = addressesOf(v).length;
+      k.set(table, { ...v, data: tableData(funderId, p.list.slice(0, have + 29)), lamports: rentMin(56 + 32 * (have + 29)) });
+      stray = have;
+    }
+    return k.fetchFn(url, init);
+  };
+  const q = await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait });
+  const before = () => sent(k, "extend").length;
+  await assert.rejects(runOn(k, q, base, { say: k.say }), /holds \d+ addresses where the journal's landed sends put in \d+.*no extend is sent/);
+  assert.ok(stray > 0);
+  assert.equal(before(), 4, "the create's extend, two more, and the one in flight when the stray landed: none after it");
+  assert.equal(sent(k, "freeze").length, 0, "nothing frozen");
+  assert.equal(recOf(dir).tables.pumpswap, undefined);
+  const kd = folderOf(base);
+  assert.ok(existsSync(path.join(kd, "funder.json")), "the key kept");
+  const r = k.logs.findIndex((l) => /cannot be finished by a resume/.test(l));
+  assert.ok(r >= 0, k.logs.slice(-8).join("\n"));
+  assert.match(k.logs[r + 2], new RegExp(`solana address-lookup-table deactivate ${table} --authority ${path.join(kd, "funder.json")}`));
+  assert.match(k.logs[r + 3], new RegExp(`solana address-lookup-table close ${table} --recipient ${RETURN} --authority`));
+  // a resume, once the chain is final, refuses the same way, nothing sent
+  k.advance(60_000);
+  const toTable = () => sent(k, "extend").length + sent(k, "create").length + sent(k, "freeze").length;
+  const sends = toTable();
+  await assert.rejects(resumeOn(k, dir, kd, base), /more than the \d+ the journal's landed sends put in/);
+  assert.equal(toTable(), sends, "nothing sent to the table by the resume");
 });
 
 test("one run per key folder: a resume beside a live run stops at once naming its pid, and so does a fresh paste; the live run finishes alone", async () => {
