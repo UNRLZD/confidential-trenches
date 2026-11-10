@@ -1870,7 +1870,17 @@ export type EvmPoolArgs = {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 
-export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
+/** The EVM pool of the proof queue, and its fee hold (card evm-device-reads-need-no-old-state). */
+export type EvmPoolOf = Pool<EvmPoolRequest> & {
+  /**
+   * Reads the period's fee at its first block while that block is fresh (the page's pass a few seconds past each
+   * period's turn) and holds it, so a bind later in the period asks no state at all. What is held is only what two
+   * operators of the fee list agreed on at that block's hash (evmBindChainFee), never the helper's word.
+   */
+  holdFee(epochStartMs: bigint, signal?: AbortSignal): Promise<void>;
+};
+
+export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   const rpcs = evmPair(a.rpcs);
   if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
   if (a.feeRpcs.some((r) => typeof r.url !== "string")) throw new Error("feeRpcs: each with its url (its operator)");
@@ -1885,7 +1895,34 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   const sync = evmTreeSync({ rpcs, pin: a.pin, history: [...(a.history ?? []), ...a.rpcs], ...(a.held ? { held: a.held } : {}), ...(a.sleep ? { sleep: a.sleep } : {}) });
   const scope = evmPoolScopeOf(pool, EVM_CHAIN_IDS[a.pin.network]);
   const sleep = a.sleep ?? wait;
+  // the fee hold (card evm-device-reads-need-no-old-state): the chain fee read at a period's first block, by period,
+  // with that block's hash and the tree depth there. A keyless operator keeps a block's state seconds to minutes (Pocket
+  // refused 4 of 10 pool reads at 28-242 s back, publicnode 6 of 12 at 15-55 s, read 2026-11-10 21:50-22:30Z), so the
+  // read is made once while the block is fresh, by the turn's pass or the period's first bind, and every bind of the
+  // period after it uses it. A bind names its own period (the queue binds at epochOf(now)), so the hold keeps that
+  // period and the one before it, for a pass that crosses the turn; older ones are dropped.
+  const heldFees = new Map<bigint, { hash: string; depth: number; chainFee: bigint }>();
+  const feeAt = (epochStartMs: bigint, signal?: AbortSignal) =>
+    evmRetryLag(async () => {
+      const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
+      // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
+      const depth = await sync.depthAt(block.number, signal, block.hash);
+      // held for this block, by its hash (a reorg that replaced the block is another block) and its depth (Base's
+      // operator fee is of G(depth)); both read again on every bind, from headers and logs, never from state
+      const h = heldFees.get(epochStartMs);
+      if (h !== undefined && h.hash === block.hash && h.depth === depth) return { block, depth, chainFee: h.chainFee };
+      // the chain fee there (the L1 data fee, and Base's operator fee), two operators agreeing at its hash
+      const chainFee = await evmBindChainFee(feeRpcs, a.pin.network, block, depth, signal, sleep);
+      heldFees.set(epochStartMs, { hash: block.hash, depth, chainFee });
+      const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
+      for (const e of heldFees.keys()) if (e < newest - EVM_EPOCH_MS) heldFees.delete(e);
+      return { block, depth, chainFee };
+    }, sleep, signal);
   return {
+    async holdFee(epochStartMs, signal) {
+      if (typeof epochStartMs !== "bigint" || epochStartMs <= 0n || epochStartMs % EVM_EPOCH_MS !== 0n) throw new Error("epochStartMs: not on the epoch grid");
+      await feeAt(epochStartMs, signal);
+    },
     id: `evm:${a.pin.network}:${pool}`,
     chain: "evm",
     scope,
@@ -1908,14 +1945,9 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
       const nowMs = await evmLatestHigh(rpcs, signal, sleep);
       if (typeof deadlineMs !== "bigint" || deadlineMs !== epochStartMs + EVM_LIFE_MS || deadlineMs > U64 || deadlineMs <= nowMs + EVM_SEND_MARGIN_MS)
         throw new Error("deadlineMs: not on the epoch grid, or too close to send");
-      // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs
-      // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
-      // and the chain fee there (the L1 data fee, and Base's operator fee), the same on both RPCs
-      const { block, depth, chainFee } = await evmRetryLag(async () => {
-        const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
-        const depth = await sync.depthAt(block.number, signal, block.hash);
-        return { block, depth, chainFee: await evmBindChainFee(feeRpcs, a.pin.network, block, depth, signal, sleep) };
-      }, sleep, signal);
+      // the device's own fee: the epoch's first block and the tree depth there, each read on both RPCs, and the chain
+      // fee there, held from the period's first read (feeAt above)
+      const { block, depth, chainFee } = await feeAt(epochStartMs, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");
       const f = await a.relayFee(epochStartMs, signal);

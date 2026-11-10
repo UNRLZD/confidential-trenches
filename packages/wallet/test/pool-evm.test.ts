@@ -581,16 +581,20 @@ test("bind walks the fee list past an operator that refuses the block's state fo
     const fees = [rpc(c, { url: "https://robinhood.drpc.org", log: logs[0], ...bad }), rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com", log: logs[1] }), rpc(c, { url: "https://robinhood-rpc.publicnode.com", log: logs[2] })];
     const seen: unknown[] = [];
     const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
-    // a whole period: every bind in it binds, the refusing operator asked in the first alone and rested after
+    // a whole period: every bind in it binds, the refusing operator asked in the first alone and rested after; the
+    // other two answer the first, and the period's later binds take its held read (card
+    // evm-device-reads-need-no-old-state)
     const fee = (l: string[]) => l.filter((x) => x.includes("0x420000000000000000000000000000000000000f")).length;
     await p.bind(bindArgs());
     const first = fee(logs[0]);
     assert.ok(first >= 1, name);
+    const others = [fee(logs[1]), fee(logs[2])];
+    assert.deepEqual(others, [2, 2], `${name}: the other two answer the first bind`);
     for (let i = 0; i < 4; i++) await p.bind(bindArgs());
     assert.equal(seen.length, 5, name);
     assert.ok(seen.every((x) => (x as { chainFee: bigint }).chainFee === 7_917n), name);
     assert.equal(fee(logs[0]), first, `${name}: the refusing operator asked in the first bind alone, then rested`);
-    assert.ok(fee(logs[1]) >= 5 && fee(logs[2]) >= 5, `${name}: the other two answer every bind`);
+    assert.deepEqual([fee(logs[1]), fee(logs[2])], others, `${name}: the period's later binds ask no operator`);
   }
   // one whose fee read hangs (a promise that never settles): the walk's own cut (feeRead.callMs here, EVM_READ_CALL_MS
   // live) ends it, and the bind binds on the other two; with no cut this bind never ends
@@ -638,6 +642,90 @@ test("bind walks the fee list past an operator that refuses the block's state fo
     const fees = [rpc(c, { url: "https://rpc.mainnet.chain.robinhood.com" }), rpc(c, { url: "https://robinhood.drpc.org", ...refusals.state! }), rpc(c, { url: "https://customer-origin.offchainlabs.com" })];
     await assert.rejects(evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined }).bind(bindArgs()), /one operator alone never passes/);
   }
+});
+
+// card evm-device-reads-need-no-old-state: with robinhood.drpc.org out, Pocket and publicnode refuse a block's state
+// seconds back (6 of 12 at 15-55 s, 4 of 10 at 28-242 s, read 2026-11-10 21:50-22:30Z), so a bind late in a period that
+// reads the chain fee at the period's first block finds no two operators. The fee read at the turn, while that block is
+// fresh, is held for the period: a later bind there asks no state at all.
+const UNKNOWN_STATE = 'HTTP 400 {"message":"Unknown state. First available state is 1","code":27}';
+/** Fee seats that keep only the newest `keep` blocks' state, as Pocket and publicnode do (the chain's head read live). */
+const freshOnly = (c: Chain, keep: number, log: string[]) =>
+  ["https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"].map((url) =>
+    rpc(c, { url, log, chainFee: (s, n) => { if (n < c.head - keep) throw new Error(UNKNOWN_STATE); return s === "f1c7a58b" ? 7_917n : 0n; } }));
+const feeCalls = (log: string[]) => log.filter((x) => x.includes("0x420000000000000000000000000000000000000f")).length;
+
+test("the period's fee read at the turn is held: a bind later in the period asks no state, at any age", async () => {
+  // the turn: block 30 is the period's first block and the head is 31; every fee seat keeps 2 blocks of state
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const seen: unknown[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 2, log), relayFee: async () => answer(), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await p.holdFee(EPOCH);
+  const held = feeCalls(log);
+  assert.equal(held, 4, "two operators, the L1 fee bound and the operator fee each");
+  // 30 s on (the head 15 blocks on, block 30's state gone from every seat): the bind binds on the held read
+  c.head = 45;
+  const b = await p.bind(bindArgs());
+  assert.equal(feeCalls(log), held, "no chain fee read at the old block");
+  assert.deepEqual(seen, [{ block: 30n, baseFeePerGas: 1_000_030n, depth: 2, chainFee: 7_917n }]);
+  assert.equal(b.feeCap, 3n * 10n ** 13n);
+  // the same with no hold: the first bind of the period, at the turn, holds its own read for the binds after it
+  {
+    const c2 = { ...CB(), head: 31 };
+    const log2: string[] = [];
+    const seen2: unknown[] = [];
+    const q = evmPool({ pin: PIN, rpcs: pair(c2, c2), feeRpcs: freshOnly(c2, 2, log2), relayFee: async () => answer(), epochFee: feeRule(seen2), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await q.bind(bindArgs());
+    const first = feeCalls(log2);
+    c2.head = 57;
+    await q.bind(bindArgs());
+    assert.equal(feeCalls(log2), first);
+    assert.equal(seen2.length, 2);
+  }
+  // nothing held and the state gone: the walk, as before, which every seat refuses (a lag, then refused)
+  {
+    const c3 = { ...CB(), head: 45 };
+    const r = evmPool({ pin: PIN, rpcs: pair(c3, c3), feeRpcs: freshOnly(c3, 2, []), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await assert.rejects(r.bind(bindArgs()), (e: unknown) => e instanceof EvmLagError);
+  }
+});
+
+test("a held fee is used only at its own block's hash, never the helper's word, and only for this period and the one before", async () => {
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log), relayFee: async (e) => answer({ epoch_start_ms: Number(e) }), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await p.holdFee(EPOCH);
+  const held = feeCalls(log);
+  // a reorg that replaces the period's first block: the held read is of another block, so the bind reads again
+  const hashOf = c.hashOf;
+  c.hashOf = (n) => (n >= 30 ? h32(`reorged ${n}`) : hashOf(n));
+  c.head = 35;
+  await p.bind(bindArgs());
+  assert.equal(feeCalls(log), held + 4, "read again at the new block's hash");
+  assert.ok(log.slice(-4).every((x) => x.includes(h32("reorged 30"))));
+  // the held read never stands in for the helper's: a helper fee that is not the device's is refused as before
+  {
+    const c2 = { ...CB(), head: 31 };
+    const q = evmPool({ pin: PIN, rpcs: pair(c2, c2), feeRpcs: freshOnly(c2, 2, []), relayFee: async () => answer({ fee: "40000000000000" }), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await q.holdFee(EPOCH);
+    c2.head = 45;
+    await assert.rejects(q.bind(bindArgs()), /is not the epoch's fee/);
+  }
+  // the hold keeps this period's read and the one before; one two periods back is dropped
+  {
+    const long = longChain([...deps(PP, [10, 12])], 200);
+    const log3: string[] = [];
+    const r = evmPool({ pin: PIN, rpcs: pair(long, long), feeRpcs: freshOnly(long, 1_000, log3), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const e0 = (T0 + 240n) * 1000n; // block 120, on the period grid
+    for (const e of [e0, e0 + EVM_EPOCH_MS, e0 + 2n * EVM_EPOCH_MS]) await r.holdFee(e);
+    const n = feeCalls(log3);
+    await r.holdFee(e0 + EVM_EPOCH_MS);
+    assert.equal(feeCalls(log3), n, "the period before: held");
+    await r.holdFee(e0);
+    assert.equal(feeCalls(log3), n + 4, "two periods back: dropped, read again");
+  }
+  await assert.rejects(p.holdFee(EPOCH + 1n), /epochStartMs: not on the epoch grid/);
 });
 
 test("bind refuses the helper's fee unless it is the device's, for this pool and epoch, and a W, chunk or deadline the pool would not take", async () => {
