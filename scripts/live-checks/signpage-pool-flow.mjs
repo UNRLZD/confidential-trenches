@@ -27,8 +27,9 @@
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
 // error exit 2.
 import "../net-window.mjs";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readRecord } from "./sol-pool-venue-tables.mjs";
 import { DEVNET_PROVIDERS, RETRY_AFTER_CAP_MS, account, answerOf, check as deployCheck, onTwoOperators, operatorOf, pageAddress, poolAddress, programDataAddress, recorder, retryAfterMs, rpc, devnetPin } from "./pool-sol-deploy.mjs";
 
 const KEY = "signpage-pool-flow";
@@ -45,7 +46,7 @@ export const RUN_TABLE = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
 /** Every lookup table the testnet build pins: each venue's generations in contracts/pool-solana/deployments/devnet.json
  *  (packages/wallet/test/sol-pool-venue-tables.test.ts holds the build's pins equal to it). */
 export const DEVNET_TABLES = Object.freeze(
-  Object.values(JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/devnet.json", import.meta.url), "utf8")).tables ?? {}).flatMap((gens) => gens.map((g) => g.table)),
+  Object.values(readRecord("devnet")?.tables ?? {}).flatMap((gens) => gens.map((g) => g.table)),
 );
 /** Run 7's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
  *  flow, on today's devnet pool (program 9Z6Yi2Vc, pool 92YuYhb4) and the helper serving it. */
