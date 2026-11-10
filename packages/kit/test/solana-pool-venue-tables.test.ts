@@ -13,6 +13,7 @@ import {
   SOLANA_JITO_TIP_ACCOUNTS,
   SOLANA_POOL_CURVE_FIRST_RANGE,
   SOLANA_POOL_TABLE_GROWS,
+  SolanaPoolBuyError,
   solanaPoolRangeWarn,
   SOLANA_SYSTEM_PROGRAM,
   buildSolanaPoolBuy,
@@ -216,14 +217,20 @@ test("the selector: the smallest of the given tables, one tip account for all; n
   const b = buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [g2!.table, g1!.table], { pick: () => 3 });
   assert.ok(b.instructions[2]!.accounts.some((a) => a.key === SOLANA_JITO_TIP_ACCOUNTS[3]));
   assert.throws(() => buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [], {}), /^Error: no_table_fits: no table$/);
-  assert.throws(() => buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve)], {}), /^Error: no_table_fits: the smallest is 1[34]\d\d bytes > 1232$/);
+  // a table that holds no account of the venue's program is no generation of it: passed over beside the venue's own,
+  // and refused venue_not_in_table by name when no given table is made for the venue
+  assert.equal(buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve), g1!.table], { pick: () => 3 }).table, g1!.table);
+  assert.throws(
+    () => buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve), tableOf(curve, 8)], {}),
+    (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table" && /^venue_not_in_table: none of the 2 tables holds an account of the pumpswap program$/.test(e.message),
+  );
 });
 
-test("a PumpSwap buy given the pump curve's table is too large: the reason each venue has its own", async () => {
+test("a PumpSwap buy given the pump curve's table is refused venue_not_in_table (it would be too large): the reason each venue has its own", async () => {
   const curve = solanaPoolVenueTableList(cfg, await tableVenue("pump-curve"), SOLANA_POOL_CURVE_FIRST_RANGE);
   const { venue, req, chain } = await setup("pumpswap");
   for (const cashback of [false, true]) {
     const ven = { ...venue, cashback } as SolanaPoolBuyVenue;
-    assert.throws(() => buildSolanaPoolBuy(cfg, release, ven, { ...req, tip: TIP, cluster: "mainnet" }, { ...chain, table: tableOf(curve) }, { pick: () => 0 }), /too_large: 1[34]\d\d bytes > 1232/);
+    assert.throws(() => buildSolanaPoolBuy(cfg, release, ven, { ...req, tip: TIP, cluster: "mainnet" }, { ...chain, table: tableOf(curve) }, { pick: () => 0 }), (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table");
   }
 });

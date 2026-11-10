@@ -17,7 +17,9 @@
 //   on the other. The lookup tables are the pin's, a list of generations per venue (card sol-pool-venue-tables), each
 //   read on both; a venue with no pinned table is refused venue_not_pinned before the pick, and the build (the kit's
 //   buildSolanaPoolBuyOnTables) loads the venue's generation that makes the smallest transaction; none that fits 1,232
-//   bytes is refused no_table_fits before the claim and the seed.
+//   bytes is refused no_table_fits before the claim and the seed. A pinned table that holds no account of the venue's
+//   program is no generation of it (the kit passes over it); when none is made for the venue it has no table here,
+//   refused venue_not_pinned, before the claim. One order: venue_not_pinned, the build (no_table_fits), the claim.
 // - Built by the kit (buildSolanaPoolBuyOnTables), checked by the rule (rules/pool.ts checkSolanaBuy: the request is the ask's,
 //   then every byte), signed by W only through signSolana (it signs nothing a check did not pass). W is derived here
 //   from the seed (freshWallet, l and j of the note) right before it signs, and must be the proof's recipient; its key
@@ -521,6 +523,8 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
         built = buildSolanaPoolBuyOnTables(cfg, release, venue, req, { blockhash: bh.blockhash, lastValidBlockHeight: bh.lastValidBlockHeight, stateSize: sizes.stateSize, rent }, own.map((t) => ({ address: t.address, table: t.table })), h.pick ? { pick: h.pick } : {});
       } catch (e) {
         if (/^no_table_fits\b/.test(String((e as Error)?.message))) return no("no_table_fits");
+        // none of the venue's pinned tables is made for it (a table pinned under the wrong venue): no table for it here
+        if (e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table") return no("venue_not_pinned");
         throw e;
       }
       const used = own.find((t) => t.address === built.table.address)!;
@@ -551,9 +555,6 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    // a venue our lookup table is not made for (PumpSwap on the mainnet's curve-only table): not open on this page, as a
-    // page with no table answers, never a failure (review P3-4 of a34c1626)
-    if (e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table") return { error: "not_allowed" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
     if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
     return { error: "failed" };

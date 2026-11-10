@@ -833,7 +833,9 @@ export function buildSolanaPoolBuy(cfg: SolanaPoolConfig, release: SolanaPoolRel
 }
 
 /** The buy on whichever of the venue's frozen table generations makes the smallest transaction (the last of equals, in
- *  the order given: the newest generation, which stays live longest): every table is tried with one tip account. None fits 1,232 bytes: refused `no_table_fits`, with
+ *  the order given: the newest generation, which stays live longest): every table is tried with one tip account. A
+ *  table that holds no account of the venue's program is no generation of it and is passed over; when every given
+ *  table is such a one: SolanaPoolBuyError venue_not_in_table. None fits 1,232 bytes: refused `no_table_fits`, with
  *  the smallest size; no table: refused the same. */
 export function buildSolanaPoolBuyOnTables(
   cfg: SolanaPoolConfig, release: SolanaPoolRelease, venue: SolanaPoolBuyVenue, req: SolanaPoolBuyRequest, chain: Omit<SolanaPoolBuyChain, "table">,
@@ -842,16 +844,23 @@ export function buildSolanaPoolBuyOnTables(
   const at = (opts.pick ?? randomIndex)(SOLANA_JITO_TIP_ACCOUNTS.length);
   let best: (SolanaPoolBuyBuilt & { table: SolanaPoolBuyChain["table"] }) | null = null;
   let smallest = Infinity;
+  let notMade = 0;
   for (const table of tables) {
     try {
       const b = buildSolanaPoolBuy(cfg, release, venue, req, { ...chain, table }, { pick: () => at });
       if (best === null || b.size <= best.size) best = { ...b, table };
     } catch (e) {
+      // a table not made for the venue is no generation of it: passed over
+      if (e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table") {
+        notMade++;
+        continue;
+      }
       const m = /^too_large: (\d+) bytes/.exec(String((e as Error)?.message));
       if (!m) throw e;
       smallest = Math.min(smallest, Number(m[1]));
     }
   }
+  if (best === null && notMade > 0 && notMade === tables.length) throw new SolanaPoolBuyError("venue_not_in_table", `none of the ${tables.length} tables holds an account of the ${venue.kind} program`);
   if (best === null) throw new Error(`no_table_fits: ${tables.length === 0 ? "no table" : `the smallest is ${smallest} bytes > ${SOLANA_MAX_TX_BYTES}`}`);
   return best;
 }

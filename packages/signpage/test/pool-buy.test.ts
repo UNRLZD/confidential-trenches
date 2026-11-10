@@ -432,13 +432,17 @@ test("a quote off the request (older than the device's slot allows) is refused: 
 });
 
 // review P3-4 of a34c1626: a buy on a venue our lookup table is not made for (PumpSwap on the mainnet's curve-only table)
-// threw a plain Error and answered "failed"; the kit's SolanaPoolBuyError venue_not_in_table answers not_allowed, as a page
-// with no table does, before W signs
-test("a buy whose venue our lookup table is not made for is refused not_allowed, never failed: nothing signed or sent", async () => {
+// threw a plain Error and answered "failed". With a list of tables per venue (card sol-pool-venue-tables), a table that
+// holds no account of the venue's program is no generation of it: the kit passes over it, and a venue none of whose
+// pinned tables is made for it (a table pinned under the wrong venue) has no table on this page, as venue_not_pinned
+// answers, before the claim: never failed, nothing claimed, taken, seeded, signed or sent
+test("a venue whose pinned tables hold none of its program's accounts is refused venue_not_pinned before the claim; one such table beside its own is passed over", async () => {
   const w = await world({ tableNotForVenue: true });
-  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" });
-  assert.ok(!w.log.includes("send") && !w.log.includes("seed"), "nothing signed or sent");
-  assert.notEqual(w.state(), "RESERVED");
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "venue_not_pinned" });
+  nothingMoved(w);
+  const both = await world({ tableNotForVenue: true, tables: { "pump-curve": [s0.tableAddr, OTHER_TABLE] } });
+  assert.deepEqual(await runPoolBuy(both.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(loadedTables(both), [OTHER_TABLE]);
 });
 
 test("a venue the two RPCs disagree on is refused: nothing taken or sent", async () => {
