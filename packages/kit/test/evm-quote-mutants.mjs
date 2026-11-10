@@ -9,12 +9,15 @@
 // its exit code) and JOBS at once, each in its own copy (each run is mostly a process's start: about 1 s each, 279 one
 // after another took 266 s and the named tests one by one 140 s on GitHub's runner, readme-fresh-run at 47109a7).
 // Each line prints its time.
-//   node packages/kit/test/evm-quote-mutants.mjs     (a heavy job: run it on a machine with spare cores)
+//   node packages/kit/test/evm-quote-mutants.mjs [<k>/<n>]     (a heavy job: run it on a machine with spare cores)
+// With <k>/<n> it runs part k of n only, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs), and the named tests of those mutants
+// on the code as it is; test:mutants runs the parts, one command each, so ci.yml's split shares them out.
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run as runGroup } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 
 const KIT = fileURLToPath(new URL("..", import.meta.url));
 const QUOTE = "src/checks/evm/quote.ts";
@@ -1033,6 +1036,8 @@ export const MUTANTS = [
   // a request queued at the gate past the bound: a plain rpc_error there is asked as its halves and handed to the spare
   [QUOTE, "      if (now >= untilMs) throw past();", '      if (now >= untilMs) throw new EvmQuoteError("rpc_error", "past the bound");', R, "QE13 "],
 ];
+// every mutant's name, in the order the parts take them
+export const NAMES = MUTANTS.map(([, find, , , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
 
 const esc = (n) => `^${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
 // each test run's own environment: without the node --test runner's NODE_TEST_CONTEXT, which turns a child's report
@@ -1073,6 +1078,7 @@ export async function baseline(dirs, byFile) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
   const JOBS = Math.max(1, Math.min(4, availableParallelism()));
   const t0 = performance.now();
   const s = (t) => `${((performance.now() - t) / 1000).toFixed(1)} s`;
@@ -1087,7 +1093,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
     const src = new Map([QUOTE, BUY, BUYU, SELLQ, SELLU, QD, PF, SR].map((f) => [f, readFileSync(join(dirs[0], f), "utf8")]));
     const byFile = new Map();
-    for (const m of MUTANTS) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
+    for (const m of part.at.map((i) => MUTANTS[i])) byFile.set(m[3], [...new Set([...(byFile.get(m[3]) ?? []), m[4]])]);
     const tb = performance.now();
     for (const { file, name: n, r, why } of await baseline(dirs, byFile)) {
       if (r !== "pass") {
@@ -1099,7 +1105,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (bad === 0) {
       let next = 0;
       const worker = async (dir) => {
-        for (let i = next++; i < MUTANTS.length; i = next++) {
+        for (let j = next++; j < part.at.length; j = next++) {
+          const i = part.at[j];
           const [file, find, repl, tf, t] = MUTANTS[i];
           const sf = src.get(file);
           if (sf.split(find).length !== 2) {
@@ -1117,11 +1124,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       };
       const tm = performance.now();
       await Promise.all(dirs.map((d) => worker(d)));
-      console.log(`${MUTANTS.length} mutants, ${JOBS} at once: ${s(tm)}`);
+      console.log(`${part.at.length} mutants, ${JOBS} at once: ${s(tm)}`);
     }
   } finally {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test (${s(t0)})` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${part.at.length} mutants fails its named test (${s(t0)})` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }

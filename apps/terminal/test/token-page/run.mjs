@@ -359,6 +359,17 @@ try {
           check(marks.every((m) => m.logo && (m.side === "buy" || m.side === "sell")), `${tag}: a mark without the token's logo or a side`);
           check(marks.every((m) => m.r.left >= plotR.left - 1 && m.r.right <= plotR.right + 1 && m.r.top >= plotR.top - 1 && m.r.bottom <= plotR.bottom + 1), `${tag}: a mark outside the plot`);
           console.log(`${tag}: ${marks.length} trade marks (${marks.filter((m) => m.side === "buy").length} buy), each the token's logo`);
+          if (phone && marks.length > 0) {
+            // card app-phone-token-taps-and-rows: a mark is tapped through a 44 px area, its disc still 12 px; a tap 18 px
+            // right of its centre (off the disc) opens a card, a second closes it
+            const tm = q("trade-mark").last();
+            const at = { x: 6 + 18, y: 6 };
+            check(Math.round(marks.at(-1).r.width) === 12, `${tag}: a mark drawn ${marks.at(-1).r.width} px, want 12`);
+            await tm.tap({ position: at, force: true });
+            check(await q("trade-mark-card").isVisible().catch(() => false), `${tag}: a tap 18 px off a mark's centre opened no card`);
+            await tm.tap({ position: at, force: true });
+            check(!(await q("trade-mark-card").isVisible().catch(() => false)), `${tag}: a second tap left the card open`);
+          }
           if (!phone) {
             for (const t of ["chart-toolbar", "chart-indicators", "chart-display", "chart-mode", "chart-denom", "chart-bottom", "chart-clock", "chart-scale-pct", "chart-scale-log", "chart-scale-auto"]) check((await q(t).count()) === 1, `${tag}: no ${t}`);
             const ranges = await f.$$eval(`${box} [data-testid^="chart-range-"]`, (els) => els.map((e) => e.textContent.trim()));

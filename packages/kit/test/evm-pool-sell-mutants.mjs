@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 import { KIT, kitCopy } from "./mutant-copy.mjs";
 
 // the sweep runs in a copy of the kit; imported (for its MUTANTS), the paths are the kit's own
@@ -188,6 +189,8 @@ export const MUTANTS = [
   // the fork fixture is the kit's output
   [SELL, "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)) });", "return Object.freeze({ chainId, address: delegate, nonce, yParity: rec[0] as 0 | 1, r: toHex(rec.slice(1, 33)), s: toHex(rec.slice(33, 65)).replace(/.$/, \"0\") });", FIXTURE],
 ];
+// every mutant's name, in the order the parts take them
+export const NAMES = MUTANTS.map(([, find, , t]) => `${find.split("\n")[0].slice(0, 70)} -> "${t}"`);
 
 // a child test run must not inherit this process's own node --test context (when the sweep runs as a test, the child
 // would report to the parent's runner and print no summary of its own)
@@ -203,9 +206,11 @@ function run(name) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // <k>/<n>: part k of n only, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs); test:mutants runs the parts
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
   const src = { [SELL]: readFileSync(SELL, "utf8"), [BUY]: readFileSync(BUY, "utf8") };
   let bad = 0;
-  for (const t of new Set(MUTANTS.map((m) => m[3]))) {
+  for (const t of new Set(MUTANTS.filter((_, i) => part.pick(i)).map((m) => m[3]))) {
     const r = run(t);
     if (r !== "pass") {
       console.log(`FAIL "${t}" ${r === "none" ? "names no test" : "fails on the code as it is"}`);
@@ -214,6 +219,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (bad > 0) process.exit(1);
   MUTANTS.forEach(([file, find, repl, t], i) => {
+    if (!part.pick(i)) return;
     if (src[file].split(find).length !== 2) {
       console.log(`FAIL mutant ${i + 1}: its text is not in ${file.split("/").pop()} exactly once`);
       bad++;
@@ -230,6 +236,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`${r === "fail" ? "ok  " : "FAIL"} mutant ${i + 1}: ${find.split("\n")[0].slice(0, 70)} -> "${t}" ${r === "fail" ? "fails" : "PASSES"}`);
     if (r !== "fail") bad++;
   });
-  console.log(bad === 0 ? `every one of ${MUTANTS.length} mutants fails its named test` : `${bad} problem(s)`);
+  console.log(bad === 0 ? `every one of ${part.at.length} mutants fails its named test` : `${bad} problem(s)`);
   process.exit(bad === 0 ? 0 : 1);
 }

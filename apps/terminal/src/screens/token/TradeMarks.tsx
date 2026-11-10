@@ -3,13 +3,17 @@
 // 9bc315d, assets/app.js P.chart). Hover on desktop and tap on a phone open a card of the mark's data. The marks are
 // placed from the chart's own pixels (convertToPixel) and placed again on every zoom, scroll and range change, once per
 // frame. Positions go through React's style prop only, so APP_HOST's CSP (style-src 'self', trusted types) needs nothing.
+// A mark is placed by its transform (left and top stay 0): a mark that moves with the chart's data (a bigger trade
+// landing in its bar takes its place) or with a zoom moves no layout box (BAR-10 CLS 0, card
+// app-phone-token-taps-and-rows). On a phone each mark is tapped through a 44 px area round it (marks.css, tapped).
 import "./marks.css";
 import type { Chart } from "klinecharts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { age, compact, price, usd } from "../discover/format.ts";
 import { Avatar } from "../market/Avatar.tsx";
 import type { Bar, ChartTf } from "./candles.ts";
-import { groupMarks, layoutMarks, shortTrader } from "./trades.ts";
+import { groupMarks, layoutMarks, pickMark, shortTrader } from "./trades.ts";
 import type { Mark, Trade, Wish } from "./trades.ts";
 import { WORDS } from "./words.ts";
 
@@ -109,10 +113,20 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
     return () => document.removeEventListener("pointerdown", close);
   }, [phone, open]);
 
+  /** The mark a phone's tap opens: the tap's own point decides (pickMark), not the element it landed on, as each mark's
+   *  44 px area reaches over its neighbours. A key's click (no point) is the focused mark's. */
+  const tapped = (e: MouseEvent<HTMLButtonElement>, d: Drawn): string => {
+    const pane = e.currentTarget.parentElement?.getBoundingClientRect();
+    if (e.detail === 0 || !pane || pane.width === 0 || pane.height === 0) return d.id;
+    const x = ((e.clientX - pane.left) * drawn.rect.width) / pane.width;
+    const y = ((e.clientY - pane.top) * drawn.rect.height) / pane.height;
+    return pickMark(drawn.marks, x, y, r) ?? d.id;
+  };
+
   const card = open === null ? null : drawn.marks.find((d) => d.id === open) ?? null;
   const { rect } = drawn;
   return (
-    <div className="tm-layer" ref={layer} data-testid="trade-marks" data-count={drawn.marks.length}>
+    <div className="tm-layer" ref={layer} data-testid="trade-marks" data-count={drawn.marks.length} data-phone={phone || undefined}>
       <div className="tm-pane" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}>
         {drawn.marks.map((d) => (
           <button
@@ -121,12 +135,19 @@ export function TradeMarks({ chart, bars, tf, factor, symbol, phone, version, tr
             className="tm"
             data-testid="trade-mark"
             data-side={d.mark.side}
-            style={{ left: d.x - r, top: d.y - r, width: 2 * r, height: 2 * r }}
+            style={{ transform: `translate(${d.x - r}px, ${d.y - r}px)`, width: 2 * r, height: 2 * r }}
             onPointerEnter={phone ? undefined : () => setOpen(d.id)}
             onPointerLeave={phone ? undefined : () => setOpen(null)}
             onFocus={phone ? undefined : () => setOpen(d.id)}
             onBlur={phone ? undefined : () => setOpen(null)}
-            onClick={phone ? () => setOpen((o) => (o === d.id ? null : d.id)) : undefined}
+            onClick={
+              phone
+                ? (e) => {
+                    const id = tapped(e, d);
+                    setOpen((o) => (o === id ? null : id));
+                  }
+                : undefined
+            }
           >
             <Avatar symbol={symbol} size={2 * r} />
             <i className="tm-dot" />
