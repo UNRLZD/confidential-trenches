@@ -3,8 +3,9 @@
 // Robinhood at the pool the kit pins for each (evmPoolVenues() pool, set from contracts/pool-evm/deployments/<chain>.json
 // by card pool-evm-deploy-mainnet), and the helper's start refuses any other pool address (apps/helper/src/pool/evm.ts
 // evmPoolSendersFromEnv). Per mainnet, with no key and no transaction:
-//   - GET <helper>/v1/pool/fee?pool=<the kit's pool pin> (on a 404, again with &epoch= the previous minute's, as a read
-//     at the minute's edge finds no first block yet): 200, network the chain, pool the pin, fee_collector and
+//   - GET <helper>/v1/pool/fee?pool=<the kit's pool pin> (read through evm-pool-fee-epoch.mjs: on a 503 index_behind or
+//     a 404, again with &epoch= the previous minute's, as a read at the minute's edge finds no first block yet; a chain
+//     with no block for that minute either is INCONCLUSIVE): 200, network the chain, pool the pin, fee_collector and
 //     sell_sender the kit's pins, a block and a fee in wei, and a full-sha X-Helper-Commit: the helper carries the pin;
 //   - GET <helper>/v1/pool/fee?pool=<the chain's pinned SellDelegate> (a contract the kit pins, never a pool): 404
 //     not_found, so no sender of the helper is keyed on it;
@@ -19,8 +20,8 @@
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { POOL_EPOCH_MS } from "../../apps/helper/src/pool/fee.ts";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
+import { evmPoolFeeAsk, feeUrl, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export const BASE = "https://ct-api.unrealized.trade";
@@ -51,26 +52,26 @@ export async function read(base = BASE, fetchFn = fetch, pins = pinsOf()) {
     const p = pins[chain];
     // the helper's own provider read can miss once (503 upstream, 429): asked again up to HELPER_TRIES times,
     // HELPER_PAUSE_MS apart, and the last answer judged (a helper that cannot answer the fee serves no withdraw)
-    const get = async (pool, epoch) => {
+    // a 503 index_behind is not that miss: the same epoch answers it again, so it is judged or stepped back, not retried
+    const get = async (url, pool) => {
       let a;
       for (let i = 0; i < HELPER_TRIES; i++) {
         if (i > 0) await new Promise((r) => setTimeout(r, HELPER_PAUSE_MS));
         try {
-          const r = await fetchFn(`${base}/v1/pool/fee?pool=${pool}${epoch === undefined ? "" : `&epoch=${epoch}`}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+          const r = await fetchFn(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
           a = { pool, status: r.status, commit: r.headers.get("x-helper-commit"), body: await r.text() };
         } catch (e) {
           a = { pool, error: String(e?.message ?? e).slice(0, 200) };
         }
-        if (a.status !== 503 && a.status !== 429 && a.error === undefined) break;
+        if ((a.status !== 503 || noBlockYet(a)) && a.status !== 429 && a.error === undefined) break;
       }
       return a;
     };
-    // at the minute's edge the current epoch's first block may not be on the helper's providers yet (fee() null, 404):
-    // the previous minute's epoch, whose first block is, is asked then (review P3-2); a helper that serves no such pool
-    // answers 404 to both
-    let fee = await get(p.pool);
-    if (fee.status === 404) fee = await get(p.pool, Math.floor(Date.now() / POOL_EPOCH_MS) * POOL_EPOCH_MS - POOL_EPOCH_MS);
-    const foreign = await get(p.sellDelegate);
+    // at the minute's edge the current epoch's first block may not be on the helper's providers yet (503 index_behind; 404
+    // from the helper before card evm-fee-quiet-epoch): the previous minute's epoch, whose first block is, is asked then
+    // (evm-pool-fee-epoch.mjs; review P3-2); a helper that serves no such pool answers 404 to both
+    const { answer: fee } = await evmPoolFeeAsk((url) => get(url, p.pool), base, p.pool);
+    const foreign = await get(feeUrl(base, p.sellDelegate), p.sellDelegate);
     let block;
     try {
       block = JSON.parse(fee.body ?? "null")?.block;
@@ -119,6 +120,7 @@ export function judge(run, pins = pinsOf()) {
     } catch {
       body = null;
     }
+    const noBlock = noBlockYet(c.fee);
     const feeOk =
       c.fee?.status === 200 &&
       SHA.test(String(c.fee?.commit ?? "")) &&
@@ -129,7 +131,9 @@ export function judge(run, pins = pinsOf()) {
       body?.sell_sender === p.sellSender &&
       /^0x[0-9a-f]+$/.test(String(body?.block)) &&
       /^[1-9][0-9]*$/.test(String(body?.fee));
-    say(feeOk, `[${chain} fee] GET /v1/pool/fee?pool=${p.pool} answers ${c.fee?.status ?? c.fee?.error ?? "none"}: network ${body?.network ?? "none"}, pool ${body?.pool ?? "none"}, fee_collector ${body?.fee_collector ?? "none"}, sell_sender ${body?.sell_sender ?? "none"}, block ${body?.block ?? "none"}, fee ${body?.fee ?? "none"}, commit ${c.fee?.commit ?? "none"}`);
+    // the chain made no block for over a minute: no fee to read, and so no block to read on the providers
+    if (noBlock) lines.push(`QUIET [${chain} fee] the helper has no block in the epoch or the one before (GET /v1/pool/fee?pool=${p.pool} answers ${c.fee.status} index_behind)`);
+    else say(feeOk, `[${chain} fee] GET /v1/pool/fee?pool=${p.pool} answers ${c.fee?.status ?? c.fee?.error ?? "none"}: network ${body?.network ?? "none"}, pool ${body?.pool ?? "none"}, fee_collector ${body?.fee_collector ?? "none"}, sell_sender ${body?.sell_sender ?? "none"}, block ${body?.block ?? "none"}, fee ${body?.fee ?? "none"}, commit ${c.fee?.commit ?? "none"}`);
     let fbody = null;
     try {
       fbody = JSON.parse(c.foreign?.body ?? "null");
@@ -142,8 +146,8 @@ export function judge(run, pins = pinsOf()) {
     say(urls.length === 2 && urls[0] === p.providers[0] && urls[1] === p.providers[1], `[${chain} providers] read on ${urls.join(", ") || "none"} (the kit's fee providers: ${p.providers.join(", ")})`);
     const quiet = pr.filter((x) => x.noAnswer !== undefined);
     for (const x of quiet) lines.push(`QUIET [${chain} ${x.url}] ${x.noAnswer}`);
-    for (const x of pr.filter((y) => y.noAnswer === undefined)) say(x.error === undefined && Number(x.codeBytes) > 0 && HASH.test(String(x.blockHash)), `[${chain} ${x.url}] pool code ${x.codeBytes ?? "none"} bytes sha256 ${x.codeSha256 ?? "none"}, block ${body?.block ?? "none"} hash ${x.blockHash ?? x.error ?? "none"}`);
-    if (pr.length === 2 && quiet.length === 0) {
+    for (const x of noBlock ? [] : pr.filter((y) => y.noAnswer === undefined)) say(x.error === undefined && Number(x.codeBytes) > 0 && HASH.test(String(x.blockHash)), `[${chain} ${x.url}] pool code ${x.codeBytes ?? "none"} bytes sha256 ${x.codeSha256 ?? "none"}, block ${body?.block ?? "none"} hash ${x.blockHash ?? x.error ?? "none"}`);
+    if (pr.length === 2 && quiet.length === 0 && !noBlock) {
       say(pr[0].codeSha256 !== null && pr[0].codeSha256 !== undefined && pr[0].codeSha256 === pr[1].codeSha256, `[${chain} code] the pool's code is the same on both providers`);
       say(HASH.test(String(pr[0].blockHash)) && pr[0].blockHash === pr[1].blockHash, `[${chain} block] the helper's block has the same hash on both providers`);
     }

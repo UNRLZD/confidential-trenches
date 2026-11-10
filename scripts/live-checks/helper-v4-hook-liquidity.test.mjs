@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { SWAP_RPCS } from "../../apps/helper/src/data/evm/swaps.ts";
+import { noAnswerHosts } from "../ci/live-rerun.mjs";
 import { BUDGET_MS, EXIT, judge, MAX_TOKENS, read, TOKENS } from "./helper-v4-hook-liquidity.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -64,8 +65,8 @@ test("robinhood: the fix's Robinhood tapes, where a router sends the take straig
   assert.deepEqual(judge(again).lines, r.lines);
 });
 
-test("an unreadable receipt, or no token on the lists, is a BAD line: FAIL", () => {
-  assert.match(bad(judge({ ...A.good, receipts: { ...A.good.receipts, [TX454]: null } })).join("\n"), /its receipt is not agreed by two providers/);
+test("a receipt two providers answered and differ on, or no token on the lists, is a BAD line: FAIL", () => {
+  assert.match(bad(judge({ ...A.good, receipts: { ...A.good.receipts, [TX454]: null } })).join("\n"), /two providers answered and their receipts differ/);
   assert.equal(judge({ ...A.good, receipts: { ...A.good.receipts, [TX454]: null } }).verdict, "FAIL");
   const r = judge({ ...A.good, coins: [] });
   assert.match(bad(r).join("\n"), /no base token read from the lists/);
@@ -209,4 +210,79 @@ test("a buy taken as PoolManager claims by its router (Base tx 0xfaaa9cc9...) is
   assert.ok(r.ok, bad(r).join("\n"));
   assert.equal(judgedOf(r), 1);
   assert.match(bad(judge(claimsRun("0.000051015555490232"))).join("\n"), /amt 0\.000051015555490232 is not the 44726051716064 its trader 0xf8cd946adb3e56c6c246fd8eaa32c4c94ec889ed got/);
+});
+
+// ------------------------------------------------------------------------------------------------ a provider's no-answer
+// Base tx 0xfaaa9cc9's real receipt (above), asked of three providers, each behaving as planted: it answers, it is silent
+// (a 429, a 503 or a fetch that fails), or it answers a receipt that differs (one log left out).
+const HOSTS = ["https://rpc-a.test", "https://rpc-b.test", "https://rpc-c.test"];
+function providers(behave) {
+  const run = claimsRun("0.000044726051716064");
+  return async (url, init) => {
+    const u = String(url);
+    const host = HOSTS.find((h) => u === h);
+    if (host === undefined) return replay(run)(url, init);
+    const how = behave[HOSTS.indexOf(host)];
+    if (how === "throws") throw Object.assign(new Error("fetch failed"), { cause: { code: "ETIMEDOUT" } });
+    if (how === "429") return new Response("{}", { status: 429 });
+    if (how === "503") return new Response("upstream", { status: 503 });
+    const q = JSON.parse(init.body);
+    const one = (c) => ({ jsonrpc: "2.0", id: c.id, result: c.method === "eth_getTransactionReceipt" ? (how === "differs" ? { ...CLAIMS_BUY, logs: CLAIMS_BUY.logs.slice(1) } : CLAIMS_BUY) : `0x${(18).toString(16).padStart(64, "0")}` });
+    return Response.json(q.map(one));
+  };
+}
+const quietRun = (behave) => read("https://helper.test", providers(behave), "base", HOSTS);
+
+test("one provider answers and the other two are silent (a 429, a 503, a timed-out fetch): the receipt has fewer than two answers, INCONCLUSIVE (exit 3), worded for the rerun to name the silent hosts, no BAD line", async () => {
+  for (const behave of [["ok", "429", "503"], ["throws", "ok", "429"], ["503", "throws", "ok"]]) {
+    const got = await quietRun(behave);
+    assert.deepEqual(Object.keys(got.quiet), [`receipt ${FAAA}`]);
+    const r = judge(got);
+    assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+    assert.equal(EXIT[r.verdict], 3);
+    assert.deepEqual(bad(r), []);
+    const silent = HOSTS.map((h, i) => [new URL(h).host, behave[i]]).filter(([, how]) => how !== "ok").map(([h]) => h).sort();
+    assert.deepEqual(noAnswerHosts(r.lines.join("\n")), silent, r.lines.join("\n"));
+    assert.match(r.lines.join("\n"), /INCONCLUSIVE receipt 0xfaaa9cc9\w+: .*(HTTP (429|503): |: no answer \(ETIMEDOUT\))/);
+    assert.match(r.lines.join("\n"), /1 read fewer than two providers answered/);
+  }
+});
+
+test("one provider silent and two that answer alike: the receipt is agreed, judged, PASS; two that answer and differ: FAIL naming it, even with a third silent", async () => {
+  const pass = judge(await quietRun(["429", "ok", "ok"]));
+  assert.equal(pass.verdict, "PASS", pass.lines.join("\n"));
+  assert.equal(judgedOf(pass), 1);
+  for (const behave of [["ok", "differs", "ok"], ["differs", "ok", "429"], ["ok", "429", "differs"]]) {
+    const r = judge(await quietRun(behave));
+    assert.equal(r.verdict, "FAIL", behave.join());
+    assert.equal(EXIT[r.verdict], 1);
+    assert.match(bad(r).join("\n"), /trade 0xfaaa9cc9\w+: two providers answered and their receipts differ/);
+  }
+});
+
+test("a wrongly reported v4 trade is a FAIL whatever else was read, a silent receipt beside it included; a silent receipt beside good trades is no pass", () => {
+  const withQuiet = (run) => ({ ...run, quiet: { "receipt 0x1111111111111111111111111111111111111111111111111111111111111111": ["rpc-a.test: no answer (ETIMEDOUT)", "rpc-b.test HTTP 429: 429 Too Many Requests"] } });
+  const wrong = judge(withQuiet(A.bad));
+  assert.equal(wrong.verdict, "FAIL");
+  assert.match(bad(wrong).join("\n"), /amt 2357\.007794273885411305 is not the 2332259212434009614487/);
+  const good = judge(withQuiet(A.good));
+  assert.equal(good.verdict, "INCONCLUSIVE");
+  assert.equal(good.ok, false);
+  assert.ok(judgedOf(good) >= 50, "the trades it could judge are still judged");
+  assert.deepEqual(noAnswerHosts(good.lines.join("\n")), ["rpc-a.test", "rpc-b.test"]);
+});
+
+test("the token's decimals met by fewer than two providers: the trade is not judged and the run is INCONCLUSIVE, not a BAD amount", async () => {
+  const run = claimsRun("0.000044726051716064");
+  const f = providers(["ok", "ok", "ok"]);
+  const noCall = async (url, init) => {
+    if (HOSTS.includes(String(url)) && JSON.parse(init.body)[0].method === "eth_call") return new Response("{}", { status: 429 });
+    return f(url, init);
+  };
+  const got = await read("https://helper.test", noCall, "base", HOSTS);
+  assert.deepEqual(Object.keys(got.quiet), [`decimals of ${coin}`]);
+  const r = judge(got);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+  assert.equal(run.decimals[coin], 18);
 });

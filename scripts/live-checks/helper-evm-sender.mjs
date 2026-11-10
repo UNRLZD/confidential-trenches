@@ -35,16 +35,19 @@
 //     runs used; pool-review-3's pays it to the Sell's feeRecipient, the fee answer's fee_recipient).
 // After: helper
 //   node scripts/live-checks/helper-evm-sender.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2.
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
+//   fee is read through evm-pool-fee-epoch.mjs, and a pool with no fee to read has no plant sent).
 import "../net-window.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolSignSellAuthorization, evmPoolVenues, evmSellRouteOf } from "../../packages/kit/src/index.ts";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { recorder as runRecorder } from "./notes-per-pool-evm.mjs";
 import { poolRecordName } from "./pool-evm-deploy.mjs";
 import { check as runCheck, RPCS as RUN_RPCS } from "./pool-evm-testnet-run.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, its signatures and the digests
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -131,6 +134,7 @@ export function feeCollectors({ networks = NETWORKS, venues = evmPoolVenues(), d
 export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const want = Object.entries(records);
   const pools = run.pools ?? [];
   say(want.length > 0, `pools with a deploy record: ${show(want.map(([n]) => n))}`);
@@ -138,33 +142,40 @@ export function judge(run, { records = evmPoolRecords(), venues = evmPoolVenues(
   for (const p of pools) {
     const n = p.network;
     const f = p.reads.find((r) => r.asked === "fee");
-    say(f?.status === 200, `[${n} fee] GET /v1/pool/fee answers ${f?.status}`);
-    const b = json(f?.body ?? "");
-    const keys = b && typeof b === "object" && !Array.isArray(b) ? Object.keys(b) : [];
-    say(keys.length === FIELDS.length && FIELDS.every((k) => keys.includes(k)), `[${n} fee] fields: ${show(keys)}`);
-    say(b?.chain === "evm" && b?.network === n && b?.pool === p.pool, `[${n} fee] chain ${show(b?.chain)}, network ${show(b?.network)}, pool ${show(b?.pool)} (asked ${p.pool})`);
-    const v = Object.hasOwn(venues, n) ? venues[n] : undefined;
-    const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
-    // the sell sender: an address, or null where the helper holds no sell key (every sale then answers 503); where the
-    // kit pins one, exactly the pin, since the device sims each sale from it
-    const sender = b?.[SENDER_FIELD];
-    const isAddress = typeof sender === "string" && ADDRESS.test(sender);
-    say((sender === null || isAddress) && (pin === undefined || (isAddress && pin.toLowerCase() === sender)), `[${n} fee] ${SENDER_FIELD} ${show(sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
-    say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `[${n} fee] fee recipient ${show(b?.fee_recipient)}`);
-    // the fee collector: the kit's pin for the network (card helper-sender-fee-proof, review M1), which the helper is
-    // held to at its start; any other address would let a sale read as paid with no fee
-    const cpin = v !== undefined && Object.hasOwn(v, "feeCollector") ? v.feeCollector.toLowerCase() : undefined;
-    say(typeof b?.fee_collector === "string" && ADDRESS.test(b.fee_collector) && b.fee_collector !== b.pool && b.fee_collector !== sender && cpin !== undefined && b.fee_collector === cpin, `[${n} fee] fee collector ${show(b?.fee_collector)}, not the pool or the sell sender, ${cpin === undefined ? "but the kit pins none for this network" : `the kit's pin ${cpin}`}`);
-    say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % 60_000 === 0, `[${n} fee] epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
-    say(typeof b?.block === "string" && QUANTITY.test(b.block) && typeof b?.fee === "string" && DEC.test(b.fee) && b.fee !== "0" && b?.step === "10000000000000", `[${n} fee] block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
-    for (const [asked, status, code] of PLANTS) {
-      const r = p.reads.find((x) => x.asked === asked);
-      const e = json(r?.body ?? "");
-      say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${n} ${asked}] POST /v1/pool/evm/sell answers ${r?.status} ${r?.body?.slice(0, 120)} (want ${status} ${code})`);
+    if (noBlockYet(f)) {
+      // the chain made no block for over a minute: no fee to read, so no plant was sent
+      quiet = true;
+      lines.push(`QUIET [${n} fee] the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${f.status} index_behind)`);
+    } else {
+      say(f?.status === 200, `[${n} fee] GET /v1/pool/fee answers ${f?.status}`);
+      const b = json(f?.body ?? "");
+      const keys = b && typeof b === "object" && !Array.isArray(b) ? Object.keys(b) : [];
+      say(keys.length === FIELDS.length && FIELDS.every((k) => keys.includes(k)), `[${n} fee] fields: ${show(keys)}`);
+      say(b?.chain === "evm" && b?.network === n && b?.pool === p.pool, `[${n} fee] chain ${show(b?.chain)}, network ${show(b?.network)}, pool ${show(b?.pool)} (asked ${p.pool})`);
+      const v = Object.hasOwn(venues, n) ? venues[n] : undefined;
+      const pin = v !== undefined && Object.hasOwn(v, "sellSender") ? v.sellSender : undefined;
+      // the sell sender: an address, or null where the helper holds no sell key (every sale then answers 503); where the
+      // kit pins one, exactly the pin, since the device sims each sale from it
+      const sender = b?.[SENDER_FIELD];
+      const isAddress = typeof sender === "string" && ADDRESS.test(sender);
+      say((sender === null || isAddress) && (pin === undefined || (isAddress && pin.toLowerCase() === sender)), `[${n} fee] ${SENDER_FIELD} ${show(sender)}, ${pin === undefined ? "the kit pins none for this network" : `the kit's pin ${pin}`}`);
+      say(typeof b?.fee_recipient === "string" && ADDRESS.test(b.fee_recipient), `[${n} fee] fee recipient ${show(b?.fee_recipient)}`);
+      // the fee collector: the kit's pin for the network (card helper-sender-fee-proof, review M1), which the helper is
+      // held to at its start; any other address would let a sale read as paid with no fee
+      const cpin = v !== undefined && Object.hasOwn(v, "feeCollector") ? v.feeCollector.toLowerCase() : undefined;
+      say(typeof b?.fee_collector === "string" && ADDRESS.test(b.fee_collector) && b.fee_collector !== b.pool && b.fee_collector !== sender && cpin !== undefined && b.fee_collector === cpin, `[${n} fee] fee collector ${show(b?.fee_collector)}, not the pool or the sell sender, ${cpin === undefined ? "but the kit pins none for this network" : `the kit's pin ${cpin}`}`);
+      say(b?.epoch_ms === 60_000 && Number.isSafeInteger(b?.epoch_start_ms) && b.epoch_start_ms > 0 && b.epoch_start_ms % 60_000 === 0, `[${n} fee] epoch ${show(b?.epoch_ms)} ms from ${show(b?.epoch_start_ms)}`);
+      say(typeof b?.block === "string" && QUANTITY.test(b.block) && typeof b?.fee === "string" && DEC.test(b.fee) && b.fee !== "0" && b?.step === "10000000000000", `[${n} fee] block ${show(b?.block)}, fee ${show(b?.fee)} wei on its step ${show(b?.step)}`);
+      for (const [asked, status, code] of PLANTS) {
+        const r = p.reads.find((x) => x.asked === asked);
+        const e = json(r?.body ?? "");
+        say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${n} ${asked}] POST /v1/pool/evm/sell answers ${r?.status} ${r?.body?.slice(0, 120)} (want ${status} ${code})`);
+      }
     }
     for (const r of p.reads) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${n} ${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
   }
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 // ---- The planted sells ----
@@ -370,12 +381,22 @@ export async function read(base, fetchFn = fetch, records = evmPoolRecords()) {
     const reads = [];
     const get = async (asked, url, init = {}) => {
       const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });
-      reads.push({ asked, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) });
+      const read = { asked, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) };
+      reads.push(read);
+      return read;
     };
-    await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
+    // the fee for the epoch and, when the helper has no block in it yet, the one before (evm-pool-fee-epoch.mjs): both
+    // asks are recorded, the first as "fee_first"
+    const fee = await evmPoolFeeAsk((url) => get("fee", url), base, pool);
+    if (fee.first) fee.first.asked = "fee_first";
+    // no fee to read (no block in the epoch or the one before): no plant is sent
+    if (noBlockYet(fee.answer)) {
+      pools.push({ network, pool, reads });
+      continue;
+    }
     // the plants are built just before they are sent, so the deadlines are measured from now; each pays the fee
     // collector the fee answer names (none named: another address, so the judge fails on the fee answer)
-    const { plants } = plantsOf({ network, pool, feeRecipient: feeCollectorOf(reads[0].body) ?? OTHER_ADDRESS });
+    const { plants } = plantsOf({ network, pool, feeRecipient: feeCollectorOf(fee.answer.body) ?? OTHER_ADDRESS });
     for (const [asked] of PLANTS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(plants[asked]) });
     pools.push({ network, pool, reads });
   }
@@ -397,9 +418,9 @@ if (import.meta.main) {
     run.sells = runs.map((x) => ({ record: x.record, urls: RUN_RPCS[x.record.chain], log: x.rec.log }));
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     for (const l of [...r.lines, ...s.lines]) console.log(l);
-    const ok = r.ok && s.ok;
-    console.log(ok ? "PASS helper-evm-sender" : "FAIL helper-evm-sender");
-    process.exit(ok ? 0 : 1);
+    const verdict = s.ok ? r.verdict : "FAIL";
+    console.log(`${verdict} helper-evm-sender`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`helper-evm-sender: ${e.message}`);
     process.exit(2);
