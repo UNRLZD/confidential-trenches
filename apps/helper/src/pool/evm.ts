@@ -1058,9 +1058,10 @@ export function evmPoolSender(
    * binds. A read that failed answers its period's callers for EVM_FEE_MISS_MS (A-4).
    */
   const DIFFERENT = "the providers hold different blocks";
-  const feeOf = (epochStartMs: number): Promise<{ block: EvmBlock; fee: bigint } | null> => {
+  const feeOf = (epochStartMs: number, fresh = false): Promise<{ block: EvmBlock; fee: bigint } | null> => {
     const known = fees.get(epochStartMs);
-    if (known && (known.until === undefined || now() < known.until)) return known.p;
+    // `fresh` (the read ahead) reads again past a kept failure: a caller's failed read never costs it a try
+    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;
     fees.delete(epochStartMs);
     const p = (async () => {
       const seconds = BigInt(Math.ceil(epochStartMs / 1000));
@@ -1107,7 +1108,7 @@ export function evmPoolSender(
     let failed: unknown = null;
     for (;;) {
       try {
-        if ((await feeOf(epochStartMs)) !== null) return;
+        if ((await feeOf(epochStartMs, true)) !== null) return;
         failed = null; // the chain has no block in the period yet: a quiet period stays quiet (card evm-fee-quiet-epoch)
       } catch (e) {
         failed = e;
@@ -1116,6 +1117,8 @@ export function evmPoolSender(
       await sleep(EVM_FEE_WARM_EVERY_MS);
     }
     if (failed !== null) log(`evm ${cfg.network}: fee read ahead failed (read on demand): ${String((failed as Error | undefined)?.message ?? failed).slice(0, 1_200)}`);
+    // review of d190f62f (B-2): a window with no block in the period (the chain stalled, or every seat behind) says so once
+    else log(`evm ${cfg.network}: fee read ahead: no block in the period by second ${Math.floor((now() - epochStartMs) / 1000)} (read on demand)`);
   };
   // M374 (5): the requests each client holds open, the queue's wait included
   const held = heldPerClient(EVM_IN_FLIGHT_MAX);

@@ -126,7 +126,7 @@ test("every Robinhood operator but its own refuses a block's state from second 1
   assert.deepEqual(pending(), [E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS]);
 });
 
-test("a read ahead that fails is tried again inside the window; failing all of it, it writes one line and the request still reads on demand; a quiet period stays quiet with no line", async (t) => {
+test("a read ahead that fails is tried again inside the window; failing all of it, it writes one line and the request still reads on demand; a quiet period stays quiet, one line saying so", async (t) => {
   const at: { T: number; stalled?: number } = { T: E };
   let down = (T: number) => T < E + 3_000;
   const calls = chain(t, (_host, method, _age, T) => (method === "eth_call" && down(T) ? { status: 502, body: { code: -32603, message: "bad gateway" } } : null), at);
@@ -156,14 +156,17 @@ test("a read ahead that fails is tried again inside the window; failing all of i
   n = calls.length;
   assert.equal((await s.fee(at.T))?.fee, feeOf("robinhood").toString());
   assert.ok(calls.length > n, "read on demand");
-  // a quiet period: no block in it through the window, no line; the request then finds none as before (null)
+  // a quiet period: no block in it through the window, one line saying so (review of d190f62f, B-2); the request then
+  // finds none as before (null)
   down = () => false;
   at.stalled = E / 1000 - S - 1;
   s = sendersOf(ENV_RH, lines).get(RH)!;
   at.T = E + evm.EVM_FEE_WARM_DELAY_MS;
   const before = lines.length;
   await s.warm(E, sleep);
-  assert.equal(lines.slice(before).filter((l) => l.includes("read ahead")).length, 0);
+  const quiet = lines.slice(before).filter((l) => l.includes("read ahead"));
+  assert.equal(quiet.length, 1, lines.slice(before).join("\n"));
+  assert.match(quiet[0]!, /^evm robinhood: fee read ahead: no block in the period by second 9 \(read on demand\)$/);
   at.T = E + 20_000;
   assert.equal(await s.fee(at.T), null);
 });
@@ -214,4 +217,21 @@ test("the timer reads each period once: a timer that fires early runs no period 
   const n = calls.length;
   await s.warm(E, async (ms) => void (clock.T += ms));
   assert.equal(calls.length, n);
+});
+
+// a fee read that failed answers its period's callers for EVM_FEE_MISS_MS (review of d190f62f, A-4): the read ahead never
+// takes that kept failure for its own, so a request's failed read just before the period's read ahead costs it no try
+test("a request's read that failed half a second into the period is kept for callers, and the read ahead at second 1 still reads, at once", async (t) => {
+  const at = { T: E + 500 };
+  const calls = chain(t, (_host, method, _age, T) => (method === "eth_call" && T < E + 900 ? { status: 502, body: { code: -32603, message: "bad gateway" } } : null), at);
+  const s = sendersOf(ENV_RH, []).get(RH)!;
+  await assert.rejects(s.fee(at.T));
+  at.T = E + evm.EVM_FEE_WARM_DELAY_MS;
+  await assert.rejects(s.fee(at.T), "a caller at second 1 gets the kept failure");
+  const tries: number[] = [];
+  const n = calls.length;
+  await s.warm(E, async (ms) => void (tries.push(at.T), (at.T += ms)));
+  assert.deepEqual(tries, [], "read on the first try");
+  assert.ok(calls.length > n);
+  assert.equal((await s.fee(at.T))?.fee, feeOf("robinhood").toString());
 });
