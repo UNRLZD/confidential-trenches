@@ -307,6 +307,50 @@ test("a release that can never land (refused, or not landed on both RPCs) ends s
   assert.equal(a.pending, null);
 });
 
+// Card sol-settle-failed-is-not-unspent: the helper sends the release and answers 502, the release lands on W, and the
+// settle throws (a lister that refuses, a 429 past the retry, a stop) while both RPCs read the blockhash past. A settle
+// that throws says nothing of the chain: the part stays owed until a read proves the release did not land, so the op is
+// never stopped with the part left on its one-use W and nothing owed.
+test("the helper's 502 after the release left, the release landed, the settle throwing once: the send stays owed, never stopped; the next pass carries it to To", async () => {
+  const amount = 5_000_000n;
+  const planted = async (reads: number) => {
+    const wd = await world([30_000_000n]);
+    const send = wd.host.send;
+    wd.host.send = async (pool, tx) => {
+      await send(pool, tx);
+      throw new Error("pool send: HTTP 502");
+    };
+    const settle = wd.host.settle;
+    let settles = 0;
+    wd.host.settle = async (id, minSlots) => {
+      if (++settles === 1) throw new Error("restore: the lister listed 10 deposits and 2 releases, but rpc 0's pages hold 12 state and 10 label leaves");
+      return settle(id, minSlots);
+    };
+    const a = await runPoolWithdraw({ ...wd.host, reads }, ASK, TO, amount, COST);
+    return { wd, a, W: wd.binds[0]!.recipient, settles: () => settles };
+  };
+  // the run's one read: the settle throws, so the part is still owed after this pass
+  const { wd, a, W, settles } = await planted(1);
+  assert.equal(settles(), 1);
+  assert.equal(a.stage, "in_transit");
+  assert.ok(!wd.stages.includes("stopped"), `stages ${wd.stages.join(",")}`);
+  assert.ok(a.pending && a.pending.noteId === wd.ids[0] && a.pending.to === TO && a.pending.last === true);
+  assert.deepEqual(wd.pendings.at(-1), a.pending, "the op's last write still owes it");
+  assert.equal(wd.balance.get(W), amount + W_FEE, "the part on W");
+  assert.equal((await wd.ns.get(wd.ids[0]!))!.state, "RESERVED");
+  // the next pass (the state reads' finish) carries it
+  const done = await finishPoolOnward(wd.host, a.pending!);
+  assert.equal(done?.stage, "sent");
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), amount);
+  // two reads in the run: the settle works on the second, so the run itself carries it
+  const two = await planted(2);
+  assert.equal(two.settles(), 2);
+  assert.equal(two.a.stage, "sent");
+  assert.ok(!two.wd.stages.includes("stopped"));
+  assert.equal(two.wd.balance.get(TO), amount);
+});
+
 // LOW 1: the fee W pays is the network's for its very message; one that rose after the plan changes what reaches To
 // (kept in the op), never W's end at 0
 test("a fee that rose after the plan, within the Max fee drawn: W still ends at 0, To gets the balance less the real fee, and the op says what arrived", async () => {
@@ -464,7 +508,7 @@ for (const order of ["during op 2's send (another tab)", "after op 2"] as const)
     const wd = await world([30_000_000n], { landed: false, readBack: "none" });
     // the read-back runs out before both RPCs read the blockhash past: "sent", the part owed
     const [r0, r1] = wd.host.rpcs;
-    const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : rpc(m, p))) as SolanaRpc;
+    const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : m === "getEpochInfo" ? { blockHeight: 0, absoluteSlot: FINAL_SLOT } : rpc(m, p))) as SolanaRpc;
     const op1 = await runPoolWithdraw({ ...wd.host, rpcs: [young(r0), young(r1)] }, ASK, TO, 5_000_000n, COST);
     assert.equal(op1.stage, "in_transit");
     const n = (await wd.ns.list())[0]!;
@@ -580,7 +624,7 @@ test("an owed send that names no attempt or context is no attempt's: stopped, no
 // spent the note carries this attempt's context.
 const youngRpcs = (wd: Awaited<ReturnType<typeof world>>): PoolWithdrawHost["rpcs"] => {
   const [r0, r1] = wd.host.rpcs;
-  const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : rpc(m, p))) as SolanaRpc;
+  const young = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => (m === "getBlockHeight" ? 0 : m === "getEpochInfo" ? { blockHeight: 0, absoluteSlot: FINAL_SLOT } : rpc(m, p))) as SolanaRpc;
   return [young(r0), young(r1)];
 };
 
