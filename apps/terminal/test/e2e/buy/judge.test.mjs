@@ -1,67 +1,72 @@
 // node --test apps/terminal/test/e2e/buy/judge.test.mjs (card app-a2-e2e): the devnet buy and sell's verdict replayed
-// from recorded runs (run.answers.json), so the judge's rules are held without a browser or money.
-//   good: a green run as recorded (run.mjs --record): the buy and the sell filled, every tx read back on both RPCs;
-//   cut:  a real run with no money (run.mjs --plant free: signed in and U answered, then cut before the fund line: no
-//         funding, no deposit, no tap, no buy transaction), which must fail.
-// Planted from the good run: the sell cut, W still holding the coin after the sell, the two RPCs reading W apart, a buy
-// tx not read back on one RPC, a host past the devnet RPC and the helper.
+// from recorded runs (run.answers.json, each run.mjs --record on 10 Nov, the net log left out), so the judge's rules are
+// held without a browser or money. No recorded run has sold yet:
+//   free: --plant free: signed in, U answered, its deposit asked unfunded (not_funded), cut before the fund line: FAIL;
+//   run2: a paid run whose buy filled ("Filled 14.9s Final", every tx finalized on both RPCs), then the run's own
+//         token-account scan met the public devnet RPC's 429 before the sell: every buy line ok, FAIL on the sell;
+//   run3: a paid run whose buy landed (finalized on both RPCs) but the box read "Slow 89.9s" at the run's 90 s bound: FAIL
+//         on the buy's end.
+// Planted from run2: W read apart on the two RPCs, a buy tx not read back on one RPC, a host past the devnet RPC and the
+// helper.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { b58, DEVNET_GENESIS, devnetOnly, judge, rpc, unb58 } from "./run.mjs";
 
 const SRC = readFileSync(new URL("./run.mjs", import.meta.url), "utf8");
-
 const answers = JSON.parse(readFileSync(new URL("./run.answers.json", import.meta.url), "utf8"));
 const bad = (v) => v.lines.filter((l) => l.startsWith("BAD")).join("\n");
+const ok = (v, re) => v.lines.some((l) => l.startsWith("ok ") && re.test(l));
 const mut = (f) => {
-  const rec = structuredClone(answers.good);
+  const rec = structuredClone(answers.run2);
   f(rec);
   return judge(rec);
 };
+const BUY = [/signed in the no-PRF way/, /pool.address answered U/, /U funded \d+ lamports/, /pool.deposit answered/, /on the pool path: pool/, /Proof ready drawn/, /the buy tapped once: 1/, /one pool.buy sent: 1/, /the box ended "Filled/, /the buy's transactions sent: 1/, /every transaction read back ok/, /CSP violations: none/, /hosts reached/];
 
-test("the recorded green run passes: the buy and the sell filled", () => {
-  const v = judge(answers.good);
-  assert.ok(v.ok, bad(v));
-  assert.ok(answers.good.txs.some((t) => t.step === "buy") && answers.good.txs.some((t) => t.step === "sell"));
-});
-
-test("the recorded run with the buy cut fails, on the buy", () => {
-  const v = judge(answers.cut);
+test("the free run fails: no funding, no tap, no buy", () => {
+  const v = judge(answers.free);
   assert.equal(v.ok, false);
+  assert.match(bad(v), /pool.deposit answered \{"ok":false,"code":"not_funded"\}/);
   assert.match(bad(v), /the buy tapped once: 0/);
   assert.match(bad(v), /the buy's transactions sent: 0/);
 });
 
-test("the sell cut fails, on the sell", () => {
-  const v = mut((r) => {
-    r.sell = { taps: 0, asks: 0 };
-    r.txs = r.txs.filter((t) => t.step !== "sell");
-    r.heldAfterSell = r.heldAfterBuy;
-  });
+test("run 2: every buy line is ok, and the run fails on the sell it never reached", () => {
+  const v = judge(answers.run2);
+  for (const re of BUY) assert.ok(ok(v, re), `${re} not ok:\n${bad(v)}`);
   assert.equal(v.ok, false);
   assert.match(bad(v), /the sell tapped once: 0/);
   assert.match(bad(v), /the sell's transactions sent: 0/);
-  assert.match(bad(v), /after the sell W holds/);
 });
 
-test("W's coin read apart on the two RPCs, or none after the buy, fails", () => {
-  assert.equal(mut((r) => (r.heldAfterBuy = [r.heldAfterBuy[0], "1"])).ok, false);
-  assert.equal(mut((r) => (r.heldAfterBuy = ["0", "0"])).ok, false);
-  assert.equal(mut((r) => (r.heldAfterSell = ["0", "5"])).ok, false);
+test("run 3: a box that ends Slow fails on the buy's end", () => {
+  const v = judge(answers.run3);
+  assert.equal(v.ok, false);
+  assert.match(bad(v), /the box ended "Slow/);
+});
+
+test("W read apart on the two RPCs, or none after the buy, fails", () => {
+  assert.match(bad(mut((r) => (r.heldAfterBuy = ["977526752591", "1"]))), /the buy's wallet/);
+  assert.match(bad(mut((r) => (r.heldAfterBuy = ["0", "0"]))), /the buy's wallet/);
+  assert.equal(ok(mut((r) => (r.heldAfterBuy = ["977526752591", "977526752591"])), /the buy's wallet/), true);
+  assert.match(bad(mut((r) => (r.heldAfterSell = ["0", "5"]))), /after the sell W holds/);
 });
 
 test("a buy transaction that did not read back ok on both RPCs fails", () => {
-  const v = mut((r) => (r.txs.find((x) => x.step === "buy").reads[1] = { status: null, err: "none" }));
-  assert.equal(v.ok, false);
+  assert.match(bad(mut((r) => (r.txs.find((x) => x.step === "buy").reads[1] = { status: null, err: "none" }))), /every transaction read back ok/);
 });
 
 test("a host past the devnet RPC and the helper fails", () => {
-  assert.equal(mut((r) => (r.hosts = [...r.hosts, "api.mainnet-beta.solana.com"])).ok, false);
+  assert.match(bad(mut((r) => (r.hosts = [...r.hosts, "api.mainnet-beta.solana.com"]))), /hosts reached/);
+});
+
+test("a read of the run's own that failed is named at the end", () => {
+  assert.match(bad(mut((r) => (r.readErrors = ["after the buy: getTransaction: {\"code\":429}"]))), /the run's own reads: after the buy/);
 });
 
 test("base58 round-trips a signature and a key", () => {
-  for (const s of answers.good.txs.map((t) => t.sig).concat(answers.good.u, answers.good.w)) assert.equal(b58(unb58(s)), s);
+  for (const s of answers.run2.txs.map((t) => t.sig).concat(answers.run2.u, answers.run2.w)) assert.equal(b58(unb58(s)), s);
 });
 
 test("any cluster but devnet is refused: mainnet's genesis, a split pair, a missing read", () => {
