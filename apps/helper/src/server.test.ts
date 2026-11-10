@@ -389,7 +389,7 @@ test("POST /v1/withdraw: the body parsed and handed to the sender, its status an
   assert.match(main, /setInterval\(\(\) => void rpc\.probe\(\)\.catch\(\(\) => undefined\), KEYED_RETRY_MS\)\.unref\(\);/);
   assert.match(main, /server = start\(commit, port, proxy, rpc, watches, lists, fee, withdraw, token, bind, pools, evmLists, swaps, ready, senders\.held, \(\) => Object\.fromEntries\(\[\.\.\.slots\]\.map\(\(\[k, v\]\) => \[k, v\.state\(\)\]\)\), release, evmPools, evmTokens, held\);/);
   // card market-token-reads: the held tokens' read takes the Solana token page and the EVM chains' lists on the one GeckoTerminal budget
-  assert.match(main, /const held = createHeld\(\{ solana: token, lists: evmLists, gecko \}\);/);
+  assert.match(main, /const held = heldFrom\(token, evmLists, gecko\);/);
   // card market-data-evm-token: each served EVM chain's token page and holders, its rows the chain's lists, its info on
   // the one GeckoTerminal budget, its pool and decimals the swap reads' (and handed to start, above)
   assert.match(main, /const evmTokens: EvmTokens = Object\.fromEntries\(SERVED_EVM\.map\(\(c\) => \[c, createEvmToken\(c, \{ lists: evmLists\[c\]!, gecko, kept: swaps\[c\]\?\.kept \}\)\]\)\);/);
