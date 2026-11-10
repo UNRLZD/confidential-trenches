@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolFee, evmPoolGas, evmPoolVenues } from "@blindfill/kit";
 import { throttleOf } from "../limits/limits.ts";
 import * as evm from "./evm.ts";
 
@@ -155,4 +155,117 @@ test("a read tries its side's next provider only within its budget, never on the
   const r4 = evm.evmFailoverRpc([p("a", fail("HTTP 429")), p("b", fail("HTTP 502"))], { log: () => {} });
   await assert.rejects(r4("eth_blockNumber", []), (e: Error) => throttleOf(e, true) > 0);
   assert.ok(lines.every((l) => !l.includes(FAKE)), lines.join("\n"));
+});
+
+// card helper-evm-read-two-operators: a pool read needs two different operators that agree, taken from the network's
+// whole provider list (the kit's fee pair, the helper's keyed URLs, the kit's quote providers). On 10 Nov 04:2xZ the live
+// helper answered GET /v1/pool/fee for the Robinhood mainnet pool 503 upstream for about 40 s on end: its first side was
+// dRPC alone (robinhood.drpc.org and its three keyed lb.drpc.live seats), every seat refusing the same state, while
+// QuickNode sat on the other side unasked. Each test below plants an operator's answers by host.
+type Plant = { status: number; body: object } | { result: unknown } | null;
+/** Stubs fetch: every host answers a 1 s chain as `block` makes it, unless `plant` answers for it. */
+function chainStub(t: TestContext, plant: (host: string, method: string, params: unknown[]) => Plant): Call[] {
+  const calls: Call[] = [];
+  const real = globalThis.fetch;
+  const realNow = Date.now;
+  t.after(() => {
+    globalThis.fetch = real;
+    Date.now = realNow;
+  });
+  Date.now = () => NOW_MS;
+  globalThis.fetch = (async (u: string | URL, init?: RequestInit) => {
+    const host = new URL(String(u)).host;
+    const { id, method, params } = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    calls.push({ host, method, params });
+    const answer = (status: number, o: object) => new Response(JSON.stringify({ jsonrpc: "2.0", id, ...o }), { status, headers: { "content-type": "application/json" } });
+    const p = plant(host, method, params);
+    if (p !== null) return "result" in p ? answer(200, { result: p.result }) : answer(p.status, { error: p.body });
+    if (method === "eth_getBlockByNumber") return answer(200, { result: block(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))) });
+    if (method === "eth_call") {
+      const [{ to, data }] = params as [{ to: string; data: string }];
+      return answer(200, { result: word(to.toLowerCase() === PIN || to.toLowerCase() === BASE_PIN || to.toLowerCase() === SEPOLIA_PIN ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
+    }
+    if (method === "eth_chainId") return answer(200, { result: "0x1237" });
+    return answer(200, { error: { code: -32601, message: "no" } });
+  }) as typeof fetch;
+  return calls;
+}
+const BASE_PIN = evmPoolVenues().base.pool!.toLowerCase();
+const SEPOLIA_PIN = evmPoolVenues()["base-sepolia"].pool!.toLowerCase();
+const DRPC_HOSTS = new Set(["robinhood.drpc.org", "lb.drpc.live"]);
+const ENV3 = { ...ENV, ROBINHOOD_RPC_URL_DRPC_2: `https://lb.drpc.live/robinhood/${FAKE}2`, ROBINHOOD_RPC_URL_DRPC_3: `https://lb.drpc.live/robinhood/${FAKE}3` };
+const opFee = (network: string) => evmPoolFee({ gas: evmPoolGas(2), gasPrice: GWEI, chainFee: evmPoolChainFee(network, EVM_POOL_TX_BYTES, evmPoolChainFeeReads(network, evmPoolGas(2)).map((r) => (r.data === ARB_L1 ? 3n : 0n))) });
+const stateReads = (calls: Call[], host: string) => calls.filter((c) => c.host === host && c.method === "eth_call").length;
+const sendersOf = (env: Record<string, string>, lines: string[]) => evm.evmPoolSendersFromEnv(env, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l));
+
+test("every seat of one operator refuses the state at the epoch block's hash: the read goes on to another operator the other side has not used, and the fee is answered by two operators, Robinhood's own and QuickNode, each named", async (t) => {
+  const calls = chainStub(t, (host, method) => (DRPC_HOSTS.has(host) && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const f = await sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.ok(stateReads(calls, "rpc.mainnet.chain.robinhood.com") > 0 && calls.some((c) => c.host.endsWith("quiknode.pro") && c.method === "eth_call"), "Robinhood's own and QuickNode answered the state reads");
+  assert.deepEqual([...hashesOf(calls)], [block(FIRST).hash]);
+  assert.equal(lines.length, 2, lines.join("\n"));
+  for (const l of lines) {
+    assert.match(l, /^evm robinhood: eth_call 0x[0-9a-f]{8} .*failed at robinhood\.drpc\.org: HTTP 400: RPC error 27[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_1\): HTTP 400[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_2\): HTTP 400[^;]*; drpc\.live \(ROBINHOOD_RPC_URL_DRPC_3\): HTTP 400[^;]*; quiknode\.pro \(ROBINHOOD_RPC_URL_QUICKNODE\) answered$/);
+    assert.ok(!l.includes(FAKE), l);
+  }
+});
+
+test("one operator answers a block by number null (its node behind): the first-block search and the block's check go on to another operator, and the fee is answered", async (t) => {
+  const calls = chainStub(t, (host, method, params) => (DRPC_HOSTS.has(host) && method === "eth_getBlockByNumber" && params[0] !== "latest" ? { result: null } : null));
+  const lines: string[] = [];
+  const f = await sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, FEE.toString());
+  assert.equal(f?.block, `0x${FIRST.toString(16)}`);
+  assert.ok(calls.some((c) => c.host.endsWith("quiknode.pro") && c.method === "eth_getBlockByNumber"), "the block's check on the first side went on to QuickNode");
+  assert.ok(lines.length > 0 && lines.every((l) => /^evm robinhood: eth_getBlockByNumber failed at robinhood\.drpc\.org: [^;]*null[^;]*;.* answered$/.test(l)), lines.join("\n"));
+});
+
+test("two operators that both answered and differ on the block's hash are a refusal, never settled by a third that agrees with one", async (t) => {
+  // dRPC and QuickNode name one hash for every block, Robinhood's own another
+  const other = (n: number) => ({ ...block(n), hash: `0x${(n + 7).toString(16).padStart(64, "0")}` });
+  chainStub(t, (host, method, params) => (host === "rpc.mainnet.chain.robinhood.com" && method === "eth_getBlockByNumber" ? { result: other(params[0] === "latest" ? HEAD : Number(BigInt(params[0] as string))) } : null));
+  const lines: string[] = [];
+  await assert.rejects(sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1), (e: Error) => /different blocks/.test(e.message) && throttleOf(e) === 0);
+});
+
+test("two operators that both answered and differ on a state word at the block's hash are a refusal: dRPC refusing the state, QuickNode reads the depth 3 where Robinhood's own reads 2", async (t) => {
+  chainStub(t, (host, method, params) => {
+    if (DRPC_HOSTS.has(host) && method === "eth_call") return UNKNOWN_STATE;
+    const [c] = params as [{ data?: string }];
+    return host.endsWith("quiknode.pro") && method === "eth_call" && c?.data === DEPTH ? { result: word(3n) } : null;
+  });
+  await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => /differ on 0x4a2b75c8/.test(e.message) && throttleOf(e) === 0);
+});
+
+test("only one operator alive: every read is refused 503 upstream (no throttle), never answered on that operator's word alone", async (t) => {
+  const down = { status: 503, body: { code: -32603, message: "down" } };
+  const calls = chainStub(t, (host) => (host === "rpc.mainnet.chain.robinhood.com" ? null : down));
+  const lines: string[] = [];
+  await assert.rejects(sendersOf(ENV3, lines).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) === 0);
+  assert.equal(lines.length, 1, lines.join("\n"));
+  assert.match(lines[0]!, /^evm robinhood: fee upstream: /);
+  assert.ok(!lines[0]!.includes(FAKE), lines[0]);
+  assert.ok(!calls.some((c) => c.method === "eth_call"), "no state read once the block could not be read on two operators");
+});
+
+test("Base: a provider's -32000 'historical state … is not available' is that provider's miss, not the chain's answer: the side goes on to another operator", async (t) => {
+  const pruned = { status: 200, body: { code: -32000, message: "historical state 39472d03baeb94e12253378cd8b493da681edf67f51e92bf826e24fec1b0a137 is not available" } };
+  const calls = chainStub(t, (host, method) => (host === "base-rpc.publicnode.com" && method === "eth_call" ? pruned : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE: evmPoolVenues().base.pool!, POOL_EVM_SENDER_KEY_BASE: KEY, BASE_RPC_URL_DRPC_1: `https://lb.drpc.live/base/${FAKE}` };
+  const f = await sendersOf(env, lines).get(BASE_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base").toString());
+  assert.ok(stateReads(calls, "lb.drpc.live") > 0, "another operator answered the state reads");
+  assert.ok(lines.length > 0 && lines.every((l) => /failed at base-rpc\.publicnode\.com: RPC error -32000: historical state [0-9a-f]+ is not available.* answered$/.test(l)), lines.join("\n"));
+});
+
+test("a test network reads past its pair too: Base Sepolia's first provider refusing the state, the fee is answered by publicnode and Pocket", async (t) => {
+  const calls = chainStub(t, (host, method) => (host === "sepolia.base.org" && method === "eth_call" ? UNKNOWN_STATE : null));
+  const lines: string[] = [];
+  const env = { POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: KEY };
+  const f = await sendersOf(env, lines).get(SEPOLIA_PIN)!.fee(EPOCH + 1);
+  assert.equal(f?.fee, opFee("base-sepolia").toString());
+  assert.ok(stateReads(calls, "base-sepolia-rpc.publicnode.com") > 0 && stateReads(calls, "base-testnet.api.pocket.network") > 0, "publicnode and Pocket answered");
 });
