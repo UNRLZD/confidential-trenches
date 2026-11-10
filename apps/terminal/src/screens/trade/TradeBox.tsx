@@ -27,6 +27,7 @@ import {
   READY,
   setMatches,
   tap,
+  unavailable,
 } from "./model.ts";
 import type { Cents, Phase } from "./model.ts";
 import { EndLine, hasRunLabel, RunLabel, stateId } from "./States.tsx";
@@ -165,6 +166,8 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const max = onPool ? (pool?.tapMax ?? null) : maxText === null ? null : parseUsd(maxText);
   const askable = (c: Cents | null) => c !== null && (!onPool || poolBuyAsk(pools, chain, token, c, price, slippageBps).ok);
   const running = busy(phase);
+  // the pool cannot buy this token yet (Unavailable): Buy and the presets stay off on this token's page
+  const off = unavailable(phase);
 
   // the set preview for the amount in the box; a change asks again and the last numbers stay, dimmed, until it answers
   useEffect(() => {
@@ -214,7 +217,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const ready = on && moneyOn && kit.request !== null && max !== null && balance !== null;
 
   function buy(c: Cents) {
-    if (!ready || busy(phaseRef.current) || !amountOk(c, max, balance)) return;
+    if (!ready || busy(phaseRef.current) || unavailable(phaseRef.current) || !amountOk(c, max, balance)) return;
     let h;
     if (onPool) {
       // only an ask the box's own checks passed: a proof ready, at most one tap's spend, the device's price as it is at
@@ -238,7 +241,7 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   // buy() and its checks; signed out it opens the sign-in sheet. On Base and Robinhood the row is the chunk's one button
   // (presetsOf), off while its value is unknown (null).
   const presets = presetsOf(chain, pool);
-  const presetOff = (p: Cents | null) => !signedOut && (p === null || !ready || !presetOn(p, max, balance, running) || !askable(p));
+  const presetOff = (p: Cents | null) => !signedOut && (p === null || !ready || off || !presetOn(p, max, balance, running) || !askable(p));
   function tapPreset(p: Cents | null) {
     if (signedOut) return openSignin(true);
     if (p === null) return;
@@ -287,7 +290,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
   const est = (shown ?? last) ? `≈ ${fmtOut((shown ?? last)!.out)} ${symbol}` : "—";
   const now = src.now();
   const state = signedOut ? "S8.1" : (stateId(phase, now, "buy") ?? "S8.3");
-  const canBuy = ready && !running && amountOk(amount, max, balance) && askable(amount);
+  const canBuy = ready && !running && !unavailable(phase) && amountOk(amount, max, balance) && askable(amount);
 
   let label;
   if (signedOut) label = <W id="signInToTrade" />;
