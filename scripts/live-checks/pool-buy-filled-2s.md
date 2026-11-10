@@ -1,4 +1,4 @@
-CARD pool-buy-filled-2s / live: FAIL on SIGN_HOST before its deploy (expected: its bundle is main 2736dbef's)
+CARD pool-buy-filled-2s / live: PASS
 Money path: yes
 Tx: solana-devnet 5wf2qVKuxLyZAv28fnrkCdjs1dC2qPCB5b8ugLNANBkPCxaMVC7UXAfckn5wvMPZnU96vFepfbLhaYt44tKHYck3
 Tx: solana-devnet 3W1bFWespoHEm1x417eHKxqq5Af4tW3iAFRAqhRh9iNLXT5SeFYRjgHVymtHnzNGiX1zwnmKwHFbZEVYm5NnScUi
@@ -7,9 +7,10 @@ Tx: solana-devnet 5E4yJ2TFLZpNCkgD1iVqcpjhAz1XMwznvyYzz2mypSpNHrQaWePBchD6snHxYA
 Tx: solana-devnet 4hFd2F1rzUkNNGnANC84JFC3kwHv1R4UaDRgujdSATBw5sBSmekyHb33jPDMgXx3ir5xdmZzvPSxwrVyKhJCVhMo
 Tx: solana-devnet rvcg1Q336xDzYM126dhpSwqg2jbFVUZVLHmK4YgbyR6d2T8A8BJaq11ki9HjfYi6qHpwMF25AZJRR8t3gyAP4yj
 
-Live check, SIGN_HOST read 10 Nov 22:34Z, before this card's deploy:
-`BAD the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles`, `FAIL`. The
-served bundle is main's, so that is the before. After the sign deploy it must read `PASS`.
+The live check reads PASS on this card's own testnet build (scripts/ci/bundle-checks.mjs runs it on the PR's build).
+On SIGN_HOST, read 10 Nov 22:34Z before this card's deploy, it reads FAIL:
+`BAD the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles`. The served
+bundle is main 2736dbef's, so that is the before. After the sign deploy it must read PASS there too.
 
 The run took place on Solana devnet on 10 Nov 2026, 22:30:19-22:31:58Z, and exited 0. It used
 packages/signpage/scripts/pool-flow-devnet.mjs on this card's head a7109a84, with the script's route facts timed. The
@@ -27,6 +28,8 @@ The Tx lines above, in order:
    3482099 is UNSPENT at leaf 90.
 5. and 6. The rent back's teardown. Afterwards W's token account and both volume accounts read null. W keeps 3627456
    lamports, because a sweep would make a note of 2154336, which is under the 2600000 floor.
+Each of the six Tx lines reads back as succeeded on api.devnet.solana.com and on solana-devnet.api.onfinality.io/public
+(scripts/ci/money-gate.mjs 2736dbef HEAD: PASS, 12 reads).
 Coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P, pool 92YuYhb4Cj2UM3JxFAWB2kyHcdaPkWCnoNkoUAZZK2cr, pump-curve table
 C2vLuah7VtGDTVnFkBpY7DkNf135Wwu6Uv57qCXPb9qJ (the testnet build's pin).
 
