@@ -1,0 +1,284 @@
+{
+ "_note": {
+  "good": "read() on 10 Nov 2026 04:47:14Z for 180 s on the signing page's own pair (solana-rpc.publicnode.com and the helper's keyed route), on SCHEDULE: 26 reads (8.7 a minute), 4 prices held, never gone, each write held 1.0 to 1.6 s after its posted slot's block time; SIGN_HOST served release-110's /app.js (from before this card)",
+  "bad": "the same 180 s from the same machine, read() with BEFORE (the page's schedule before this card, every 15 s): 12 reads, the writes held 10.5, 7.4 and 14.8 s after landing"
+ },
+ "good": {
+  "at": "2026-11-10T04:47:14.292Z",
+  "rpcs": [
+   "https://solana-rpc.publicnode.com",
+   "https://ct-api.unrealized.trade/v1/rpc/solana"
+  ],
+  "run": {
+   "startMs": 1794286034293,
+   "endMs": 1794286214326,
+   "reads": [
+    {
+     "startMs": 1794286034293,
+     "ms": 673,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286049968,
+     "ms": 681,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286065649,
+     "ms": 697,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286081348,
+     "ms": 609,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286082959,
+     "ms": 204,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286084165,
+     "ms": 201,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286085366,
+     "ms": 212,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286086580,
+     "ms": 202,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286087783,
+     "ms": 204,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286102987,
+     "ms": 601,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286118590,
+     "ms": 584,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286134002,
+     "ms": 591,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286135595,
+     "ms": 216,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286136811,
+     "ms": 212,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286138025,
+     "ms": 208,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286153233,
+     "ms": 690,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286168924,
+     "ms": 585,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286184509,
+     "ms": 583,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286186094,
+     "ms": 219,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286187313,
+     "ms": 209,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286188524,
+     "ms": 207,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286189732,
+     "ms": 203,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286190937,
+     "ms": 207,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286192145,
+     "ms": 206,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286193351,
+     "ms": 230,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286208591,
+     "ms": 581,
+     "kind": "good"
+    }
+   ],
+   "held": [
+    {
+     "publishedS": 1794286032,
+     "at": "467591243",
+     "heldMs": 1794286034966,
+     "blockTimeS": 1794286033
+    },
+    {
+     "publishedS": 1794286084,
+     "at": "467591494",
+     "heldMs": 1794286087987,
+     "blockTimeS": 1794286087
+    },
+    {
+     "publishedS": 1794286136,
+     "at": "467591733",
+     "heldMs": 1794286138233,
+     "blockTimeS": 1794286137
+    },
+    {
+     "publishedS": 1794286190,
+     "at": "467591991",
+     "heldMs": 1794286193581,
+     "blockTimeS": 1794286192
+    }
+   ],
+   "gone": []
+  },
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+  }
+ },
+ "bad": {
+  "at": "2026-11-10T04:47:14.292Z",
+  "rpcs": [
+   "https://solana-rpc.publicnode.com",
+   "https://ct-api.unrealized.trade/v1/rpc/solana"
+  ],
+  "run": {
+   "startMs": 1794286034293,
+   "endMs": 1794286214331,
+   "reads": [
+    {
+     "startMs": 1794286034293,
+     "ms": 697,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286049990,
+     "ms": 658,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286065648,
+     "ms": 698,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286081348,
+     "ms": 605,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286096954,
+     "ms": 582,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286112537,
+     "ms": 616,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286128153,
+     "ms": 597,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286143751,
+     "ms": 607,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286159360,
+     "ms": 626,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286174988,
+     "ms": 592,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286190581,
+     "ms": 592,
+     "kind": "good"
+    },
+    {
+     "startMs": 1794286206173,
+     "ms": 582,
+     "kind": "good"
+    }
+   ],
+   "held": [
+    {
+     "publishedS": 1794286032,
+     "at": "467591243",
+     "heldMs": 1794286034990,
+     "blockTimeS": 1794286033
+    },
+    {
+     "publishedS": 1794286084,
+     "at": "467591494",
+     "heldMs": 1794286097536,
+     "blockTimeS": 1794286087
+    },
+    {
+     "publishedS": 1794286136,
+     "at": "467591733",
+     "heldMs": 1794286144358,
+     "blockTimeS": 1794286137
+    },
+    {
+     "publishedS": 1794286190,
+     "at": "467591991",
+     "heldMs": 1794286206755,
+     "blockTimeS": 1794286192
+    }
+   ],
+   "gone": []
+  },
+  "sign": {
+   "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+  }
+ }
+}
