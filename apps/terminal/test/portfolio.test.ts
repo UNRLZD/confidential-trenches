@@ -413,7 +413,7 @@ test("one balance: the vault alone, then the vault and one pool", () => {
 });
 
 test("one balance: a pool with no fresh price has no dollar part and stays out of Cash; none is made up", () => {
-  // Solana's feed bound is 60 s: a read 120 s old is past it on this device's clock
+  // a read 120 s old is past Solana's feed bound (the kit's POOL_USD_FEEDS) on this device's clock
   const s = { ...FOUR, wallets: [], pools: [{ chain: "solana" as const, asset: "SOL" as const, balance: "12.5", price: PX(150, 120) }, { chain: "base" as const, asset: "ETH" as const, balance: "0.25" }] };
   const t = portfolio(snap(s), data(), NOW).totals!;
   assert.equal(t.cash, 7318n);
