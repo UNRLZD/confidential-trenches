@@ -629,12 +629,14 @@ async function startOnce(env: Record<string, string>, boundMs: number): Promise<
   return out;
 }
 
-test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start with exit 2 naming that host, and /v1/health never says ready before it", async (t) => {
-  // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers state reads only for the last
-  // 15 s, and each a second late, so the helper is up and answering its health while the check runs
+// card helper-evm-ready-holds-a-fee: the start's check reads the seat list, and a state one operator lacks is asked again
+// for up to 90 s (pool/evm-failover.test.ts (3)); an answer that two operators give differently is refused at once
+test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently stops the start with exit 2 naming the read, and /v1/health never says ready before it", async (t) => {
+  // two JSON-RPC nodes on loopback, a block every 2 s up to now; the second answers every state read with another word,
+  // each a second late, so the helper is up and answering its health while the check runs
   const g = BigInt(Math.floor(Date.now() / 1000)) - 2_000n;
   // two loopback addresses: an env pair must be two operators (fold B), and an IP host is its address
-  const nodes = [0, 15].map((keepS) =>
+  const nodes = [2, 3].map((word) =>
     createServer((q, r) => {
       let body = "";
       q.on("data", (d) => (body += d)).on("end", () => {
@@ -643,12 +645,13 @@ test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start 
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(g + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         const answer = (out: object) => r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, ...out }));
         if (method === "eth_getBlockByNumber") return answer({ result: block(params[0] === "latest" ? latest : BigInt(params[0] as string)) });
+        if (method === "eth_chainId") return answer({ result: "0x14a34" }); // Base Sepolia, the kit's pin
         if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
-        const at = BigInt((params[1] as { blockHash: string }).blockHash);
-        if (keepS === 0) return answer({ result: `0x${"0".repeat(63)}2` });
-        setTimeout(() => answer(g + 2n * at < BigInt(Math.floor(Date.now() / 1000)) - 15n ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` }), 1_000);
+        const out = { result: `0x${"0".repeat(63)}${word}` };
+        if (word === 2) return answer(out);
+        setTimeout(() => answer(out), 1_000);
       });
-    }).listen(0, keepS === 0 ? "::1" : "127.0.0.1"),
+    }).listen(0, word === 2 ? "::1" : "127.0.0.1"),
   );
   t.after(() => nodes.forEach((s) => (s.closeAllConnections(), s.close())));
   await Promise.all(nodes.map((s) => new Promise((ok) => (s.listening ? ok(null) : s.once("listening", ok)))));
@@ -656,8 +659,12 @@ test("MEDIUM-1 an EVM pool whose second RPC keeps 15 s of state stops the start 
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
   const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
-  assert.match(r.err, new RegExp(`helper: POOL_EVM_RPCS_BASE_SEPOLIA: ${new URL(urls[1]!).host.replace(/\./g, "\\.")}: no answer to 0x[0-9a-f]{8} .*historical state`));
-  assert.ok(!r.err.includes(new URL(urls[0]!).host), "the first provider answered");
+  const m = /helper: POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block \d+, (\d+) s old \(a proof's fee is read up to 600 s back\), 1 try over (\d+) s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: \[::1\]:\d+ answers 0x0{63}2, 127\.0\.0\.1:\d+ 0x0{63}3/.exec(r.err);
+  assert.ok(m !== null, r.err);
+  // the age is the helper's real clock against the nodes' block times, read at the refusal: the first block at most
+  // 600 s back when the search ran (blocks 2 s apart, a second's rounding), aged by the try since (its "over" seconds)
+  const [age, over] = [Number(m[1]), Number(m[2])];
+  assert.ok(age >= 600 - 3 && age <= 600 + over + 1, `${age} s old after ${over} s`);
   assert.ok(!r.err.includes(key.slice(2)), "the key is never printed");
   assert.ok(r.readies.length > 0, "the helper answered its health while the check ran");
   assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);

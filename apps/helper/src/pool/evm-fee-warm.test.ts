@@ -58,6 +58,8 @@ function chain(t: TestContext, refuse: Refuse, at: { T: number; stalled?: number
       const [{ to, data }] = params as [{ to: string; data: string }];
       return answer(200, { result: word(to.toLowerCase() === RH || to.toLowerCase() === BASE ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
     }
+    // each chain's id, the kit's pin (Base 8453, Robinhood 4663)
+    if (method === "eth_chainId") return answer(200, { result: host.includes("base") ? "0x2105" : "0x1237" });
     return answer(200, { error: { code: -32601, message: "no" } });
   }) as typeof fetch;
   return calls;
@@ -234,4 +236,133 @@ test("a request's read that failed half a second into the period is kept for cal
   assert.deepEqual(tries, [], "read on the first try");
   assert.ok(calls.length > n);
   assert.equal((await s.fee(at.T))?.fee, feeOf("robinhood").toString());
+});
+
+// card helper-evm-ready-holds-a-fee: a new helper says ready only once every pool's fee for the period it starts in, or
+// the next one's, is in memory, so a deploy's old helper serves until then. The chain: dRPC refuses every state of one
+// period's blocks (as it did for whole periods, 3 of 7 read 10 Nov), the public operators but Robinhood's own keep 12 s,
+// Robinhood's own keeps all. A start 30 s into that period passes the start's state check (a proof's life back, two
+// operators: dRPC and Robinhood's own), but the period's fee has one operator left.
+const GONE: Refuse = (host, method, ageS, T) => {
+  if (method !== "eth_call" || host === OWN) return null;
+  const blockS = T / 1000 - ageS;
+  if (host === "robinhood.drpc.org") return blockS >= E / 1000 && blockS < E / 1000 + 60 ? { status: 400, body: { code: 27, message: "Unknown state. First available state is 1" } } : null;
+  return host.includes("robinhood") && ageS >= 12 ? PRUNED(ageS) : null;
+};
+
+test("(2) a start 30 s into a period whose fee's state is gone says ready at the next period's read, not before: the period's fee is never in memory, the next one's is, read once", async (t) => {
+  const at = { T: E + 30_000 };
+  const calls = chain(t, GONE, at);
+  const lines: string[] = [];
+  const s = sendersOf(ENV_RH, lines).get(RH)!;
+  const waits: number[] = [];
+  let readyAt: number | null = null;
+  await s.ready(async (ms) => {
+    assert.equal(readyAt, null);
+    waits.push(ms);
+    at.T += ms;
+  }).then(() => void (readyAt = at.T));
+  // no wait in the start's state check; one wait, to the next period's read at its second 1, and ready there
+  assert.deepEqual(waits, [31_000]);
+  assert.equal(readyAt, E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS);
+  assert.deepEqual(lines.filter((l) => l.includes("read ahead")).map((l) => l.slice(0, 48)), ["evm robinhood: fee read ahead failed (read on de"]);
+  // the next period's fee answers from memory all period; the timer's warm of it reads nothing more (one read a period)
+  const n = calls.length;
+  await s.warm(E + 60_000);
+  for (const sec of [1, 30, 59]) assert.equal((await s.fee(E + 60_000 + sec * 1000))?.fee, feeOf("robinhood").toString(), `second ${sec}`);
+  assert.equal(calls.length, n);
+});
+
+test("(2b) the start's wait for the period's fee waits on the timer's read of it, never a second read: one read ahead, one line, then the next period's", async (t) => {
+  const at = { T: E + evm.EVM_FEE_WARM_DELAY_MS };
+  // every operator but Robinhood's own refuses the state of this period's blocks, all through its read-ahead window
+  const calls = chain(t, (host, method, ageS, T) => (method === "eth_call" && host !== OWN && T / 1000 - ageS >= E / 1000 && T / 1000 - ageS < E / 1000 + 60 ? PRUNED(ageS) : null), at);
+  const lines: string[] = [];
+  const s = sendersOf(ENV_RH, lines).get(RH)!;
+  const sleep = async (ms: number) => void (at.T += ms);
+  // the timer's read ahead of the period, and the start's check beside it
+  const timer = s.warm(E, sleep);
+  await s.ready(sleep);
+  await timer;
+  assert.equal(lines.filter((l) => l.includes("read ahead failed")).length, 1, lines.join("\n"));
+  assert.equal((await s.fee(at.T))?.epoch_start_ms, E + 60_000);
+  assert.ok(calls.length > 0);
+});
+
+test("(4) /v1/health's ready stays false while any pool has no fee for the period the start is in or the next: Base's fee read at once, Robinhood's only at the next period's read, ready at that read with both held", async (t) => {
+  const S = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, GONE, at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const done: string[] = [];
+  const pools = new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep).then(() => void done.push(s.network)) }]));
+  const refused: string[] = [];
+  const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), pools, (e: Error) => void refused.push(e.message)));
+  for (let i = 0; i < 10_000 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
+  // Base holds its fee at once, Robinhood none: both wait for the next period (review P3-2: ready only at a moment every
+  // pool holds the running period's fee)
+  assert.deepEqual([done, pending.map((p) => p.ms)], [[], [31_000, 31_000]], "both waiting for the next period");
+  assert.equal(gate.ready(), false);
+  at.T += 31_000;
+  for (const w of pending.splice(0)) w.go();
+  await gate.warmed;
+  assert.equal(gate.ready(), true);
+  assert.deepEqual([done.sort(), refused, at.T], [["base", "robinhood"], [], E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS]);
+});
+
+test("the start's waits, a period and the read ahead's window fit under the deploy's wait for ready, with room for the reads: redeploy.sh's REDEPLOY_READY_S default and compose's start_period", async () => {
+  const { readFileSync } = await import("node:fs");
+  const deploy = new URL("../../deploy/", import.meta.url);
+  const wait = Number(/REDEPLOY_READY_S:-(\d+)/.exec(readFileSync(new URL("redeploy.sh", deploy), "utf8"))?.[1]);
+  const start = Number(/start_period: (\d+)s/.exec(readFileSync(new URL("compose.yaml", deploy), "utf8"))?.[1]);
+  const ours = evm.EVM_READY_MISS_MS + fee.POOL_EPOCH_MS + evm.EVM_FEE_WARM_WINDOW_MS;
+  assert.equal(ours, 160_000);
+  for (const bound of [wait, start]) assert.ok(Number.isInteger(bound) && bound * 1000 - ours >= 120_000, `${bound} s`);
+});
+
+test("(4b) review P3-2: Base's fee read in the start's period, Robinhood's only in the next, and Base's providers down by then: never ready while Base holds no fee for the running period", async (t) => {
+  const S = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, (host, method, ageS, T) => {
+    if (host.includes("base")) return T >= E + 60_000 ? { status: 502, body: { code: -32603, message: "bad gateway" } } : null;
+    return GONE(host, method, ageS, T);
+  }, at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep) }])), () => {}));
+  // three periods on: each wait the test lets go moves the clock to its end
+  for (let k = 0; k < 40 && at.T < E + 240_000; k++) {
+    for (let i = 0; i < 10_000 && pending.length === 0 && !gate.ready(); i++) await new Promise((r) => setImmediate(r));
+    assert.equal(gate.ready(), false, `ready at second ${(at.T - E) / 1000}, Base holding no fee for that period`);
+    const w = pending.shift()!;
+    at.T += w.ms;
+    w.go();
+  }
+  assert.ok(at.T >= E + 240_000);
+  assert.deepEqual([await senders.get(RH)!.held(E + 60_000), await senders.get(BASE)!.held(E + 60_000)], [true, false], "Robinhood holds the next period's fee, Base none");
+  // and while the check runs, the pool routes answer the coded 503 (review P3-5), never a read
+  // both checks passed: each pool's routes read as they do after a start (Base's fee read fails: the route's 503 upstream)
+  await assert.rejects(senders.get(BASE)!.fee(at.T), /HTTP 502/);
+});
+
+test("review of f86e1c27 P3-1: Robinhood whole, Base's fee's state unreadable: Robinhood's routes serve once its own check passed, Base's answer the coded 503, and ready stays false", async (t) => {
+  const S2 = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, (host, method) => (host.includes("base") && method === "eth_call" ? { status: 200, body: { code: -32000, message: "missing trie node" } } : null), at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const gate = S2.readyGate(Promise.resolve(), S2.poolsChecked(new Map(), new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep) }])), () => {}));
+  // Base's first wait between tries, Robinhood's check passed and waiting on Base's fee
+  for (let i = 0; i < 10_000 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(gate.ready(), false);
+  assert.equal((await senders.get(RH)!.fee(at.T))?.fee, feeOf("robinhood").toString(), "Robinhood's fee route serves");
+  assert.notDeepEqual((await senders.get(RH)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } }, "Robinhood's send route serves");
+  await assert.rejects(senders.get(BASE)!.fee(at.T), /the start's check has not passed/);
+  assert.deepEqual((await senders.get(BASE)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  assert.deepEqual((await senders.get(BASE)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  assert.notDeepEqual((await senders.get(RH)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
 });

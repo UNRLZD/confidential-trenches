@@ -2134,7 +2134,7 @@ test("one operator's receipt on both sides, at two reads, never clears a charge:
       },
     };
     let clock = NOW;
-    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1, readyProviders: [ra, rb] }, pair, () => clock);
+    const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, pair, () => clock);
     let sent = 0;
     let last: Awaited<ReturnType<typeof s.sell>> | undefined;
     for (let i = 0; i < 60 && last?.status !== 429; i++) {
@@ -2174,7 +2174,7 @@ test("a sale's first receipt from one operator, then two other operators' provin
     },
   };
   let clock = NOW;
-  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1, readyProviders: [ra, rb] }, pair, () => clock);
+  const s = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY, sellKey: SELL_KEY, feeRecipient: FEE_TO, feeCollector: COLLECTOR, receiptPollMs: 1 }, pair, () => clock);
   let sent = 0;
   for (let i = 0; i < 60; i++) {
     const r = await s.sell(freshBody(`W-newest-${i}`, { sell: { token: `0x${(0xe200 + i).toString(16).padStart(40, "0")}` } }), "203.0.113.79");
