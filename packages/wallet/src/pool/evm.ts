@@ -1688,13 +1688,19 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
    * every root of its leaves has the same time at any later block: the trees, their roots and the cut are the anchor's.
    * In that order: the newest block first, then the anchor's height (a reorg after it is a retry), then the times.
    */
-  async function timesAt(anchor: EvmBlock, signal?: AbortSignal): Promise<string> {
+  async function timesAt(anchor: EvmBlock, signal?: AbortSignal): Promise<EvmBlock> {
     const top = await anchorAt(EVM_NEWEST_TAG, signal);
-    if (top.hash === anchor.hash) return anchor.hash;
+    if (top.hash === anchor.hash) return anchor;
     if (top.number < anchor.number) return lag(`the newest agreed block ${top.number} is below the anchor ${anchor.number}`);
-    const now = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(anchor.number), `rpc ${k} block ${anchor.number}`, sig, sleep), signal);
-    if (now.some((b) => b === null || b.hash !== anchor.hash)) lag(`block ${anchor.number} moved under the read (a reorg)`);
-    return top.hash;
+    await heights([anchor], "the read", signal);
+    return top;
+  }
+  /** Each block still at its height on both RPCs, else a retry (a reorg, or a seat on another fork). */
+  async function heights(blocks: readonly EvmBlock[], what: string, signal?: AbortSignal): Promise<void> {
+    for (const b of blocks) {
+      const now = await both(rpcs, (rpc, k, sig) => readBlock(rpc, tag(b.number), `rpc ${k} block ${b.number}`, sig, sleep), signal);
+      if (now.some((x) => x === null || x.hash !== b.hash)) lag(`block ${b.number} moved under ${what} (a reorg)`);
+    }
   }
 
   async function cutOf(events: Ev[], prefix: bigint[], beforeMs: bigint, h: string, signal?: AbortSignal): Promise<number> {
@@ -1717,7 +1723,8 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         if (r.anchor.timestamp * 1000n < beforeMs) lag(`the anchor ${r.anchor.number} (${r.anchor.timestamp * 1000n} ms) has not reached ${beforeMs}`);
         // a root's time is read again each call: a reorg may make the same leaves' roots in another block
         rootTimes.clear();
-        const h = await timesAt(r.anchor, signal);
+        const top = await timesAt(r.anchor, signal);
+        const h = top.hash;
         const prefix: bigint[] = [];
         const n = await cutOf(r.events, prefix, beforeMs, h, signal);
         const cut = r.events.slice(0, n);
@@ -1732,6 +1739,10 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
         const lt = await agreed(VIEWS.labelRootTimes + hex(word(labelTree.root!)), h, "labelRootTimes(root)", signal);
         const labelAt = cut.lastIndexOf(lastLabel) + 1;
         if (lt === 0n || lt !== (labelAt === n ? st : await leafTime(r.events, prefix, labelAt, h, signal))) throw new Error(`the label root built from the cut is not the pool's root of block ${lastLabel.block}`);
+        // the times were the anchor's chain's only if the block they were read at and the anchor both still hold their
+        // heights on both RPCs once they are read (review of 7fbf2af3, P2-1: a newest block named on a fork that lacks
+        // the anchor gives that fork's times, so another cut); a change is a retry
+        if (top.hash !== r.anchor.hash) await heights([top, r.anchor], "the root times", signal);
         return { stateTree, labelTree, stateRoot: stateTree.root!, labelRoot: labelTree.root! };
       }, sleep, signal));
     },
@@ -1756,6 +1767,34 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
       return serial(() => (hash === undefined ? evmRetryLag(once, sleep, signal) : once()));
     },
   };
+}
+
+/**
+ * The period's chain fee at its first block, its state reads first and with the fewest (card
+ * evm-device-reads-need-no-old-state; review of 7fbf2af3, P2-2): a keyless operator keeps a block's state seconds
+ * (robinhood-rpc.publicnode.com answered 5 of 5 fee reads under 10 s back and refused 12 of 12 at 10 s and more, read
+ * 2026-11-10 23:21-23:37Z). A chain whose fee reads do not depend on the depth (Robinhood: ArbGasInfo's L1 base fee
+ * estimate) reads the fee at once and leaves the depth to the caller (null); one whose do (Base: getOperatorFee of
+ * G(depth)) reads the pool's currentTreeSize() there on two operators of the list, then the fee at that depth. `feeAtMs`
+ * is when the fee's answers were in (Date.now()), for the live check's age bound.
+ */
+export async function evmPeriodChainFee(feeRpcs: EvmTwoOperators<EvmRpc>, network: EvmNetwork, pool: string, block: EvmBlock, signal?: AbortSignal, sleep: Sleep = wait): Promise<{ depth: number | null; chainFee: bigint; feeAtMs: number }> {
+  // whether the reads move with the depth: the shallowest tree's and the deepest's (32, the kit's EVM_POOL_MAX_DEPTH)
+  const flat = JSON.stringify(evmPoolChainFeeReads(network, evmPoolGas(0))) === JSON.stringify(evmPoolChainFeeReads(network, evmPoolGas(32)));
+  let depth: number | null = null;
+  if (!flat) {
+    let size: bigint;
+    try {
+      [{ value: size }] = await feeRpcs.read(`the pool's size at block ${block.number} (${block.hash})`, (rpc, sig) => view(rpc, pool, VIEWS.currentTreeSize, block.hash, `fee rpc ${new URL(rpc.url!).host} currentTreeSize()`, sig, sleep), (x, y) => x === y, signal);
+    } catch (e) {
+      if (e instanceof EvmOperatorsUnanswered) throw e.errors.length > 0 && e.errors.every((y) => y instanceof EvmLagError) ? new EvmLagError(e.message) : e;
+      throw e;
+    }
+    if (size >= 1n << 32n) throw new Error(`the pool's size at block ${block.number}: ${size}, past any tree it holds`);
+    depth = depthOf(Number(size));
+  }
+  const chainFee = await evmBindChainFee(feeRpcs, network, block, depth ?? 0, signal, sleep);
+  return { depth, chainFee, feeAtMs: Date.now() };
 }
 
 /**
@@ -1924,18 +1963,25 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   const feeAt = (epochStartMs: bigint, signal?: AbortSignal) =>
     evmRetryLag(async () => {
       const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
-      // the depth on the epoch block's own chain: depthAt refuses (a retry) when that block is no longer at its height
-      const depth = await sync.depthAt(block.number, signal, block.hash);
       // held for this block, by its hash (a reorg that replaced the block is another block) and its depth (Base's
-      // operator fee is of G(depth)); both read again on every bind, from headers and logs, never from state
+      // operator fee is of G(depth)): the depth on the block's own chain read again from the pool's logs (depthAt
+      // refuses, a retry, when that block is no longer at its height), never from state
       const h = heldFees.get(epochStartMs);
-      if (h !== undefined && h.hash === block.hash && h.depth === depth) return { block, depth, chainFee: h.chainFee };
-      // the chain fee there (the L1 data fee, and Base's operator fee), two operators agreeing at its hash
-      const chainFee = await evmBindChainFee(feeRpcs, a.pin.network, block, depth, signal, sleep);
-      heldFees.set(epochStartMs, { hash: block.hash, depth, chainFee });
+      if (h !== undefined && h.hash === block.hash) {
+        const depth = await sync.depthAt(block.number, signal, block.hash);
+        if (h.depth === depth) return { block, depth, chainFee: h.chainFee };
+      }
+      // the period's fee read while its block is fresh: its state reads straight after the block (review of 7fbf2af3,
+      // P2-2), then the depth from the logs, which must be the one the state gave
+      const { depth, chainFee } = await evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, signal, sleep);
+      const logs = await sync.depthAt(block.number, signal, block.hash);
+      if (depth !== null && depth !== logs) throw new Error(`the tree depth at block ${block.number}: ${depth} by the pool's size there on two operators, ${logs} by its logs`);
+      // what two operators agreed on at the block's hash is held for the period: a lie two operators agree on lasts the
+      // period too, the two-operator limit of every read here (evmTwoOperators), where before it lasted one bind
+      heldFees.set(epochStartMs, { hash: block.hash, depth: logs, chainFee });
       const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
       for (const e of heldFees.keys()) if (e < newest - EVM_EPOCH_MS) heldFees.delete(e);
-      return { block, depth, chainFee };
+      return { block, depth: logs, chainFee };
     }, sleep, signal);
   return {
     async holdFee(epochStartMs, signal) {

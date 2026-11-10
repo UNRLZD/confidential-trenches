@@ -300,10 +300,55 @@ test("trees after a long paging read the root times at a fresh block, the anchor
   const times = last.filter(([x]) => x.includes(sel("stateRootTimes(uint256)")));
   assert.ok(times.length > 0);
   const t0 = times[0]![1];
-  const anchorCheck = last.filter(([x, i]) => i < t0 && x.startsWith("eth_getBlockByNumber") && !x.includes('"latest"') && !x.includes('"finalized"')).at(-1)!;
-  const newest = last.filter(([x, i]) => i < anchorCheck[1] && x.includes('"latest"')).at(-1)!;
+  const anchorCheck = last.filter(([x, i]) => i < t0 && x.startsWith("eth_getBlockByNumber") && x.includes(`"${q(100)}"`)).at(-1)!;
+  const newest = last.filter(([x, i]) => i < t0 && x.includes('"latest"')).at(-1)!;
   assert.ok(newest[1] < anchorCheck[1] && anchorCheck[1] < t0, "F, then the anchor's canonicity, then the times");
   assert.ok(times.every(([x]) => !x.includes(c.hashOf(100))), "no root time at the old anchor's hash");
+});
+
+// review of 7fbf2af3, P2-1: both seats answer the round on chain A (its third deposit in block 96, the anchor A100), then
+// name fork B's block 105 (B from 95, the deposit in 98) as the newest, then hold A100 at height 100 again: the times at
+// B105 are fork B's, so the cut before block 97 would be 2 where chain A's is 3. Once the times are read, the newest
+// block's height and the anchor's are read again on both seats: a change is a retry, then chain A's cut.
+test("trees: a newest block on a fork that lacks the anchor is a retry, never the fork's cut (review P2-1)", async () => {
+  const A = chain([...deps(PP, [10, 12, 96])], 100, 90);
+  const B: Chain = { ...chain([...deps(PP, [10, 12, 98])], 105, 90), hashOf: (n) => (n <= 95 ? A.hashOf(n) : h32(`fork B ${n}`)) };
+  const onB = (h: string) => Array.from({ length: 10 }, (_, i) => 96 + i).some((n) => B.hashOf(n) === h);
+  let flipped = false, bLeft = 0;
+  const seat = (url: string): EvmRpc => {
+    const a = rpc(A, { url, getLogs: () => void (!flipped && ((flipped = true), (bLeft = 4))) }), b = rpc(B, { url });
+    return Object.assign(async (m: string, p: readonly unknown[]) => {
+      if (m === "eth_getBlockByNumber" && bLeft > 0) return (bLeft--, b(m, p));
+      if (m === "eth_call" && onB((p[1] as { blockHash: string }).blockHash)) return b(m, p);
+      return a(m, p);
+    }, { url });
+  };
+  const waits: number[] = [];
+  const t = await evmTreeSync({ rpcs: [seat("https://a.example"), seat("https://b.example")], pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(96));
+  assert.ok(flipped, "the fork was named");
+  assert.equal(t.stateTree.size, 3, "chain A's cut, never fork B's");
+  assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
+});
+
+test("trees: a newest block below the anchor, or an anchor one seat alone no longer holds, is a retry", async () => {
+  // the newest agreed block, read for the times, below the anchor (one seat's latest behind for one read)
+  {
+    const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
+    let low = false, pages = 0;
+    const waits: number[] = [];
+    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && (low = true)) }, { latest: () => (low ? ((low = false), 95) : c.head) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(20));
+    assert.equal(t.stateTree.size, 4);
+    assert.ok(waits.includes(EVM_LAG_WAIT_MS), "below the anchor: a retry");
+  }
+  // the anchor reorged on seat b alone while the head moved on: a retry
+  {
+    const c = chain([...deps(PP, [10, 12, 15]), { block: 20, kind: "wd", leaf: 999n }], 100, 90);
+    let flip = false, pages = 0;
+    const waits: number[] = [];
+    const t = await evmTreeSync({ rpcs: pair(c, c, { getLogs: () => void (pages++ === 0 && ((flip = true), (c.head += 5))) }, { hashOf: (n) => (flip && n === 100 ? h32("b alone 100") : c.hashOf(n)) }), pin: PIN, sleep: async (ms: number) => void waits.push(ms) }).trees(after(20));
+    assert.equal(t.stateTree.size, 4);
+    assert.ok(waits.includes(EVM_LAG_WAIT_MS), "one seat's anchor moved: a retry");
+  }
 });
 
 test("trees: an anchor reorged away during the paging is a retry, then the new chain's times", async () => {
@@ -788,6 +833,43 @@ test("a held fee is used only at its own block's hash, never the helper's word, 
     assert.equal(feeCalls(log3), n + 4, "two periods back: dropped, read again");
   }
   await assert.rejects(p.holdFee(EPOCH + 1n), /epochStartMs: not on the epoch grid/);
+});
+
+// review of 7fbf2af3, P2-2: the period's fee is read while its block is fresh, so its state reads come straight after the
+// block, before the sync's round (anchors, views, log pages); on Base the pool's size there first (the operator fee is of
+// G(depth)), on Robinhood the fee alone (ArbGasInfo's estimate does not move with the depth)
+test("the hold reads the fee's state straight after the period's first block, before the sync's logs", async () => {
+  for (const network of ["base", "robinhood"] as const) {
+    const c = { ...CB(), head: 31 };
+    const log: string[] = [];
+    const chainId = network === "base" ? 8453n : 4663n;
+    const seatOf = (url: string) => rpc(c, { url, log, chainId });
+    const p = evmPool({ pin: { ...PIN, network }, rpcs: [seatOf("https://a.example"), seatOf("https://b.example")], feeRpcs: [seatOf("https://c.example"), seatOf("https://d.example")], relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    await p.holdFee(EPOCH);
+    const oracle = network === "base" ? "0x420000000000000000000000000000000000000f" : "0x000000000000000000000000000000000000006c";
+    const firstFee = log.findIndex((x) => x.includes(oracle));
+    const firstLogs = log.findIndex((x) => x.startsWith("eth_getLogs"));
+    const size = log.findIndex((x) => x.includes(sel("currentTreeSize()")) && x.includes(c.hashOf(30)));
+    assert.ok(firstFee >= 0 && firstLogs >= 0 && firstFee < firstLogs, `${network}: the fee before the logs (${firstFee}, ${firstLogs})`);
+    if (network === "base") assert.ok(size >= 0 && size < firstFee, "Base: the pool's size at the block, then the fee");
+    else assert.equal(log.filter((x) => x.includes(sel("currentTreeSize()")) && x.includes(c.hashOf(30))).length, 0, "Robinhood: no size read at the block");
+  }
+});
+
+test("a held fee is not taken once the depth at its block moved: read again", async () => {
+  const c = { ...CB(), head: 31 };
+  const log: string[] = [];
+  const seen: unknown[] = [];
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log), relayFee: async () => answer({ fee: "40000000000000" }), epochFee: feeRule(seen), salt: () => new Uint8Array(16), sleep: async () => undefined });
+  await p.holdFee(EPOCH);
+  const held = feeCalls(log);
+  // two leaves at blocks 25 and 26 (past the finalized 20, below the period's first block 30): 5 leaves at block 30,
+  // depth 3 now
+  c.events.push({ block: 25, kind: "wd", leaf: 4242n }, { block: 26, kind: "wd", leaf: 4243n });
+  c.events.sort((x, y) => x.block - y.block);
+  await p.bind(bindArgs());
+  assert.ok(feeCalls(log) > held, "read again at the new depth");
+  assert.equal((seen.at(-1) as { depth: number }).depth, 3);
 });
 
 test("bind refuses the helper's fee unless it is the device's, for this pool and epoch, and a W, chunk or deadline the pool would not take", async () => {
