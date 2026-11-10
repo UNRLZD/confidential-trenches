@@ -133,8 +133,12 @@ type Plant = {
   /** RPC p's first this-many read-back reads (getTransaction at confirmed) answer this very transaction with an
    *  unreadable meta, then as `readBack` says */
   metaJunkReads?: number;
-  /** the host's tables by venue ({ "pump-curve": the fixture's table } when not given); OTHER_TABLE reads as a table */
-  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>>;
+  /** the host's tables by venue ({ <the coin's venue>: [the fixture's table] } when not given); OTHER_TABLE reads as the
+   *  fixture's table under another address, and `extraTables` adds more (address: the table's addresses) */
+  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>>;
+  extraTables?: Readonly<Record<string, (fixture: readonly string[]) => readonly string[]>>;
+  /** the coin: pump's curve (the default) or a graduated PumpSwap coin, as the LiteSVM run recorded each */
+  coin?: "pump" | "pumpswap";
 };
 const OTHER_TABLE = base58.encode(new Uint8Array(32).fill(8));
 /** The fixture's table address (solana-pool-buy-fx.ts setup). */
@@ -163,7 +167,8 @@ function otherBuyOf(sent: Uint8Array): Uint8Array {
 }
 
 async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
-  const s = await setup("pump", SPEND);
+  const coin = plant.coin ?? "pump";
+  const s = await setup(coin, SPEND);
   const log: string[] = [];
   let st = "HELD";
   let sent: Uint8Array | null = null;
@@ -180,13 +185,14 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
     [s.tableAddr]: { owner: ALT, data: s.tableData },
     [OTHER_TABLE]: { owner: ALT, data: s.tableData },
+    ...Object.fromEntries(Object.entries(plant.extraTables ?? {}).map(([a, f]) => [a, { owner: ALT, data: Uint8Array.from([...s.tableData.subarray(0, 56), ...f(s.addresses).flatMap((k) => [...base58.decode(k)])]) }])),
     [POOL]: { owner: PROGRAM, data: poolAccount() },
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
     [fx.rent.account]: { owner: fx.rent.answers[p].owner, data: base64.decode(fx.rent.answers[p].data) },
   });
   const rpc = (p: 0 | 1): SolanaRpc => {
-    const venue = replay(fx.pump, p, plant.venueOff && p === 1 ? (list, ans) => {
+    const venue = replay(fx[coin], p, plant.venueOff && p === 1 ? (list, ans) => {
       const k = list.indexOf(s.venue.kind === "pump-curve" ? s.venue.curve : "");
       if (k >= 0 && ans.value[k]) {
         const d = base64.decode(ans.value[k].data[0]);
@@ -261,7 +267,14 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const rpcs = [rpc(0), rpc(1)] as const;
   const host: PoolBuyHost = {
     pin: PIN,
-    tables: plant.tables ?? { "pump-curve": s.tableAddr },
+    tables: plant.tables ?? { [coin === "pump" ? "pump-curve" : "pumpswap"]: [s.tableAddr] },
+    // the claim, logged: the order of the claim against the take and the seed is what the refusals are held to
+    claimed: new (class extends Set<string> {
+      override add(x: string) {
+        log.push(`claim:${x}`);
+        return super.add(x);
+      }
+    })(),
     cluster: "mainnet",
     rpcs,
     ready: async () => (st === "HELD" ? readies[Math.min(readyCalls++, readies.length - 1)]! : []),
@@ -332,30 +345,60 @@ test("a buy: checked, signed by W in slot 1, taken before it leaves, read back o
   assert.equal(m.blockhash, BLOCKHASH);
 });
 
-// Card sol-pool-venue-tables: the page pins a table per venue and the build loads the buy's venue's own; a venue with no
-// pinned table is refused venue_not_pinned after the reads and before the pick, so no note is claimed, taken or signed
-test("a buy loads its venue's own pinned table, never another venue's", async () => {
-  const w = await world({ tables: { pumpswap: OTHER_TABLE, "pump-curve": s0.tableAddr } });
-  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
-  const m = solanaDecodeMessage(w.sentTx()!.subarray(129));
-  assert.deepEqual(m.lookups.map((l) => l.table), [s0.tableAddr], "the curve buy loads the curve's table only");
-});
-test("a venue with no pinned table is refused venue_not_pinned: read, never picked, taken, signed or sent", async () => {
-  const w = await world({ tables: { pumpswap: OTHER_TABLE } });
-  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "venue_not_pinned" });
+// Card sol-pool-venue-tables: the page pins a list of table generations per venue and builds on the buy's venue's
+// generation that makes the smallest transaction; a venue with no pinned table is refused venue_not_pinned after the
+// reads and before the pick, and a buy no generation fits is refused no_table_fits before the claim: neither claims,
+// takes, reads the seed, signs or sends
+const ASK_PS: PoolAsk = { ...ASK, token: fx.pumpswap.mint };
+const GEN_SMALL = base58.encode(new Uint8Array(32).fill(6));
+const CURVE_LIKE = base58.encode(new Uint8Array(32).fill(5));
+/** The fixture's table without its pool pages: an older generation, whose buys name the pages as static keys. */
+const noPages = (a: readonly string[]): readonly string[] => a.filter((k) => !Array.from({ length: 8 }, (_, i) => [solanaPoolPage(PROGRAM, 0, i * 1024), solanaPoolPage(PROGRAM, 1, i * 1024)]).flat().includes(k));
+const nothingMoved = (w: World): void => {
   assert.equal(w.state(), "HELD");
   assert.equal(w.sentTx(), null);
-  assert.ok(!w.log.some((x) => x.startsWith("take:") || x === "seed" || x === "send"), w.log.join(","));
-  assert.ok(w.log.includes("0:getMultipleAccounts"), "the venue was read: the refusal names the venue the quote picked");
-  assert.equal(w.host.claimed?.size ?? 0, 0, "no note claimed");
+  assert.ok(!w.log.some((x) => x.startsWith("claim:") || x.startsWith("take:") || x === "seed" || x === "send"), w.log.join(","));
+  assert.equal(w.host.claimed?.size ?? 0, 0, "no note held claimed");
+};
+const loadedTables = (w: World): string[] => solanaDecodeMessage(w.sentTx()!.subarray(129)).lookups.map((l) => l.table);
+
+test("a curve buy loads the curve's pinned table, never another venue's", async () => {
+  const w = await world({ tables: { pumpswap: [OTHER_TABLE], "pump-curve": [s0.tableAddr] } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(loadedTables(w), [s0.tableAddr]);
 });
-test("no table pinned for any venue: refused not_allowed before any read", async () => {
-  const w = await world({ tables: {} });
-  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" });
-  assert.ok(!w.log.some((x) => /^[01]:/.test(x)), w.log.join(","));
-  // an inherited venue key is no pin (a polluted prototype names none)
-  const v = await world({ tables: Object.create({ "pump-curve": s0.tableAddr }) });
-  assert.deepEqual(await runPoolBuy(v.host, ASK), { error: "not_allowed" });
+test("a PumpSwap buy with both venues pinned loads PumpSwap's table (mutant A4: always the curve's)", async () => {
+  const w = await world({ coin: "pumpswap", tables: { "pump-curve": [OTHER_TABLE], pumpswap: [s0.tableAddr] } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK_PS), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+  assert.deepEqual(loadedTables(w), [s0.tableAddr]);
+  // the claim comes before the seed is read and the take, once the build fits
+  const at = (x: string) => w.log.findIndex((l) => l === x || l.startsWith(x));
+  assert.ok(at("claim:") >= 0 && at("claim:") < at("seed") && at("seed") < at("take:"), w.log.join(","));
+});
+test("generations: the buy loads the venue's generation that makes the smallest transaction, in either pin order", async () => {
+  for (const order of [[GEN_SMALL, s0.tableAddr], [s0.tableAddr, GEN_SMALL]]) {
+    const w = await world({ coin: "pumpswap", tables: { pumpswap: order }, extraTables: { [GEN_SMALL]: noPages } });
+    assert.deepEqual(await runPoolBuy(w.host, ASK_PS), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+    assert.deepEqual(loadedTables(w), [s0.tableAddr], order.join(" "));
+  }
+});
+test("a buy no pinned generation fits is refused no_table_fits before the claim, the take and the seed", async () => {
+  const w = await world({ coin: "pumpswap", tables: { pumpswap: [CURVE_LIKE] }, extraTables: { [CURVE_LIKE]: (a) => a.slice(0, 11) } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK_PS), { error: "no_table_fits" });
+  nothingMoved(w);
+});
+test("a venue with no pinned table is refused venue_not_pinned: read, never claimed, taken, seeded, signed or sent (mutants A8, A8b)", async () => {
+  const w = await world({ tables: { pumpswap: [OTHER_TABLE] } });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "venue_not_pinned" });
+  nothingMoved(w);
+  assert.ok(w.log.includes("0:getMultipleAccounts"), "the venue was read: the refusal names the venue the quote picked");
+});
+test("no table pinned, or a pin that is not a list of addresses: refused not_allowed before any read (mutant A2)", async () => {
+  for (const tables of [{}, Object.create({ "pump-curve": [s0.tableAddr] }), { "pump-curve": s0.tableAddr }, { "pump-curve": [] }, { "pump-curve": [7] }, { "pump-curve": [s0.tableAddr], pumpswap: [{}] }]) {
+    const w = await world({ tables: tables as never });
+    assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" }, JSON.stringify(tables));
+    assert.ok(!w.log.some((x) => /^[01]:/.test(x)), w.log.join(","));
+  }
 });
 
 // Card sol-w-sweep, delta review 7 of 08290868: the buy writes W's buy mint (and its token program, the venue's) before

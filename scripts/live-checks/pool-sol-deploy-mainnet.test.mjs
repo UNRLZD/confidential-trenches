@@ -102,7 +102,7 @@ test("the owner's paste's own recording on mainnet passes, once its record exist
   // curve entry is the paste's own table and list
   const { tables, ...pasted } = JSON.parse(readFileSync(RECORD, "utf8"));
   assert.deepEqual(g.deployment, pasted);
-  if (tables !== undefined) assert.deepEqual({ table: tables["pump-curve"]?.table, addresses: tables["pump-curve"]?.addresses }, { table: g.deployment.table, addresses: g.deployment.table_addresses });
+  if (tables !== undefined) assert.deepEqual({ table: tables["pump-curve"]?.[0]?.table, addresses: tables["pump-curve"]?.[0]?.addresses }, { table: g.deployment.table, addresses: g.deployment.table_addresses });
   assert.deepEqual(g.rpcs, MAINNET_RPCS);
   const r = await checkMainnet({ deployment: g.deployment, fetchFn: replay(g.answers), rpcs: g.rpcs, sleep: async () => {} });
   assert.equal(r.ok, true, r.lines.join("\n"));

@@ -285,7 +285,7 @@ test("the mainnet build's pool reads on the network's own pair and fee route: SI
   assert.equal(PAGE_SOL_PIN, SOL_POOLS.mainnet, "the mainnet pin, never the devnet one");
   assert.ok(PAGE_SOL_PIN !== undefined && PAGE_SOL_PIN.program === SOL_MAINNET_DEPLOY.program, "the deploy record's program");
   assert.equal(PAGE_TABLES, SOL_POOL_TABLES.mainnet, "pool.buy loads the mainnet tables by venue");
-  assert.equal(PAGE_TABLES["pump-curve"], SOL_MAINNET_DEPLOY.table, "the curve's is the deploy record's lookup table");
+  assert.equal(PAGE_TABLES["pump-curve"]?.[0], SOL_MAINNET_DEPLOY.table, "the curve's first generation is the deploy record's lookup table");
   // the pair: one read each, to two hosts
   const before = rentReads.length;
   const [a, b] = pageSolanaRpcs();

@@ -93,7 +93,7 @@ test("the testnet flow (card signpage-pool-notes): a Solana pool.deposit runs th
 });
 
 test("the testnet build pins the devnet pool's lookup tables by venue, so its pool.buy runs (cards signpage-pool-flow-run, sol-pool-venue-tables)", async () => {
-  // the wallet's SOL_POOL_TABLES.devnet: the curve's created by devnet tx 4M7F8EG1… for the pool 92YuYhb4…
+  // the wallet's SOL_POOL_TABLES.devnet: each venue's generations, as deployments/devnet.json records them
   assert.equal(PAGE_TABLES, SOL_POOL_TABLES.devnet);
   assert.ok(PAGE_TABLES["pump-curve"] !== undefined);
   let opened = 0;
@@ -481,7 +481,7 @@ test("pool.buy runs on the pinned devnet pool once a lookup table is pinned; wit
   const page = { store: async () => (opened++, Promise.reject(new Error("no store"))), seed64: async () => new Uint8Array(64) };
   const reads: string[] = [];
   const offline = (n: string) => Object.assign(async (m: string) => (reads.push(m), Promise.reject(new Error("offline"))), { url: `https://${n}.invalid` });
-  const k = poolKinds(testnetPoolDeps(testnetPool(page, { tables: { "pump-curve": base58.encode(new Uint8Array(32).fill(9)) }, rpcs: [offline("a"), offline("b")] }).flow));
+  const k = poolKinds(testnetPoolDeps(testnetPool(page, { tables: { "pump-curve": [base58.encode(new Uint8Array(32).fill(9))] }, rpcs: [offline("a"), offline("b")] }).flow));
   const r = k["pool.buy"](buy("solana"), ctx) as { running?: true; after: Promise<unknown>; answer: () => unknown };
   assert.equal(r.running, true, "the buy runs");
   await r.after;

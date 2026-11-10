@@ -11,7 +11,8 @@
 //   - SIGN_HOST (https://confidential.unrealized.trade) serves the mainnet build: its /app.js carries none of the
 //     testnet build's pins or providers (TESTNET_ONLY).
 // - The run (card signpage-pool-flow-run, scripts/live-checks/signpage-pool-flow.md), on both devnet RPCs at finalized:
-//   - the testnet build's lookup table (DEVNET_TABLE): the ALT program's, the same bytes on both, active, holding the
+//   - the lookup table run 7's buy loaded (RUN_TABLE; the testnet build's curve table until card sol-pool-venue-tables
+//     pinned each venue's generations from contracts/pool-solana/deployments/devnet.json): the ALT program's, the same bytes on both, active, holding the
 //     pool and both trees' first pages;
 //   - the deposit: succeeded, a call of the pinned program on the pool;
 //   - the pool buy: succeeded, a call of the pinned program and of pump.fun, paid by the helper's devnet fee payer (the
@@ -26,7 +27,7 @@
 // --program or --table reads another account in the pin's place (the recorded bad answers). PASS exit 0, FAIL exit 1,
 // error exit 2.
 import "../net-window.mjs";
-import { realpathSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DEVNET_PROVIDERS, RETRY_AFTER_CAP_MS, account, answerOf, check as deployCheck, onTwoOperators, operatorOf, pageAddress, poolAddress, programDataAddress, recorder, retryAfterMs, rpc, devnetPin } from "./pool-sol-deploy.mjs";
 
@@ -37,9 +38,15 @@ export const PIN = Object.freeze({
   program: devnetPin().program,
   feePayer: "9T3RgAVTNgedZhjJyC1UmyisV61pFWoU24LQHnk5W2bb",
   pool: devnetPin().pool,
-  /** DEVNET_TABLE (packages/signpage/src/pool-testnet.ts). */
-  table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ",
 });
+/** The lookup table run 7's buy loaded (below): the testnet build's curve table then, retired from the build since card
+ *  sol-pool-venue-tables (the wallet's SOL_POOL_TABLES.devnet pins deployments/devnet.json's generations). */
+export const RUN_TABLE = "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ";
+/** Every lookup table the testnet build pins: each venue's generations in contracts/pool-solana/deployments/devnet.json
+ *  (packages/wallet/test/sol-pool-venue-tables.test.ts holds the build's pins equal to it). */
+export const DEVNET_TABLES = Object.freeze(
+  Object.values(JSON.parse(readFileSync(new URL("../../contracts/pool-solana/deployments/devnet.json", import.meta.url), "utf8")).tables ?? {}).flatMap((gens) => gens.map((g) => g.table)),
+);
 /** Run 7's transactions (signpage-pool-flow.md): the deposit, the pool buy and the sell back, through the page's testnet
  *  flow, on today's devnet pool (program 9Z6Yi2Vc, pool 92YuYhb4) and the helper serving it. */
 export const RUN = Object.freeze({
@@ -53,7 +60,7 @@ export const HELPER = "https://ct-api.unrealized.trade";
 
 export const SIGN = "https://confidential.unrealized.trade";
 /** What only the testnet build carries: the devnet pins and the testnet RPC hosts (src/pool-testnet.ts). */
-export const TESTNET_ONLY = Object.freeze([PIN.program, PIN.feePayer, PIN.table, "api.devnet.solana.com", "/v1/rpc/solana-devnet", "sepolia.base.org", "base-sepolia-rpc.publicnode.com", "rpc.testnet.chain.robinhood.com", "robinhood-sepolia-rpc.publicnode.com"]);
+export const TESTNET_ONLY = Object.freeze([PIN.program, PIN.feePayer, ...DEVNET_TABLES, "api.devnet.solana.com", "/v1/rpc/solana-devnet", "sepolia.base.org", "base-sepolia-rpc.publicnode.com", "rpc.testnet.chain.robinhood.com", "robinhood-sepolia-rpc.publicnode.com"]);
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 /** A GET read again on a 429 or a 5xx, three tries at most, after its Retry-After when it gives one (at most
@@ -184,12 +191,12 @@ function b58(bytes) {
 }
 
 /** The verdict for `program` read through `fetchFn` (live, or a recorded answer replayed), and SIGN_HOST's read `sign`,
- *  against today's devnet pin (devnetPin(), the deploy record pool-sol-deploy.devnet.json) and today's table pin
- *  PIN.table, the ones a live run reads: a replay is judged on them too, so a recording on another program, pool or
+ *  against today's devnet pin (devnetPin(), the deploy record pool-sol-deploy.devnet.json) and run 7's table
+ *  RUN_TABLE, the ones a live run reads: a replay is judged on them too, so a recording on another program, pool or
  *  table FAILs (it takes no deploy record or table pin of its own). */
-export async function check({ program, table = PIN.table, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper, ...rest } = {}) {
+export async function check({ program, table = RUN_TABLE, fetchFn = fetch, rpcs = DEVNET_PROVIDERS, sleep, sign, helper, ...rest } = {}) {
   if ("deployment" in rest || "pinTable" in rest) throw new Error("check reads today's devnet pin and table only: no deploy record or table pin is passed in");
-  const pinTable = PIN.table;
+  const pinTable = RUN_TABLE;
   const pin = devnetPin();
   const record = pin.record;
   program ??= pin.program;
@@ -216,9 +223,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const helper = await readHelper();
     const deployment = devnetPin().record;
     const program = opt("--program") ?? PIN.program;
-    const table = opt("--table") ?? PIN.table;
+    const table = opt("--table") ?? RUN_TABLE;
     const r = await check({ program, table, fetchFn: opt("--record") ? rec.fetchFn : fetch, sign, helper });
-    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, pin_table: PIN.table, program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
+    if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ deployment, pin_table: RUN_TABLE, program, table, rpcs: DEVNET_PROVIDERS, at: new Date().toISOString(), sign, helper, answers: rec.answers })}\n`);
     for (const l of r.lines) console.log(l);
     console.log(`${r.ok ? "PASS" : "FAIL"} ${KEY}`);
     process.exit(r.ok ? 0 : 1);

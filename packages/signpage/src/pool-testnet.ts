@@ -281,8 +281,8 @@ export type TestnetOver = {
   lister?: SolanaRpc;
   fetch?: typeof fetch;
   hardwareConcurrency?: number;
-  /** The lookup tables pool.buy loads, by venue (the network's, PAGE_TABLES, otherwise). */
-  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>>;
+  /** The lookup tables pool.buy may load, by venue, generations oldest first (the network's, PAGE_TABLES, otherwise). */
+  tables?: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>>;
   /** Web Locks (navigator.locks otherwise); none: no RESERVED pass runs. */
   locks?: Pick<LockManager, "request" | "query"> | null;
   /** The Solana pool's pin (PAGE_SOL_PIN otherwise): tests run the page's own flow on a fake pool. */
@@ -304,9 +304,9 @@ export type TestnetOver = {
   tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
 };
 
-/** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads its
- *  venue's own, and a venue with none is refused venue_not_pinned (card sol-pool-venue-tables). */
-export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", string>>> = SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {};
+/** The page network's lookup tables by venue (the wallet's SOL_POOL_TABLES of PAGE_CLUSTER): a pool buy loads one of
+ *  its venue's own generations, and a venue with none is refused venue_not_pinned (card sol-pool-venue-tables). */
+export const PAGE_TABLES: Readonly<Partial<Record<"pump-curve" | "pumpswap", readonly string[]>>> = SOL_POOL_TABLES[POOL_TESTNET ? "devnet" : "mainnet"] ?? {};
 /** The pool send's own window: the helper answers a tag 3 only once it has simulated and sent it, and a send may wait
  *  out a blockhash's life (~60 to 90 s), so this is over 90 s, never the client's 10 s for the pool.buy kind's answer
  *  (the kit's SIGNPAGE_TIMEOUT_MS["pool.buy"]: the run answers once both RPCs read its transaction back, or at its

@@ -14,7 +14,8 @@
 //   waits for U to hold exactly that, or that plus at least an empty account's rent. Someone else funds U.
 // - What differs from the page in a browser, and only that: the prover is snarkjs's fullProve in this process, the one
 //   the prover worker makes (the setup files checked by sha256 against ZK_SETUP_FILES); <tables> are the lookup tables
-//   by venue: "pinned" (the testnet build's own, PAGE_TABLES) or venue=address pairs, comma-separated; the RPCs are the page's own (src/page-rpc.ts: its bounded retry of a 429, a 5xx,
+//   by venue: "pinned" (the testnet build's own, PAGE_TABLES) or venue=address[+address...] (a venue's generations,
+//   oldest first), comma-separated; the RPCs are the page's own (src/page-rpc.ts: its bounded retry of a 429, a 5xx,
 //   -32029/-32429, a non-JSON answer or a stall is the page's, never this script's), each answer of 429 or 5xx logged,
 //   and a call that still fails logged with its named fault; the helper's answers are logged by status. Every check,
 //   the send and every read-back are the page's own code.
@@ -73,12 +74,13 @@ const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 if (POOL_TESTNET !== true || SOL_POOLS.devnet === undefined) throw new Error("not the testnet build's pins");
 
 const [TABLE, MINT, SPEND, OUT] = process.argv.slice(2);
-if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <pinned | venue=table,...> <mint> <spend SOL> <out.json>");
-// the tables by venue: the build's pinned ones, or the pairs given (a table not pinned yet, before its pin commit)
+if (!OUT) throw new Error("usage: pool-flow-devnet.mjs <pinned | venue=table[+table...],...> <mint> <spend SOL> <out.json>");
+// the tables by venue, generations oldest first: the build's pinned ones, or the ones given (tables not pinned yet,
+// before their pin commit), each venue's joined by +
 const TABLES = TABLE === "pinned" ? PAGE_TABLES : Object.freeze(Object.fromEntries(TABLE.split(",").map((x) => {
   const [v, a] = x.split("=");
   if ((v !== "pump-curve" && v !== "pumpswap") || !a) throw new Error(`not a venue=table pair: ${x}`);
-  return [v, a];
+  return [v, Object.freeze(a.split("+"))];
 })));
 const RUNG = 10_000_000n;
 const FEE = 5_000n;
