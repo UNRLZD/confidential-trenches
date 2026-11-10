@@ -192,7 +192,9 @@ async function call(rpc: JsonRpc, method: string, params: readonly unknown[]): P
   try {
     return await rpc(method, params);
   } catch (e) {
-    const http = /^HTTP (\d{3})$/.exec(msg(e))?.[1]; // the kit's JSON-RPC client's text for a non-2xx answer
+    // the kit's JSON-RPC client's text for a non-2xx answer: "HTTP 429", or past its retry "HTTP 429 (http_429, 1 try at
+    // <host>)" (kit send.ts SolanaRpcTransportError)
+    const http = /^HTTP (\d{3})(?: \(|$)/.exec(msg(e))?.[1];
     throw new RpcFailed(method, /RPC error (-?\d+)/.exec(msg(e))?.[1], http === undefined ? undefined : Number(http));
   }
 }

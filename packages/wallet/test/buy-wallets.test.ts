@@ -685,3 +685,18 @@ test("EVM: an upper-case provider reads as lower case (the block's hash is sent 
   await assert.rejects(evmReader(c(), bad("eth_getBalance", () => "0x7G")).read(evmW(L, 0)), /eth_getBalance: not a quantity/);
   await assert.rejects(evmReader(c(), bad("eth_call", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /not one 32-byte word/);
 });
+
+// card pool-sell-share-across-wallets (its 5-wallet devnet run): the kit's own JSON-RPC client, past its retry, throws a
+// provider's 429 as "HTTP 429 (http_429, 1 try at <host>)" (kit send.ts SolanaRpcTransportError); one such 429 on the
+// testnet build's devnet RPC failed every sell's wallet list, where it is a failed round like the helper's
+test("a 429 as the kit's JSON-RPC client throws it is a failed round too: read again after the wait, never a refusal at once", async () => {
+  let n = 0;
+  const once429: Edit = (_m, o) => {
+    if (n++ === 0) throw new Error("HTTP 429 (http_429, 1 try at api.devnet.solana.com)");
+    return o;
+  };
+  const waits: number[] = [];
+  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solanaHoldingsReader(solRpc(solChain(), once429), { wait429: () => 1234, sleep: async (ms: number) => { waits.push(ms); } }) }]);
+  assert.deepEqual(r.failed, []);
+  assert.deepEqual(waits, [1234]);
+});
