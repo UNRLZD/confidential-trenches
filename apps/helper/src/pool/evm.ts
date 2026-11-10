@@ -2147,27 +2147,39 @@ export function evmScrubber(urls: readonly string[]): (text: string) => string {
       if (x.length >= 8) for (const f of [x, encodeURIComponent(x), decodeURIComponentOr(x)]) keys.add(f);
     }
   }
-  // a secret's characters (code points), each escaped; "iu": Unicode's simple case folding, on code points
+  // each secret whole, as written, longest first; then its start of 8 to EVM_SCRUB_KEY_MAX characters (code points, each
+  // escaped) in any ASCII case ("i"; no "u": a provider echoes its key as it is or in another case, never in another
+  // script's case pairs, and a code point cut inside its surrogate pair ends the start before it either way). Review of
+  // 41c6c371, P3-2: a pattern of 4,000 nested groups aborts the process when compiled; a start of 256 is ample, and the
+  // whole secret is still removed where it appears whole
+  const whole = [...keys].sort((x, y) => y.length - x.length);
   const esc = (c: string) => c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const patterns = [...keys]
-    .map((k) => [...k].map(esc))
-    .sort((x, y) => y.length - x.length)
-    .map((cs) => new RegExp(`${cs.slice(0, 8).join("")}${cs.slice(8).map((c) => `(?:${c}`).join("")}${")?".repeat(Math.max(0, cs.length - 8))}`, "giu"));
+  const patterns = whole
+    .map((k) => [...k].slice(0, EVM_SCRUB_KEY_MAX).map(esc))
+    .map((cs) => new RegExp(`${cs.slice(0, 8).join("")}${cs.slice(8).map((c) => `(?:${c}`).join("")}${")?".repeat(Math.max(0, cs.length - 8))}`, "gi"));
   return (text) => {
-    let m = text.slice(0, EVM_SCRUB_MAX).replace(/https?:\/\/[^\s"'<>`]*/gi, (u) => {
+    // the secrets before the URLs (review of 41c6c371, P3-3): a URL's run stops at an apostrophe, and a key that holds one
+    // would leave its rest past it, no longer a start of it
+    // each whole secret first, on the whole words (a native split, linear), so one longer than the cut is still removed
+    let all = text;
+    for (const k of whole) all = all.split(k).join("<key>");
+    let m = all.slice(0, EVM_SCRUB_MAX);
+    for (const r of patterns) m = m.replace(r, "<key>");
+    m = m.replace(/https?:\/\/[^\s"'<>`]*/gi, (u) => {
       try {
         return new URL(u).host;
       } catch {
         return "<url>";
       }
     });
-    for (const r of patterns) m = m.replace(r, "<key>");
-    return text.length > EVM_SCRUB_MAX ? `${m}…` : m;
+    return all.length > EVM_SCRUB_MAX ? `${m}…` : m;
   };
 }
 /** The most of a provider's words the scrubber reads (review of f86e1c27, P2): a JSON-RPC error's words are a line or
  *  two; a log line holds 160 of them, a refusal 1,200. */
 export const EVM_SCRUB_MAX = 4_096;
+/** The longest start of a secret the scrubber's patterns read (review of 41c6c371, P3-2). */
+export const EVM_SCRUB_KEY_MAX = 256;
 const decodeURIComponentOr = (x: string): string => {
   try {
     return decodeURIComponent(x);
@@ -2276,7 +2288,15 @@ export function evmReadPair(seats: readonly EvmSeat[], first: readonly [string, 
   };
   const NONE: ReadonlySet<string> = new Set();
   return {
-    chains: () => Promise.all(seats.map((p) => idOf(p).then((id) => ({ seat: p.name, id }), () => ({ seat: p.name, id: null })))),
+    // review of 41c6c371, P3-1: a held seat is passed over here, and one whose own call timed out or answered no
+    // JSON-RPC is held as in a walk, so a hung seat costs the start one timeout, not one a try. Safe: no seat's answer is
+    // used before its chain id is read on it (ask()), so a seat passed over here is read for its chain at its first use
+    chains: () =>
+      Promise.all(
+        seats
+          .filter((p) => p.skip?.() !== true && !((heldUntil.get(p) ?? -Infinity) > now()))
+          .map((p) => idOf(p).then((id) => ({ seat: p.name, id }), (e: unknown) => (seatDead(e) && heldUntil.set(p, now() + EVM_SEAT_HOLD_MS), { seat: p.name, id: null }))),
+      ),
     one: (k, method, params) => walk(k, method, params, new Set(), NONE).then((r) => r.value),
     both: (method, params) => {
       // each side's own first operator is its claim before either side asks anything: a side whose first seat is held

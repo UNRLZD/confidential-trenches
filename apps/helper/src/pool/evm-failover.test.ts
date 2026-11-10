@@ -732,7 +732,7 @@ test("review P2-2: a seat that hangs to its client's timeout is asked once and p
   const r = await readyOn(s, at);
   assert.deepEqual([r.out, r.waits], ["ready", []]);
   // asked once for a read, and once for its chain id with every seat's at the start (review of f86e1c27, P3-4)
-  assert.deepEqual(calls.filter((c) => c.host === "robinhood.drpc.org").map((c) => c.method), ["eth_chainId", "eth_chainId"], "asked once, then passed over");
+  assert.deepEqual(calls.filter((c) => c.host === "robinhood.drpc.org").map((c) => c.method), ["eth_chainId"], "asked once, then passed over (review of 41c6c371, P3-1: the start's read of every seat's chain passes over a held one)");
   const said = lines.filter((l) => l.includes("passed over"));
   assert.equal(said.length, 1, lines.join("\n"));
   assert.match(said[0]!, /^evm robinhood: robinhood\.drpc\.org passed over 30 s at a time from now: The operation was aborted due to timeout$/);
@@ -801,7 +801,7 @@ test("review item 8: a pair seat that answers HTML, 401 or 403 never refuses the
     const s = sendersWith(ENV_RH, lines).get(PIN)!;
     const r = await readyOn(s, at);
     assert.deepEqual([r.out, r.waits], ["ready", []], name);
-    assert.deepEqual(calls.filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").map((c) => c.method), ["eth_chainId", "eth_chainId"], `${name}: asked once, and for its chain id with every seat's`);
+    assert.deepEqual(calls.filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").map((c) => c.method), ["eth_chainId"], `${name}: asked once`);
     const said = lines.filter((l) => l.includes("passed over"));
     assert.equal(said.length, 1, `${name}: ${lines.join("\n")}`);
     assert.match(said[0]!, /^evm robinhood: rpc\.mainnet\.chain\.robinhood\.com passed over 30 s at a time from now: /, name);
@@ -846,7 +846,7 @@ test("review P3-6: a revert whose data holds a seat's URL leaves no part of its 
   assert.equal((await readyOn(s, at)).out, "ready");
   revert = true;
   const e = await s.fee(EPOCH - 60_000 + 1).then(() => assert.fail("a revert is no fee"), (x: Error) => x);
-  assert.match(e.message, /^RPC error 3: execution reverted: a\.example$/);
+  assert.match(e.message, /^RPC error 3: execution reverted: a\.example<key>$/);
 });
 
 test("review P3-2: a pool's fee read of the start's period that comes back after the period ended is not a fee for the running period: ready only once the next period's fee is held", async (t) => {
@@ -874,14 +874,14 @@ test("review P3-2: a pool's fee read of the start's period that comes back after
 // ---- review of f86e1c27 ----
 const K40 = "pathKEY-0123456789abcdef0123456789abcdef";
 const KEYED = `https://a.example/v2/${K40}`;
-/** Does `out` hold 8 or more characters of the key's start, in any case (Unicode's simple case folding, as the scrub)? */
-const holdsKey = (out: string, k = K40) => out.includes(k.slice(0, 8)) || new RegExp(k.slice(0, 8).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"), "iu").test(out);
+/** Does `out` hold 8 or more characters of the key's start, in any ASCII case, as the scrub reads it? */
+const holdsKey = (out: string, k = K40) => out.toUpperCase().includes(k.slice(0, 8).toUpperCase());
 
 // The scrub runs in a child process with a bound of its own: a scrub that never ends holds its event loop, which no
 // test timeout in this process could end (review of f86e1c27, P2, the probe's N=8 and N=60 never settled)
 const scrubbed = (code: string): unknown => {
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", `const evm = await import(${JSON.stringify(new URL("./evm.ts", import.meta.url).href)});\n${code}`], { encoding: "utf8", timeout: 20_000 });
-  assert.equal(r.signal, null, `the scrub did not settle in 20 s (killed by ${r.signal})`);
+  assert.equal(r.signal, null, `the scrub did not settle in 20 s or its process aborted (${r.signal})`);
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 };
@@ -980,4 +980,81 @@ test("review of f86e1c27 P3-4: a pair seat on another chain that throttles its f
   assert.deepEqual(await readyOn(s, at), { out: "ready", waits: [] });
   assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
   assert.deepEqual([...new Set(calls.filter((c) => c.host === "robinhood.drpc.org").map((c) => c.method))], ["eth_chainId"], "asked for its chain only");
+});
+
+// ---- review of 41c6c371 ----
+/** ready() on the test's clock with hung seats: a hung seat's call ends at its client's 5 s timeout, every other takes
+ *  `ms`; the clock moves by each call's time, one after another (no two calls overlap: the slowest case). */
+async function hungStart(t: TestContext, hung: readonly string[], ms: number, other?: (method: string, params: unknown[]) => Planted) {
+  const at = { T: NOW_MS };
+  const calls = planted(t, (host, method, params) => {
+    if (hung.includes(host)) {
+      at.T += 5_000;
+      throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    }
+    at.T += ms;
+    return null;
+  }, at);
+  const s = sendersWith(ENV).get(PIN)!;
+  const r = await readyOn(s, at);
+  return { r, s, at, calls, other };
+}
+
+test("review of 41c6c371 P3-1: two hung dRPC seats and every other call 1.5 s: ready inside 60 s, each hung seat's chain id asked once", async (t) => {
+  const { r, at, calls } = await hungStart(t, ["robinhood.drpc.org", "lb.drpc.live"], 1_500);
+  assert.equal(r.out, "ready");
+  assert.ok(at.T - NOW_MS <= 60_000, `${(at.T - NOW_MS) / 1000} s`);
+  t.diagnostic(`ready after ${(at.T - NOW_MS) / 1000} s`);
+  for (const h of ["robinhood.drpc.org", "lb.drpc.live"]) assert.ok(calls.filter((c) => c.host === h && c.method === "eth_chainId").length <= 2, h);
+});
+
+test("review of 41c6c371 P3-1: four hung seats and every other call 1.2 s: ready, never refused", async (t) => {
+  const { r, at } = await hungStart(t, ["robinhood.drpc.org", "lb.drpc.live", "robinhood-rpc.publicnode.com", "robinhood.rpc.blxrbdn.com"], 1_200);
+  assert.equal(r.out, "ready", `${(at.T - NOW_MS) / 1000} s`);
+  t.diagnostic(`ready after ${(at.T - NOW_MS) / 1000} s`);
+});
+
+test("review of 41c6c371 P3-1: a seat held at the start whose chain is another is read for its chain at its first use and never used", async (t) => {
+  const at = { T: NOW_MS };
+  let hang = true;
+  const other = otherChain(900_000_000);
+  const calls = planted(t, (host, method, params) => {
+    if (host !== "rpc.mainnet.chain.robinhood.com") return null;
+    if (hang) throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    return other(method, params);
+  }, at);
+  let ahead = 0;
+  const perfNow = performance.now.bind(performance);
+  performance.now = () => perfNow() + ahead;
+  t.after(() => void (performance.now = perfNow));
+  const s = sendersWith(ENV_RH).get(PIN)!;
+  assert.deepEqual(await readyOn(s, at), { out: "ready", waits: [] });
+  // past its hold it answers, as another chain's node
+  hang = false;
+  ahead += 31_000;
+  at.T += 31_000;
+  const n = calls.length;
+  assert.equal((await s.fee(EPOCH - 60_000 + 1))?.fee, FEE.toString());
+  assert.deepEqual([...new Set(calls.slice(n).filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").map((c) => c.method))], ["eth_chainId"], "read for its chain, never used");
+});
+
+test("review of 41c6c371 P3-2: a secret of 4,000 or 20,000 characters in a seat URL builds and scrubs: removed whole, and a start of 8 or more of it", () => {
+  const out = scrubbed(`
+    const res = [];
+    for (const n of [4000, 20000]) {
+      const k = "LONGkey-" + "0123456789abcdef".repeat(Math.ceil(n / 16)).slice(0, n - 8);
+      const scrub = evm.evmScrubber(["https://a.example/v2/" + k]);
+      // cut within its first 256 characters (EVM_SCRUB_KEY_MAX), the start the patterns read
+      res.push([scrub("whole " + k + " end"), scrub("cut " + k.slice(0, 200)), scrub("upper " + k.slice(0, 100).toUpperCase())]);
+    }
+    console.log(JSON.stringify(res));
+  `) as string[][];
+  for (const r of out) assert.deepEqual(r, ["whole <key> end", "cut <key>", "upper <key>"]);
+});
+
+test("review of 41c6c371 P3-3: a key holding an apostrophe, echoed inside its URL, leaves no part of it", () => {
+  const k = "abcd'efghijklmnopqrstuvwxyz";
+  const scrub = evm.evmScrubber([`https://a.example/rpc?key=${k}`]);
+  const out = scrub(`bad key at https://a.example/rpc?key=${k}: over its plan`);
+  assert.equal(out, "bad key at a.example<key>: over its plan");
 });
