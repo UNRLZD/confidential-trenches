@@ -22,6 +22,7 @@ import {
   EvmUnansweredError, evmAgreedLogs, evmAgreedRead, evmAnswered, evmContextPreimage, evmEpochBlock, evmLatestHigh, evmMemoryHold, evmNow, EVM_SOURCE_CALLS, evmPair, evmPool, evmPoolContextOf, evmPoolLogPager, evmPoolScopeOf, evmTreeSync,
   type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHeld, type EvmSyncHold,
 } from "../src/pool/evm.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 /** Whether `p` has settled once the event loop has run; mocked timers move only when ticked, so a wait still running
  * stays unsettled however slow this machine is. */
@@ -1283,7 +1284,8 @@ test("X15, X20, X21 bind refuses W as the fee recipient, a chunk of 2^128, a sal
 
 test("X16 the wait between retries ends at once when the read is aborted (the real wait)", async (t) => {
   // the real sleep on mocked timers: the abort at 50 ms must end the wait with no more time passing
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const c = C3();
   const ac = new AbortController();
   const p = evmTreeSync({ rpcs: pair(c, c, {}, { latest: () => 22, finalized: () => 12 }), pin: PIN }).trees(after(25), ac.signal);
@@ -1589,7 +1591,8 @@ test("a pool read that failed by name is never tried again by a read around it (
 
 test("an abort during a pool read's wait ends it at once, and the other RPC's read with it", async (t) => {
   // on mocked timers: the abort at 50 ms must end the wait with no more time passing
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const rpcs = pair(c3, c3);
   rpcs[1] = flaky(rpcs[1], byNumber("latest"), Array(100).fill(HTTP_429));
   const ac = new AbortController();

@@ -444,7 +444,8 @@ test("card evm-sell-no-release-in-flight: a release the device sent holds the se
 // PR #563's fresh run (10 Nov 00:10Z) refused the log-twice case below as rpc_disagree: its providers are built per batch,
 // and two built in different wall seconds gave the head block two times. Every provider of a test gives one head time.
 test("two providers built a second and a half apart give the same head block, time included", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_400 });
+  enableTimers(t.mock.timers, { apis: ["Date"], now: 1_700_000_000_400 });
+  t.after(() => resetTimers(t.mock.timers));
   refreshHead();
   const head = async (p: EvmRpc) => (await p([{ method: "eth_getBlockByNumber", params: ["latest", false] }]))[0];
   const first = provider({ price: flat });

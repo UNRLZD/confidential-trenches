@@ -20,6 +20,7 @@ import { askWithdrawFee, type RelayDeps, type RelayRpc, relayWithdraw, WITHDRAW_
 import { type WithdrawRequest, WITHDRAW_SEND_MARGIN_MS, withdrawRequest } from "../src/withdraw/request.ts";
 import { BUSY_ASKS, BUSY_WAIT_FIRST_MS, BUSY_WAIT_MAX_MS } from "../src/busy.ts";
 import { argsFor, BLOCK_MS, closeVaults, FEE_MAX, type FeeEdit, feeReplay, RELAY_FEE, SEED, signalsProver, TOKEN, type Vault, vaultWith } from "./withdraw-fixture.ts";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 /** Whether `p` has settled once the event loop has run; mocked timers move only when ticked, so a wait still running
  * stays unsettled however slow this machine is. */
@@ -171,7 +172,8 @@ test("the fee, busy: a Retry-After over the cap waits only the cap", async () =>
 
 test("the fee, busy: the caller's signal ends a wait at once", async (t) => {
   // on mocked timers: the abort at 50 ms must end the 10 s wait with no more time passing
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  enableTimers(t.mock.timers, { apis: ["setTimeout"] });
+  t.after(() => resetTimers(t.mock.timers));
   const stop = new AbortController();
   const sent: string[] = [];
   setTimeout(() => stop.abort(new Error("stopped")), 50);

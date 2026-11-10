@@ -3,6 +3,7 @@
 // it; anything else rejects at once; without `retry` the client is one attempt, as before.
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { enableTimers, resetTimers } from "./mock-timers.ts";
 import { SOLANA_POOL_QUOTE_MAX_AGE_SLOTS } from "../src/trade/solana/pool-buy.ts";
 import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaJsonRpc, type SolanaRpcRetry } from "../src/trade/solana/send.ts";
 
@@ -33,7 +34,8 @@ const FAST: SolanaRpcRetry = { deadlineMs: 1_500, backoffMs: 10 };
  * time until the call settles or `maxMs` passes. Returns what it settled to and the mocked ms that took, so a wait is
  * judged by the time the code asked for, never by how fast this machine ran. */
 async function onMockedTime(t: TestContext, call: () => Promise<unknown>, step: number, maxMs: number) {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_700_000_000_000 });
+  enableTimers(t.mock.timers, { apis: ["setTimeout", "Date"], now: 1_700_000_000_000 });
+  t.after(() => resetTimers(t.mock.timers));
   const out: { settled: boolean; value?: unknown; ms: number } = { settled: false, ms: 0 };
   void call().then(
     (v) => Object.assign(out, { settled: true, value: v }),
