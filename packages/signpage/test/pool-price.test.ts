@@ -532,3 +532,15 @@ test("at the feed's write: the live check's follower (scripts/live-checks/pool-u
   const check = await follow({ read: () => poolUsdPrice({ chain: "solana", rpcs: pair, nowMs: t }), now: () => t, sleep: async (ms: number) => void (t += ms), untilMs: (T + 160) * 1000 });
   assert.deepEqual(check.reads.map((r) => r.startMs), page.readsAt.filter((ms) => ms < (T + 160) * 1000));
 });
+
+test("at the feed's write: a chain with no RPCs yet (a read never started) is asked for them again only each POOL_PRICE_REFRESH_MS, however often the state is read", async () => {
+  let asked = 0;
+  const h = holder({ rpcs: () => (asked++, null) });
+  for (let s = 0; s < 31; s++) {
+    h.p.refresh(["solana"]);
+    await settled();
+    h.clock.ms += 1_000;
+  }
+  assert.equal(asked, 3, "at 0, 15 and 30 s");
+  assert.equal(h.p.get("solana"), null);
+});
