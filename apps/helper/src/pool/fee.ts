@@ -36,3 +36,40 @@ export type PoolFeeAnswer = {
 /** The start of the epoch holding `ms`. */
 export const epochStartOf = (ms: number): number => ms - (ms % POOL_EPOCH_MS);
 
+
+/** A clock and a one-shot timer: the process's own (never holding it open), or a test's. */
+export type EpochTimer = { now: () => number; after: (ms: number, run: () => void) => () => void };
+const PROCESS_TIMER: EpochTimer = {
+  now: () => Date.now(),
+  after: (ms, run) => {
+    const t = setTimeout(run, ms);
+    t.unref();
+    return () => clearTimeout(t);
+  },
+};
+
+/**
+ * Runs `run` once each period on the POOL_EPOCH_MS grid, `delayMs` after the period's start, with that start, from the
+ * next period on (a start mid-period leaves that period to the reads on demand), until the returned stop. A timer that
+ * fires early or late runs each period once, never one twice.
+ */
+export function everyEpoch(run: (epochStartMs: number) => void, delayMs: number, timer: EpochTimer = PROCESS_TIMER): () => void {
+  let stopped = false;
+  let last = -Infinity;
+  let cancel = () => {};
+  const next = () => {
+    const t = timer.now();
+    const start = Math.max(epochStartOf(t) + POOL_EPOCH_MS, last + POOL_EPOCH_MS);
+    cancel = timer.after(Math.max(0, start + delayMs - t), () => {
+      if (stopped) return;
+      last = start;
+      run(start);
+      next();
+    });
+  };
+  next();
+  return () => {
+    stopped = true;
+    cancel();
+  };
+}
