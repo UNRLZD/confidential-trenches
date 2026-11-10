@@ -4,12 +4,18 @@ Tx: base-sepolia 0x51d3660144eb0bbcd2032fbbc87586a7dc625bdcd34eb52e5d692b9f7b53f
 Tx: base-sepolia 0x374260bc1fe459743f0cc3c7ee2086c86cbd9cfe84fc4564122a23f5e269bbcc
 Tx: base-sepolia 0xbfeed905872cabaebefa3c03aa327cfefa84256a021efacc5b8baa387a568064
 Tx: base-sepolia 0x72c36797ea3644e342a5b40d0387e6d4013c96064326f6f16bcdfa45ccb1ed0e
+Tx: base-sepolia 0xf745626323ba2a560b144b8b2dbf112b88e9d56f32c6e6830d014ecb20c93519
+Tx: base-sepolia 0xd79d7ff9535883b129b2f7bb5145f66e157ff688c683758e5474e078d4f9fe14
+Tx: base-sepolia 0x41ddc17fc2ca900a6c50541125e326f7871407e8645bcc916a6ff729191aaa0c
 Tx: robinhood-testnet 0xe5bcf64c21316fd48dc6b4a9e06878623216666f57edb9d66ea2f9f7195f5572
 Tx: robinhood-testnet 0xbf8bbb2283a092e49944c0c45d197bc07a7ac0febe9c60cb77c20aaf4db6ceaa
 Tx: robinhood-testnet 0x43543fc6b78cc9cf6fff800cd5338e7df1e8ef747c60e87174cbbca6205c05fb
 Tx: robinhood-testnet 0xd0951815432c66af3d2ef4f4c5130fe44d660a361297beb95b9821df424ecb74
-Buy: base-sepolia 0x72c36797ea3644e342a5b40d0387e6d4013c96064326f6f16bcdfa45ccb1ed0e
-Buy: robinhood-testnet 0xd0951815432c66af3d2ef4f4c5130fe44d660a361297beb95b9821df424ecb74
+Tx: robinhood-testnet 0x102b23d3dca9e168eac747afe92dee1fe49d29b1f36401b9edba4a93d911438f
+Tx: robinhood-testnet 0xc983514b18f8134dd64e586e6ee7803ac9d227d15f3c904ee32e7c47459caecb
+Tx: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
+Buy: base-sepolia 0x41ddc17fc2ca900a6c50541125e326f7871407e8645bcc916a6ff729191aaa0c
+Buy: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
 
 One real private buy on each testnet through the signing page's own code path: the page's pool kinds
 (src/pool-kinds.ts over src/pool-testnet.ts testnetPool, as main.ts wires them) on the testnet build's own pins, pool
@@ -51,3 +57,28 @@ so it held every buy. Nothing of those tries reached a chain: the restore at the
 buys above spent those same notes. E then funded the senders (0.002 ETH on Base Sepolia, 0.0012 ETH on Robinhood testnet).
 The Robinhood deposit's note stayed INCOMING through 40 minutes of the deposit runner's load passes, each answering
 failed, while the pool's sync read the deposit on both RPCs at 02:51Z; the buy run restored it from the seed.
+
+The second run (04:32Z to 04:37Z), on the rebuilt read-back: the buy answers "sent" once the helper has the bytes, then
+reads its end only from the pool's own Bought and Withdrawn events (eth_getLogs by the pool's address and the two event
+topics, from the newest block read before the send), matches the proof's nullifier on the device, and ends filled when
+both pool RPCs show the same Bought paying W the token at least the min out W signed. Per chain, its three Tx lines (the
+last three) are: E funds a new U, U's deposit of 0.001 ETH into the pinned pool, the buy; the Buy lines name these buys,
+which the live check reads back.
+
+base-sepolia: U 0x9e7A3c932cF9aa86f5A7e15DEc7589f446C302BA, funded 1024612320002043 wei; its deposit read back in block
+56816773 on both pool RPCs, and the buy run restored the note UNSPENT from the seed. The buy of Base Sepolia USDC at
+04:35:54Z: the chunk 1000000000000000 wei, the fee 20000000000000 wei, W 0xF39fA9D6Efd0C441a623e0ba41f6d870A6116679,
+route Uniswap v4 native to USDC (fee 500, tick spacing 10, no hook) through the pinned v4 adapter. The page answered
+sent 11.4 s after the tap, then filled 2.8 s later from both RPCs' Bought in block 56817486 for 2.529634 USDC; W's
+holding, written pending before the send, was completed with that amount, the transaction and the block.
+
+robinhood-testnet: U 0xcB80853b53097154CC30FeD246d49842C95703d9, funded 1035381040000000 wei; its deposit read back in
+block 151182480 on both pool RPCs. The buy of tSPILL at 04:36:33Z: the chunk 1000000000000000 wei, the fee
+30000000000000 wei, W 0x94FE4C14e7012e00A21752AC052094B4c21980BB, route Uniswap v4 native to tSPILL (fee 10000, tick
+spacing 200, no hook) through the pinned v4 adapter. Sent 5.4 s after the tap, filled 2.8 s later from both RPCs'
+Bought in block 151183344 for 0.000960299999983784 tSPILL.
+
+Who learned what, from each run's request log (every request from the tap to the end): the helper's POST
+/v1/pool/evm/send carried the calldata, so it learned W, the proof's nullifier and the route; every other request went to
+the chain's two pool RPCs (eth_call for the quote and the token's decimals, eth_blockNumber, eth_getBlockByNumber,
+eth_getLogs, eth_chainId) and named none of W, the nullifier or the transaction hash.
