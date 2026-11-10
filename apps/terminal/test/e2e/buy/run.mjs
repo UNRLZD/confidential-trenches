@@ -82,6 +82,7 @@ export function judge(rec) {
   say(Array.isArray(rec.heldAfterSell) && rec.heldAfterSell.length === 2 && rec.heldAfterSell.every((x) => x === "0"), `after the sell W holds ${(rec.heldAfterSell ?? ["-", "-"]).join(" / ")} on the two RPCs`);
   say(txs.length > 0 && txs.every((t) => t.reads?.length === 2 && t.reads.every((r) => r.err === null && (r.status === "confirmed" || r.status === "finalized"))), `every transaction read back ok on both RPCs: ${txs.map((t) => `${t.step} ${t.sig.slice(0, 8)} ${(t.reads ?? []).map((r) => r.status ?? "none").join("/")}`).join(", ") || "none"}`);
   say(rec.pages === 1, `one page from first frame to last: ${rec.pages}`);
+  say((rec.readErrors ?? []).length === 0, `the run's own reads: ${(rec.readErrors ?? []).join("; ") || "all answered"}`);
   say((rec.dialogs ?? 0) === 0, `no dialog: ${rec.dialogs ?? 0}`);
   say((rec.csp ?? []).length === 0, `CSP violations: ${(rec.csp ?? []).join("; ") || "none"}`);
   say((rec.hosts ?? []).every((h) => ALLOWED.has(h)), `hosts reached: ${(rec.hosts ?? []).join(", ")}`);
@@ -153,7 +154,7 @@ async function needOf() {
   return RUNG + (await ask(17)) + ((await ask(144)) - (await ask(0))) + FEE;
 }
 async function readBack(sig) {
-  const st = (await both("getSignatureStatuses", [[sig], { searchTransactionHistory: true }])).map((x) => x.value[0]);
+  const st = (await Promise.all([DEVNET_RPC, HELPER_RPC].map((u) => rpc(u, "getSignatureStatuses", [[sig], { searchTransactionHistory: true }], { tries: 12 })))).map((x) => x.value[0]);
   return st.map((x) => ({ status: x?.confirmationStatus ?? null, err: x ? x.err : "none" }));
 }
 /** The wallet the buy filled, the owner whose MINT balance the buy's transactions raised, and what it held once that
@@ -275,7 +276,19 @@ export async function run({ plant = null, shots = null } = {}) {
     const sentAt = {};
     const mark = () => (sentAt[step] ??= Date.now());
     const isPoolSend = (r) => r.method() === "POST" && new URL(r.url()).hostname === REAL.api && new URL(r.url()).pathname === "/v1/pool/solana/send";
+    // the page's requests from the buy's tap on (host, path, JSON-RPC method, time), for the timing split's reading of
+    // where a trade's wait is spent; names and times only, never a body
+    rec.net = [];
     context.on("request", (r) => {
+      if (["buy", "held", "sell"].includes(step) && rec.net.length < 4000) {
+        const u = new URL(r.url());
+        let method = null;
+        try {
+          const b = JSON.parse(r.postData() ?? "null");
+          method = Array.isArray(b) ? b.map((x) => x?.method).join("+") : (b?.method ?? null);
+        } catch {}
+        rec.net.push({ step, at: Date.now(), host: u.hostname, path: u.pathname, method });
+      }
       if (r.method() !== "POST") return;
       if (isPoolSend(r)) return void mark();
       try {
@@ -428,7 +441,13 @@ export async function run({ plant = null, shots = null } = {}) {
     // 7. the buy's wallet W and what it holds, read on both RPCs
     step = "held";
     await Promise.allSettled(answers);
-    ({ w: rec.w, held: rec.heldAfterBuy } = await buyWallet(sent.filter((x) => x.step === "buy").map((x) => x.sig)));
+    // no read of the run's own stops the sell: one that fails is reported at the end (rec.readErrors) and the sell goes on
+    rec.readErrors = [];
+    try {
+      ({ w: rec.w, held: rec.heldAfterBuy } = await buyWallet(sent.filter((x) => x.step === "buy").map((x) => x.sig)));
+    } catch (e) {
+      rec.readErrors.push(`after the buy: ${String(e?.message ?? e).slice(0, 200)}`);
+    }
 
     // 8. the sell side, once the signing page's state holds the position: 100% sold in one tap, back into the pool
     const side = vis('[data-testid="trade-side-sell"]');
@@ -470,17 +489,18 @@ export async function run({ plant = null, shots = null } = {}) {
     // 10. every transaction the page sent, and U's funding, read back on both RPCs
     await Promise.allSettled(answers);
     for (const s of sent) if (!rec.txs.some((t) => t.sig === s.sig)) rec.txs.push(s);
-    for (const t of rec.txs) t.reads = await readBack(t.sig).catch((e) => [{ status: null, err: String(e?.message).slice(0, 80) }]);
     rec.csp = events.filter((e) => e.kind === "csp").map((e) => `${e.host} ${e.directive} ${e.blocked}`);
     rec.hosts = [...hosts].sort();
     rec.pages ??= null;
     await h.close();
     rmSync(signRoot, { recursive: true, force: true });
+    // every transaction read back on both RPCs once the page is closed (its polling no longer shares the RPC's limit)
+    for (const t of rec.txs) t.reads = await readBack(t.sig).catch((e) => [{ status: null, err: String(e?.message).slice(0, 80) }]);
     // 9. W holds none of the coin, read on both RPCs once the page is closed (its own polling no longer shares the
     // public RPC's limit), with a longer patience for a rate limit
     if (rec.w && rec.sell?.taps === 1) {
       step = "after";
-      rec.heldAfterSell = await heldOn(rec.w, { tries: 12 }).catch((e) => ((rec.error ??= String(e?.message ?? e).slice(0, 300)), null));
+      rec.heldAfterSell = await heldOn(rec.w, { tries: 12 }).catch((e) => (rec.readErrors.push(`after the sell: ${String(e?.message ?? e).slice(0, 200)}`), null));
     }
   }
   return rec;
