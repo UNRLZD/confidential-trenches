@@ -12,7 +12,16 @@
 //     (SET, withPositions), the pass's Solana position with an amount at its decimals and a cost worked out from the
 //     buy records (PASS, positionsPass), the buy records' meta key (COSTS), the kept pass's (KEPT, the first state read
 //     after a load) and the device's full sells' (SOLD, the gone rule), where the build before it only ever sent
-//     positions:[].
+//     positions:[];
+//   - /app.js runs that pass: the state read's positions() reads the kept pass, starts the sign-in's first pass and
+//     answers the last (FIRST), the cache calls the pass with its stop signal and a sell's read when one was fed (RUN),
+//     the pass asks the finder for the Ws of this device's buy records only (RECORDS), and a sell's own read of the Ws
+//     stops a running pass first (PREEMPT). A build whose state read never starts a pass, or whose cache never runs
+//     one, fails.
+// What it cannot see from outside: a signed-in device's positions. They need the device's seed and a buy on it, and a
+// runner holds neither, so the page's behaviour is held by its tests (packages/signpage/test/positions.test.ts and
+// positions-requests.test.ts, the mainnet build's every request); this check holds that the deployed script is the
+// build that wires it.
 // After: sign
 //   node scripts/live-checks/signpage-state-holdings.mjs [--url <origin>] [--record <file>]
 //   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's committed build
@@ -41,6 +50,14 @@ export const COSTS = "owed/cost-sol";
 export const KEPT = "owed/positions-sol";
 /** The full sells' key (src/positions.ts POSITIONS_SOLD_KEY). */
 export const SOLD = "owed/sold-sol";
+/** The state read's positions(): `positions:async()=>(await c.ready(),c.first(),c.get())` (src/pool-testnet.ts). */
+export const FIRST = /positions:async\(\)=>\(await ([\w$]+)\.ready\(\),\1\.first\(\),\1\.get\(\)\)/g;
+/** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`. */
+export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,\.\.\.[\w$]+===null\?\{\}:\{found:[\w$]+\}\}\)/g;
+/** positionsPass asks the finder for the recorded Ws only: `.wallets(new Set(o.map(([e])=>e)))`. */
+export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\[[\w$]+\]\)=>[\w$]+\)\)\)/g;
+/** The sell host's read stops a running pass first: `wallets:async()=>{c.preempt();`. */
+export const PREEMPT = /wallets:async\(\)=>\{[\w$]+\.preempt\(\);/g;
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }. */
@@ -60,6 +77,8 @@ export function judge(rec) {
   const at = (k) => Number.isSafeInteger(m[k]) && m[k] >= 1;
   say(at("set") && at("pass") && at("costs") && at("kept") && at("sold"),
     `/app.js fills positions from the device's own pass, with its cost (set ${m.set ?? "?"}, pass ${m.pass ?? "?"}, costs ${m.costs ?? "?"}, kept ${m.kept ?? "?"}, sold ${m.sold ?? "?"})`);
+  say(at("first") && at("run") && at("records") && at("preempt"),
+    `/app.js runs the pass from the state read, on the device's buy records, stopped by a sell's read (first ${m.first ?? "?"}, run ${m.run ?? "?"}, records ${m.records ?? "?"}, preempt ${m.preempt ?? "?"})`);
   return { pass: lines.every((l) => l.startsWith("ok ")), lines };
 }
 
@@ -89,7 +108,7 @@ export async function probe(origin, fetchFn = fetch) {
     status: res.status,
     bytes: body.length,
     sha384: `sha384-${createHash("sha384").update(body).digest("base64")}`,
-    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL), set: countOf(text, SET), pass: countOf(text, PASS), costs: countOf(text, COSTS), kept: countOf(text, KEPT), sold: countOf(text, SOLD) },
+    marks: { sum: countOf(text, SUM), fill: countOf(text, FILL), set: countOf(text, SET), pass: countOf(text, PASS), costs: countOf(text, COSTS), kept: countOf(text, KEPT), sold: countOf(text, SOLD), first: countOf(text, FIRST), run: countOf(text, RUN), records: countOf(text, RECORDS), preempt: countOf(text, PREEMPT) },
   };
   return rec;
 }

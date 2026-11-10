@@ -3,14 +3,17 @@
 // - good: this card's build (index.html and public/app.js at the card's branch, --local) served at / and /app.js: PASS;
 // - bad_live_before: the live SIGN_HOST before this card's release, whose state sends vault_balance "0" and
 //   positions [] on every signed-in state (src/state.ts stateOf): FAIL on the marks alone;
-// - and the good record with its integrity naming another script, and with each mark gone: each FAIL.
+// - bad_review_build: the build the review rejected (d50dd0ce, --local), whose pass named a stranger's token and read
+//   every W, and whose sell waited behind it: FAIL on the run's marks;
+// - and the good record with its integrity naming another script, and with each mark gone: each FAIL. A planted build
+//   whose state read starts no pass, or whose cache runs none, fails.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as check from "./signpage-state-holdings.mjs";
-import { COSTS, FILL, judge, KEPT, localFetch, PASS, probe, SET, SIGN_ORIGIN, SOLD, SUM } from "./signpage-state-holdings.mjs";
+import { COSTS, FILL, FIRST, judge, KEPT, localFetch, PASS, PREEMPT, probe, RECORDS, RUN, SET, SIGN_ORIGIN, SOLD, SUM } from "./signpage-state-holdings.mjs";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -19,18 +22,24 @@ const BAD = (rec) => judge(rec).lines.filter((l) => l.startsWith("BAD")).map((l)
 const MARKS = "/app.js fills vault_balance from the device's own notes";
 const SAME = "/app.js is the script / names: its sha384 is the integrity";
 const POS = "/app.js fills positions from the device's own pass, with its cost";
+const RUNS = "/app.js runs the pass from the state read, on the device's buy records, stopped by a sell's read";
 
 test("the recorded good answer (the card's build) passes", () => {
   const r = judge(answers.good);
   assert.equal(r.pass, true, r.lines.join("\n"));
   const m = answers.good.app.marks;
-  assert.ok(m.sum >= 1 && m.fill >= 1 && m.set >= 1 && m.pass >= 1 && m.costs >= 1 && m.kept >= 1 && m.sold >= 1);
+  assert.ok(m.sum >= 1 && m.fill >= 1 && m.set >= 1 && m.pass >= 1 && m.costs >= 1 && m.kept >= 1 && m.sold >= 1 && m.first >= 1 && m.run >= 1 && m.records >= 1 && m.preempt >= 1);
 });
 
 test("the recorded live SIGN_HOST before the release fails, on the marks alone", () => {
   assert.equal(answers.bad_live_before.url, SIGN_ORIGIN);
   assert.equal(judge(answers.bad_live_before).pass, false);
-  assert.deepEqual(BAD(answers.bad_live_before), [MARKS, POS]);
+  assert.deepEqual(BAD(answers.bad_live_before), [MARKS, POS, RUNS]);
+});
+
+test("the recorded build the review rejected fails, on the run's marks", () => {
+  assert.equal(judge(answers.bad_review_build).pass, false);
+  assert.deepEqual(BAD(answers.bad_review_build), [RUNS]);
 });
 
 test("the good script under a page whose integrity names another script fails; each mark gone fails", () => {
@@ -47,6 +56,13 @@ test("the good script under a page whose integrity names another script fails; e
     gone.app.marks[k] = 0;
     assert.deepEqual(BAD(gone), [POS], k);
   }
+  for (const k of ["first", "run", "records", "preempt"]) {
+    const gone = structuredClone(answers.good);
+    gone.app.marks[k] = 0;
+    assert.deepEqual(BAD(gone), [RUNS], k);
+    delete gone.app.marks[k];
+    assert.deepEqual(BAD(gone), [RUNS], `${k} not read`);
+  }
 });
 
 test("the committed build in this tree passes the live rule", async () => {
@@ -55,7 +71,7 @@ test("the committed build in this tree passes the live rule", async () => {
 });
 
 test("a rebuilt bundle with an unrelated copy change passes with no re-record; one with vault_balance back at `0` fails", async () => {
-  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL, SET, PASS, COSTS, KEPT, SOLD])));
+  const copy = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => copyChange(js, [SUM, FILL, SET, PASS, COSTS, KEPT, SOLD, FIRST, RUN, RECORDS, PREEMPT])));
   assert.equal(judge(copy).pass, true, judge(copy).lines.join("\n"));
   assert.notEqual(copy.app.sha384, (await probe(SIGN_ORIGIN, localFetch)).app.sha384, "another bundle than the tree's");
   // the state step's fill replaced by the fixed "0" the build before it sent
@@ -76,6 +92,18 @@ test("a rebuilt bundle with an unrelated copy change passes with no re-record; o
   const noKept = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => dropRule(js, KEPT)));
   assert.equal(noKept.app.marks.kept, 0);
   assert.deepEqual(BAD(noKept), [POS]);
+  // a build with no pass: the state read never starts one, or the cache never runs one
+  const noFirst = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(FIRST, (m, c) => `positions:async()=>(await ${c}.ready(),${c}.get())`)));
+  assert.equal(noFirst.app.marks.first, 0);
+  assert.deepEqual(BAD(noFirst), [RUNS]);
+  const noRun = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(RUN, "Promise.resolve({positions:[],whole:!0})")));
+  assert.equal(noRun.app.marks.run, 0);
+  assert.deepEqual(BAD(noRun), [RUNS]);
+  // every W read, not only the recorded ones; a sell that does not stop the pass
+  const allWs = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(RECORDS, ".wallets(new Set())")));
+  assert.deepEqual(BAD(allWs), [RUNS]);
+  const noStop = await probe(SIGN_ORIGIN, plantedFetch(localFetch, (js) => js.replace(PREEMPT, "wallets:async()=>{")));
+  assert.deepEqual(BAD(noStop), [RUNS]);
 });
 
 test("the check has the shape scripts/ci/bundle-checks.mjs runs: read(fetch) on SIGN_HOST, then judge", async () => {

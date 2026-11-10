@@ -2,18 +2,18 @@
  "good": {
   "key": "signpage-state-holdings",
   "url": "local build",
-  "at": "2026-11-09T23:20:14.936Z",
+  "at": "2026-11-10T00:28:23.266Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-xJySJk5gByK+32Nw7gnXDTx0bVbx8ecgDGMt6mJyG2K04in6uaPnr+WjwRrpwjQp",
+   "integrity": "sha384-cnae4C3S4DHaVkBsb9nlruqbhId0COEaHpPXSIm4O30U3gaFwDmLKGVt8vJ5pQ1s",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 895647,
-   "sha384": "sha384-xJySJk5gByK+32Nw7gnXDTx0bVbx8ecgDGMt6mJyG2K04in6uaPnr+WjwRrpwjQp",
+   "bytes": 862806,
+   "sha384": "sha384-cnae4C3S4DHaVkBsb9nlruqbhId0COEaHpPXSIm4O30U3gaFwDmLKGVt8vJ5pQ1s",
    "marks": {
     "sum": 1,
     "fill": 1,
@@ -21,7 +21,11 @@
     "pass": 1,
     "costs": 1,
     "kept": 1,
-    "sold": 1
+    "sold": 1,
+    "first": 1,
+    "run": 1,
+    "records": 1,
+    "preempt": 1
    }
   }
  },
@@ -48,6 +52,36 @@
     "costs": 0,
     "kept": 0,
     "sold": 0
+   }
+  }
+ },
+ "bad_review_build": {
+  "key": "signpage-state-holdings",
+  "url": "local build at d50dd0ce (the reviewed build, merged with main)",
+  "at": "2026-11-10T00:28:31.850Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-1IplXTCe9YoWx6e5C3Q9amONjseYvPycDuHXjVkZiGuVmse17rIsUc+AOvtQHaU/",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 861146,
+   "sha384": "sha384-1IplXTCe9YoWx6e5C3Q9amONjseYvPycDuHXjVkZiGuVmse17rIsUc+AOvtQHaU/",
+   "marks": {
+    "sum": 1,
+    "fill": 1,
+    "set": 1,
+    "pass": 1,
+    "costs": 1,
+    "kept": 1,
+    "sold": 1,
+    "first": 1,
+    "run": 0,
+    "records": 0,
+    "preempt": 0
    }
   }
  }
