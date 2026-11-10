@@ -4342,3 +4342,27 @@ test("card pool-sell-share-across-wallets: a provider's rate limit before any si
   assert.deepEqual(waits, [2_000, 2_000, 2_000]);
   nothingBuilt(w);
 });
+
+test("card pool-sell-share-across-wallets review P3-5: a sign out asked while a sale reads stops it before its signature; one asked before a sale starts stops it before any read of its own", async () => {
+  // asked during the second sale's own reads: that sale started, and its signature never comes
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  let out = false;
+  let sent = 0;
+  const gate = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      if (method === "sendTransaction") sent++;
+      if (sent >= 1 && method === "getAccountInfo" && params[0] === ataOfW(W.address)) out = true;
+      return rpc(method, params);
+    }) as SolanaRpc;
+  const a = await runPoolSell({ ...w.host, rpcs: [gate(w.c.rpcs[0]), gate(w.c.rpcs[1])] as const, stopped: () => out }, share(10_000));
+  assert.ok(out);
+  assert.deepEqual(soldBy(w, saleSigs(a)).map((s) => who(s.signer!)), ["X"]);
+  assert.equal(heldOn(w, W.address), T5);
+  // asked before the second sale's turn: it reads nothing of its own
+  const v = await twoBuys({ ataLamports: TOKEN_RENT });
+  let stop = false;
+  const at = { n: -1 };
+  const b = await runPoolSell({ ...v.host, sent: (sig: string) => void ((stop = true), (at.n = v.c.calls.length), v.sent.push(sig)), stopped: () => stop }, share(10_000));
+  assert.equal("stage" in b && b.stage, "part_filled");
+  assert.ok(!v.c.calls.slice(at.n).some((c) => c.method === "getAccountInfo" && c.params[0] === ataOfW(W.address)), "the stopped sale read its wallet");
+});
