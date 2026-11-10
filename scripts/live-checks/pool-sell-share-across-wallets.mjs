@@ -27,8 +27,9 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "pool-sell-share-across-wallets";
 export const SIGN = "https://confidential.unrealized.trade";
-/** This card's release: the first list cut after release-108 (main's newest at 4efc012f) can hold its build. */
-export const FIRST_RELEASE = 109;
+/** This card's release: the first list cut after release-109 (main's newest when this card merged origin/main
+ *  4ae503b1) can hold its build. */
+export const FIRST_RELEASE = 110;
 const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
 /** The SIGN_HOST /app.js of every written release list from FIRST_RELEASE on: its sha384 to its release. */
 export function releasedAppJs(dir = RELEASES, from = FIRST_RELEASE) {

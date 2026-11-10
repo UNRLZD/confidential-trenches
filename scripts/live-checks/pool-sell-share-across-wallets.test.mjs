@@ -36,8 +36,8 @@ for (const k of ["bad", "liveBefore"]) {
   });
 }
 
-test("the release lists read: none before FIRST_RELEASE (main's newest at 4efc012f is release-108)", () => {
-  assert.equal(FIRST_RELEASE, 109);
+test("the release lists read: none before FIRST_RELEASE (main's newest at 4ae503b1 is release-109)", () => {
+  assert.equal(FIRST_RELEASE, 110);
   assert.ok([...releasedAppJs().values()].every((x) => Number(x.slice(8)) >= FIRST_RELEASE));
   assert.ok(releasedAppJs(undefined, 1).size > 50, "every written list is read from release-1");
   assert.ok(!releasedAppJs().has(ANSWERS.bad.sha384), "main's build before this card is in no list of this card's on");

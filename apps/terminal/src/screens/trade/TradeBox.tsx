@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { Chain } from "@blindfill/kit";
 import { heldOf } from "../portfolio/model.ts";
 import type { Row } from "../portfolio/model.ts";
-import { useBalance, useHeld } from "../portfolio/source.tsx";
+import { useHeld, useOffPool } from "../portfolio/source.tsx";
 import { SellBox } from "../positions/SellBox.tsx";
 import { useSell } from "../positions/source.tsx";
 import { headerModel } from "../signin/model.ts";
@@ -156,9 +156,10 @@ export function useTrade(at: TradeAt | null, initialAmount = "") {
   const pool = onPool ? poolView(pools, chain, price) : null;
   // the proof's state reads state.pools alone: it draws with no price
   const proof = onPool ? proofStatus(pools, chain) : "none";
-  // Bal: the header's Cash (the one balance) on a chain with no pool, the pool's on a chain with one; one number for the
-  // amount gate. Signed out there is none to show: the signing page sends a state with a zero one, which is not "$0" of anyone's
-  const cash = useBalance(snapshot);
+  // Bal: the vault path's money (Cash less the SOL and ETH pools, useOffPool) on a chain with no pool, the pool's on a
+  // chain with one; one number for the amount gate. Signed out there is none to show: the signing page sends a state
+  // with a zero one, which is not "$0" of anyone's
+  const cash = useOffPool(snapshot);
   const balance = tradeBal(onPool, pool, signedOut ? null : cash).cents;
   const maxText = onPool ? null : kit.maxBuy(chain);
   const max = onPool ? (pool?.tapMax ?? null) : maxText === null ? null : parseUsd(maxText);

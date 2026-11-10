@@ -51,6 +51,7 @@ import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
 import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
+import { attachPush, closePush, PUSH_PATH } from "./data/push.ts";
 import { randomUUID } from "node:crypto";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -73,8 +74,8 @@ type Fee = ReturnType<typeof feeQuoterFromEnv>;
 const ONECLICK_STATUS = "oneclick/v0/status";
 /** The proxy path whose live answers are POST /v1/intents's quote records (card helper-id-intents, intents/records.ts). */
 const ONECLICK_QUOTE = "oneclick/v0/quote";
-const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades"], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
-const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES] = MOUNTED.proxy;
+const MOUNTED = { proxy: ["/v1/proxy/", "/v1/rpc/", "/v1/market/lists", "/v1/market/token", "/v1/market/holders", "/v1/market/candles", "/v1/market/trades", PUSH_PATH], relay: ["/v1/token-status", "/v1/withdraw/fee", "/v1/withdraw", "/v1/pool/fee", "/v1/pool/solana/send", "/v1/pool/evm/send", "/v1/pool/evm/sell"], delegate: ["/v1/bind"], intents: ["/v1/intents"] } as const satisfies Partial<Record<Part, readonly string[]>>;
+const [PROXY_PREFIX, RPC_PREFIX, MARKET_LISTS, MARKET_TOKEN, MARKET_HOLDERS, MARKET_CANDLES, MARKET_TRADES, MARKET_PUSH] = MOUNTED.proxy;
 const [TOKEN_STATUS, WITHDRAW_FEE, WITHDRAW, POOL_FEE, POOL_SOLANA_SEND, POOL_EVM_SEND, POOL_EVM_SELL] = MOUNTED.relay;
 const [BIND] = MOUNTED.delegate;
 const [INTENTS] = MOUNTED.intents;
@@ -151,11 +152,25 @@ const SHA = /^[0-9a-f]{40}$/;
 
 type Headers = Record<string, string>;
 
+/**
+ * The push socket's origins (card market-data-push): APP_HOST alone, the first of the kit's HELPER_CORS.origins ("this
+ * release's APP_HOST and SIGN_HOST"). Live market data is APP_HOST's read (H7 "Cross-origin reads": APP_HOST for market
+ * data); SIGN_HOST reads quotes, relays and status, and is never pushed to.
+ */
+export const PUSH_ORIGINS: ReadonlySet<string> = new Set([HELPER_CORS.origins[0]]);
+
+/** The request's Origin when it is one of `allowed` byte for byte (scheme, host and port), else null: no Origin, "null"
+ *  and "*" included. The one Origin check of every answer's CORS headers, a preflight and the push socket's upgrade. */
+export function originIn(req: IncomingMessage, allowed: ReadonlySet<string> = ORIGINS): string | null {
+  const origin = req.headers.origin;
+  return typeof origin === "string" && allowed.has(origin) ? origin : null;
+}
+
 /** The CORS headers of one answer: the request's Origin echoed only when it is one of the two, byte for byte. */
 export function cors(req: IncomingMessage): Headers {
   const h: Headers = { Vary: "Origin" };
-  const origin = req.headers.origin;
-  if (typeof origin === "string" && ORIGINS.has(origin)) {
+  const origin = originIn(req);
+  if (origin !== null) {
     h["Access-Control-Allow-Origin"] = origin;
     h["Access-Control-Expose-Headers"] = EXPOSE;
   }
@@ -165,15 +180,14 @@ export function cors(req: IncomingMessage): Headers {
 /** A preflight gets the allow headers only from one of the two origins, for a listed method and no header but content-type. */
 function preflight(req: IncomingMessage): Headers {
   const h: Headers = { Vary: "Origin" };
-  const origin = req.headers.origin;
+  const origin = originIn(req);
   const method = req.headers["access-control-request-method"];
   const asked = (req.headers["access-control-request-headers"] ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (
-    typeof origin === "string" &&
-    ORIGINS.has(origin) &&
+    origin !== null &&
     typeof method === "string" &&
     METHODS.includes(method) &&
     asked.every((a) => (HELPER_CORS.allowHeaders as readonly string[]).includes(a))
@@ -453,6 +467,9 @@ export function handler(
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }
+      // the push socket (data/push.ts) is an upgrade only, which the server's upgrade listener answers: a plain request
+      // is told so (RFC 9110 15.5.22), with no read
+      if (path === MARKET_PUSH) return send(426, { error: { code: "upgrade_required" } }, { ...cors(req), Upgrade: "websocket", Connection: "Upgrade" });
       if (path === MARKET_LISTS) {
         if (req.method !== "GET" && req.method !== "HEAD") return send(405, { error: { code: "method_not_allowed" } }, { ...cors(req), Allow: "GET, HEAD, OPTIONS" });
         // Discover's lists: exactly one chain, Solana (src/data/solana/lists.ts) or an EVM chain this helper serves
@@ -897,6 +914,8 @@ export function start(commit: string, port: number, proxy?: Proxy, rpc?: Rpc, wa
     { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 65_000 },
     handler(commit, proxy, rpc, watches, lists, fee, withdraw, token, bind, release, pools, evmPools, undefined, evmLists, evmSwaps, ready, senders, solana, undefined, evmTokens),
   );
+  // card market-data-push: the push socket, upgraded for APP_HOST's Origin only, in its own window per client
+  attachPush(server, { commit, readers: evmSwaps ?? {}, allowed: (req) => originIn(req, PUSH_ORIGINS) !== null, client: clientOf, take: clientWindow(API_RATE_MAX).take });
   server.listen(port);
   // the relayers start once this process holds the senders (sendersFromEnv): a restart resends their open sends and
   // settles before any request
@@ -929,6 +948,8 @@ export function drainer(server: Server): () => void {
   return () => {
     stopping = true;
     for (const res of inFlight) last(res);
+    // the push sockets are told the helper goes away (1001); the page opens its next one on the helper that replaces it
+    closePush(server);
     server.close();
     server.closeIdleConnections();
   };

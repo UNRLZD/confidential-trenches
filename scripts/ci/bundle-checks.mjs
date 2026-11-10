@@ -149,6 +149,7 @@ export const OUT = {
   "trade-box-pool": "a browser",
   "app-console-429": "the helper under load",
   "trade-box-bal-cash": "a browser",
+  "portfolio-one-balance": "a browser",
   "app-sell-mount": "a browser",
   "app-list-age": "a browser and the helper",
   "app-discover-toolbar": "a browser and the helper",
