@@ -1,5 +1,5 @@
 {
- "note": "Card oneclick-partner-fee-live. good: HELPER_HOST read 2026-11-06T16:53:07.627Z, the three quotes as 1Click answered the helper (a live dry:false and a dry quote of 25 USDC from Solana to NEAR USDC, both appFees fee 1, and wNEAR to NEAR USDC fee 20): PASS. main_pin: HELPER_HOST read 2026-11-06T16:53:30.536Z by this check run on main 1e3e9a05, whose kit pinned fee 20 for the partner path (it FAILed there on live and usdc, app-fees); under this card's kit the same real answers PASS. bad_key_refused: what 1Click answers a key it does not honour, read 2026-11-06T16:53:19.683Z on 1Click's own /v0/quote with a made-up X-API-Key (401 Invalid token), as a helper holding a revoked key would be answered: FAIL. The test also derives bad answers from good by setting the unsigned appFees entry: fee 20 on the live and the dry USDC quote (the pin before this card, or a relabel) and fee 1 on wNEAR: FAIL each. Each body is recorded without 1Click's signature (the secret scan refuses its shape); the test signs each again with a throwaway key it adds to the kit's pinned set.",
+ "note": "Card oneclick-partner-fee-live. good: HELPER_HOST read 2026-11-06T16:53:07.627Z, the three quotes as 1Click answered the helper (a live dry:false and a dry quote of 25 USDC from Solana to NEAR USDC, both appFees fee 1, and wNEAR to NEAR USDC fee 20): PASS. main_pin: HELPER_HOST read 2026-11-06T16:53:30.536Z by this check run on main 1e3e9a05, whose kit pinned fee 20 for the partner path (it FAILed there on live and usdc, app-fees); under this card's kit the same real answers PASS. bad_key_refused: what 1Click answers a key it does not honour, read 2026-11-06T16:53:19.683Z on 1Click's own /v0/quote with a made-up X-API-Key (401 Invalid token), as a helper holding a revoked key would be answered: FAIL. The test also derives bad answers from good by setting the unsigned appFees entry: fee 20 on the live and the dry USDC quote (the pin before this card, or a relabel) and fee 1 on wNEAR: FAIL each. Each body is recorded without 1Click's signature (the secret scan refuses its shape); the test signs each again with a throwaway key it adds to the kit's pinned set. Card deposit-quote-no-liquidity: no_liquidity is good with the live and the usdc 25 USDC quotes answered as 1Click answers a size no solver quotes, 400 with the body the deployed helper passed on 2026-11-10T19:06:57Z (its message \"No liquidity available\", read on a dry quote of NEAR USDC into nep141:purge-558.meme-cooking.near in 4.3 s; the card's own reads of 25 USDC from Solana on 10 Nov 07:04-07:43Z gave the same status and message): 1Click's liquidity, not the helper: INCONCLUSIVE, never FAIL. other_400 is the same with the usdc 400 carrying another message (planted): a 400 that is not 1Click's no-liquidity answer stays a FAIL. The test also derives no_liquidity with the pair's fee set to 1: FAIL, so a no-liquidity quote never hides a BAD one.",
  "good": {
   "base": "https://ct-api.unrealized.trade",
   "answers": {
@@ -201,6 +201,142 @@
     "bytes": 125,
     "at": 1793984000558,
     "ms": 383
+   }
+  }
+ },
+ "no_liquidity": {
+  "base": "https://ct-api.unrealized.trade",
+  "answers": {
+   "live": {
+    "request": {
+     "dry": false,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:06.422Z"
+    },
+    "status": 400,
+    "body": "{\"message\":\"No liquidity available\",\"correlationId\":\"2357c43d-9fdf-4c05-9732-edaa447fcb6a\",\"timestamp\":\"2026-11-10T19:06:57.250Z\",\"path\":\"/v0/quote\"}",
+    "bytes": 149,
+    "at": 1793983987627,
+    "ms": 4343
+   },
+   "usdc": {
+    "request": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:07.627Z"
+    },
+    "status": 400,
+    "body": "{\"message\":\"No liquidity available\",\"correlationId\":\"2357c43d-9fdf-4c05-9732-edaa447fcb6a\",\"timestamp\":\"2026-11-10T19:06:57.250Z\",\"path\":\"/v0/quote\"}",
+    "bytes": 149,
+    "at": 1793983988640,
+    "ms": 4343
+   },
+   "pair": {
+    "request": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:wrap.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000000000000000000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:08.640Z"
+    },
+    "status": 201,
+    "body": "{\"quote\":{\"amountIn\":\"10000000000000000000000000\",\"amountInFormatted\":\"10.0\",\"amountInUsd\":\"37.500000000000\",\"minAmountIn\":\"10000000000000000000000000\",\"amountOut\":\"37558983\",\"amountOutFormatted\":\"37.558983\",\"amountOutUsd\":\"37.500000000000\",\"minAmountOut\":\"37183393\",\"timeEstimate\":20,\"refundFee\":\"0\",\"withdrawFee\":\"4690\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:wrap.near\",\"depositType\":\"ORIGIN_CHAIN\",\"destinationAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"amount\":\"10000000000000000000000000\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-06T17:23:08.640Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[{\"recipient\":\"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd\",\"fee\":20}]},\"timestamp\":\"2026-11-06T16:53:08.747Z\",\"correlationId\":\"9a87a3ad-87f0-41bd-b0a9-7c73103473d5\"}",
+    "bytes": 1243,
+    "at": 1793983989235,
+    "ms": 594
+   }
+  }
+ },
+ "other_400": {
+  "base": "https://ct-api.unrealized.trade",
+  "answers": {
+   "live": {
+    "request": {
+     "dry": false,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:06.422Z"
+    },
+    "status": 400,
+    "body": "{\"message\":\"No liquidity available\",\"correlationId\":\"2357c43d-9fdf-4c05-9732-edaa447fcb6a\",\"timestamp\":\"2026-11-10T19:06:57.250Z\",\"path\":\"/v0/quote\"}",
+    "bytes": 149,
+    "at": 1793983987627,
+    "ms": 4343
+   },
+   "usdc": {
+    "request": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:07.627Z"
+    },
+    "status": 400,
+    "body": "{\"message\":\"Amount is too low for bridge, try at least 1000000\",\"correlationId\":\"00000000-0000-4000-8000-000000000000\",\"timestamp\":\"2026-11-10T19:06:57.250Z\",\"path\":\"/v0/quote\"}",
+    "bytes": 177,
+    "at": 1793983988640,
+    "ms": 4343
+   },
+   "pair": {
+    "request": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:wrap.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "10000000000000000000000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-06T17:23:08.640Z"
+    },
+    "status": 201,
+    "body": "{\"quote\":{\"amountIn\":\"10000000000000000000000000\",\"amountInFormatted\":\"10.0\",\"amountInUsd\":\"37.500000000000\",\"minAmountIn\":\"10000000000000000000000000\",\"amountOut\":\"37558983\",\"amountOutFormatted\":\"37.558983\",\"amountOutUsd\":\"37.500000000000\",\"minAmountOut\":\"37183393\",\"timeEstimate\":20,\"refundFee\":\"0\",\"withdrawFee\":\"4690\"},\"quoteRequest\":{\"dry\":true,\"depositMode\":\"SIMPLE\",\"swapType\":\"EXACT_INPUT\",\"slippageTolerance\":100,\"originAsset\":\"nep141:wrap.near\",\"depositType\":\"ORIGIN_CHAIN\",\"destinationAsset\":\"nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1\",\"amount\":\"10000000000000000000000000\",\"refundTo\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"refundType\":\"INTENTS\",\"recipient\":\"4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0\",\"recipientType\":\"DESTINATION_CHAIN\",\"deadline\":\"2026-11-06T17:23:08.640Z\",\"confidentiality\":\"public\",\"quoteWaitingTimeMs\":0,\"insured\":false,\"appFees\":[{\"recipient\":\"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd\",\"fee\":20}]},\"timestamp\":\"2026-11-06T16:53:08.747Z\",\"correlationId\":\"9a87a3ad-87f0-41bd-b0a9-7c73103473d5\"}",
+    "bytes": 1243,
+    "at": 1793983989235,
+    "ms": 594
    }
   }
  }

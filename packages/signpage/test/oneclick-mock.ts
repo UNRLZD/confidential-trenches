@@ -99,6 +99,8 @@ export interface Mock {
   status?: number;
   throws?: boolean;
   stampedAt?: number;
+  /** card deposit-quote-no-liquidity: the first this many asks answer 1Click's 400 "No liquidity available" */
+  noLiquidity?: number;
 }
 export interface Sent {
   url: string;
@@ -111,6 +113,8 @@ export function h1c(m: Mock = {}): { fetch: typeof fetch; sent: Sent[] } {
     const request = JSON.parse(String(init?.body)) as OneClickRequest;
     sent.push({ url: String(url), init: init ?? {}, request });
     if (m.throws) throw new TypeError("fetch failed");
+    if (sent.length <= (m.noLiquidity ?? 0))
+      return new Response(JSON.stringify({ message: "No liquidity available" }), { status: 400, headers: { "content-type": "application/json" } });
     if (m.status !== undefined && m.status !== 200)
       return new Response(JSON.stringify({ error: { code: "upstream" } }), { status: m.status, headers: { "content-type": "application/json" } });
     const a = liveAnswer(request, m.stampedAt ?? NOW - 500);

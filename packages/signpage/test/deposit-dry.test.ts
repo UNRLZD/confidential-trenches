@@ -62,13 +62,14 @@ interface Net {
   tokens?: { status?: number; body?: unknown; throws?: boolean; response?: () => Response };
   /** Every request waits until its signal aborts (`deaf`: forever, its signal unheard). */
   hang?: "heard" | "deaf";
-  quote?: { status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
+  quote?: { noLiquidity?: number; status?: number; throws?: boolean; w?: bigint; spread?: number; fee?: number; before?: (a: Answer) => void; after?: (a: Answer) => void };
   /** Per-origin overrides of `quote`. */
   by?: Record<string, Net["quote"]>;
 }
 /** The helper's 1Click proxy, as data: every request it got. */
 function helper(net: Net = {}) {
   const sent: { url: string; method: string; body?: OneClickRequest }[] = [];
+  const asked = new Map<string, number>();
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     const method = init?.method ?? "GET";
@@ -91,6 +92,10 @@ function helper(net: Net = {}) {
     sent.push({ url: u, method, body });
     const q = net.by?.[body.originAsset] ?? net.quote ?? {};
     if (q.throws) throw new TypeError("fetch failed");
+    // card deposit-quote-no-liquidity: 1Click's 400 for a size no solver quoted at that second, the first noLiquidity asks of an origin
+    const k = asked.get(body.originAsset) ?? 0;
+    asked.set(body.originAsset, k + 1);
+    if (k < (q.noLiquidity ?? 0)) return new Response(JSON.stringify({ message: "No liquidity available" }), { status: 400, headers: { "content-type": "application/json" } });
     if (q.status !== undefined && q.status !== 200) return new Response("{}", { status: q.status, headers: { "content-type": "application/json" } });
     const a = dryAnswer(body, q.w, q.spread, q.fee);
     q.before?.(a);
@@ -321,6 +326,26 @@ test("deposit.dry: an answer that fails a check is quote_check_failed, never bel
 test("deposit.dry: the helper's codes, busy and down not kept", async () => {
   for (const [q, code] of [[{ status: 429 }, "busy"], [{ status: 503 }, "down"], [{ throws: true }, "down"], [{ status: 400 }, "not_available"]] as const)
     assert.deepEqual((await frame({ quote: q }).ask(dry("25"))).error, { code }, code);
+});
+
+// Card deposit-quote-no-liquidity (review ruling a): the display reads are asked again as the user types and opens the
+// sheet, so on 1Click's 400 "No liquidity available" they make one ask: the dry lines answer not_available, and an asset
+// whose probe had no liquidity is left out of the list while the others are listed.
+test("deposit.dry and deposit.assets: a no-liquidity answer is one ask: not_available, and only that asset left out", async () => {
+  const f = frame({ quote: { noLiquidity: 1 } });
+  assert.deepEqual((await f.ask(dry("25"))).error, { code: "not_available" });
+  assert.equal(f.sent.filter((x) => x.body !== undefined).length, 1);
+  const a = frame({ by: { [SOL_USDC]: { noLiquidity: 1 } } });
+  const list = await a.ask(ASSETS);
+  assert.equal(list.ok, true, JSON.stringify(list));
+  assert.deepEqual((list.result as { assets: { origin_asset: string }[] }).assets.map((x) => x.origin_asset), ONECLICK_USDC_ASSETS.filter((x) => x !== SOL_USDC));
+  assert.equal(a.sent.filter((x) => x.body !== undefined).length, ONECLICK_USDC_ASSETS.length);
+});
+
+test("the committed asks end inside the one ask's window, well inside the kit client's for each committed kind", async () => {
+  const { DEPOSIT_QUOTE_TIMEOUT_MS } = await import("../../wallet/src/deposit/quote.ts");
+  const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
+  for (const kind of ["deposit.quote", "pool.address"] as const) assert.ok(DEPOSIT_QUOTE_TIMEOUT_MS + 3_000 <= SIGNPAGE_TIMEOUT_MS[kind]!, kind);
 });
 
 // ------------------------------------------------------------------------------------------------ deposit.quote

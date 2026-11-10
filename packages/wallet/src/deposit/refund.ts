@@ -22,7 +22,7 @@
 import { HELPER_FETCH_INIT, HELPER_INTENTS_CODES, type HelperIntentsCode, type HelperSignedIntent, type OneClickRequest } from "@blindfill/kit";
 import { base58, base64 } from "@scure/base";
 import { readCapped } from "./capped.ts";
-import { askDepositQuote, checkPoolDepositWallet, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_DESTINATION, type DepositQuoteReply, type PoolDepositChain } from "./quote.ts";
+import { askDepositQuoteAgain, checkPoolDepositWallet, DEPOSIT_QUOTE_DESTINATION, DEPOSIT_QUOTE_SLIPPAGE_BPS, POOL_DEPOSIT_DESTINATION, type DepositQuoteReply, type PoolDepositChain } from "./quote.ts";
 
 /** The release's relayer for an id's intents: POST /v1/intents on HELPER_HOST (kit helper/v1.ts HelperIntentsRequest). */
 export const RELEASE_INTENTS_URL = "https://ct-api.unrealized.trade/v1/intents";
@@ -238,7 +238,8 @@ export async function runRefundMove<Q, I>(ask: RefundMoveAsk, deps: RefundMoveDe
   }
   let reply: DepositQuoteReply;
   try {
-    reply = await askDepositQuote(request, deps.fetchFn);
+    // asked again on 1Click's no-liquidity answer, inside the one ask's window (card deposit-quote-no-liquidity)
+    reply = await askDepositQuoteAgain(request, deps.fetchFn);
   } catch {
     deps.signal?.throwIfAborted();
     return { kind: "refused", why: "down" };

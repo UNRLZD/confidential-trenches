@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ASSETS, BASE_USDC, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from "./kit-deposit-assets-dry.mjs";
+import { ASSETS, BASE_USDC, DEVICE_ASKS, EXIT, NEAR_USDC, PLACEHOLDER, SOL_USDC, dec, judge } from "./kit-deposit-assets-dry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "kit-deposit-assets-dry.answers.json"), "utf8"));
@@ -237,4 +237,64 @@ test("the file's CLI replays an answer: the synthetic good one ends PASS (exit 0
   assert.equal(bad.code, 1);
   assert.equal(bad.out.at(-1), "FAIL kit-deposit-assets-dry");
   assert.equal(bad.out.filter((l) => l.startsWith("BAD ")).length, 3);
+});
+
+// Card deposit-quote-no-liquidity: these reads ask each quote once; a read refused not_available after 1Click's 400 "No
+// liquidity available" (one real body, the deployed helper's of 10 Nov 19:06:57Z, placed on these routes) is 1Click's
+// liquidity: INCONCLUSIVE (exit 3), never FAIL. Any other refusal, status, message or count stays a FAIL, and it never
+// hides a BAD line.
+const NL = { status: 400, message: "No liquidity available" };
+/** The dry quote's asks, each answered `answers[i]`, and deposit.dry refused not_available. */
+const dryRefused = (a, answers) => {
+  const req = dryReq(a);
+  a.helper = [...a.helper.filter((r) => r.phase !== "dry"), ...answers.map((x) => ({ ...structuredClone(req), ...x }))];
+  const m = a.log.find((x) => x.data?.id === a.ids.dry);
+  m.data = { v: 1, id: a.ids.dry, ok: false, error: { code: "not_available" } };
+};
+/** deposit.assets without `id`, whose probe's asks were each answered `answers[i]`. */
+const assetLeftOut = (a, id, answers) => {
+  const probe = a.helper.find((r) => r.phase === "assets" && r.body?.originAsset === id);
+  a.helper = [...a.helper.filter((r) => r !== probe), ...answers.map((x) => ({ ...structuredClone(probe), ...x }))];
+  const m = a.log.find((x) => x.data?.id === a.ids.assets);
+  m.data.result.assets = m.data.result.assets.filter((x) => x.origin_asset !== id);
+};
+const three = Array(DEVICE_ASKS).fill(NL); // the page's asks of one display quote: one
+
+test("planted, one real no-liquidity body on the 25 USDC route: deposit.dry not_available after it: INCONCLUSIVE, exit 3", () => {
+  const v = judge(plant((a) => dryRefused(a, three)));
+  assert.equal(v.verdict, "INCONCLUSIVE", v.lines.join("\n"));
+  assert.equal(v.ok, false);
+  assert.equal(EXIT[v.verdict], 3);
+  assert.equal(DEVICE_ASKS, 1);
+  assert.deepEqual(v.lines, ["INCONCLUSIVE deposit.dry answered not_available after 1Click's no-liquidity 400 to its ask: 1Click's liquidity, not the page's"]);
+  // an asset left out of deposit.assets whose probe had no liquidity on each ask, and the keyless comparison quote's own 400
+  const left = judge(plant((a) => assetLeftOut(a, BASE_USDC, three)));
+  assert.equal(left.verdict, "INCONCLUSIVE", left.lines.join("\n"));
+  const direct = judge(plant((a) => (a.oneclick.quote = { status: 400, body: { message: "No liquidity available", path: "/v0/quote" } })));
+  assert.equal(direct.verdict, "INCONCLUSIVE", direct.lines.join("\n"));
+  // every asset's probe without liquidity: deposit.assets not_available
+  const none = judge(plant((a) => {
+    for (const id of Object.keys(ASSETS)) assetLeftOut(a, id, three);
+    a.log.find((x) => x.data?.id === a.ids.assets).data = { v: 1, id: a.ids.assets, ok: false, error: { code: "not_available" } };
+  }));
+  assert.equal(none.verdict, "INCONCLUSIVE", none.lines.join("\n"));
+});
+
+test("planted: a display read asked again, another status or message, another code, or beside a BAD line: FAIL", () => {
+  const cases = {
+    "two asks (a page that asks a display read again)": (a) => dryRefused(a, [NL, NL]),
+    "four asks": (a) => dryRefused(a, [NL, NL, NL, NL]),
+    "the ask the helper's 503": (a) => dryRefused(a, [{ status: 503 }]),
+    "a 400 of another message": (a) => dryRefused(a, [{ status: 400, message: "Amount is too low" }]),
+    "a 400 with no message": (a) => dryRefused(a, [{ status: 400 }]),
+    "busy after a no-liquidity answer": (a) => (dryRefused(a, three), (a.log.find((x) => x.data?.id === a.ids.dry).data.error.code = "busy")),
+    "an asset left out, its probe answered 429": (a) => assetLeftOut(a, BASE_USDC, [{ status: 429 }]),
+    "the keyless quote's 400 of another message": (a) => (a.oneclick.quote = { status: 400, body: { message: "tokenIn is not valid" } }),
+    "no liquidity beside a live request": (a) => (dryRefused(a, three), (a.helper.find((r) => r.phase === "assets" && r.body !== null).body.dry = false)),
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const v = judge(plant(change));
+    assert.equal(v.verdict, "FAIL", `${name}: ${v.lines.join(" | ")}`);
+  }
+  assert.equal(EXIT.FAIL, 1);
 });
