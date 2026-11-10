@@ -1320,6 +1320,7 @@ const put = (root, file, text) => {
   writeFileSync(path.join(root, file), text);
 };
 const REC = "contracts/pool-solana/deployments/mainnet.json";
+const OUTSIDE = ["contracts/pool-solana/scripts/deploy.mjs", "scripts/live-checks/pool-sol-deploy.mjs", "packages/kit/src/trade/solana/pool-deposit.ts"];
 /** A bare "public repo": main is old (generation 1) -> mid (generation 2 recorded) -> head (a README edit); card is off main. */
 function gateRepo() {
   const root = mkdtempSync(path.join(tmpdir(), "venue-table-gate-"));
@@ -1332,7 +1333,9 @@ function gateRepo() {
   put(src, "contracts/pool-solana/scripts/venue-table.mjs", "// v1\n");
   put(src, "packages/kit/src/trade/solana/pool-buy.ts", "export {};\n");
   put(src, "README.md", "one\n");
-  gitT(src, "add", "--", "contracts", "packages", "README.md");
+  // what the paste also runs, outside GATED: the sends and key folder, the RPC list, the kit's other pool code
+  for (const f of OUTSIDE) put(src, f, "// v1\n");
+  gitT(src, "add", "--", "contracts", "packages", "scripts", "README.md");
   gitT(src, "commit", "-q", "-m", "old");
   const old = gitT(src, "rev-parse", "HEAD");
   put(src, REC, rec({ "pump-curve": MAINNET.tables["pump-curve"], pumpswap: [{ ...SWAP_G1, addresses: [] }] }));
@@ -1388,6 +1391,12 @@ test("the mainnet source gate: a HEAD behind main whose mainnet.json differs is 
     put(d, f, readFileSync(path.join(d, f), "utf8") + "\n");
     assert.match(gate(d).join("\n"), new RegExp(`${f.replace(/[./]/g, "\\$&")} has changes not committed`), f);
   }
+  // a dirty file outside GATED that the paste runs (deploy.mjs, the live check's RPC list, the kit's pool-deposit.ts): refused
+  for (const f of OUTSIDE) {
+    const d = cloneAt(o, o.head);
+    put(d, f, readFileSync(path.join(d, f), "utf8") + "// changed\n");
+    assert.match(gate(d).join("\n"), new RegExp(`${f.replace(/[./]/g, "\\$&")} has changes not committed`), f);
+  }
   // a commit off main: refused
   gitT(path.join(o.root, "src"), "push", "-q", o.bare, "card");
   assert.match(gate(cloneAt(o, o.card)).join("\n"), /not an ancestor of main/);
@@ -1402,6 +1411,21 @@ test("the mainnet source gate: a HEAD behind main whose mainnet.json differs is 
   assert.deepEqual(gate(r, { venue: "pumpswap", table: T }), []);
   assert.match(gate(r, { venue: "pumpswap", table: b58encode(new Uint8Array(32).fill(5)) }).join(), /has changes not committed/);
   assert.match(gate(r).join(), /has changes not committed/);
+  // the own row and nothing else: the row beside another change of the record, or placed before the older generation
+  const other = cloneAt(o, o.head);
+  const w2 = JSON.parse(readFileSync(path.join(other, REC), "utf8"));
+  w2.tables.pumpswap.push({ table: T, pages: SWAP_G1.pages, made_at: SWAP_G1.made_at, addresses: [], txs: [] });
+  w2.program_id = b58encode(new Uint8Array(32).fill(6));
+  writeFileSync(path.join(other, REC), JSON.stringify(w2, null, 2) + "\n");
+  assert.match(gate(other, { venue: "pumpswap", table: T }).join(), /mainnet\.json has changes not committed/, "own row and another program");
+  const before = cloneAt(o, o.head);
+  const w3 = JSON.parse(readFileSync(path.join(before, REC), "utf8"));
+  w3.tables.pumpswap.unshift({ table: T, pages: SWAP_G1.pages, made_at: SWAP_G1.made_at, addresses: [], txs: [] });
+  writeFileSync(path.join(before, REC), JSON.stringify(w3, null, 2) + "\n");
+  assert.match(gate(before, { venue: "pumpswap", table: T }).join(), /mainnet\.json has changes not committed/, "own row before the older generation");
+  // the own row beside a change to another tracked file: refused for that file
+  put(r, OUTSIDE[0], readFileSync(path.join(r, OUTSIDE[0]), "utf8") + "// changed\n");
+  assert.match(gate(r, { venue: "pumpswap", table: T }).join(), /deploy\.mjs has changes not committed/);
 });
 
 test("the CLI holds a mainnet run and a mainnet resume to the source gate before any read; a dry run is not gated", async () => {

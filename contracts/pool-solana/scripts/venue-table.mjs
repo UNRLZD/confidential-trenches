@@ -761,8 +761,9 @@ const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === "object" && 
 /**
  * The mainnet source gate: [] when the checkout at `root` may run a mainnet paste or resume. HEAD is an ancestor of (or
  * equal to) `remote`'s main as git ls-remote answers it now, fetched when missing (source-gate.mjs's mainProblems);
- * GATED's three files each have the same blob at HEAD as at main; and `git status` shows none of them changed. A resume
- * (`journal`) may find the record changed by its own row for the journal's table alone: a stop after the record write.
+ * GATED's three files each have the same blob at HEAD as at main; and `git status` shows no tracked file changed. A resume
+ * (`journal`) may find the record changed by its own row for the journal's table alone, at the end of its venue's list:
+ * a stop after the record write.
  * source-gate.mjs's full cloneProblems cannot hold here: the owner's checkout is not a fresh clone (its .git/config
  * holds includeIf keys of its own and its info/exclude a pattern, both of which cloneProblems refuses), so this gate
  * holds what the generation rests on: the record main has, read by the code main has.
@@ -802,7 +803,8 @@ export function sourceProblems({ root = REPO, remote = SOURCE_REPO, journal = nu
       const w = JSON.parse(readFileSync(path.join(root, GATED[0]), "utf8"));
       const h = JSON.parse(git("show", `${head}:${GATED[0]}`));
       const rows = w.tables?.[journal.venue];
-      if (!Array.isArray(rows) || rows.filter((g) => g?.table === journal.table).length !== 1) return false;
+      // the run appends its row at the end, once: anywhere else it is not the run's own write
+      if (!Array.isArray(rows) || rows.filter((g) => g?.table === journal.table).length !== 1 || rows.at(-1)?.table !== journal.table) return false;
       const rest = rows.filter((g) => g?.table !== journal.table);
       w.tables = { ...w.tables, [journal.venue]: rest };
       if (h.tables?.[journal.venue] === undefined && rest.length === 0) delete w.tables[journal.venue];
@@ -811,7 +813,9 @@ export function sourceProblems({ root = REPO, remote = SOURCE_REPO, journal = nu
       return false;
     }
   };
-  const changed = git("status", "--porcelain", "--untracked-files=no", "--", ...GATED).split("\n").filter(Boolean).map((l) => l.slice(3));
+  // every tracked file, not only GATED's: the paste also runs deploy.mjs (the sends, the key folder), the live check's
+  // RPC list and the kit's other pool code, so a checkout with any tracked change is refused
+  const changed = git("status", "--porcelain", "--untracked-files=no").split("\n").filter(Boolean).map((l) => l.slice(3));
   for (const f of changed) if (!(f === GATED[0] && ownRow())) p.push(`${f} has changes not committed: a mainnet paste runs only main's files (commit and merge them, or restore them), then paste the line again`);
   return p;
 }
