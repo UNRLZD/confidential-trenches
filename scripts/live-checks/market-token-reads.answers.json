@@ -1,0 +1,505 @@
+{
+ "good": {
+  "note": "apps/helper at card/market-token-reads 5b0c5ada: GET /v1/market/held served by the helper handler on a Mac (127.0.0.1:8799), its sources the deployed helper token page and lists answers and the real GeckoTerminal, every other path the deployed helper, at 2026-11-10T02:58:54.026Z; each lists answer cut to the row the check reads, each candles answer to its last 24 bars",
+  "run": {
+   "base": "http://127.0.0.1:8799",
+   "readAt": "2026-11-10T02:58:54.026Z",
+   "chains": {
+    "solana": {
+     "lists": {
+      "at": "2026-11-10T02:58:54.027Z",
+      "ms": 1015,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:54 GMT",
+       "keep-alive": "timeout=5",
+       "transfer-encoding": "chunked",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:58:45.502Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "jupiter"
+      },
+      "body": "{\"chain\":\"solana\",\"lists\":{\"new\":[{\"chain\":\"solana\",\"token\":\"2Fx2sbJemYXDCkQytTDxz9fUyJpi4xjRDu8tzDHrpump\",\"symbol\":\"SXSN\",\"name\":\"67%\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279519,\"price_usd\":\"0.00000212635898601\",\"mc_usd\":\"2126.35898601\",\"vol_24h_usd\":\"64.4802370756\",\"chg_5m_bps\":-1309,\"chg_1h_bps\":-1309,\"chg_24h_bps\":-1309,\"liq_usd\":\"1212.7357723\",\"holders\":3,\"top10_bps\":null,\"src\":\"jupiter\",\"as_of_ms\":1794279529497,\"creator\":\"K6Eh9fwKkrhVNq6SpRtJn7F4Myi3HUst5QP8x5BKHnR\",\"creator_sold_bps\":null,\"dev_bps\":86,\"snipers_bps\":null,\"mint_auth\":false,\"freeze_auth\":false,\"vol_5m_usd\":\"64.4802370756\",\"buys_5m\":2,\"sells_5m\":2,\"net_5m_usd\":\"29.1646584551\",\"risk_src\":\"jupiter\",\"launchpad\":\"pump.fun\",\"curve_bps\":2469,\"vol_1h_usd\":\"64.4802370756\",\"chg_4h_bps\":null,\"buys_24h\":2,\"sells_24h\":2,\"buys_1h\":2,\"sells_1h\":2}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"solana\",\"token\":\"Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr\",\"symbol\":\"FLOAT\",\"name\":\"FLOAT\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1793224397,\"price_usd\":\"0.00889977850602\",\"mc_usd\":\"7870318.90879\",\"vol_24h_usd\":\"4815557.76958\",\"chg_5m_bps\":83,\"chg_1h_bps\":491,\"chg_24h_bps\":-3034,\"liq_usd\":\"865225.300051\",\"holders\":14505,\"top10_bps\":2537,\"src\":\"jupiter\",\"as_of_ms\":1794279525502,\"creator\":\"2rQ13KrAdDsAtd1LuKV1kGj6nFB4V4GsD9GAYKXi353T\",\"creator_sold_bps\":null,\"dev_bps\":0,\"snipers_bps\":null,\"mint_auth\":false,\"freeze_auth\":false,\"vol_5m_usd\":\"14553.1424121\",\"buys_5m\":93,\"sells_5m\":59,\"net_5m_usd\":\"5417.68000113\",\"risk_src\":\"jupiter\",\"launchpad\":\"raydium-launchlab\",\"curve_bps\":10000,\"vol_1h_usd\":\"129416.453766\",\"chg_4h_bps\":null,\"buys_24h\":27592,\"sells_24h\":26005,\"buys_1h\":1051,\"sells_1h\":697}],\"graduating\":[]},\"as_of_ms\":1794279525502,\"unsettled\":[\"5mwGHFGTWAAqGiNerBt1NUuz3sAJ1G4xuWoGYDvUMLBf\",\"GdMeyDrbBXjPp41tKe1bkHLDqyzwcbqpgZRhTdbW7PMk\",\"Gw9woJq4iQcexDmuQFxPoyPdSxKELLJDp6S1Cdvj1tdd\"]}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:55.042Z",
+      "ms": 226,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:55 GMT",
+       "keep-alive": "timeout=5",
+       "server-timing": "total;dur=223",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:58:45.502Z",
+       "x-helper-commit": "5b0c5ada00000000000000000000000000000000",
+       "x-helper-source": "jupiter"
+      },
+      "body": "{\"tokens\":[{\"token\":\"Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr\",\"symbol\":\"FLOAT\",\"name\":\"FLOAT\",\"price_usd\":\"0.00889977850602\",\"src\":\"jupiter\"}],\"as_of_ms\":1794279525502}"
+     },
+     "candles": {
+      "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr": {
+       "at": "2026-11-10T02:58:55.269Z",
+       "ms": 205,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:55 GMT",
+        "keep-alive": "timeout=5",
+        "server-timing": "total;dur=1",
+        "transfer-encoding": "chunked",
+        "vary": "Origin, Accept-Encoding",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:55.196Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain,geckoterminal"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794193200,\"0.0127315121901\",\"0.0134896467405\",\"0.0120272774035\",\"0.0126418712381\",\"79271.2141995\"],[1794196800,\"0.0126418712381\",\"0.0129836774407\",\"0.0123228637371\",\"0.0129791773243\",\"27949.1329876\"],[1794200400,\"0.0129791773243\",\"0.0130180368325\",\"0.012108349311\",\"0.0128299746334\",\"38124.0853063\"],[1794204000,\"0.0128299746334\",\"0.0129390625313\",\"0.0123353817886\",\"0.0127029935369\",\"4510.07644841\"],[1794207600,\"0.0127029935369\",\"0.0127923508922\",\"0.0121246255063\",\"0.012526416456\",\"8587.97790562\"],[1794211200,\"0.012526416456\",\"0.0130627002707\",\"0.012072108454\",\"0.0130627002707\",\"21108.4391827\"],[1794214800,\"0.0130627002707\",\"0.0131834268193\",\"0.012605742035\",\"0.0126391850728\",\"14827.5294752\"],[1794218400,\"0.0126391850728\",\"0.0128071214615\",\"0.0122958397416\",\"0.012786147765\",\"9098.8057197\"],[1794222000,\"0.012786147765\",\"0.0127881914225\",\"0.0119984489852\",\"0.0119984489852\",\"13197.0809903\"],[1794225600,\"0.0119984489852\",\"0.0128462160562\",\"0.0119984489852\",\"0.0122716212188\",\"13678.2421596\"],[1794229200,\"0.0122716212188\",\"0.0134938075926\",\"0.0112417260371\",\"0.0129561466692\",\"76483.0361827\"],[1794232800,\"0.0129561466692\",\"0.0132955172344\",\"0.012403621274\",\"0.0124363992085\",\"32429.87978\"],[1794236400,\"0.0124363992085\",\"0.0128676468494\",\"0.0116896366102\",\"0.0120406039944\",\"30556.9981376\"],[1794240000,\"0.0120406039944\",\"0.0125608208774\",\"0.0117897227954\",\"0.0123593324055\",\"17987.2057142\"],[1794243600,\"0.0123593324055\",\"0.0123593324055\",\"0.0110614535567\",\"0.0113744073337\",\"39706.9107936\"],[1794247200,\"0.0113744073337\",\"0.0125882868606\",\"0.0102661325104\",\"0.0121464033475\",\"140442.786114\"],[1794250800,\"0.0121464033475\",\"0.0122750019365\",\"0.0102339065305\",\"0.0107634472061\",\"216408.598972\"],[1794254400,\"0.0107634472061\",\"0.0110401244722\",\"0.00958905401306\",\"0.0102780770766\",\"139568.175905\"],[1794258000,\"0.0102780770766\",\"0.0108315197408\",\"0.00921781330523\",\"0.00953535667121\",\"55182.0511003\"],[1794261600,\"0.00953535667121\",\"0.00960585247896\",\"0.00804455908155\",\"0.00842954861706\",\"136123.557229\"],[1794265200,\"0.00842954861706\",\"0.00963179470461\",\"0.0080980668255\",\"0.00905506541708\",\"97105.474786\"],[1794268800,\"0.00905506541708\",\"0.00931753403452\",\"0.00833222302147\",\"0.00859648170472\",\"37380.2751311\"],[1794272400,\"0.00859648170472\",\"0.00900915439891\",\"0.00822249842359\",\"0.00823382783248\",\"61942.0366963\"],[1794276000,\"0.00823382783248\",\"0.00919238774073\",\"0.00810049052534\",\"0.00886299733116\",\"28000.2333229\"]],\"src\":\"chain,geckoterminal\",\"as_of_ms\":1794279535196}"
+      }
+     }
+    },
+    "base": {
+     "lists": {
+      "at": "2026-11-10T02:58:55.474Z",
+      "ms": 203,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:55 GMT",
+       "keep-alive": "timeout=5",
+       "transfer-encoding": "chunked",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:56:28.776Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"base\",\"lists\":{\"new\":[{\"chain\":\"base\",\"token\":\"0xd139a0052029ae1e56b4da1b015d530094e6336b\",\"symbol\":\"GIK\",\"name\":\"GRID Token\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279332,\"price_usd\":\"0.0000354083759383\",\"mc_usd\":\"35408.37594\",\"vol_24h_usd\":\"0.010614\",\"chg_5m_bps\":0,\"chg_1h_bps\":0,\"chg_24h_bps\":0,\"liq_usd\":\"33301.6373\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279472575,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.010614\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"0.010614\",\"chg_4h_bps\":null,\"buys_24h\":1,\"sells_24h\":0,\"buys_1h\":1,\"sells_1h\":0}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"884.117527622\",\"mc_usd\":\"1886329.0026\",\"vol_24h_usd\":\"36110212.0116\",\"chg_5m_bps\":34,\"chg_1h_bps\":97,\"chg_24h_bps\":562,\"liq_usd\":\"1878574.7548\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279388776,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"145855.106092\",\"buys_5m\":87,\"sells_5m\":23,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1381956.00358\",\"chg_4h_bps\":null,\"buys_24h\":13895,\"sells_24h\":14409,\"buys_1h\":541,\"sells_1h\":436}],\"graduating\":[]},\"as_of_ms\":1794279388776,\"unsettled\":[],\"pools\":{\"0xb200000000000000000000397293cb8cda9a10c5\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"0x29cc30f9d113b356ce408667aa6433589cecbdca\":\"0x83f3aca29bc79b048b99c56013475570acc97ccf\",\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"0xb2000000000000000000004884b426556b92883d\":\"0x66dcd42e6314b287110922ae36cb2a8bdeecc153\",\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\":\"0x422df9aa896e883c9cdcbad309c0785b7364a1cf\",\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\":\"0x868eed6bad4bd368cd053b766f84cc727697589a\",\"0xb20000000000000000000078ee7ce2fe4908108c\":\"0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec\",\"0xb200000000000000000000fd2f87532b90095211\":\"0x41e21950362b1014bc629252ecfff8fca5f1646c\",\"0xb2000000000000000000007b9fcbd005511acbd5\":\"0x880db7dda4407d99508574e680d067d1164b3cfe\",\"0xc0634090f2fe6c6d75e61be2b949464abb498973\":\"0xd9edc75a3a797ec92ca370f19051babebfb2edee\",\"0xb2000000000000000000008bc8786b856e61707c\":\"0xd072410fa13d242e1d53721bcf7af02e3455dc96\",\"0xb200000000000000000000d9192b6b456483c2e8\":\"0x532e0f46d1e528507fc9454d5847c231f23bddf6\",\"0xb2000000000000000000002d0ba3164cc74f58b7\":\"0x16c70f04c3080a127486cdf5a4c33c066bbf47c3\",\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"0x8b7dde054be9d180c1be7fae0874697374a49832\":\"0x8a8e4170c09074b109352190d47e54d7c1f61e4e\",\"0xb2000000000000000000001e800a7f5189430cd0\":\"0x7a33000372f3f028f074182ccb9d16cbeefbf920\",\"0xb2000000000000000000000d8ce462e99ee7a47b\":\"0x138cb591c4a7d854d796e1906af8228d84cb7642\",\"0xb2000000000000000000007d16372840df4dabbe\":\"0xa0473ced0cd1bfb857e3e04b5fa4b6af18c5e44d\",\"0x11030f79109269d796fd0fb956d6244e502757f7\":\"0x0ab02e160f0df68dc049b012c514857306960eae\",\"0xb200000000000000000000ab99cfa739e253872b\":\"0x2740c0faab738f6e346e545fde02aef9b1a01ee7\",\"0x14d6c649292c5c9790c5196d1a9ea039307947a1\":\"0x95475b9b1492cf109969ff25c2862ef38d1a9998c6288f8b9b7d1c99c6443c2e\",\"0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22\":\"0x5e3c5083f27654fac92126cb3fbd8773306cd90d\",\"0x853a7c99227499dba9db8c3a02aa691afdebf841\":\"0xf1cacd7e005b9337c58aae77bc88d93c635cdf4d\",\"0xd139a0052029ae1e56b4da1b015d530094e6336b\":\"0x6c0080134d30cb6f6ff612e579748e42e8e84605\",\"0x4f67c571b788c88fd79f68242f59abf04e4772cd\":\"0xccf88b54c5355e86612f92d29c43143a989f3f28\",\"0xb0eb921fe547c68d62137ab75126e573e33f9ffd\":\"0xfdbfe920e64149510ff0d1a45df9514857e0b2eb\",\"0xcb9dd216fe0707eafc46fb6aa565380dfd704e19\":\"0x5ecf2cd8278bc8b00a41a1da4ae991f6513c3102\",\"0x0e9baeb033e1cb3dd1cdd1249dd420e2e711ab30\":\"0x050c0e18a4d8339fa2bbef03e67b2b30b6fc5cdf\",\"0x6153d0f526c9afa733817aa420ecd956ac840551\":\"0xef3e87acf726bb8d402eff4170677416ebe14609\",\"0xab2751fb28258c7bb910a1baaf82a1fecce6a3bc\":\"0x9dfa9016009cf40c879ef650a08e4723a040397b6570d23ae766e3e20f14e341\",\"0x6df49f25cdc4dc79d288caecc7885e724edd7fe5\":\"0x27566b67fc1733dc54f3a56b26db38ea7190e4d4\",\"0xebace02b8a48f5c058c964552f0ba856336fcdc2\":\"0x68ea975856ee496453eebff984bdff0e3e343a3a\",\"0x57316b721afc30b5a70f3d6aa7bce01ca1cf7572\":\"0xc5b5c9af001ace0fb65a64690681cdc240486a5e\",\"0xd20c1053e4ba6be1cfe25b46900547bd89dd87a1\":\"0xb3098d78c3d59681bbd0a0117315d6af5c047197\",\"0xf5001c6d5fe9d5209eaf65a69e13515dc25ba675\":\"0x8e99fb6307f40c3d531acfd9a193865fdc931d96\",\"0x7c128ba6c0cb6145d0f3eb3367e57a29d38c9467\":\"0x72ff51c991ed01f30ac350a4414fc1921b232db8\",\"0xb69646fa6337ee903dce784ddfe98805bf4a0c88\":\"0xd2493f58cae9a1704f4216089d0ada5dd6107e45\",\"0x1e026ac4661c6b6608ed661a38d715ccef242765\":\"0x7e256c74dd5a1681dfcf86632557dcb9995e464f543a20ee66852bd687c8a9de\",\"0x2a395342993dedd1ba1c62c119aad6fbc95cd2e5\":\"0xa8a8df4713c51b17c0a91cfd226e68d9ac007fc4\",\"0x37063db5da5e93fa7f7d1a97a65fbb625628424a\":\"0x601176c7c393609aa234948e111b318785c41c20\",\"0x89bf7ffc9e856b025d0bd130fe940b5b00d9933d\":\"0xf0a12f70d4202225b0083cbb4338cf7811a4790d\",\"0x89adf91d1b1cd8f67bf6d18e2e78ddfcdf475ced\":\"0x143792c99f4899098df4de3b514cf96d0b25a268\",\"0xb200000000000000000000c500012bb91bab598e\":\"0x75562057fa73f2f8b8e867a3191913611a46852a5575fc98c02780b5f74ef612\"}}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:55.677Z",
+      "ms": 553,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:56 GMT",
+       "keep-alive": "timeout=5",
+       "server-timing": "total;dur=551",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:56:28.776Z",
+       "x-helper-commit": "5b0c5ada00000000000000000000000000000000",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"tokens\":[{\"token\":\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\",\"symbol\":\"USDC\",\"name\":\"USD Coin\",\"price_usd\":\"0.9970370575\",\"src\":\"geckoterminal\"},{\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"price_usd\":\"884.117527622\",\"src\":\"geckoterminal\"}],\"as_of_ms\":1794279388776}"
+     },
+     "candles": {
+      "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+       "at": "2026-11-10T02:58:56.230Z",
+       "ms": 194,
+       "status": 404,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:56 GMT",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked",
+        "vary": "Origin",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+       },
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      },
+      "0xb200000000000000000000397293cb8cda9a10c5": {
+       "at": "2026-11-10T02:58:56.424Z",
+       "ms": 816,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:56 GMT",
+        "keep-alive": "timeout=5",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=417",
+        "transfer-encoding": "chunked",
+        "vary": "Origin, Accept-Encoding",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:56.582Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain,geckoterminal"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794193200,\"839.434570633\",\"847.533101873\",\"834.083901658\",\"839.487349937\",\"1204591.31355\"],[1794196800,\"839.487349937\",\"842.754901125\",\"829.525892296\",\"833.142008259\",\"1530480.99329\"],[1794200400,\"833.142008259\",\"838.228274983\",\"819.915757879\",\"821.70460968\",\"2000610.45744\"],[1794204000,\"821.70460968\",\"828.849494181\",\"814.562727741\",\"814.562727741\",\"1448384.54156\"],[1794207600,\"814.562727741\",\"820.233624814\",\"787.584699659\",\"800.216974752\",\"1378028.88328\"],[1794211200,\"800.216974752\",\"823.2120086\",\"799.963207551\",\"814.838375626\",\"1304950.82218\"],[1794214800,\"814.838375626\",\"826.39138586\",\"806.907209256\",\"818.729330052\",\"1791868.1506\"],[1794218400,\"818.729330052\",\"829.044694269\",\"815.503668313\",\"816.120820896\",\"1483081.31149\"],[1794222000,\"816.120820896\",\"830.790700785\",\"813.343222284\",\"820.214357797\",\"1423503.39626\"],[1794225600,\"820.214357797\",\"841.836269316\",\"814.241025249\",\"838.878344753\",\"1678554.82696\"],[1794229200,\"838.878344753\",\"842.073342035\",\"825.552635168\",\"834.084749251\",\"1791352.96768\"],[1794232800,\"834.084749251\",\"887.453139298\",\"827.728191486\",\"884.439638818\",\"2982213.47133\"],[1794236400,\"884.439638818\",\"893.714338431\",\"860.401536351\",\"893.714338431\",\"1618250.74815\"],[1794240000,\"893.714338431\",\"904.337606772\",\"881.901318874\",\"899.0953455\",\"1544296.94348\"],[1794243600,\"899.0953455\",\"904.535391572\",\"888.784395717\",\"888.894223212\",\"1085655.96584\"],[1794247200,\"888.894223212\",\"895.591685278\",\"876.095116977\",\"886.13985364\",\"1019465.05259\"],[1794250800,\"886.13985364\",\"893.260214454\",\"877.948530038\",\"888.432792166\",\"1165459.77769\"],[1794254400,\"888.432792166\",\"899.530692767\",\"880.095943768\",\"884.985408844\",\"1391232.28164\"],[1794258000,\"884.985408844\",\"898.411616085\",\"881.860528761\",\"895.968108313\",\"996533.854723\"],[1794261600,\"895.968108313\",\"900.663196118\",\"890.616553124\",\"893.757554065\",\"773291.050892\"],[1794265200,\"893.757554065\",\"901.914321572\",\"888.649794395\",\"895.354578025\",\"1616139.71665\"],[1794268800,\"895.354578025\",\"906.087987452\",\"877.119516481\",\"877.944176634\",\"1814250.11982\"],[1794272400,\"877.944176634\",\"892.480796354\",\"874.093210089\",\"876.832103747\",\"1964025.94772\"],[1794276000,\"884.88157036114519828085886566852\",\"886.309558423565017042234732455398\",\"884.324169827989398742399833705763\",\"885.42164664030091806431860706104\",\"119410.86006\"]],\"src\":\"chain,geckoterminal\",\"own_from_s\":1794276000,\"as_of_ms\":1794279536582}"
+      }
+     }
+    },
+    "robinhood": {
+     "lists": {
+      "at": "2026-11-10T02:58:57.240Z",
+      "ms": 191,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:57 GMT",
+       "keep-alive": "timeout=5",
+       "transfer-encoding": "chunked",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:55:05.669Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"robinhood\",\"lists\":{\"new\":[{\"chain\":\"robinhood\",\"token\":\"0x5c7e7cf56d2f9de78333f149fc18470cb18c55fb\",\"symbol\":\"AICoin\",\"name\":\"AICoin\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279269,\"price_usd\":\"0.0000212284511586\",\"mc_usd\":\"21228.45116\",\"vol_24h_usd\":\"514.232489272\",\"chg_5m_bps\":0,\"chg_1h_bps\":0,\"chg_24h_bps\":0,\"liq_usd\":\"21227.2592\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279436838,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"514.232489272\",\"buys_5m\":7,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"514.232489272\",\"chg_4h_bps\":null,\"buys_24h\":7,\"sells_24h\":4,\"buys_1h\":7,\"sells_1h\":4}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000619468114508\",\"mc_usd\":\"612724.3092\",\"vol_24h_usd\":\"518858.174075\",\"chg_5m_bps\":-261,\"chg_1h_bps\":-2143,\"chg_24h_bps\":-4793,\"liq_usd\":\"55821.7121\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279352964,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"8692.34722244\",\"buys_5m\":73,\"sells_5m\":98,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"24638.3497708\",\"chg_4h_bps\":null,\"buys_24h\":4466,\"sells_24h\":4401,\"buys_1h\":231,\"sells_1h\":219}],\"graduating\":[]},\"as_of_ms\":1794279305669,\"unsettled\":[],\"pools\":{\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"0x020bfc650a365f8bb26819deaabf3e21291018b4\":\"0xd42a491087a15e5afd51feb3606066cc152d2b09\",\"0x39dbed3a2bd333467115de45665cc57f813c4571\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"0x000de658153f47f23e92973c8eb1e89762703676\":\"0x32c50d83271c3af69696fe6b08def9c4f26d38b640da2cdb2a7c39acd8bbca5a\",\"0xecc4237f20128d253cc00c14a7122e7e24a21627\":\"0xce922ad7e201a078e3cfd56ae42c95f3874ba322e36c547336c8e191654d6a98\",\"0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f\":\"0x2b0d0183d017c58b924401ca8ac362f6e01f0e9e\",\"0xedbf91223639800bcd5756815caf908df3b890be\":\"0x9be7ab27227e115085b0949a819a73f6963ddc6da0c6204d37757c24297706e8\",\"0x72be1277e198d0c476869253cb4e62807e14533c\":\"0x5480a1684776826bc7c98123635ed38accedaa6adeb49f73bc5e87975c1ef995\",\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"0xe8ffd7e24187f72afb08d75b1bb13088a989a791\":\"0xd64fbda67e1015df43fa5e49f02ca844729e5f94\",\"0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111\":\"0x1649550af1e3363b4c25236434530af7e6886b183e1f574a98fdd1d04d287a2d\",\"0xe9ed524551451de13b8d3aa9bfb5785e5b07e6ab\":\"0xe1ef18c8fe846f028c02b3f420815dca7870a29f\",\"0x0339f5459fc690ac85f1782e15782a151b4a9e1b\":\"0x9501a20bedb8bea0798fe5d4c411f5e270965d49\",\"0xfce34d21a92069100e3226638140706cf03a266e\":\"0x7ffd58d9ab075007d3ff9a2fa31ed8993aa918680154d87eeed1861d1683b34e\",\"0x7bae7a90c7328969614b3efbee8c4a9026befea8\":\"0xf9572b36d790c881b353ed8a8b8abc420944643bb7c7d05ba66e0ffa8a10f962\",\"0x94641b97010608c3827fb058074889f19868ff33\":\"0x338fce553e60c8b0acccde1956bc378586ef6f2935339ebae5804d429d461e44\",\"0x255979302fd6a5e2ff6dce0d8b018f51e06e243a\":\"0xa8f330994e5832b499e1c82921846f423a20ba7601fe9b42340715d2f81c8bd0\",\"0x51250b135174ca09450ec01c4aff73cf69dbb590\":\"0xa85f02f8e836e92912c8e0588f60b8868eedc154e558c10a1966269e5122b77c\",\"0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3\":\"0x40521592c1698c730b85f2e0f3c1a59b33ae2f98\",\"0xcec185eb182c47d1ba1efc84e6959e18cd620be4\":\"0xf50a897ae1b4dfdac5a8d573f0d0f59c75832b7832b7e631e1192d1e64019039\",\"0x92fc187e34b25aab7ce974ee82ef027f440c570c\":\"0xfa115a24d55d1480a2f371ac5ccafe7dd2d8e14533e33237e007e9b71e4f710b\",\"0xccee82fe024c36fa15e1005ede3e9e4787e23d09\":\"0x67983c0d78cea3a8b4a5cc283feeeefd278a8ae5c6504b983b0c72bde13d1c0c\",\"0x5c7e7cf56d2f9de78333f149fc18470cb18c55fb\":\"0x55a52f80bc723de8805d58a70bc7eee94993028740a2b05b49508e56ea612426\",\"0x4cd0498a0e3e604245487465126b168e099c0087\":\"0x098bb56d2b2fa1e5652e9e9a8c62f61d14d4c11a4c16fdd64b84ada417abd8ae\",\"0x33c0e4e308c5ee34f6b4c3df74d5b10d43fe7d55\":\"0x2a944020af5bc3bfa3fd766780664691e1d163f4a57a66620637b6610919a628\",\"0xb210e99a1ea5a90aa2c642f9479374a230ed90f3\":\"0xee165a4bcfb55249df5fc4da4182b7034a9e1052\",\"0x8cb5b10dc17a0165d78bf38f1daac75339a71267\":\"0xbf7f4a8456a20ca7cf2dcd2d5277b2c45a874734\",\"0x991432c89fd51bfb0a355558fb3ac282cf175ccd\":\"0x6975f6dc913ca429b55c27050b076db61103612693d0f64eaff5aed9a02dc5f4\",\"0x7a054f89e638c78a5e98b911df98708be1ca6136\":\"0x742241aa14bbfa7bc90fd97ea86423b70c6c8adc5305d133b24de149d97dca4d\",\"0xd0fa66a02b12a7667aafe2e9b8309b9d29af4a54\":\"0xa8caf8eb0815345a41f09338ea0d5d089ae46600\",\"0x7c4587df751373f6559bcab97ba6b5494a0f8186\":\"0xe1f22191fd74328a0c11a97b8847d63adb7b4900\",\"0xc3df9d47132899bbb7f0446b0722018df0e896bf\":\"0x3066957f8b00324c27e20f427b88ae4a450ccc246c36d3097aa52791935b72a5\",\"0x2b979a0e5e8af8b36f4c405bff41a9a0ae2749d0\":\"0xd3c1f6a8d63661127c5aab48a6c5852dff555ff4e42edd7cae6d24582a1a05bf\",\"0x83a7441204e91065832450edaf4e70cb73317120\":\"0x7b23c87947f9249a9f193ce53659144d5255b885561effc44776e2e44ac7be4e\",\"0x2aa94587b26cdf45dec608dff8616df38686001f\":\"0x57f72bb7e67baee5558e8e593680d21f196d0ee7\",\"0xed956ba55dded58f664ace1942cd1c11300b0087\":\"0x18b7c465eaf096dc9aec79352eafec76d5d631283f4ac74930d0311ac4a3baed\",\"0x59d0be8767927b27f9d1a83a43352c743d695440\":\"0x83ac6bb74045601e89015408bc6187585a104dae\",\"0x9db3724ec18edd87515762402640583a86d84aa0\":\"0x5af59ac69de733dc6d14a150772b57adb802e6ab\",\"0x7eceb66ef6e7dcf8629de8eed723fbd60d4f1e18\":\"0x21bb816ae78c7a7d28323182d3872b80458b2566\",\"0x7ad2fcbe93886ef0fb8f71c0f8be6b2843ae3c1b\":\"0xc987a477a22b5ffb11e302ef9584af2810e110191758c0db442e9668b2563684\"}}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:57.432Z",
+      "ms": 198,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "cache-control": "no-store",
+       "connection": "keep-alive",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:57 GMT",
+       "keep-alive": "timeout=5",
+       "server-timing": "total;dur=196",
+       "vary": "Origin",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:55:05.669Z",
+       "x-helper-commit": "5b0c5ada00000000000000000000000000000000",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"tokens\":[{\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"price_usd\":\"0.000670733406913\",\"src\":\"geckoterminal\"}],\"as_of_ms\":1794279305669}"
+     },
+     "candles": {
+      "0xc9675fe679c7d4e1b94416f66d61c96127eb964a": {
+       "at": "2026-11-10T02:58:57.630Z",
+       "ms": 190,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "connection": "keep-alive",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:57 GMT",
+        "keep-alive": "timeout=5",
+        "server-timing": "evm-open;dur=0, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=0",
+        "transfer-encoding": "chunked",
+        "vary": "Origin",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:57.007Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794276000,\"0.000668832701176355679326193018\",\"0.000718338247738223323204979553\",\"0.000578875707213658998240035015\",\"0.00068963095056691896001575254\",\"15022.792096472554622303\"]],\"src\":\"chain\",\"own_from_s\":1794276000,\"as_of_ms\":1794279537007}"
+      }
+     }
+    }
+   },
+   "near": {
+    "at": "2026-11-10T02:58:57.819Z",
+    "ms": 1,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "cache-control": "no-store",
+     "connection": "keep-alive",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 10 Nov 2026 02:58:57 GMT",
+     "keep-alive": "timeout=5",
+     "vary": "Origin",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "5b0c5ada00000000000000000000000000000000"
+    },
+    "body": "{\"error\":{\"code\":\"not_found\"}}"
+   }
+  }
+ },
+ "bad_not_deployed": {
+  "note": "the deployed helper f8945cd4 before this card: /v1/market/held answers 404 on every chain, at 2026-11-10T02:58:01.907Z; cut as the good run",
+  "run": {
+   "base": "https://ct-api.unrealized.trade",
+   "readAt": "2026-11-10T02:58:01.907Z",
+   "chains": {
+    "solana": {
+     "lists": {
+      "at": "2026-11-10T02:58:01.908Z",
+      "ms": 966,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:02 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:57:53.490Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "jupiter"
+      },
+      "body": "{\"chain\":\"solana\",\"lists\":{\"new\":[{\"chain\":\"solana\",\"token\":\"GAzfgTvasvWig84Z2pzo6mk6K1Y2pkvYL3pSnAbUpump\",\"symbol\":\"USDC\",\"name\":\"$Moonking\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279476,\"price_usd\":\"0.00000403965637977\",\"mc_usd\":\"4039.65637977\",\"vol_24h_usd\":\"44.7298749061\",\"chg_5m_bps\":null,\"chg_1h_bps\":null,\"chg_24h_bps\":null,\"liq_usd\":null,\"holders\":3,\"top10_bps\":null,\"src\":\"jupiter\",\"as_of_ms\":1794279481488,\"creator\":\"BgbPKXoBF7WNgBxvLSCk4dZLkD1XV52hH7LTas6aMpoB\",\"creator_sold_bps\":null,\"dev_bps\":55,\"snipers_bps\":null,\"mint_auth\":false,\"freeze_auth\":false,\"vol_5m_usd\":\"44.7298749061\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":\"44.7298749061\",\"risk_src\":\"jupiter\",\"launchpad\":\"pump.fun\",\"curve_bps\":173,\"vol_1h_usd\":\"44.7298749061\",\"chg_4h_bps\":null,\"buys_24h\":1,\"sells_24h\":0,\"buys_1h\":1,\"sells_1h\":0}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"solana\",\"token\":\"Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr\",\"symbol\":\"FLOAT\",\"name\":\"FLOAT\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1793224397,\"price_usd\":\"0.00891641589761\",\"mc_usd\":\"7885031.81176\",\"vol_24h_usd\":\"4815337.26932\",\"chg_5m_bps\":190,\"chg_1h_bps\":712,\"chg_24h_bps\":-3021,\"liq_usd\":\"864714.544296\",\"holders\":14507,\"top10_bps\":2537,\"src\":\"jupiter\",\"as_of_ms\":1794279477501,\"creator\":\"2rQ13KrAdDsAtd1LuKV1kGj6nFB4V4GsD9GAYKXi353T\",\"creator_sold_bps\":null,\"dev_bps\":0,\"snipers_bps\":null,\"mint_auth\":false,\"freeze_auth\":false,\"vol_5m_usd\":\"19690.5274281\",\"buys_5m\":137,\"sells_5m\":89,\"net_5m_usd\":\"9906.9558963\",\"risk_src\":\"jupiter\",\"launchpad\":\"raydium-launchlab\",\"curve_bps\":10000,\"vol_1h_usd\":\"129724.027819\",\"chg_4h_bps\":null,\"buys_24h\":27612,\"sells_24h\":26004,\"buys_1h\":1049,\"sells_1h\":693}],\"graduating\":[]},\"as_of_ms\":1794279473490,\"unsettled\":[]}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:02.875Z",
+      "ms": 187,
+      "status": 404,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:02 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     "candles": {
+      "Bv1a7cEj5aRnJQhMw4kRQqAFesMSd5LwcDnUzq52BMmr": {
+       "at": "2026-11-10T02:58:03.062Z",
+       "ms": 2505,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "content-encoding": "gzip",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:05 GMT",
+        "server-timing": "total;dur=1902",
+        "transfer-encoding": "chunked",
+        "vary": "Origin, Accept-Encoding",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:05.169Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain,geckoterminal"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794193200,\"0.0127315121901\",\"0.0134896467405\",\"0.0120272774035\",\"0.0126418712381\",\"79271.2141995\"],[1794196800,\"0.0126418712381\",\"0.0129836774407\",\"0.0123228637371\",\"0.0129791773243\",\"27949.1329876\"],[1794200400,\"0.0129791773243\",\"0.0130180368325\",\"0.012108349311\",\"0.0128299746334\",\"38124.0853063\"],[1794204000,\"0.0128299746334\",\"0.0129390625313\",\"0.0123353817886\",\"0.0127029935369\",\"4510.07644841\"],[1794207600,\"0.0127029935369\",\"0.0127923508922\",\"0.0121246255063\",\"0.012526416456\",\"8587.97790562\"],[1794211200,\"0.012526416456\",\"0.0130627002707\",\"0.012072108454\",\"0.0130627002707\",\"21108.4391827\"],[1794214800,\"0.0130627002707\",\"0.0131834268193\",\"0.012605742035\",\"0.0126391850728\",\"14827.5294752\"],[1794218400,\"0.0126391850728\",\"0.0128071214615\",\"0.0122958397416\",\"0.012786147765\",\"9098.8057197\"],[1794222000,\"0.012786147765\",\"0.0127881914225\",\"0.0119984489852\",\"0.0119984489852\",\"13197.0809903\"],[1794225600,\"0.0119984489852\",\"0.0128462160562\",\"0.0119984489852\",\"0.0122716212188\",\"13678.2421596\"],[1794229200,\"0.0122716212188\",\"0.0134938075926\",\"0.0112417260371\",\"0.0129561466692\",\"76483.0361827\"],[1794232800,\"0.0129561466692\",\"0.0132955172344\",\"0.012403621274\",\"0.0124363992085\",\"32429.87978\"],[1794236400,\"0.0124363992085\",\"0.0128676468494\",\"0.0116896366102\",\"0.0120406039944\",\"30556.9981376\"],[1794240000,\"0.0120406039944\",\"0.0125608208774\",\"0.0117897227954\",\"0.0123593324055\",\"17987.2057142\"],[1794243600,\"0.0123593324055\",\"0.0123593324055\",\"0.0110614535567\",\"0.0113744073337\",\"39706.9107936\"],[1794247200,\"0.0113744073337\",\"0.0125882868606\",\"0.0102661325104\",\"0.0121464033475\",\"140442.786114\"],[1794250800,\"0.0121464033475\",\"0.0122750019365\",\"0.0102339065305\",\"0.0107634472061\",\"216408.598972\"],[1794254400,\"0.0107634472061\",\"0.0110401244722\",\"0.00958905401306\",\"0.0102780770766\",\"139568.175905\"],[1794258000,\"0.0102780770766\",\"0.0108315197408\",\"0.00921781330523\",\"0.00953535667121\",\"55182.0511003\"],[1794261600,\"0.00953535667121\",\"0.00960585247896\",\"0.00804455908155\",\"0.00842954861706\",\"136123.557229\"],[1794265200,\"0.00842954861706\",\"0.00963179470461\",\"0.0080980668255\",\"0.00905506541708\",\"97105.474786\"],[1794268800,\"0.00905506541708\",\"0.00931753403452\",\"0.00833222302147\",\"0.00859648170472\",\"37380.2751311\"],[1794272400,\"0.00859648170472\",\"0.00900915439891\",\"0.00822249842359\",\"0.00823382783248\",\"61942.0366963\"],[1794276000,\"0.00823382783248\",\"0.00919238774073\",\"0.00810049052534\",\"0.00886299733116\",\"28000.2333229\"]],\"src\":\"chain,geckoterminal\",\"as_of_ms\":1794279485169}"
+      }
+     }
+    },
+    "base": {
+     "lists": {
+      "at": "2026-11-10T02:58:05.567Z",
+      "ms": 199,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:05 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:54:28.809Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"base\",\"lists\":{\"new\":[{\"chain\":\"base\",\"token\":\"0xd139a0052029ae1e56b4da1b015d530094e6336b\",\"symbol\":\"GIK\",\"name\":\"GRID Token\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279332,\"price_usd\":\"0.0000354083759383\",\"mc_usd\":\"35408.37594\",\"vol_24h_usd\":\"0.010614\",\"chg_5m_bps\":0,\"chg_1h_bps\":0,\"chg_24h_bps\":0,\"liq_usd\":\"33301.6373\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279472575,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"0.010614\",\"buys_5m\":1,\"sells_5m\":0,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"0.010614\",\"chg_4h_bps\":null,\"buys_24h\":1,\"sells_24h\":0,\"buys_1h\":1,\"sells_1h\":0}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"base\",\"token\":\"0xb200000000000000000000397293cb8cda9a10c5\",\"symbol\":\"SNDKc\",\"name\":\"Sandisk Corporation\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1792637453,\"price_usd\":\"884.117527622\",\"mc_usd\":\"1886329.0026\",\"vol_24h_usd\":\"36110212.0116\",\"chg_5m_bps\":34,\"chg_1h_bps\":97,\"chg_24h_bps\":562,\"liq_usd\":\"1878574.7548\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279388776,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"145855.106092\",\"buys_5m\":87,\"sells_5m\":23,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"1381956.00358\",\"chg_4h_bps\":null,\"buys_24h\":13895,\"sells_24h\":14409,\"buys_1h\":541,\"sells_1h\":436}],\"graduating\":[]},\"as_of_ms\":1794279268809,\"unsettled\":[],\"pools\":{\"0xb200000000000000000000397293cb8cda9a10c5\":\"0x2836e062a3fe75943a7f4a552e2365b98e414e75\",\"0x29cc30f9d113b356ce408667aa6433589cecbdca\":\"0x83f3aca29bc79b048b99c56013475570acc97ccf\",\"0x07b3d902783c3c12b077508c3b5c00113d1291d0\":\"0x2df380544b88adb3ad0a94100dcc45fd705aae2d\",\"0xb2000000000000000000004884b426556b92883d\":\"0x66dcd42e6314b287110922ae36cb2a8bdeecc153\",\"0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee\":\"0x422df9aa896e883c9cdcbad309c0785b7364a1cf\",\"0x311935cd80b76769bf2ecc9d8ab7635b2139cf82\":\"0x868eed6bad4bd368cd053b766f84cc727697589a\",\"0xb20000000000000000000078ee7ce2fe4908108c\":\"0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec\",\"0xb200000000000000000000fd2f87532b90095211\":\"0x41e21950362b1014bc629252ecfff8fca5f1646c\",\"0xb2000000000000000000007b9fcbd005511acbd5\":\"0x880db7dda4407d99508574e680d067d1164b3cfe\",\"0xc0634090f2fe6c6d75e61be2b949464abb498973\":\"0xd9edc75a3a797ec92ca370f19051babebfb2edee\",\"0xb2000000000000000000008bc8786b856e61707c\":\"0xd072410fa13d242e1d53721bcf7af02e3455dc96\",\"0xb200000000000000000000d9192b6b456483c2e8\":\"0x532e0f46d1e528507fc9454d5847c231f23bddf6\",\"0xb2000000000000000000002d0ba3164cc74f58b7\":\"0x16c70f04c3080a127486cdf5a4c33c066bbf47c3\",\"0xe0cd4cacddcbf4f36e845407ce53e87717b6601d\":\"0x9331f571f79d1e186a095c93756b5680a43932ac\",\"0x8b7dde054be9d180c1be7fae0874697374a49832\":\"0x8a8e4170c09074b109352190d47e54d7c1f61e4e\",\"0xb2000000000000000000001e800a7f5189430cd0\":\"0x7a33000372f3f028f074182ccb9d16cbeefbf920\",\"0xb2000000000000000000000d8ce462e99ee7a47b\":\"0x138cb591c4a7d854d796e1906af8228d84cb7642\",\"0xb2000000000000000000007d16372840df4dabbe\":\"0xa0473ced0cd1bfb857e3e04b5fa4b6af18c5e44d\",\"0x6985884c4392d348587b19cb9eaaf157f13271cd\":\"0x0f21a72a02dc78217c2987826d061500aecf7707\",\"0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22\":\"0x5e3c5083f27654fac92126cb3fbd8773306cd90d\",\"0xb200000000000000000000c2e324d24d7eecd1fb\":\"0xf5fcb9cdafce67d50afef298f88e709d2b946ba6\",\"0x940181a94a35a4569e4529a3cdfb74e38fd98631\":\"0x20cb8f872ae894f7c9e32e621c186e5afce82fd0\",\"0xd139a0052029ae1e56b4da1b015d530094e6336b\":\"0x6c0080134d30cb6f6ff612e579748e42e8e84605\",\"0x4f67c571b788c88fd79f68242f59abf04e4772cd\":\"0xccf88b54c5355e86612f92d29c43143a989f3f28\",\"0xb0eb921fe547c68d62137ab75126e573e33f9ffd\":\"0xfdbfe920e64149510ff0d1a45df9514857e0b2eb\",\"0xcb9dd216fe0707eafc46fb6aa565380dfd704e19\":\"0x5ecf2cd8278bc8b00a41a1da4ae991f6513c3102\",\"0x0e9baeb033e1cb3dd1cdd1249dd420e2e711ab30\":\"0x050c0e18a4d8339fa2bbef03e67b2b30b6fc5cdf\",\"0x6153d0f526c9afa733817aa420ecd956ac840551\":\"0xef3e87acf726bb8d402eff4170677416ebe14609\",\"0xab2751fb28258c7bb910a1baaf82a1fecce6a3bc\":\"0x9dfa9016009cf40c879ef650a08e4723a040397b6570d23ae766e3e20f14e341\",\"0x6df49f25cdc4dc79d288caecc7885e724edd7fe5\":\"0x27566b67fc1733dc54f3a56b26db38ea7190e4d4\",\"0xebace02b8a48f5c058c964552f0ba856336fcdc2\":\"0x68ea975856ee496453eebff984bdff0e3e343a3a\",\"0x57316b721afc30b5a70f3d6aa7bce01ca1cf7572\":\"0xc5b5c9af001ace0fb65a64690681cdc240486a5e\",\"0xd20c1053e4ba6be1cfe25b46900547bd89dd87a1\":\"0xb3098d78c3d59681bbd0a0117315d6af5c047197\",\"0xf5001c6d5fe9d5209eaf65a69e13515dc25ba675\":\"0x8e99fb6307f40c3d531acfd9a193865fdc931d96\",\"0x7c128ba6c0cb6145d0f3eb3367e57a29d38c9467\":\"0x72ff51c991ed01f30ac350a4414fc1921b232db8\",\"0xb69646fa6337ee903dce784ddfe98805bf4a0c88\":\"0xd2493f58cae9a1704f4216089d0ada5dd6107e45\",\"0x1e026ac4661c6b6608ed661a38d715ccef242765\":\"0x7e256c74dd5a1681dfcf86632557dcb9995e464f543a20ee66852bd687c8a9de\",\"0x2a395342993dedd1ba1c62c119aad6fbc95cd2e5\":\"0xa8a8df4713c51b17c0a91cfd226e68d9ac007fc4\",\"0x37063db5da5e93fa7f7d1a97a65fbb625628424a\":\"0x601176c7c393609aa234948e111b318785c41c20\",\"0x89bf7ffc9e856b025d0bd130fe940b5b00d9933d\":\"0xf0a12f70d4202225b0083cbb4338cf7811a4790d\",\"0x89adf91d1b1cd8f67bf6d18e2e78ddfcdf475ced\":\"0x143792c99f4899098df4de3b514cf96d0b25a268\",\"0xb200000000000000000000c500012bb91bab598e\":\"0x75562057fa73f2f8b8e867a3191913611a46852a5575fc98c02780b5f74ef612\"}}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:05.766Z",
+      "ms": 186,
+      "status": 404,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:05 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     "candles": {
+      "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+       "at": "2026-11-10T02:58:05.952Z",
+       "ms": 190,
+       "status": 404,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:06 GMT",
+        "vary": "Origin",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+       },
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      },
+      "0xb200000000000000000000397293cb8cda9a10c5": {
+       "at": "2026-11-10T02:58:06.142Z",
+       "ms": 625,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:06 GMT",
+        "server-timing": "evm-open;dur=436, evm-queue;dur=0;desc=\"0 posts: pace 0 ms, in flight 0 ms\", total;dur=436",
+        "vary": "Origin",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:06.650Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794276000,\"884.88157036114519828085886566852\",\"886.309558423565017042234732455398\",\"884.433776955303200058956956248258\",\"884.433776955303200058956956248258\",\"91803.914446\"]],\"src\":\"chain\",\"own_from_s\":1794276000,\"as_of_ms\":1794279486650}"
+      }
+     }
+    },
+    "robinhood": {
+     "lists": {
+      "at": "2026-11-10T02:58:06.767Z",
+      "ms": 193,
+      "status": 200,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-encoding": "gzip",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:06 GMT",
+       "vary": "Origin, Accept-Encoding",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-fetched-at": "2026-11-10T02:55:05.669Z",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+       "x-helper-source": "geckoterminal"
+      },
+      "body": "{\"chain\":\"robinhood\",\"lists\":{\"new\":[{\"chain\":\"robinhood\",\"token\":\"0x5c7e7cf56d2f9de78333f149fc18470cb18c55fb\",\"symbol\":\"AICoin\",\"name\":\"AICoin\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1794279269,\"price_usd\":\"0.0000212284511586\",\"mc_usd\":\"21228.45116\",\"vol_24h_usd\":\"514.232489272\",\"chg_5m_bps\":0,\"chg_1h_bps\":0,\"chg_24h_bps\":0,\"liq_usd\":\"21227.2592\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279436838,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"514.232489272\",\"buys_5m\":7,\"sells_5m\":4,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"514.232489272\",\"chg_4h_bps\":null,\"buys_24h\":7,\"sells_24h\":4,\"buys_1h\":7,\"sells_1h\":4}],\"trending\":[],\"trending_5m\":[],\"trending_1h\":[{\"chain\":\"robinhood\",\"token\":\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\",\"symbol\":\"GIGATENEV\",\"name\":\"Giga Tenev\",\"icon\":false,\"venue\":null,\"label\":null,\"created_s\":1791568900,\"price_usd\":\"0.000619468114508\",\"mc_usd\":\"612724.3092\",\"vol_24h_usd\":\"518858.174075\",\"chg_5m_bps\":-261,\"chg_1h_bps\":-2143,\"chg_24h_bps\":-4793,\"liq_usd\":\"55821.7121\",\"holders\":null,\"top10_bps\":null,\"src\":\"geckoterminal\",\"as_of_ms\":1794279352964,\"creator\":null,\"creator_sold_bps\":null,\"dev_bps\":null,\"snipers_bps\":null,\"mint_auth\":null,\"freeze_auth\":null,\"vol_5m_usd\":\"8692.34722244\",\"buys_5m\":73,\"sells_5m\":98,\"net_5m_usd\":null,\"risk_src\":null,\"launchpad\":null,\"curve_bps\":null,\"vol_1h_usd\":\"24638.3497708\",\"chg_4h_bps\":null,\"buys_24h\":4466,\"sells_24h\":4401,\"buys_1h\":231,\"sells_1h\":219}],\"graduating\":[]},\"as_of_ms\":1794279305669,\"unsettled\":[],\"pools\":{\"0xc9675fe679c7d4e1b94416f66d61c96127eb964a\":\"0xe96c99be1ffcc204714ebce32870ab12b8b362308fa50b9352c03b2486a5d448\",\"0x020bfc650a365f8bb26819deaabf3e21291018b4\":\"0xd42a491087a15e5afd51feb3606066cc152d2b09\",\"0x39dbed3a2bd333467115de45665cc57f813c4571\":\"0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269\",\"0x000de658153f47f23e92973c8eb1e89762703676\":\"0x32c50d83271c3af69696fe6b08def9c4f26d38b640da2cdb2a7c39acd8bbca5a\",\"0xecc4237f20128d253cc00c14a7122e7e24a21627\":\"0xce922ad7e201a078e3cfd56ae42c95f3874ba322e36c547336c8e191654d6a98\",\"0x7fe995a80075df3dc8ae11a9b82c7fe4202cd87f\":\"0x2b0d0183d017c58b924401ca8ac362f6e01f0e9e\",\"0xedbf91223639800bcd5756815caf908df3b890be\":\"0x9be7ab27227e115085b0949a819a73f6963ddc6da0c6204d37757c24297706e8\",\"0x72be1277e198d0c476869253cb4e62807e14533c\":\"0x5480a1684776826bc7c98123635ed38accedaa6adeb49f73bc5e87975c1ef995\",\"0x18e674231a58c239dc7daedcffe15ec3a24cff5c\":\"0x590dcb6a87828bf688b48089a62239b693378f1fb64d2286e6a399ed8c005fdf\",\"0xe8ffd7e24187f72afb08d75b1bb13088a989a791\":\"0xd64fbda67e1015df43fa5e49f02ca844729e5f94\",\"0x000050e18ffa3f8f7ad170eb9cef160eb3ed1111\":\"0x1649550af1e3363b4c25236434530af7e6886b183e1f574a98fdd1d04d287a2d\",\"0xe9ed524551451de13b8d3aa9bfb5785e5b07e6ab\":\"0xe1ef18c8fe846f028c02b3f420815dca7870a29f\",\"0x0339f5459fc690ac85f1782e15782a151b4a9e1b\":\"0x9501a20bedb8bea0798fe5d4c411f5e270965d49\",\"0xfce34d21a92069100e3226638140706cf03a266e\":\"0x7ffd58d9ab075007d3ff9a2fa31ed8993aa918680154d87eeed1861d1683b34e\",\"0x7bae7a90c7328969614b3efbee8c4a9026befea8\":\"0xf9572b36d790c881b353ed8a8b8abc420944643bb7c7d05ba66e0ffa8a10f962\",\"0x94641b97010608c3827fb058074889f19868ff33\":\"0x338fce553e60c8b0acccde1956bc378586ef6f2935339ebae5804d429d461e44\",\"0x255979302fd6a5e2ff6dce0d8b018f51e06e243a\":\"0xa8f330994e5832b499e1c82921846f423a20ba7601fe9b42340715d2f81c8bd0\",\"0x51250b135174ca09450ec01c4aff73cf69dbb590\":\"0xa85f02f8e836e92912c8e0588f60b8868eedc154e558c10a1966269e5122b77c\",\"0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3\":\"0x40521592c1698c730b85f2e0f3c1a59b33ae2f98\",\"0xcec185eb182c47d1ba1efc84e6959e18cd620be4\":\"0xf50a897ae1b4dfdac5a8d573f0d0f59c75832b7832b7e631e1192d1e64019039\",\"0x92fc187e34b25aab7ce974ee82ef027f440c570c\":\"0xfa115a24d55d1480a2f371ac5ccafe7dd2d8e14533e33237e007e9b71e4f710b\",\"0xccee82fe024c36fa15e1005ede3e9e4787e23d09\":\"0x67983c0d78cea3a8b4a5cc283feeeefd278a8ae5c6504b983b0c72bde13d1c0c\",\"0x5c7e7cf56d2f9de78333f149fc18470cb18c55fb\":\"0x55a52f80bc723de8805d58a70bc7eee94993028740a2b05b49508e56ea612426\",\"0x4cd0498a0e3e604245487465126b168e099c0087\":\"0x098bb56d2b2fa1e5652e9e9a8c62f61d14d4c11a4c16fdd64b84ada417abd8ae\",\"0x33c0e4e308c5ee34f6b4c3df74d5b10d43fe7d55\":\"0x2a944020af5bc3bfa3fd766780664691e1d163f4a57a66620637b6610919a628\",\"0xb210e99a1ea5a90aa2c642f9479374a230ed90f3\":\"0xee165a4bcfb55249df5fc4da4182b7034a9e1052\",\"0x8cb5b10dc17a0165d78bf38f1daac75339a71267\":\"0xbf7f4a8456a20ca7cf2dcd2d5277b2c45a874734\",\"0x991432c89fd51bfb0a355558fb3ac282cf175ccd\":\"0x6975f6dc913ca429b55c27050b076db61103612693d0f64eaff5aed9a02dc5f4\",\"0x7a054f89e638c78a5e98b911df98708be1ca6136\":\"0x742241aa14bbfa7bc90fd97ea86423b70c6c8adc5305d133b24de149d97dca4d\",\"0xd0fa66a02b12a7667aafe2e9b8309b9d29af4a54\":\"0xa8caf8eb0815345a41f09338ea0d5d089ae46600\",\"0x7c4587df751373f6559bcab97ba6b5494a0f8186\":\"0xe1f22191fd74328a0c11a97b8847d63adb7b4900\",\"0xc3df9d47132899bbb7f0446b0722018df0e896bf\":\"0x3066957f8b00324c27e20f427b88ae4a450ccc246c36d3097aa52791935b72a5\",\"0x2b979a0e5e8af8b36f4c405bff41a9a0ae2749d0\":\"0xd3c1f6a8d63661127c5aab48a6c5852dff555ff4e42edd7cae6d24582a1a05bf\",\"0x83a7441204e91065832450edaf4e70cb73317120\":\"0x7b23c87947f9249a9f193ce53659144d5255b885561effc44776e2e44ac7be4e\",\"0x2aa94587b26cdf45dec608dff8616df38686001f\":\"0x57f72bb7e67baee5558e8e593680d21f196d0ee7\",\"0xed956ba55dded58f664ace1942cd1c11300b0087\":\"0x18b7c465eaf096dc9aec79352eafec76d5d631283f4ac74930d0311ac4a3baed\",\"0x59d0be8767927b27f9d1a83a43352c743d695440\":\"0x83ac6bb74045601e89015408bc6187585a104dae\",\"0x9db3724ec18edd87515762402640583a86d84aa0\":\"0x5af59ac69de733dc6d14a150772b57adb802e6ab\",\"0x7eceb66ef6e7dcf8629de8eed723fbd60d4f1e18\":\"0x21bb816ae78c7a7d28323182d3872b80458b2566\",\"0x7ad2fcbe93886ef0fb8f71c0f8be6b2843ae3c1b\":\"0xc987a477a22b5ffb11e302ef9584af2810e110191758c0db442e9668b2563684\"}}"
+     },
+     "held": {
+      "at": "2026-11-10T02:58:06.960Z",
+      "ms": 187,
+      "status": 404,
+      "headers": {
+       "access-control-allow-origin": "https://ct-app.unrealized.trade",
+       "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+       "alt-svc": "h3=\":443\"; ma=2592000",
+       "cache-control": "no-store",
+       "content-type": "application/json; charset=utf-8",
+       "date": "Tue, 10 Nov 2026 02:58:07 GMT",
+       "vary": "Origin",
+       "via": "1.1 Caddy",
+       "x-content-type-options": "nosniff",
+       "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+      },
+      "body": "{\"error\":\"not_found\"}"
+     },
+     "candles": {
+      "0xc9675fe679c7d4e1b94416f66d61c96127eb964a": {
+       "at": "2026-11-10T02:58:07.147Z",
+       "ms": 301,
+       "status": 200,
+       "headers": {
+        "access-control-allow-origin": "https://ct-app.unrealized.trade",
+        "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+        "alt-svc": "h3=\":443\"; ma=2592000",
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+        "date": "Tue, 10 Nov 2026 02:58:07 GMT",
+        "server-timing": "evm-open;dur=115, evm-queue;dur=15;desc=\"1 posts: pace 0 ms, in flight 15 ms\", total;dur=115",
+        "vary": "Origin",
+        "via": "1.1 Caddy",
+        "x-content-type-options": "nosniff",
+        "x-fetched-at": "2026-11-10T02:58:07.351Z",
+        "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2",
+        "x-helper-source": "chain"
+       },
+       "body": "{\"tf\":\"1h\",\"candles\":[[1794276000,\"0.000668832701176355679326193018\",\"0.000718338247738223323204979553\",\"0.000578875707213658998240035015\",\"0.000689255553999553257690523124\",\"15014.791686638190586171\"]],\"src\":\"chain\",\"own_from_s\":1794276000,\"as_of_ms\":1794279487351}"
+      }
+     }
+    }
+   },
+   "near": {
+    "at": "2026-11-10T02:58:07.448Z",
+    "ms": 187,
+    "status": 404,
+    "headers": {
+     "access-control-allow-origin": "https://ct-app.unrealized.trade",
+     "access-control-expose-headers": "X-Helper-Commit, X-Helper-Source, X-Fetched-At, Retry-After",
+     "alt-svc": "h3=\":443\"; ma=2592000",
+     "cache-control": "no-store",
+     "content-type": "application/json; charset=utf-8",
+     "date": "Tue, 10 Nov 2026 02:58:07 GMT",
+     "vary": "Origin",
+     "via": "1.1 Caddy",
+     "x-content-type-options": "nosniff",
+     "x-helper-commit": "f8945cd4b84a5e82cb52243569ce6b98d47ff6c2"
+    },
+    "body": "{\"error\":\"not_found\"}"
+   }
+  }
+ }
+}
