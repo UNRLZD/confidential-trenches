@@ -46,3 +46,11 @@ Tx: base-sepolia 0x02e7c91d820b4848eb07c053c8465d9da528f8accfce2ff494e77b72f62ee
 Tx: base-sepolia 0xf9e418a43b19cef4a3426a6304cfaf2b4d3f8077ce7f8e91f8e2e7267902422d
 Tx: robinhood-testnet 0xfe73579b72c200884f3fb8966e83d7640af0f43cc56de28c8efffc4bf165e240
 Tx: robinhood-testnet 0x4adf0a1fd619bc69c31479bcc6f12d43bc02bf1bfdfbeb067c41e20a177e3066
+
+The leaf indexes above (17, 10, 20, 13) are each note's position in the pool's tree, counted from 0, as the note holds
+it. The pool's first log of each deposit (LeafInserted) carries the tree's size after the insert instead: 18, 11, 21
+and 14. Both name the same leaf.
+
+This release is fixed forward, never undone: a signing page build before it cannot read a note that holds the block
+its deposit's nonce was read used at, so an older build is never served again while a deposit is between mined and
+final.

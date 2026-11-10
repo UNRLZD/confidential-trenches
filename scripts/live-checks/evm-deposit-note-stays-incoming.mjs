@@ -13,12 +13,13 @@
 //   - the price's reads at that block by number (accountReads): eth_getTransactionCount and eth_getBalance;
 //   - the dead-send judgment's (spentFinal): eth_getTransactionCount at that block's hash (EIP-1898), the "finalized"
 //     header on both at or below that block, and the header at the lower finalized number with one hash on both.
-// Each must answer a well-formed value on both seats. A seat that refuses one (a state miss is judged a wrong answer,
-// judgeStateMiss) fails the check at once, as the page fails on it; a seat that answers nothing usable is asked again
-// (the page's client retries a transport fault too) and on its last try makes the check INCONCLUSIVE. Two seats on
-// different blocks at one number (a moment's fork, or a seat behind) are read again from the newest block, FORK_TRIES
-// times FORK_WAIT_MS apart, as the page's own lag retry reads them (the wallet's EVM_LAG_TRIES and EVM_LAG_WAIT_MS),
-// and fail only if they still differ.
+// Each must answer a well-formed value on both seats. A seat that refuses a read is never asked the same read again
+// (the page does not ask again either), and one that answers nothing usable is (the page's client retries a transport
+// fault too), making the check INCONCLUSIVE on its last try. Two seats on different blocks at one number (a moment's
+// fork, or a seat behind) are read again from the newest block, FORK_TRIES times FORK_WAIT_MS apart, as the page's own
+// lag retry reads them (the wallet's EVM_LAG_TRIES and EVM_LAG_WAIT_MS); a seat that refuses U's state at the newest
+// block (a state miss is judged a wrong answer, judgeStateMiss) is read again the same way, from a newer block, as the
+// page's next pass reads it. Either fails the check only if it is still so on the last read.
 // What the bundle rule (OLD_STATE_READ) sees: a state method named as a string literal, then within one list of params
 // with no nested list, a "finalized" or "safe" literal as the last param, in any quote style, with no space after the
 // commas: the shape the page's minified build makes, so SIGN_HOST's bundle before this card is caught by it. It does not
@@ -112,7 +113,8 @@ export function replayer(log) {
   };
 }
 
-/** Two seats on different blocks at one number: read again from the newest block. */
+/** Two seats on different blocks at one number, or a seat that refuses U's state at the newest block: read again from
+ *  the newest block. */
 class Fork extends Error {}
 class ReadFailed extends Error {
   constructor(message, quiet) {
@@ -169,9 +171,14 @@ async function pairReadsOnce(transport, { chain, seats, address }, before) {
   const at = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", [hx(n), false], `block ${n}`), `${host(u)}: block ${n}`));
   if (at[0].hash !== at[1].hash) throw new Fork(`${chain}: the seats hold different blocks at ${n} on ${FORK_TRIES} reads`);
   const blk = at[0];
+  // U's state at the newest block: a refusal is read again from the newest block (Fork), never asked again as it is
+  const fresh = (p) =>
+    p.catch((e) => {
+      throw e instanceof ReadFailed && !e.quiet ? new Fork(`${e.message} (on ${FORK_TRIES} reads)`) : e;
+    });
   for (const [method, what] of [["eth_getTransactionCount", "U's nonce"], ["eth_getBalance", "U's balance"]])
-    await both(async (u) => qty(await ask(transport, u, method, [address, hx(n)], `${what} at the newest block ${n}`), `${host(u)}: ${what}`));
-  await both(async (u) => qty(await ask(transport, u, "eth_getTransactionCount", [address, { blockHash: blk.hash }], `U's nonce at the newest block's hash`), `${host(u)}: U's nonce at the block hash`));
+    await fresh(both(async (u) => qty(await ask(transport, u, method, [address, hx(n)], `${what} at the newest block ${n}`), `${host(u)}: ${what}`)));
+  await fresh(both(async (u) => qty(await ask(transport, u, "eth_getTransactionCount", [address, { blockHash: blk.hash }], `U's nonce at the newest block's hash`), `${host(u)}: U's nonce at the block hash`)));
   const fin = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", ["finalized", false], "the finalized header"), `${host(u)}: the finalized header`));
   const low = fin[0].number < fin[1].number ? fin[0].number : fin[1].number;
   if (low > n) throw new Error(`${chain}: a finalized header ${low} above the newest agreed block ${n}`);

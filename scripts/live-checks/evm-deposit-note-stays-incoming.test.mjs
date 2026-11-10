@@ -59,7 +59,7 @@ test("planted: a seat whose finalized header is refused, or two seats on differe
   assert.match(r.lines.at(-1), /^base: the seats hold different final blocks at \d+ on 5 reads$/);
 });
 
-test("planted: a moment's fork (two seats on different blocks at one number, then one block) is read again and passes, as the page's lag retry reads it; an RPC error is never asked again", async () => {
+test("planted: a moment's fork (two seats on different blocks at one number, then one block) is read again and passes, as the page's lag retry reads it; so is a seat that refuses U's state at the newest block once", async () => {
   const seat = A.good.pairs[0].seats[1];
   for (const final of [false, true]) {
     const at = A.good.log.filter((e) => e.url === seat && e.method === "eth_getBlockByNumber" && /^0x/.test(e.params[0]))[final ? 1 : 0];
@@ -70,9 +70,17 @@ test("planted: a moment's fork (two seats on different blocks at one number, the
     assert.deepEqual(waits, [2_000], final ? "the final blocks" : "the newest block");
   }
   const once = A.good.log.flatMap((e) => (e.url === A.good.pairs[1].seats[0] && e.method === "eth_getBalance" ? [{ url: e.url, method: e.method, params: e.params, error: REFUSED }, e] : [e]));
-  const r = await run({ ...A.good, log: once });
-  assert.equal(r.verdict, "FAIL", "refused once: failed, as the page fails");
-  assert.match(r.lines.at(-1), /U's balance at the newest block \d+: RPC error -32000/);
+  const waits = [];
+  const r = await run({ ...A.good, log: once }, { sleep: async (ms) => void waits.push(ms) });
+  assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+  assert.deepEqual(waits, [2_000], "refused once: read again from the newest block, once");
+  // refused on every read: a failure, named, after the last read
+  const always = A.good.log.map((e) => (e.url === A.good.pairs[1].seats[0] && e.method === "eth_getBalance" ? { url: e.url, method: e.method, params: e.params, error: REFUSED } : e));
+  const waited = [];
+  const bad = await run({ ...A.good, log: always }, { sleep: async (ms) => void waited.push(ms) });
+  assert.equal(bad.verdict, "FAIL");
+  assert.equal(waited.length, 4);
+  assert.match(bad.lines.at(-1), /U's balance at the newest block \d+: RPC error -32000: historical state [0-9a-f]+ is not available \(on 5 reads\)$/);
 });
 
 test("bundleFacts: a state read at a finalized or safe tag is found in any quote style; reads at the newest block or a hash are not; a seat it lacks is named", () => {
