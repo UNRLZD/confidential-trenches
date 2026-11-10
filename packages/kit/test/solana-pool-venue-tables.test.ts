@@ -122,6 +122,9 @@ test("generations: PumpSwap's first fills its table, 136 state pages and 90 labe
   // made when the state tree passed generation 1's warning and the label tree lags far behind: each from its own page
   const [, g2] = await generations("pumpswap", [FIRST, { state: 111_412, label: 5_000 }]);
   assert.deepEqual(g2!.range, { state: [107, 242], label: [3, 92] });
+  // its warning is 80 percent into its own range, counted from the range's first page, never from entry 0
+  assert.deepEqual(solanaPoolRangeWarn(g2!.range), { state: 107 * 1024 + 111_411, label: 3 * 1024 + 73_728 });
+  assert.deepEqual(solanaPoolRangeEnd(g2!.range), { state: 243 * 1024, label: 93 * 1024 });
   assert.equal(g2!.list.length, 256);
   // the curve: its first generation is the frozen mainnet table's (pages 0 and 1, 25 addresses); it fits at any tree
   // size (below), so its next range is its first at every size: a generation only for changed venue accounts
