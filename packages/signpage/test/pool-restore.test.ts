@@ -1501,13 +1501,14 @@ test("review P3-6 (1): a sign out during a pause ends it at once: no second try,
   const n = nearOf(new Map<string, As>([[down, "down"]]));
   let r: ReturnType<typeof poolRestore> | null = null;
   let at = -1;
-  // the sign out 50 ms into the 60 s pause, so it is the pause's own abort listener that ends it
-  const w = await world({ ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, pausesMs: [60_000], step5: () => void ((at = n.log.length), setTimeout(() => r!.signedOut(), 50)) });
+  let tries = 0;
+  // the sign out 50 ms into the 60 s pause, so it is the pause's own abort listener that ends it: the 60 s pause ends
+  // inside the test's own timeout (10 s), with no second try
+  const w = await world({ ux: () => uxOf(new Map()).reads, pools: () => SOL_ONLY, solana: emptyWalk, ids: n.ids, pausesMs: [60_000], step5: () => void (tries++, (at = n.log.length), setTimeout(() => r!.signedOut(), 50)) });
   r = w.r;
   assert.equal(await w.r.auto(), "done");
-  const t0 = performance.now();
   await w.r.idle();
-  assert.ok(performance.now() - t0 < 5_000, `the pause ended at the sign out (${Math.round(performance.now() - t0)} ms)`);
+  assert.equal(tries, 1, "no second try after the sign out");
   assert.equal(n.log.length, at, "no id read after the sign out");
 });
 
