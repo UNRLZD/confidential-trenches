@@ -145,7 +145,7 @@ type Plant = {
   /** the coin: pump's curve (the default) or a graduated PumpSwap coin, as the LiteSVM run recorded each */
   coin?: "pump" | "pumpswap";
   /** RPC 1 reads this table otherwise: no account, its last byte flipped, or owned by another program */
-  tableOff?: { address: string; how: "gone" | "bytes" | "owner" };
+  tableOff?: { address: string; how: "gone" | "bytes" | "owner" | "hang" };
 };
 const OTHER_TABLE = base58.encode(new Uint8Array(32).fill(8));
 /** The fixture's table address (solana-pool-buy-fx.ts setup). */
@@ -238,6 +238,8 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
       if (method === "getAccountInfo") {
         const a0 = accounts(p)[params[0] as string];
         const off = plant.tableOff && p === 1 && params[0] === plant.tableOff.address ? plant.tableOff.how : null;
+        // a read that never answers: nothing (no timer either) keeps the process waiting on it
+        if (off === "hang") return new Promise<never>(() => {});
         const a = !a0 || off === null ? a0 : off === "gone" ? undefined : off === "owner" ? { owner: PROGRAM, data: a0.data } : { owner: a0.owner, data: Uint8Array.from(a0.data, (x, i) => (i === a0.data.length - 1 ? x ^ 1 : x)) };
         if (plant.sizeSkewOnce && p === 1 && params[0] === POOL && !skewed) {
           skewed = true;
@@ -387,6 +389,18 @@ test("a buy reads its own venue's tables only: a curve buy fills whatever the Pu
     assert.deepEqual(await runPoolBuy(w.host, ASK), { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, how);
     assert.deepEqual(loadedTables(w), [s0.tableAddr], how);
   }
+});
+test("a curve buy ends while the PumpSwap table's read never answers: the buy awaits its own venue's tables only", async () => {
+  const w = await world({ tables: { pumpswap: [OTHER_TABLE], "pump-curve": [s0.tableAddr] }, tableOff: { address: OTHER_TABLE, how: "hang" } });
+  // judged by order, not by time: the buy against 5,000 turns of the event loop (the fake answers every other read at once)
+  let turns = 0;
+  const spin = new Promise<"hung">((ok) => {
+    const turn = (): void => void (++turns >= 5_000 ? ok("hung") : setImmediate(turn));
+    setImmediate(turn);
+  });
+  const got = await Promise.race([runPoolBuy(w.host, ASK), spin]);
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] }, `after ${turns} turns`);
+  assert.deepEqual(loadedTables(w), [s0.tableAddr]);
 });
 test("the venue's own table read otherwise on RPC 1 (gone, other bytes, another owner) refuses the buy before the claim: nothing claimed, taken, seeded or sent", async () => {
   for (const how of ["gone", "bytes", "owner"] as const) {

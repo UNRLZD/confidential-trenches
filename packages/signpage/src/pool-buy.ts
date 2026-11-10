@@ -474,7 +474,9 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     // on its own venue's tables only, so another venue's unreadable table never stops it
     const tableReads = new Map<SolanaPoolBuyVenue["kind"], Promise<{ address: string; table: SolanaLookupTable; reads: Awaited<ReturnType<typeof tableOf>>["reads"] }[]>>();
     for (const v of new Set(pinned!.map(([v]) => v))) tableReads.set(v, Promise.all(pinned!.filter(([x]) => x === v).map(async ([, address]) => ({ address, ...(await tableOf(h, address)) }))));
-    await Promise.allSettled(tableReads.values());
+    // not awaited here: the buy waits on its own venue's reads only (below, once the reference names the venue), so a
+    // slow or hung read of another venue's table never holds it; a rejection no buy awaits is marked handled
+    for (const r of tableReads.values()) r.catch(() => {});
     const tip = h.cluster === "mainnet" ? SOLANA_JITO_TIP_MIN : 0n;
     // each root's leaf index, found once: absent when it is on no page or not on both RPCs at one index
     const roots = new Map<string, number | null>();
