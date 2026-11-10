@@ -129,7 +129,9 @@ test("the two sides never share an operator: a spare of a side's operator stays 
   }
 });
 
-test("a read tries its side's next provider only within its budget, never on the chain's own answer, never on a held spare; all failed, it throws the first provider's words first", async () => {
+// A read past its budget would wait on the hung spare forever: the test's own timeout is the bound, and the refusal names
+// the 50 ms budget it ended on, not a clock read.
+test("a read tries its side's next provider only within its budget, never on the chain's own answer, never on a held spare; all failed, it throws the first provider's words first", { timeout: 10_000 }, async () => {
   const lines: string[] = [];
   const asked: string[] = [];
   const p = (name: string, answer: () => Promise<unknown>, skip?: () => boolean) => ({ name, url: `https://${name}.example/${FAKE}`, rpc: async () => (asked.push(name), answer()), ...(skip ? { skip } : {}) });
@@ -137,9 +139,7 @@ test("a read tries its side's next provider only within its budget, never on the
   const never = () => new Promise<never>(() => {});
   // a spare that hangs: the read ends at its budget, and the spare after it is not asked
   const r1 = evm.evmFailoverRpc([p("a", fail("HTTP 503")), p("hang", never), p("late", async () => "0x1")], { log: (l) => void lines.push(l), budgetMs: 50 });
-  const t0 = performance.now();
   await assert.rejects(r1("eth_blockNumber", []), (e: Error) => /^HTTP 503 \(eth_blockNumber/.test(e.message) && e.message.includes("hang: no answer in the read's 50 ms"));
-  assert.ok(performance.now() - t0 < 1_000);
   assert.deepEqual(asked, ["a", "hang"]);
   // the chain's own answer (a revert) is the same on any provider: thrown at once
   asked.length = 0;

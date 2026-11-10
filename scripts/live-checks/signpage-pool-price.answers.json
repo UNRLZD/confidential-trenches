@@ -1,36 +1,38 @@
 {
  "good": {
   "check": "signpage-pool-price",
-  "at": "2026-11-04T15:36:52.748Z",
-  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "at": "2026-11-10T03:32:46.255Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
   "host": "sign",
-  "browser": "157.0.8103.38",
+  "browser": "156.0.8078.79",
   "read": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
     "https://ct-api.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "9663681652",
+   "price": "8564162588",
    "expo": -8,
-   "published_s": 1793806609,
-   "read_ms": 1793806613763
+   "published_s": 1794281561,
+   "read_ms": 1794281566255
   },
-  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-  "treeBundle": "sha384-yAMS3uu/XU+r8SXxJX5c8g/DXenQqFTUd3cJXlTujHb0pL+BVt0go3HY+9AUVkfQ",
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-yAMS3uu/XU+r8SXxJX5c8g/DXenQqFTUd3cJXlTujHb0pL+BVt0go3HY+9AUVkfQ"
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
   },
-  "entry": "/assets/index-C4hTE6bh.js",
+  "entry": "/assets/index-XvbkxnaR.js",
   "runs": [
    {
     "width": "desktop",
     "price": "fresh",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.96",
+     "bal": "Bal $0.85",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -39,7 +41,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000517401",
+       "amount": "0.000583828",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -52,9 +54,11 @@
     "price": "fresh",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.96",
+     "bal": "Bal $0.85",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -63,7 +67,7 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000517401",
+       "amount": "0.000583828",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
@@ -76,9 +80,11 @@
     "price": "stale",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy DJT"
     },
@@ -90,9 +96,11 @@
     "price": "stale",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy DJT"
     },
@@ -104,9 +112,11 @@
     "price": "none",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy DJT"
     },
@@ -118,9 +128,11 @@
     "price": "none",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy DJT"
     },
@@ -160,7 +172,7 @@
     "route": "token",
     "box": {
      "path": "vault",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": true,
      "cta": "Sign in to trade"
     },
@@ -174,7 +186,7 @@
     "route": "token",
     "box": {
      "path": "vault",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": true,
      "cta": "Sign in to trade"
     },
@@ -188,7 +200,7 @@
     "route": "token",
     "box": {
      "path": "vault",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": true,
      "cta": "Sign in to trade"
     },
@@ -202,7 +214,7 @@
     "route": "token",
     "box": {
      "path": "vault",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": true,
      "cta": "Sign in to trade"
     },
@@ -216,7 +228,7 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy cbBTC"
     },
@@ -230,9 +242,131 @@
     "route": "token",
     "box": {
      "path": "pool",
-     "bal": "Bal \u2014",
+     "bal": "Bal —",
      "ctaOn": false,
      "cta": "Buy cbBTC"
+    },
+    "asked": [],
+    "shot": "phone-none.png"
+   }
+  ]
+ },
+ "wrongChain": {
+  "check": "signpage-pool-price",
+  "at": "2026-11-10T03:33:37.760Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "host": "sign",
+  "browser": "156.0.8078.79",
+  "read": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://ct-api.unrealized.trade/v1/rpc/solana"
+   ],
+   "price": "8564199206",
+   "expo": -8,
+   "published_s": 1794281614,
+   "read_ms": 1794281617760
+  },
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+  "signBundle": {
+   "status": 200,
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+  },
+  "entry": "/assets/index-XvbkxnaR.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "desktop-fresh.png"
+   },
+   {
+    "width": "phone",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "phone-fresh.png"
+   },
+   {
+    "width": "desktop",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "desktop-stale.png"
+   },
+   {
+    "width": "phone",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "phone-stale.png"
+   },
+   {
+    "width": "desktop",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "desktop-none.png"
+   },
+   {
+    "width": "phone",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "bal": "Bal $73.18",
+     "ctaOn": false,
+     "cta": "Buy Anthropic"
     },
     "asked": [],
     "shot": "phone-none.png"

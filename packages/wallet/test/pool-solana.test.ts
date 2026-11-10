@@ -2785,7 +2785,7 @@ test("review P2-2: a held bucket taken whole still has one counter per mark in i
 // Retry-After), its provider a stub answering from the fake chain; it reads SOL_MARK_READ_BATCH_MAX marks a call, seat 0
 // (publicnode's 10) SOL_MARK_READ_BATCH. Real clocks: before, the first window's 429 failed the 3.5 s call, a failed walk
 // kept nothing and every pass began again, so a pool past about 320 marks never closed.
-async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes: number; ms: number; ok: number; throttled: number; marks: number }> {
+async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes: number; ok: number; throttled: number; marks: number }> {
   const { chain } = bigPool(nPre, nSpent);
   const helper = createHelperRpc({ SOLANA_RPC_URL: "https://keyed.example/?api-key=not-a-key" }, {
     log: () => {},
@@ -2808,13 +2808,15 @@ async function coldThroughHelper(nPre: number, nSpent: number): Promise<{ notes:
   }));
   const t0 = Date.now();
   const r = await solanaRestoreNotes({ seed64: SEED, program: PROGRAM, lister: lister(chain), rpcs: [rpc(chain, { ...MAINNET, url: "https://a.example" }), seat1], gap: 4, markBatches: [SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] });
-  return { notes: r.notes.length, ms: Date.now() - t0, ok: codes.filter((c) => c === 200).length, throttled: codes.filter((c) => c === 429).length, marks };
+  const out = { notes: r.notes.length, ok: codes.filter((c) => c === 200).length, throttled: codes.filter((c) => c === 429).length, marks };
+  // the time is printed for the record, never judged: the pass is judged by its count of reads and by closing at all
+  console.log(`# cold ${nPre + nSpent} marks: ${((Date.now() - t0) / 1000).toFixed(1)} s; helper calls ${out.ok} answered (${marks} of them mark reads), ${out.throttled} answered 429 and waited out`);
+  return out;
 }
 
 for (const [nPre, nSpent] of [[80, 80], [200, 200], [500, 500], [2_500, 2_500]] as const)
   test(`review P2-1 of e3489b3b: a cold restore of ${nPre + nSpent} marks with seat 1 through the helper's own route and limiter closes on its first pass, the helper's mark reads ${SOL_MARK_READ_BATCH_MAX} a call`, { timeout: 240_000 }, async () => {
     const r = await coldThroughHelper(nPre, nSpent);
-    console.log(`# cold ${nPre + nSpent} marks: ${(r.ms / 1000).toFixed(1)} s; helper calls ${r.ok} answered (${r.marks} of them mark reads), ${r.throttled} answered 429 and waited out`);
     assert.equal(r.notes, 2);
     // one mark read a SOL_MARK_READ_BATCH_MAX of each bucket's marks: never above one a 100 marks and one a bucket
     assert.ok(r.marks <= Math.ceil((nPre + nSpent) / SOL_MARK_READ_BATCH_MAX) + 2 * Math.ceil((nPre + nSpent) / SOL_MARK_BUCKET), `${r.marks} mark reads`);
