@@ -349,9 +349,10 @@ export function poolSellAsk(pools: SignpageState["pools"], chain: Chain, token: 
 }
 
 /**
- * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the one balance the header and Portfolio's
- * Cash tile draw (balanceOf), never a second sum; on a chain whose pool the signing page reports, that pool's balance
- * in USD (poolView), null while it cannot be priced. One number for the amount gate (amountOk) either way.
+ * The trade box's Bal (card trade-box-bal-cash): on a chain with no pool, the vault path's part of Portfolio's Cash
+ * (Totals.offPool, from the same totals as balanceOf, never a second sum; card portfolio-one-balance); on a chain whose
+ * pool the signing page reports, that pool's balance in USD (poolView), its part of Cash, null while it cannot be priced.
+ * One number for the amount gate (amountOk) either way.
  */
 export function tradeBal(onPool: boolean, pool: PoolView | null, cash: Cents | null): { from: "cash" | "pool"; cents: Cents | null } {
   return onPool ? { from: "pool", cents: pool?.balance ?? null } : { from: "cash", cents: cash };

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { CHAINS, FUNDINGS, RUN_FUNDINGS, RUN_SENDERS, check, checkHelper, checkRuns, collectorAt, collectorOf, runRecord } from "./evm-testnet-delegate-review3.mjs";
+import { CHAINS, FUNDINGS, RUN_FUNDINGS, RUN_SENDERS, check, checkHelper, checkRuns, collectorAt, collectorOf, readHelper, runRecord } from "./evm-testnet-delegate-review3.mjs";
 import { replayer } from "./notes-per-pool-evm.mjs";
 import { BUILD } from "./pool-evm-deploy.mjs";
 
@@ -285,4 +285,49 @@ test("a dry run's FeeCollector record names no collector; the v1 delegate's froz
   assert.match(v1.sell, /^0x[0-9a-f]{8}$/);
   assert.ok(lower(V.code).includes(`63${v1.sell.slice(2)}`), `the v1 code dispatches ${v1.sell}`);
   assert.ok(!lower(V.code).includes(`63${BUILD.contracts.SellDelegate.sell.slice(2)}`), "and not the current build's sell");
+});
+
+// card evm-fee-quiet-epoch: HELPER_HOST's fee is read through evm-pool-fee-epoch.mjs. The helper has no block yet in the
+// first moment of a minute (503 index_behind; 404 not_found before its change): the epoch before is asked, and a chain
+// with no block for a minute is INCONCLUSIVE, never PASS.
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+/** readHelper() against a fake helper: `first` answers the fee asked for the helper's now, `second` the one with &epoch=. */
+async function plantedHelper(first, second) {
+  const venues = evmPoolVenues();
+  const asked = [];
+  const fetchFn = async (url) => {
+    asked.push(url);
+    const chain = CHAINS.find((c) => url.includes(`pool=${venues[c].pool}`));
+    const a = url.includes("&epoch=") ? second : first;
+    const [status, body] = a === "good" ? [200, A.helper.find((h) => h.network === chain).body] : a;
+    return new Response(body, { status, headers: { "x-helper-commit": "7c3b9b9a83f489a6e58ed9b895675804dca5593f" } });
+  };
+  const helper = await readHelper("https://helper.test", fetchFn, venues);
+  return { helper, asked, h: checkHelper(helper) };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`the first fee answer ${name} and the epoch before's 200 passes: both asks recorded, the 200 judged`, async () => {
+    const { helper, asked, h } = await plantedHelper(first, "good");
+    assert.equal(asked.length, 2 * CHAINS.length);
+    assert.equal(asked.filter((u) => u.includes("&epoch=")).length, CHAINS.length);
+    for (const x of helper) assert.deepEqual([x.status, x.first?.status], [200, first[0]]);
+    assert.equal(h.verdict, "PASS", h.lines.join("\n"));
+    assert.equal(h.ok, true);
+  });
+}
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why", async () => {
+  const { h } = await plantedHelper(NO_BLOCK, NO_BLOCK);
+  assert.equal(h.verdict, "INCONCLUSIVE", h.lines.join("\n"));
+  assert.equal(h.ok, false);
+  for (const c of CHAINS) assert.ok(h.lines.some((l) => l.startsWith("QUIET") && l.includes(c) && /no block in the epoch or the one before/.test(l)), c);
+  assert.ok(!h.lines.some((l) => l.startsWith("FAIL")), h.lines.join("\n"));
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { h } = await plantedHelper(NOT_FOUND, NOT_FOUND);
+  assert.equal(h.verdict, "FAIL", h.lines.join("\n"));
+  assert.ok(h.lines.some((l) => l.startsWith("FAIL") && /fee collector \(none\)/.test(l) && /status 404/.test(l)));
 });

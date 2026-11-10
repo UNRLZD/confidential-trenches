@@ -1,6 +1,7 @@
 // The testnet flow's EVM pool.deposit (card pool-deposits, slice 3): src/pool-testnet.ts routes a Base or Robinhood
-// pool.deposit to src/pool-deposit-evm.ts only when that chain's EVM pin exists on the page's network; with none (the
-// wallet's EVM_POOLS is empty today) it is refused not_allowed and nothing is read.
+// pool.deposit to src/pool-deposit-evm.ts only when that chain's EVM pin exists on the page's network (the wallet's
+// EVM_POOLS: Base Sepolia and Robinhood testnet in this build, card evm-pool-pins); with none it is refused not_allowed
+// and nothing is read.
 //   node --test test/pool-testnet-evm-deposit.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -8,11 +9,13 @@ import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import type { EvmPoolPin, EvmRpc } from "../../wallet/src/pool/evm.ts";
-import { evmSourceOperator } from "../../wallet/src/pool/evm.ts";
 
+// the network is set before any pool module loads (the wallet's network.ts reads it once, and evm.ts imports it): a
+// static import of one would load it first, as mainnet, so they are imported after the set, and the file checks it
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
 const { testnetPool } = await import("../src/pool-testnet.ts");
-const { EVM_POOLS } = await import("../../wallet/src/pool/evm.ts");
+const { EVM_POOLS, evmSourceOperator } = await import("../../wallet/src/pool/evm.ts");
+assert.equal((await import("../../wallet/src/pool/network.ts")).POOL_TESTNET, true, "this file runs as the testnet build");
 type Ask = import("../src/rules/pool.ts").PoolAsk;
 
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16)));
@@ -58,10 +61,23 @@ test("with the chain's EVM pin, an EVM pool.deposit reaches the EVM deposit runn
   assert.equal(r.calls.length, before);
 });
 
-test("without the chain's EVM pin (the page's EVM_POOLS today), an EVM pool.deposit is refused not_allowed and nothing is read", async () => {
-  assert.deepEqual({ ...EVM_POOLS }, {}, "no EVM pool pinned yet");
+test("the testnet build's own pins (EVM_POOLS) route a Base and a Robinhood pool.deposit to the EVM deposit runner, on that pin", async () => {
+  for (const chain of ["base", "robinhood"] as const) {
+    const net = chain === "base" ? "base-sepolia" : "robinhood-testnet";
+    const r = rpcs();
+    const pins: unknown[] = [];
+    const flow = testnetPool(page(), { evmRpcs: () => r.pair, evmRound: (p) => (pins.push(p), async () => ({ events: [], finalBlock: 100n })) }).flow;
+    const run = flow({ ...ASK, chain }, ctx) as { running: true; after: Promise<void>; answer(): unknown };
+    assert.equal(run.running, true, `${chain}: a run of the runner`);
+    await run.after;
+    assert.deepEqual(run.answer(), { error: "not_funded" });
+    assert.ok(EVM_POOLS[net] !== undefined && pins.length > 0 && pins.every((p) => p === EVM_POOLS[net]), `${chain}: the run's pool is EVM_POOLS["${net}"]`);
+  }
+});
+
+test("without the chain's EVM pin (as on SIGN_HOST's build, card evm-pool-pins), an EVM pool.deposit is refused not_allowed and nothing is read", async () => {
   const r = rpcs();
-  const flow = testnetPool(page(), { evmRpcs: () => r.pair }).flow;
+  const flow = testnetPool(page(), { evmPin: () => undefined, evmRpcs: () => r.pair }).flow;
   for (const chain of ["base", "robinhood"] as const) assert.deepEqual(flow({ ...ASK, chain }, ctx), { error: "not_allowed" });
   assert.deepEqual(r.calls, []);
   // the other EVM kinds stay refused

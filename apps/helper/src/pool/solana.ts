@@ -579,6 +579,8 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       if (!Number.isSafeInteger(height) || height <= 0) return no(503, "upstream");
       const signed: SolanaSignedTx = { wire: signAsFeePayer(tx, seed), lastValidBlockHeight: height };
       let through = paths;
+      // a rebroadcast waiting for its region's next second (./jito.ts) is dropped unsent once the send has ended
+      const ended = new AbortController();
       const bundled = jito !== null && tx.tag === 3;
       if (bundled) {
         // M362 (4): bundle-only, so a tag 3 that would fail on chain never lands; rebroadcast the same way, one a
@@ -595,11 +597,12 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
             {
               name: "jito",
               // the region's own pace (./jito.ts JITO_REGION_INTERVAL_MS) plus JITO_TICK_SLACK_MS, so the kit's tick, in
-              // whole Date.now() ms, never lands inside the gate's performance.now() interval and is refused unsent
+              // whole Date.now() ms, lands past the gate's performance.now() interval; one the gate stamps later than
+              // that waits for the region's next second (./jito.ts rebroadcast), never refused unsent
               minIntervalMs: jito.intervalMs + JITO_TICK_SLACK_MS,
               paceKey: region,
               send: async (b64) => {
-                const r = await jito.rebroadcast(region, b64, sig);
+                const r = await jito.rebroadcast(region, b64, sig, ended.signal);
                 if (r.kind !== "ok") throw new Error(`block engine ${r.kind}: ${r.detail}`);
                 return sig;
               },
@@ -609,6 +612,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
         // every region failed on transport: the plain send, under M356 (1) (a failure that lands is paid once an epoch)
       }
       const h = send([signed], { paths: through, providers: [a, b] });
+      h.done.then(() => ended.abort(), () => ended.abort());
       // the send's end frees the nullifier only if once still holds this send's entry (a newer one stays):
       //   expired (never landed, no fee paid): free now; failed (a paid failure): free, and refuse it until the next
       //   epoch; unknown, or no answer: held until the release's deadline, after which it cannot land

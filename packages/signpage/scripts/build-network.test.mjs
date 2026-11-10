@@ -20,8 +20,12 @@ const TESTNET_ONLY = [
   "base-testnet.api.pocket.network", // Base Sepolia's second pool provider (card notes-per-pool-evm-base-hang)
   "rpc.testnet.chain.robinhood.com",
   "robinhood-sepolia-rpc.publicnode.com",
+  "sepolia.base.org", // Base Sepolia's fee provider (src/pool-testnet.ts TESTNET_EVM_FEE_RPCS)
+  "robinhood-testnet.drpc.org", // Robinhood testnet's fee provider (the same)
   "r-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow the testnet withdrawal relayer (card signpage-withdraw-handoff)
   "f-2b700409.bf-vt-20261102t071444.testnet", // gitleaks:allow its fee recipient
+  "0x6c830ac1b22d96baf692af4dd17d822ba61c32ec", // the Base Sepolia pool's fee recipient (wallet EVM_POOLS, card evm-pool-pins)
+  "0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7", // the Robinhood testnet pool's fee recipient
 ];
 /** The mainnet pin (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
  *  sol-pools-mainnet-pin): the testnet build carries none of it. */
