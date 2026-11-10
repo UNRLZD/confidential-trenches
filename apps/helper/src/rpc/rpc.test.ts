@@ -680,12 +680,14 @@ test("card app-console-429: one caller's burst of 35 on a keyed provider (Helius
 test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller over it gets a 429 with no hold; the public endpoint is not paced", async () => {
   const lines: string[] = [];
   const env = { SOLANA_RPC_URL: `https://mainnet.helius-rpc.invalid/?api-key=${KEY}`, RPC_BUDGET_SOLANA: "1000,100" };
-  // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits
-  const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t0 = performance.now();
+  // a plan of 1000 per 10 s is 100 a second: 40 callers at once all go now, none waits (each wait the client asks for
+  // is recorded, then waited on the real timer)
+  const waits: number[] = [];
+  const sleep = (ms: number) => (waits.push(ms), new Promise((ok) => setTimeout(ok, ms)));
+  const r = createRpc(env, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l), sleep });
   const all = await Promise.all(Array.from({ length: 40 }, (_, i) => r.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   assert.equal(all.filter((a) => a.status === 200).length, 40);
-  assert.ok(performance.now() - t0 < 500, "within the plan's second nothing waits");
+  assert.deepEqual(waits, [], "within the plan's second nothing waits");
   const tight = createRpc({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, RPC_BUDGET_SOLANA: "100,90" }, { fetch: keepsPerSecond(10).fetch as never, log: (l) => lines.push(l) });
   const many = await Promise.all(Array.from({ length: 40 }, (_, i) => tight.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `198.51.100.${i}`)));
   const refused = many.filter((a) => a.status === 429);
@@ -693,10 +695,9 @@ test("card app-console-429: past PACE_MAX_MS of queued sends, only the caller ov
   assert.equal(refused.length, 20, "the rest are refused, each its own caller's 429");
   for (const a of refused) assert.equal(a.why, "solana pace", "named as the pace, not the provider");
   // the public endpoint (no SOLANA_RPC_URL): its limit is per 10 s, so 20 callers at once all go now
-  const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l) });
-  const t1 = performance.now();
+  const pub = createRpc({}, { fetch: keepsPerSecond(100).fetch as never, log: (l) => lines.push(l), sleep });
   const open = await Promise.all(Array.from({ length: 20 }, (_, i) => pub.handle("solana", JSON_T, JSON.stringify(getBalance(i + 1)), `192.0.2.${i}`)));
-  assert.deepEqual([open.filter((a) => a.status === 200).length, performance.now() - t1 < 500], [20, true], "not paced");
+  assert.deepEqual([open.filter((a) => a.status === 200).length, waits], [20, []], "not paced");
   assert.deepEqual(lines.filter((l) => l.startsWith("rpc hold")), [], "no hold");
 });
 
@@ -711,11 +712,13 @@ test("card helper-rpc-hold-queued: a send waiting for a keyed provider's second 
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: "0x1" }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const lines: string[] = [];
-  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now() });
+  // each wait the client asks for is recorded, then waited on the real timer
+  const waits: number[] = [];
+  const sleep = (ms: number) => (waits.push(ms), new Promise((ok) => setTimeout(ok, ms)));
+  const r = createRpc({ BASE_RPC_URL: `https://base-mainnet.example.invalid/v2/${KEY}`, RPC_BUDGET_BASE: "100,16" }, { fetch: fetch as never, log: (l) => lines.push(l), now: () => performance.timeOrigin + performance.now(), sleep });
   const blockNumber = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "eth_blockNumber", params: [] });
-  const t0 = performance.now();
   const all = await Promise.all(Array.from({ length: 11 }, (_, i) => r.handle("base", JSON_T, blockNumber(i + 1), `198.51.100.${i}`)));
-  assert.ok(performance.now() - t0 >= 1_000, "the 11th waited for the provider's next second");
+  assert.equal(waits.length, 1, `the 11th alone waited for the provider's next second: ${waits.join(", ")}`);
   assert.equal(sent.length, 10, `${sent.length} sent: the waiting send went out after the provider's 429`);
   const last = all[10]!;
   assert.equal(last.status, 429);

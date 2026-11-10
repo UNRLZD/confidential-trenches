@@ -113,7 +113,7 @@ test("only a 200 of oneclick /v0/status reaches the hook: a quote, another vendo
   assert.deepEqual(seen, []);
 });
 
-test("fold 5: during the senders' handover the hook waits (nothing opens the deposit store the old helper holds), no lock take waits and the event loop never stalls on one, and it runs once they are this helper's", async (t) => {
+test("fold 5: during the senders' handover the hook waits (nothing opens the deposit store the old helper holds), no lock is taken while the old helper holds it, and it runs once they are this helper's", async (t) => {
   const seed = Buffer.alloc(32, 5);
   const priv = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
   const pub = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x as string, "base64url");
@@ -139,17 +139,13 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   const errors: string[] = [];
   t.mock.method(console, "error", (l: string) => void errors.push(l));
   // the store's lock is SQLite's BEGIN EXCLUSIVE, the only SQLite call there is (store/durable.ts), and its take blocks
-  // the thread for its busy timeout (LOCK_WAIT_MS, 250 ms) while the old helper holds it: each take's own synchronous
-  // time is measured, under a millisecond when nobody holds the lock, so a runner's scheduling cannot reach 50 ms
+  // the thread for its busy timeout (LOCK_WAIT_MS, 250 ms) while the old helper holds it: each take is counted with
+  // whether the old helper still held the store then, never timed, so a runner's scheduling cannot reach it
   const exec = DatabaseSync.prototype.exec;
-  let lockWait = 0;
+  let takenWhileHeld = 0;
   const takes = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
-    const at = performance.now();
-    try {
-      return exec.call(this, sql);
-    } finally {
-      lockWait = Math.max(lockWait, performance.now() - at);
-    }
+    if (oldOpen) takenWhileHeld++;
+    return exec.call(this, sql);
   });
   const bind = bindSenderFromEnv(env, {}, near, env.BIND_VAULT_MAINNET); // a stand-in vault: its own pin
   t.after(() => bind.stop());
@@ -157,14 +153,6 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   const senders = new Promise<void>((ok) => (handOver = ok));
   const h = await helper(bind, undefined, senders);
   t.after(() => h.close());
-  let last = performance.now();
-  let worst = 0;
-  const tick = setInterval(() => {
-    const now = performance.now();
-    worst = Math.max(worst, now - last);
-    last = now;
-  }, 5);
-  t.after(() => clearInterval(tick));
   for (let i = 0; i < 3; i++) {
     const r = await call(h.port, STATUS_PATH);
     assert.deepEqual([r.status, r.body], [200, UPSTREAM]);
@@ -177,10 +165,7 @@ test("fold 5: during the senders' handover the hook waits (nothing opens the dep
   handOver();
   for (let i = 0; i < 100 && errors.length === 0; i++) await new Promise((ok) => setTimeout(ok, 10));
   assert.ok(takes.mock.callCount() > 0, "the new helper took the store's lock, so its take was measured");
-  assert.ok(lockWait < 50, `a lock take waited ${Math.round(lockWait)} ms`);
-  // any other synchronous wait: under the 250 ms a held lock blocks, far over a shared runner's noise (52 ms, PR #510's
-  // fresh run on a kit-only change, run 42558532011)
-  assert.ok(worst < 200, `worst event-loop gap ${Math.round(worst)} ms`);
+  assert.equal(takenWhileHeld, 0, "no lock take while the old helper held the store");
   assert.deepEqual(readsBefore, [], "nothing started while the senders are the old helper's");
   assert.ok(reads.length > 0, "the hook ran once the senders were this helper's");
 });

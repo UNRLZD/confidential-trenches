@@ -51,10 +51,16 @@ test("an answer over 16 KB or a timeout is a transport failure: every region is 
   const big = async () => (n++, new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG, pad: "x".repeat(20_000) })));
   assert.equal((await jitoSender({ fetch: big }).send("AA==", SIG)).kind, "transport");
   assert.equal(n, 8);
-  const slow = (_u: string, init: RequestInit) => new Promise<Response>((_, no) => init.signal!.addEventListener("abort", () => no(new Error("timeout"))));
-  const t0 = Date.now();
+  // each region given up on the sender's own 20 ms timeout, not the default 2 s one: its abort comes before a 1 s timer
+  // the hung request starts after it (timers fire in the order they are due, however busy the machine is)
+  const order: string[] = [];
+  const slow = (_u: string, init: RequestInit) =>
+    new Promise<Response>((_, no) => {
+      const later = setTimeout(() => order.push("1 s timer"), 1_000);
+      init.signal!.addEventListener("abort", () => (clearTimeout(later), order.push("abort"), no(new Error("timeout"))));
+    });
   assert.equal((await jitoSender({ fetch: slow, timeoutMs: 20 }).send("AA==", SIG)).kind, "transport");
-  assert.ok(Date.now() - t0 < 2_000);
+  assert.deepEqual(order, Array(8).fill("abort"), "every region aborted on timeoutMs, before a 1 s timer");
 });
 
 test("M369 (L1): any HTTP status is the region's word, never transport: a 5xx or a 429 from every region is busy", async () => {
@@ -70,11 +76,18 @@ test("M369 (L1): any HTTP status is the region's word, never transport: a 5xx or
 });
 
 // M369 (M1): one pacer per region, shared by every carry
-const ok = () => {
+const ok = (now: () => number = () => performance.now()) => {
   const seen: { host: string; at: number }[] = [];
-  const fetch = async (u: string) => (seen.push({ host: new URL(u).host, at: performance.now() }), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG })));
+  const fetch = async (u: string) => (seen.push({ host: new URL(u).host, at: now() }), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG })));
   return { seen, fetch };
 };
+/** `p`'s answer once the promise steps queued now have run, with no time passing; undefined while it waits. */
+async function atOnce<T>(p: Promise<T>): Promise<T | undefined> {
+  let got: T | undefined;
+  void p.then((v) => (got = v));
+  for (let i = 0; i < 10 && got === undefined; i++) await new Promise((r) => setImmediate(r));
+  return got;
+}
 
 test("M369 (M1): first sends at once take a region each; the ninth waits for the first region's next second, never two in one second", async () => {
   const e = ok();
@@ -106,22 +119,23 @@ test("M369 (M1): a rebroadcast goes only to its region, only in a second nobody 
 });
 
 test("M369 (M1): a first send books its region's next second ahead of every rebroadcast", async () => {
-  const e = ok();
-  const j = jitoSender({ fetch: e.fetch, intervalMs: 300 });
+  const f = fakeTime();
+  const e = ok(f.clock);
+  const j = jitoSender({ fetch: e.fetch, intervalMs: 300, clock: f.clock, sleep: f.sleep });
   // every region's second just taken by a rebroadcast
   for (const r of SOLANA_JITO_BLOCK_ENGINES) assert.equal((await j.rebroadcast(r, "AA==", SIG)).kind, "ok");
-  const f = j.send("AA==", SIG); // books the region whose second ends first (the first one taken), and waits for it
+  const first = j.send("AA==", SIG); // books the region whose second ends first (the first one taken), and waits for it
   // the first send booked that region's next second: a rebroadcast there is refused unsent at once, never waits for it
   const before = e.seen.length;
-  const t0 = performance.now();
-  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "busy");
-  assert.ok(performance.now() - t0 < 100, "it did not wait");
+  const waits = f.waiting();
+  assert.equal((await atOnce(j.rebroadcast(R0, "AA==", SIG)))?.kind, "busy", "refused with no time passing");
+  assert.equal(f.waiting(), waits, "it asked for no wait");
   assert.equal(e.seen.length, before, "nothing sent");
-  const sent = await f;
+  await f.advance(300);
+  const sent = await first;
   assert.deepEqual(sent, { kind: "ok", region: R0 });
   const at = e.seen.filter((x) => x.host === new URL(R0).host).map((x) => x.at);
-  assert.equal(at.length, 2);
-  assert.ok(at[1]! - at[0]! >= 300, `the first send went ${(at[1]! - at[0]!).toFixed(1)} ms after the rebroadcast`);
+  assert.deepEqual(at, [0, 300], "the first send went at the region's next second");
 });
 
 test("the request: POST sendTransaction, base64, no redirect followed", async () => {
@@ -134,29 +148,32 @@ test("the request: POST sendTransaction, base64, no redirect followed", async ()
 });
 
 test("M369 (M1): a first send waits at most JITO_QUEUE_MAX_MS for a second; past it, every region booked, it is busy and sends nothing", async () => {
-  const e = ok();
-  const j = jitoSender({ fetch: e.fetch, intervalMs: 1_000, queueMaxMs: 100 });
+  const f = fakeTime();
+  const e = ok(f.clock);
+  const j = jitoSender({ fetch: e.fetch, intervalMs: 1_000, queueMaxMs: 100, clock: f.clock, sleep: f.sleep });
   const r = await Promise.all(Array.from({ length: 8 }, () => j.send("AA==", SIG)));
   assert.ok(r.every((x) => x.kind === "ok"));
-  const t0 = performance.now();
-  const ninth = await j.send("AA==", SIG);
-  assert.equal(ninth.kind, "busy");
-  assert.ok(performance.now() - t0 < 100, "it did not wait");
+  const ninth = await atOnce(j.send("AA==", SIG));
+  assert.equal(ninth?.kind, "busy", "busy with no time passing");
+  assert.equal(f.waiting(), 0, "it did not wait");
   assert.equal(e.seen.length, 8, "nothing sent");
   assert.equal(JITO_QUEUE_MAX_MS, 2_100, "two region intervals (card helper-jito-pace-margin)");
 });
 
 test("M369 (M1): by default each region takes one request a second plus the margin (Jito's keyless limit): the ninth first send at once waits 1,050 ms", async () => {
-  const e = ok();
-  const j = jitoSender({ fetch: e.fetch });
+  const f = fakeTime();
+  const e = ok(f.clock);
+  const j = jitoSender({ fetch: e.fetch, clock: f.clock, sleep: f.sleep });
   // card helper-jito-pace-margin (review of 48c11e3c, P2): the margin is the default, not only a constant
   assert.equal(j.intervalMs, 1_050);
   assert.equal(JITO_REGION_INTERVAL_MS, 1_050);
-  const t0 = performance.now();
-  const r = await Promise.all(Array.from({ length: 9 }, () => j.send("AA==", SIG)));
+  const all = Promise.all(Array.from({ length: 9 }, () => j.send("AA==", SIG)));
+  await f.advance(JITO_REGION_INTERVAL_MS - 1);
+  assert.equal(e.seen.length, 8, "eight at once, the ninth not 1 ms before the region's next second");
+  await f.advance(1);
+  const r = await all;
   assert.ok(r.every((x) => x.kind === "ok"));
-  const waited = e.seen[8]!.at - t0;
-  assert.ok(waited >= JITO_REGION_INTERVAL_MS - 1 && waited < 1_550, `the ninth waited ${Math.round(waited)} ms`);
+  assert.equal(e.seen[8]!.at, JITO_REGION_INTERVAL_MS, "the ninth waited 1,050 ms");
   assert.equal(e.seen[8]!.host, e.seen[0]!.host, "the region whose second ended first");
 });
 
@@ -181,24 +198,36 @@ test("M374 (2): an event loop that stalls past two booked seconds never sends tw
 // The review's G2 (fold 4, R4f): the default queue limit is in use, not only a constant. Every region booked 3 s ahead:
 // a default sender's next first send is busy at once.
 test("G2: by default a first send never waits past JITO_QUEUE_MAX_MS: a 17th booking is refused at once", async () => {
-  const j = jitoSender({ fetch: ok().fetch, intervalMs: 1_500 });
+  const f = fakeTime();
+  const j = jitoSender({ fetch: ok(f.clock).fetch, intervalMs: 1_500, clock: f.clock, sleep: f.sleep });
   const all = Array.from({ length: 16 }, () => j.send("AA==", SIG)); // booked in this tick: every region's next second 3 s on
-  const t0 = performance.now();
-  const r = await j.send("AA==", SIG);
-  assert.equal(r.kind, "busy");
-  assert.ok(performance.now() - t0 < 100);
-  await Promise.all(all);
+  await f.advance(0);
+  assert.equal(f.waiting(), 8, "the second eight wait for their region's next second");
+  const r = await atOnce(j.send("AA==", SIG));
+  assert.equal(r?.kind, "busy", "busy with no time passing");
+  assert.equal(f.waiting(), 8, "the 17th asked for no wait");
+  await f.advance(1_500);
+  assert.ok((await Promise.all(all)).every((x) => x.kind === "ok"));
 });
 
 // R4g: the default per-region timeout is in use: a region that never answers is given up at about 2 s.
 test("a default sender gives up on a hung region at about JITO_TIMEOUT_MS (2 s): transport", async () => {
-  const hung = (_u: string, init: RequestInit) => new Promise<Response>((_, no) => init.signal!.addEventListener("abort", () => no(new Error("timeout"))));
+  // given up between a 1.5 s timer started before the request and a 3 s one started after it: timers fire in the order
+  // they are due, however busy the machine is
+  const order: string[] = [];
+  const before = setTimeout(() => order.push("1.5 s timer"), 1_500);
+  let after: ReturnType<typeof setTimeout> | undefined;
+  const hung = (_u: string, init: RequestInit) =>
+    new Promise<Response>((_, no) => {
+      after = setTimeout(() => order.push("3 s timer"), 3_000);
+      init.signal!.addEventListener("abort", () => (order.push("abort"), no(new Error("timeout"))));
+    });
   const j = jitoSender({ fetch: hung, regions: [SOLANA_JITO_BLOCK_ENGINES[0]!] });
-  const t0 = performance.now();
   const r = await j.send("AA==", SIG);
-  const ms = performance.now() - t0;
+  clearTimeout(before);
+  clearTimeout(after);
   assert.equal(r.kind, "transport");
-  assert.ok(ms >= 1_900 && ms < 2_600, `gave up after ${Math.round(ms)} ms`);
+  assert.deepEqual(order, ["1.5 s timer", "abort"], "given up after 1.5 s and before 3 s");
   assert.equal(JITO_TIMEOUT_MS, 2_000);
 });
 

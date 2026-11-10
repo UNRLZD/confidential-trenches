@@ -177,10 +177,11 @@ async function jupTurnCase(early: number) {
   const searches: Promise<unknown>[] = [];
   const seen = { handle: (...a: Parameters<typeof proxy.handle>) => (searches.push(proxy.handle(...a)), searches.at(-1)!) };
   const tok = T.createSolanaToken(seen as never, rpc as never);
-  const t0 = Date.now();
   const a = await tok.page(mint(3));
   assert.equal(a.status, 200, (a as { body: string }).body);
-  assert.ok(Date.now() - t0 < 1_000, `the page within 1 s: ${Date.now() - t0} ms`);
+  // the page answered on its own JUP_PAGE_WAIT_MS (500 ms) timer, before the search's retry at Jupiter's reset (1 s on):
+  // it never waited on the search (timers fire in the order they are due, however busy the machine is)
+  assert.equal(calls, 1, "the page answered before the search's retry was sent");
   const h = (a as { timing?: string }).timing ?? "";
   assert.deepEqual(entries(h), ["lists", "rpc-wait", "rpc", "jup", "launch", "read"], h);
   assert.match(h, new RegExp(`jup;desc="late";dur=${T.JUP_PAGE_WAIT_MS}`));
