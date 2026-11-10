@@ -9,7 +9,8 @@ Tx: solana-devnet rvcg1Q336xDzYM126dhpSwqg2jbFVUZVLHmK4YgbyR6d2T8A8BJaq11ki9HjfY
 
 The live check reads PASS on this card's own testnet build (scripts/ci/bundle-checks.mjs runs it on the PR's build).
 On SIGN_HOST, read 10 Nov 22:34Z before this card's deploy, it reads FAIL:
-`BAD the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles`. The served
+`BAD the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles, by a
+back-off capped at its own most and the Retry-After's, and finite`. The served
 bundle is main 2736dbef's, so that is the before. After the sign deploy it must read PASS there too.
 
 The run took place on Solana devnet on 10 Nov 2026, 22:30:19-22:31:58Z, and exited 0. It used

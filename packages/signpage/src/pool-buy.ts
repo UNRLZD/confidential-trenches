@@ -27,13 +27,21 @@
 //   and the seed are zeroed when the run ends.
 // - The order, so the quote is fresh when W signs (the check refuses a reference over 25 slots behind the device's own
 //   slot), in three rounds by each read's inputs (card pool-buy-filled-2s): the rent, the pinned tables, the trees' sizes
-//   and the reference; then the root indexes of every ready proof, the venue and the blockhash (its slot), started last;
-//   then the blockhash on RPC 1; then the pick, from the ready proofs read again, filtered, built and claimed
-//   in one turn (the build is synchronous); then check and sign. A proof remade meanwhile onto a root not yet found runs the reads once more.
+//   and the reference; then the root indexes of every ready proof, the venue and the blockhash (its slot), started
+//   last; then the blockhash on RPC 1; then the pick, from the ready proofs read again, filtered, built and claimed in
+//   one turn (the build is synchronous); then check and sign. A proof remade meanwhile onto a root not yet found runs
+//   the reads once more. Counted by the age check: the reference's slot against the device's. Not counted: the time
+//   from the slot read to the signature. The venue's read starts a microtask after the slot's, and a root page past the
+//   first after the page before it, so when the second round ends over POOL_BUY_SLOT_STALE_MS (a second, the device's
+//   clock) after the slot was answered, the blockhash and slot are read again and the check runs on that read: what
+//   goes uncounted is at most that second, the third round (RPC 1's blockhash reads) and the build, check and sign.
 // - After the send (card pool-buy-filled-2s): the read-back reads at a slot's pace (POOL_BUY_POLL_MS); a provider's
-//   throttle, or a settle that threw, waits twice as long each time (its Retry-After when longer). The settle lists every
-//   mark of the pool, so it is asked only once each RPC's finalized slot reaches the slot it read this transaction at,
-//   held to those slots. The app's Filled is the route's amount out, told at confirmed; the stage filled is the settle's.
+//   throttle waits twice as long each time (its Retry-After when longer, at most POOL_BUY_RETRY_AFTER_MAX_MS), back to
+//   the pace once a read goes through. The settle lists every mark of the pool, so it is asked only once each RPC's
+//   finalized slot reaches the slot it read this transaction at (an RPC that names none is held to the other's), held
+//   to those slots, or past POOL_BUY_GATE_MAX_MS from the land whatever the slots say; between reads it waits out the
+//   gap at a slot's time each. A settle that threw, or past the gate found no spend, waits twice as long each time.
+//   The app's Filled is the route's amount out, told at confirmed; the stage filled is the settle's.
 // - The fee: the proof's relay fee cap must be at most the epoch fee the device works out from the Rent sysvar it read on
 //   both RPCs (the kit's solanaPoolFee), never only the binding's own word.
 // - The take: only after the check and the signature does the queue's take move the note HELD -> RESERVED, awaited
@@ -206,6 +214,13 @@ export const POOL_BUY_POLL_MS = 400;
 export const POOL_BUY_BACKOFF_MAX_MS = 8_000;
 /** The longest Retry-After a read of the buy honours: the helper's own window (apps/helper/src/rpc/rpc.ts, up to 10 s). */
 export const POOL_BUY_RETRY_AFTER_MAX_MS = 10_000;
+/** The finality gate's bound, from the read that saw the transaction landed: past it the settle is asked whatever slot
+ *  an RPC named for the transaction (one RPC's word, 2^53 - 1 say, never holds a landed buy), and its own reads decide. */
+export const POOL_BUY_GATE_MAX_MS = 30_000;
+/** The device's slot (its blockhash read) ages uncounted while the reads of its round finish: when the round's last
+ *  read settles more than this after the slot was answered, on the device's clock, the blockhash and slot are read again
+ *  and the quote's age is checked against that read. */
+export const POOL_BUY_SLOT_STALE_MS = 1_000;
 /** Two providers a slot apart read the pool's state tree at two sizes: read again once, this long after. */
 export const POOL_BUY_SIZE_RETRY_MS = 500;
 
@@ -492,6 +507,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   // from here on W signs: a provider that fails past this is never "down" (the transaction may land)
   let signing = false;
   const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  const nowMs = (): number => Number(h.now?.() ?? BigInt(Date.now()));
   const tell = (x: BuyRoute): void => {
     try {
       h.route?.(x);
@@ -545,7 +561,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       const own = await ownRead;
       if (own.length === 0) return no("venue_not_pinned");
       // round 2: each ready proof's root indexes not found yet (the sizes name the newest page), the venue, then the
-      // device's blockhash and slot, started last so no read of the run starts after it
+      // device's blockhash and slot, started last (the venue's read and a page past the first start after it: below)
       const lookups: Promise<void>[] = [];
       for (const p of mine(await h.ready()))
         for (const [tree, size, root] of [[0, sizes.state, p.publicSignals[3]], [1, sizes.label, p.publicSignals[5]]] as const) {
@@ -555,7 +571,13 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
           lookups.push(rootIndex(h, tree, size, dec(root)).then((i) => void roots.set(k, i), (e) => (e instanceof Refused ? undefined : Promise.reject(e))));
         }
       const venueRead: Promise<SolanaPoolBuyVenue> = readSolanaPoolBuyVenue(h.rpcs, kind, token, ...(h.pick ? [h.pick] : []));
-      const [, venue, bh] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(h.rpcs)]);
+      // the slot is read before some of its round's reads end (the venue's a microtask on, a root page past the first
+      // after the page before it): when the round ends over POOL_BUY_SLOT_STALE_MS after the slot was answered, the
+      // blockhash and slot are read again, so a slow or lying provider costs a round, never the quote's age bound
+      let slotAt = 0;
+      const timed: readonly [SolanaRpc, SolanaRpc] = [((m: string, q: readonly unknown[]) => h.rpcs[0](m, q).then((x) => ((slotAt = nowMs()), x))) as SolanaRpc, h.rpcs[1]];
+      const [, venue, first] = await Promise.all([Promise.all(lookups), venueRead, blockhashOf(timed)]);
+      const bh = nowMs() - slotAt > POOL_BUY_SLOT_STALE_MS ? await blockhashOf(h.rpcs) : first;
       const minOut = (best.expectedOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
       // the pick, from the ready proofs as they are now (a remake or another tab may have changed them during the
       // reads): the smallest chunk that pays the spend and W's accounts; filtered and claimed in one turn, so two runs
@@ -665,17 +687,21 @@ export async function sendAndSettle(
   // the buy's own reads after the send (card pool-buy-filled-2s): at the slot's pace; a provider's throttle (HTTP 429, a
   // JSON-RPC throttle, past the client's own retry) or a settle that threw waits twice as long each time, up to
   // POOL_BUY_BACKOFF_MAX_MS, or the provider's Retry-After when longer; back to the pace once a read goes through
-  let pace = POOL_BUY_POLL_MS;
-  const slow = (e: unknown): void => {
-    const after = e instanceof SolanaRpcTransportError && e.afterMs !== null ? Math.min(e.afterMs, POOL_BUY_RETRY_AFTER_MAX_MS) : 0;
-    pace = Math.max(Math.min(pace * 2, POOL_BUY_BACKOFF_MAX_MS), after);
+  const backoff = (cur: number, e: unknown): number => {
+    const ms = e instanceof SolanaRpcTransportError ? Number(e.afterMs) : NaN;
+    const after = Number.isFinite(ms) && ms > 0 ? Math.min(ms, POOL_BUY_RETRY_AFTER_MAX_MS) : 0;
+    return Math.max(Math.min(cur * 2, POOL_BUY_BACKOFF_MAX_MS), after);
   };
+  let pace = POOL_BUY_POLL_MS;
+  const slow = (e: unknown): void => void (pace = backoff(pace, e));
   const throttled = (e: unknown): boolean => e instanceof SolanaRpcTransportError && (e.fault === "http_429" || e.fault === "rpc_throttled");
   // the settle (solanaSettleSpent: the note SPENT, its change written), asked until it finds the spend, then never again.
   // A settle that throws (a lister that refuses, a 429 past the retry, a stop) is not known yet (null), never "unspent"
   let settled = false;
-  // the host's settle as asked here: a throw slows the next read too (card pool-buy-filled-2s), and is still no answer
-  const settler = { settle: (id: string, minSlots?: readonly [number, number]) => h.settle(id, minSlots).catch((e: unknown) => (slow(e), Promise.reject(e))) };
+  // the settle's own wait (card pool-buy-filled-2s): it lists every mark of the pool, so after one that threw (still no
+  // answer) or, past the finality gate, found no spend, the next waits twice as long, from the slot's time to the cap
+  let hold = POOL_BUY_POLL_MS;
+  const settler = { settle: (id: string, minSlots?: readonly [number, number]) => h.settle(id, minSlots).catch((e: unknown) => ((hold = backoff(hold, e)), Promise.reject(e))) };
   const spent = async (minSlots?: readonly [number, number]): Promise<boolean | null> => {
     if (settled) return true;
     const s = await settler.settle(r.noteId, minSlots).then((x) => x.kind === "spent", () => null);
@@ -716,7 +742,7 @@ export async function sendAndSettle(
   // names the helper's signature only once both RPCs read this very transaction under it.
   const unlanded = async (txs: TxRef[], hint?: string): Promise<PoolBuyAnswer> => {
     for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
-      if (i > 0) await waitIn(Math.max(POOL_BUY_WAIT_MS, pace));
+      if (i > 0) await waitIn(Math.max(POOL_BUY_WAIT_MS, pace, hold));
       const past = await pastAt(h.rpcs, lastHeight); // before the settle: a spend final by then is in its read
       const s = await spent(past ?? undefined);
       if (s) {
@@ -801,21 +827,35 @@ export async function sendAndSettle(
   // it every second for 85 s before), and held to those slots. Until then only the two slots are read, each read once
   // and then the gap waited out: the most slots either RPC is short, at a slot's time each (at least the pace, at most
   // POOL_BUY_BACKOFF_MAX_MS), so a buy reads them a few times, never every slot (on mainnet one seat is the helper's
-  // keyed route, whose budget every user shares)
-  let gap = 0;
+  // keyed route, whose budget every user shares). Past POOL_BUY_GATE_MAX_MS from the land the settle is asked whatever
+  // the slots say, its own reads deciding; a settle that finds no spend is asked again at its doubling wait (hold); a
+  // read that goes through puts the pace back to the slot's
+  const landedAt = clock();
+  let next = pace;
   for (let i = 0; i < reads && (i === 0 || inTime()); i++) {
-    if (i > 0) await waitIn(Math.max(pace, Math.min(gap * POOL_BUY_POLL_MS, POOL_BUY_BACKOFF_MAX_MS)));
-    gap = 0;
+    if (i > 0) await waitIn(next);
     let fin: number[];
     try {
       fin = (await Promise.all(h.rpcs.map((rpc) => rpc("getSlot", [{ commitment: "finalized" }])))).map(int);
     } catch (e) {
       if (throttled(e)) slow(e);
+      next = pace;
       continue;
     }
-    gap = Math.max(...fin.map((x, k) => (txSlots[k] ?? 0) - x));
-    if (gap > 0) continue;
-    if (!(await spent([fin[0]!, fin[1]!]))) continue;
+    pace = POOL_BUY_POLL_MS;
+    next = pace;
+    const gap = Math.max(...fin.map((x, k) => (txSlots[k] ?? 0) - x));
+    const left = POOL_BUY_GATE_MAX_MS - (clock() - landedAt);
+    if (gap > 0 && left > 0) {
+      next = Math.max(pace, Math.min(gap * POOL_BUY_POLL_MS, POOL_BUY_BACKOFF_MAX_MS, left));
+      continue;
+    }
+    const s = await spent([fin[0]!, fin[1]!]);
+    if (s === false) hold = backoff(hold, null);
+    if (!s) {
+      next = hold;
+      continue;
+    }
     const a = await spentBy(signature, txs);
     if (a) return a;
   }

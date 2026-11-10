@@ -2,14 +2,19 @@
 // Live check of card pool-buy-filled-2s on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and only
 // that: the served /app.js is the one index.html pins (its sha384); and the bundle sends no pool transaction (it never
 // names the helper's /v1/pool/solana/send), or, in src/pool-buy.ts sendAndSettle as minified:
-//   - the read-back's pace starts at a slot (400 ms) and only a throttle or a settle that threw doubles it, up to a cap,
-//     or the provider's Retry-After when longer: `g=400,_=e=>{let t=e instanceof Ry&&e.afterMs!==null?Math.min(...):0;
-//     g=Math.max(Math.min(g*2,_V),t)}`;
-//   - after `named`, the read-back's wait is that pace (`t>0&&await h(g)`), never a fixed second, and the finality
-//     wait's is the gap at a slot's time each, at least that pace (`t>0&&await h(Math.max(g,Math.min(F*400,_V)))`);
+//   - one back-off: a wait doubled up to a cap, or the provider's Retry-After when longer, and only a finite one, at most
+//     its own cap: `g=(e,t)=>{let n=t instanceof Ly?Number(t.afterMs):NaN,r=Number.isFinite(n)&&n>0?Math.min(n,vV):0;
+//     return Math.max(Math.min(e*2,_V),r)}`;
+//   - the read-back's pace starts at a slot (400 ms) and a throttle doubles it by that back-off: `_=400,v=e=>void(_=g(_,
+//     e))`; the settle's own wait starts at a slot and a settle that throws doubles it: `x=400,S={settle:(t,n)=>e.settle(
+//     t,n).catch(e=>(x=g(x,e),Promise.reject(e)))}`;
+//   - after `named`, the read-back waits that pace (`n>0&&await h(_)`), never a fixed second, and the finality loop its
+//     own next wait (`t>0&&await h(R)`): the pace again once a finalized-slot read goes through (`_=400,R=_`), the gap
+//     at a slot's time each while an RPC is short and the gate's bound is not past (`if(r>0&&i>0){R=Math.max(_,Math.min(
+//     r*400,_V,i));continue}`), and the settle's wait after a settle that found no spend (`a===!1&&(x=g(x,null)),!a){R=x;
+//     continue}`);
 //   - once the transaction read back on both RPCs, the settle (the function that calls the host's `.settle(`) is asked
-//     only behind both RPCs' finalized getSlot reaching each one's slot of this transaction, and held to those slots:
-//     `if(F=Math.max(...n.map((e,t)=>(P[t]??0)-e)),F>0||!await x([n[0],n[1]]))continue`, and nowhere else past the
+//     only past that gate, held to both RPCs' finalized slots read (`await C([n[0],n[1]])`), and nowhere else past the
 //     read-back.
 // A pace of a fixed second, a settle asked before the finality gate, or a gate missing each FAIL.
 // It reads two stretches of the minified bundle, so it does not prove the whole rule (the three rounds of the checks'
@@ -32,10 +37,11 @@ const esc = (s) => s.replace(/\$/g, "\\$");
 
 /** The hook the bundle calls right after it checks the helper's signature is one (signpage-sent-read-back's HOOK). */
 const HOOK = /\.length!==64\)return [\w$]+\(\[\]\);await [\w$]+\.named\?\.\(/;
-/** The pace: its name (group 1) set to 400, doubled up to a cap or the Retry-After by the throttle's function. */
-const PACE = /,([\w$]+)=400,[\w$]+=[\w$]+=>\{let ([\w$]+)=[\w$]+ instanceof [\w$]+&&[\w$]+\.afterMs!==null\?Math\.min\([\w$]+\.afterMs,[\w$]+\):0;\1=Math\.max\(Math\.min\(\1\*2,[\w$]+\),\2\)\}/;
-/** The settle's function: its name (group 1), the one that asks the host's settle. */
+/** The back-off: its name (group 1). */
+const BACKOFF = /([\w$]+)=\(([\w$]+),([\w$]+)\)=>\{let ([\w$]+)=\3 instanceof [\w$]+\?Number\(\3\.afterMs\):NaN,([\w$]+)=Number\.isFinite\(\4\)&&\4>0\?Math\.min\(\4,[\w$]+\):0;return Math\.max\(Math\.min\(\2\*2,[\w$]+\),\5\)\}/;
+/** The settle's function: its name (group 1), the one that asks the host's settle (through the settle's back-off). */
 const SETTLE = /([\w$]+)=async [\w$]+=>\{if\([\w$]+\)return!0;let [\w$]+=await [\w$]+\.settle\(/;
+const N = String.raw`[\w$]+`;
 
 /** sendAndSettle from its `function` keyword to `named` (head), and from `named` to its end (stretch). */
 export function facts(index, js) {
@@ -54,19 +60,23 @@ export function facts(index, js) {
 function problems(head, stretch) {
   if (typeof head !== "string" || typeof stretch !== "string") return ["the bundle's sendAndSettle is not read"];
   const out = [];
-  const pace = PACE.exec(head)?.[1];
-  if (pace === undefined) return ["the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles"];
+  const g = BACKOFF.exec(head)?.[1];
+  const pace = g && new RegExp(String.raw`,(${N})=400,${N}=${N}=>void\(\1=${esc(g)}\(\1,${N}\)\)`).exec(head)?.[1];
+  const hold = g && new RegExp(String.raw`,(${N})=400,${N}=\{settle:\((${N}),(${N})\)=>${N}\.settle\(\2,\3\)\.catch\((${N})=>\(\1=${esc(g)}\(\1,\4\),Promise\.reject\(\4\)\)\)\}`).exec(head)?.[1];
+  if (!pace || !hold) return ["the bundle's read-back has no pace of a slot (400 ms) that only a throttle or a thrown settle doubles, by a back-off capped at its own most and the Retry-After's, and finite"];
   const waits = [...stretch.matchAll(/[\w$]+>0&&await [\w$]+\(([^()]*)\)/g)].map((x) => x[1]);
-  if (waits.length !== 1 || waits[0] !== pace) out.push(`the bundle's read-back wait is not its pace (${waits.join(", ") || "none"}): a fixed wait asks a throttled provider again at once`);
+  if (waits.length !== 2 || waits[0] !== pace) out.push(`the bundle's read-back wait is not its pace (${waits.join(", ") || "none"}): a fixed wait asks a throttled provider again at once`);
   const settle = SETTLE.exec(head)?.[1];
   if (settle === undefined) return [...out, "the bundle's settle function is not read"];
-  // the finality wait: the gap (group 1) waited at a slot's time each, at least the pace, then both RPCs' finalized slot
-  // (group 2) read; the settle only once neither is short, held to those slots
-  const gate = new RegExp(String.raw`[\w$]+>0&&await [\w$]+\(Math\.max\(${esc(pace)},Math\.min\(([\w$]+)\*400,[\w$]+\)\)\),\1=0;let ([\w$]+);try\{\2=\(await Promise\.all\([\w$]+\.rpcs\.map\(([\w$]+)=>\3\(\x60getSlot\x60,\[\{commitment:\x60finalized\x60\}\]\)\)\)\)\.map\([\w$]+\)\}catch\([\w$]+\)\{[^{}]*continue\}if\(\1=Math\.max\(\.\.\.\2\.map\(\(([\w$]+),([\w$]+)\)=>\([\w$]+\[\5\]\?\?0\)-\4\)\),\1>0\|\|!await ${esc(settle)}\(\[\2\[0\],\2\[1\]\]\)\)continue`);
-  const g = gate.exec(stretch);
-  if (!g) return [...out, "the bundle asks the settle with no gate on both RPCs' finalized slot reaching the transaction's: it lists every mark of the pool before the chain can answer it"];
-  // past the read-back (its `return E(...)` for a transaction not landed), the gate's is the only settle call
-  const landedAt = stretch.lastIndexOf("return", g.index);
+  // the finality loop: its wait (group 1); both RPCs' finalized slots (group 2); the pace back once they read; the gap
+  // (group 3) waited while short and the gate's bound (group 4) not past; then the settle, held to those slots, and
+  // after one that found no spend the settle's own wait
+  const P = esc(pace), H = esc(hold);
+  const gate = new RegExp(String.raw`${N}>0&&await ${N}\((${N})\);let (${N});try\{\2=\(await Promise\.all\(${N}\.rpcs\.map\((${N})=>\3\(\x60getSlot\x60,\[\{commitment:\x60finalized\x60\}\]\)\)\)\)\.map\(${N}\)\}catch\(${N}\)\{[^{}]*\1=${P};continue\}${P}=400,\1=${P};let (${N})=Math\.max\(\.\.\.\2\.map\(\((${N}),(${N})\)=>\(${N}\[\6\]\?\?0\)-\5\)\),(${N})=${N}-\(${N}\(\)-${N}\);if\(\4>0&&\7>0\)\{\1=Math\.max\(${P},Math\.min\(\4\*400,${N},\7\)\);continue\}let (${N})=await ${esc(settle)}\(\[\2\[0\],\2\[1\]\]\);if\(\8===!1&&\(${H}=${esc(g)}\(${H},null\)\),!\8\)\{\1=${H};continue\}`);
+  const m = gate.exec(stretch);
+  if (!m || waits[1] !== m[1]) return [...out, "the bundle's finality wait is not the rule (the settle only once both RPCs' finalized slot reaches the transaction's or the gate's bound is past, held to those slots; the gap waited out; the pace back after a read; a settle that found no spend asked again at its doubling wait): it lists every mark of the pool before the chain can answer it, or every slot"];
+  // past the read-back (its `return k(...)` for a transaction not landed), the gate's is the only settle call
+  const landedAt = stretch.lastIndexOf("return", m.index);
   const calls = [...stretch.slice(landedAt).matchAll(new RegExp(`(?<![\\w$.])${esc(settle)}\\(`, "g"))].length;
   if (calls !== 1) out.push(`the bundle asks the settle ${calls} times past the read-back: once, behind the finality gate, is the rule`);
   return out;

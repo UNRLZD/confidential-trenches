@@ -969,6 +969,35 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   clearInterval(drain);
 });
 
+test("a withdraw whose first run is still live beside the page opened again: one release and one onward send, W at 0, To the amount", async () => {
+  const { world, TO, COST } = WORLD;
+  const wd = await world([30_000_000n], { hangReadBack: true });
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    const answer = await wd.host.send(pool, base64.decode(tx));
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
+  const amount = 5_000_000n;
+  // the first tab's run stays live: once its read-back answers it reads, settles and sends on as the other page does
+  const t1 = testnetPool(page, over);
+  const run = t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
+  for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(wd.releases.length, 1, "the release went out");
+  await new Promise((r) => setTimeout(r, 20));
+  const W = wd.binds[0]!.recipient;
+  const t2 = testnetPool(page, { ...over, fetch: undefined });
+  await t2.stateRead();
+  wd.unhang();
+  await run;
+  await t2.stateRead();
+  assert.equal(wd.releases.length, 1, "one release");
+  assert.equal(wd.onwards().length, 1, "one onward send, whichever page made it");
+  assert.equal(wd.balance.get(W), 0n);
+  assert.equal(wd.balance.get(TO), amount);
+});
+
 // fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again
 test("keepRelease adds the release's signature to the owed send still stored only: a dropped send stays dropped, the stored one keeps its own fee ceiling", async () => {
   const { w } = await wallet();
