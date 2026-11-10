@@ -344,7 +344,25 @@ test("(4b) review P3-2: Base's fee read in the start's period, Robinhood's only 
   assert.ok(at.T >= E + 240_000);
   assert.deepEqual([await senders.get(RH)!.held(E + 60_000), await senders.get(BASE)!.held(E + 60_000)], [true, false], "Robinhood holds the next period's fee, Base none");
   // and while the check runs, the pool routes answer the coded 503 (review P3-5), never a read
+  // both checks passed: each pool's routes read as they do after a start (Base's fee read fails: the route's 503 upstream)
+  await assert.rejects(senders.get(BASE)!.fee(at.T), /HTTP 502/);
+});
+
+test("review of f86e1c27 P3-1: Robinhood whole, Base's fee's state unreadable: Robinhood's routes serve once its own check passed, Base's answer the coded 503, and ready stays false", async (t) => {
+  const S2 = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, (host, method) => (host.includes("base") && method === "eth_call" ? { status: 200, body: { code: -32000, message: "missing trie node" } } : null), at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const gate = S2.readyGate(Promise.resolve(), S2.poolsChecked(new Map(), new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep) }])), () => {}));
+  // Base's first wait between tries, Robinhood's check passed and waiting on Base's fee
+  for (let i = 0; i < 10_000 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(gate.ready(), false);
+  assert.equal((await senders.get(RH)!.fee(at.T))?.fee, feeOf("robinhood").toString(), "Robinhood's fee route serves");
+  assert.notDeepEqual((await senders.get(RH)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } }, "Robinhood's send route serves");
   await assert.rejects(senders.get(BASE)!.fee(at.T), /the start's check has not passed/);
-  assert.deepEqual((await senders.get(RH)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
-  assert.deepEqual([(await senders.get(RH)!.sell({})).status, (await senders.get(BASE)!.sell({})).body], [503, { error: { code: "upstream", detail: "the start's check has not passed" } }]);
+  assert.deepEqual((await senders.get(BASE)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  assert.deepEqual((await senders.get(BASE)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  assert.notDeepEqual((await senders.get(RH)!.sell({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
 });

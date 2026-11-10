@@ -165,7 +165,7 @@ export const MUTANTS = [
   [EVM, "      for (const p of held) yield { p, op: p.operator };\n", "", T4, "F3: a first seat held 8 s is passed over"],
   [EVM, "      const claimed: [Set<string>, Set<string>] = [new Set([first[0]]), new Set([first[1]])];", "      const claimed: [Set<string>, Set<string>] = [new Set(), new Set()];", T4, "F3: a first seat held 8 s is passed over"],
   [EVM, "      if (asked > 0 && left <= 0) break seats;", "", T4, "F3: a side's read is bounded at EVM_READ_BUDGET_MS"],
-  [EVM, "        const v = await (asked++ === 0 ? p.rpc(method, params) : within(p.rpc(method, params), left));", "        const v = await within(p.rpc(method, params), (asked++, left));", T4, "F3: a side's read is bounded at EVM_READ_BUDGET_MS"],
+  [EVM, "        const v = await (asked++ === 0 ? ask(p, method, params) : within(ask(p, method, params), left));", "        const v = await within(ask(p, method, params), (asked++, left));", T4, "F3: a side's read is bounded at EVM_READ_BUDGET_MS"],
   [EVM, "      const left = start + budgetMs - now();", "      const left = budgetMs;", T4, "F3: a side's read is bounded at EVM_READ_BUDGET_MS"],
   [EVM, "    if (asked === 0) throw new Error(`${readOf(method, params)}: no operator left apart from the other side's`);\n", "", T4, "a null receipt or transaction is an answer"],
   [EVM, "...(holds !== undefined ? { skip: () => holds.heldMs(p.url) > 0 || holds.dayOut(p.url, 1) } : {})", "", T4, "the env's seats"],

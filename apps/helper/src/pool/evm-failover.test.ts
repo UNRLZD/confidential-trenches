@@ -7,6 +7,7 @@
 // none of 24), each in about 70 ms, so one failed read ended the whole fee read.
 // Every provider here is a stub of fetch; the keyed URLs carry a made-up path, never a real key.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -242,7 +243,8 @@ function chainStub(t: TestContext, plant: (host: string, method: string, params:
       const [{ to, data }] = params as [{ to: string; data: string }];
       return answer(200, { result: word(to.toLowerCase() === PIN || to.toLowerCase() === BASE_PIN || to.toLowerCase() === SEPOLIA_PIN ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
     }
-    if (method === "eth_chainId") return answer(200, { result: "0x1237" });
+    // each chain's id, the kit's pin: Base Sepolia 84532, Base 8453, Robinhood 4663
+    if (method === "eth_chainId") return answer(200, { result: /sepolia|testnet/.test(String(u)) ? "0x14a34" : /base/.test(String(u)) ? "0x2105" : "0x1237" });
     return answer(200, { error: { code: -32601, message: "no" } });
   }) as typeof fetch;
   return calls;
@@ -729,7 +731,8 @@ test("review P2-2: a seat that hangs to its client's timeout is asked once and p
   const s = sendersWith(ENV_RH, lines).get(PIN)!;
   const r = await readyOn(s, at);
   assert.deepEqual([r.out, r.waits], ["ready", []]);
-  assert.equal(calls.filter((c) => c.host === "robinhood.drpc.org").length, 1, "asked once, then passed over");
+  // asked once for a read, and once for its chain id with every seat's at the start (review of f86e1c27, P3-4)
+  assert.deepEqual(calls.filter((c) => c.host === "robinhood.drpc.org").map((c) => c.method), ["eth_chainId", "eth_chainId"], "asked once, then passed over");
   const said = lines.filter((l) => l.includes("passed over"));
   assert.equal(said.length, 1, lines.join("\n"));
   assert.match(said[0]!, /^evm robinhood: robinhood\.drpc\.org passed over 30 s at a time from now: The operation was aborted due to timeout$/);
@@ -798,7 +801,7 @@ test("review item 8: a pair seat that answers HTML, 401 or 403 never refuses the
     const s = sendersWith(ENV_RH, lines).get(PIN)!;
     const r = await readyOn(s, at);
     assert.deepEqual([r.out, r.waits], ["ready", []], name);
-    assert.equal(calls.filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").length, 1, `${name}: asked once`);
+    assert.deepEqual(calls.filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").map((c) => c.method), ["eth_chainId", "eth_chainId"], `${name}: asked once, and for its chain id with every seat's`);
     const said = lines.filter((l) => l.includes("passed over"));
     assert.equal(said.length, 1, `${name}: ${lines.join("\n")}`);
     assert.match(said[0]!, /^evm robinhood: rpc\.mainnet\.chain\.robinhood\.com passed over 30 s at a time from now: /, name);
@@ -866,4 +869,115 @@ test("review P3-2: a pool's fee read of the start's period that comes back after
   const n = calls.length;
   assert.equal(await s.held(E + 60_000), true);
   assert.equal(calls.length, n, "ready came before the running period's fee was read");
+});
+
+// ---- review of f86e1c27 ----
+const K40 = "pathKEY-0123456789abcdef0123456789abcdef";
+const KEYED = `https://a.example/v2/${K40}`;
+/** Does `out` hold 8 or more characters of the key's start, in any case (Unicode's simple case folding, as the scrub)? */
+const holdsKey = (out: string, k = K40) => out.includes(k.slice(0, 8)) || new RegExp(k.slice(0, 8).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"), "iu").test(out);
+
+// The scrub runs in a child process with a bound of its own: a scrub that never ends holds its event loop, which no
+// test timeout in this process could end (review of f86e1c27, P2, the probe's N=8 and N=60 never settled)
+const scrubbed = (code: string): unknown => {
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `const evm = await import(${JSON.stringify(new URL("./evm.ts", import.meta.url).href)});\n${code}`], { encoding: "utf8", timeout: 20_000 });
+  assert.equal(r.signal, null, `the scrub did not settle in 20 s (killed by ${r.signal})`);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+};
+
+test("review of f86e1c27 P2: words of U+0130 (two characters lower-cased) and then the seat's own key settle, whatever their count, the key gone, as the scrub and as a failed seat's line", () => {
+  const out = scrubbed(`
+    const K = ${JSON.stringify(K40)};
+    const scrub = evm.evmScrubber([${JSON.stringify(KEYED)}]);
+    const lines = [];
+    const words = (n) => "\u0130".repeat(n) + K;
+    const pair = evm.evmReadPair([{ name: "a.example", url: ${JSON.stringify(KEYED)}, operator: "A", rpc: async () => { throw new Error("HTTP 400: RPC error -32602: " + words(n)); } }, { name: "c.example", url: "https://c.example/", operator: "C", rpc: async () => "0x1" }, { name: "b.example", url: "https://b.example/", operator: "B", rpc: async () => "0x1" }], ["A", "B"], { log: (l) => lines.push(l) });
+    let n = 0;
+    const direct = [];
+    for (n of [0, 7, 8, 60]) { direct.push(scrub(words(n))); await pair.one(0, "eth_blockNumber", []); }
+    console.log(JSON.stringify({ direct, lines }));
+  `) as { direct: string[]; lines: string[] };
+  assert.deepEqual(out.direct, [0, 7, 8, 60].map((n) => `${"\u0130".repeat(n)}<key>`));
+  assert.equal(out.lines.length, 4, out.lines.join("\n"));
+  for (const [i, n] of [0, 7, 8, 60].entries()) assert.ok(out.lines[i]!.includes(`a.example: HTTP 400: RPC error -32602: ${"\u0130".repeat(n)}`) && !holdsKey(out.lines[i]!), out.lines[i]);
+});
+
+test("review of f86e1c27 P2: 500 strings of the key, its starts and cases, U+0130, U+212A, surrogate pairs and 64 KB of text are each scrubbed in one bounded pass, none left holding 8 characters of the key", () => {
+  const QK = "queryKEY-fedcba9876543210fedcba9876543210";
+  const outs = scrubbed(`
+    const [K, QK] = [${JSON.stringify(K40)}, ${JSON.stringify(QK)}];
+    const scrub = evm.evmScrubber([${JSON.stringify(KEYED)}, "https://b.example/rpc?apikey=" + QK]);
+    let seed = 0x5eed;
+    const rnd = (n) => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) % n);
+    const pieces = (k) => [k, k.toUpperCase(), k.slice(0, 8 + rnd(k.length - 7)), encodeURIComponent(k), "\u0130", "\u212a", "\ud83d\ude00", "\ud800", "x".repeat(rnd(40)), " ", "https://a.example/v2/" + k.slice(0, 8 + rnd(20))];
+    const out = [];
+    for (let i = 0; i < 500; i++) {
+      let s = "";
+      for (let j = 0, m = 1 + rnd(30); j < m; j++) { const ps = pieces(rnd(2) === 0 ? K : QK); s += ps[rnd(ps.length)]; }
+      if (i % 50 === 0) s = "y".repeat(64 * 1024) + s; // long words: cut first, the key past the cut never read
+      if (i % 50 === 1) s += "z".repeat(64 * 1024);
+      out.push([s.length, scrub(s)]);
+    }
+    console.log(JSON.stringify(out));
+  `) as [number, string][];
+  assert.equal(outs.length, 500);
+  for (const [i, [inLength, out]] of outs.entries()) {
+    assert.ok(out.length <= evm.EVM_SCRUB_MAX + 1, `${i}: ${out.length} characters`);
+    assert.ok(inLength <= evm.EVM_SCRUB_MAX || out.endsWith("…"), `${i}: the cut is marked`);
+    assert.ok(!holdsKey(out) && !holdsKey(out, QK), `${i}: ${JSON.stringify(out.slice(0, 300))}`);
+  }
+});
+
+test("review of f86e1c27 P3-3: a seat slower than what the read had left is cut, never held: the next read asks it in its place again", async () => {
+  const lines: string[] = [];
+  let slow = true;
+  const seat = (name: string, operator: string, rpc: evm.EvmRpc): evm.EvmSeat => ({ name, url: `https://${name}/rpc`, operator, rpc });
+  const seats = [
+    seat("a1.example", "A", async () => Promise.reject(new Error("RPC error -32603: internal"))),
+    seat("c1.example", "C", () => (slow ? new Promise((r) => setTimeout(() => r("c"), 200)) : Promise.resolve("c"))),
+    seat("d1.example", "D", async () => "d"),
+    seat("b1.example", "B", async () => "b"),
+  ];
+  const pair = evm.evmReadPair(seats, ["A", "B"], { log: (l) => void lines.push(l), budgetMs: 50 });
+  await assert.rejects(pair.one(0, "eth_blockNumber", []), /no answer in the read's 50 ms/);
+  slow = false;
+  assert.equal(await pair.one(0, "eth_blockNumber", []), "c", "asked in its place, not passed over");
+  assert.ok(!lines.some((l) => l.includes("passed over")), lines.join("\n"));
+});
+
+test("review of f86e1c27 P3-5: every post takes 5 s, so each fee read outlasts its period: the start never says ready on a fee whose period has gone", { timeout: 20_000 }, async (t) => {
+  const at = { T: NOW_MS };
+  const LIMIT = NOW_MS + 900_000; // fifteen periods, five times the 180 s a start took with the period check removed
+  // past the limit every post fails at once and every wait never ends, so nothing is left running
+  planted(t, () => {
+    if (at.T >= LIMIT) throw new TypeError("fetch failed");
+    at.T += 5_000;
+    return null;
+  }, at);
+  let state = "waiting";
+  void sendersWith(ENV_RH).get(PIN)!.ready((ms) => (at.T >= LIMIT ? new Promise<void>(() => {}) : ((at.T += ms), Promise.resolve()))).then(() => void (state = "ready"), (e: Error) => void (state = e.message));
+  for (let i = 0; i < 200_000 && at.T < LIMIT && state === "waiting"; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(state, "waiting", `at second ${(at.T - NOW_MS) / 1000}`);
+  assert.ok(at.T >= LIMIT);
+});
+
+test("review of f86e1c27 P3-4: a pair seat on another chain that throttles its first chain id read is still read for its chain at the start and refused by name; one that throttles it every time is never used", async (t) => {
+  const at = { T: NOW_MS };
+  let throttles = 1;
+  const other = otherChain(900_000_000);
+  const calls = planted(t, (host, method, params) => {
+    if (host !== "robinhood.drpc.org") return null;
+    if (method === "eth_chainId" && throttles-- > 0) return { status: 429, error: { code: -32005, message: "rate limit" } };
+    return other(method, params);
+  }, at);
+  const r = await readyOn(sendersWith(ENV_RH).get(PIN)!, at);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state, 1 try over 0 s: robinhood\.drpc\.org names chain 1, not robinhood's 4663$/);
+  throttles = Infinity;
+  at.T = NOW_MS;
+  calls.length = 0;
+  const s = sendersWith(ENV_RH).get(PIN)!;
+  assert.deepEqual(await readyOn(s, at), { out: "ready", waits: [] });
+  assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.deepEqual([...new Set(calls.filter((c) => c.host === "robinhood.drpc.org").map((c) => c.method))], ["eth_chainId"], "asked for its chain only");
 });
