@@ -8,7 +8,8 @@
 // the new image, with the environment compose gives the helper, before any helper is started or stopped, so a set the
 // start would refuse stops the redeploy there instead of after the swap's wait (REDEPLOY_READY_S) with a new helper
 // that never gets ready. deploy/vault-lines.sh moves the two vault lines to the deploy record's vault.
-// Card sol-pools-mainnet-pin: and the mainnet mark scan's two routes (checkMarksRoute), each asked the scan once.
+// Card sol-pools-mainnet-pin: and the mainnet mark scan's two routes (checkMarksRoute), each asked the scan once, and
+// no keyed Solana URL of the signing page's direct seat's operator (checkSolanaPairOperators).
 import { createHash } from "node:crypto";
 import { EVM_POOL_HISTORY, evmPoolProvidersOf, evmPoolVenues, evmRpcOperator } from "@blindfill/kit";
 import { bindSenderFromEnv } from "./bind/env.ts";
@@ -48,6 +49,33 @@ export function checkPoolRpcOperators(env: Record<string, string | undefined>): 
       if (pool.has(op)) throw new Error(`${name}: its operator ${op} runs the device's ${chain} pool list`);
       if (history.has(op)) throw new Error(`${name}: its operator ${op} runs the device's ${chain} pool history`);
     }
+  }
+}
+
+/** The signing page's direct Solana seat (packages/signpage/src/trade.ts SOLANA_PROVIDER_A; the helper imports no page
+ *  code, so packages/signpage/test/pool-testnet.test.ts reads this file's constant and holds the two equal). */
+export const PAGE_SOLANA_DIRECT = "https://solana-rpc.publicnode.com";
+
+/**
+ * Throws when a keyed Solana URL the helper would read /v1/rpc/solana from (rpc/rpc.ts RPC_UPSTREAMS.solana keyed
+ * names) is run by the operator of the signing page's direct Solana seat (PAGE_SOLANA_DIRECT), or has no operator (not
+ * an http(s) URL): the page reads every Solana pool mark and page on its pair, that seat directly and this helper's
+ * /v1/rpc/solana as the other (packages/signpage/src/pool-testnet.ts pageSolanaRpcs), and a mark counts only when both
+ * give it the same bytes, so the two seats must be two operators (card sol-pools-mainnet-pin, review P3-6 of
+ * a34c1626). The operator is rpc/rpc.ts operatorOf's. Names the variable and the operator, never the URL or any part
+ * of it: a keyed URL carries its key.
+ */
+export function checkSolanaPairOperators(env: Record<string, string | undefined>): void {
+  const direct = operatorOf(PAGE_SOLANA_DIRECT);
+  for (const name of RPC_UPSTREAMS.solana.keyed) {
+    const url = env[name];
+    if (url === undefined || url === "") continue;
+    let op: string | null = null;
+    try {
+      op = /^https?:$/.test(new URL(url).protocol) ? operatorOf(url) : null;
+    } catch {}
+    if (op === null) throw new Error(`${name}: not an http(s) URL, so no operator apart from the page's direct Solana seat`);
+    if (op === direct) throw new Error(`${name}: its operator ${op} is the signing page's direct Solana seat, so the page's pair would read one operator twice`);
   }
 }
 
@@ -132,11 +160,12 @@ if (import.meta.main) {
     checkPoolEnv(process.env);
     checkSenderEnv(process.env);
     checkPoolRpcOperators(process.env);
+    checkSolanaPairOperators(process.env);
     for (const line of await checkMarksRoute(process.env)) console.log(`helper env: ${line}`);
   } catch (e) {
     console.error(`helper env: ${(e as Error).message}`);
     process.exit(2);
   }
-  console.log("helper env: the pool senders', the withdrawal relayer's and the deposit carry's settings are whole; no keyed Base or Robinhood URL is a pool-list or pool-history operator's; the mark scan's two routes answer");
+  console.log("helper env: the pool senders', the withdrawal relayer's and the deposit carry's settings are whole; no keyed Base or Robinhood URL is a pool-list or pool-history operator's; no keyed Solana URL is the page's direct seat's operator; the mark scan's two routes answer");
   process.exit(0);
 }

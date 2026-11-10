@@ -338,3 +338,31 @@ test("evm-pool-sync-holds: node src/env-check.ts exits 2 on a keyed URL of a poo
   assert.match(r.stderr, /helper env: BASE_RPC_URL: its operator publicnode\.com runs the device's base pool list/);
   assert.ok(!(r.stdout + r.stderr).includes("FAKEKEY123"), "the key was printed");
 });
+
+// review P3-6 of a34c1626 (card sol-pools-mainnet-pin): the signing page reads every Solana pool mark and page on its
+// pair, PublicNode directly (seat 0) and this helper's /v1/rpc/solana (seat 1); a keyed Solana URL of PublicNode's here
+// would make the two seats one operator, so a lie of that one operator would pass both.
+test("a keyed Solana URL the helper reads /v1/rpc/solana from, run by the page's direct seat's operator (PublicNode), is refused naming the variable, never the URL or its key; another operator's, and none set, pass", async () => {
+  const { checkSolanaPairOperators } = (await import("./env-check.ts")) as unknown as { checkSolanaPairOperators: (env: Record<string, string | undefined>) => void };
+  assert.equal(typeof checkSolanaPairOperators, "function", "env-check.ts checkSolanaPairOperators");
+  // PAGE_SOLANA_DIRECT is held equal to the page's own constant by packages/signpage/test/pool-testnet.test.ts
+  const KEY = "k3y-test-value-not-a-key";
+  const why = (env: Record<string, string | undefined>): string | null => {
+    try {
+      checkSolanaPairOperators(env);
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+  for (const name of ["SOLANA_RPC_URL", "SOLANA_RPC_URL_QUICKNODE", "SOLANA_RPC_URL_DRPC_1", "SOLANA_RPC_URL_DRPC_2", "SOLANA_RPC_URL_DRPC_3"]) {
+    for (const url of [`https://solana-rpc.publicnode.com/${KEY}`, `https://solana-mainnet.publicnode.com/?token=${KEY}`]) {
+      const m = why({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.com/?api-key=${KEY}`, [name]: url });
+      assert.equal(m, `${name}: its operator publicnode.com is the signing page's direct Solana seat, so the page's pair would read one operator twice`);
+      assert.ok(!m!.includes(KEY), m!);
+    }
+    assert.equal(why({ [name]: `not a url ${KEY}` }), `${name}: not an http(s) URL, so no operator apart from the page's direct Solana seat`);
+  }
+  assert.equal(why({}), null);
+  assert.equal(why({ SOLANA_RPC_URL: `https://mainnet.helius-rpc.com/?api-key=${KEY}`, SOLANA_RPC_URL_QUICKNODE: `https://x.solana-mainnet.quiknode.pro/${KEY}/`, SOLANA_RPC_URL_DRPC_1: `https://lb.drpc.live/solana/${KEY}` }), null);
+});

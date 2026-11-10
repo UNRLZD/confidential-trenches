@@ -4,7 +4,8 @@
 // before this card, 404 on the token and holders of both chains: FAIL. bad_holders_429: the deployed helper at ed0f714a
 // (14:54Z), base's holders 429 behind the GeckoTerminal budget (card evm-holders-never-starve): FAIL. Made from the good answer: a page missing a
 // field, a row with an extra field, the other chain's tag, a launchpad other than the lists', a Risk field not a Field,
-// holders missing `top_bps`, an unlisted address answered 200, a stale read and no CORS echo: each FAIL.
+// holders missing `top_bps`, an unlisted address answered 200, a stale read and no CORS echo: each FAIL. Holders dated
+// 50 min before the read PASS and 71 min FAIL (card market-data-evm-capacity: the helper serves a held count an hour).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,7 +13,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/discover/fields.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../../apps/helper/src/data/solana/token.ts";
-import { CHAINS, HOLDERS, judge, PAGE, pick, read, READS, RISK, ROW, UNLISTED } from "./market-data-evm-token.mjs";
+import { INFO_SERVE_MS } from "../../apps/helper/src/data/evm/token.ts";
+import { AGE_MS, CHAINS, HOLDERS, judge, PAGE, pick, read, READS, RISK, ROW, UNLISTED } from "./market-data-evm-token.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "market-data-evm-token.answers.json"), "utf8"));
@@ -83,6 +85,16 @@ test("bad_holders_429: a holders read the budget refused (429) FAILs, naming it"
   assert.ok(bad(r).some((l) => l.startsWith("BAD base: GET /v1/market/holders") && l.endsWith("answers 429")), bad(r).join("\n"));
 });
 
+// card market-data-evm-capacity: the helper serves a held holder count, dated by its read, for an hour, so holders read
+// 50 minutes ago PASS where the token page's 10 minutes would FAIL them (red at 1e00df14)
+test("a held holders count 50 min old PASSes; the token page keeps its 10 minutes", async () => {
+  const held = edit("base", "holders", undefined, { "x-fetched-at": "2026-11-09T01:10:00.000Z" });
+  const r = await run(held);
+  assert.deepEqual(bad(r), []);
+  assert.equal(AGE_MS.token, 600_000);
+  assert.equal(AGE_MS.holders, INFO_SERVE_MS + 600_000, "the helper's hold and GeckoTerminal's lag");
+});
+
 test("made from the good answer: each fault FAILs, naming it", async () => {
   const cases = [
     [edit("base", "token", (b) => delete b.decimals), /base token: .*page: missing decimals/],
@@ -99,6 +111,8 @@ test("made from the good answer: each fault FAILs, naming it", async () => {
     [edit("robinhood", "holders", (b) => (b.holders = [{ addr: "x", amt: "1.5", bps: 1 }])), /robinhood holders: .*holder row/],
     [edit("base", "unlisted", undefined, undefined, 200), /BAD base: GET .*dead \(no list holds it\) answers 200/],
     [edit("base", "token", undefined, { "x-fetched-at": "2026-11-09T01:00:00.000Z" }), /BAD base token X-Fetched-At/],
+    // card market-data-evm-capacity: a held count past the helper's hour (INFO_SERVE_MS) and GeckoTerminal's lag
+    [edit("robinhood", "holders", undefined, { "x-fetched-at": "2026-11-09T00:49:00.000Z" }), /BAD robinhood holders X-Fetched-At/],
     [edit("robinhood", "holders", undefined, { "access-control-allow-origin": "*" }), /BAD robinhood holders Access-Control-Allow-Origin/],
     [edit("base", "token", undefined, undefined, 404), /BAD base: GET \/v1\/market\/token.* answers 404/],
   ];

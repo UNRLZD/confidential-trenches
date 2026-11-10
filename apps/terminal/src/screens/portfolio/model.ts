@@ -5,10 +5,11 @@
 //
 // What the kit gives (packages/kit/src/signpage/messages.ts SignpageState): the vault's USDC (`vault_balance`), the
 // wallets with their state and size, each open position's chain, token, amount and cost, and every operation's id,
-// kind, stage and txs (`ops`). What it does not give, so the screen takes it from `PortfolioData` (source.tsx), a local
-// type the card's report names as missing kit calls: a token's symbol, name and price and whether a route sells it; a
-// position's bought, sold and realized, its open time, its TP/SL and its held or reverted mark; the closed positions;
-// the value series; the fees paid; and each operation's time, USD size, token and units.
+// kind, stage and txs (`ops`) with what the device knows of it beside them (kit OpDetail, card kit-portfolio-reads: its
+// time, chain, token, units and USD size, each when the device holds it). What it does not give, so the screen takes it
+// from `PortfolioData` (source.tsx), a local type the card's report names as missing kit calls: a token's symbol, name
+// and price and whether a route sells it; a position's bought, sold and realized, its open time, its TP/SL and its held
+// or reverted mark; the closed positions; the value series; and the fees paid.
 import { moneyWallets, POOL_ASSET_DECIMALS } from "@blindfill/kit";
 import { small } from "../discover/format.ts";
 import type { Chain, Operation, PoolAsset, SignpageClientSnapshot, SignpageState, TxRef } from "@blindfill/kit";
@@ -115,16 +116,6 @@ export interface ClosedTrade {
   closed_at: number;
 }
 
-/** An operation's own facts. Not in the kit (ops carry id, kind, stage and txs only). */
-export interface OpDetail {
-  at: number;
-  /** USD decimal string. */
-  usd?: string;
-  units?: string;
-  chain?: Chain;
-  token?: string;
-}
-
 /** A one-time wallet whose key was exported on SIGN_HOST (S14.4). Not in the kit. */
 export interface ExportedKey {
   id: string;
@@ -142,12 +133,11 @@ export interface PortfolioData {
   series: readonly (readonly [number, string])[];
   /** USD decimal string: the buys' and sells' fees from this browser's receipts (CN-116). */
   fees: string | null;
-  op(id: string): OpDetail | null;
   exported: readonly ExportedKey[];
 }
 
 /** No market reads, no closed trades, no series: what the live source has until the kit carries them (dashes). */
-export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, op: () => null, exported: [] };
+export const NO_DATA: PortfolioData = { market: () => null, extra: () => null, closed: [], series: [], fees: null, exported: [] };
 
 // --------------------------------------------------------------------------------------------------- positions S10
 
@@ -177,7 +167,7 @@ export interface Row {
   /** The wallets that hold it, each with its own export (card app-export-every-wallet). */
   addresses: string[];
   openedAt: number | null;
-  /** S10.12: a sell of this token on its way, from the kit's op and its detail. */
+  /** S10.12: a sell of this token on its way, from the kit's op: its stage, chain, token and time. */
   selling: { stage: "sending" | "landing"; ms: number } | null;
 }
 
@@ -214,8 +204,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
   let selling: Row["selling"] = null;
   for (const o of ops) {
     if (o.kind !== "sell" || (o.stage !== "signed" && o.stage !== "sent")) continue;
-    const od = d.op(o.id);
-    if (od?.chain === p.chain && od.token === p.token) selling = { stage: o.stage === "signed" ? "sending" : "landing", ms: Math.max(0, now - od.at) };
+    if (o.chain === p.chain && o.token === p.token) selling = { stage: o.stage === "signed" ? "sending" : "landing", ms: o.created_ms === undefined ? 0 : Math.max(0, now - o.created_ms) };
   }
   return {
     key: key(p.chain, p.token),
@@ -557,14 +546,19 @@ export interface ActFilter {
 export const NO_FILTER: ActFilter = { kinds: [], min: 0n, q: "" };
 
 const SHOWN = new Set(["buy", "sell", "deposit", "withdraw"]);
+/** A trade's stages where its asked amount never moved in full: its row draws no amount (the dash), since the op's
+ *  amount_usd and units are the request's ask (kit OpDetail), and only a done op's amount is what moved. */
+const NOT_MOVED = new Set(["refused", "not_landed", "part_filled"]);
 
-/** Every row Activity lists: the kit's deposits, withdrawals, buys and sells with their local detail, and the exported keys. Newest first; rows with no time last, in the kit's order. */
+/** Every row Activity lists: the kit's deposits, withdrawals, buys and sells, each with what its op carries (kit OpDetail:
+ *  time, USD size, units, chain, token; a deposit's USD is its amount_usd), and the exported keys. Newest first; rows
+ *  with no time last, in the kit's order. */
 export function activity(ops: readonly Operation[] | null | undefined, d: PortfolioData): ActRow[] {
   const rows: ActRow[] = [];
   for (const o of ops ?? []) {
     if (!SHOWN.has(o.kind)) continue;
-    const x = d.op(o.id);
-    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: x?.at ?? null, usd: cents(x?.usd), units: x?.units ?? null, chain: x?.chain ?? null, token: x?.token ?? null, txs: o.txs, address: null });
+    const moved = !NOT_MOVED.has(o.stage);
+    rows.push({ id: o.id, kind: o.kind as ActKind, stage: o.stage, at: o.created_ms ?? null, usd: moved ? cents(o.amount_usd) : null, units: moved ? (o.units ?? null) : null, chain: o.chain ?? null, token: o.token ?? null, txs: o.txs, address: null });
   }
   for (const e of d.exported) rows.push({ id: e.id, kind: "export", stage: "key_exported", at: e.at, usd: null, units: null, chain: e.chain, token: e.token, txs: [], address: e.address });
   const timed = rows.filter((r) => r.at !== null).sort((a, b) => b.at! - a.at!);

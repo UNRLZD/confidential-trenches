@@ -15,7 +15,7 @@ import { start } from "../../server.ts";
 import { GT_PAGE_WAIT_MS, GT_SERVE_MS, geckoBudget, WINDOW_MS, type GeckoBudget } from "../gecko.ts";
 import { HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../solana/token.ts";
 import { GT_BASE } from "./lists.ts";
-import { createEvmToken, INFO_FRESH_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
+import { createEvmToken, INFO_FRESH_MS, INFO_SERVE_MS, INFO_WAIT_MS, toInfo } from "./token.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 type Snapshot = { as_of_ms: number; lists: Record<string, Record<string, unknown>[]> };
@@ -214,6 +214,9 @@ test("toInfo: only an answer naming this token; numbers in range or null", () =>
 // 14:33-14:46Z: "calls: ahead sol bars 1, lists 1-2 ... window 3 of 5"), and a token's first info read went to the
 // "refresh" (page) or "stale" (holders) lane, which stop at 3 and 4 calls: Robinhood's holders answered 429 at 14:46Z
 // ("stale base info 1; refused: ... stale 4"). A read of what nobody holds is a page read (../gecko.ts refreshLane).
+// Its promise as it holds on the keyless budget (card market-data-evm-capacity): a listed token's holders answer 200
+// whenever the helper read them in the last INFO_SERVE_MS, however busy the window; a token nobody read in that time
+// answers 200 when the budget frees a call within GT_PAGE_WAIT_MS, else 429 with the wait (the last test below).
 /** One budget for both chains, as the server's, with the window the live helper had: one ahead call, two list calls. */
 function liveWindow(clock: () => number): GeckoBudget {
   const b = geckoBudget(clock);
@@ -253,30 +256,80 @@ test("the window busy: a token's first holders read with no page before it answe
   assert.equal(calls, 2);
 });
 
-test("a held info's re-read keeps refreshLane's lanes: refused, the held count serves while under GT_SERVE_MS, never past it", async () => {
+// Card market-data-evm-capacity: the holder count is display data that moves slowly, so a held one serves, dated by its
+// own read, for INFO_SERVE_MS, while its re-read waits for a call nobody's first read needs. Before it, a count held
+// past GT_SERVE_MS (10 min) was dropped and a full window answered 429 for a token the helper had read (live 20:34Z:
+// "refused /v1/market/holders geckoterminal budget", window 5 of 5). Red at 1e00df14 (the 429 at GT_SERVE_MS).
+test("a held info's re-read leaves a first read its calls: refused, the held count serves, dated, while under INFO_SERVE_MS, never past it", async () => {
   let t = NOW;
   calls = 0;
   const gecko = geckoBudget(() => t);
   const tok = createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko, fetch: fake("robinhood"), now: () => t });
   const c = CASES[1];
-  assert.equal(JSON.parse((await tok.holders(c.addr)).body).total, c.holders);
-  // past INFO_FRESH_MS (a "stale" re-read: 5 min held, past REFRESH_URGENT_MS), the window full for that lane
+  const first = JSON.parse((await tok.holders(c.addr)).body);
+  assert.equal(first.total, c.holders);
+  // past INFO_FRESH_MS, the window at the room a held re-read leaves a first read (COLD_RESERVE)
   t += INFO_FRESH_MS;
-  for (let i = 0; i < 4; i++) assert.ok(gecko.take("pages"));
+  for (let i = 0; i < 3; i++) assert.ok(gecko.take("pages"));
   const held = await tok.holders(c.addr);
   assert.equal(held.status, 200);
-  assert.equal(JSON.parse(held.body).total, c.holders, "the held count, dated by its read");
+  assert.equal(JSON.parse(held.body).total, c.holders, "the held count");
+  assert.equal(JSON.parse(held.body).as_of_ms, first.as_of_ms, "dated by its read, not by the answer");
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, c.holders);
-  assert.equal(calls, 1, "the stale lane refused: no call");
-  // past GT_SERVE_MS the held count is not served (the market routes' freshness bound): its re-read is a page read, and
-  // refused it is the budget's 429 with its wait, never a 200 with an old count
+  assert.equal(calls, 1, "the re-read refused: no call");
+  // past GT_SERVE_MS, the window full: still the held count, dated (the 429 before this card)
   t = NOW + GT_SERVE_MS;
+  for (let i = 0; i < 5; i++) assert.ok(gecko.take("pages"));
+  const kept = await tok.holders(c.addr);
+  assert.equal(kept.status, 200, kept.body);
+  assert.equal(JSON.parse(kept.body).total, c.holders);
+  assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, c.holders);
+  assert.equal(calls, 1);
+  // past INFO_SERVE_MS the held count is not served: its re-read is a page read, and refused it is the budget's 429 with
+  // its wait, never a 200 with a count older than the bound
+  t = NOW + INFO_SERVE_MS;
   for (let i = 0; i < 5; i++) assert.ok(gecko.take("pages"));
   const old = await tok.holders(c.addr);
   assert.equal(old.status, 429, old.body);
   assert.ok((old.retryAfterS ?? 0) >= 1);
   assert.equal(JSON.parse((await tok.page(c.addr)).body).row.holders, null, "the page: no old count");
   assert.equal(calls, 1);
+});
+
+// Card market-data-evm-capacity: N tokens opened inside one window, on the window the live helper keeps with its own
+// background reads (liveWindow: 3 of 5). Each token's holders were read once in the last INFO_SERVE_MS (a page opened
+// earlier, a live run's read): every one answers 200 with its count and no call is spent. Red at 1e00df14: each count
+// was dropped at GT_SERVE_MS, the re-reads met the full window and answered 429.
+test("four tokens on both chains, read within the hour, opened again inside one window with the background's 3 of 5 held: holders 200 for each, dated, no 429", async () => {
+  let t = NOW;
+  calls = 0;
+  const all = (["base", "robinhood"] as const).flatMap((chain) => Object.keys(FX[chain].info).map((addr) => ({ chain, addr })));
+  assert.equal(all.length, 4);
+  const gecko = geckoBudget(() => t);
+  const tok = {
+    base: createEvmToken("base", { lists: listsOf("base"), gecko, fetch: fake("base"), now: () => t }),
+    robinhood: createEvmToken("robinhood", { lists: listsOf("robinhood"), gecko, fetch: fake("robinhood"), now: () => t }),
+  };
+  for (const [i, c] of all.entries()) {
+    t = NOW + i * WINDOW_MS; // one a window
+    assert.equal((await tok[c.chain].holders(c.addr)).status, 200);
+  }
+  assert.equal(calls, 4);
+  // 40 min later the window holds the background's three calls (ahead 1, lists 2) and a cold chart's pool and bars
+  t = NOW + 40 * 60_000;
+  assert.ok(gecko.take("ahead", false, false, "sol bars"));
+  assert.ok(gecko.take("lists", true));
+  assert.ok(gecko.take("lists", true));
+  assert.ok(gecko.take("pages", false, false, "base pool"));
+  assert.ok(gecko.take("pages", false, false, "base bars"));
+  for (const c of all) {
+    const h = await tok[c.chain].holders(c.addr);
+    assert.equal(h.status, 200, `${c.chain} ${c.addr}: ${h.body}`);
+    assert.equal(typeof JSON.parse(h.body).total, "number");
+    const p = await tok[c.chain].page(c.addr);
+    assert.equal(typeof JSON.parse(p.body).row.holders, "number", `${c.chain} ${c.addr} page`);
+  }
+  assert.equal(calls, 4, "no call spent: the window is full");
 });
 
 // The window full, 5 of 5, as at 14:29Z with the live run's Solana pages: a cold holders read waits for the budget's next

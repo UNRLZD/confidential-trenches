@@ -48,6 +48,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { signBuilt } from "../signpage-built.mjs";
 import { EXIT, pageRefuses, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "wallet-restore-reads-ux";
@@ -196,9 +197,8 @@ export function bundleFacts(index, js) {
     ux_wired: !!wired && once(FOLLOW_DEPS(wired[2]), js),
   };
 }
-const SIGNPAGE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/signpage");
-/** This tree's committed SIGN_HOST build: its index.html and public/app.js. */
-export const localBuild = () => ({ index: readFileSync(path.join(SIGNPAGE, "index.html"), "utf8"), js: readFileSync(path.join(SIGNPAGE, "public/app.js"), "utf8") });
+/** This tree's SIGN_HOST build, made from its sources (signBuilt: never committed): its index.html and public/app.js. */
+export const localBuild = () => ({ index: readFileSync(path.join(signBuilt(), "index.html"), "utf8"), js: readFileSync(path.join(signBuilt(), "public/app.js"), "utf8") });
 /** SIGN_HOST's build as served (`fetchFn`), or this tree's committed one (`local`): its bundle facts. */
 export async function readBundle(fetchFn = fetch, local = false) {
   if (local) {

@@ -165,16 +165,16 @@ test("an op written to the store appears in ops with its stage, and each stage c
   const id = crypto.randomUUID();
   const tx = { chain: "near", hash: "9xQ1" };
   await t.put("ops", id, { kind: "deposit", stage: "waiting", txs: [], created_ms: 2 });
-  assert.deepEqual((await p.event((s) => (s.ops as unknown[]).length === 1)).ops, [{ id, kind: "deposit", stage: "waiting", txs: [] }]);
+  assert.deepEqual((await p.event((s) => (s.ops as unknown[]).length === 1)).ops, [{ id, kind: "deposit", stage: "waiting", txs: [], created_ms: 2 }]);
   await t.put("ops", id, { kind: "deposit", stage: "into_vault", txs: [tx], created_ms: 2 });
-  assert.deepEqual((await p.event((s) => JSON.stringify(s.ops).includes("into_vault"))).ops, [{ id, kind: "deposit", stage: "into_vault", txs: [tx] }]);
+  assert.deepEqual((await p.event((s) => JSON.stringify(s.ops).includes("into_vault"))).ops, [{ id, kind: "deposit", stage: "into_vault", txs: [tx], created_ms: 2 }]);
   // oldest first by created_ms; a buy keeps its code
   const older = crypto.randomUUID();
   await t.put("ops", older, { kind: "buy", stage: "refused", txs: [], code: "quote_check_failed", created_ms: 1 });
   const e = await p.event((s) => (s.ops as unknown[]).length === 2);
   assert.deepEqual(e.ops, [
-    { id: older, kind: "buy", stage: "refused", txs: [], code: "quote_check_failed" },
-    { id, kind: "deposit", stage: "into_vault", txs: [tx] },
+    { id: older, kind: "buy", stage: "refused", txs: [], code: "quote_check_failed", created_ms: 1 },
+    { id, kind: "deposit", stage: "into_vault", txs: [tx], created_ms: 2 },
   ]);
 });
 
@@ -220,7 +220,7 @@ test("exact keys: the state's keys and value types, and nothing secret in it", a
   });
   assert.deepEqual(s, {
     release: RELEASE, api: 1, signed_in: true, way: "passkey", code_saved: false, vault_balance: "0",
-    wallets: [], positions: [], orders: [], held: [], ops: [{ id, kind: "withdraw", stage: "submitted", txs: [{ chain: "near", hash: "4Hc" }] }],
+    wallets: [], positions: [], orders: [], held: [], ops: [{ id, kind: "withdraw", stage: "submitted", txs: [{ chain: "near", hash: "4Hc" }], created_ms: 1 }],
   });
   const json = JSON.stringify(s);
   for (const secret of [ENTROPY_HEX, WORDS, WORDS.split(" ")[0]!, "5000000", "0xabc"]) assert.ok(!json.includes(secret), secret);
@@ -336,11 +336,11 @@ test("kit-deposit-calls: a deposit op's stage and facts reach the app through th
     // a stray field in the record is never copied
     await t.put("ops", id, { kind: "deposit", txs: [], created_ms: 3, note: "x", ...facts });
     const s = await p.event((st) => JSON.stringify(st.ops).includes(`"stage":"${facts.stage}"`));
-    assert.deepEqual(s.ops, [{ id, kind: "deposit", txs: [], ...facts }], JSON.stringify(facts));
+    assert.deepEqual(s.ops, [{ id, kind: "deposit", txs: [], created_ms: 3, ...facts }], JSON.stringify(facts));
     assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true, `the kit's client takes it: ${JSON.stringify(facts)}`);
   }
   await t.put("ops", "x2", { kind: "deposit", stage: "expired", txs: [], created_ms: 4 });
-  assert.deepEqual(((await p.event((st) => (st.ops as unknown[]).length === 2)).ops as unknown[]).at(-1), { id: "x2", kind: "deposit", stage: "expired", txs: [] });
+  assert.deepEqual(((await p.event((st) => (st.ops as unknown[]).length === 2)).ops as unknown[]).at(-1), { id: "x2", kind: "deposit", stage: "expired", txs: [], created_ms: 4 });
 });
 
 test("kit-deposit-calls: a deposit record with a fact on the wrong stage, or a fact on another kind, is left out", () => {
@@ -382,7 +382,7 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
   const follow = { chain: "solana", s: "777", i: 3, u: "U_X", refund_id: "ab".repeat(32), address: "DEPOSIT", deadline_ms: 1, origin: "nep141:base-usdc", min_out: "20000000" };
   // the record as the pool follow keeps it (pool-deposit-follow.ts PoolDepositOp): since_ms once a send was seen, refunded from the refund on
   const rec = (stage: string, more: Record<string, unknown> = {}) => ({ kind: "pool_deposit", stage, txs: [], created_ms: 1, follow, ...more });
-  const want = (stage: string, more: Record<string, unknown> = {}) => ({ id, kind: "pool_deposit", stage, txs: [], chain: "solana", ...more });
+  const want = (stage: string, more: Record<string, unknown> = {}) => ({ id, kind: "pool_deposit", stage, txs: [], chain: "solana", created_ms: 1, ...more });
   for (const [r, w] of [
     [rec("quote_checked"), want("quote_checked")],
     [rec("expired"), want("expired")],
@@ -410,7 +410,7 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
     const op = opOf(id, r);
     assert.deepEqual(op, w, JSON.stringify(r));
     assert.ok(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [op!])), `the kit reads ${r.stage}`);
-    for (const k of ["follow", "created_ms", "final"]) assert.ok(!(k in op!), `${k} never sent`);
+    for (const k of ["follow", "final"]) assert.ok(!(k in op!), `${k} never sent`);
   }
   // a record that is not one: left out, never sent
   for (const bad of [
@@ -420,4 +420,43 @@ test("pool-deposit-stages: a pool deposit's op reaches the app at every stage, w
     rec("held"),
     rec("in_pool", { since_ms: -1 }),
   ]) assert.equal(opOf(id, bad), null, JSON.stringify(bad));
+});
+
+// card kit-portfolio-reads: what an op carries beside its stage (kit messages.ts OpDetail), each from its record only,
+// so Activity draws its time, chain, token, units and USD size from the kit alone. A record from before them sends the
+// op as before; one detail of another shape costs that detail, never the op; a pool deposit's chain is its follow's.
+test("kit-portfolio-reads: each op detail its record holds reaches the app, on every kind, and a bad one costs that detail only", async () => {
+  const id = "op-1";
+  // a pool sell's record as pool-sell.ts writes it, and a trade-box buy's as trade.ts writes it
+  const sell = { kind: "sell", pool: "sol", sha: "ab", stage: "sent", txs: [{ chain: "solana", hash: "5sig" }], created_ms: 1793586677909, chain: "solana", token: "Mint1111", units: "1234.567891" };
+  assert.deepEqual(opOf(id, sell), { id, kind: "sell", stage: "sent", txs: [{ chain: "solana", hash: "5sig" }], created_ms: 1793586677909, chain: "solana", token: "Mint1111", units: "1234.567891" });
+  const buy = { kind: "buy", sha: "cd", stage: "filled", txs: [], created_ms: 5, chain: "solana", token: "Mint1111", amount_usd: "25.5" };
+  assert.deepEqual(opOf(id, buy), { id, kind: "buy", stage: "filled", txs: [], created_ms: 5, chain: "solana", token: "Mint1111", amount_usd: "25.5" });
+  for (const kind of ["withdraw", "restore"]) {
+    const stage = kind === "withdraw" ? "sent" : "done";
+    assert.deepEqual(opOf(id, { kind, stage, txs: [], created_ms: 9 }), { id, kind, stage, txs: [], created_ms: 9 }, kind);
+    assert.deepEqual(opOf(id, { kind, stage, txs: [] }), { id, kind, stage, txs: [] }, `${kind} from before`);
+  }
+  // one detail of another shape: that detail left out, the op and its other details sent
+  for (const [k, v] of [["created_ms", -1], ["created_ms", "5"], ["created_ms", 1.5], ["chain", "doge"], ["token", ""], ["units", "1e3"], ["units", 5], ["amount_usd", "-1"]] as const) {
+    const op = opOf(id, { ...buy, units: "2", [k]: v }) as Record<string, unknown> | null;
+    assert.ok(op, `${k} ${JSON.stringify(v)}: the op is still sent`);
+    assert.ok(!(k in op!), `${k} ${JSON.stringify(v)} left out`);
+    assert.equal(op!.stage, "filled");
+    assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(stateOf(true, undefined, [op as never])), true);
+  }
+  // a deposit's amount_usd is its done fact: off done the op is left out, as before this card
+  assert.equal(opOf(id, { kind: "deposit", stage: "waiting", txs: [], created_ms: 1, amount_usd: "5" }), null);
+  // a pool deposit's chain is its follow's, never the record's own
+  const follow = { chain: "base", s: "1", i: 0, u: "U", refund_id: "ab".repeat(32), address: "D", deadline_ms: 1, origin: "o", min_out: "1" };
+  assert.equal((opOf(id, { kind: "pool_deposit", stage: "in_pool", txs: [], created_ms: 2, chain: "solana", follow }) as { chain?: string }).chain, "base");
+  // through the frame: the sell's record in the store reaches the app with its detail
+  const p = await setup();
+  const t = await p.tab();
+  await signIn(t, "code", true);
+  assert.deepEqual((await p.ask()).ops, []);
+  await t.put("ops", id, sell);
+  const s = await p.event((st) => (st.ops as unknown[]).length === 1);
+  assert.deepEqual(s.ops, [opOf(id, sell)]);
+  assert.equal(SIGNPAGE_RESULT_SCHEMAS.state(s), true);
 });
