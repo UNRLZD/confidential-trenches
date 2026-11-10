@@ -47,6 +47,7 @@ const EFEE = "card evm-testnet-delegate-review3: an EVM sell pays";
 const DREF = "EVM deposit: one refusal per field";
 const DOK = "EVM deposit: U's one rung";
 const DSIGN = "EVM deposit: signs as U";
+const SHARE = "card pool-sell-share-across-wallets: a sell by share is 1 to 10,000";
 
 // [text, replacement, the test that must fail, its file when not rules-pool.test.ts]
 export const MUTANTS = [
@@ -67,8 +68,18 @@ export const MUTANTS = [
   ['if (!mint || d[45] !== 1) return refuse("decimals");', 'if (!mint) return refuse("decimals");', DEC],
   ['/^0x[0-9a-fA-F]{64}$/.test(a)', "/^0x[0-9a-fA-F]+$/.test(a)", DEC],
   ['if (n > 255n) return refuse("decimals");', "", DEC],
-  ["s > POOL_MAX_SLIPPAGE_BPS) return refuse(\"slippage\");", "s > 10_000) return refuse(\"slippage\");", REQ],
-  ['!Number.isInteger(s) || s < 0', "s < 0", REQ],
+  // the slippage of a sell or buy by amount (two spaces in) and of a sell by share (four), each its own row
+  ['s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', 's > 10_000) return refuse("slippage");\n  return { kind: p.kind, chain, token: token!, amount,', REQ],
+  ['\n  if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n  if (typeof s !== "number" || s < 0 ||', REQ],
+  // a sell by share (card pool-sell-share-across-wallets): its slippage, and the share itself
+  ['s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");\n    return { kind: p.kind, chain, token: token!, amount: 0n,', 's > 10_000) return refuse("slippage");\n    return { kind: p.kind, chain, token: token!, amount: 0n,', SHARE],
+  ['\n    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n    if (typeof s !== "number" || s < 0 ||', SHARE],
+  ['\n    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 ||', '\n    if (typeof s !== "number" || !Number.isInteger(s) ||', SHARE],
+  ['b < 1 || b > 10_000) return refuse("amount");', 'b > 10_000) return refuse("amount");', SHARE],
+  ['b < 1 || b > 10_000) return refuse("amount");', 'b < 1) return refuse("amount");', SHARE],
+  ['!Number.isInteger(b) || b < 1', "b < 1", SHARE],
+  ['p.amount !== undefined || typeof b', "typeof b", SHARE],
+  ['p.kind !== "pool.sell" || p.amount !== undefined', "p.amount !== undefined", SHARE],
   // the signed bytes
   ['if (m.blockhash !== reads.blockhash) return refuse("blockhash");', "", DEP],
   ['if (ixs.slice(n).some((x) => x.program === SOLANA_COMPUTE_BUDGET_PROGRAM)) refuse("compute_budget");', "", DEP],

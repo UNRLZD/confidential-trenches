@@ -116,6 +116,8 @@ test("card pool-sell-share-across-wallets: a sell by share is 1 to 10,000 basis 
     [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, amount: "1", slippage_bps: 1 }, "amount"],
     [{ kind: "pool.sell", chain: "solana", token: sol, slippage_bps: 1 }, "amount"],
     [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: 5_001 }, "slippage"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: -1 }, "slippage"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: 1.5 }, "slippage"],
     [{ kind: "pool.buy", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: 1 }, "amount"],
     [{ kind: "pool.deposit", chain: "solana", share_bps: 5_000 }, "amount"],
   ] as const) {
