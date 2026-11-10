@@ -635,9 +635,17 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const e = evmPool(chain);
     if (e === null || !POOL_TESTNET) return null;
     return (over.tradeKinds?.evmBuy ?? poolBuyEvmKind)(() => evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, {
+      // the chain's queue, opened when it is not; one that cannot open (signed out) is dropped, so the next tap opens it
+      // again
       queue: async () => {
         let p = evmQueues.get(chain);
-        if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
+        if (p === undefined) {
+          const opening = openEvmQueue(chain);
+          evmQueues.set(chain, (p = opening));
+          opening.catch(() => {
+            if (evmQueues.get(chain) === opening) evmQueues.delete(chain);
+          });
+        }
         return (await p).queue as ProofQueue<EvmPoolRequest>;
       },
       seed64: page.seed64,

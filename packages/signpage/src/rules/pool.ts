@@ -804,9 +804,11 @@ function checkRelay(proof: EvmPoolProofBinding, relay: EvmRelayData, pins: Retur
   if (proof.context !== context) refuse("context");
 }
 
-/** An EVM pool buy: the kit's pinned Buy, the request's token and amount, a min out at least `floor` (the device's
- *  own floor from its two-RPC pool reads, less the user's slippage), the proof's relay data the device's. */
-export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, floor: bigint, testnet = false): PoolDraw {
+/** An EVM pool buy: the kit's pinned Buy, the request's token and amount, the proof's relay data the device's, and a
+ *  min out the check derives itself: the device's quote (`agreed`: the route's output both of its providers gave, for
+ *  the token the ask names and exactly the ask's amount less the relay fee the device caps, ctx.feeCap) less the ask's
+ *  own slippage, never a floor or slippage the caller hands in. */
+export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProofBinding, relay: EvmRelayData, ask: PoolAsk, ctx: PoolContext, agreed: { token: string; amountIn: bigint; amountOut: bigint }, testnet = false): PoolDraw {
   if (ask.kind !== "pool.buy") return refuse("kind");
   // only a buy built from the device's own quote: never a server's route, hook data or min out
   if (!evmIsQuotedBuy(built)) return refuse("not_quoted");
@@ -818,7 +820,13 @@ export function checkEvmBuy(built: EvmPoolBuy, pool: string, given: EvmPoolProof
   if (![pins.v3, pins.v4].some((a) => a !== undefined && lower(a) === lower(built.adapter))) return refuse("adapter");
   if (lower(built.token) !== lower(ask.token ?? "")) return refuse("token");
   if (proof.value !== ask.amount) return refuse("amount");
-  if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");
+  // the quote: the ask's token, for the ask's amount less the device's fee cap (what the pool swaps), above 0
+  if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");
+  if (typeof ctx.feeCap !== "bigint" || ctx.feeCap < 0n || ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap) return refuse("amount");
+  if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");
+  if (typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");
+  const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;
+  if (floor <= 0n || built.minOut < floor) return refuse("min_out");
   checkRelay(proof, relay, pins, ctx);
   const read = { venues: pins.venues, pool: pins.pool, chainId: pins.chainId, proof };
   passed("evm.buy", built, read);
