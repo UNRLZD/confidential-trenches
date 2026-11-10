@@ -178,8 +178,8 @@ export type PoolWithdrawHost = Pick<PoolBuyHost, "send" | "now" | "reads" | "wai
   /** One use of the seed (a derive or a signature), zeroed after it; absent: seed64. A finish passes one that takes
    *  the seed's shared lock for that use alone, so a sign out never waits on a blockhash. */
   withSeed?<T>(f: (seed64: Uint8Array) => T | Promise<T>): Promise<T>;
-  /** The wallet's solanaSettleSpent for this note. */
-  settle(noteId: string): Promise<{ kind: "spent" | "unspent" }>;
+  /** The wallet's solanaSettleSpent for this note, its reads at or past minSlots when given (PoolBuyHost settle). */
+  settle(noteId: string, minSlots?: readonly [number, number]): Promise<{ kind: "spent" | "unspent" }>;
   /** The onward send a part owes, written once its note is RESERVED and before its release leaves (awaited): a crash
    *  from there on leaves the op owing it, for the state reads' finishPoolOnward. */
   owe?(pending: PendingOnward): Promise<void>;
