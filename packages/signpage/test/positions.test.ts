@@ -488,7 +488,7 @@ test("the page: the first signed-in read starts a pass from the finder's read, a
   const tp = testnetPool(
     { store: async () => w, seed64: async () => SEED64.slice() },
     // @ts-expect-error a stand-in sell kind: only its run's end matters here
-    { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } },
+    { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } },
   );
   let told = 0;
   tp.watch(() => told++);
@@ -545,7 +545,7 @@ test("the page: two buy wallets, one W's failed read is its own: the other updat
   let failW = "";
   const finder: HoldingsReader = { chain: "sol", read: async (a) => (a === failW ? Promise.reject(new Error("no")) : { native: 0n, tokens: amounts.get(a)!, unreadable: [] }) };
   const timers: (() => void)[] = [];
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => finder, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => finder, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await tp.positions();
   await until(async () => ((await tp.positions()) ?? []).length === 2);
   failW = solanaWallet(1);
@@ -1177,7 +1177,7 @@ test("P1-1 (ZZPROBE 4): the page: a buy whose run ends sent (its spend not read 
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => (await tp.positions()) !== null);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   await until(() => told.length === 1);
@@ -1206,7 +1206,7 @@ test("P1-1: the page: a buy that ends filled with no amount told, the finder not
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: "filled", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => (await tp.positions()) !== null);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   await until(() => told);
@@ -1234,7 +1234,7 @@ test("P1-1: a sign out lets go of the buys this page ran: after the next sign-in
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => (await tp.positions()) !== null);
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   await until(() => told);
@@ -1292,7 +1292,7 @@ test("P2-1 (ZZPAGE 4): a full sell ends filled while the finder still lists the 
   const timers: (() => void)[] = [];
   let ended!: () => void;
   const sell = () => () => ({ running: true as const, after: new Promise<void>((r) => (ended = r)), answer: () => ({ result: { stage: "filled", txs: [] } }) });
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => (await tp.positions())?.[0]?.amount === "5");
   await w.update("meta", POSITIONS_SOLD_KEY, () => ({ [solanaWallet()]: [MINT] }));
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 5_000_000n, slippageBps: 100, decimals: 6 }, { id: "s1", sha: "00", progress: () => {} } as never);
@@ -1327,7 +1327,7 @@ test("P2-2 (ZZPAGE 1): a retry booked before a sell, firing while the sell reads
     sellRead = host().wallets().then(() => void (sellReadAt = clock.ms - start));
     return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => paced, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => paced, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} /* kept: the sell's hold clears this retry, and the test fires it all the same */ } } as never);
   await tp.positions();
   for (let i = 0; i < N; i++) {
     await until(() => queue.length === 1);
@@ -1365,7 +1365,7 @@ test("P2-2 (PROBE A, the page): a sell whose own read of the Ws fails still ends
     host().wallets().catch(() => void (sellFailed = true));
     return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
@@ -1391,7 +1391,7 @@ test("P2-2 (the load route): the rent backs a load resumes read the Ws through t
   const rpc = (k: number) => async (method: string, params: readonly unknown[]) =>
     method === "getAccountInfo" && params[0] === "SysvarRent111111111111111111111111111111111" ? { context: { slot: 10 }, value: { owner: "Sysvar1111111111111111111111111111111111111", lamports: 1, data: [base64.encode(rent), "base64"] } } : c.rpcs[k]!(method, params);
   const timers: (() => void)[] = [];
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: [rpc(0), rpc(1)], holdings: () => c.finder, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: [rpc(0), rpc(1)], holdings: () => c.finder, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => ((await tp.positions()) ?? []).length === 1);
   c.state.fail = true;
   const before = c.calls.finder;
@@ -1423,7 +1423,7 @@ test("w14: with no Web Locks a pass reads no seed and no W", async () => {
   c.amounts[0] = 1_000_000n;
   let seeds = 0;
   const timers: (() => void)[] = [];
-  const tp = testnetPool({ store: async () => w, seed64: async () => (seeds++, SEED64.slice()) }, { pin: PIN, locks: null, rpcs: c.rpcs, holdings: () => c.finder, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => (seeds++, SEED64.slice()) }, { pin: PIN, locks: null, rpcs: c.rpcs, holdings: () => c.finder, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await tp.positions();
   await until(() => timers.length === 1);
   assert.deepEqual([seeds, c.calls.finder], [0, 0]);
@@ -1642,12 +1642,13 @@ test("P2-A (P1): the page: a buy that ended sent and never lands: one round of r
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: first ? "sent" : "filled", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => ((await tp.positions()) ?? []).length === 1);
+  // each retry fired as it is booked; a pass runs long on a loaded box, so none booked within 3 s is the round's end
   const fire = async (): Promise<number> => {
     let n = 0;
     for (;;) {
-      await new Promise((r) => setTimeout(r, 60));
+      for (let i = 0; i < 300 && timers.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
       if (timers.length === 0) return n;
       timers.shift()!();
       n++;
@@ -1655,9 +1656,12 @@ test("P2-A (P1): the page: a buy that ended sent and never lands: one round of r
   };
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT2, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
   await until(() => routed === 1);
+  const before = c.calls.finder;
   progresses[0]!("sent");
   const fired = await fire();
-  assert.ok(fired >= POSITIONS_RETRIES && fired <= POSITIONS_RETRIES + 1, `one round: ${fired}`);
+  // one round: a pass and its retries; a pass asked for while the run's own pass reads takes a booked retry's turn
+  const passes = c.calls.finder - before;
+  assert.ok(passes >= POSITIONS_RETRIES && passes <= POSITIONS_RETRIES + 2 && fired <= POSITIONS_RETRIES, `one round: ${passes} passes, ${fired} retries`);
   c.amounts[0] = 3_000_000n;
   const reads = c.calls.finder;
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 } as never, { id: "b2", sha: "00", progress: () => {}, route: () => {} } as never);
@@ -1723,7 +1727,7 @@ test("t03: a buy that ended not landed is not looked for: the finder not listing
     })();
     return { running: true as const, after: ran, answer: () => ({ result: { stage: "not_landed", txs: [] } }) };
   };
-  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => (await tp.positions()) !== null);
   const reads0 = c.calls.finder;
   tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);

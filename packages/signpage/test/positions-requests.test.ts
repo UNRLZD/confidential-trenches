@@ -99,7 +99,7 @@ test("the positions on the mainnet build: no request names a W to any host but t
   }) as typeof fetch;
 
   const timers: (() => void)[] = [];
-  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   type Tp = ReturnType<typeof make>;
   const show = (p: readonly Position[] | null) => p?.map((x) => [names.get(x.token), x.amount, x.wallets.map((a) => names.get(a))]);
   const until = async (f: () => boolean | Promise<boolean>) => {
