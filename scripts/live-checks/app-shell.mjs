@@ -40,7 +40,8 @@ import { fileURLToPath } from "node:url";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
 import { consoleError } from "./console-errors.mjs";
 import { launchBrowser } from "../browsers.mjs";
-import { launchHarnessBrowser, PUSH_SOCKET } from "../harness-sockets.mjs";
+import { launchHarnessBrowser } from "../harness-sockets.mjs";
+import { PUSH_SOCKET } from "../harness-sockets.mjs";
 import { named } from "./record-names.mjs";
 import { downNote, footerEvidence, outages, rpcRows, verifyEvidence, VERIFY_RELEASES } from "./rpc-outage.mjs";
 
