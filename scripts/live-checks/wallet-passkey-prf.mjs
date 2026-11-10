@@ -80,9 +80,33 @@ export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
 const WAIT_MS = 15_000;
-/** The one console line that is the live run's load, not a page error (judge): a 429 from the helper's own Solana RPC
- *  route, as console-errors.mjs keeps it (origin and path only). */
-export const HELPER_SOLANA_429 = "console: Failed to load resource: the server responded with a status of 429 () (https://ct-api.unrealized.trade/v1/rpc/solana)";
+/** The helper's own Solana RPC route, and the console line a 429 there leaves, as console-errors.mjs keeps it (origin
+ *  and path only). */
+export const HELPER_SOLANA = "https://ct-api.unrealized.trade/v1/rpc/solana";
+export const HELPER_SOLANA_429 = `console: Failed to load resource: the server responded with a status of 429 () (${HELPER_SOLANA})`;
+/** The signed-in page's price and display reads on that route (card sign-live-checks-read-a-pinned-page; the sign live
+ *  run 42882854987 opens the page in 78 jobs at once, each polling them, and the route's budget is every caller's):
+ *  Pyth's SOL/USD account (packages/kit/src/price/pool-usd.ts POOL_USD_FEEDS.solana), the Rent sysvar (the pool's
+ *  tap_max, packages/signpage/src/pools.ts withSolanaRent) and the pinned mainnet pool's own account
+ *  (packages/wallet/src/pool/solana.ts, SOL_MAINNET_DEPLOY's pool), by getAccountInfo or getMultipleAccounts. A 429 on
+ *  one of them is the run's load (a WARN line with its count); a 429 on any other read there, as a money kind's, fails. */
+export const DISPLAY_ACCOUNTS = Object.freeze(["7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE", "SysvarRent111111111111111111111111111111111", "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"]);
+/** What a refused request's body read: each JSON-RPC call's method and its accounts, and whether every call is a price
+ *  or display read (DISPLAY_ACCOUNTS by getAccountInfo or getMultipleAccounts). A body that is not JSON-RPC is none. */
+export function refusedRead(body) {
+  let j;
+  try {
+    j = JSON.parse(body ?? "");
+  } catch {
+    return { calls: [], display: false };
+  }
+  const calls = (Array.isArray(j) ? j : [j]).map((c) => {
+    const p = Array.isArray(c?.params) ? c.params[0] : undefined;
+    return { method: typeof c?.method === "string" ? c.method : null, accounts: Array.isArray(p) ? p.map(String) : typeof p === "string" ? [p] : [] };
+  });
+  const display = calls.length > 0 && calls.every((c) => (c.method === "getAccountInfo" ? c.accounts.length === 1 : c.method === "getMultipleAccounts") && c.accounts.length > 0 && c.accounts.every((a) => DISPLAY_ACCOUNTS.includes(a)));
+  return { calls, display };
+}
 export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector default, the page's guard
 // Sign out's draw time on the page's own clock: performance.now() when a Sign out button is inserted. Run before the
 // page's scripts; a press's distance from it bounds the press's distance from the page's own guard time from above.
@@ -266,13 +290,19 @@ export function judge(rec) {
   const ty = n.typed ?? {};
   say(ty.state === "signed-in" && HEX64.test(ty.expected ?? "") && ty.account === ty.expected && ty.codeSaved === "true" && ty.seedWrapped === true,
     `no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true (${ty.state}, ${ty.account === ty.expected ? "equal to the check's own" : "differs"}, code_saved ${ty.codeSaved})`);
-  // the helper's own Solana route refusing for its shared budget (429) is the live run's load, never this page's error:
-  // the sign live run opens the page in 78 jobs at once, each polling the pool price on that route (card
-  // sign-live-checks-read-a-pinned-page, run 42882854987); counted, never kept as an error. Any other line stays one:
-  // another status, path or host, a CSP violation, a page error.
-  const errs = (rec.errors ?? []).filter((e) => e !== HELPER_SOLANA_429);
+  // the helper's Solana route refusing a price or display read for its shared budget (429) is the live run's load, never
+  // this page's error (card sign-live-checks-read-a-pinned-page, run 42882854987): each such refusal, as the page's own
+  // response read it (rec.refused), takes one of its console lines out of the errors and into a WARN line with the count.
+  // A 429 there on any other read fails, and so does every other line: another status, route or host, a CSP violation,
+  // a page error, and a 429 console line with no refused price or display read under it.
+  const refused = Array.isArray(rec.refused) ? rec.refused : [];
+  const other = refused.filter((x) => x?.display !== true);
+  say(other.length === 0, `no read but a price or display read is refused (429) on the helper's Solana route (${other.length}${other.length ? `: ${other.slice(0, 3).map((x) => JSON.stringify(x?.calls ?? null)).join("; ")}` : ""})`);
+  let room = refused.length - other.length;
+  const errs = (rec.errors ?? []).filter((e) => !(e === HELPER_SOLANA_429 && room > 0 && room-- > 0));
   const load = (rec.errors ?? []).length - errs.length;
-  say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}${load ? `; the helper's Solana route refused ${load} read${load === 1 ? "" : "s"} for its shared budget (429), the run's load` : ""}`);
+  say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}`);
+  if (load) lines.push(`WARN the helper's Solana route refused ${load} price or display read${load === 1 ? "" : "s"} for its shared budget (429), the run's load`);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
   return { verdict, pass: verdict === "PASS", lines };
 }
@@ -451,7 +481,18 @@ async function click(page, action) {
 }
 /** The check's page and console hooks: a page error, and a console error kept through the shared collector
  *  (console-errors.mjs) as its text and its address's origin and path. */
-export function watch(page, errors) {
+export function watch(page, errors, refused = null) {
+  // a 429 from the helper's Solana route, with what it read (judge: a price or display read is the run's load)
+  if (refused) page.on("response", (r) => {
+    if (r.status() !== 429) return;
+    let u;
+    try {
+      u = new URL(r.url());
+    } catch {
+      return;
+    }
+    if (`${u.origin}${u.pathname}` === HELPER_SOLANA) refused.push(refusedRead(r.request().postData()));
+  });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(`console: ${consoleError(m)}`);
@@ -551,7 +592,8 @@ async function repeatEnter(page, cdp) {
 /** One full probe. Returns { record, prf } where prf (hex, in memory only) is for the caller's own parity check. */
 export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, site, fetchFn = fetch } = {}) {
   const errors = [];
-  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, phone: {}, noPrf: {}, errors };
+  const refused = [];
+  const record = { key: KEY, url, mode: harness ? "harness" : "live", at: new Date().toISOString(), prf: {}, phone: {}, noPrf: {}, errors, refused };
   let prfHex = null;
   // prf run
   {
@@ -562,11 +604,11 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(DRAWN);
       await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
-      watch(page, errors);
+      watch(page, errors, refused);
       const creds = await authenticator(page, true);
       // a second tab, open before the first one makes a passkey: its button must then run no ceremony
       const tab2 = await ctx.newPage();
-      watch(tab2, errors);
+      watch(tab2, errors, refused);
       const creds2 = await authenticator(tab2, true);
       await page.goto(url);
       await tab2.goto(url);
@@ -657,7 +699,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const APP = `https://${APP_HOST}/__wallet-passkey-prf-frame.html`;
       if (!h.harnessApp) await ctx.route(APP, (rt) => rt.fulfill({ status: 200, contentType: "text/html", body: FRAME_PARENT }));
       const parent = await ctx.newPage();
-      watch(parent, errors);
+      watch(parent, errors, refused);
       // SIGN_HOST's frame-ancestors 'none' blocks this frame outright (card signpage-shell; signpage-skeleton holds the
       // header). It is lifted here, for this parent's frame only, so the page's own rule still shows: in a frame it
       // draws no sign-in or sign-out control.
@@ -717,7 +759,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(HOLD_LAYER);
       const [a, b] = [await ctx.newPage(), await ctx.newPage()];
       for (const t of [a, b]) {
-        watch(t, errors);
+        watch(t, errors, refused);
         await authenticator(t, true);
         await t.goto(url);
         await settled(t);
@@ -739,7 +781,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await ctx.addInitScript(DRAWN);
       await ctx.addInitScript(HOLD_LAYER);
       const page = await ctx.newPage();
-      watch(page, errors);
+      watch(page, errors, refused);
       const creds = await authenticator(page, true);
       const touch = (type, points) => creds.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
       await page.goto(url);
@@ -788,7 +830,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       await nctx.addInitScript(DRAWN);
       await nctx.addInitScript(HOLD_LAYER);
       const page = await nctx.newPage();
-      watch(page, errors);
+      watch(page, errors, refused);
       await authenticator(page, false);
       await page.goto(url);
       record.noPrf.open = await settled(page);
@@ -870,7 +912,7 @@ export async function probe({ url = `https://${SIGN_HOST}/`, harness = false, si
       const tctx = await h.browser.newContext();
       await tctx.addInitScript(HOLD_LAYER);
       const typing = await tctx.newPage();
-      watch(typing, errors);
+      watch(typing, errors, refused);
       await typing.goto(url);
       await settled(typing);
       // a missing control is a finding, not an error: the step records the state it left
