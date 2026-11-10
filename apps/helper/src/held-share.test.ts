@@ -8,7 +8,6 @@ import { randomBytes } from "node:crypto";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { geckoBudget } from "./data/gecko.ts";
 import { HELD_MAX } from "./data/held.ts";
 import { b58encode, createSolanaLists } from "./data/solana/lists.ts";
 import { createProxy } from "./proxy/proxy.ts";
@@ -72,7 +71,7 @@ test("30 held Solana mints, cold and again: the same address's RPC read, token p
   const rpc = createRpc({}, { fetch: stub });
   const lists = createSolanaLists(proxy, rpc);
   const token = solanaTokenFromEnv({}, proxy, lists, rpc);
-  const held = heldFrom(token, {}, geckoBudget(Date.now));
+  const held = heldFrom(token, {});
   const h = createServer(handler(COMMIT, proxy, rpc, undefined, lists, undefined, undefined, token, undefined, null, new Map(), new Map(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, held));
   try {
     await new Promise<void>((r) => h.listen(0, "127.0.0.1", () => r()));
