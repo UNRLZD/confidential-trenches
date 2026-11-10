@@ -1,7 +1,8 @@
 // pool.buy on an EVM pool (card signpage-evm-pool-buy, src/pool-buy-evm.ts and src/evm-send.ts): the device's own quote
-// (replayed from the kit's recorded Base answers), the kit's build, checkEvmBuy, W's signature, the take, the send and
-// the read-back on two RPCs, each step's refusals; and the buy's calldata, byte for byte the encoding the pool's
-// testnet run sends (contracts/pool-evm/script/testnet-run-lib.mjs buyData).
+// (replayed from the kit's recorded Base answers), the kit's build, checkEvmBuy, W's signature, the pending record, the
+// take, the send and the read-back on the pool's own events on two RPCs, each step's refusals and each end; and the
+// buy's calldata, byte for byte the encoding the pool's testnet run sends (contracts/pool-evm/script/testnet-run-lib.mjs
+// buyData). The two pool RPCs are fakes of a chain whose clock is the run's own (each wait moves it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,8 +14,8 @@ import { asRecorded, gasRoundAnswers, withMarker } from "../../kit/test/evm-quot
 import { entropyToWords, freshWallet, wordsToSeed64 } from "../../wallet/src/derive/keys.ts";
 import { EVM_POOL_EVENTS, evmPoolContextOf, evmPoolScopeOf, evmRelayDataBytes, type EvmPoolRequest, type EvmRelayData } from "../../wallet/src/pool/evm.ts";
 import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
-import { EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
-import { evmBuyCalldata, EvmSendRefused } from "../src/evm-send.ts";
+import { EVM_BUY_SETTLE_MS, EVM_OWED_BACK_KEY, EVM_POSITION_COSTS_KEY, runEvmPoolBuy, type EvmHolding, type EvmOwedBack, type EvmPoolBuyAnswer, type EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
+import { evmBuyCalldata, EvmSendBusy, EvmSendNoAnswer, EvmSendRefused } from "../src/evm-send.ts";
 import type { PoolAsk } from "../src/rules/pool.ts";
 
 // the pool's testnet run's own encoder (contracts/pool-evm/script/testnet-run-lib.mjs), a plain module with no types
@@ -51,7 +52,7 @@ const CHUNK = AMOUNT_IN + FEE;
 const SEED = wordsToSeed64(entropyToWords(new Uint8Array(16)));
 const L = 5n;
 const W = freshWallet(SEED, "evm", L, 0).address;
-const NULLIFIER = 777n;
+const NULLIFIER = 0x1234567890abcdef1234n;
 
 const relayOf = (o: Partial<EvmRelayData> = {}): EvmRelayData => ({ recipient: W, feeRecipient: FEE_TO, feeCap: FEE, deadlineMs: NOW + 170_000n, refundPrecommitment: 9n, salt: "0x" + "ab".repeat(16), ...o });
 function readyOf(relay = relayOf(), id = "n1", attempt = "a1"): ReadyProof<EvmPoolRequest> {
@@ -76,48 +77,74 @@ const ASK: PoolAsk = { kind: "pool.buy", chain: "base", token: TOKEN, amount: CH
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const topic = (s: string) => "0x" + hex(keccak_256(new TextEncoder().encode(s)));
 const w32 = (v: bigint) => v.toString(16).padStart(64, "0");
-const HASH = "0x" + "ab".repeat(32);
-/** The pool's Bought for W, as a receipt carries it. */
-const bought = (out: bigint, o: { nullifier?: bigint; token?: string } = {}) => ({
-  address: POOL,
-  topics: [topic(EVM_POOL_EVENTS.Bought), "0x" + w32(BigInt(W))],
-  data: "0x" + [BigInt(FEE_TO), CHUNK, FEE, o.nullifier ?? NULLIFIER, 99n, BigInt(o.token ?? TOKEN), out].map(w32).join(""),
-});
-/** One RPC: the transaction under HASH (the calldata it was sent, or `input`), its receipt (`status` and logs). */
-type Chain = { tx?: "mine" | "other" | "none"; status?: "0x1" | "0x0" | null; logs?: unknown[] };
-const rpcOf = (c: Chain, sent: { data?: string }): EvmPoolBuyHost["rpcs"][0] => async (method, params) => {
-  const hash = (params as string[])[0];
-  if (method === "eth_getTransactionByHash") {
-    if ((c.tx ?? "mine") === "none" || hash !== HASH) return null;
-    return { hash, to: POOL, input: c.tx === "other" ? "0x1234" : sent.data, chainId: "0x" + BigInt(B.chainId).toString(16) };
-  }
-  if (method === "eth_getTransactionReceipt") return c.status === null ? null : { transactionHash: hash, blockNumber: "0x10", status: c.status ?? "0x1", logs: c.logs ?? [] };
+const HELPER_HASH = "0x" + "ab".repeat(32);
+const TX = "0x" + "cd".repeat(32);
+const DEADLINE = NOW + 170_000n;
+const START = 0x100n;
+const OTHER = "0x00000000000000000000000000000000000000aa";
+type Rel = { kind?: "bought" | "withdrawn"; w?: string; feeTo?: string; value?: bigint; fee?: bigint; nullifier?: bigint; token?: string; out?: bigint; block?: bigint; tx?: string; address?: string };
+/** A release log of the pool, as eth_getLogs gives it. */
+const release = (o: Rel = {}) => {
+  const head = [BigInt(o.feeTo ?? FEE_TO), o.value ?? CHUNK, o.fee ?? FEE, o.nullifier ?? NULLIFIER, 99n];
+  const withdrawn = o.kind === "withdrawn";
+  return {
+    address: o.address ?? POOL,
+    topics: [topic(withdrawn ? EVM_POOL_EVENTS.Withdrawn : EVM_POOL_EVENTS.Bought), "0x" + w32(BigInt(o.w ?? W))],
+    data: "0x" + (withdrawn ? head : [...head, BigInt(o.token ?? TOKEN), o.out ?? 40_000_000n]).map(w32).join(""),
+    blockNumber: "0x" + (o.block ?? 0x110n).toString(16),
+    transactionHash: o.tx ?? TX,
+    logIndex: "0x2",
+    removed: false,
+  };
+};
+/** One pool RPC: its newest block at the run's clock (`t`, or `time` for its block time), the releases it shows, and
+ *  every call it got. */
+type Side = { logs?: unknown[] | (() => unknown[]); time?: () => bigint; down?: boolean };
+type Call = { method: string; params: unknown };
+const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost["rpcs"][0] => async (method, params) => {
+  calls.push({ method, params });
+  if (side.down) throw new Error("down");
+  if (method === "eth_blockNumber") return "0x" + START.toString(16);
+  if (method === "eth_getBlockByNumber") return { number: "0x" + (START + 0x40n).toString(16), timestamp: "0x" + ((side.time?.() ?? clock.t) / 1000n).toString(16) };
+  if (method === "eth_getLogs") return typeof side.logs === "function" ? side.logs() : (side.logs ?? []);
   throw new Error(`no ${method}`);
 };
 
-type Seen = { seeds: number; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; sent: string[]; quotes: EvmPoolBuyQuote["route"][] };
-function host(o: { ready?: ReadyProof<EvmPoolRequest>[]; a?: Chain; b?: Chain; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string> } = {}): { h: EvmPoolBuyHost; seen: Seen } {
-  const seen: Seen = { seeds: 0, takes: [], sends: [], settles: 0, records: [], sent: [], quotes: [] };
-  const wire: { data?: string } = {};
+type Seen = { seeds: Uint8Array[]; keys: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
+type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void> };
+function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
+  const clock = { t: NOW };
+  const seen: Seen = { seeds: [], keys: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
   const h: EvmPoolBuyHost = {
     chain: "base",
     testnet: false,
     pin: { network: "base", pool: POOL, feeRecipient: FEE_TO, fromBlock: 1n },
     venues: VENUES,
-    rpcs: [rpcOf(o.a ?? {}, wire), rpcOf(o.b ?? {}, wire)],
+    rpcs: [rpcOf(o.a ?? {}, clock, seen.calls), rpcOf(o.b ?? {}, clock, seen.calls)],
     ready: async () => ready,
     take: async (id, attempt) => {
+      seen.order.push("take");
       seen.takes.push(id);
       const r = ready.find((x) => x.noteId === id && x.attempt === attempt);
       if (!r) throw new Error("taken by another attempt");
       return r;
     },
-    seed64: async () => (seen.seeds++, SEED.slice()),
+    seed64: async () => {
+      const s = SEED.slice();
+      seen.seeds.push(s);
+      return s;
+    },
+    derive: (seed, chain, l, j) => {
+      const w = freshWallet(seed, chain, l, j);
+      seen.keys.push(w.secretKey);
+      return w;
+    },
     // the device's quote: the standard shapes the kit refuses below its own best route (the recording's), then that one
     quote: async (req) => {
       seen.quotes.push(req.route);
       assert.equal(req.amountIn, CHUNK - FEE, "the quote is for what the pool swaps: the chunk less the proof's fee");
+      assert.equal(req.slippageBps, ASK.slippageBps, "the quote is asked at the ask's own slippage");
       if (o.quote) return o.quote();
       const q = await fixtureQuote();
       if (JSON.stringify(req.route) !== JSON.stringify(FIXTURE_ROUTE)) throw new EvmQuoteError("below_reference", "the standard pool quotes more", { amountOut: q.amountOut, route: FIXTURE_ROUTE });
@@ -126,20 +153,31 @@ function host(o: { ready?: ReadyProof<EvmPoolRequest>[]; a?: Chain; b?: Chain; s
     build: (adapter, q) => evmQuotedBuy(VENUES, adapter, q, QF.now),
     decimals: async () => 6,
     send: async (body) => {
+      seen.order.push("send");
       seen.sends.push(body);
-      wire.data = "0x" + hex(body.data);
-      return o.send ? o.send() : HASH;
+      return o.send ? o.send() : HELPER_HASH;
     },
     settle: () => void seen.settles++,
-    record: async (w, rec) => void seen.records.push([w, rec]),
-    sent: (x) => void seen.sent.push(x),
+    record: async (w, rec) => {
+      seen.order.push(`record ${rec.state}`);
+      if (o.record) await o.record();
+      seen.records.push([w, structuredClone(rec)]);
+    },
+    owe: async (x) => void seen.owed.push(x),
+    sent: () => void seen.sent++,
+    late: (x) => void seen.late.push(x),
     claimed: o.claimed ?? new Set(),
-    now: () => NOW,
-    reads: 3,
-    wait: async () => {},
+    now: () => clock.t,
+    wait: async (ms) => void (clock.t += BigInt(ms)),
   };
   return { h, seen };
 }
+const both = (logs: unknown[] | (() => unknown[])): Pick<HostOpts, "a" | "b"> => ({ a: { logs }, b: { logs } });
+const lateOf = async (seen: Seen): Promise<EvmPoolBuyAnswer> => {
+  for (let i = 0; i < 1000 && seen.late.length === 0; i++) await new Promise((r) => setImmediate(r));
+  return seen.late[0]!;
+};
+const zero = (b: Uint8Array) => b.every((x) => x === 0);
 
 test("the buy's calldata is the pool's canonical encoding: byte for byte the testnet run's buyData", async () => {
   const r = readyOf();
@@ -152,75 +190,234 @@ test("the buy's calldata is the pool's canonical encoding: byte for byte the tes
   assert.equal(hex(ours.subarray(0, 4)), "3edadd79", "PrivacyPoolSimple.buy's selector");
 });
 
-test("a buy read back on both RPCs with the pool's Bought for W is filled, and W's holding stores the route the transaction took", async () => {
-  const logs = [bought(40_000_000n)];
-  const { h, seen } = host({ a: { logs }, b: { logs } });
+test("filled: one Bought for the nullifier, the same on both RPCs, paying W the token at least min out; filled names the release's own transaction and completes W's holding", async () => {
+  const { h, seen } = host(both([release()]));
   const got = await runEvmPoolBuy(h, ASK);
-  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: HASH }] });
+  assert.deepEqual(got, { stage: "filled", txs: [{ chain: "base", hash: TX }] }, "the chain's transaction, never the helper's word");
   assert.deepEqual(seen.takes, ["n1"]);
   assert.equal(seen.sends.length, 1);
   assert.equal(seen.sends[0]!.epoch, NOW - 10_000n, "the epoch whose fee the proof binds");
-  assert.deepEqual(seen.sent, [HASH], "named once both RPCs read this very transaction");
+  assert.equal(seen.sent, 1, "told sent once the bytes left");
   // the kit refused the first standard shape below its own best, and the device asked that best route once
   assert.deepEqual(seen.quotes.at(-1), FIXTURE_ROUTE);
-  assert.equal(seen.records.length, 1);
-  const [w, rec] = seen.records[0]!;
-  assert.equal(w, W);
-  assert.deepEqual(rec, { mint: TOKEN.toLowerCase(), received: "40", decimals: 6, chain: "base", route: { venue: "uniswap-v3", adapter: A_V3, path: FIXTURE_ROUTE, tx: HASH, block: "16" } });
+  const route = { venue: "uniswap-v3", adapter: A_V3, path: FIXTURE_ROUTE };
+  assert.deepEqual(seen.records, [
+    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "pending", route }],
+    [W, { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "40", route: { ...route, tx: TX, block: "272" } }],
+  ]);
   assert.equal(EVM_POSITION_COSTS_KEY, "owed/cost-evm");
   assert.equal(seen.settles, 1, "the settle pass ends the RESERVED note");
 });
 
-test("a quote that fails checkEvmBuy is never signed: no seed read, no take, no send", async () => {
+test("(ruling 2) the read-back names no W, nullifier or transaction to a public RPC: newest blocks and the pool's logs by address and topics only", async () => {
+  const { h, seen } = host(both([release()]));
+  await runEvmPoolBuy(h, ASK);
+  assert.deepEqual([...new Set(seen.calls.map((c) => c.method))].sort(), ["eth_blockNumber", "eth_getBlockByNumber", "eth_getLogs"]);
+  const said = JSON.stringify(seen.calls.map((c) => c.params)).toLowerCase();
+  for (const secret of [W.slice(2).toLowerCase(), w32(NULLIFIER), NULLIFIER.toString(16), HELPER_HASH.slice(2), TX.slice(2)]) assert.ok(!said.includes(secret), `no read names ${secret}`);
+  const filter = seen.calls.find((c) => c.method === "eth_getLogs")!.params as [Record<string, unknown>];
+  assert.deepEqual(filter, [{ address: POOL, topics: [[topic(EVM_POOL_EVENTS.Bought), topic(EVM_POOL_EVENTS.Withdrawn)]], fromBlock: "0x100", toBlock: "0x140" }]);
+});
+
+test("(ruling 2) a Bought on one RPC only, or the two differing, is not filled; past the tap's bound the answer is sent, and the end goes out late once both agree", async () => {
+  let lagging = true;
+  const { h, seen } = host({ a: { logs: [release()] }, b: { logs: () => (lagging ? [] : [release()]) } });
+  const got = await runEvmPoolBuy(h, ASK);
+  assert.deepEqual(got, { stage: "sent", txs: [] });
+  assert.ok(seen.clock.t - NOW >= BigInt(EVM_BUY_SETTLE_MS), "the tap read for its bound");
+  assert.ok(seen.clock.t - NOW < BigInt(EVM_BUY_SETTLE_MS) + 10_000n, "and no longer");
+  assert.equal(seen.records.length, 1, "W's holding is written pending all the same");
+  lagging = false;
+  assert.deepEqual(await lateOf(seen), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
+  assert.equal(seen.records.at(-1)![1].state, "filled");
+  for (const differ of [{ block: 0x111n }, { tx: "0x" + "ef".repeat(32) }, { out: 40_000_001n }]) {
+    const r = host({ a: { logs: [release()] }, b: { logs: [release(differ)] } });
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "sent", txs: [] }, JSON.stringify(differ, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+  }
+});
+
+test("(ruling 2) not_landed: the nullifier released elsewhere (another W, token, fee recipient, value, fee, or out under min out), or both RPCs' newest block past the deadline with none", async () => {
+  for (const o of [{ w: OTHER }, { token: OTHER }, { feeTo: OTHER }, { value: CHUNK - 1n }, { fee: FEE + 1n }, { out: 1n }, { kind: "withdrawn" as const, w: OTHER }]) {
+    const r = host(both([release(o)]));
+    assert.deepEqual(await runEvmPoolBuy(r.h, ASK), { stage: "not_landed", txs: [] }, JSON.stringify(Object.keys(o)));
+    assert.equal(r.seen.records.at(-1)![1].state, "pending");
+  }
+  // a release of another nullifier is not this buy's at all
+  const near = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 100_000n }))], ...both([release({ nullifier: 5n })]) });
+  assert.deepEqual(await runEvmPoolBuy(near.h, ASK), { stage: "not_landed", txs: [] });
+  assert.ok(near.seen.clock.t > NOW + 100_000n, "only once the chain's time is past the deadline");
+});
+
+test("(ruling 2) never not_landed before the deadline on both RPCs: a send with nothing on chain reads on, and one RPC past it is not both", async () => {
+  // nothing lands and the deadline is 170 s off: the tap answers sent at its bound; the end (not_landed) goes out late
+  const { h, seen } = host();
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  assert.deepEqual(await lateOf(seen), { stage: "not_landed", txs: [] });
+  assert.ok(seen.clock.t > DEADLINE);
+  // one RPC's block time stuck before the deadline: never not_landed, however long
+  const stuck = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 100_000n }))], b: { time: () => NOW } });
+  assert.deepEqual(await runEvmPoolBuy(stuck.h, ASK), { stage: "sent", txs: [] });
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(stuck.seen.late.every((x) => (x as { stage: string }).stage !== "not_landed"));
+});
+
+test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, W's ETH (the chunk less the fee) is written owed back, and the answer names the release", async () => {
+  const { h, seen } = host(both([release({ kind: "withdrawn" })]));
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
+  assert.deepEqual(seen.owed, [{ address: W, chain: "base", wei: (CHUNK - FEE).toString(), tx: TX, block: "272" }]);
+  assert.equal(seen.records.at(-1)![1].state, "withdrawn");
+  assert.equal(EVM_OWED_BACK_KEY, "owed/back-evm");
+});
+
+test("(ruling 3) W's holding is written pending before the take and the send; a write that fails sends nothing and leaves the note HELD", async () => {
+  const { h, seen } = host(both([release()]));
+  assert.equal(((await runEvmPoolBuy(h, ASK)) as { stage: string }).stage, "filled");
+  assert.deepEqual(seen.order.slice(0, 3), ["record pending", "take", "send"]);
+  assert.equal(seen.records[0]![1].mint, TOKEN.toLowerCase(), "a landed buy is never without its record (ZZ-B2)");
+  const failing = host({ record: () => Promise.reject(new Error("store closed")) });
+  assert.deepEqual(await runEvmPoolBuy(failing.h, ASK), { error: "failed" });
+  assert.deepEqual([failing.seen.takes.length, failing.seen.sends.length, failing.seen.settles, failing.h.claimed!.size], [0, 0, 0, 0]);
+});
+
+test("(ruling 1) the helper's 5xx, a coded-less 4xx, a timeout or a fault after the bytes left: never an error, the run reads on to the chain's end (ZZ-E)", async () => {
+  for (const e of [new EvmSendNoAnswer(502, "not 200"), new EvmSendNoAnswer(503, "not 200"), new EvmSendNoAnswer(504, "not 200"), new EvmSendNoAnswer(400, "no code"), new EvmSendNoAnswer(null, "timeout"), new TypeError("fetch failed")]) {
+    const { h, seen } = host({ send: () => Promise.reject(e), ...both([release()]) });
+    assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] }, e.message);
+    assert.deepEqual([seen.sends.length, seen.sent, seen.settles], [1, 1, 1]);
+  }
+});
+
+test("(ruling 1) only the helper's own 4xx naming a code is a refusal: refused, the note taken and settled, nothing read", async () => {
+  const { h, seen } = host({ send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")) });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [] });
+  assert.deepEqual([seen.takes.length, seen.sends.length, seen.sent, seen.settles], [1, 1, 0, 1]);
+  assert.ok(!seen.calls.some((c) => c.method === "eth_getLogs"));
+});
+
+test("(ruling 1) a busy helper is asked again after its Retry-After (at least 1 s) while the proof has more than the send margin left; then the run reads on", async () => {
+  let n = 0;
+  const { h, seen } = host({ send: async () => (++n < 3 ? Promise.reject(new EvmSendBusy(500)) : HELPER_HASH), ...both([release()]) });
+  assert.equal(((await runEvmPoolBuy(h, ASK)) as { stage: string }).stage, "filled");
+  assert.equal(seen.sends.length, 3);
+  assert.equal(seen.clock.t - NOW >= 2_000n, true, "each wait at least 1 s");
+  // busy for good: asked until the margin, then read on (never an error)
+  const busy = host({ send: () => Promise.reject(new EvmSendBusy(60_000)), ...both([release()]) });
+  assert.equal(((await runEvmPoolBuy(busy.h, ASK)) as { stage: string }).stage, "filled");
+  assert.equal(busy.seen.sends.length, 2, "at 0 s, and at 60 s; a third would wait past the deadline less the margin");
+  assert.ok(busy.seen.clock.t - NOW < 60_000n + 5_000n, "never past the deadline less the margin");
+  // no margin left at all: asked once
+  const late = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 61_000n }))], send: () => Promise.reject(new EvmSendBusy(1_000)), ...both([release()]) });
+  await runEvmPoolBuy(late.h, ASK);
+  assert.equal(late.seen.sends.length, 1);
+});
+
+test("(ruling 2) the read-back has a wall-clock bound however slow each read is, and the seed's lock is let go before it (ZZ-D)", async () => {
+  const { h, seen } = host();
+  let held = false;
+  const during: boolean[] = [];
+  h.hold = async (f) => {
+    held = true;
+    try {
+      return await f();
+    } finally {
+      held = false;
+    }
+  };
+  const rpcs = h.rpcs;
+  h.rpcs = rpcs.map((rpc) => async (m: string, p: unknown) => {
+    if (m === "eth_getLogs") {
+      during.push(held);
+      seen.clock.t += 8_000n; // a slow RPC: 8 s a read
+    }
+    return rpc(m as never, p as never);
+  }) as never;
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  assert.ok(during.length > 0 && during.every((x) => x === false), "no read-back under the seed's lock");
+  assert.ok(during.length < 20, `the tap's reads end at the bound: ${during.length}`);
+});
+
+test("(ruling 6) a quote whose min out is under the ask's own slippage of the agreed output is never signed", async () => {
+  // the kit's quote asked at another slippage: its min out under the ask's floor
+  const q = await fixtureQuote();
+  const loose = { ...q, minOut: (q.amountOut * 5_000n) / 10_000n };
+  const { h, seen } = host({ quote: async () => loose });
+  h.build = (adapter, x) => evmQuotedBuy(VENUES, adapter, q, QF.now) && evmQuotedBuy(VENUES, adapter, x, QF.now);
+  const got = await runEvmPoolBuy(h, ASK);
+  assert.ok("error" in got, JSON.stringify(got));
+  assert.deepEqual([seen.seeds.length, seen.takes.length, seen.sends.length], [0, 0, 0]);
+});
+
+test("(ruling 6) the relay data's fee cap is held to the device's binding fee: a proof whose relay data commits more is never signed", async () => {
+  const relay = relayOf({ feeCap: FEE * 2n });
+  const r = readyOf(relay);
+  const { h, seen } = host({ ready: [{ ...r, binding: { ...r.binding, feeCap: FEE } }] });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
+  assert.deepEqual([seen.seeds.length, seen.sends.length], [0, 0]);
+});
+
+test("a quote that fails checkEvmBuy is never signed: no seed read, no record, no take, no send", async () => {
   // the proof binds another fee recipient than the pinned one: the rule refuses fee_recipient
   const { h, seen } = host({ ready: [readyOf(relayOf({ feeRecipient: "0x0000000000000000000000000000000000000bad" }))] });
   const claimed = h.claimed!;
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "quote_check_failed" });
-  assert.deepEqual([seen.seeds, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0]);
+  assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length, seen.settles], [0, 0, 0, 0, 0]);
   assert.equal(claimed.size, 0, "the proof is released for the next tap");
   // a quote the kit refuses: never signed either
   const r2 = host({ quote: () => Promise.reject(new EvmQuoteError("stale_quote", "old")) });
   assert.deepEqual(await runEvmPoolBuy(r2.h, ASK), { error: "quote_check_failed" });
-  assert.deepEqual([r2.seen.seeds, r2.seen.takes.length, r2.seen.sends.length], [0, 0, 0]);
+  assert.deepEqual([r2.seen.seeds.length, r2.seen.takes.length, r2.seen.sends.length], [0, 0, 0]);
+  // the relay data names another recipient than the proof's W: refused by the rule before the seed is read
+  const r3 = host({ ready: [readyOf(relayOf({ recipient: OTHER }))] });
+  assert.deepEqual(await runEvmPoolBuy(r3.h, ASK), { error: "quote_check_failed" });
+  assert.equal(r3.seen.seeds.length, 0);
 });
 
-test("a buy read back on one RPC only is not marked filled", async () => {
-  const logs = [bought(40_000_000n)];
-  const { h, seen } = host({ a: { logs }, b: { tx: "none" } });
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
-  assert.deepEqual([seen.records.length, seen.sent.length, seen.settles], [0, 0, 1]);
-  // read on both, with Bought on one and none on the other: not filled either
-  const r2 = host({ a: { logs }, b: { logs: [] } });
-  assert.deepEqual(await runEvmPoolBuy(r2.h, ASK), { stage: "sent", txs: [{ chain: "base", hash: HASH }] });
-  assert.equal(r2.seen.records.length, 0);
-  // a Bought that names another nullifier, or another token, is not this buy's
-  for (const log of [bought(40_000_000n, { nullifier: 1n }), bought(40_000_000n, { token: "0x00000000000000000000000000000000000000aa" })]) {
-    const r3 = host({ a: { logs: [log] }, b: { logs: [log] } });
-    assert.equal(((await runEvmPoolBuy(r3.h, ASK)) as { stage: string }).stage, "sent");
-    assert.equal(r3.seen.records.length, 0);
+test("(ruling 7) the pin, the venue list and the proof's own signals: each off is refused before the seed", async () => {
+  const cases: [string, (h: EvmPoolBuyHost) => void, ReadyProof<EvmPoolRequest>[] | undefined, string][] = [
+    ["the pin is another network's", (h) => void (h.pin = { ...h.pin, network: "robinhood" }), undefined, "not_allowed"],
+    ["the venue list's pool is not the pin's", (h) => void (h.venues = Object.freeze({ base: { ...VENUES.base, pool: OTHER } }) as never), undefined, "not_allowed"],
+    ["a fee of the whole chunk", () => {}, [{ ...readyOf(), binding: { ...readyOf().binding, feeCap: CHUNK } }], "not_funded"],
+    ["the proof's context is not its binding's", () => {}, [{ ...readyOf(), publicSignals: readyOf().publicSignals.map((x, i) => (i === 7 ? "1" : x)) as never }], "failed"],
+    ["the proof's value is not its chunk", () => {}, [{ ...readyOf(), publicSignals: readyOf().publicSignals.map((x, i) => (i === 2 ? "1" : x)) as never }], "failed"],
+  ];
+  for (const [name, edit, ready, code] of cases) {
+    const { h, seen } = host({ ready });
+    edit(h);
+    assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: code }, name);
+    assert.deepEqual([seen.seeds.length, seen.takes.length, seen.sends.length], [0, 0, 0], name);
   }
 });
 
-test("a helper that answers the send with another transaction than the one signed: never named, never filled", async () => {
-  const { h, seen } = host({ a: { tx: "other" }, b: { tx: "other" } });
-  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
-  assert.deepEqual([seen.sent.length, seen.records.length, seen.settles], [0, 0, 1]);
+test("(ruling 7) keys: the seed is zeroed once W is derived and W's key once it signed, on every path; W must be the proof's W", async () => {
+  const ok = host(both([release()]));
+  await runEvmPoolBuy(ok.h, ASK);
+  assert.ok(ok.seen.seeds.length === 1 && zero(ok.seen.seeds[0]!), "the seed");
+  assert.ok(ok.seen.keys.length === 1 && zero(ok.seen.keys[0]!), "W's key");
+  // W is not the proof's: refused before it signs, the seed and the key zeroed, nothing taken or sent
+  const r = readyOf();
+  const other = host({ ready: [{ ...r, wallet: { ...r.wallet, j: 1 } }] });
+  assert.deepEqual(await runEvmPoolBuy(other.h, ASK), { error: "failed" });
+  assert.ok(zero(other.seen.seeds[0]!) && zero(other.seen.keys[0]!));
+  assert.deepEqual([other.seen.records.length, other.seen.takes.length, other.seen.sends.length], [0, 0, 0]);
+  // a fault after the signature (the record): both zeroed
+  const fault = host({ record: () => Promise.reject(new Error("no store")) });
+  await runEvmPoolBuy(fault.h, ASK);
+  assert.ok(zero(fault.seen.seeds[0]!) && zero(fault.seen.keys[0]!));
 });
 
-test("the proof taken is settled on every exit past the take, and released before it", async () => {
-  // the helper refuses: failed, and the settle runs (the note RESERVED until it ends it)
-  const refused = host({ send: () => Promise.reject(new EvmSendRefused(422, "fee_off")) });
-  assert.deepEqual(await runEvmPoolBuy(refused.h, ASK), { error: "failed" });
-  assert.deepEqual([refused.seen.takes.length, refused.seen.settles], [1, 1]);
-  // no answer at all: the helper may have sent it; nothing named, the settle runs
-  const silent = host({ send: () => Promise.reject(new TypeError("fetch failed")) });
-  assert.deepEqual(await runEvmPoolBuy(silent.h, ASK), { stage: "sent", txs: [] });
-  assert.equal(silent.seen.settles, 1);
-  // reverted on both: refused with its transaction, settled
-  const reverted = host({ a: { status: "0x0" }, b: { status: "0x0" } });
-  assert.deepEqual(await runEvmPoolBuy(reverted.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: HASH }] });
-  assert.equal(reverted.seen.settles, 1);
-  // a remake swapped in after the pick: the take refuses, nothing is sent, the settle runs
+test("an RPC down before the signature: nothing signed, recorded, taken or sent", async () => {
+  const { h, seen } = host({ b: { down: true } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "failed" });
+  assert.deepEqual([seen.seeds.length, seen.records.length, seen.takes.length, seen.sends.length, seen.settles, h.claimed!.size], [0, 0, 0, 0, 0, 0]);
+});
+
+test("(ruling 7) the take hands out this very attempt or nothing is sent", async () => {
+  const r = readyOf();
+  const { h, seen } = host();
+  h.take = async () => (seen.takes.push("n1"), { ...r, attempt: "a2" });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { error: "failed" });
+  assert.deepEqual([seen.sends.length, seen.settles], [0, 1]);
+  // a remake swapped in after the pick: the take refuses, nothing is sent, nothing to settle
   const swapped = host();
   swapped.h.take = async () => {
     throw new Error("taken by another attempt");
@@ -233,15 +430,14 @@ test("the proof taken is settled on every exit past the take, and released befor
     throw new Error("the two RPCs differ");
   };
   assert.deepEqual(await runEvmPoolBuy(early.h, ASK), { error: "failed" });
-  assert.deepEqual([early.seen.seeds, early.seen.takes.length, early.seen.settles, early.h.claimed!.size], [0, 0, 0, 0]);
+  assert.deepEqual([early.seen.seeds.length, early.seen.takes.length, early.seen.settles, early.h.claimed!.size], [0, 0, 0, 0]);
 });
 
 test("a second tap while one is in flight takes another proof, or none", async () => {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  const logs = [bought(40_000_000n)];
+  let release_!: () => void;
+  const gate = new Promise<void>((r) => (release_ = r));
   const claimed = new Set<string>();
-  const first = host({ a: { logs }, b: { logs }, claimed, quote: async () => (await gate, fixtureQuote()) });
+  const first = host({ ...both([release()]), claimed });
   first.h.quote = async (req) => {
     first.seen.quotes.push(req.route);
     await gate;
@@ -250,10 +446,10 @@ test("a second tap while one is in flight takes another proof, or none", async (
   const run1 = runEvmPoolBuy(first.h, ASK);
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual([...claimed], ["n1"], "the first tap holds its proof");
-  const second = host({ a: { logs }, b: { logs }, claimed });
+  const second = host({ ...both([release()]), claimed });
   assert.deepEqual(await runEvmPoolBuy(second.h, ASK), { error: "not_funded" }, "the only ready proof is the first tap's");
-  assert.equal(second.seen.seeds, 0);
-  release();
+  assert.equal(second.seen.seeds.length, 0);
+  release_();
   assert.equal(((await run1) as { stage: string }).stage, "filled");
   assert.equal(claimed.size, 0);
 });

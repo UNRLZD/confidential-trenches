@@ -16,6 +16,7 @@ import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { Pool } from "../../wallet/src/pool/pool.ts";
+import type { EvmPoolBuyHost } from "../src/pool-buy-evm.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 
 (globalThis as { __SIGN_NETWORK__?: string }).__SIGN_NETWORK__ = "testnet";
@@ -366,6 +367,44 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
   await got.after;
   assert.deepEqual(hosts, [{ chain: "base", network: "base-sepolia", ready: 1 }], "on the chain's own queue: its landed note's proof");
   assert.deepEqual(t.flow({ ...ask, chain: "robinhood" }, null as never), { error: "not_allowed" });
+  await t.signedOut();
+});
+
+test("the EVM buy's host on the testnet page: the testnet rule, one claim set for every tap, its settle the chain's RESERVED pass, and a queue that could not open is opened again on the next tap (review P3-8, t02-t04)", async () => {
+  const { w, ns } = await wallet();
+  let signedIn = false;
+  let reads = 0;
+  const made: EvmPoolBuyHost[] = [];
+  const t = testnetPool(page(w, () => signedIn), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => (c === "base" ? PIN : undefined),
+    evmRpcs: unread,
+    evmSync: () => ({ events: async () => (reads++, FREEING) }),
+    evmQueuePool: () => fakeEvmPool() as Pool<unknown>,
+    tradeKinds: {
+      evmBuy: (host) => () => {
+        made.push(host());
+        return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+      },
+    },
+  });
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  t.flow(ask, null as never);
+  t.flow(ask, null as never);
+  assert.equal(made.length, 2);
+  const [a, b] = made as [EvmPoolBuyHost, EvmPoolBuyHost];
+  assert.equal(a.testnet, true, "the testnet build checks the buy by the testnet rule");
+  assert.ok(a.claimed instanceof Set && a.claimed === b.claimed, "two taps share one claim set");
+  // signed out: the queue cannot open; the tap fails, and the next tap, signed in, opens it
+  await assert.rejects(a.ready());
+  signedIn = true;
+  assert.deepEqual(await b.ready(), [], "opened again once the seed is there");
+  // the settle runs the chain's RESERVED pass: a note past its deadline with no release is freed
+  const id = await reserved(ns);
+  a.settle();
+  await until(() => reads > 0);
+  for (let i = 0; i < 200 && (await ns.get(id))!.state === "RESERVED"; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.notEqual((await ns.get(id))!.state, "RESERVED");
   await t.signedOut();
 });
 

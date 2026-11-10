@@ -253,7 +253,8 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
         } catch (e) {
           if (e instanceof EvmSendRefused) return { answer: { stage: "refused", txs: [] } };
           if (e instanceof EvmSendBusy && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
-            await wait(Math.min(Math.max(e.retryAfterMs, 1_000), 5_000));
+            // the helper's own Retry-After (evmPoolSend caps it at EVM_SEND_RETRY_MAX_S), at least 1 s
+            await wait(Math.max(e.retryAfterMs, 1_000));
             continue;
           }
           // no answer: the bytes may be on their way
