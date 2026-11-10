@@ -57,6 +57,15 @@ test("planted: a balance of $0, a Buy button, an exit plan left on, and the word
   some(mut((rec) => { rec.loads[0].page.box.text += " 48.20 available"; }), /says "available"/);
 });
 
+test("card app-orders-coming-soon: the block with Coming soon and no switch passes; Coming soon beside a switch, or other words, fail", () => {
+  const soon = mut((rec) => {
+    for (const l of rec.loads) for (const m of [l.page, l.sheet]) if (m?.box) Object.assign(m.box.exit, { text: "Exit plan Sells automatically once this buy fills Coming soon", pressed: null });
+  });
+  assert.equal(soon.ok, true, soon.lines.join("\n"));
+  some(mut((rec) => { Object.assign(rec.loads[0].page.box.exit, { text: "Exit plan Sells automatically once this buy fills Coming soon", pressed: "false" }); }), /the exit plan is not off/);
+  some(mut((rec) => { Object.assign(rec.loads[0].page.box.exit, { text: "Exit plan Coming soon", pressed: null }); }), /the exit plan block reads "Exit plan Coming soon"/);
+});
+
 test("planted: a box left of the chart, outside its column or the window, or a grid above the Route & fees line fails", () => {
   some(mut((rec) => { rec.loads[0].page.box.left = 100; }), /not to the right of the chart/);
   some(mut((rec) => { rec.loads[0].page.box.inColumn = false; }), /not inside the page's right column/);

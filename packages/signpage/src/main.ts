@@ -68,13 +68,13 @@ import { depositNamer } from "./deposit-name.ts";
 import { poolAddressHost } from "./pool-deposit-address.ts";
 import { depositFollows, FOLLOW_LOCK } from "./deposit-follow.ts";
 import { depositToEnd, poolFollows, poolRefundMover, solanaPoolFollowDeps, type PoolFollowHost } from "./pool-deposit-follow.ts";
-import { POOL_ADDRESS_ASSET, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
+import { POOL_ADDRESS_ASSET, poolQuotePricing, readSolanaPoolFloor, type PoolQuotePricing } from "./pool-deposit-address.ts";
 import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { ONECLICK_USDC_ASSETS } from "../../kit/src/checks/oneclick.ts";
 import { POOL_ASSET_DECIMALS, type PoolStatePrice } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
-import { poolPrices } from "./pool-price.ts";
+import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -206,6 +206,8 @@ else {
   // the pool kinds' deps: the network's pins and each chain's two RPCs, which the price reads use too (src/pool-price.ts)
   const poolDeps = testnetPoolDeps(testnet?.flow);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
+  // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
+  wakeWhenShown(document, prices);
   pagePrice = (chain) => prices.get(chain);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
@@ -224,14 +226,7 @@ else {
   const poolKindMap = poolKinds(poolDeps);
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
-  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => {
-    if (!ONECLICK_USDC_ASSETS.includes(origin)) return null;
-    const p = prices.get(chain);
-    if (p === null) return null;
-    const d = -p.expo, digits = p.price.padStart(d + 1, "0");
-    const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
-    return { decimalsIn: 6, pricing: { in: ["1", "1"], out: [usd, usd] } };
-  };
+  const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
   const solPair = (): readonly [SolanaRpc, SolanaRpc] | null => (PAGE_SOL_PIN === undefined ? null : (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null));
   // the quote's floor on X's pool, read now on its two RPCs (pool-deposit-address.ts readSolanaPoolFloor); none on a
   // chain whose reads are not built here yet (Base and Robinhood: no mainnet pool is pinned)

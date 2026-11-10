@@ -81,7 +81,7 @@ test("the prices: SOL and ETH as the signing page read them, ETH from Base's fee
 test("the prices: none signed out or with no pool read, none past its feed's bound: never a number not read", () => {
   assert.deepEqual(footerTicks(undefined, NOW), []);
   assert.deepEqual(footerTicks([], NOW), []);
-  // read 61 s before its feed's 60 s bound ends: Pyth's SOL is dropped, Chainlink's ETH stays
+  // read 120 s ago, past Pyth's bound (the kit's POOL_USD_FEEDS) and inside Chainlink's: Pyth's SOL is dropped, Chainlink's ETH stays
   const stale = { price: "18512345678", expo: -8, published_s: Math.floor(NOW / 1000) - 120, read_ms: NOW - 120_000 };
   assert.deepEqual(footerTicks(pools({ solana: stale }), NOW).map((t) => t.sym), ["ETH"]);
   assert.deepEqual(footerTicks(pools({ solana: null, base: null, robinhood: null }), NOW), []);

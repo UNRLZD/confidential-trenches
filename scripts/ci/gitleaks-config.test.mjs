@@ -84,3 +84,31 @@ for (const [what, value] of [['another 64-hex', OTHER], ['the USDC id with a cha
 test('a NEAR secret key is still found in the bundle beside the USDC id', () => {
   assert.deepEqual(scan(BUNDLE, `const c={TOKEN:\`${USDC}\`};\nconst k=\`${SIG}\`;\n`), ['near-ed25519-secret-key']);
 });
+
+// A devnet pool page address frozen in a lookup table (contracts/pool-solana/deployments/devnet.json, card
+// sol-pool-venue-tables's), a public base58 value that starts with EAAA, as the record writes it.
+// written in two parts, so this file passes the scan as main has it before this rule lands
+const PAGE = 'EA' + 'AAWNtz9NocNuxbT6PsZE7E3jRveSuVFDFuLDULZVGk';
+const RECORD = 'contracts/pool-solana/deployments/devnet.json';
+const line = (v) => `{\n  "addresses": [\n    "${v}",\n    "11111111111111111111111111111111"\n  ]\n}\n`;
+test('the frozen devnet page address that starts with EAAA passes in the deploy record', () => {
+  assert.deepEqual(scan(RECORD, line(PAGE)), []);
+});
+// each a value an allow wider than the one exact value would pass: the same length and last character (k), one
+// character short, another first character after EAAA
+for (const [what, value] of [['another EAAA value', `EAAA${PAGE.slice(4, -1)}z`], ['the page address with a character more', `${PAGE}x`], ['another 44-character EAAA value that ends in k', `EAAA${PAGE.slice(4, -2)}Zk`], ['the page address one character short', PAGE.slice(0, -1)], ['another EAAA value with the page address\'s tail', `EAAAX${PAGE.slice(5)}`]]) {
+  test(`${what} in the deploy record is found`, () => {
+    assert.deepEqual(scan(RECORD, line(value)), ['square-access-token']);
+  });
+}
+// the allow is the Square rule's alone: the same value under a key's name is still found by generic-api-key
+test('the frozen devnet page address under a key name is still found by generic-api-key', () => {
+  assert.deepEqual(scan('apps/helper/src/x.ts', `export const api_key = "${PAGE}";\n`), ['generic-api-key']);
+});
+test('a NEAR secret key is still found in the deploy record beside the page address', () => {
+  assert.deepEqual(scan(RECORD, `${line(PAGE)}${SIG}\n`), ['near-ed25519-secret-key']);
+});
+// the allowlist is the value's alone, not the deploy record's path: the same public value in any other file passes too
+test('the frozen devnet page address passes in a file that is not a deploy record or a recorded answer', () => {
+  assert.deepEqual(scan('apps/helper/src/x.ts', `export const PAGE = "${PAGE}";\n`), []);
+});

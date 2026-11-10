@@ -6,7 +6,8 @@
 //   bad:  live SIGN_HOST on release-53, before this card: restore refused not_allowed signed in too, and no run with
 //         no tap: FAIL.
 // Planted from the good run: a run that stalls, one that never ends, a second run with no tap, an answer that is not
-// started, a restore answered while signed out.
+// started, a restore answered while signed out. Card sign-live-checks-read-a-pinned-page: live111 (below), and the
+// pinned hosts' cases planted at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -46,4 +47,39 @@ test("planted: a stalled or endless run, a second run with no tap, another answe
   fails(mut((rec) => (rec.steps.signedOut.answer = { v: 1, id: "x", ok: true, result: { stage: "started" } })), /signed out/);
   fails(mut((rec) => (rec.steps.signedIn = null)), /sign SIGN_HOST in/);
   fails(mut((rec) => rec.errors.push("no words field")), /no error/);
+});
+
+// Card sign-live-checks-read-a-pinned-page: the pinned mainnet page reads its pool on the hosts its own connect-src names
+// (PINNED_HOSTS); every other host, a pinned host its served connect-src does not name, and the page's own "restore
+// stalled" line still fail. The wait and the done rule are unchanged.
+test("planted: a stray host, a pinned host the page's connect-src does not name, a stalled line: FAIL; the pinned hosts in it: PASS", () => {
+  const pinned = (rec) => {
+    rec.hosts = { "confidential.unrealized.trade": 3, "ct-app.unrealized.trade": 2, "ct-api.unrealized.trade": 4, "solana-rpc.publicnode.com": 9, "rpc.mainnet.fastnear.com": 7 };
+    rec.connect = ["ct-api.unrealized.trade", "solana-rpc.publicnode.com", "rpc.mainnet.fastnear.com", "near.drpc.org"];
+  };
+  const ok = mut(pinned);
+  assert.equal(ok.ok, true, ok.lines.join("\n"));
+  fails(mut((rec) => (pinned(rec), (rec.hosts["evil.example"] = 1))), /every request goes to .*stray: evil\.example/);
+  fails(mut((rec) => (pinned(rec), (rec.hosts["api.mainnet-beta.solana.com"] = 1))), /stray: api\.mainnet-beta\.solana\.com/);
+  fails(mut((rec) => (pinned(rec), (rec.connect = rec.connect.filter((h) => h !== "rpc.mainnet.fastnear.com")))), /not in its connect-src: rpc\.mainnet\.fastnear\.com/);
+  fails(mut((rec) => (pinned(rec), (rec.connect = null))), /not in its connect-src: ct-api/);
+  fails(mut((rec) => rec.requests.push({ host: "evil.example", path: "/" })), /stray: evil\.example/);
+  fails(mut((rec) => (rec.console = ["warning: restore stalled: lane 3: 1 id unread (both providers refused)"])), /the page logged no stalled restore \(warning: restore stalled: lane 3/);
+  fails(mut((rec) => ((rec.requests = []), (rec.hosts = {}))), /every request goes to .*\(none\)/);
+});
+
+// live111: the live page on release 111 (the mainnet Solana pool pinned), this card's check, 10 Nov 20:03Z: every
+// request on SIGN_HOST, APP_HOST and the pinned hosts its connect-src names, and the restore still reading at WAIT_MS
+// (step 5's 168 ids at the providers' pace): FAIL on done alone, until card restore-first-sign-in-under-two-minutes.
+test("recorded live run on release 111: the hosts line passes, and it fails on done alone (still reading)", () => {
+  const r = judge(ANSWERS.live111);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0]), [
+    "BAD the sign-in on an empty store ran one restore with no tap, and it ended done",
+    "BAD its progress reads, then ends done, never stalled",
+  ]);
+  assert.ok(r.lines.some((l) => l.startsWith("OK  every request goes to SIGN_HOST, APP_HOST or a pinned pool's host the page's own connect-src names (") && l.includes("rpc.mainnet.fastnear.com")), r.lines.join("\n"));
+  const x = structuredClone(ANSWERS.live111);
+  x.hosts["api.mainnet-beta.solana.com"] = 1;
+  assert.ok(judge(x).lines.some((l) => l.startsWith("BAD every request goes to") && l.includes("stray: api.mainnet-beta.solana.com")));
 });

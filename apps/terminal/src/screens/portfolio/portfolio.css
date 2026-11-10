@@ -316,3 +316,6 @@
 .pools.wls .plr > .adr { font-family: var(--font-num); font-size: 11px; text-align: right; }
 /* the desktop header panel is a fixed 364px: Where it is scrolls when the pools and Wallets need more, so no row is cut off */
 .pfd .eqbrk { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+
+/* The Orders route (card app-orders-coming-soon): Portfolio's empty state alone, in the middle of the page. */
+.pf.pf-orders { min-height: 60vh; display: flex; align-items: center; justify-content: center; }

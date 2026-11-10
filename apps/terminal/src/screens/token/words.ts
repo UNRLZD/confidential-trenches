@@ -106,6 +106,9 @@ export const WORDS = {
   railNew: DISCOVER.colNew,
   noTokens: DISCOVER.noTokens,
   expand: ok("Expand", "R5 trenches-1440.html rail-expand aria-label"),
+  // the lower panel's My orders tab (card app-orders-coming-soon): orders are out of the plan for now
+  myOrders: ok("My orders", "R5 token.js U.lowerTabs lower-tab-orders and token-390.html m-tab-lower-orders"),
+  soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
 } as const satisfies Record<string, Word>;
 
 export type WordId = keyof typeof WORDS;
