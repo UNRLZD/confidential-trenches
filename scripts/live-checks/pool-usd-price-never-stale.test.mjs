@@ -10,7 +10,9 @@
 // Planted on the good one: a span with no price, too few writes, a short run, another pair, a write with no landing
 // time, a late hold, an unpinned bundle, a bundle in no release list: each FAIL. And on this tree's own build (review of
 // eb2dfdc5, P2-3): the bundle of release-110 under any release number, the 60 s bound, the 15 s schedule, the 1 s poll,
-// no timer rearm and no late tag each FAIL on the bundle's marks. And follow() on the 10 Nov writes, a mocked clock.
+// no timer rearm and no late tag each FAIL on the bundle's marks. And follow() on a mocked clock: the 10 Nov writes; a
+// feed that stops (its price gone from its end, judged FAIL; the late window ends at end + leadMs); a provider answering
+// an older price (never held over the newer one) (review of eb2dfdc5, L4, L5, L7).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -142,4 +144,45 @@ test("follow() on the 10 Nov writes, a mocked clock: the page's schedule is neve
   const before = await onTimeline(BEFORE);
   assert.ok(Math.max(...before.late) > WRITE_HELD_MS, String(before.late));
   assert.ok(before.late.every((ms) => ms <= BEFORE.refreshMs), String(before.late));
+});
+
+// a feed on a mocked clock: `pubAt(t)` the price's publish time a read at t (ms) returns, or late past BOUND_S as the kit
+// tells it (PoolUsdStale with the feed's time)
+async function onFeed(pubAt, forMs) {
+  let t = 1_794_282_000_000;
+  const startMs = t;
+  const read = async () => {
+    const p = pubAt(t);
+    if (t / 1000 - p > BOUND_S) throw Object.assign(new Error(`the price is older than ${BOUND_S} s: published ${p}`), { name: "PoolUsdStale", publishedS: p });
+    return { chain: "solana", price: 1n, expo: -8, publishedS: p, at: BigInt(p) };
+  };
+  const run = await follow({ read, now: () => t, sleep: async (ms) => void (t += ms), untilMs: t + forMs });
+  return { run, startMs, P: Math.floor(startMs / 1000) - 10 };
+}
+
+test("follow() on a feed that stops (review of eb2dfdc5, L4, L7): the price is gone from its end, the run judged FAIL; read each poll for leadMs past the end, then backing off to refreshMs", async () => {
+  const P = Math.floor(1_794_282_000_000 / 1000) - 10;
+  const { run } = await onFeed(() => P, 160_000);
+  const endMs = (P + BOUND_S) * 1000;
+  assert.equal(run.held.length, 1);
+  assert.equal(run.gone.length, 1, JSON.stringify(run.gone));
+  assert.ok(run.gone[0][0] >= endMs && run.gone[0][0] <= endMs + 200, `gone from ${run.gone[0][0] - endMs} ms past the end`);
+  assert.ok(run.gone[0][1] >= run.endMs - 200);
+  const v = judge({ at: "planted", rpcs: [...PAGE_PAIR], run, sign: A.good.sign }, okLedger(A.good));
+  assert.ok(bad(v).some((l) => /^BAD no price for \d+\.\d s, \d+ s into the run: Buy off and no USD/.test(l)), v.lines.join("\n"));
+  // the late window: each pollMs to its end + leadMs, then a failure's backoff, up to refreshMs
+  const after = run.reads.filter((r) => r.startMs > endMs + SCHEDULE.leadMs);
+  assert.ok(after.length > 0 && after.length <= 8, `${after.length} reads after the window`);
+  const inside = run.reads.filter((r) => r.startMs > endMs && r.startMs <= endMs + SCHEDULE.leadMs);
+  assert.ok(inside.every((r, i) => i === 0 || r.startMs - inside[i - 1].startMs === SCHEDULE.pollMs), JSON.stringify(inside.map((r) => r.startMs - endMs)));
+  assert.equal(after.at(-1).startMs - after.at(-2).startMs, SCHEDULE.refreshMs);
+});
+
+test("follow() never holds an older price over a newer one (review of eb2dfdc5, L5): a provider answering 30 s back leaves the newer price held, never gone before its own end", async () => {
+  const P = Math.floor(1_794_282_000_000 / 1000) - 10;
+  let first = true;
+  const { run } = await onFeed(() => (first ? ((first = false), P) : P - 30), 60_000);
+  assert.deepEqual(run.held.map((h) => h.publishedS), [P]);
+  assert.deepEqual(run.gone, [], "the newer price is good to P + 75 s, past the run's end (P + 70 s); the older one ended at P + 45 s");
+  assert.ok(run.reads.filter((r) => r.kind === "good").length > 1, "the older price was read as good and not held");
 });

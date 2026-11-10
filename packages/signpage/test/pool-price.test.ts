@@ -641,6 +641,34 @@ test("at the feed's write, review P3: a price ahead of the device's clock as the
   assert.equal(h.p.get("solana"), null);
 });
 
+test("at the feed's write, review P4: a PoolUsdStale with no whole publish time (none, a fraction, past 2^53) is no late feed: it backs off as a failure", async () => {
+  for (const publishedS of [undefined, T + 0.5, 2 ** 53, Number.NaN]) {
+    const read = async (): Promise<PoolUsdPrice> => {
+      throw Object.assign(new Error("the price is older than 75 s"), { name: "PoolUsdStale", publishedS });
+    };
+    const waits: number[] = [];
+    const h = holder({ read, after: (ms) => void waits.push(ms), visible: () => true });
+    for (let i = 0; i < 3; i++) {
+      h.p.refresh(["solana"]);
+      await settled();
+      h.clock.ms += waits.at(-1)!;
+    }
+    assert.deepEqual(waits, [POOL_PRICE_RETRY_MS, 2 * POOL_PRICE_RETRY_MS, 4 * POOL_PRICE_RETRY_MS], String(publishedS));
+  }
+  // control: a whole publish time is a late feed, read each POOL_PRICE_WRITE_POLL_MS
+  const late = async (): Promise<PoolUsdPrice> => {
+    throw Object.assign(new Error("the price is older than 75 s"), { name: "PoolUsdStale", publishedS: Math.floor(h.clock.ms / 1000) - 80 });
+  };
+  const waits: number[] = [];
+  const h = holder({ read: late, after: (ms) => void waits.push(ms), visible: () => true });
+  for (let i = 0; i < 3; i++) {
+    h.p.refresh(["solana"]);
+    await settled();
+    h.clock.ms += waits.at(-1)!;
+  }
+  assert.deepEqual(waits, [POOL_PRICE_WRITE_POLL_MS, POOL_PRICE_WRITE_POLL_MS, POOL_PRICE_WRITE_POLL_MS]);
+});
+
 test("at the feed's write, review P3: a read of the price already held leaves the held read as it was (its first read_ms): the state is the same, so no state event goes to the app", async () => {
   const pub = Math.floor(FX.nowMs / 1000) - 10;
   const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: pub, source: "pyth", at: 1n });

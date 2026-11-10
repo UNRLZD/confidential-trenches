@@ -288,6 +288,18 @@ test("card pool-usd-price-never-stale: a quote into the Solana pool is priced by
   assert.equal(old.sent.length, 0, "76 s: no quote");
 });
 
+// review of eb2dfdc5, D1: the price as a decimal keeps its leading zero under 1 USD and every digit; none for SOL or ETH
+// today, but the pricing is the 1Click check's input
+test("card pool-usd-price-never-stale, review D1: poolQuotePricing writes the price's decimal whole: under 1 USD with its leading zero, at whole units, and at expo 0", async () => {
+  const { poolQuotePricing } = await import("../src/pool-deposit-address.ts");
+  const at = (price: string, expo: number) => poolQuotePricing({ price, expo, published_s: 1, read_ms: 1000, rpcs: ["https://a.example", "https://b.example"] } as never, BASE_USDC)?.pricing.out[0];
+  assert.equal(at("5", -8), "0.00000005");
+  assert.equal(at("99999999", -8), "0.99999999");
+  assert.equal(at("100000000", -8), "1.00000000");
+  assert.equal(at("9301048308", -8), "93.01048308");
+  assert.equal(at("150", 0), "150");
+});
+
 // review of eb2dfdc5, P1 (the reviewer's probe, flipped): the price was taken once, before the floor read and the quote,
 // and used after them with no second look at its bound
 test("card pool-usd-price-never-stale, review P1: the quote is checked at the price as it is at the check: a price 74 s old at the ask and past its bound by the answer refuses the quote (not_allowed, nothing to the follow); a newer price then is the one checked", async () => {

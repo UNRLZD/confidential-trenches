@@ -86,6 +86,10 @@ export const MUTANTS = [
   [PRICE, 'override readonly name = "PoolUsdStale";', 'override readonly name = "Error";', STALE],
   [PRICE, "    this.publishedS = publishedS;", "    this.publishedS = 0;", STALE],
   [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', 'if (rb.status === "rejected") throw rb.reason;', STALE],
+  // review of eb2dfdc5, K1-K3: the age is told after every other check, so a late price with another fault is no late tag
+  [PRICE, "  if (conf * 10_000n > price", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (conf * 10_000n > price", STALE],
+  [PRICE, "  for (const r of reads) if (BigInt(r.slot) < posted)", "  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  for (const r of reads) if (BigInt(r.slot) < posted)", STALE],
+  [PRICE, "  if (price <= 0n) fail(`the price ${price} is not positive`);\n  const publishedS = Number(updatedAt);\n", "  const publishedS = Number(updatedAt);\n  checkAge(publishedS, feed.maxAgeS, nowAt(nowS, bound));\n  if (price <= 0n) fail(`the price ${price} is not positive`);\n", STALE],
   // review of eb2dfdc5, P3: Robinhood's late tag only once Base's read is whole and agreeing
   [PRICE, 'if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;\n  if (rp.status === "rejected") throw rp.reason;', 'if (rp.status === "rejected") throw rp.reason;\n  if (rb.status === "rejected") throw rb.reason instanceof PoolUsdStale ? new Error(`Base\'s ETH/USD: ${rb.reason.message}`) : rb.reason;', STALE],
   [PRICE, "maxAgeS: 1_500 }", "maxAgeS: 15_000 }", STALE],

@@ -89,8 +89,8 @@ export function facts(index, js) {
 }
 
 /**
- * The page's schedule for one chain, on `read` (the kit's poolUsdPrice on a pair): read, hold a good price (never an
- * older one), and read again as src/pool-price.ts does: a good read POOL_PRICE_WRITE_LEAD_MS before the held price's end,
+ * The page's schedule for one chain, on `read` (the kit's poolUsdPrice on a pair): read, hold a newer good price (never
+ * an older one, and the same publish not again), and read again as src/pool-price.ts does: a good read POOL_PRICE_WRITE_LEAD_MS before the held price's end,
  * then each pollMs; a late feed (the kit's PoolUsdStale) each pollMs for leadMs past its end; a failure 1 s on, doubling,
  * up to refreshMs. Looks at the held price every SAMPLE_MS until `untilMs` or `stop()`, and tells `onHold` each price it
  * holds. Returns what it read and held.
@@ -119,8 +119,9 @@ export async function follow({ read, now = Date.now, sleep = (ms) => new Promise
         lateEndMs = end(got);
       } else {
         kind = "good";
-        if (p === null || got.publishedS >= p.publishedS) {
-          if (p === null || got.publishedS > p.publishedS) held.push({ publishedS: got.publishedS, at: got.at, heldMs: now() });
+        // a newer price only: an older one never, and the same publish leaves the held read as it was (src/pool-price.ts)
+        if (p === null || got.publishedS > p.publishedS) {
+          held.push({ publishedS: got.publishedS, at: got.at, heldMs: now() });
           p = got;
           onHold(p);
         }

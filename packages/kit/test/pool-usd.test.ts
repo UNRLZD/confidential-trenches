@@ -509,6 +509,31 @@ test("staleness: a refusal for age alone is named PoolUsdStale with the feed's t
   assert.equal(alone?.name, "PoolUsdStale", String(alone));
 });
 
+test("staleness: the PoolUsdStale tag comes only after every other check holds: a late price that is also wide, read before its own slot, or not positive is a plain refusal (review of eb2dfdc5, K1-K3)", async (t) => {
+  enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });
+  const lateSol = (SOL_PUBLISH_S + POOL_USD_FEEDS.solana.maxAgeS + 30) * 1000;
+  const err = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e as Error);
+  const both = (f: (b: Uint8Array) => void) => [solEdit(f), solEdit(f)];
+  // control: late alone is the tag
+  assert.equal((await err(solana(undefined, lateSol)))?.name, "PoolUsdStale");
+  const wide = await err(solana(both(setU64(AT.conf, SOL_PRICE / 20n)), lateSol));
+  assert.match(String(wide), /confidence .* is wider than/);
+  assert.equal(wide?.name, "Error");
+  const early = await err(solana(both(setU64(AT.postedSlot, 1n << 60n)), lateSol));
+  assert.match(String(early), /before the update's own slot/);
+  assert.equal(early?.name, "Error");
+  const zero = await err(solana(both(setI64(AT.price, 0n)), lateSol));
+  assert.match(String(zero), /price 0 is not positive/);
+  assert.equal(zero?.name, "Error");
+  for (const chain of ["base", "robinhood"] as const) {
+    const late = (Number(words(FX[chain])[3]) + POOL_USD_FEEDS[chain].maxAgeS + 30) * 1000;
+    assert.equal((await err(evm(chain, [], late)))?.name, "PoolUsdStale", chain);
+    const z = await err(evm(chain, [wordEdit(LRD, 1, 0n), wordEdit(LRD, 1, 0n)], late));
+    assert.match(String(z), /price 0 is not positive/, chain);
+    assert.equal(z?.name, "Error", chain);
+  }
+});
+
 test("staleness: a Chainlink price older than its chain's bound is refused; at the bound it is used", async (t) => {
   // the age is told as the read returns: a clock that does not move, so the bound is met exactly
   enableTimers(t.mock.timers, { apis: ["Date"], now: NOW });

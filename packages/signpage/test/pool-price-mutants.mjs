@@ -62,6 +62,8 @@ export const MUTANTS = [
   ["if (!was || got.published_s > was.published_s) held.set(chain, got);", "if (!was || got.published_s >= was.published_s) held.set(chain, got);"],
   ["          if (due.get(chain) === mine) due.set(chain, Math.min(mine, now()));\n", ""],
   ["          if (due.get(chain) === mine) due.set(chain, Math.min(mine, now()));", "          due.set(chain, Math.min(mine, now()));"],
+  // review P4: the late tag only with a whole publish time
+  ['e.name === "PoolUsdStale" && Number.isSafeInteger((e as { publishedS?: unknown }).publishedS))', 'e.name === "PoolUsdStale")'],
   ['    if (doc.visibilityState === "visible") prices.wake();', "    prices.wake();"],
   ['    if (doc.visibilityState === "visible") prices.wake();', '    if (doc.visibilityState === "visible") {}'],
   ['if (e instanceof Error && e.name === "PoolUsdStale" && Number.isSafeInteger', 'if (e instanceof Error && e.name === "PoolUsdLate" && Number.isSafeInteger'],
