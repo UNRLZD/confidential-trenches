@@ -453,7 +453,7 @@ test("refused: an RPC on another genesis, an unknown venue or cluster, a record 
   await assert.rejects(mk({ dir: bad }), /not the program's pool account/);
   // the pool account missing on one RPC, or owned by another program on one
   await assert.rejects(plan("mainnet", "pumpswap", { fetchFn: fakeCluster({ poolOwner: (i) => (i === 1 ? null : CFG.program) }).fetchFn, wait: k.wait, dir: recordDir() }), /pool account .* missing/);
-  await assert.rejects(plan("mainnet", "pumpswap", { fetchFn: fakeCluster({ poolOwner: (i) => (i === 1 ? SYSTEM : CFG.program) }).fetchFn, wait: k.wait, dir: recordDir() }), /not the program's/);
+  await assert.rejects(plan("mainnet", "pumpswap", { fetchFn: fakeCluster({ poolOwner: (i) => (i === 1 ? SYSTEM : CFG.program) }).fetchFn, wait: k.wait, dir: recordDir() }), new RegExp(`the pool account ${MAINNET.pool} on \\S+ is not the program's \\(owner ${SYSTEM}\\)`));
   // the two providers disagree on the venue's global account
   const flip = (d) => Buffer.from(d.map((b, i) => (i === 900 ? b ^ 1 : b)));
   const k2 = fakeCluster({ kinds: { pumpswap: flip } });
@@ -1163,6 +1163,46 @@ test("a run whose own landed extend shows in the account reads only after a whil
   assert.deepEqual(got, p.list);
   assert.equal(sent(k, "extend").length, 9, "the create's extend and eight more, each once");
   assert.deepEqual(readdirSync(base), []);
+});
+
+test("the extend guard holds the next extend while both RPCs' reads at confirmed stay behind the landed sends, and after 90 s stops the run with the key kept", async () => {
+  let table = null, extendsSent = 0, prev = null;
+  const k = fakeCluster({
+    view: (i, a, cm, v) => (a === table && prev && cm === "confirmed" ? prev : v),
+    onSend: ({ kinds, tx }) => {
+      if (kinds.includes("create")) table = tx.ixs.find((x) => x.prog === ALT).acc[0];
+      // from the second extend on, both RPCs read the table at confirmed as it was before it
+      if (kinds.includes("extend") && ++extendsSent === 2) prev = k.get(table);
+      return "land";
+    },
+  });
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", recordDir());
+  await assert.rejects(runOn(k, p, base), /both RPCs read 28 addresses, the journal's landed sends put in 57: no extend is sent and the key is kept; resume again in a minute/);
+  assert.equal(sent(k, "extend").length, 2, "no third extend while the reads are behind");
+  assert.equal(sent(k, "freeze").length, 0);
+});
+
+test("the extend guard refuses a table both RPCs read at confirmed with the landed count but not the list's prefix: no further extend, nothing frozen", async () => {
+  let table = null, extendsSent = 0, swap = false;
+  const k = fakeCluster({
+    view: (i, a, cm, v) => {
+      if (!(a === table && swap && cm === "confirmed" && v)) return v;
+      const d = Buffer.from(v.data);
+      d.set(new Uint8Array(32).fill(7), 56 + 32 * 40);
+      return { ...v, data: d };
+    },
+    onSend: ({ kinds, tx }) => {
+      if (kinds.includes("create")) table = tx.ixs.find((x) => x.prog === ALT).acc[0];
+      if (kinds.includes("extend") && ++extendsSent === 2) swap = true;
+      return "land";
+    },
+  });
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", recordDir());
+  await assert.rejects(runOn(k, p, base), /holds 57 addresses where the journal's landed sends put in 57, not the list's prefix: no extend is sent/);
+  assert.equal(sent(k, "extend").length, 2);
+  assert.equal(sent(k, "freeze").length, 0);
 });
 
 test("an extend that lands between a guard read and the run's next extend, sent by no run of this folder: no further extend goes, nothing is frozen, and the recovery is said with the kept key", async () => {
