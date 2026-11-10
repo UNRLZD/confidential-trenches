@@ -115,7 +115,7 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   throw new Error(`no ${method}`);
 };
 
-type Seen = { seeds: Uint8Array[]; keys: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
+type Seen = { seeds: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
 type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void> };
 /** Every host's sign out, aborted after each test: the reads a test leaves following end with it. */
 const stops: AbortController[] = [];
@@ -123,7 +123,7 @@ afterEach(() => void stops.splice(0).forEach((c) => c.abort()));
 function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
   stops.push(new AbortController());
   const clock = { t: NOW };
-  const seen: Seen = { seeds: [], keys: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
+  const seen: Seen = { seeds: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
   const h: EvmPoolBuyHost = {
     chain: "base",
@@ -143,11 +143,6 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
       const s = SEED.slice();
       seen.seeds.push(s);
       return s;
-    },
-    derive: (seed, chain, l, j) => {
-      const w = freshWallet(seed, chain, l, j);
-      seen.keys.push(w.secretKey);
-      return w;
     },
     // the device's quote: the standard shapes the kit refuses below its own best route (the recording's), then that one
     quote: async (req) => {
@@ -450,37 +445,35 @@ test("(ruling 7) the pin, the venue list and the proof's own signals: each off i
   }
 });
 
-test("(ruling 7) keys: the seed is zeroed once W is derived and W's key once it signed, on every path; W must be the proof's W", async () => {
+test("(ruling 7) keys: the seed is zeroed once W is derived, on every path; W must be the proof's W (W's key: zeroed once it signed and in the finally, src/pool-buy-evm.ts; freshWallet is called there directly, the wallet's one-derivation gate, so no test reaches the key)", async () => {
   const ok = host(both([release()]));
   await runEvmPoolBuy(ok.h, ASK);
   assert.ok(ok.seen.seeds.length === 1 && zero(ok.seen.seeds[0]!), "the seed");
-  assert.ok(ok.seen.keys.length === 1 && zero(ok.seen.keys[0]!), "W's key");
-  // already zero when the bytes are made: the record before the take sees both zeroed
+  // already zero when the bytes are made: the record before the take sees it zeroed
   const at = host(both([release()]));
   const zeroAt: boolean[] = [];
   at.h.record = async (w, rec) => {
-    if (rec.state === "pending") zeroAt.push(zero(at.seen.seeds[0]!), zero(at.seen.keys[0]!));
+    if (rec.state === "pending") zeroAt.push(zero(at.seen.seeds[0]!));
     at.seen.records.push([w, rec]);
   };
   await runEvmPoolBuy(at.h, ASK);
-  assert.deepEqual(zeroAt, [true, true], "the seed zeroed once W is derived, W's key once it signed");
-  // a derive that throws: the seed zeroed all the same
-  const thrown = host();
-  thrown.h.derive = () => {
-    throw new Error("derive");
-  };
+  assert.deepEqual(zeroAt, [true], "the seed zeroed once W is derived");
+  // a derive that throws (a label that is no field element): the seed zeroed all the same, nothing signed or sent
+  const r0 = readyOf();
+  const thrown = host({ ready: [{ ...r0, wallet: { ...r0.wallet, l: -1n } }] });
   assert.deepEqual(await runEvmPoolBuy(thrown.h, ASK), { error: "failed" });
+  assert.equal(thrown.seen.seeds.length, 1, "the seed was read");
   assert.ok(zero(thrown.seen.seeds[0]!));
-  // W is not the proof's: refused before it signs, the seed and the key zeroed, nothing taken or sent
-  const r = readyOf();
-  const other = host({ ready: [{ ...r, wallet: { ...r.wallet, j: 1 } }] });
+  assert.deepEqual([thrown.seen.records.length, thrown.seen.sends.length], [0, 0]);
+  // W is not the proof's: refused before it signs, the seed zeroed, nothing recorded, taken or sent
+  const other = host({ ready: [{ ...r0, wallet: { ...r0.wallet, j: 1 } }] });
   assert.deepEqual(await runEvmPoolBuy(other.h, ASK), { error: "failed" });
-  assert.ok(zero(other.seen.seeds[0]!) && zero(other.seen.keys[0]!));
+  assert.ok(zero(other.seen.seeds[0]!));
   assert.deepEqual([other.seen.records.length, other.seen.takes.length, other.seen.sends.length], [0, 0, 0]);
-  // a fault after the signature (the record): both zeroed
+  // a fault after the signature (the record): the seed zeroed
   const fault = host({ record: () => Promise.reject(new Error("no store")) });
   await runEvmPoolBuy(fault.h, ASK);
-  assert.ok(zero(fault.seen.seeds[0]!) && zero(fault.seen.keys[0]!));
+  assert.ok(zero(fault.seen.seeds[0]!));
 });
 
 test("an RPC down before the signature: nothing signed, recorded, taken or sent", async () => {

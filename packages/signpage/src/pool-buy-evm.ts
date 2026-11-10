@@ -127,8 +127,6 @@ export type EvmPoolBuyHost = {
   claimed?: Set<string>;
   /** The page's follows: aborted at sign out, which ends the reads. */
   signal?: AbortSignal;
-  /** W from the seed (the wallet's freshWallet; a test's spy). */
-  derive?: typeof freshWallet;
   now?(): bigint;
   wait?(ms: number): Promise<void>;
 };
@@ -235,7 +233,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       const from = heads[0]! < heads[1]! ? heads[0]! : heads[1]!;
       // W, from the seed, right before it signs: the proof's W and the relay data's recipient
       seed = await h.seed64();
-      const w = (h.derive ?? freshWallet)(seed, "evm", r.wallet.l, r.wallet.j);
+      const w = freshWallet(seed, "evm", r.wallet.l, r.wallet.j);
       key = w.secretKey;
       seed.fill(0);
       if (lower(w.address) !== lower(r.wallet.address) || lower(relay.recipient) !== lower(w.address)) return no();
