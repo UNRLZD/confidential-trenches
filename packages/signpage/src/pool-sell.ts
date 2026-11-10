@@ -72,7 +72,7 @@ import { refKey, type Leaf, type NoteRecord, type NoteStore } from "../../wallet
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
-import { blockhashOf, pastAt, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
+import { blockhashOf, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
 // the full sell's keep is priced by the sell's rule too (rules/pool.ts checkSolanaSell, review L1 of 38faee89)
@@ -329,6 +329,20 @@ async function settleSellNote(rpcs: Rpcs, program: string, scope: bigint, sync: 
     return { end: "dropped", signature };
   }
   return { end: "pending", signature };
+}
+
+/** Each RPC's finalized slot once both are past `last`: one getEpochInfo at finalized per RPC, so the block height and
+ *  the slot are one node's, of one block; null while either is not past, or a read fails. */
+async function pastAt(rpcs: Rpcs, last: number): Promise<[number, number] | null> {
+  try {
+    const got = await Promise.all(rpcs.map(async (r) => {
+      const e = (await r("getEpochInfo", [{ commitment: "finalized" }])) as { blockHeight?: unknown; absoluteSlot?: unknown } | null;
+      return int(e?.blockHeight) > last ? int(e?.absoluteSlot) : null;
+    }));
+    return got[0] !== null && got[1] !== null ? [got[0], got[1]] : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The stage a settled sell answers: its transaction failed on both (`dead`), or the chain's word on its note. */

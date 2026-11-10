@@ -1025,3 +1025,14 @@ test("each ending's time: not_landed at the first read past the blockhash (and o
   assert.ok(always.ms <= POOL_BUY_SETTLE_MS, `${always.ms} ms`);
   assert.equal(always.ms, 119_000);
 });
+
+// Card sol-settle-failed-is-not-unspent: "past" is a finalized height above the blockhash's last valid one (151 here:
+// the higher of RPC 0's word, 100, and RPC 1's height + 151). At the last itself a block may still take the transaction.
+test("past is a finalized height above the blockhash's last valid one: at the last itself, sent; one above, not_landed", async () => {
+  const at = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 151 });
+  assert.deepEqual(await runPoolBuy(at.host, ASK), { stage: "sent", txs: [] });
+  assert.deepEqual(at.settleSlots, [null, null, null], "never asked as the verdict's settle");
+  const above = await world({ helper: "502", landsAtSettle: "never", finalHeight: () => 152 });
+  assert.deepEqual(await runPoolBuy(above.host, ASK), { stage: "not_landed", txs: [] });
+  assert.deepEqual(above.settleSlots, [[500, 500]]);
+});

@@ -345,8 +345,9 @@ export async function pastOnBoth(rpcs: readonly [SolanaRpc, SolanaRpc], last: nu
 
 /** Each RPC's finalized slot once both are past `last`: one getEpochInfo at finalized per RPC, so the block height and
  *  the slot are one node's, of one block; null while either is not past, or a read fails. A read held to these slots
- *  (minContextSlot) holds every transaction of that blockhash that ever landed. */
-export async function pastAt(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<[number, number] | null> {
+ *  (minContextSlot) holds every transaction of that blockhash that ever landed. The same read as pool-sell.ts pastAt,
+ *  which a live check (sol-rent-back-dust-burn) reads in place in the bundle beside the sell's own verdict. */
+async function pastAt(rpcs: readonly [SolanaRpc, SolanaRpc], last: number): Promise<[number, number] | null> {
   try {
     const got = await Promise.all(rpcs.map(async (r) => {
       const e = (await r("getEpochInfo", [{ commitment: "finalized" }])) as { blockHeight?: unknown; absoluteSlot?: unknown } | null;
