@@ -653,6 +653,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       fetch: over.fetch,
       settle: () => void reserveEvm(chain).catch(() => {}),
       testnet: POOL_TESTNET,
+      signal: follows.signal,
     }));
   };
   // an EVM pool's INCOMING notes finished with no ask (src/pool-deposit-evm.ts, the Solana pass's rule), one pass per

@@ -3,7 +3,7 @@
 // take, the send and the read-back on the pool's own events on two RPCs, each step's refusals and each end; and the
 // buy's calldata, byte for byte the encoding the pool's testnet run sends (contracts/pool-evm/script/testnet-run-lib.mjs
 // buyData). The two pool RPCs are fakes of a chain whose clock is the run's own (each wait moves it).
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -112,7 +112,11 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
 
 type Seen = { seeds: Uint8Array[]; keys: Uint8Array[]; takes: string[]; sends: { pool: string; data: Uint8Array; epoch: bigint }[]; settles: number; records: [string, EvmHolding][]; owed: EvmOwedBack[]; sent: number; late: EvmPoolBuyAnswer[]; quotes: EvmPoolBuyQuote["route"][]; calls: Call[]; order: string[]; clock: { t: bigint } };
 type HostOpts = { ready?: ReadyProof<EvmPoolRequest>[]; a?: Side; b?: Side; send?: () => Promise<string>; quote?: () => Promise<EvmPoolBuyQuote>; claimed?: Set<string>; record?: () => Promise<void> };
+/** Every host's sign out, aborted after each test: the reads a test leaves following end with it. */
+const stops: AbortController[] = [];
+afterEach(() => void stops.splice(0).forEach((c) => c.abort()));
 function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
+  stops.push(new AbortController());
   const clock = { t: NOW };
   const seen: Seen = { seeds: [], keys: [], takes: [], sends: [], settles: 0, records: [], owed: [], sent: 0, late: [], quotes: [], calls: [], order: [], clock };
   const ready = o.ready ?? [readyOf()];
@@ -168,7 +172,12 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
     late: (x) => void seen.late.push(x),
     claimed: o.claimed ?? new Set(),
     now: () => clock.t,
-    wait: async (ms) => void (clock.t += BigInt(ms)),
+    // the chain's clock moves by each wait, and the event loop turns, so a follow that never ends starves no test
+    wait: async (ms) => {
+      await new Promise((r) => setImmediate(r));
+      clock.t += BigInt(ms);
+    },
+    signal: stops.at(-1)!.signal,
   };
   return { h, seen };
 }
@@ -254,11 +263,17 @@ test("(ruling 2) never not_landed before the deadline on both RPCs: a send with 
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
   assert.deepEqual(await lateOf(seen), { stage: "not_landed", txs: [] });
   assert.ok(seen.clock.t > DEADLINE);
-  // one RPC's block time stuck before the deadline: never not_landed, however long
-  const stuck = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 100_000n }))], b: { time: () => NOW } });
+  // one RPC's block time stuck before the deadline: never not_landed while it is, however long; the reads go on past
+  // the follow window, slower, and the end goes out once that RPC moves (an hour past the deadline here)
+  let moved = false;
+  const stuck = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 100_000n }))], b: { time: () => (moved ? stuck.seen.clock.t : NOW) } });
   assert.deepEqual(await runEvmPoolBuy(stuck.h, ASK), { stage: "sent", txs: [] });
-  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
-  assert.ok(stuck.seen.late.every((x) => (x as { stage: string }).stage !== "not_landed"));
+  while (stuck.seen.clock.t < NOW + 100_000n + 3_600_000n) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(stuck.seen.late, [], "no end while one RPC is behind the deadline");
+  const rounds = stuck.seen.calls.filter((c) => c.method === "eth_getLogs").length;
+  assert.ok(rounds < 2 * (EVM_BUY_SETTLE_MS / 2_000 + (100_000 + 300_000) / 2_000 + 3_600_000 / 30_000) + 20, `slow past the follow window: ${rounds} reads`);
+  moved = true;
+  assert.deepEqual(await lateOf(stuck.seen), { stage: "not_landed", txs: [] });
 });
 
 test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _release: FeeOverCap only): a release charging less is still this buy's, filled or owed back by its own fee", async () => {
@@ -268,6 +283,19 @@ test("the fee is the sender's pick up to the proof's cap (PrivacyPool.sol _relea
   const free = host(both([release({ kind: "withdrawn", fee: 0n })]));
   assert.deepEqual(await runEvmPoolBuy(free.h, ASK), { stage: "refused", txs: [{ chain: "base", hash: TX }] });
   assert.equal(free.seen.owed[0]!.wei, CHUNK.toString(), "the chunk less the fee charged");
+});
+
+test("a sign out ends the reads past the tap: no late end, no more reads", async () => {
+  // the two RPCs never agree: no end, so only the sign out stops the reads
+  const { h, seen } = host({ a: { logs: [release()] }, b: { logs: [release({ block: 0x111n })] } });
+  assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  stops.at(-1)!.abort();
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  const n = seen.calls.length;
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(seen.calls.length, n, "no read after the sign out");
+  assert.deepEqual(seen.late, []);
 });
 
 test("(ruling 4) a Withdrawn for the nullifier: the buy did not fill, W's ETH (the chunk less the fee) is written owed back, and the answer names the release", async () => {

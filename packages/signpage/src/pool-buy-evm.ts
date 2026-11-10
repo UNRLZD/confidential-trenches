@@ -40,8 +40,10 @@
 //       reverts a release once block.timestamp is past the relay data's deadline). Never on a revert: the pool has no
 //       sender check, so the public calldata can land until the deadline.
 //   The tap's run reads for EVM_BUY_SETTLE_MS from the send and then answers its last true stage ("sent"); the reads go
-//   on, with no lock held, until an end (at most EVM_BUY_FOLLOW_MS past the deadline), which goes to the app as the
-//   kind's progress (`late`). The proof's deadline is at most EVM_LIFE_MS (210 s) from its epoch's start and at least
+//   on, with no lock held, until an end, which goes to the app as the kind's progress (`late`), so its button never
+//   stays on "sent": every EVM_BUY_WAIT_MS until EVM_BUY_FOLLOW_MS past the deadline (an end comes by then unless a
+//   pool RPC is down or stuck), then every EVM_BUY_SLOW_WAIT_MS while the page is signed in (`signal`, aborted at sign
+//   out, ends the reads; the settle pass ends the note either way). The proof's deadline is at most EVM_LIFE_MS (210 s) from its epoch's start and at least
 //   the send margin and take slack (75 s) after the take.
 // - Settled: every run that took its note starts the chain's settle pass as it ends, and again when its reads end (the
 //   one path that ends a RESERVED note: SPENT with its change once the release is final, UNSPENT once both RPCs' final
@@ -123,6 +125,8 @@ export type EvmPoolBuyHost = {
   late?(a: { stage: TradeStage; txs: TxRef[] }): void;
   /** The notes a run on this page has picked and not finished. */
   claimed?: Set<string>;
+  /** The page's follows: aborted at sign out, which ends the reads. */
+  signal?: AbortSignal;
   /** W from the seed (the wallet's freshWallet; a test's spy). */
   derive?: typeof freshWallet;
   now?(): bigint;
@@ -133,8 +137,9 @@ export type EvmPoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "n
 
 /** The tap's read-back from the send, on the wall clock (the Solana buy's POOL_BUY_SETTLE_MS). */
 export const EVM_BUY_SETTLE_MS = 120_000;
-/** How long past the proof's deadline the reads go on for an end (two RPCs whose newest block lags the deadline). */
+/** How long past the proof's deadline the reads go on at EVM_BUY_WAIT_MS; then at EVM_BUY_SLOW_WAIT_MS until an end. */
 export const EVM_BUY_FOLLOW_MS = 300_000;
+export const EVM_BUY_SLOW_WAIT_MS = 30_000;
 /** Between two rounds of reads: each is four requests, two on each pool RPC. */
 export const EVM_BUY_WAIT_MS = 2_000;
 /** The standard v4 (fee, tick spacing) pairs and v3 fee tiers the first quote asks in turn (the kit's own standard set,
@@ -268,9 +273,11 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     if ("answer" in out) return out.answer;
     // the read-back, outside the lock: the tap's part, then on past it with no answer owed
     const sentAt = clock();
-    const tap = await watch(h, out.watch, () => clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS), wait);
+    const live = (): boolean => h.signal?.aborted !== true;
+    const tap = await watch(h, out.watch, () => live() && clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS), wait);
     if (tap !== null) return tap;
-    void watch(h, out.watch, () => clock() <= out.watch.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS), wait)
+    const slowAt = out.watch.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
+    void watch(h, out.watch, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms))
       .then((a) => {
         settle();
         if (a !== null) h.late?.(a);
@@ -332,6 +339,7 @@ export type EvmBuyPage = {
   settle(): void;
   testnet: boolean;
   fetch?: typeof fetch;
+  signal?: AbortSignal;
 };
 
 /** The page's host for one EVM buy run: the kit's quote, build and venue list, the helper's send, the pool's pair for
@@ -366,6 +374,7 @@ export function evmBuyHost(chain: Chain, pin: EvmPoolPin, rpcs: readonly [EvmRpc
       await store.update("meta", EVM_OWED_BACK_KEY, (v) => ({ ...(typeof v === "object" && v !== null ? v : {}), [o.address]: o }));
     },
     claimed,
+    signal: page.signal,
   };
 }
 
