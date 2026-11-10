@@ -255,3 +255,35 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
 });
+
+test("card pool-usd-price-never-stale: a quote into the Solana pool is priced by the page's own price within the kit's one bound: asked at 74 s, none at 76 s", async () => {
+  const { poolPrices } = await import("../src/pool-price.ts");
+  const { poolQuotePricing } = await import("../src/pool-deposit-address.ts");
+  const { POOL_USD_FEEDS } = await import("../../kit/src/price/pool-usd.ts");
+  assert.equal(POOL_USD_FEEDS.solana.maxAgeS, 75);
+  const pubS = 1_793_778_006;
+  const clock = { ms: pubS * 1000 + 2_000 };
+  const prices = poolPrices({
+    rpcs: (c) => (c === "solana" ? ([Object.assign(async () => null, { url: "https://a.example" }), Object.assign(async () => null, { url: "https://b.example" })] as never) : null),
+    now: () => clock.ms,
+    read: async () => ({ chain: "solana", asset: "SOL", decimals: 9, price: 9_301_048_308n, expo: -8, publishedS: pubS, source: "pyth", at: 1n }),
+    after: () => {},
+  });
+  prices.refresh(["solana"]);
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+  const q = { chain: "solana", origin_asset: BASE_USDC, amount: "25" };
+  const at = (s: number) => {
+    clock.ms = (pubS + s) * 1000;
+    const w = world();
+    w.deps.priced = (_chain, origin) => poolQuotePricing(prices.get("solana"), origin);
+    return w;
+  };
+  assert.deepEqual(poolQuotePricing(prices.get("solana"), BASE_USDC), { decimalsIn: 6, pricing: { in: ["1", "1"], out: ["93.01048308", "93.01048308"] } });
+  assert.equal(poolQuotePricing(prices.get("solana"), "nep141:wrap.near"), null, "only USDC in");
+  const young = at(74);
+  await ask(young, q);
+  assert.equal(young.sent.length, 1, "74 s: a quote is asked");
+  const old = at(76);
+  assert.deepEqual(await ask(old, q), { error: "not_allowed" });
+  assert.equal(old.sent.length, 0, "76 s: no quote");
+});

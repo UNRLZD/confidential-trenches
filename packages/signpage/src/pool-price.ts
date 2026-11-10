@@ -14,8 +14,20 @@
 // - A failed read (card signpage-price-read-retry) is due again POOL_PRICE_RETRY_MS after it ends, doubled per failure
 //   in a row up to POOL_PRICE_REFRESH_MS, not POOL_PRICE_REFRESH_MS after its try: one slow provider leaves Bal without
 //   USD and Buy off for about a second, not 15 s (sign live runs 41920575578 and 41924297260, 4 Nov 22:00Z and 22:25Z).
-//   A good read ends the run of failures. A read whose price is past its bound as it ends is a failure. A provider that
-//   answered 429 with Retry-After is not asked again sooner than it said, up to POOL_PRICE_RETRY_AFTER_MAX_MS.
+//   A good read ends the run of failures. A provider that answered 429 with Retry-After is not asked again sooner than
+//   it said, up to POOL_PRICE_RETRY_AFTER_MAX_MS.
+// - At the feed's write (card pool-usd-price-never-stale): Pyth's sponsored SOL/USD account is written when its price is
+//   50 to 57 s old and lands 1 to 3 s later (720 reads, 10 Nov 03:56-04:26Z), and its bound is 75 s (the kit's
+//   POOL_USD_FEEDS: heartbeat 60 s + 15 s). Read only every 15 s, the held price ran out before the next read saw the
+//   write: no USD and Buy off 11% of the time, up to 13 s at once. So from POOL_PRICE_WRITE_LEAD_MS before a held price's
+//   end (the kit's poolUsdGoodUntilS: publish + 50 s on Solana), a good read whose price is no newer is read again
+//   POOL_PRICE_WRITE_POLL_MS after it ends, until a newer price is in. A feed later than its bound (both providers agreeing
+//   on a price refused only for its age, the kit's PoolUsdStale, or one past its bound as the read ends) is read again
+//   POOL_PRICE_WRITE_POLL_MS after it too, for POOL_PRICE_WRITE_LEAD_MS past that end, so the box is back within a
+//   second or two of a late write; after that, a failure as any other. A provider that fails never takes this path: its
+//   read backs off as above. Only while the page is shown (`visible`): a hidden page reads every POOL_PRICE_REFRESH_MS
+//   as before, and is read at once when shown again (`wake`). Reads start only from a state read, so a page with no app
+//   that asks its state reads nothing (src/api.ts).
 // - The app hears each new price: a read that ends calls the watchers (the API posts a state event when the state read
 //   then differs), and once its next read is due (POOL_PRICE_REFRESH_MS after it, or the failure's wait) calls them
 //   again, so a state read starts the next read while a pool shows. Signed out, or with no pool, no state names a chain
@@ -36,6 +48,12 @@ export const POOL_PRICE_REFRESH_MS = 15_000;
 export const POOL_PRICE_RETRY_MS = 1_000;
 /** A provider's Retry-After is waited up to this: one provider's header never leaves a chain unpriced for longer. */
 export const POOL_PRICE_RETRY_AFTER_MAX_MS = 60_000;
+/** From this long before a held price's end (and as long after it, for a late feed) a price no newer is read again each
+ *  POOL_PRICE_WRITE_POLL_MS: on Solana its bound of 75 s less this is publish + 50 s, the earliest write read (50 s). */
+export const POOL_PRICE_WRITE_LEAD_MS = 25_000;
+/** How soon a read no newer than the held price is read again inside POOL_PRICE_WRITE_LEAD_MS of its end: a write is
+ *  held within this and one read of it landing. */
+export const POOL_PRICE_WRITE_POLL_MS = 1_000;
 
 export type PoolPriceDeps = {
   /** The chain's two RPCs of two providers, as the pool kinds read on; null: none, so no price. */
@@ -46,6 +64,8 @@ export type PoolPriceDeps = {
   read?(args: PoolUsdArgs): Promise<PoolUsdPrice>;
   /** Tests only: the timer the next tick waits on (setTimeout otherwise). */
   after?(ms: number, fn: () => void): void;
+  /** Whether the page is shown (document.visibilityState otherwise; true with no document). */
+  visible?(): boolean;
 };
 
 export type PoolPrices = {
@@ -54,6 +74,8 @@ export type PoolPrices = {
   /** Starts a read for each chain due one (see the header); never throws, never waits. */
   refresh(chains: readonly Chain[]): void;
   watch(fn: () => void): void;
+  /** The page is shown again: every chain is due a read now, and the watchers hear it so a state read starts it. */
+  wake(): void;
 };
 
 const priced = (c: Chain): c is PoolUsdChain => Object.hasOwn(POOL_USD_FEEDS, c);
@@ -62,6 +84,7 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
   const now = deps.now ?? Date.now;
   const read = deps.read ?? poolUsdPrice;
   const after = deps.after ?? ((ms: number, fn: () => void) => void setTimeout(fn, ms));
+  const visible = deps.visible ?? (() => typeof document === "undefined" || document.visibilityState !== "hidden");
   const held = new Map<PoolUsdChain, PoolStatePrice>();
   /** When the chain's next read is due, unix ms on `now`. */
   const due = new Map<PoolUsdChain, number>();
@@ -80,6 +103,8 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     const p = held.get(chain);
     return p && usable(chain, p) ? p : null;
   };
+  /** When a price stops being used, unix ms: the kit's one bound. */
+  const endMs = (chain: PoolUsdChain, publishedS: number, readMs: number): number => poolUsdGoodUntilS(chain, publishedS, readMs / 1000) * 1000;
   const start = (chain: PoolUsdChain): void => {
     const rpcs = deps.rpcs(chain);
     if (rpcs === null) return;
@@ -88,33 +113,53 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     reading.add(chain);
     /** The provider's Retry-After of a refused read, ms. */
     let afterMs = 0;
+    /** A price both providers agreed on, refused only for its age (the feed is late): its end, unix ms. */
+    let lateEndMs: number | null = null;
     void Promise.resolve()
       .then(() => read({ chain, rpcs, nowMs: now(), ...(base ? { baseRpcs: base } : {}) }))
       .then((p) => {
         if (p.chain !== chain || p.price <= 0n) return false;
         const got = { price: p.price.toString(), expo: p.expo, published_s: p.publishedS, read_ms: now() };
-        // a price past its bound as the read ends is a failed read: the last good one stands, and the next read is soon
-        if (!usable(chain, got)) return false;
-        held.set(chain, got);
+        // a price past its bound as the read ends: the feed is late, the last good one stands
+        if (!usable(chain, got)) {
+          lateEndMs = endMs(chain, got.published_s, got.read_ms);
+          return false;
+        }
+        // an older price than the one held never replaces it
+        const was = held.get(chain);
+        if (!was || got.published_s >= was.published_s) held.set(chain, got);
         return true;
       })
       // refused (stale, disagreeing, unsure, unreachable): the last good read stands until its bound drops it
       .catch((e: unknown) => {
+        // the kit's refusal for age alone, after both providers agreed on a whole, sure price (pool-usd.ts PoolUsdStale)
+        if (e instanceof Error && e.name === "PoolUsdStale" && Number.isSafeInteger((e as { publishedS?: unknown }).publishedS))
+          lateEndMs = endMs(chain, (e as Error & { publishedS: number }).publishedS, now());
         if (e instanceof SolanaRpcTransportError && e.afterMs !== null) afterMs = Math.min(e.afterMs, POOL_PRICE_RETRY_AFTER_MAX_MS);
         return false;
       })
       .then((ok) => {
         reading.delete(chain);
-        let waitMs = POOL_PRICE_REFRESH_MS;
-        if (ok) failed.delete(chain);
-        else {
+        const t = now();
+        let waitMs: number;
+        if (ok) {
+          failed.delete(chain);
+          // the next read at the feed's write: POOL_PRICE_WRITE_LEAD_MS before the held price's end, then each
+          // POOL_PRICE_WRITE_POLL_MS until a newer price is in; POOL_PRICE_REFRESH_MS at most, and always while hidden
+          const p = held.get(chain)!;
+          const toWrite = endMs(chain, p.published_s, p.read_ms) - POOL_PRICE_WRITE_LEAD_MS - t;
+          waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;
+        } else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {
+          // a late feed, not a failing provider: read again soon, no failure counted
+          waitMs = POOL_PRICE_WRITE_POLL_MS;
+        } else {
           const n = (failed.get(chain) ?? 0) + 1;
           failed.set(chain, n);
           waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);
           // a provider that said when to ask again is not asked sooner
           waitMs = Math.max(waitMs, afterMs);
-          due.set(chain, now() + waitMs);
         }
+        due.set(chain, t + waitMs);
         tell();
         after(waitMs, tell);
       });
@@ -132,6 +177,10 @@ export function poolPrices(deps: PoolPriceDeps): PoolPrices {
     },
     watch(fn) {
       watchers.add(fn);
+    },
+    wake() {
+      due.clear();
+      tell();
     },
   };
 }

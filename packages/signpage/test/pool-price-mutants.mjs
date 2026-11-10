@@ -15,17 +15,18 @@ const TEST = fileURLToPath(new URL("./pool-price.test.ts", import.meta.url));
 const MUTANT_SRC = fileURLToPath(new URL(`../src/.pool-price-mutant-${process.pid}.ts`, import.meta.url));
 const MUTANT_TEST = fileURLToPath(new URL(`./.pool-price-mutant-${process.pid}.test.ts`, import.meta.url));
 const IMPORT = 'from "../src/pool-price.ts";';
-const NAME = "retry";
+// the retry tests, and the schedule at the feed's write (card pool-usd-price-never-stale)
+const NAME = "(retry|at the feed's write)";
 
 // [text, replacement]
 export const MUTANTS = [
   ["export const POOL_PRICE_RETRY_MS = 1_000;", "export const POOL_PRICE_RETRY_MS = 15_000;"],
   ["if (p.chain !== chain || p.price <= 0n) return false;", "if (p.chain !== chain || p.price <= 0n) return true;"],
   ["POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return false;", "POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return true;"],
-  ["if (ok) failed.delete(chain);", "if (ok) {}"],
+  ["          failed.delete(chain);\n", ""],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS;"],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS * 2 ** (n - 1);"],
-  ["due.set(chain, now() + waitMs);", ""],
+  ["due.set(chain, t + waitMs);", ""],
   ["after(waitMs, tell);", "after(POOL_PRICE_REFRESH_MS, tell);"],
   ["if (at !== undefined && now() < at) continue;", "if (false) continue;"],
   // the cap of the backoff, the due time of a good read, a failed read's end told, the last good price kept on a failure,
@@ -34,11 +35,30 @@ export const MUTANTS = [
   ["due.set(chain, now() + POOL_PRICE_REFRESH_MS);", "due.set(chain, now() + POOL_PRICE_RETRY_MS);"],
   ["        tell();\n        after(waitMs, tell);", "        if (ok) tell();\n        after(waitMs, tell);"],
   ["POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return false;", "POOL_PRICE_RETRY_AFTER_MAX_MS);\n        held.delete(chain);\n        return false;"],
-  ["due.set(chain, now() + waitMs);", "due.set(chain, (due.get(chain) ?? now()) - POOL_PRICE_REFRESH_MS + waitMs);"],
-  // a price past its bound as the read ends is a failure, and a provider's Retry-After is waited, up to its cap
-  ["if (!usable(chain, got)) return false;", ""],
+  ["due.set(chain, t + waitMs);", "due.set(chain, (due.get(chain) ?? t) - POOL_PRICE_REFRESH_MS + waitMs);"],
+  // a price past its bound as the read ends is never held, and a provider's Retry-After is waited, up to its cap
+  ["if (!usable(chain, got)) {", "if (false) {"],
   ["waitMs = Math.max(waitMs, afterMs);", ""],
   ["Math.min(e.afterMs, POOL_PRICE_RETRY_AFTER_MAX_MS)", "e.afterMs"],
+  // card pool-usd-price-never-stale: the read at the feed's write, each second until a newer price; a late feed read
+  // each second for the window past its end, then a failure; never while hidden; shown again, read at once; an older
+  // price never held over a newer one
+  ["export const POOL_PRICE_WRITE_LEAD_MS = 25_000;", "export const POOL_PRICE_WRITE_LEAD_MS = 10_000;"],
+  ["export const POOL_PRICE_WRITE_POLL_MS = 1_000;", "export const POOL_PRICE_WRITE_POLL_MS = 3_000;"],
+  ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = POOL_PRICE_REFRESH_MS;"],
+  ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS);"],
+  ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = visible() ? Math.min(toWrite, POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;"],
+  ["p.read_ms) - POOL_PRICE_WRITE_LEAD_MS - t;", "p.read_ms) - t;"],
+  ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (false) {"],
+  ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (lateEndMs !== null && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {"],
+  ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (lateEndMs !== null && visible()) {"],
+  ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (visible() && t <= (lateEndMs ?? Infinity) + POOL_PRICE_WRITE_LEAD_MS) {"],
+  ["          lateEndMs = endMs(chain, got.published_s, got.read_ms);\n", ""],
+  ['if (e instanceof Error && e.name === "PoolUsdStale" && Number.isSafeInteger', 'if (e instanceof Error && e.name === "PoolUsdLate" && Number.isSafeInteger'],
+  ["if (!was || got.published_s >= was.published_s) held.set(chain, got);", "held.set(chain, got);"],
+  ['const visible = deps.visible ?? (() => typeof document === "undefined" || document.visibilityState !== "hidden");', "const visible = deps.visible ?? (() => true);"],
+  ["      due.clear();\n      tell();", "      tell();"],
+  ["      due.clear();\n      tell();", "      due.clear();"],
 ];
 
 // a child test run must not inherit this process's own node --test context

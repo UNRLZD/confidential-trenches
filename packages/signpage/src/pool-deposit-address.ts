@@ -25,7 +25,7 @@ import { base58, base64, hex } from "@scure/base";
 import { backupFirst, type DepositRecord } from "@blindfill/wallet/store";
 import { ONECLICK_USDC_ASSETS, type OneClickPricing } from "../../kit/src/checks/oneclick.ts";
 import { HELPER_BIND_DEPOSIT_CAP } from "../../kit/src/helper/v1.ts";
-import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type SignpageResults } from "../../kit/src/signpage/messages.ts";
+import { POOL_ASSET_DECIMALS, type PoolAsset, type PoolChain, type PoolStatePrice, type SignpageResults } from "../../kit/src/signpage/messages.ts";
 import { POOL_DEPOSIT_NETWORK, askDepositQuote, poolDepositQuoteRequest } from "../../wallet/src/deposit/quote.ts";
 import type { Deferred, HostAnswer, HostRefusal } from "./api.ts";
 import type { DepositPublic } from "./deposit-wire.ts";
@@ -45,6 +45,16 @@ const USDC_DECIMALS = 6;
 export interface PoolQuotePricing {
   decimalsIn: number;
   pricing: Exclude<OneClickPricing, "usdc">;
+}
+
+/** A quote's price reads from the page's own price for X's pool (src/pool-price.ts `get`, null once past the kit's
+ *  bound): USDC in at 1 USD on both reads, X's coin at that price on both; any other origin, or no price, none (no
+ *  quote is asked). */
+export function poolQuotePricing(p: PoolStatePrice | null, origin: string): PoolQuotePricing | null {
+  if (!ONECLICK_USDC_ASSETS.includes(origin) || p === null) return null;
+  const d = -p.expo, digits = p.price.padStart(d + 1, "0");
+  const usd = d === 0 ? digits : `${digits.slice(0, digits.length - d)}.${digits.slice(digits.length - d)}`;
+  return { decimalsIn: USDC_DECIMALS, pricing: { in: ["1", "1"], out: [usd, usd] } };
 }
 
 export interface PoolAddressDeps {
