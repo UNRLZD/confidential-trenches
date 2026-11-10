@@ -319,12 +319,12 @@ test("card helper-token-page-fast: an RPC that never answers the launch read: th
     },
   };
   const t = createSolanaToken(fakeProxy(), rpc, { now: () => NOW });
-  const started = Date.now();
+  // within the box: the page's own LAUNCH_WAIT_MS timer fires before a timer due 700 ms after it, set before it (timers
+  // fire in the order they are due, however busy the machine is)
   const a = await within(LAUNCH_WAIT_MS + 700, t.page(CURVE));
   assert.notEqual(a, "late", "the page waited on the launch read");
   if (a === "late") return;
   assert.equal(a.status, 200);
-  assert.ok(Date.now() - started < 1_000, `${Date.now() - started} ms`);
   const p = JSON.parse(a.body);
   assert.equal(p.row.launchpad, null, "not read yet: null, never Jupiter's tag alone");
   assert.equal(p.decimals, 6);
