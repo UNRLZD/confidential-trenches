@@ -41,9 +41,9 @@
 //   naming W; the testnet choice above). With no pin on the page's network, every pool kind is refused not_allowed and
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
-import { base64 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -60,7 +60,7 @@ import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
-import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
+import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
@@ -812,7 +812,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   };
   // the Ws of the buys this page ran to filled or sent, this sign-in: the finder reads at finalized, so one it does not
   // list yet is looked for again (src/positions.ts awaited)
-  const awaited = new Set<string>();
+  const awaited = new Map<string, string>();
   // state.positions (src/positions.ts, card signpage-state-holdings): this device's buys (W's buy mint, written before
   // every send, and its buy record when the run told the amount), each from the finder's one read of its W (the
   // helper's keyed route on mainnet; no read here names a W to a public provider, nor a mint no buy of W's named); one
@@ -834,12 +834,22 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
         awaited: () => awaited,
-        sold: async () => new Set(Object.entries(await meta(POSITIONS_SOLD_KEY)).flatMap(([a, ms]) => (Array.isArray(ms) ? ms.filter((m): m is string => typeof m === "string").map((m) => `${a} ${m}`) : []))),
+        // each by the sell that marked it (its signatures), so a later sell of it is looked for afresh
+        sold: async () => {
+          const by = await meta(POSITIONS_SOLD_TX_KEY);
+          return new Map(Object.entries(await meta(POSITIONS_SOLD_KEY)).flatMap(([a, ms]) => (Array.isArray(ms) ? ms.filter((m): m is string => typeof m === "string").map((m) => [`${a} ${m}`, String(by[`${a} ${m}`] ?? "")] as const) : [])));
+        },
         kept: async () => st.get("meta", POSITIONS_KEPT_KEY),
         keep: async (k) => void (await st.put("meta", POSITIONS_KEPT_KEY, k)),
         // one read on the finder's own route (pageSolanaRpcs: the helper's keyed route is the second on mainnet, the
-        // testnet finder's devnet RPC the first), never a public provider: a display's, never a sell's
-        decimals: async (mint) => tokenDecimalsShown("solana", await (POOL_TESTNET ? r[0] : r[1])("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])),
+        // testnet finder's devnet RPC the first), never a public provider: a display's, never a sell's. On mainnet it
+        // carries the pass's stop in its every fetch, in the helper route's own queue: nothing of a signed-out account's
+        // is sent after the sign out, queued or tried again
+        decimals: async (mint) => {
+          const rpc = POOL_TESTNET ? r[0] : over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal));
+          run.signal.throwIfAborted();
+          return tokenDecimalsShown("solana", await rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }]));
+        },
       }, memo);
     },
     {
@@ -894,22 +904,63 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell. The store's own
   // rent-back records (pool-sell.ts owedRentBacks) underneath, as the host has always named them (scripts/live-checks/
   // sol-w-sweep.mjs reads the host's owed: and bought: from its store)
+  const asRecord = (v: unknown): Record<string, unknown> => ({ ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) });
+  const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  // a signed Solana tx's signatures (base58): its count (one byte, under 128), then 64 bytes each
+  const signaturesOf = (tx: string): string[] => {
+    try {
+      const b = base64.decode(tx);
+      const n = b[0] ?? 0;
+      if (n === 0 || n > 127 || b.length < 1 + 64 * n) return [];
+      return Array.from({ length: n }, (_, i) => base58.encode(b.subarray(1 + 64 * i, 65 + 64 * i)));
+    } catch {
+      return [];
+    }
+  };
+  // a sell that ended not landed (the chain's answer, never before it): its full-sell marks taken back, its signature
+  // kept so the same sell never marks again; the positions read again after
+  const unsold = async (signature: string): Promise<void> => {
+    const st = await page.store();
+    await st.update("meta", POSITIONS_UNLANDED_KEY, (v) => [...new Set([...asList(v), signature])]);
+    const by = asRecord(await st.get("meta", POSITIONS_SOLD_TX_KEY));
+    const gone = Object.entries(by).filter(([, sigs]) => typeof sigs === "string" && sigs.split(" ").includes(signature)).map(([k]) => k);
+    if (gone.length === 0) return;
+    await st.update("meta", POSITIONS_SOLD_KEY, (v) => {
+      const all = asRecord(v);
+      for (const k of gone) {
+        const [a, m] = k.split(" ") as [string, string];
+        all[a] = asList(all[a]).filter((x) => x !== m);
+      }
+      return all;
+    });
+    await st.update("meta", POSITIONS_SOLD_TX_KEY, (v) => {
+      const all = asRecord(v);
+      for (const k of gone) delete all[k];
+      return all;
+    });
+  };
   const owedNoted = (store: TestnetPage["store"]): ReturnType<typeof owedRentBacks> => {
     const owed = owedRentBacks(store);
     return {
       ...owed,
       put: async (rec) => {
         await owed.put(rec);
-        const mints = Object.keys(rec.sell ?? {});
-        if (mints.length === 0) return;
-        await (await page.store())
-          .update("meta", POSITIONS_SOLD_KEY, (v) => {
-            const all = { ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) };
-            const had = Array.isArray(all[rec.address]) ? (all[rec.address] as unknown[]).filter((m): m is string => typeof m === "string") : [];
-            all[rec.address] = [...new Set([...had, ...mints])];
+        if (Object.keys(rec.sell ?? {}).length === 0) return;
+        try {
+          const st = await page.store();
+          // a sell that ended not landed marks nothing again (a rent back's later write carries its record)
+          const unlanded = new Set(asList(await st.get("meta", POSITIONS_UNLANDED_KEY)));
+          const sells = Object.entries(rec.sell ?? {}).map(([m, by]) => [m, signaturesOf(by.tx)] as const).filter(([, sigs]) => !sigs.some((g) => unlanded.has(g)));
+          if (sells.length === 0) return;
+          await st.update("meta", POSITIONS_SOLD_TX_KEY, (v) => ({ ...asRecord(v), ...Object.fromEntries(sells.map(([m, sigs]) => [`${rec.address} ${m}`, sigs.join(" ")])) }));
+          await st.update("meta", POSITIONS_SOLD_KEY, (v) => {
+            const all = asRecord(v);
+            all[rec.address] = [...new Set([...asList(all[rec.address]), ...sells.map(([m]) => m)])];
             return all;
-          })
-          .catch(() => {});
+          });
+        } catch {
+          /* a note that fails changes nothing in the sell */
+        }
       },
     };
   };
@@ -932,7 +983,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (facts.wallet !== undefined) {
         facts.decimals = boughtDecimals.get(facts.wallet);
         boughtDecimals.delete(facts.wallet);
-        if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.add(facts.wallet);
+        if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
       }
       void (async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))()
         .catch(() => {})
@@ -948,7 +999,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // the run ended "sent" (its spend not read as final): no records, its W looked for, its decimals let go
       else if (stage === "sent" && !done && facts.wallet !== undefined) {
         boughtDecimals.delete(facts.wallet);
-        awaited.add(facts.wallet);
+        awaited.set(facts.wallet, ctx.id);
         positions.refresh();
       }
     };
@@ -967,15 +1018,25 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // progress the run posts at its end; a refusal ran nothing, read again all the same. A sell a closed page left is
   // read again when the settle on load writes its end (settleSells).
   const recordedSell = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof sell> => {
+    // not landed: its marks taken back first (the signature from its ops record, written before the send)
+    const ended = (stage: string | undefined): void => {
+      if (stage !== "not_landed") return positions.refresh();
+      void (async () => {
+        const hash = ((await (await page.store()).get("ops", ctx.id)) as { txs?: { hash?: unknown }[] } | undefined)?.txs?.[0]?.hash;
+        if (typeof hash === "string") await unsold(hash);
+      })()
+        .catch(() => {})
+        .finally(() => positions.refresh());
+    };
     const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
       ctx.progress(stage);
-      if (TRADE_ENDS.has(stage)) positions.refresh();
+      if (TRADE_ENDS.has(stage)) ended(stage);
     };
     const run = sell(ask, { ...ctx, progress });
     if ("after" in run)
       void run.after.then(() => {
         const a = run.answer() as { result?: { stage?: string } };
-        if (a.result?.stage !== "sent") positions.refresh();
+        if (a.result?.stage !== "sent") ended(a.result?.stage);
       });
     return run;
   };
@@ -1028,7 +1089,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         // each sell's stage written before its record goes (a write that fails keeps it for the next read)
         await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
           await settleSellOps(ops, signature, stage);
-          // a sell's end, written: its tokens read again (card signpage-state-holdings)
+          // a sell's end, written: its tokens read again (card signpage-state-holdings), a not landed one's marks back
+          if (stage === "not_landed") await unsold(signature).catch(() => {});
           positions.refresh();
         } }, locks);
       } finally {

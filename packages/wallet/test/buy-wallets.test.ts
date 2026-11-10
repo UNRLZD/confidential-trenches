@@ -566,6 +566,60 @@ test("a read stopped while its calls wait their turn on the paced route sends no
   }
 });
 
+/** globalThis.fetch for `origin`: each call answered after `ms`, every body kept. */
+const slowFetch = (origin: string, ms: number) => {
+  const real = globalThis.fetch;
+  const sent: { method: string; body: string }[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (!String(u).startsWith(origin)) return real(u, init);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push({ method: q.method, body: String(init?.body) });
+    await new Promise((r) => setTimeout(r, ms));
+    return evmOk(q.method, q.id);
+  }) as typeof fetch;
+  return { sent, restore: () => void (globalThis.fetch = real) };
+};
+const endOf = (p: Promise<unknown>, s: AbortSignal) => p.then(() => "read", (e: unknown) => (s.aborted && e === s.reason ? "stopped" : `failed: ${String(e)}`));
+const names = (body: string, w: string) => body.toLowerCase().includes(w.slice(2).toLowerCase());
+
+test("b07: the EVM reader stopped with its block read in flight sends no balance read naming W", async () => {
+  const f = slowFetch("https://b07.example", 200);
+  try {
+    const r = evmHelperHoldings("https://b07.example", "base", [USDC]);
+    const stop = new AbortController();
+    const end = endOf(r.read(evmW(L, 0), stop.signal), stop.signal);
+    await new Promise((r) => setTimeout(r, 50));
+    stop.abort();
+    assert.equal(await end, "stopped");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(f.sent.filter((x) => names(x.body, evmW(L, 0))).map((x) => x.method), [], "no call named W after the stop");
+  } finally {
+    f.restore();
+  }
+});
+
+test("b08: the EVM reader's token read waiting its turn on the route when its read is stopped is never sent", async () => {
+  const f = slowFetch("https://b08.example", 200);
+  try {
+    const r = evmHelperHoldings("https://b08.example", "base", [USDC]);
+    const stop = new AbortController();
+    const w = evmW(L, 1);
+    // W's block and balance go out; another reader's calls fill the window, so W's token read waits its turn
+    const end = endOf(r.read(w, stop.signal), stop.signal);
+    await new Promise((r) => setTimeout(r, 100));
+    const other = r.read(evmW(L, 0)).catch(() => {});
+    await new Promise((r) => setTimeout(r, 900));
+    assert.ok(f.sent.some((x) => x.method === "eth_getBalance" && names(x.body, w)), "W's balance read went out");
+    stop.abort();
+    assert.equal(await end, "stopped");
+    await other;
+    await new Promise((r) => setTimeout(r, 500));
+    assert.deepEqual(f.sent.filter((x) => x.method === "eth_call" && names(x.body, w)).map((x) => x.method), [], "W's token read sent after the stop");
+  } finally {
+    f.restore();
+  }
+});
+
 test("a chain whose finalized slot moves every 400 ms: every W's round answers at one slot, so each is read", async () => {
   // as Solana's does; a minContextSlot past the slot is refused with -32016, as the RPC does
   const t0 = Date.now();
