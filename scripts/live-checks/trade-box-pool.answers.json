@@ -1,21 +1,23 @@
 {
  "good": {
   "check": "trade-box-pool",
-  "at": "2026-11-04T12:03:02.496Z",
+  "at": "2026-11-10T03:27:53.949Z",
   "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool",
-  "browser": "157.0.8103.38",
-  "entry": "/assets/index-D2sAQfy_.js",
+  "browser": "156.0.8078.79",
+  "entry": "/assets/index-XvbkxnaR.js",
   "runs": [
    {
     "width": "desktop",
     "proof": "ready",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
      "proof": "ready",
      "proofText": "Proof ready",
-     "cta": "Buy CRCLx"
+     "cta": "Buy DJT"
     },
     "sent": [],
     "shot": "desktop-ready.png"
@@ -25,11 +27,13 @@
     "proof": "ready",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
      "proof": "ready",
      "proofText": "Proof ready",
-     "cta": "Buy CRCLx"
+     "cta": "Buy DJT"
     },
     "sent": [],
     "shot": "phone-ready.png"
@@ -39,11 +43,13 @@
     "proof": "making",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
      "proof": "making",
      "proofText": "Making proof",
-     "cta": "Buy CRCLx"
+     "cta": "Buy DJT"
     },
     "sent": [],
     "shot": "desktop-making.png"
@@ -53,11 +59,13 @@
     "proof": "making",
     "framed": true,
     "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
     "box": {
      "path": "pool",
      "proof": "making",
      "proofText": "Making proof",
-     "cta": "Buy CRCLx"
+     "cta": "Buy DJT"
     },
     "sent": [],
     "shot": "phone-making.png"
@@ -123,6 +131,79 @@
      "proof": null,
      "proofText": null,
      "cta": "Buy ZEC"
+    },
+    "sent": [],
+    "shot": "phone-making.png"
+   }
+  ]
+ },
+ "wrongChain": {
+  "check": "trade-box-pool",
+  "at": "2026-11-10T03:28:12.572Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool",
+  "browser": "156.0.8078.79",
+  "entry": "/assets/index-XvbkxnaR.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "desktop-ready.png"
+   },
+   {
+    "width": "phone",
+    "proof": "ready",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "phone-ready.png"
+   },
+   {
+    "width": "desktop",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
+    },
+    "sent": [],
+    "shot": "desktop-making.png"
+   },
+   {
+    "width": "phone",
+    "proof": "making",
+    "framed": true,
+    "route": "token",
+    "mint": "0xecc4237f20128d253cc00c14a7122e7e24a21627",
+    "chain": "robinhood",
+    "box": {
+     "path": "vault",
+     "proof": null,
+     "proofText": null,
+     "cta": "Buy Anthropic"
     },
     "sent": [],
     "shot": "phone-making.png"

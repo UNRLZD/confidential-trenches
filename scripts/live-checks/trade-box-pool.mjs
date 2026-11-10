@@ -4,9 +4,10 @@
 // for SIGN_HOST's shell (app-in-shell.mjs) that sends a signed-in state holding the devnet Solana pool as the signing page
 // reported it after the recorded pool deposit (signpage-pool-notes.run.json: one 0.01 SOL note; tap_max by the kit's own
 // rule, solanaPoolBuyMaxSpend at the worst venue, the 0.001 SOL tip cap, rent 5,080/1: 1,736,080 lamports), once with the
-// proof ready and once with it still making, since no check can sign a real account in. Headless Chromium opens / (the
-// token route, a Solana token) at 1440 x 900 (desktop, the box in the right column) and 390 x 844 (phone, dpr 2, the
-// bar's Buy opens the trade sheet) and reads:
+// proof ready and once with it still making, since no check can sign a real account in. Headless Chromium opens a Solana
+// token's own page, /token/solana/<DJT> (app-sell-mount's PATH; never /, which draws the live Trending column's top, a
+// token of any chain, on the deployed app), reads the token and chain it drew, at 1440 x 900 (desktop, the box in the
+// right column) and 390 x 844 (phone, dpr 2, the bar's Buy opens the trade sheet) and reads:
 //   - the box is on the pool path (data-path="pool");
 //   - its proof label is the state's: ready with the proof ready, making while it is not, and it has words;
 //   - one tap on its main button asks the shell for no vault buy (kind "buy"): only pool.buy, or nothing while the box
@@ -26,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute, SIGN_HOST } from "./app-in-shell.mjs";
+import { MINT, PATH } from "./app-sell-mount.mjs";
 
 const KEY = "trade-box-pool";
 export const APP_HOST = "https://ct-app.unrealized.trade";
@@ -56,6 +58,8 @@ export const WIDTHS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 ];
+/** The chain of the token the check opens (app-sell-mount's PATH is /token/solana/<MINT>). */
+export const CHAIN = "solana";
 const READY_MS = 20_000;
 
 // ------------------------------------------------------------------------------------------------ the verdict
@@ -72,6 +76,7 @@ export function judge(rec) {
     const bad = [];
     if (r.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (r.route !== "token") bad.push(`drew ${r.route ?? "nothing"}, not the token route`);
+    else if (r.mint !== MINT || r.chain !== CHAIN) bad.push(`the token page drew ${r.mint ?? "no token"} on ${r.chain ?? "no chain"}, not the Solana token ${MINT} on ${CHAIN}`);
     if (!r.box) bad.push("no trade box");
     else {
       if (r.box.path !== "pool") bad.push(`the box is on the ${r.box.path ?? "unmarked"} path, not the pool's`);
@@ -96,6 +101,8 @@ const READ = (sheet) => {
   const p = el?.querySelector('[data-testid="trade-proof"]');
   return {
     route: main?.dataset.route ?? null,
+    mint: main?.querySelector("section.tkp[data-token]")?.getAttribute("data-token") ?? null,
+    chain: main?.querySelector("section.tkp[data-token] .tkp-head .tok-cb[data-chain]")?.getAttribute("data-chain") ?? null,
     box: el ? { path: el.getAttribute("data-path"), proof: p?.getAttribute("data-proof") ?? null, proofText: p?.textContent?.trim() || null, cta: el.querySelector('[data-testid="trade-cta"]')?.textContent?.trim() ?? null } : null,
   };
 };
@@ -123,11 +130,11 @@ const seen = (page) => page.evaluate(() => (window.__ctShellSeen ?? []).length);
 
 async function runOne(browser, w, proof, shots, route) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
-  const run = { width: w.name, proof, framed: false, route: null, box: null, sent: null, shot: null };
+  const run = { width: w.name, proof, framed: false, route: null, mint: null, chain: null, box: null, sent: null, shot: null };
   try {
     await ctx.route("**/*", route);
     const page = await ctx.newPage();
-    await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
+    await page.goto(`${APP_HOST}${PATH}`, { waitUntil: "load" });
     const f = await terminal(page);
     run.framed = f !== null && originOf(page.url()) === SIGN_HOST;
     if (!f) return run;
