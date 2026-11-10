@@ -62,7 +62,7 @@ import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resume
 import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
-import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
+import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
@@ -353,6 +353,8 @@ export type TestnetOver = {
   evmSync?: (pin: EvmPoolPin, rpcs: readonly [EvmRpc, EvmRpc], list: readonly EvmRpc[]) => Pick<EvmTreeSync, "events">;
   /** An EVM chain's pool for its proof queue (the wallet's evmPool over the chain's pool list otherwise). */
   evmQueuePool?: (chain: "base" | "robinhood") => Pool<unknown>;
+  /** The EVM turn pass's clock, timers, spread draw and tab visibility (the page's own otherwise; tests). */
+  evmTurn?: EvmTurnDeps;
   /** The deposit kinds (poolDepositKind, poolDepositEvmKind otherwise): a test reads the hosts this page wires into them
    *  (its sign-out signal and its pass, fold review 3). */
   depositKinds?: { solana?: typeof poolDepositKind; evm?: typeof poolDepositEvmKind };
@@ -479,7 +481,22 @@ export type TestnetPool = {
 
 /** The testnet build's devnet pool on this page: the deposit flow, its settling and the next buy's proofs. */
 /** An open proof queue, its note store and the id of the pool it proves for. */
-type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string };
+type OpenQueue = { queue: ProofQueue<unknown>; notes: NoteStore; poolId: string; hold?: (signal?: AbortSignal) => Promise<void> };
+
+/** The EVM turn pass (card evm-device-reads-need-no-old-state): this long past each period's turn, plus the page's
+ *  spread, the period's first block is in on both seats (Base makes one every 2 s, Robinhood several a second) and still
+ *  fresh: Pocket and publicnode refused its state 15 to 242 s back (read 2026-11-10 21:50-22:30Z). */
+export const EVM_TURN_PASS_MS = 3_000;
+/** Each page adds 0 to this to EVM_TURN_PASS_MS, drawn once a page load, so the open pages do not ask the same public
+ *  operators in the same second. */
+export const EVM_TURN_SPREAD_MS = 2_000;
+export type EvmTurnDeps = {
+  now?: () => number;
+  random?: () => number;
+  setTimeout?: (f: () => unknown, ms: number) => unknown;
+  clearTimeout?: (t: unknown) => void;
+  visibility?: { hidden: () => boolean; onShow: (f: () => unknown) => void } | null;
+};
 
 export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetPool {
   const pin = over.pin === null ? undefined : (over.pin ?? PAGE_SOL_PIN);
@@ -547,6 +564,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
+    stopTurn();
     positions.clear();
     awaited.clear();
     follows.abort();
@@ -637,7 +655,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           epochFee: evmEpochFee,
         });
       const hardwareConcurrency = over.hardwareConcurrency ?? globalThis.navigator?.hardwareConcurrency;
-      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id };
+      // the period's fee held at the turn (the wallet's evmPool holdFee), at the pool's own time's period
+      const holdFee = (pool as Partial<Pick<EvmPoolOf, "holdFee">>).holdFee;
+      const hold = typeof holdFee === "function" ? async (s?: AbortSignal) => {
+        const now = await pool.now(s);
+        await holdFee.call(pool, now - (now % pool.epochMs), s);
+      } : undefined;
+      return { queue: openProofQueue({ seed64, notes, pool, provers: [prover.vault], hardwareConcurrency, skip: owedNotes }), notes, poolId: pool.id, ...(hold ? { hold } : {}) };
     } catch (err) {
       notes.close();
       throw err;
@@ -818,6 +842,79 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         if (mine.some((n) => n.state === "RESERVED")) await reserveEvm(chain).catch(() => {});
       }),
     );
+  };
+  // the EVM turn pass (card evm-device-reads-need-no-old-state): a keyless operator keeps a block's state seconds to
+  // minutes, so each chain's period fee is read a few seconds past the period's turn, while its first block is fresh,
+  // and held (the wallet's evmPool holdFee); then the chain's queue pass runs, whose binds take the held read, so a
+  // first proof is ready within seconds of the turn with no tap. Only under evmRead's own condition (the chain's queue
+  // open or its notes landed): a page with nothing on a chain reads nothing at the turn. It names nothing of the user:
+  // block headers, the pool's logs and public views at a block hash. Armed at a state read and cleared at sign out. A
+  // hidden tab reads nothing at the turn (its timers run late, and nobody taps there); shown again, it runs once at once.
+  const turnDeps = over.evmTurn ?? {};
+  const turnNow = turnDeps.now ?? (() => Date.now());
+  // a timer that never holds a process open (Node's unref; a browser's has none)
+  const turnSet = turnDeps.setTimeout ?? ((f: () => unknown, ms: number) => {
+    const t = setTimeout(f, ms) as unknown as { unref?: () => void };
+    t.unref?.();
+    return t;
+  });
+  const turnClear = turnDeps.clearTimeout ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
+  const turnSpread = Math.floor((turnDeps.random ?? Math.random)() * EVM_TURN_SPREAD_MS);
+  const turnSeen =
+    turnDeps.visibility !== undefined ? turnDeps.visibility
+    : typeof document !== "undefined" ? { hidden: () => document.visibilityState === "hidden", onShow: (f: () => unknown) => document.addEventListener("visibilitychange", () => void (document.visibilityState === "visible" && f())) }
+    : null;
+  let turnTimer: unknown = null;
+  let turnMissed = false;
+  let turnShowOn = false;
+  const evmTurnPass = async (): Promise<void> => {
+    const chains = (["base", "robinhood"] as const).filter((c) => evmPool(c) !== null);
+    if (chains.length === 0) return;
+    const all = await readNotes(await page.store());
+    const signal = evmStop.signal;
+    await Promise.all(
+      chains.map(async (chain) => {
+        const mine = all.filter((n) => n.scope === evmPool(chain)!.scope);
+        if (!(evmQueues.has(chain) || mine.some((n) => n.state === "UNSPENT" || n.state === "HELD"))) return;
+        let p = evmQueues.get(chain);
+        if (p === undefined) evmQueues.set(chain, (p = openEvmQueue(chain)));
+        const q = await p.catch(() => null);
+        // the fee first, then the pass: a read that fails leaves the pass to read it as before
+        await q?.hold?.(signal).catch(() => {});
+        if (signal.aborted) return;
+        if (!evmPassing.has(chain)) evmPassing.set(chain, evmProofs(chain).finally(() => evmPassing.delete(chain)));
+        await evmPassing.get(chain);
+      }),
+    );
+  };
+  const armTurn = (): void => {
+    if (turnTimer !== null) return;
+    if (!turnShowOn && turnSeen !== null) {
+      turnShowOn = true;
+      turnSeen.onShow(() => {
+        if (!turnMissed || turnTimer === null) return;
+        turnMissed = false;
+        return evmTurnPass().catch(() => {});
+      });
+    }
+    const now = turnNow();
+    const e = Number(EVM_EPOCH_MS);
+    let at = now - (now % e) + EVM_TURN_PASS_MS + turnSpread;
+    if (at <= now) at += e;
+    turnTimer = turnSet(() => {
+      turnTimer = null;
+      armTurn();
+      if (turnSeen?.hidden()) {
+        turnMissed = true;
+        return;
+      }
+      return evmTurnPass().catch(() => {});
+    }, at - now);
+  };
+  const stopTurn = (): void => {
+    if (turnTimer !== null) turnClear(turnTimer);
+    turnTimer = null;
+    turnMissed = false;
   };
   // pool.buy: the open queue's ready proofs; one run per tap, each picking a proof no other run of this page holds
   const tables = over.tables === undefined ? PAGE_TABLES : over.tables;
@@ -1336,6 +1433,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // Solana pool's part (none pinned: only theirs): neither waits on the other, and one that fails or hangs never stops
   // the other
   const stateRead = (): Promise<void> => {
+    armTurn();
     const evm = evmRead().catch(() => {});
     if (scope === null) return evm;
     return Promise.all([evm, solanaRead()]).then(() => {});
@@ -1591,6 +1689,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      stopTurn();
       signOuts++;
       stopSolana();
       evmStop.abort();

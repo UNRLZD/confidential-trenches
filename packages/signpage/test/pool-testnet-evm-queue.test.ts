@@ -493,3 +493,134 @@ test("the EVM buy's live check reads what the testnet page reads: its pairs, cha
   assert.equal(lc.BOUGHT, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_POOL_EVENTS.Bought))));
   assert.equal(lc.BUY_SELECTOR, "0x" + hex(keccak_256(new TextEncoder().encode(EVM_BUY_SIGNATURE)).subarray(0, 4)));
 });
+
+// ---- the turn pass (card evm-device-reads-need-no-old-state) ----
+// A keyless operator keeps a block's state seconds to minutes, so the page reads each chain's period fee a few seconds
+// past the turn, while the period's first block is fresh, and runs the queue's pass then, only for a chain with its
+// queue open or its notes landed.
+const { EVM_TURN_PASS_MS, EVM_TURN_SPREAD_MS } = await import("../src/pool-testnet.ts");
+const { evmPool: walletEvmPool } = await import("../../wallet/src/pool/evm.ts");
+const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+/** The page's turn timers, by hand: each set timer's wait and its callback (which returns the pass). */
+function turnTimers(o: { now: number; random?: () => number; hidden?: () => boolean }) {
+  const set: { ms: number; f: () => unknown; cleared: boolean }[] = [];
+  let onShow: (() => unknown) | null = null;
+  return {
+    set,
+    show: () => onShow?.(),
+    evmTurn: {
+      now: () => o.now,
+      random: o.random ?? (() => 0),
+      setTimeout: (f: () => unknown, ms: number) => (set.push({ ms, f, cleared: false }), set.length - 1),
+      clearTimeout: (t: unknown) => void (set[t as number]!.cleared = true),
+      visibility: { hidden: o.hidden ?? (() => false), onShow: (f: () => unknown) => void (onShow = f) },
+    },
+  };
+}
+/** A Base Sepolia pool with an EVM_POOLS-shaped pin and an empty pool on a fake chain of 2 s blocks, block 100 the
+ *  period's first, the head 101: every request it is asked, by method and params, in `asked`. */
+function emptyChain(asked: string[]) {
+  const T = 1_800_000_000 - 200; // block n's time T + 2n: block 100 at the period's start
+  const head = 101;
+  const h = (n: number) => `0x${(n + 1).toString(16).padStart(64, "0")}`;
+  const blk = (n: number) => (n > head ? null : { number: `0x${n.toString(16)}`, hash: h(n), parentHash: h(n - 1), timestamp: `0x${(T + 2 * n).toString(16)}`, baseFeePerGas: "0x3b9aca00" });
+  const mk = (url: string): EvmRpc =>
+    Object.assign(async (method: string, params: readonly unknown[]) => {
+      asked.push(`${url} ${method} ${JSON.stringify(params)}`);
+      if (method === "eth_chainId") return "0x14a34";
+      if (method === "eth_getBlockByNumber") return blk(params[0] === "latest" ? head : params[0] === "finalized" ? head - 10 : Number(BigInt(params[0] as string)));
+      if (method === "eth_getBlockByHash") return blk(Number(BigInt(params[0] as string)) - 1);
+      if (method === "eth_getLogs") return [];
+      if (method === "eth_call") {
+        const [{ to, data }] = params as [{ to: string; data: string }];
+        if (to === "0x420000000000000000000000000000000000000f") return `0x${(data.startsWith("0xf1c7a58b") ? 7917 : 0).toString(16).padStart(64, "0")}`;
+        if (data === "0x" + Buffer.from(keccak_256(new TextEncoder().encode("SCOPE()")).subarray(0, 4)).toString("hex")) return `0x${SCOPE.toString(16).padStart(64, "0")}`;
+        return `0x${"0".repeat(64)}`;
+      }
+      throw new Error(`unexpected ${method}`);
+    }, { url });
+  return { pair: [mk("https://a.example"), mk("https://b.example")] as const, fees: [mk("https://c.example"), mk("https://d.example")] };
+}
+
+test("the turn pass: armed at a state read for turn + 3 s + this page's spread (0 to 2 s, drawn once), and only for a chain with its queue open or its notes landed", async () => {
+  const { w, ns } = await wallet();
+  const START = 1_800_000_000_000; // a period's start
+  const tt = turnTimers({ now: START + 20_000, random: () => 0.25 });
+  let pools = 0, holds = 0, binds = 0;
+  const pool = () => {
+    pools++;
+    const p = fakeEvmPool();
+    return Object.assign(p, { holdFee: async (e: bigint) => (assert.equal(e, BigInt(START)), void holds++), bind: async (b: Parameters<typeof p.bind>[0]) => (binds++, fakeEvmPool().bind(b)) }) as Pool<unknown>;
+  };
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: pool, evmTurn: tt.evmTurn } as Parameters<typeof testnetPool>[1]);
+  assert.equal(EVM_TURN_PASS_MS, 3_000);
+  assert.equal(EVM_TURN_SPREAD_MS, 2_000);
+  await t.stateRead();
+  assert.equal(tt.set.length, 1);
+  assert.equal(tt.set[0]!.ms, 60_000 - 20_000 + 3_000 + 500, "the next turn + 3 s + 0.25 x 2 s");
+  // nothing on the chain: the turn reads nothing and opens no queue, and the next turn is armed
+  await tt.set[0]!.f();
+  assert.deepEqual([pools, holds], [0, 0]);
+  assert.equal(tt.set.length, 2);
+  // a landed note: the fee held first, then the queue's pass, which binds
+  await landed(ns);
+  await tt.set[1]!.f();
+  for (let i = 0; i < 50 && binds === 0; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual([pools, holds], [1, 1]);
+  assert.ok(binds >= 1, "the queue's pass ran");
+  // the spread is drawn once a page load: every turn of this page waits the same 500 ms past turn + 3 s
+  assert.equal(tt.set[2]!.ms % 60_000, (60_000 - 20_000 + 3_500) % 60_000);
+  // sign out: the armed turn is cleared and none is armed after it
+  const armed = tt.set.length;
+  await t.signedOut();
+  assert.ok(tt.set[armed - 1]!.cleared, "cleared at sign out");
+  assert.equal(tt.set.length, armed);
+});
+
+test("the turn pass: a hidden tab reads nothing at the turn and runs it once when shown again", async () => {
+  const { w, ns } = await wallet();
+  let hidden = true;
+  const tt = turnTimers({ now: 1_800_000_010_000, hidden: () => hidden });
+  let holds = 0;
+  const t = testnetPool(page(w), { prover: { vault: signalsProver(), stop: () => {} }, evmPin: (c) => (c === "base" ? PIN : undefined), evmRpcs: unread, evmSync: () => ({ events: async () => assert.fail("no sync read") }), evmQueuePool: () => Object.assign(fakeEvmPool(), { holdFee: async () => void holds++ }) as Pool<unknown>, evmTurn: tt.evmTurn } as Parameters<typeof testnetPool>[1]);
+  await landed(ns);
+  await t.stateRead();
+  const before = holds; // the state read's own pass holds nothing
+  await tt.set[0]!.f();
+  assert.equal(holds, before, "hidden: no read at the turn");
+  hidden = false;
+  await tt.show();
+  assert.equal(holds, before + 1, "shown: once, at once");
+  await tt.show();
+  assert.equal(holds, before + 1, "shown again with no turn missed: nothing");
+  await t.signedOut();
+});
+
+test("the turn pass's reads name nothing of the user: block headers, the pool's logs and public views at a block hash, on a real EVM pool", async () => {
+  const { w, ns } = await wallet();
+  const asked: string[] = [];
+  const fetched: string[] = [];
+  const c = emptyChain(asked);
+  const tt = turnTimers({ now: 1_800_000_002_000 });
+  const t = testnetPool(page(w), {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (x) => (x === "base" ? PIN : undefined),
+    evmRpcs: () => [...c.pair],
+    evmSync: () => ({ events: async () => assert.fail("no RESERVED note") }),
+    evmQueuePool: () => walletEvmPool({ pin: PIN, rpcs: c.pair, feeRpcs: c.fees, relayFee: async () => assert.fail("no bind: the pool holds no leaf"), epochFee: evmEpochFee, sleep: async () => {} }) as Pool<unknown>,
+    fetch: (async (u: string) => (fetched.push(String(u)), new Response("{}", { status: 404 }))) as unknown as typeof fetch,
+    evmTurn: tt.evmTurn,
+  } as Parameters<typeof testnetPool>[1]);
+  const n = await landed(ns);
+  await t.stateRead();
+  asked.length = 0;
+  await tt.set[0]!.f();
+  const fee = asked.filter((x) => x.includes("0x420000000000000000000000000000000000000f"));
+  assert.ok(fee.length >= 2 && fee.every((x) => x.includes(`0x${(101).toString(16).padStart(64, "0")}`)), "the chain fee at the period's first block (100), by its hash");
+  const W = freshWallet(SEED64, "evm", L0, 0).address.toLowerCase().slice(2);
+  const mine = [W, w64(n.leaf!.commitment), w64(P(D0)), w64(L0), w64(noteSecrets(SEED64, D0).nullifierHash)];
+  for (const x of [...asked, ...fetched]) for (const m of mine) assert.ok(!x.toLowerCase().includes(m), `no user value in ${x.slice(0, 120)}`);
+  assert.ok(asked.every((x) => / eth_(chainId|getBlockByNumber|getBlockByHash|getLogs|call) /.test(x)), "headers, logs and views only");
+  await t.signedOut();
+});
+const w64 = (v: bigint) => v.toString(16).padStart(64, "0");
