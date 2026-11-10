@@ -299,10 +299,10 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
           // (the helper answers 429 when one of its sends took them, then 422 on the spent nullifier), so the chain
           // decides (review P2-3)
           if (e instanceof EvmSendRefused && !busied) {
-            // nothing left the device: this run's pending record is removed before it answers (a removal that fails
-            // leaves it, and the note's next buy is refused until the load's follow ends it)
-            await h.unrecord(w.address, binding.nullifier).catch(() => {});
-            return { answer: { stage: "refused", txs: [] } };
+            // a refusal is the helper's word, and the device never drops what it may own on a server's word: the run
+            // answers refused, its pending record stays, and the chain ends it (the follow below: a Bought fills W's
+            // holding, no release by the two-round safe rule removes it, as the note's settle frees the note)
+            return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null } as Watch };
           }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
             busied = true;
@@ -321,24 +321,33 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
       return { watch: { want, from, holding, w: w.address, stops: [null, null], none: null } };
     });
     if ("answer" in out) return out.answer;
+    // on past the answer with no answer owed: W's reads until the chain ends the pending record
+    const follow = (x: Watch, refused: boolean): void => {
+      const slowAt = x.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
+      const mine = followed;
+      followed = null;
+      void watch(h, x, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
+        .finally(() => void (mine !== null && h.following?.delete(mine)))
+        .then((a) => {
+          // null: a sign out ended the reads, so nothing is settled after it (review P2-2)
+          if (a === null || !live()) return;
+          settle();
+          // after a refusal the app was told refused: only a release the helper's word denied is news
+          if (!refused || a.stage !== "not_landed") h.late?.(a);
+        })
+        .catch(() => {});
+    };
+    if ("refused" in out) {
+      if (live()) follow(out.refused, true);
+      return { stage: "refused", txs: [] };
+    }
     // the read-back, outside the lock: the tap's part, then on past it with no answer owed
     const sentAt = clock();
     const tap = await watch(h, out.watch, () => live() && clock() - sentAt < BigInt(EVM_BUY_SETTLE_MS), wait, clock, live);
     if (tap !== null) return tap;
     // a sign out ended the tap's reads: no follow
     if (!live()) return { stage: "sent", txs: [] };
-    const slowAt = out.watch.want.deadlineMs + BigInt(EVM_BUY_FOLLOW_MS);
-    const mine = followed;
-    followed = null;
-    void watch(h, out.watch, live, (ms) => wait(clock() > slowAt ? EVM_BUY_SLOW_WAIT_MS : ms), clock, live)
-      .finally(() => void (mine !== null && h.following?.delete(mine)))
-      .then((a) => {
-        // null: a sign out ended the reads, so nothing is settled after it (review P2-2)
-        if (a === null || !live()) return;
-        settle();
-        h.late?.(a);
-      })
-      .catch(() => {});
+    follow(out.watch, false);
     return { stage: "sent", txs: [] };
   } catch (e) {
     // past the post, only a true stage: the bytes may be on their way

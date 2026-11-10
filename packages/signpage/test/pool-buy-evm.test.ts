@@ -361,7 +361,7 @@ test("(ruling 1) a fault of the page past the post is never an error: the stage 
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "sent", txs: [] });
 });
 
-test("(ruling 1) only the helper's own 4xx naming a code is a refusal: refused, the note taken and settled, nothing read", async () => {
+test("(ruling 1) only the helper's own 4xx naming a code is a refusal: refused, the note taken and settled, nothing read before the answer (W's follow reads after it: pending end 1)", async () => {
   const { h, seen } = host({ send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")) });
   assert.deepEqual(await runEvmPoolBuy(h, ASK), { stage: "refused", txs: [] });
   assert.deepEqual([seen.takes.length, seen.sends.length, seen.sent, seen.settles], [1, 1, 0, 1]);
@@ -743,18 +743,36 @@ test("(P2-2) a sign out during the follow's own end write: no settle is started 
   assert.deepEqual(seen.late, []);
 });
 
-// ---- the pending record's end (the coordinator's ruling on P3-7): each fails at e5978942 ----
+// ---- the pending record's end (review P3-7): each fails at e5978942 ----
 const followPending = M.followPendingEvmBuys as ((h: EvmPoolBuyHost) => Promise<void>) | undefined;
 const pastAll = (): Pick<HostOpts, "a" | "b"> => ({ a: { time: () => DEADLINE + 1_000n }, b: { time: () => DEADLINE + 1_000n } });
 
-test("(pending end 1) a coded refusal on the first POST removes this run's pending record before it answers: the same note's next buy signs and sends", async () => {
+const until = async (done: () => boolean): Promise<boolean> => {
+  for (let i = 0; i < 2000 && !done(); i++) await new Promise((r) => setImmediate(r));
+  return done();
+};
+
+test("(pending end 1) a coded refusal on the first POST is the helper's word: the run answers refused and its pending record stays; no release by the two-round safe rule removes it and the same note buys again; a Bought after it fills W's holding, never removed", async () => {
+  const refuse = () => Promise.reject(new EvmSendRefused(422, "simulation_failed"));
+  // an honest refusal: nothing on either RPC, past the deadline
   const kept = new Map<string, EvmHolding>();
-  const first = host({ holdings: kept, send: () => Promise.reject(new EvmSendRefused(422, "simulation_failed")) });
+  const first = host({ holdings: kept, send: refuse, ...pastAll() });
   assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "refused", txs: [] });
-  assert.equal(kept.has(W), false, "no pending left");
+  assert.equal(kept.get(W)?.state, "pending", "the pending stays at the answer");
+  assert.ok(await until(() => !kept.has(W)), "the run's own follow ends it not_landed in the same page life");
+  assert.deepEqual(first.seen.late, [], "the app was told refused: not_landed is no news");
+  assert.equal(first.h.following!.size, 0);
   const next = host({ holdings: kept, ...both([release()]) });
   assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] });
   assert.equal(next.seen.sends.length, 1);
+  // a lying helper: it refused and sent the bytes all the same
+  const lied = new Map<string, EvmHolding>();
+  const liar = host({ holdings: lied, send: refuse, ...both([release()]) });
+  assert.deepEqual(await runEvmPoolBuy(liar.h, ASK), { stage: "refused", txs: [] });
+  assert.ok(await until(() => lied.get(W)?.state === "filled"), "the Bought fills W's holding");
+  assert.deepEqual([lied.get(W)?.received, lied.get(W)?.route.tx], ["40", TX]);
+  assert.deepEqual(liar.seen.late, [{ stage: "filled", txs: [{ chain: "base", hash: TX }] }], "the end the helper denied goes out late");
+  assert.equal(liar.seen.settles, 2, "the settle at the answer, and again at the end");
 });
 
 test("(pending end 2) not_landed by the two-round safe rule removes this run's pending record with the verdict: the same note's next buy signs and sends", async () => {
