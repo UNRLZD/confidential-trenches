@@ -154,6 +154,22 @@ test("a refusal carries every seat error of the side that refused, in its walk's
   });
 });
 
+// card evm-device-reads-need-no-old-state: with dRPC out, three of Robinhood's four operators refuse a block's state
+// 55 s back (2 of 15 fee reads at +55 s, read 2026-11-10 21:50Z), so no read at that block binds, whatever the order; the
+// device holds the period's read from the turn instead (wallet src/pool/evm.ts holdFee)
+test("three of four operators refusing an old block's state: no read binds, every refusal carried, one answer never enough", async () => {
+  for (const order of [[RH, DR, PK, PN], [DR, PK, PN, RH], [PK, RH, PN, DR]]) {
+    const fakes = new Map(order.map((u) => [u, u === RH ? ok("0x2a") : refuses(STATE)] as const));
+    await assert.rejects(evmTwoOperators(seats(order.map((u) => [u, fakes.get(u)!]))).read("fee at an old block", f, eq), (e: unknown) => {
+      assert.ok(e instanceof EvmOperatorsUnanswered, String(e));
+      assert.ok(e.errors.length >= 1 && e.errors.every((z) => (z as Error).message === STATE), "only the refusals of state, the one answer never counted twice");
+      return true;
+    });
+    assert.equal(fakes.get(RH)!.calls, 1, "the one operator that keeps the state is asked once");
+    for (const u of order) if (u !== RH) assert.ok(fakes.get(u)!.calls <= 1, `${u}: asked at most once`);
+  }
+});
+
 test("the caller's abort ends the read at once, and no seat is rested for it", async () => {
   const ac = new AbortController();
   const [h, a] = [hangs(), hangs()];

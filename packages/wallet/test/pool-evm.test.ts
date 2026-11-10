@@ -730,6 +730,21 @@ test("the period's fee read at the turn is held: a bind later in the period asks
     assert.equal(feeCalls(log2), first);
     assert.equal(seen2.length, 2);
   }
+  // three of four operators refusing the old block, the fourth keeping it: with nothing held no two agree (one operator
+  // alone never passes); with the turn's read held the bind binds and asks none of them
+  for (const hold of [false, true]) {
+    const c4 = { ...CB(), head: 31 };
+    const log4: string[] = [];
+    const fees = [rpc(c4, { url: "https://rpc.mainnet.chain.robinhood.com", log: log4 }), ...freshOnly(c4, 2, log4)];
+    const s4 = evmPool({ pin: PIN, rpcs: pair(c4, c4), feeRpcs: fees, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    if (hold) await s4.holdFee(EPOCH);
+    const n = feeCalls(log4);
+    c4.head = 57;
+    if (hold) {
+      await s4.bind(bindArgs());
+      assert.equal(feeCalls(log4), n, "held: no operator asked at the old block");
+    } else await assert.rejects(s4.bind(bindArgs()), /one operator alone never passes/);
+  }
   // nothing held and the state gone: the walk, as before, which every seat refuses (a lag, then refused)
   {
     const c3 = { ...CB(), head: 45 };
