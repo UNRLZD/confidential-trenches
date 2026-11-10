@@ -46,7 +46,7 @@ import { feeQuoterFromEnv, FeeReadRefused, STORE_ENV, type FeeQuoter } from "./w
 import { withdrawSenderFromEnv, type WithdrawSender } from "./withdraw/send.ts";
 import { POOL_EPOCH_MS } from "./pool/fee.ts";
 import { POOL_SOLANA_BODY_MAX, solanaPoolSendersFromEnv, type SolanaPoolSender } from "./pool/solana.ts";
-import { evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
+import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BODY_MAX, POOL_LIFE_MAX_MS, type EvmPoolSender } from "./pool/evm.ts";
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
@@ -1003,6 +1003,7 @@ if (import.meta.main) {
   let server: Server | null = null;
   let saveWarm = () => undefined as void;
   let drain = () => undefined as void;
+  let stopWarm = () => undefined as void;
   try {
     checkVendorPlans(process.env);
     // card evm-pool-sync-holds: no keyed Base or Robinhood URL of a pool-list operator (env-check.ts, as the redeploy runs it)
@@ -1071,6 +1072,9 @@ if (import.meta.main) {
     // card evm-buy-hookdata-fee: an EVM pool RPC that cannot answer the fee's state reads 10 min back stops the start;
     // both pool kinds' start checks run from here, and ready (below) waits for them
     const checked = poolsChecked(pools, evmPools, (e) => (console.error(`helper: ${e.message}`), process.exit(2)));
+    // card helper-evm-fee-at-epoch-start: each pool's fee read at its period's start, while every provider still holds
+    // the period's first block's state; a request answers it from memory
+    stopWarm = evmFeeWarm(evmPools.values());
     const swaps: Swaps = { ...evmSwapsFromEnv(process.env, evmLists, gecko, holds), solana: solanaTradesFromEnv(process.env, lists, token, rpc, slots) };
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
@@ -1108,6 +1112,7 @@ if (import.meta.main) {
   // a stop finishes the requests in flight (the old helper of a deploy's swap): no new connection, idle ones closed,
   // the warm file written for the next helper, exit once the last answer is out or at STOP_MS
   const stop = () => {
+    stopWarm();
     saveWarm();
     if (server === null) process.exit(0);
     server.once("close", () => process.exit(0));
