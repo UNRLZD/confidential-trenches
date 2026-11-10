@@ -19,7 +19,10 @@
 //     deposit note of another scope stalls by name, and the seed is opened per use, only while still stored; since card
 //     wallet-id-reader-paced: a busy provider (HTTP 429 or 5xx, its JSON -429, dRPC's code 30, no answer in time) is
 //     waited out at its pace and asked again within BUSY_WAIT_MAX_MS (busy_wait), and two providers that answer
-//     differently at one block stop the read and step 5, naming the stronger (pair_wrong);
+//     differently at one block stop the read and step 5, naming the stronger (pair_wrong); since card
+//     restore-first-sign-in-under-two-minutes (review P2-2 of 53f5e92f): an id unread, a disagreement of the pair
+//     included, is named unread and the lane reads on past it (ids_stop, pair_wrong), and a read still unanswered on
+//     the last try is told as a finding (ids_end);
 //   - each provider, asked with Origin SIGN_ORIGIN as the page asks (a POST with content-type application/json, so its
 //     preflight first), answers with CORS for the page's origin, and answers what the IdReader decides on:
 //       a registered id (REGISTERED, a NearBlocks USDC holder read 8 Nov 2026, registered on USDC) reads registered
@@ -146,13 +149,16 @@ const pairClass = (text) => {
 /**
  * pair_wrong: PairDisagrees (`P=class extends Error{stronger;constructor(e,t){super(t),this.name=`PairDisagrees`,
  * this.stronger=e}}`); the IdReader whole (readerOf: readId called by the read closure, RANK by name, both answers
- * needed); and step 5's catch, whose first statement throws P on at once, naming its lane and index, before an id is
- * counted unread. The IdReader's setup is the one busy_wait binds. The count is 1 when all hold, else 0.
+ * needed); and step 5's catch, which passes on a throw only once the run's signal ended and otherwise counts the id
+ * unread, a P naming both answers (`${e.message}, read again`), never as an answer (card
+ * restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f: one provider's word on one id never stops the ids
+ * after it; before, the catch threw P on at once). The IdReader's setup is the one busy_wait binds. The count is 1 when
+ * all hold, else 0.
  */
 export const PAIR_WRONG = (text) => {
   const P = pairClass(text);
   if (P === null) return 0;
-  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\(\1 instanceof ${P}\)throw new ${P}\(\1\.stronger,` + "`" + String.raw`lane \$\{(${N})\}: at index \$\{(${N})\}, \$\{\1\.message\}, to be retried` + "`" + String.raw`\);if\((${N})\.push\(\{i:\3,id:(${N}),error:(${N})\(\1\)\}\),`, "g"));
+  const stop = all(text, new RegExp(String.raw`\}catch\((${N})\)\{if\((${N})\.signal\?\.aborted\)throw \1;if\((${N})\.push\(\{i:(${N}),id:(${N}),error:\1 instanceof ${P}\?` + "`" + String.raw`\$\{\1\.message\}, read again` + "`" + String.raw`:(${N})\(\1\)\}\),`, "g"));
   if (stop.length < 1) return 0;
   const r = readerOf(text, P);
   return r !== null && all(text, rx(String.raw`function ${esc(r.SETUP)}\(`)).length === 1 ? 1 : 0;
@@ -207,10 +213,11 @@ export const MARK = Object.freeze({
   id_pass_meet: "did not meet; the restore does not start",
   id_pass_stale: "blocks past it; open a fresh pass",
   ids_margin: "id reads failed with none showing history between them",
-  // the page's wiring (src/pool-restore.ts readDepositIds): the first unread id stops every read after it,
-  // `if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=e,e}` (the id and its index,
-  // card wallet-restore-reads-ux)
-  ids_stop: /\.throwIfAborted\(\),([\w$]+)!==void 0\)throw \1;try\{return await [\w$]+\(([\w$]+),[\w$]+\)\}catch\(([\w$]+)\)\{throw \1\?\?=\3,\3\}/g,
+  // the page's wiring (src/pool-restore.ts readDepositIds): each id read through keptIdReader's reader on the run's
+  // own signal, the id and its index handed on, nothing kept between reads, so an unread id never stops the ids after
+  // it (card restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f; before, the first unread id stopped
+  // every read after it): `reader:u}=await zW(Nw,n.rpcs,r,{...n.opts,signal:i}),d=await BW(...),f=async(e,t)=>(i.throwIfAborted(),u(e,t))`
+  ids_stop: /reader:([\w$]+)\}=await [\w$]+\([\w$]+,[\w$]+\.rpcs,[\w$]+,\{\.\.\.[\w$]+\.opts,signal:([\w$]+)\}\),[\w$]+=await [\w$]+\([^()]*\),[\w$]+=async\(([\w$]+),([\w$]+)\)=>\(\2\.throwIfAborted\(\),\1\(\3,\4\)\)/g,
   // and a lane unfinished ends the run stalled by name (src/pool-restore.ts idsUndone)
   ids_undone: "past the note walk's end: restore again from there",
   // a pool scope is never done while its U_X on the pool's chain is unread (POOL_CHAIN_UNREAD)
@@ -224,10 +231,12 @@ export const MARK = Object.freeze({
   // review of e31892ef (P3-3), as card restore-first-sign-in-under-two-minutes made it: step 5 runs after the walk's
   // end, and each try's end is told off the very lists its catch pushes to: a throw goes on `retry` unless the run's
   // seed is gone (SeedGone, the class the seed lock throws) or its signal ended; a try is answered only with `retry`
-  // and `held` both empty; on its last try `held` is told as `named` (a finding), on the others as it is (an end that
-  // drops a list, or calls a try answered with reasons left, holds none),
-  // `.catch(e=>{if(e instanceof sG||t.aborted)throw e;r.retry.push(`step 5 did not finish: ${...}`)}),t.throwIfAborted();let i=r.retry.length===0&&r.held.length===0,a=i||n>x.length;if(await v(a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}),i){`
-  ids_end: /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\4\.retry,held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{/g,
+  // and `held` both empty; on its last try `held` and `retry` are told as `named` (a finding: review P2-2 of 53f5e92f,
+  // never silent), on the others as it is; an answered try removes the marker only when the walk failed nowhere and it
+  // found nothing (review P2-1: a finding keeps step 5 owed) (an end that drops a list, calls a try answered with
+  // reasons left, or removes the marker with a finding, holds none),
+  // `.catch(e=>{if(e instanceof sG||t.aborted)throw e;r.retry.push(`step 5 did not finish: ${...}`)}),t.throwIfAborted();let i=r.retry.length===0&&r.held.length===0,a=i||n>x.length;if(await v(a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}),i){!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}`
+  ids_end: /\.catch\(([\w$]+)=>\{if\(\1 instanceof ([\w$]+)\|\|([\w$]+)\.aborted\)throw \1;([\w$]+)\.retry\.push\(`step 5 did not finish: \$\{\1 instanceof Error\?\1\.message:`it threw`\}`\)\}\),\3\.throwIfAborted\(\);let ([\w$]+)=\4\.retry\.length===0&&\4\.held\.length===0,([\w$]+)=\5\|\|([\w$]+)>([\w$]+)\.length;if\(await [\w$]+\(\6\?\{retry:\[\],held:\[\],named:\[\.\.\.\4\.named,\.\.\.\4\.held,\.\.\.\4\.retry\],tries:\7,last:\6\}:\{\.\.\.\4,tries:\7,last:\6\}\),\5\)\{![\w$]+&&\4\.named\.length===0&&await [\w$]+\(async\(\)=>\(await [\w$]+\.store\(\)\)\.delete\(`meta`,[\w$]+\)\);return\}/g,
   // each pool scope whose chain has no U_X reads on the page (its walked entry's `ux` null; card
   // wallet-restore-reads-ux) pushes the very constant that holds the U_X text (POOL_CHAIN_UNREAD), which the build
   // places before readDepositIds, as the statement right after its reasons' push to the same array, with nothing between

@@ -219,7 +219,7 @@ const treeRecord = async (fetchFn = localFetch) => ({ ...answers.good, url: "loc
 // rate (paceOf), step 5's PairDisagrees rethrow (`${e.message}, to be retried`), step 5's read through keptIdReader
 // (`let{rpcs:s,pass:c,reader:l}=await JV(`, its pair and pass the held reader's: card wallet-restore-reads-ux) and signedOut's new keep; each zeroes its own marker and no other (measured on the
 // merged build at 124994e7)
-const RULE_OF = { busy_wait: "perSec:.39,burst:8", pair_wrong: ".message}, to be retried`", id_keep: "let{rpcs:", id_signout: "signedOut:()=>{" };
+const RULE_OF = { busy_wait: "perSec:.39,burst:8", pair_wrong: ".message}, read again`", id_keep: "let{rpcs:", id_signout: "signedOut:()=>{" };
 const ruleOf = (m) => (typeof MARK[m] === "function" ? RULE_OF[m] : MARK[m]);
 
 test("the committed build in this tree passes the live rule, with the recorded providers' reads", async () => {
@@ -270,15 +270,20 @@ test("reach_misses and reach_floor match a miss counted only past the floor, nev
   assert.equal(n("let o=a??0,s=[]", "reach_floor"), 0);
 });
 
-// the page's wiring (src/pool-restore.ts readDepositIds): the error kept is the one thrown again
-test("ids_stop matches the first unread id stopping every read after it, never another", () => {
+// the page's wiring (src/pool-restore.ts readDepositIds): each id on the run's signal, read on past an unread one
+// (card restore-first-sign-in-under-two-minutes, review P2-2 of 53f5e92f; the stop that kept the first error and threw
+// it at every read after is gone)
+test("ids_stop matches each id read on the run's signal through the kept reader, nothing kept between reads, never another", () => {
   const n = (text, k) => [...text.matchAll(MARK[k])].length;
-  // the id and its index handed on (card wallet-restore-reads-ux: the U_X reads beside the id take the index)
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=e,e}", "ids_stop"), 1);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw p;try{return await a(e,t)}catch(e){throw o??=e,e}", "ids_stop"), 0);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw e}", "ids_stop"), 0);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e,t)}catch(e){throw o??=x,e}", "ids_stop"), 0);
-  assert.equal(n("if(r.throwIfAborted(),o!==void 0)throw o;try{return await a(e)}catch(e){throw o??=e,e}", "ids_stop"), 0, "the index dropped");
+  const line = (o = {}) => {
+    const x = { sig: "i", rd: "u", check: "i", call: "u(e,t)", ...o };
+    return `let{rpcs:c,pass:l,reader:${x.rd}}=await zW(Nw,n.rpcs,r,{...n.opts,signal:${x.sig}}),d=await BW(Nw,c,l,{...n.opts,signal:i}),f=async(e,t)=>(${x.check}.throwIfAborted(),${x.call}),p=1`;
+  };
+  assert.equal(n(line(), "ids_stop"), 1);
+  assert.equal(n(line({ check: "o" }), "ids_stop"), 0, "another signal checked");
+  assert.equal(n(line({ call: "c(e,t)" }), "ids_stop"), 0, "another reader");
+  assert.equal(n(line({ call: "u(e)" }), "ids_stop"), 0, "the index dropped");
+  assert.equal(n(`let{rpcs:c,pass:l,reader:u}=await zW(Nw,n.rpcs,r,{...n.opts,signal:i}),d=await BW(Nw,c,l,{...n.opts,signal:i}),f=async(e,t)=>{if(i.throwIfAborted(),o!==void 0)throw o;try{return await u(e,t)}catch(e){throw o??=e,e}}`, "ids_stop"), 0, "the stop at the first unread id");
 });
 
 test("a 429 or a 408 is asked again after its Retry-After (10 s with none, 30 s at most), and after four asks it is the answer", async () => {
@@ -318,11 +323,12 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
     to: "r",
     answered: "r.retry.length===0&&r.held.length===0",
     last: "a=i||n>x.length",
-    told: "a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}",
+    told: "a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}",
+    gone: "!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}",
   };
   const end = (o = {}) => {
     const x = { ...good5, ...o };
-    return `.catch(e=>{${x.pass}${x.to}.retry.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)}),t.throwIfAborted();let i=${x.answered},${x.last};if(await v(${x.told}),i){`;
+    return `.catch(e=>{${x.pass}${x.to}.retry.push(\`step 5 did not finish: \${e instanceof Error?e.message:\`it threw\`}\`)}),t.throwIfAborted();let i=${x.answered},${x.last};if(await v(${x.told}),i){${x.gone}`;
   };
   assert.equal(n(end(), "ids_end"), 1);
   assert.equal(n(end({ pass: "" }), "ids_end"), 0, "a seed gone retried");
@@ -331,8 +337,12 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end({ answered: "r.retry.length===0" }), "ids_end"), 0, "answered with money read apart left");
   assert.equal(n(end({ answered: "r.retry.length<2&&r.held.length===0" }), "ids_end"), 0);
   assert.equal(n(end({ last: "a=i||n>=x.length" }), "ids_end"), 0, "a try fewer");
-  assert.equal(n(end({ told: "a?{retry:r.retry,held:[],named:[...r.named],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops held");
-  assert.equal(n(end({ told: "a?{retry:r.retry,held:r.held,named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
+  assert.equal(n(end({ told: "a?{retry:[],held:[],named:[...r.named,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops held");
+  assert.equal(n(end({ told: "a?{retry:[],held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops what is unread (silent: review P2-2)");
+  assert.equal(n(end({ told: "a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the 53f5e92f end: unread kept off the finding");
+  assert.equal(n(end({ told: "a?{retry:[],held:r.held,named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
+  assert.equal(n(end({ gone: "!g&&await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
+  assert.equal(n(end({ gone: "await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed after a failed walk");
   assert.equal(n(end({ told: "{...r,tries:n,last:a}" }), "ids_end"), 0, "held never a finding");
   // the branch of a pool whose chain has no U_X reads (its `ux` null): its ids' reasons through the helper by kind, then
   // the unread chain on `named`, with nothing between them, then the next pool
@@ -454,7 +464,8 @@ const PLANTS = [
   ["pair_wrong", "readId reads rpcs[0] for both (one provider's word as the pair's)", () => plant(String.raw`=await Promise\.allSettled\(§\.map\((?<p>§)=>§\(§\[\k<p>\],§\)\)\)`, (s, g) => s.replace(`[${g.p}]`, "[0]"))],
   ["pair_wrong", "RANK inverted (the weaker named the liar)", () => swap("\\{unused:0,used:1,money:2\\}", "{unused:0,used:1,money:2}", "{unused:2,used:1,money:0}")],
   ["pair_wrong", "readId ranks by another table than RANK", () => plant(String.raw`=(?<r>§)\[(?<o>§)\[0\]\.x\]>\k<r>\[\k<o>\[1\]\.x\]`, (s, g) => s.replaceAll(`${g.r}[`, "({unused:0,used:1,money:2})["))],
-  ["pair_wrong", "step 5's catch lets a disagreement read on", () => swap(String.raw`\}catch\((?<e>§)\)\{if\(\k<e> instanceof §\)throw new §\(\k<e>\.stronger,`, "if(", "if(!1&&")],
+  ["pair_wrong", "step 5's catch takes a disagreement as unused (the id skipped, never named unread)", () => plant(String.raw`\}catch\((?<e>§)\)\{if\(§\.signal\?\.aborted\)throw \k<e>;`, (s, g) => `${s}if(${g.e} instanceof Error&&${g.e}.name===\`PairDisagrees\`)continue;`)],
+  ["pair_wrong", "step 5's catch counts a read unread after the run's signal ended", () => plant(String.raw`\}catch\((?<e>§)\)\{if\(§\.signal\?\.aborted\)throw \k<e>;`, () => "}catch(e){")],
   // what a Retry keeps
   ["id_keep", "a kept answer of unused for every id", () => plant(String.raw`let (?<h>§)=(?<k>§)\?\.answers\.get\((?<u>§)\);if\(\k<h>!==void 0\)return \k<h>;`, (s, g) => `let ${g.h}=${g.k}?.answers.get(${g.u});if(${g.k})return\`unused\`;`)],
   ["id_keep", "every answer kept across passes (lasting on any state)", () => plant(String.raw`,(?<b>§)&&(?<x>§)===` + "`used`" + String.raw`&&(?<k>§)\?\.lasting\.add\((?<u>§)\)`, (s, g) => `,${g.k}?.lasting.add(${g.u})`)],
@@ -493,7 +504,9 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
   const cases = [
     ["ids_end", /if\([\w$]+ instanceof [\w$]+\|\|[\w$]+\.aborted\)throw [\w$]+;/, ""],
     ["ids_end", /&&[\w$]+\.held\.length===0/, ""],
-    ["ids_end", /,\.\.\.[\w$]+\.held\]/, "]"],
+    ["ids_end", /,\.\.\.[\w$]+\.held,/, ","],
+    ["ids_end", /,\.\.\.[\w$]+\.retry\]/, "]"],
+    ["ids_end", /&&[\w$]+\.named\.length===0&&await/, "&&await"],
     ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
     ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],
     ["ids_ux_push", /\.named\.push\(`\$\{[\w$]+\.label\}: \$\{[\w$]+\}`\);continue\}$/, (s) => s.replace(".named.", ".retry.")],

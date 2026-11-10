@@ -120,7 +120,7 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(mut(/:([\w$]+)>1n&&([\w$]+)\.push\(\{why:`holds/, ":!1&&$2.push({why:`holds").id_held, false, "money above the kept unit not named");
   assert.equal(mut(/&&!([\w$]+)\.startsWith\(`nep141:`\)\?/, "&&!1?").id_held, false, "an NFT or multi-token read as moved-out dust (review P3-4)");
   assert.equal(mut(/amounts:\[([\w$]+)\.get\(([\w$]+)\)\?\?0n,([\w$]+)\.get\(\2\)\?\?0n\]/, "amounts:[$1.get($2)??0n,$1.get($2)??0n]").id_held, false, "one provider's map gives both amounts (review P2-2)");
-  assert.equal(mut(/,([\w$]+)=await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),\{\.\.\.([\w$]+)\.opts,signal:([\w$]+)\}\),([\w$]+),([\w$]+)=async\(/, ",$1=async e=>[],$8,$9=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
+  assert.equal(mut(/,([\w$]+)=await ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),\{\.\.\.([\w$]+)\.opts,signal:([\w$]+)\}\),([\w$]+)=async\(/, ",$1=async e=>[],$8=async(").id_held, false, "step 5's held reader returns nothing (review P2-2)");
   // on main's keptIdReader (merge of wallet-id-reader-paced): the held reader opened on another pass or pair than the id
   // reader's, or without the run's signal, is not step 5's
   const head = /let\{rpcs:([\w$]+),pass:([\w$]+),reader:([\w$]+)\}=await ([\w$]+)\(([\w$]+),([\w$]+)\.rpcs,([\w$]+),\{\.\.\.\6\.opts,signal:([\w$]+)\}\),([\w$]+)=await ([\w$]+)\(\5,\1,\2,\{\.\.\.\6\.opts,signal:\8\}\),/;

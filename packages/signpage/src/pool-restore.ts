@@ -37,7 +37,9 @@
 //   - The walk's notes are the floor: they are written before any id is read, whatever the ids then show.
 //   - Step 5 takes minutes on mainnet (8 lanes x 21 ids of an empty scope, 3 views an id on each provider at FastNEAR's
 //     0.39 a second: about 7.7 s an id, 21.5 minutes), so it runs after the walk's end and holds no lock a money kind
-//     takes: the user deposits, buys, sells and withdraws on the notes the walk wrote meanwhile.
+//     takes: the user deposits, buys, sells and withdraws on the notes the walk wrote meanwhile. RESTORE_LOCK is held
+//     for the walk and its floor only; step 5 runs under RESTORE_IDS_LOCK, one tab's at a time, and a tab that finds
+//     it held reads no id beside it (review P2-4 of 53f5e92f: a second tab's restore or Sync waited out step 5).
 //   - Each scope's lanes are read from this store's own lane first; once that lane is read its counter goes past the
 //     lane's highest with any history plus two of the lane (step 7's again; a counter only goes up). No deposit waits
 //     for it. The residual, in plain words: a restored account that asks a deposit quote in the first minutes (about
@@ -45,12 +47,16 @@
 //     so 1Click sees one id quoted twice and, if both quotes are funded, the two outside sends share it. Never a loss:
 //     the second deposit on the precommitment goes in as the id's next note (src/pool-deposit.ts, taken).
 //   - Each try's reasons are of two kinds (Step5Reasons). A read that did not answer (`retry`: an id unread on both
-//     providers, which stops every read after it; a pass the providers refuse; any read that throws) writes nothing the
-//     user sees: step 5 is asked again by itself after STEP5_PAUSES_MS, five tries in all, then left to the marker. A
-//     finding about the user's money (`named`) writes one new restore op, stalled, once a run, so the app's sheet shows
-//     it with Retry (S19.5), as the run's own end did before. Both go to the host's `step5`.
+//     providers or read apart by them, the lane reading on past it; a pass the providers refuse; any read that throws)
+//     writes nothing the user sees on the tries before the last: step 5 is asked again by itself after
+//     STEP5_PAUSES_MS, five tries in all, and what the last still leaves unread is told as a finding (review P2-2 of
+//     53f5e92f: never silent for good). A finding about the user's money (`named`) leaves the newest restore op
+//     stalled at the end of each try that has one (a new stalled op when the newest is not), so the app's sheet shows
+//     it with Retry (S19.5), and every request that joins the run after it is told stalled (review P2-1). Both go to
+//     the host's `step5`.
 //   - Step 5 is owed by a marker (RESTORE_IDS_KEY: the pinned pools' scopes) from the walk's end until a try reads
-//     every id; a signed-in load that finds it runs the restore again in the background, no op written (resume).
+//     every id and finds nothing; a signed-in load that finds it runs the restore again in the background, no op
+//     written (resume).
 //   - The testnet build reads no deposit id: it makes no 1Click quote (src/pool-deposit-address.ts), so no id of its
 //     pools can hold a trace on NEAR.
 //   - A pool deposit's money can also wait at its one-time account U_X on the pool's own chain (1Click's delivery there,
@@ -124,6 +130,8 @@ import { PAGE_SOL_CACHE, PAGE_SOL_MARK_BATCHES, PAGE_SOL_PIN, pageEvmHistory, pa
 
 /** The Web Lock a run holds (each tab's runs in turn); RESTORE_LOCK/<op id>: one follower's op, held while it runs. */
 export const RESTORE_LOCK = "ct-pool/restore";
+/** Step 5's own lock (one tab's step 5 at a time), apart from RESTORE_LOCK: never `${RESTORE_LOCK}/<op id>`, a follower's. */
+export const RESTORE_IDS_LOCK = "ct-pool/restore-ids";
 
 /** The gap between two "reading" progress events: within the 10 s the kit's client names. */
 export const RESTORE_BEAT_MS = 5_000;
@@ -209,7 +217,7 @@ export function lanesOf(notes: readonly RestoredNote[], scope: bigint): { laneHi
 /**
  * Each reason one try of step 5 is not done, as found, on one of three lists (so a throw keeps the reasons before it):
  * - `retry`: a read that did not answer (an id unread on both providers, a pass refused, any throw), asked again by
- *   itself; past the page's tries it is left to the marker, silent;
+ *   itself; on the page's last try it is told as a finding, and the marker stays;
  * - `held`: a read about money that is there (a U_X or an id holding something, its amount unread or read apart on the
  *   two RPCs), asked again the same way; past the page's tries it is a finding, so money on a one-time id is never left
  *   with nothing on screen;
@@ -243,22 +251,17 @@ async function readDepositIds(
   // pass it reads at (the kept one while fresh, else the one just opened): nearIdHeldReader refuses a pass
   // VAULT_SYNC_LAG_MAX blocks old, and step 5 takes minutes
   const heldOf = await nearIdHeldReader(POOL_DEPOSIT_NETWORK, rpcs, pass, { ...ids.opts, signal });
-  let stop: unknown;
+  // each id on the run's signal; an id unread leaves the ids after it read (review P2-2 of 53f5e92f): the lane names
+  // it unread and reads on, as restoreDepositIds does past any unread id
   const holds: IdReader = async (u, i) => {
     signal.throwIfAborted();
-    if (stop !== undefined) throw stop;
-    try {
-      return await reader(u, i);
-    } catch (e) {
-      stop ??= e;
-      throw e;
-    }
+    return reader(u, i);
   };
   const undone = (label: string, r: DepositIds): void => {
     for (const y of idsUndoneOf(r)) out[y.kind].push(`${label}: ${y.why}`);
   };
   // this store's lane first; once read whole (no lane stopped past its walk's end) its counter goes past its highest
-  const lanes = (scope: bigint) => ({ first: own.lane, laneRead: async (x: LaneIds) => void (x.lane === own.lane && x.reach === null && (await own.raise(scope, coverTo(x)))) });
+  const lanes = (scope: bigint) => ({ first: own.lane, signal, laneRead: async (x: LaneIds) => void (x.lane === own.lane && x.reach === null && (await own.raise(scope, coverTo(x)))) });
   for (const w of walked) {
     // the walk's deposit notes are all of its pool's scope: one of another is a drift, never read on
     const drift = w.notes.filter((n) => n.ref.kind === "deposit" && n.ref.s !== w.scope);
@@ -539,7 +542,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
 
   // one run: the walk, its notes written (the floor), `first` told; then step 5, tried again by itself on a read that did
   // not answer. `owed`: a load's resume, which reads nothing when another tab removed the marker meanwhile
-  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void): Promise<void> => {
+  const read = async (signal: AbortSignal, owed: boolean, first: (stage: RestoreStage) => void, run: { finding: boolean }): Promise<void> => {
     const pools = (h.pools ?? pagePools)();
     const solana = h.solana ?? solanaRestoreNotes;
     const evm = h.evm ?? evmRestoreNotes;
@@ -554,36 +557,39 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       h.ended?.(stage, why);
       first(stage);
     };
-    // the restore lock, held for the run (each tab's runs in turn); the seed's lock only for each use of the seed
-    return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, async (): Promise<void> => {
-      // the run's seed: an HMAC of it under a key drawn for this run, taken at its first use and held in memory only
-      // (never stored, logged or sent), so a sign out and a sign in with other words in another tab between two uses
-      // stops the run before one more use, never deriving those words' ids on this run's lanes nor writing this run's
-      // notes into that store (review of e31892ef, P3-2)
-      const runKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
-      let mark = null as Uint8Array | null;
-      // under the seed lock, shared, while this run's seed is still the one stored: a sign out (exclusive) never runs
-      // inside a use; `fn` gets the seed, zeroed when it ends
-      const seedHeld = <T,>(fn: (seed64: Uint8Array) => Promise<T>): Promise<T> =>
-        locks().request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
-          signal.throwIfAborted();
-          if (!(await h.signedIn())) throw new SeedGone("signed out during the restore");
-          const s = await h.seed64();
-          try {
-            const m = hmac(sha256, runKey, s);
-            if (mark === null) mark = m;
-            else {
-              const same = m.length === mark.length && m.every((x, k) => x === mark![k]);
-              m.fill(0);
-              if (!same) throw new SeedGone("other words were signed in during the restore");
-            }
-            return await fn(s);
-          } finally {
-            s.fill(0);
+    // the run's seed: an HMAC of it under a key drawn for this run, taken at its first use and held in memory only
+    // (never stored, logged or sent), so a sign out and a sign in with other words in another tab between two uses
+    // stops the run before one more use, never deriving those words' ids on this run's lanes nor writing this run's
+    // notes into that store (review of e31892ef, P3-2)
+    const runKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    let mark = null as Uint8Array | null;
+    // under the seed lock, shared, while this run's seed is still the one stored: a sign out (exclusive) never runs
+    // inside a use; `fn` gets the seed, zeroed when it ends
+    const seedHeld = <T,>(fn: (seed64: Uint8Array) => Promise<T>): Promise<T> =>
+      locks().request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+        signal.throwIfAborted();
+        if (!(await h.signedIn())) throw new SeedGone("signed out during the restore");
+        const s = await h.seed64();
+        try {
+          const m = hmac(sha256, runKey, s);
+          if (mark === null) mark = m;
+          else {
+            const same = m.length === mark.length && m.every((x, k) => x === mark![k]);
+            m.fill(0);
+            if (!same) throw new SeedGone("other words were signed in during the restore");
           }
-        }) as Promise<T>;
-      // the seed for one use
-      const seed: SeedUse = (use) => seedHeld(async (s) => use(s));
+          return await fn(s);
+        } finally {
+          s.fill(0);
+        }
+      }) as Promise<T>;
+    // the seed for one use
+    const seed: SeedUse = (use) => seedHeld(async (s) => use(s));
+    // step 5 of this run, set at the walk's end and run after the restore lock is let go
+    let step5: (() => Promise<void>) | null = null;
+    // the restore lock, held for the walk and its floor (each tab's walks in turn), never for step 5 (review P2-4 of
+    // 53f5e92f: a second tab's restore or Sync waited out the whole of step 5); the seed's lock only for each use of it
+    return locks().request(RESTORE_LOCK, { mode: "exclusive", signal }, async (): Promise<void> => {
       try {
         // a load's resume that another tab's run finished first: nothing is owed
         if (owed && (await (await h.store()).get("meta", RESTORE_IDS_KEY)) === undefined) return end("done");
@@ -645,17 +651,24 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // the wait the user sees ends here: their notes are back, shown and spendable
         const stage: RestoreStage = why.length > 0 ? "stalled" : "done";
         end(stage);
+        step5 = async (): Promise<void> => {
 
-        // step 5, after the walk's end: it holds no lock a money kind takes, and tells the user only of a finding
-        // about their money (`named`: a stalled op of its own, once a run, unless the walk's end was stalled already,
-        // whose sheet the user has); a read that did not answer is asked again by itself, the pauses growing, then left
-        // to the marker
-        let surfaced = stage === "stalled";
+        // step 5, after the walk's end: it holds no lock a money kind takes, and tells the user of a finding about
+        // their money (`named`); a read that did not answer is asked again by itself, the pauses growing, and told the
+        // same way on the last try (review P2-2 of 53f5e92f: never silent for good). A finding told holds for the run
+        // (review P2-1): every request that joins it from then on ends stalled (start's follow), and at each try's end
+        // with one the newest restore op is stalled (one written when it is not), so a Retry tapped meanwhile never
+        // leaves the screen saying done
         const tell = async (r: Step5End): Promise<void> => {
           h.step5?.(r);
-          if (r.named.length === 0 || surfaced) return;
-          surfaced = true;
-          await seedHeld(async () => (await h.store()).put("ops", crypto.randomUUID(), { kind: "restore", stage: "stalled", txs: [], created_ms: now() }));
+          if (r.named.length === 0) return;
+          run.finding = true;
+          await seedHeld(async () => {
+            const st = await h.store();
+            const ops = await Promise.all((await st.keys("ops")).map(async (k) => (await st.get("ops", k)) as { kind?: unknown; stage?: unknown; created_ms?: unknown } | undefined));
+            const newest = ops.filter((o) => o?.kind === "restore").sort((x, y) => Number(x!.created_ms) - Number(y!.created_ms)).at(-1);
+            if (newest?.stage !== "stalled") await st.put("ops", crypto.randomUUID(), { kind: "restore", stage: "stalled", txs: [], created_ms: now() });
+          });
         };
         // the testnet build: named at the walk's end above, nothing for step 5 to read
         if (ids === null) return;
@@ -681,21 +694,36 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           signal.throwIfAborted();
           const answered = out.retry.length === 0 && out.held.length === 0;
           const last = answered || t > pauses.length;
-          // past the tries, money read but not read whole is a finding: the user sees it (the sheet's Retry)
-          await tell(last ? { retry: out.retry, held: [], named: [...out.named, ...out.held], tries: t, last } : { ...out, tries: t, last });
+          // past the tries, what is still not read is told as a finding: the user sees it (the sheet's Retry)
+          await tell(last ? { retry: [], held: [], named: [...out.named, ...out.held, ...out.retry], tries: t, last } : { ...out, tries: t, last });
           if (answered) {
-            // every id read: nothing is owed, unless a pool's walk failed (the next load walks it and reads its ids)
-            if (!walkFailed) await seedHeld(async () => (await h.store()).delete("meta", RESTORE_IDS_KEY));
+            // every id read and nothing found: nothing is owed, unless a pool's walk failed (the next load walks it and
+            // reads its ids); a finding keeps the marker, so the next load reads again (review P2-1)
+            if (!walkFailed && out.named.length === 0) await seedHeld(async () => (await h.store()).delete("meta", RESTORE_IDS_KEY));
             return;
           }
           if (last) return;
           await pause(pauses[t - 1]!, signal);
         }
-      } finally {
+        };
+      } catch (e) {
         runKey.fill(0);
         mark?.fill(0);
+        throw e;
       }
-    }).catch((e: unknown): never => {
+    })
+      .then(async () => {
+        try {
+          // step 5 under a lock of its own, one tab at a time: a tab whose step 5 another tab runs reads no id beside
+          // it (that tab's run reads them, and removes the marker once every id is read)
+          const go = step5 as (() => Promise<void>) | null;
+          if (go !== null) await locks().request(RESTORE_IDS_LOCK, { mode: "exclusive", ifAvailable: true }, async (l) => void (l !== null && (signal.throwIfAborted(), await go())));
+        } finally {
+          runKey.fill(0);
+          mark?.fill(0);
+        }
+      })
+      .catch((e: unknown): never => {
       why.push(`the restore stopped: ${e instanceof Error ? e.message : "it threw"}`);
       end("stalled");
       throw e;
@@ -735,7 +763,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       // the walk's end is its followers' records' end: each one's write landed (or failed)
       void Promise.all(followers.map((f) => f.writes)).then(() => firstOf(s));
     };
-    const done = read(ctl.signal, owed, post)
+    const state = { finding: false };
+    const done = read(ctl.signal, owed, post, state)
       .catch(() => {})
       .then(async () => {
         post("stalled");
@@ -757,8 +786,9 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         write(f, "started");
         write(f, "reading");
         progress?.("reading");
-        // a request after the walk's end (a Retry, a Sync while step 5 reads on) is told that end at once
-        if (stage !== null) tell(f, stage);
+        // a request after the walk's end (a Retry, a Sync while step 5 reads on) is told that end at once, stalled once
+        // step 5 has told a finding in this run (review P2-1)
+        if (stage !== null) tell(f, state.finding ? "stalled" : stage);
       },
     };
     run = r;
