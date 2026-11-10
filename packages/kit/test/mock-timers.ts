@@ -3,8 +3,8 @@
 // them later, while timers are mocked again, takes out whatever live timer holds that place then, and that wait never
 // ends. enableTimers keeps track of every timer set while mocked; resetTimers clears each one still set first, so no
 // handle leaves with a place. test/mock-timers.test.mjs refuses a direct timers.enable( or timers.reset( in any test.
-// The same file sits in each package whose tests mock timers (packages/kit, packages/signpage, apps/helper), byte for
-// byte: no package imports another's tests.
+// The same file sits in each package whose tests mock timers (packages/kit, packages/signpage, packages/wallet,
+// apps/helper), byte for byte: no package imports another's tests.
 import type { MockTimers } from "node:test";
 
 type Clear = (h: unknown) => void;

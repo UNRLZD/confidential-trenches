@@ -11,16 +11,20 @@ import { Avatar } from "../market/Avatar.tsx";
 import { pickData, useDiscoverData } from "./data.ts";
 import { usePick } from "../../shell/chain-pick.ts";
 import { ColSearch, Dock, Ic, PadChip, PauseIcon, Presets, QuickBuyField, T } from "./Toolbar.tsx";
-import { narrowed, padEntries, pendingNew, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
+import { matches, narrowed, padEntries, pendingNew, QB_DEFAULT, qbAmount, readView, viewRows } from "./view.ts";
 import type { View } from "./view.ts";
+import { filterOn, filterRows, readFilters } from "./filters.ts";
+import type { ColFilter, Filters } from "./filters.ts";
+import { FilterPanel } from "./FilterPanel.tsx";
 
 // S5 Discover (A2.1, app.md:1454; 09-design-brief S5), drawn after R5's discover-1440.html and discover-390.html
 // (design-lock-r5) from a 06b snapshot: four columns from 768 px, one list with tabs on the phone (S5.18). States:
 // S5.1 skeleton rows, S5.2 rows, S5.3 No tokens, S5.5 Offline with Retry. The snapshot comes from the caller;
 // DiscoverRoute reads it from the helper (data.ts, card app-discover-live). The toolbar (card app-discover-toolbar,
 // view.ts and Toolbar.tsx): the presets, the MC chip, the launchpad menu, each column's search, the phone's chips and
-// Pause, and the Quick buy amount. Not here yet, each on its own card: the row's quick buy, the column filter panel,
-// Following, the watchlist and the stale pill.
+// Pause, and the Quick buy amount. Each column's filter panel (card app-discover-filter-panel, filters.ts and
+// FilterPanel.tsx): the funnel in the column head on the desktop, the funnel at the end of the chips on the phone. Not here
+// yet, each on its own card: the row's quick buy, Following, the watchlist and the stale pill.
 
 export type DiscoverData = { status: "loading" } | { status: "error" } | { status: "ready"; snapshot: MarketSnapshot };
 
@@ -181,7 +185,7 @@ function Skeleton({ phone }: { phone: boolean }) {
   );
 }
 
-function Body({ data, k, win, phone, nowMs, onRetry, view, q }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void; view: View; q: string }) {
+function Body({ data, k, win, phone, nowMs, onRetry, view, filter, q }: { data: DiscoverData; k: ColumnKey; win: Win; phone: boolean; nowMs: number; onRetry: () => void; view: View; filter: ColFilter; q: string }) {
   if (data.status === "loading")
     return (
       <div className="dsc-rows" role="list" aria-busy="true" aria-label={WORDS.loading.text} data-state="S5.1">
@@ -202,10 +206,12 @@ function Body({ data, k, win, phone, nowMs, onRetry, view, q }: { data: Discover
         <W id="noTokens" />
       </div>
     );
-  const rows = viewRows(all, view, q);
-  // nothing left under the toolbar's view (R5 S5.13 `No results`, CN-95) or the column's search (R5 S5.14 `No tokens`)
+  const kept = filterRows(viewRows(all, view), filter, nowMs);
+  const rows = kept.filter((r) => matches(r, q));
+  // nothing left under the toolbar's view and the column's filters (R5 S5.13 `No results`, CN-95) or the column's search
+  // (R5 S5.14 `No tokens`)
   if (!rows.length)
-    return q.trim() && viewRows(all, view).length > 0 ? (
+    return q.trim() && kept.length > 0 ? (
       <div className="dsc-rows dsc-msg" data-state="S5.14">
         <W id="noTokens" />
       </div>
@@ -223,7 +229,10 @@ function Body({ data, k, win, phone, nowMs, onRetry, view, q }: { data: Discover
   );
 }
 
-const countOf = (data: DiscoverData, k: ColumnKey, view: View, q: string) => (data.status === "ready" ? String(viewRows(columnRows(data.snapshot, k), view, q).length) : "—");
+/** The tokens a column keeps under the toolbar's view and its filters (its head's count and the panel's), or null. */
+const keptOf = (data: DiscoverData, k: ColumnKey, view: View, filter: ColFilter, nowMs: number): number | null =>
+  data.status === "ready" ? filterRows(viewRows(columnRows(data.snapshot, k), view), filter, nowMs).length : null;
+const countOf = (n: number | null) => (n === null ? "—" : String(n));
 
 /** A value kept on this device (the toolbar's view, the Quick buy amount); blocked storage keeps it for the visit only. */
 function useKept<T>(key: string, read: (raw: unknown) => T): [T, (v: T) => void] {
@@ -249,12 +258,31 @@ function useKept<T>(key: string, read: (raw: unknown) => T): [T, (v: T) => void]
 
 const readAmount = (raw: unknown): string => (typeof raw === "string" && qbAmount(raw) !== null ? raw : QB_DEFAULT);
 
+/** The funnel (R5 colHead's filter button, discover-390.html's m-filter-open): pressed while its panel is open, a dot while
+ *  the column's filters narrow anything. */
+function FunnelButton({ on, dot, label, testid, phone, onClick }: { on: boolean; dot: boolean; label: string; testid: string; phone?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className={phone ? "dsc-mfun" : "dsc-hb"} data-on={on} aria-pressed={on} aria-haspopup="dialog" aria-label={label} data-filter-btn="" data-testid={testid} onClick={onClick}>
+      <Ic k="funnel" size={14} />
+      {dot && <span className="dsc-hbdot" />}
+    </button>
+  );
+}
+
 /** S5. `nowMs` is the clock ages are drawn against; `onRetry` asks the caller to read again. */
 export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: number; onRetry: () => void }) {
   const [tab, setTab] = useState<ColumnKey>("new");
   const tabWin = COLUMNS.find((c) => c.key === tab)!.win;
   const [view, setView] = useKept<View>("ct.discover.view", readView);
   const [amount, setAmount] = useKept<string>("ct.discover.quickbuy", readAmount);
+  // each column's filter panel, kept as the toolbar's view is; the panel open on the desktop (a column) and the phone
+  const [filters, setFilters] = useKept<Filters>("ct.discover.filters", readFilters);
+  const setFilter = (k: ColumnKey) => (f: ColFilter) => setFilters({ ...filters, [k]: f });
+  const [panel, setPanel] = useState<ColumnKey | null>(null);
+  const [sheet, setSheet] = useState(false);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const closeSheet = useCallback(() => setSheet(false), []);
+  const snap = data.status === "ready" ? data.snapshot : null;
   // each column's search: open with its text, or closed (absent)
   const [search, setSearch] = useState<Partial<Record<ColumnKey, string>>>({});
   // Pause (the phone): the list holds the read it showed when paused; Resume draws the live one again
@@ -304,11 +332,12 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
                   <>
                     <Glyph k={c.key} />
                     <span className="dsc-ht" id={`dsc-h-${c.key}`}><W id={TITLE[c.key]} /></span>
-                    <span className="dsc-count">{countOf(data, c.key, view, "")}</span>
+                    <span className="dsc-count">{countOf(keptOf(data, c.key, view, filters[c.key], nowMs))}</span>
                     <span className="dsc-grow" />
                     <button type="button" className="dsc-hb" aria-label={`${WORDS.search.text} ${title}`} data-testid={`col-search-${c.key}`} onClick={() => setSearch((s) => ({ ...s, [c.key]: "" }))}>
                       <Ic k="search" size={14} />
                     </button>
+                    <FunnelButton on={panel === c.key} dot={filterOn(filters[c.key])} label={`${WORDS.filters.text} ${title}`} testid={`col-filter-${c.key}`} onClick={() => setPanel((p) => (p === c.key ? null : c.key))} />
                   </>
                 ) : (
                   <>
@@ -328,7 +357,10 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
                   </>
                 )}
               </div>
-              <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} view={view} q={q ?? ""} />
+              <Body data={data} k={c.key} win={c.win} phone={false} nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[c.key]} q={q ?? ""} />
+              {panel === c.key && (
+                <FilterPanel col={c.key} title={title} snapshot={snap} filter={filters[c.key]} onFilter={setFilter(c.key)} count={keptOf(data, c.key, view, filters[c.key], nowMs)} onClose={closePanel} />
+              )}
             </section>
           );
         })}
@@ -338,13 +370,15 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
           {COLUMNS.map((c) => (
             <button key={c.key} type="button" role="tab" aria-selected={tab === c.key} className="dsc-tab" data-tab={c.key} onClick={() => setTab(c.key)}>
               <W id={TITLE[c.key]} />
-              <span className="dsc-count">{countOf(phoneData, c.key, view, "")}</span>
+              <span className="dsc-count">{countOf(keptOf(phoneData, c.key, view, filters[c.key], nowMs))}</span>
             </button>
           ))}
         </div>
         <div className="dsc-mfilters" data-testid="m-discover-filters">
           <Presets view={view} onView={setView} phone />
           <PadChip entries={entries} view={view} onView={setView} phone title={<W id="padMenuTitle" />} />
+          <span className="dsc-grow" />
+          <FunnelButton phone on={sheet} dot={filterOn(filters[tab])} label={WORDS.filters.text} testid="m-filter-open" onClick={() => setSheet((o) => !o)} />
         </div>
         {held && (
           <div className="dsc-mpend">
@@ -354,8 +388,14 @@ export function Discover({ data, nowMs, onRetry }: { data: DiscoverData; nowMs: 
             </button>
           </div>
         )}
-        <Body data={phoneData} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} view={view} q="" />
+        <Body data={phoneData} k={tab} win={tabWin} phone nowMs={nowMs} onRetry={onRetry} view={view} filter={filters[tab]} q="" />
         <Dock amount={amount} onAmount={setAmount} />
+        {sheet && (
+          <>
+            <div className="dsc-fscrim" aria-hidden="true" />
+            <FilterPanel phone col={tab} title={WORDS[TITLE[tab]].text} snapshot={phoneData.status === "ready" ? phoneData.snapshot : null} filter={filters[tab]} onFilter={setFilter(tab)} count={keptOf(phoneData, tab, view, filters[tab], nowMs)} onClose={closeSheet} />
+          </>
+        )}
       </div>
     </section>
   );
