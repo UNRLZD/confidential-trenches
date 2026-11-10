@@ -606,3 +606,264 @@ test("A-4: 30 requests for 10 unreadable periods within 2 s read each period onc
   await assert.rejects(s.fee(EPOCH + 1));
   assert.ok(calls.length > 0, "read again once the miss is 2 s old");
 });
+
+// ---- card helper-evm-ready-holds-a-fee, review of 2bcfd4e0: seats that are wrong, hang, lag or fill their words with
+// their own URL. Each provider is a stub of fetch on the chain above, its clock the test's own (`at.T`); `plant` answers
+// in a provider's place when it returns anything ----
+type Planted = Response | { error: object; status?: number } | { result: unknown } | null;
+function planted(t: TestContext, plant: (host: string, method: string, params: unknown[], url: string) => Planted, at: { T: number }, lag: ReadonlyMap<string, number> = new Map()): Call[] {
+  const calls: Call[] = [];
+  const real = globalThis.fetch;
+  const realNow = Date.now;
+  t.after(() => {
+    globalThis.fetch = real;
+    Date.now = realNow;
+  });
+  Date.now = () => at.T;
+  globalThis.fetch = (async (u: string | URL, init?: RequestInit) => {
+    const host = new URL(String(u)).host;
+    const { id, method, params } = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    calls.push({ host, method, params });
+    const answer = (status: number, o: object) => new Response(JSON.stringify({ jsonrpc: "2.0", id, ...o }), { status, headers: { "content-type": "application/json" } });
+    const p = plant(host, method, params, String(u));
+    if (p instanceof Response) return p;
+    if (p !== null) return "result" in p ? answer(200, { result: p.result }) : answer(p.status ?? 200, { error: p.error });
+    const head = Math.floor(at.T / 1000) - S - (lag.get(host) ?? 0);
+    if (method === "eth_getBlockByNumber") {
+      const n = params[0] === "latest" ? head : Number(BigInt(params[0] as string));
+      return answer(200, { result: n > head ? null : block(n) });
+    }
+    if (method === "eth_call") {
+      const [{ to, data }] = params as [{ to: string; data: string }];
+      return answer(200, { result: word(to.toLowerCase() === PIN.toLowerCase() && data === DEPTH ? 2n : data === ARB_L1 ? 3n : 0n) });
+    }
+    if (method === "eth_chainId") return answer(200, { result: "0x1237" }); // Robinhood, 4663, the kit's pin
+    return answer(200, { error: { code: -32601, message: "no" } });
+  }) as typeof fetch;
+  return calls;
+}
+const ENV_RH = { POOL_EVM_ADDRESS_ROBINHOOD: PIN, POOL_EVM_SENDER_KEY_ROBINHOOD: KEY };
+/** ready() on the test's clock, each wait moving it: "ready" or the refusal's words, the waits, and the whole text. */
+async function readyOn(s: evm.EvmPoolSender, at: { T: number }): Promise<{ out: string; waits: number[] }> {
+  const waits: number[] = [];
+  const out = await s.ready(async (ms) => void (waits.push(ms), (at.T += ms))).then(() => "ready", (e: Error) => e.message);
+  return { out, waits };
+}
+const sendersWith = (env: Record<string, string>, lines: string[] = []) => evm.evmPoolSendersFromEnv(env, evmPoolVenues(), undefined, undefined, (l: string) => void lines.push(l));
+/** Another chain's node (Ethereum's id), its own blocks, newest `head`; a block hash of ours is unknown to it. */
+const otherChain = (head: number) => (method: string, params: unknown[]): Planted => {
+  if (method === "eth_chainId") return { result: "0x1" };
+  if (method === "eth_getBlockByNumber") {
+    const n = params[0] === "latest" ? head : Number(BigInt(params[0] as string));
+    return { result: n > head ? null : { ...block(n), hash: `0xee${n.toString(16).padStart(62, "0")}` } };
+  }
+  if (method === "eth_call") return { error: { code: -32000, message: "header not found" } };
+  return null;
+};
+
+test("review P2-1: a pair seat on another chain, either side, its newest block under or over ours, refuses the start at once naming both seats and both chains, before any block read", async (t) => {
+  const at = { T: NOW_MS };
+  let bad: { host: string; f: ReturnType<typeof otherChain> } | null = null;
+  const calls = planted(t, (host, method, params) => (bad !== null && host === bad.host ? bad.f(method, params) : null), at);
+  for (const host of ["robinhood.drpc.org", "rpc.mainnet.chain.robinhood.com"]) {
+    for (const head of [5_000, 900_000_000]) {
+      bad = { host, f: otherChain(head) };
+      at.T = NOW_MS;
+      calls.length = 0;
+      const r = await readyOn(sendersWith(ENV_RH).get(PIN)!, at);
+      assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state, 1 try over 0 s: two chains: (robinhood\.drpc\.org names chain 1, rpc\.mainnet\.chain\.robinhood\.com chain 4663|robinhood\.drpc\.org names chain 4663, rpc\.mainnet\.chain\.robinhood\.com chain 1)$/, `${host} ${head}`);
+      assert.deepEqual([r.waits, calls.map((c) => c.method)], [[], ["eth_chainId", "eth_chainId"]], `${host} ${head}`);
+    }
+  }
+});
+
+test("review P3-6: a refusal and every log line hold no part of a seat's key, whatever branch built them: a 40-character key in a path and in a query, each echoed by its seat whole, cut, upper-cased, encoded or in a revert's data", async (t) => {
+  const K_PATH = "pathKEY-0123456789abcdef0123456789abcdef";
+  const K_QUERY = "queryKEY-fedcba9876543210fedcba9876543210";
+  const ENV_KEYS = { ...ENV_RH, POOL_EVM_RPCS_ROBINHOOD: `https://a.example/v2/${K_PATH},https://b.example/rpc?apikey=${K_QUERY}` };
+  const QUOTE = new Set(evmPoolVenues().robinhood.providers!.map((u) => new URL(u).host));
+  const at = { T: NOW_MS };
+  let how: (host: string, method: string, params: unknown[], url: string) => Planted = () => null;
+  planted(t, (...a) => how(...a), at);
+  const mine = (host: string) => host === "a.example" || host === "b.example";
+  // no third operator holds the state, so each case's answer is the one its seat gave
+  const onState = (f: (url: string) => Planted) => (host: string, method: string, _p: unknown[], url: string): Planted =>
+    QUOTE.has(host) && method === "eth_call" ? { error: { code: -32000, message: "header not found" } } : mine(host) && method === "eth_call" ? f(url) : null;
+  const keyOf = (url: string) => (url.includes("?") ? K_QUERY : K_PATH);
+  const cases: [string, typeof how][] = [
+    ["HTTP 400, the URL in the message", onState((url) => ({ status: 400, error: { code: -32602, message: `bad request to ${url}` } }))],
+    ["-32000 that is no state miss, the URL in the message", onState((url) => ({ error: { code: -32000, message: `upstream ${url} failed` } }))],
+    ["a revert, the URL in its data", onState((url) => ({ error: { code: 3, message: "execution reverted", data: url } }))],
+    ["a message the client's 120-character cut ends inside the key", onState((url) => ({ status: 400, error: { code: -32603, message: `${"x".repeat(Math.max(0, 120 - url.length + 14))}${url}` } }))],
+    ["the URL percent-encoded", onState((url) => ({ status: 400, error: { code: -32603, message: `no route for ${encodeURIComponent(url)}` } }))],
+    ["the key alone, upper-cased", onState((url) => ({ status: 400, error: { code: -32603, message: `key ${keyOf(url).toUpperCase()} is over its plan` } }))],
+    ["the key alone, cut", onState((url) => ({ status: 400, error: { code: -32603, message: `${"y".repeat(100)} key ${keyOf(url)}` } }))],
+    ["a block read answered with the URL", (host, method, _p, url) => (mine(host) && method === "eth_getBlockByNumber" ? { result: { hash: url, number: url, timestamp: url } } : QUOTE.has(host) && method === "eth_getBlockByNumber" ? { result: null } : null)],
+    ["the transport failing with the URL in its words", (host, method, _p, url) => {
+      if (mine(host)) throw new TypeError(`request to ${url} failed, reason: connect ECONNREFUSED`);
+      return QUOTE.has(host) && method !== "eth_chainId" ? { error: { code: -32000, message: "header not found" } } : null;
+    }],
+  ];
+  for (const [name, f] of cases) {
+    how = f;
+    at.T = NOW_MS;
+    const lines: string[] = [];
+    const r = await readyOn(sendersWith(ENV_KEYS, lines).get(PIN)!, at);
+    assert.notEqual(r.out, "ready", name);
+    for (const text of [r.out, ...lines]) {
+      const low = text.toLowerCase();
+      for (const k of [K_PATH, K_QUERY]) assert.ok(!low.includes(k.slice(0, 8).toLowerCase()) && !text.includes(encodeURIComponent(k).slice(0, 8)), `${name}: ${text}`);
+      assert.ok(!/https?:\/\//i.test(text), `${name}: a URL left in ${text}`);
+    }
+  }
+});
+
+test("review P2-2: a seat that hangs to its client's timeout is asked once and passed over after it, one line naming it; the start is ready on two other operators, and a later fee read never waits on it", async (t) => {
+  const at = { T: NOW_MS };
+  const hang = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  const calls = planted(t, (host) => {
+    if (host === "robinhood.drpc.org") throw hang; // the kit client's AbortSignal.timeout, as it ends
+    return null;
+  }, at);
+  const lines: string[] = [];
+  const s = sendersWith(ENV_RH, lines).get(PIN)!;
+  const r = await readyOn(s, at);
+  assert.deepEqual([r.out, r.waits], ["ready", []]);
+  assert.equal(calls.filter((c) => c.host === "robinhood.drpc.org").length, 1, "asked once, then passed over");
+  const said = lines.filter((l) => l.includes("passed over"));
+  assert.equal(said.length, 1, lines.join("\n"));
+  assert.match(said[0]!, /^evm robinhood: robinhood\.drpc\.org passed over 30 s at a time from now: The operation was aborted due to timeout$/);
+  // a send's fee read of an earlier period, after the start: never asks it
+  const n = calls.length;
+  assert.equal((await s.fee(EPOCH + 1))?.fee, FEE.toString());
+  assert.ok(calls.length > n && calls.slice(n).every((c) => c.host !== "robinhood.drpc.org"));
+});
+
+test("review P2-2: a held seat never lets one operator count twice: dRPC's public seat hangs, its keyed seats alone hold the state, every other operator pruned: refused at the bound", async (t) => {
+  const at = { T: NOW_MS };
+  const hang = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  planted(t, (host, method) => {
+    if (host === "robinhood.drpc.org") throw hang;
+    if (method === "eth_call" && host !== "lb.drpc.live") return { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } };
+    return null;
+  }, at);
+  const r = await readyOn(sendersWith(ENV).get(PIN)!, at);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block \d+, 600 s old .*, 14 tries over 87 s: /);
+});
+
+test("review P3-1: one odd answer on a seat reached on a failover ('0x' or null to one state read) is asked again, never the start's end", async (t) => {
+  const at = { T: NOW_MS };
+  let odd: unknown = "0x";
+  let n = 0;
+  planted(t, (host, method) => {
+    if (method !== "eth_call") return null;
+    if (host === "robinhood.drpc.org") return { status: 400, error: UNKNOWN_STATE.body };
+    if (host === "robinhood-rpc.publicnode.com" && n++ === 0) return { result: odd };
+    return null;
+  }, at);
+  for (const v of ["0x", null]) {
+    odd = v;
+    n = 0;
+    at.T = NOW_MS;
+    const r = await readyOn(sendersWith(ENV_RH).get(PIN)!, at);
+    assert.deepEqual([r.out, r.waits], ["ready", [1_000]], String(v));
+  }
+});
+
+test("review P3-4: side A's first operator's newest block 700 s old, every other at the head: the check searches from the newer head and is ready at once", async (t) => {
+  const at = { T: NOW_MS };
+  planted(t, () => null, at, new Map([["robinhood.drpc.org", 700]]));
+  const r = await readyOn(sendersWith(ENV_RH).get(PIN)!, at);
+  assert.deepEqual([r.out, r.waits], ["ready", []]);
+});
+
+test("review item 8: a pair seat that answers HTML, 401 or 403 never refuses the start; one line names it, and it is passed over, not asked at every read", async (t) => {
+  const at = { T: NOW_MS };
+  const WRONG: [string, () => Response][] = [
+    ["HTML", () => new Response("<html><body>Welcome to nginx</body></html>", { status: 200, headers: { "content-type": "text/html" } })],
+    ["401", () => new Response(JSON.stringify({ message: "Unauthorized" }), { status: 401, headers: { "content-type": "application/json" } })],
+    ["403", () => new Response("Forbidden", { status: 403 })],
+  ];
+  let bad: (() => Response) | null = null;
+  const calls = planted(t, (host) => (bad !== null && host === "rpc.mainnet.chain.robinhood.com" ? bad() : null), at);
+  let ahead = 0;
+  const perfNow = performance.now.bind(performance);
+  performance.now = () => perfNow() + ahead;
+  t.after(() => void (performance.now = perfNow));
+  for (const [name, f] of WRONG) {
+    bad = f;
+    at.T = NOW_MS;
+    calls.length = 0;
+    const lines: string[] = [];
+    const s = sendersWith(ENV_RH, lines).get(PIN)!;
+    const r = await readyOn(s, at);
+    assert.deepEqual([r.out, r.waits], ["ready", []], name);
+    assert.equal(calls.filter((c) => c.host === "rpc.mainnet.chain.robinhood.com").length, 1, `${name}: asked once`);
+    const said = lines.filter((l) => l.includes("passed over"));
+    assert.equal(said.length, 1, `${name}: ${lines.join("\n")}`);
+    assert.match(said[0]!, /^evm robinhood: rpc\.mainnet\.chain\.robinhood\.com passed over 30 s at a time from now: /, name);
+    const n = calls.length;
+    await s.fee(EPOCH + 1);
+    assert.ok(calls.slice(n).every((c) => c.host !== "rpc.mainnet.chain.robinhood.com"), `${name}: not asked at the next read`);
+    // past its hold (on the read pair's clock, performance.now) it is asked again, answers the same, and is held again
+    // with no second line
+    at.T += 31_000;
+    ahead += 31_000;
+    const m = calls.length;
+    await s.fee(EPOCH - 60_000 + 1);
+    assert.ok(calls.slice(m).some((c) => c.host === "rpc.mainnet.chain.robinhood.com"), `${name}: asked again past its hold`);
+    assert.equal(lines.filter((l) => l.includes("passed over")).length, 1, `${name}: one line, at the first hold`);
+  }
+});
+
+test("review timing note: the check's bound holds its reads' time with its waits: every post takes 1 s (Robinhood's own pace), the state gone on every seat: refused within 90 s and one try, never 14 tries", async (t) => {
+  const at = { T: NOW_MS };
+  let posts = 0;
+  planted(t, (_host, method) => {
+    posts++;
+    at.T += 1_000;
+    return method === "eth_call" ? { error: { code: -32000, message: "header not found" } } : null;
+  }, at);
+  const r = await readyOn(sendersWith(ENV_RH).get(PIN)!, at);
+  const tries = Number(/, (\d+) tr(?:y|ies) over (\d+) s: /.exec(r.out)?.[1]);
+  const over = Number(/, \d+ tr(?:y|ies) over (\d+) s: /.exec(r.out)?.[1]);
+  assert.match(r.out, /^POOL_EVM_RPCS_ROBINHOOD: the fee's state at block \d+, \d+ s old .*, \d+ tries over \d+ s: /);
+  // the last try starts within the bound and finishes: at most the bound and one try's posts
+  const perTry = Math.ceil(posts / tries);
+  assert.ok(tries < 14 && over <= 90 + perTry && over === (at.T - NOW_MS) / 1000, `${tries} tries over ${over} s, ${posts} posts`);
+  t.diagnostic(`${tries} tries, ${posts} posts, ${(at.T - NOW_MS) / 1000} s`);
+});
+
+test("review P3-6: a revert whose data holds a seat's URL leaves no part of its key in the error a send's fee read rejects with", async (t) => {
+  const K = "pathKEY-0123456789abcdef0123456789abcdef";
+  const at = { T: NOW_MS };
+  let revert = false;
+  planted(t, (host, method, _p, url) => (revert && method === "eth_call" && host === "a.example" ? { error: { code: 3, message: "execution reverted", data: url } } : null), at);
+  const s = sendersWith({ ...ENV_RH, POOL_EVM_RPCS_ROBINHOOD: `https://a.example/v2/${K},https://b.example/rpc` }).get(PIN)!;
+  assert.equal((await readyOn(s, at)).out, "ready");
+  revert = true;
+  const e = await s.fee(EPOCH - 60_000 + 1).then(() => assert.fail("a revert is no fee"), (x: Error) => x);
+  assert.match(e.message, /^RPC error 3: execution reverted: a\.example$/);
+});
+
+test("review P3-2: a pool's fee read of the start's period that comes back after the period ended is not a fee for the running period: ready only once the next period's fee is held", async (t) => {
+  const at = { T: EPOCH + 60_000 + 59_500 };
+  const E = EPOCH + 60_000;
+  const first = block(E / 1000 - S).hash;
+  let moved = false;
+  const calls = planted(t, (_host, method, params) => {
+    // the fee's read at E's first block answers half a second after E ends
+    if (!moved && method === "eth_call" && (params[1] as { blockHash?: string } | undefined)?.blockHash === first) {
+      moved = true;
+      at.T = E + 60_500;
+    }
+    return null;
+  }, at, new Map());
+  const s = sendersWith(ENV_RH).get(PIN)!;
+  assert.equal((await readyOn(s, at)).out, "ready");
+  assert.ok(moved);
+  // the next period's fee is already in memory: no read
+  const n = calls.length;
+  assert.equal(await s.held(E + 60_000), true);
+  assert.equal(calls.length, n, "ready came before the running period's fee was read");
+});

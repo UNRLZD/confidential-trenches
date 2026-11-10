@@ -58,6 +58,8 @@ function chain(t: TestContext, refuse: Refuse, at: { T: number; stalled?: number
       const [{ to, data }] = params as [{ to: string; data: string }];
       return answer(200, { result: word(to.toLowerCase() === RH || to.toLowerCase() === BASE ? (data === DEPTH ? 2n : 0n) : data === ARB_L1 ? 3n : 0n) });
     }
+    // each chain's id, the kit's pin (Base 8453, Robinhood 4663)
+    if (method === "eth_chainId") return answer(200, { result: host.includes("base") ? "0x2105" : "0x1237" });
     return answer(200, { error: { code: -32601, message: "no" } });
   }) as typeof fetch;
   return calls;
@@ -287,7 +289,7 @@ test("(2b) the start's wait for the period's fee waits on the timer's read of it
   assert.ok(calls.length > 0);
 });
 
-test("(4) /v1/health's ready stays false while any pool has no fee for the period the start is in or the next: Base's fee read at once, Robinhood's only at the next period's read", async (t) => {
+test("(4) /v1/health's ready stays false while any pool has no fee for the period the start is in or the next: Base's fee read at once, Robinhood's only at the next period's read, ready at that read with both held", async (t) => {
   const S = await import("../server.ts");
   const at = { T: E + 30_000 };
   chain(t, GONE, at);
@@ -298,12 +300,13 @@ test("(4) /v1/health's ready stays false while any pool has no fee for the perio
   const pools = new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep).then(() => void done.push(s.network)) }]));
   const refused: string[] = [];
   const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), pools, (e: Error) => void refused.push(e.message)));
-  for (let i = 0; i < 10_000 && pending.length === 0; i++) await new Promise((r) => setImmediate(r));
-  assert.deepEqual([done, pending.map((p) => p.ms)], [["base"], [31_000]], "Base ready, Robinhood waiting for the next period");
+  for (let i = 0; i < 10_000 && pending.length < 2; i++) await new Promise((r) => setImmediate(r));
+  // Base holds its fee at once, Robinhood none: both wait for the next period (review P3-2: ready only at a moment every
+  // pool holds the running period's fee)
+  assert.deepEqual([done, pending.map((p) => p.ms)], [[], [31_000, 31_000]], "both waiting for the next period");
   assert.equal(gate.ready(), false);
-  const w = pending.shift()!;
-  at.T += w.ms;
-  w.go();
+  at.T += 31_000;
+  for (const w of pending.splice(0)) w.go();
   await gate.warmed;
   assert.equal(gate.ready(), true);
   assert.deepEqual([done.sort(), refused, at.T], [["base", "robinhood"], [], E + 60_000 + evm.EVM_FEE_WARM_DELAY_MS]);
@@ -317,4 +320,31 @@ test("the start's waits, a period and the read ahead's window fit under the depl
   const ours = evm.EVM_READY_MISS_MS + fee.POOL_EPOCH_MS + evm.EVM_FEE_WARM_WINDOW_MS;
   assert.equal(ours, 160_000);
   for (const bound of [wait, start]) assert.ok(Number.isInteger(bound) && bound * 1000 - ours >= 120_000, `${bound} s`);
+});
+
+test("(4b) review P3-2: Base's fee read in the start's period, Robinhood's only in the next, and Base's providers down by then: never ready while Base holds no fee for the running period", async (t) => {
+  const S = await import("../server.ts");
+  const at = { T: E + 30_000 };
+  chain(t, (host, method, ageS, T) => {
+    if (host.includes("base")) return T >= E + 60_000 ? { status: 502, body: { code: -32603, message: "bad gateway" } } : null;
+    return GONE(host, method, ageS, T);
+  }, at);
+  const senders = sendersOf({ ...ENV_RH, POOL_EVM_ADDRESS_BASE: BASE, POOL_EVM_SENDER_KEY_BASE: KEY }, []);
+  const pending: { ms: number; go: () => void }[] = [];
+  const sleep = (ms: number) => new Promise<void>((go) => pending.push({ ms, go }));
+  const gate = S.readyGate(Promise.resolve(), S.poolsChecked(new Map(), new Map([...senders].map(([k, s]) => [k, { ready: () => s.ready(sleep) }])), () => {}));
+  // three periods on: each wait the test lets go moves the clock to its end
+  for (let k = 0; k < 40 && at.T < E + 240_000; k++) {
+    for (let i = 0; i < 10_000 && pending.length === 0 && !gate.ready(); i++) await new Promise((r) => setImmediate(r));
+    assert.equal(gate.ready(), false, `ready at second ${(at.T - E) / 1000}, Base holding no fee for that period`);
+    const w = pending.shift()!;
+    at.T += w.ms;
+    w.go();
+  }
+  assert.ok(at.T >= E + 240_000);
+  assert.deepEqual([await senders.get(RH)!.held(E + 60_000), await senders.get(BASE)!.held(E + 60_000)], [true, false], "Robinhood holds the next period's fee, Base none");
+  // and while the check runs, the pool routes answer the coded 503 (review P3-5), never a read
+  await assert.rejects(senders.get(BASE)!.fee(at.T), /the start's check has not passed/);
+  assert.deepEqual((await senders.get(RH)!.carry({})).body, { error: { code: "upstream", detail: "the start's check has not passed" } });
+  assert.deepEqual([(await senders.get(RH)!.sell({})).status, (await senders.get(BASE)!.sell({})).body], [503, { error: { code: "upstream", detail: "the start's check has not passed" } }]);
 });

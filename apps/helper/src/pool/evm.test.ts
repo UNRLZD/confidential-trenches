@@ -597,6 +597,7 @@ async function nodes(keepFrom: bigint, http429 = 0): Promise<{ urls: [string, st
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(T0 + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         let out: object;
         if (method === "eth_getBlockByNumber") out = { result: block(params[0] === "latest" ? 600n : BigInt(params[0] as string)) };
+        else if (method === "eth_chainId") out = { result: "0x14a34" }; // Base Sepolia, the kit's pin
         else if (method === "eth_call") {
           const at = BigInt((params[1] as { blockHash: string }).blockHash);
           out = at < keep ? { error: { code: -32000, message: `historical state ${"ab".repeat(32)} is not available` } } : { result: `0x${"0".repeat(63)}2` };
@@ -814,12 +815,13 @@ test("ready() makes a try two operators do not answer again, 1 s then doubling t
   }
 });
 
-// card evm-buy-hookdata-fee, review fold 4 LOW-2: ready()'s refusals at once
-test("LOW-2 ready(): an answer that is not a 32-byte word (not hex, '0x', 31 bytes), two operators that differ and another block at the same number are refused at once, with no wait", async () => {
+// card evm-buy-hookdata-fee, review fold 4 LOW-2; card helper-evm-ready-holds-a-fee, review P2-1, P3-1, P3-3: what
+// ready() refuses at once, each refusal naming the seats, and an odd answer it asks again
+test("LOW-2 ready(): two chains, a chain not the kit's pin, two values for one read and another block at the same number are refused at once naming each seat; an answer that is not a 32-byte word is asked again", async () => {
   const s = (b: EvmRpc, a: EvmRpc = rpc([])) => evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: KEY }, [a, b], () => NOW);
   /** The mock's provider, its n-th eth_call at a hash answered by `answer(n)` (an Error is thrown, undefined: the mock). */
-  const onCall = (answer: (n: number) => unknown, c: Chain = chainOf()): EvmRpc => {
-    const inner = rpc([], {}, c);
+  const onCall = (answer: (n: number) => unknown, c: Chain = chainOf(), opts = {}): EvmRpc => {
+    const inner = rpc([], opts, c);
     let n = 0;
     return async (method, params) => {
       if (method === "eth_call") {
@@ -835,18 +837,30 @@ test("LOW-2 ready(): an answer that is not a 32-byte word (not hex, '0x', 31 byt
     await assert.rejects(s(b).ready(async (ms) => void waits.push(ms)), re, what);
     assert.deepEqual(waits, [], what);
   };
-  // not hex, or hex but not a 32-byte word, which feeOf's viewAt refuses too: refused at the start, not at the first bind
-  for (const v of ["0xzz", 7, null, "0x", `0x${"0".repeat(62)}`]) await once(onCall(() => v), /^Error: the fee's state at block \d+, .*1 try over 0 s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: not a word$/, String(v));
+  // not hex, or hex but not a 32-byte word, which feeOf's viewAt refuses too: on every try, refused at the bound naming
+  // the seat; once only, asked again and ready
+  for (const v of ["0xzz", 7, null, "0x", `0x${"0".repeat(62)}`]) {
+    const waits: number[] = [];
+    await assert.rejects(s(onCall(() => v)).ready(async (ms) => void waits.push(ms)), /^Error: the fee's state at block \d+, .*14 tries over 87 s: b answered 0x[0-9a-f]{8} at 0x[0-9a-f]{40} with no 32-byte word$/, String(v));
+    assert.deepEqual(waits, READY_WAITS, String(v));
+    const w1: number[] = [];
+    await s(onCall((n) => (n === 0 ? v : undefined))).ready(async (ms) => void w1.push(ms));
+    assert.deepEqual(w1, [1_000], String(v));
+  }
   // a word and more (viewAt reads the first), on both: ready
   const more = () => onCall(() => `0x${"0".repeat(63)}2${"f".repeat(64)}`);
   await s(more(), more()).ready();
-  // two operators that differ on a word
-  await once(onCall(() => `0x${"0".repeat(63)}3`), /: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: two operators differ$/, "differ");
+  // two values for one read
+  await once(onCall(() => `0x${"0".repeat(63)}3`), /: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: a answers 0x0{63}2, b 0x0{63}3$/, "differ");
   // the second provider holds another block at the number the first found: refused before any state read
   let stateReads = 0;
   const other = onCall(() => void stateReads++, chainOf({ hash: (n) => `0x${(n + 1n).toString(16).padStart(64, "0")}` }));
-  await once(other, /^Error: the fee's state at block \d+, .*: two operators hold two blocks at that number$/, "another block");
+  await once(other, /^Error: the fee's state at block \d+, .*1 try over 0 s: two blocks at \d+: the search found 0x[0-9a-f]{64}, b holds 0x[0-9a-f]{64}$/, "another block");
   assert.equal(stateReads, 0);
+  // review P2-1: a seat on another chain (its blocks under ours) and two seats on a chain that is not the pin, refused
+  // before any block read
+  await once(onCall(() => undefined, chainOf(), { chain: "0x1" }), /^Error: the fee's state, 1 try over 0 s: two chains: a names chain 84532, b chain 1$/, "two chains");
+  await assert.rejects(s(onCall(() => undefined, chainOf(), { chain: "0x1" }), onCall(() => undefined, chainOf(), { chain: "0x1" })).ready(async () => assert.fail("no wait")), /: a and b name chain 1, not base-sepolia's 84532$/);
 });
 
 // card evm-quote-warm-round fold 8: every read the sender makes is at a past block, so with no RPCs set it reads the

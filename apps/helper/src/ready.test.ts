@@ -645,6 +645,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
         const block = (n: bigint) => ({ number: `0x${n.toString(16)}`, timestamp: `0x${(g + 2n * n).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" });
         const answer = (out: object) => r.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, ...out }));
         if (method === "eth_getBlockByNumber") return answer({ result: block(params[0] === "latest" ? latest : BigInt(params[0] as string)) });
+        if (method === "eth_chainId") return answer({ result: "0x14a34" }); // Base Sepolia, the kit's pin
         if (method !== "eth_call") return answer({ error: { code: -32601, message: "no" } });
         const out = { result: `0x${"0".repeat(63)}${word}` };
         if (word === 2) return answer(out);
@@ -658,7 +659,7 @@ test("MEDIUM-1 an EVM pool whose two RPCs answer the fee's state differently sto
   const key = `0x${createHashOf("helper-pool-senders/test-key/EVM_SENDER")}`; // pool/evm.test.ts's test key
   const r = await startOnce({ POOL_EVM_ADDRESS_BASE_SEPOLIA: evmPoolVenues()["base-sepolia"].pool!, POOL_EVM_SENDER_KEY_BASE_SEPOLIA: key, POOL_EVM_RPCS_BASE_SEPOLIA: urls.join(",") }, 15_000);
   assert.equal(r.code, 2, `exit ${r.code}; stderr: ${r.err}`);
-  assert.match(r.err, /helper: POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block \d+, 600 s old \(a proof's fee is read up to 600 s back\), 1 try over 0 s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: two operators differ/);
+  assert.match(r.err, /helper: POOL_EVM_RPCS_BASE_SEPOLIA: the fee's state at block \d+, 600 s old \(a proof's fee is read up to 600 s back\), 1 try over \d+ s: 0x[0-9a-f]{8} at 0x[0-9a-f]{40}: \[::1\]:\d+ answers 0x0{63}2, 127\.0\.0\.1:\d+ 0x0{63}3/);
   assert.ok(!r.err.includes(key.slice(2)), "the key is never printed");
   assert.ok(r.readies.length > 0, "the helper answered its health while the check ran");
   assert.ok(r.readies.every((x) => x === false), `never ready before the exit: ${JSON.stringify(r.readies)}`);
