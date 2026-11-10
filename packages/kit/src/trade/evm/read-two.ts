@@ -20,8 +20,15 @@
 // - "Answered": the read resolved. Two answers that differ (`same` false) are refused, EvmOperatorsDiffer, which
 //   carries both: the walk never asks a third operator once both sides answered, so a disagreement is never turned
 //   into agreement. One operator alone never passes: a side left with no operator refuses the read.
-// - Words: a seat is named by its host, never its URL, in every message; any listed URL a provider's own words carry is
-//   replaced by its host.
+// - Words: a seat is named by its host, never its URL, in every message; any URL a provider's own words carry (any case,
+//   port, path or key) and any listed host followed by a path are replaced by the host.
+// - What the walk gives up against a fixed pair (independent review, 2026-11-10): any two of the list's operators that
+//   collude, with the others blocked, can now agree, where before only the fixed two could. Accepted for the reads on
+//   it: the bind's fee must still equal the helper's answer, is capped at 50% of the chunk and goes to the pinned
+//   recipient; Verify is a display. Independence as far as it can be read from outside (the clients' own version
+//   answers, read by the review): Robinhood: nitro v3.12.4-rc.3 on Robinhood's own, v3.12.1 and v3.12.2 on Pocket, a
+//   modified build on publicnode, hidden on dRPC; Base: reth v2.5.2 on base.org, publicnode and Pocket, hidden on dRPC
+//   and Tenderly.
 import { evmRpcOperator } from "./rpc-operator.ts";
 
 /** How long one seat's call may take before its side walks on (ms). */
@@ -46,12 +53,14 @@ export class EvmOperatorsDiffer<T = unknown> extends Error {
   }
 }
 
-/** A read no two operators answered: each side's walk, by host, in its words; `cause`, the refusing side's last seat's
- *  own error (a caller's named failure stays that failure). */
+/** A read no two operators answered: each side's walk, by host, in its words; `errors`, every seat error of the side
+ *  that refused, in the order it walked (a caller judges them all: a lag only when every one lagged); `cause`, the last. */
 export class EvmOperatorsUnanswered extends Error {
-  constructor(m: string, cause?: unknown) {
-    super(m, { cause });
+  readonly errors: readonly unknown[];
+  constructor(m: string, errors: readonly unknown[] = []) {
+    super(m, { cause: errors[errors.length - 1] });
     this.name = "EvmOperatorsUnanswered";
+    this.errors = Object.freeze([...errors]);
   }
 }
 
@@ -97,11 +106,16 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
   if (operators.length < 2) throw new Error("seats: two operators at least (two seats of one operator are one)");
   const seatsOf = new Map(operators.map((op) => [op, seats.filter((s) => s.operator === op)]));
   const restUntil = new Map<string, number>();
-  // a provider's words with every listed URL as its host
-  const urls = [...seats].sort((a, b) => b.url.length - a.url.length);
+  // a provider's words with every URL as its host: any http(s) run, in any case and with any port, path or key, and any
+  // listed host followed by a path with no scheme; each regex built once, each replace one pass over the original
+  // string, bounded first (no loop whose progress hangs on an index into a case-folded copy)
+  const ANY_URL = /https?:\/\/([^\s/?#"'<>]+)[^\s"'<>]*/gi;
+  const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const bare = [...new Set(seats.map((s) => s.host.replace(/:\d+$/, "")))].map((h) => ({ h, re: new RegExp(`\\b${escape(h)}(?::\\d+)?[/?#][^\\s"'<>]*`, "gi") }));
   const said = (e: unknown): string => {
-    let m = String((e as Error | undefined)?.message ?? e);
-    for (const s of urls) m = m.split(s.url).join(s.host);
+    let m = String((e as Error | undefined)?.message ?? e).slice(0, 2_000);
+    m = m.replace(ANY_URL, (_, host: string) => host.replace(/^[^@]*@/, ""));
+    for (const { h, re } of bare) m = m.replace(re, h);
     return m.slice(0, 200);
   };
 
@@ -118,7 +132,7 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
     signal?.addEventListener("abort", stop, { once: true });
     const side = async (k: 0 | 1): Promise<EvmOperatorAnswer<T>> => {
       const walked: string[] = [];
-      let last: unknown;
+      const errors: unknown[] = [];
       const next = (): string | undefined => {
         if (walked.length === 0) return firsts[k];
         const op = order.find((x) => !claimed.has(x));
@@ -129,7 +143,7 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
         for (const s of seatsOf.get(op)!) {
           ac.signal.throwIfAborted();
           const left = start + budgetMs - now();
-          if (left <= 0) throw new EvmOperatorsUnanswered(`${what}: no two operators answered in ${budgetMs} ms (side ${k}: ${walked.join("; ") || "none asked"})`, last);
+          if (left <= 0) throw new EvmOperatorsUnanswered(`${what}: no two operators answered in ${budgetMs} ms (side ${k}: ${walked.join("; ") || "none asked"})`, errors);
           const call = new AbortController();
           const cut = AbortSignal.any([ac.signal, call.signal]);
           let timer: ReturnType<typeof setTimeout> | undefined;
@@ -151,7 +165,7 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
           } catch (e) {
             if (ac.signal.aborted) throw ac.signal.reason;
             restUntil.set(op, now() + restMs);
-            last = e;
+            errors.push(e);
             walked.push(`${s.host}: ${said(e)}`);
           } finally {
             clearTimeout(timer);
@@ -159,7 +173,7 @@ export function evmTwoOperators<R>(list: readonly EvmReadSeat<R>[], o: EvmTwoOpe
         }
         if (walked.length === 0) walked.push(`${op}: no seat`);
       }
-      throw new EvmOperatorsUnanswered(`${what}: one operator alone never passes (side ${k}: ${walked.join("; ")}; no operator left that the other side did not ask)`, last);
+      throw new EvmOperatorsUnanswered(`${what}: one operator alone never passes (side ${k}: ${walked.join("; ")}; no operator left that the other side did not ask)`, errors);
     };
     // one side's refusal stops the other's walk, and both settle before the read ends, so nothing runs behind it
     let first: { e: unknown } | null = null;

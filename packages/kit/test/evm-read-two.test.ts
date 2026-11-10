@@ -111,6 +111,49 @@ test("messages name a seat by host, never its URL's path or key", async () => {
   });
 });
 
+test("a provider's words lose every URL path: any case, a port, no scheme, a key", async () => {
+  const keyed = "https://lb.drpc.live/robinhood/AkEySeCrEt0123456789";
+  for (const said of ["HTTPS://LB.DRPC.LIVE/robinhood/AkEySeCrEt0123456789", "https://lb.drpc.live:443/robinhood/AkEySeCrEt0123456789", "lb.drpc.live/robinhood/AkEySeCrEt0123456789", "upstream https://user:AkEySeCrEt@other.example/x/AkEySeCrEt?k=AkEySeCrEt", `\u0130${"\u0130".repeat(5000)} ${keyed}`]) {
+    await assert.rejects(evmTwoOperators(seats([[RH, ok("0x1")], [keyed, refuses(said)]])).read("fee", f, eq), (e: unknown) => {
+      const m = String((e as Error).message);
+      assert.ok(!/AkEySeCrEt/i.test(m), m);
+      return true;
+    });
+  }
+});
+
+test("the budget ends a side: no seat is asked once the read's time is spent", async () => {
+  let t = 0;
+  const [a, x, b, c] = [ok("0x1"), { calls: 0, answer: async () => ((t = 10_000), Promise.reject(new Error("HTTP 503"))) } as Fake, ok("0x1"), ok("0x1")];
+  await assert.rejects(evmTwoOperators(seats([[RH, a], [DR, x], [PK, b], [PN, c]]), { now: () => t }).read("fee", f, eq), /no two operators answered in 8000 ms/);
+  assert.deepEqual([x.calls, b.calls, c.calls], [1, 0, 0]);
+});
+
+test("a rest ends: an operator that refused is asked first again once EVM_READ_REST_MS has passed", async () => {
+  let t = 0;
+  let blind = true;
+  const d: Fake = { calls: 0, answer: async () => (blind ? Promise.reject(new Error(STATE)) : "0x1") };
+  const [a, b] = [ok("0x1"), ok("0x1")];
+  const two = evmTwoOperators(seats([[RH, a], [DR, d], [PK, b]]), { now: () => t });
+  await two.read("fee", f, eq);
+  t = 1_000;
+  await two.read("fee", f, eq);
+  assert.equal(d.calls, 1, "resting: asked last, so not asked");
+  (t = 1 + EVM_READ_REST_MS), (blind = false);
+  assert.deepEqual((await two.read("fee", f, eq)).map((x) => x.operator), ["robinhood.com", "drpc.org"]);
+  assert.equal(d.calls, 2);
+});
+
+test("a refusal carries every seat error of the side that refused, in its walk's order", async () => {
+  const [a, x, y] = [ok("0x1"), refuses("first"), refuses("second")];
+  await assert.rejects(evmTwoOperators(seats([[RH, a], [DR, x], [PK, y]])).read("fee", f, eq), (e: unknown) => {
+    assert.ok(e instanceof EvmOperatorsUnanswered);
+    assert.deepEqual(e.errors.map((z) => (z as Error).message), ["first", "second"]);
+    assert.equal((e.cause as Error).message, "second");
+    return true;
+  });
+});
+
 test("the caller's abort ends the read at once, and no seat is rested for it", async () => {
   const ac = new AbortController();
   const [h, a] = [hangs(), hangs()];
