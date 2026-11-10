@@ -10,12 +10,14 @@
 // every engine the app takes the typed words. fstar and prefix run at phone width. bad.* were recorded before the check
 // named its width, so their first line is the width's BAD and the tests read the lines after it. The rest are a good run with one thing changed each, among them the lines that
 // signpage-frame-state judged (retired with this card): a reload while signed in, the status deleted raw, its backfill.
+// release111.chromium.<width>: the live page on release 111, the mainnet Solana pool pinned (card
+// sign-live-checks-read-a-pinned-page): PASS, with the pinned hosts' cases planted from it at the end.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { EVENT_MS, judge, START, WIDTHS } from "./signpage-shell.mjs";
+import { connectHosts, EVENT_MS, judge, PINNED_HOSTS, START, WIDTHS } from "./signpage-shell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-shell.answers.json"), "utf8"));
@@ -79,7 +81,7 @@ for (const engine of ["webkit", "chromium"]) {
     const b = bad(r);
     assert.equal(b.length, 2, r.lines.join("\n"));
     assert.match(b[0], /^BAD the frame cannot be sent to https:\/\/example\.com\/ \([1-9]\d* requests for it\)$/);
-    assert.match(b[1], /^BAD no request leaves SIGN_HOST and APP_HOST \([1-9]\d*: example\.com/);
+    assert.match(b[1], /^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \([1-9]\d*: example\.com/);
   });
 }
 
@@ -268,3 +270,73 @@ for (const engine of ["webkit", "chromium", "firefox"]) {
     assert.ok(bad(r).some((l) => /^BAD the 12 words typed while the app calls focus\(\) every 20 ms: the shell holds all of them, the app none \(shell not all, app [1-9]\d* characters\)$/.test(l)), r.lines.join("\n"));
   });
 }
+
+// Card sign-live-checks-read-a-pinned-page: PINNED_HOSTS is the mainnet page's own pinned-pool hosts, read from their
+// sources, so a host the page adds or drops fails here before it fails a live run.
+test("PINNED_HOSTS is exactly the hosts the page's sources name for the mainnet Solana pool's reads", async () => {
+  const src = (f) => readFileSync(path.join(HERE, "../..", f), "utf8");
+  const one = (f, re) => {
+    const m = re.exec(src(f));
+    assert.ok(m, `${f}: ${re}`);
+    return m.slice(1).map((u) => new URL(u).host);
+  };
+  const { NEAR_NETWORKS } = await import("../../packages/kit/src/near/networks.ts");
+  const want = [
+    ...one("packages/signpage/src/trade.ts", /export const TRADE_HELPER = "([^"]+)"/),
+    ...one("packages/signpage/src/trade.ts", /export const SOLANA_PROVIDER_A = "([^"]+)"/),
+    ...one("packages/signpage/src/pool-restore.ts", /export const RESTORE_UX_SOLANA = Object\.freeze\(\["([^"]+)", "([^"]+)"\]/),
+    new URL(NEAR_NETWORKS.mainnet.fastnear[0]).host,
+    new URL(NEAR_NETWORKS.mainnet.drpc).host,
+  ];
+  assert.deepEqual([...PINNED_HOSTS].sort(), [...new Set(want)].sort());
+  assert.match(src("packages/signpage/src/pool-testnet.ts"), /: \[solanaPacedRpc\(pageRpc\(SOLANA_PROVIDER_A\)\), solanaPacedRpc\(pageHelperRpc\(TRADE_HELPER\)\)\];/);
+  assert.match(src("packages/signpage/src/pool-restore.ts"), /return \{ rpcs: \(\) => \[relayRpc\(net\.fastnear\[0\]\), relayRpc\(net\.drpc\)\] \};/);
+  // and each is in the page's own connect-src as committed
+  const csp = /Content-Security-Policy: (.+)/.exec(src("packages/signpage/public/_headers"))[1];
+  for (const h of PINNED_HOSTS) assert.ok(connectHosts(csp).includes(h), h);
+});
+
+// release111.<engine>.<width>: the live page on release 111 (main 1de76548, the mainnet Solana pool pinned), recorded
+// by this card's check: signed out it asks no host but the two; signed in it reads the pool, its price, the Rent and the
+// restore's first reads on PINNED_HOSTS, each named by its served connect-src: PASS. Planted from them: a pinned host
+// asked signed out (the price, or a read naming a wallet), at no known time, or not in the connect-src; a host that is
+// in the connect-src but not pinned; any third host: FAIL.
+const RELEASE111 = Object.entries(ANSWERS.release111).flatMap(([engine, ws]) => Object.entries(ws).map(([width, rec]) => ({ engine, width, rec })));
+for (const { engine, width, rec } of RELEASE111) {
+  test(`recorded live run on release 111 (${engine}, ${width}): PASS, with signed-in reads on the pinned hosts and none signed out`, () => {
+    assert.match(rec.source, /^live https:\/\/confidential\.unrealized\.trade/);
+    const r = judge(rec);
+    assert.equal(r.ok, true, r.lines.join("\n"));
+    assert.ok(rec.requests.some((x) => PINNED_HOSTS.includes(x.host)), "the pinned page read its pool");
+    assert.ok(r.lines.some((l) => /^ok  signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(0 signed out; [1-9]\d* signed in to /.test(l)), r.lines.join("\n"));
+  });
+}
+
+test("release 111 planted: a pinned host asked signed out, at no time, or not in the connect-src; an unpinned or third host: FAIL", () => {
+  const { rec: g } = RELEASE111.find((x) => x.engine === "chromium");
+  const read = g.requests.find((x) => PINNED_HOSTS.includes(x.host));
+  const at = (t, over = {}) => {
+    const r = clone(g);
+    r.requests.push({ ...clone(read), t, ...over });
+    return judge(r);
+  };
+  const st = g.steps;
+  const badLine = (j, re) => {
+    assert.equal(j.ok, false, j.lines.join("\n"));
+    assert.ok(j.lines.some((l) => l.startsWith("BAD") && re.test(l)), j.lines.join("\n"));
+  };
+  const out = /^BAD signed out, no request goes past SIGN_HOST and APP_HOST; signed in, only to a pinned pool's host the page's own connect-src names \(1 signed out/;
+  badLine(at(st.created.t - 1), out); // before Create passkey
+  badLine(at(st.passkeyOut.t + 1), out); // after the passkey's sign out
+  badLine(at(st.words.t - 1), out); // before the words' Continue
+  badLine(at(st.wordsOut.t + 1), out); // after the words' sign out
+  badLine(at(st.stranger.t + 1, { host: "rpc.mainnet.fastnear.com", path: "/", rpc: [{ method: "query", params: { request_type: "view_account", account_id: "a".repeat(64), finality: "final" } }] }), out); // an account id, signed out
+  badLine(at(undefined), out); // at no known time
+  const noCsp = clone(g);
+  noCsp.connect = noCsp.connect.filter((h) => h !== read.host);
+  badLine(judge(noCsp), new RegExp(`not in its connect-src: ${read.host.replaceAll(".", "\\.")}`));
+  const none = clone(g);
+  none.connect = null;
+  assert.equal(judge(none).ok, false);
+  for (const host of ["api.mainnet-beta.solana.com", "sender.helius-rpc.com", "evil.example"]) badLine(at(st.words.t + 1, { host }), new RegExp(`^BAD no request leaves SIGN_HOST and APP_HOST but for the pinned pool's hosts \\(1: ${host.replaceAll(".", "\\.")}`));
+});
