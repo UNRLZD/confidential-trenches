@@ -2141,7 +2141,7 @@ const keyedOf = (env: Record<string, string | undefined>, network: string): { ur
  * stop; the timer never holds the process open. The cost, per pool, is one fee read a period, at most
  * EVM_FEE_WARM_WINDOW_MS / EVM_FEE_WARM_EVERY_MS of them when it fails, whatever the number of users: a read is the
  * first-block search (8 to 10 block reads at Robinhood's 0.1 s blocks, on one side) and, on each of two operators, the
- * block by number, the tree depth and the chain fee (evm-fee-warm.test.ts counts them).
+ * block by number, the block before it, the tree depth and the chain fee (evm-fee-warm.test.ts counts them).
  */
 export function evmFeeWarm(senders: Iterable<Pick<EvmPoolSender, "warm">>, timer?: EpochTimer, sleep?: (ms: number) => Promise<void>): () => void {
   const all = [...senders];
