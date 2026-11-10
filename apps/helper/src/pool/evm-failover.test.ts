@@ -846,7 +846,7 @@ test("review P3-6: a revert whose data holds a seat's URL leaves no part of its 
   assert.equal((await readyOn(s, at)).out, "ready");
   revert = true;
   const e = await s.fee(EPOCH - 60_000 + 1).then(() => assert.fail("a revert is no fee"), (x: Error) => x);
-  assert.match(e.message, /^RPC error 3: execution reverted: a\.example<key>$/);
+  assert.match(e.message, /^RPC error 3: execution reverted: a\.example$/);
 });
 
 test("review P3-2: a pool's fee read of the start's period that comes back after the period ended is not a fee for the running period: ready only once the next period's fee is held", async (t) => {
@@ -1056,5 +1056,17 @@ test("review of 41c6c371 P3-3: a key holding an apostrophe, echoed inside its UR
   const k = "abcd'efghijklmnopqrstuvwxyz";
   const scrub = evm.evmScrubber([`https://a.example/rpc?key=${k}`]);
   const out = scrub(`bad key at https://a.example/rpc?key=${k}: over its plan`);
-  assert.equal(out, "bad key at a.example<key>: over its plan");
+  // the URL's run passes over the <key> and takes the ":" after it, a URL character (review of e52fa55f)
+  assert.equal(out, "bad key at a.example over its plan");
+});
+
+// ---- review of e52fa55f ----
+test("review of e52fa55f P3: a URL echoed with its key is its host alone: a query key holding a raw '+', the URL's path past its key, and a key holding an apostrophe", () => {
+  const QK = "queryKEY+76543210fedcba9876543210"; // a raw "+" in a query: URLSearchParams reads it as a space
+  const PK = "pathKEY-0123456789abcdef0123456789abcdef";
+  const AK = "abcd'efghijklmnopqrstuvwxyz";
+  const scrub = evm.evmScrubber([`https://b.example/rpc?apikey=${QK}`, `https://a.example/v2/${PK}`, `https://c.example/rpc?key=${AK}`]);
+  assert.equal(scrub(`limit at https://b.example/rpc?apikey=${QK} reached`), "limit at b.example reached");
+  assert.equal(scrub(`moved: https://a.example/v2/${PK}/acct/9912345/x?uid=4471&s=abc now`), "moved: a.example now");
+  assert.equal(scrub(`bad key at https://c.example/rpc?key=${AK}: over its plan`), "bad key at c.example over its plan");
 });

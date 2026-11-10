@@ -2165,7 +2165,9 @@ export function evmScrubber(urls: readonly string[]): (text: string) => string {
     for (const k of whole) all = all.split(k).join("<key>");
     let m = all.slice(0, EVM_SCRUB_MAX);
     for (const r of patterns) m = m.replace(r, "<key>");
-    m = m.replace(/https?:\/\/[^\s"'<>`]*/gi, (u) => {
+    // a URL's run passes over a secret's <key> (review of e52fa55f: a key the secrets pass cut short, a raw "+" in a
+    // query, or the URL's path past its key, stays otherwise)
+    m = m.replace(/https?:\/\/(?:<key>|[^\s"'<>`])*/gi, (u) => {
       try {
         return new URL(u).host;
       } catch {
