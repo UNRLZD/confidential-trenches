@@ -664,9 +664,10 @@ export function handler(
  */
 /** GET /v1/market/held as the helper runs it (src/data/held.ts, card market-token-reads): each Solana mint's row with
  *  no chain read (solana/token.ts named: Discover's row or Jupiter's search), so a device's held tokens never spend its
- *  own RPC share; each served EVM chain's lists and the one GeckoTerminal budget. */
-export function heldFrom(token: Pick<Token, "named">, evmLists: EvmLists, gecko: GeckoBudget): Held {
-  return createHeld({ solana: { page: (mint) => token.named(mint) }, lists: evmLists, gecko });
+ *  own RPC share; each served EVM chain's lists, and DexScreener on its own budget for a token no list carries, so a
+ *  held read never takes a GeckoTerminal call the token page and the charts need. */
+export function heldFrom(token: Pick<Token, "named">, evmLists: EvmLists): Held {
+  return createHeld({ solana: { page: (mint) => token.named(mint) }, lists: evmLists });
 }
 
 export function solanaTokenFromEnv(env: Record<string, string | undefined>, proxy: Proxy, lists: Lists, rpc: Rpc, gecko?: GeckoBudget, slots?: Map<SlotName, Slot>): Token {
@@ -1078,7 +1079,7 @@ if (import.meta.main) {
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
-    const held = heldFrom(token, evmLists, gecko);
+    const held = heldFrom(token, evmLists);
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();
     setInterval(saveWarm, TICK_MS).unref();

@@ -952,6 +952,36 @@ test("another tab settled the op while the release was out, the run ending in_tr
   assert.equal(((await wd.w.get("ops", "op-w")) as { owed?: unknown }).owed, undefined, "the op still owes nothing");
 });
 
+// Card sol-settle-failed-is-not-unspent: the page's own withdraw, the helper answering 502 after it sent the release,
+// the release landed on W, and every settle on the page failing (its lister down) while both RPCs read the blockhash
+// past. The run stopped and the op dropped its owed send, the part left on W with nothing owed. A settle that throws is
+// not known yet: the op stays in_transit, its send kept, and the settle is asked at the past read's slots.
+test("a withdraw on the page, the helper's 502 after the release landed, every settle failing: the op stays in_transit, its owed send kept; the settle asked at the past read's slots", async () => {
+  const { world, TO, COST, FINAL_SLOT } = WORLD;
+  const wd = await world([30_000_000n]);
+  const fetchFn = (async (_url: string, init: { body: string }) => {
+    const { pool, tx } = JSON.parse(init.body) as { pool: string; tx: string };
+    await wd.host.send(pool, base64.decode(tx));
+    return new Response("{}", { status: 502 });
+  }) as unknown as typeof fetch;
+  const asked: unknown[] = [];
+  const lister = (async (_m: string, p: readonly unknown[]) => {
+    asked.push((p[1] as { minContextSlot?: unknown }).minContextSlot);
+    throw new Error("HTTP 503");
+  }) as never;
+  const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, lister, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
+  await testnetPool({ store: async () => wd.w, seed64: async () => SEED64.slice() }, over).withdraw({ chain: "solana", to: TO, amount: 5_000_000n, maxFee: COST }, "op-w");
+  const id = wd.ids[0]!;
+  assert.equal(wd.releases.length, 1, "the release went out");
+  assert.equal(wd.balance.get(wd.binds[0]!.recipient), 5_000_000n + WORLD.W_FEE, "the part on W");
+  const op = (await wd.w.get("ops", "op-w")) as { stage: string; owed?: unknown };
+  assert.equal(op.stage, "in_transit");
+  assert.equal(op.owed, id, "the op still owes the part's send");
+  assert.ok(Object.keys(((await wd.w.get("meta", "owed/op-w")) as Record<string, unknown> | undefined) ?? {}).includes(id), "its send kept");
+  assert.equal((await wd.ns.get(id))!.state, "RESERVED");
+  assert.ok(asked.length > 0 && asked.every((s) => s === undefined || s === FINAL_SLOT) && asked.includes(FINAL_SLOT), `asked at ${asked.join(",")}`);
+});
+
 test("an owed send with no release signature under 2,500 newer entries of W's history, the page's RPC functions new on every pass: the next finish reads on from the last one's place and sends it (fold 4, review HIGH)", async () => {
   const { wd, over, page, TO, end } = await hungWithdraw();
   const id = wd.ids[0]!;
@@ -978,6 +1008,36 @@ test("an owed send with no release signature under 2,500 newer entries of W's hi
   assert.equal(wd.balance.get(TO), 5_000_000n);
   assert.equal(((await wd.w.get("ops", "op-w")) as { stage: string }).stage, "sent");
   await end();
+});
+
+// Card sol-settle-failed-is-not-unspent (C3): the buy's settle that decides not_landed is held to the slots of the read
+// that saw the blockhash past; the page's buy host hands them to solanaSettleSpent, so its lister and seats are asked at
+// or past them
+test("the page's buy host asks its settle at the slots the buy hands it: the lister at or past the higher", async () => {
+  const { w, ns } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: unknown[] = [];
+  const lister = (async (_m: string, p: readonly unknown[]) => {
+    asked.push((p[1] as { minContextSlot?: unknown }).minContextSlot);
+    throw new Error("HTTP 503");
+  }) as never;
+  const rpc = async (m: string) => {
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} }, tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const { land } = fakePool();
+  const n = await land(ns, await incoming(ns, null, 7));
+  const b = buyHost!();
+  try {
+    await assert.rejects(b.settle(n.id, [700, 710]));
+    assert.deepEqual(asked, [710]);
+    asked.length = 0;
+    await assert.rejects(b.settle(n.id));
+    assert.deepEqual(asked, [undefined], "none handed: none asked");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
 });
 
 // Delta review 8 of 5697d7a1, F3: W's buy record goes through the page's wallet store, written by the buy host the page
@@ -1135,6 +1195,29 @@ test("card wallet-restore-reads-ux review P3: the testnet build's restore reads 
     assert.deepEqual(ends, [{ stage: "stalled", why: [`solana: ${POOL_UX_UNREAD_TESTNET}`] }]);
   } finally {
     store.close();
+  }
+});
+
+// Review P2-2 and P3-5 of 77055f4e (card pool-sell-share-across-wallets): the page's sell host writes a sale settled
+// outside a request's run (the load's rent back) to the record that names it, and stops its sales at a sign out
+test("the page's sell host settles a sale's record by its signature, and a sign out asked after it stops its sales; a host made after the sign out is not stopped", async () => {
+  const { w } = await wallet();
+  const { poolSellKind } = await import("../src/pool-sell.ts");
+  let sellHost: Parameters<typeof poolSellKind>[0] | undefined;
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { tradeKinds: { sell: (mk) => ((sellHost = mk), poolSellKind(mk)) } });
+  const s = sellHost!();
+  try {
+    await w.put("ops", "op-s", { kind: "sell", pool: "sol", sha: "00", stage: "sent", txs: [{ chain: "solana", hash: "sigS" }], created_ms: 1 });
+    await s.settled!("sigS", "filled");
+    assert.equal(((await w.get("ops", "op-s")) as { stage: string }).stage, "filled");
+    assert.equal(s.stopped!(), false);
+    t.signingOut();
+    assert.equal(s.stopped!(), true);
+    const after = sellHost!();
+    assert.equal(after.stopped!(), false);
+    (after as { end?: () => void }).end?.();
+  } finally {
+    (s as { end?: () => void }).end?.();
   }
 });
 

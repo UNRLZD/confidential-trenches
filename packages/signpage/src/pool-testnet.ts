@@ -719,6 +719,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // proved by the queue's next pass. One pass per chain at a time: a state read during one joins it. A sign out stops
   // it (signingOut): its lock wait and its round end at once, and it writes nothing after. No Web Locks: no pass.
   let evmStop = new AbortController();
+  // the sign outs asked on this page (signingOut): a Solana sell's host stops its sales at the next one
+  let signOuts = 0;
   const settleEvmReserved = async (chain: "base" | "robinhood"): Promise<void> => {
     const e = evmPool(chain);
     if (e === null || !locks) return;
@@ -796,13 +798,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
-      settle: async (noteId) => {
+      // minSlots: the not_landed verdict's slots (pool-buy.ts pastAt), every read at or past them
+      settle: async (noteId, minSlots) => {
         // the stop's signal of this call, taken before its first wait: a sign out during the seed read stops it
         const signal = solanaStop.signal;
         const seed64 = await page.seed64();
         try {
           notes ??= await openNoteStore(await page.store());
-          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }
@@ -835,6 +838,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
   const sellHost = (): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
+    // the sign outs asked before this host: one asked after it stops its sales before their signatures (review P3-5 of
+    // 77055f4e)
+    const outs = signOuts;
     let notes: Promise<NoteStore> | null = null;
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
     return {
@@ -864,6 +870,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
       // the sells with no deposit back (kept on W) sent and not settled yet, settled at the next load
       kept: keptSells(page.store),
+      // a sale settled outside a request's run (the load's rent back settles the note it finds INCOMING first): its
+      // stage on the record that names it, so no record stays "sent" for good (review P2-2 of 77055f4e); a request's
+      // run puts its own over this one (poolSellKind)
+      settled: async (signature, stage) => settleSellOps(await page.store(), signature, stage),
+      stopped: () => signOuts !== outs,
       end: () => void notes?.then((n) => n.close(), () => {}),
     };
   };
@@ -1137,11 +1148,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(q ? { drop: (id: string) => q.drop(id) } : {}),
             seed64: page.seed64,
             send: (p, tx) => helperPoolSend(p, tx, over.fetch),
-            settle: async (noteId) => {
+            settle: async (noteId, minSlots) => {
               const signal = solanaStop.signal;
               const seed64 = await page.seed64();
               try {
-                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
               } finally {
                 seed64.fill(0);
               }
@@ -1267,6 +1278,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     watch: (fn) => void watchers.add(fn),
     signingOut: () => {
+      signOuts++;
       stopSolana();
       evmStop.abort();
       evmStop = new AbortController();

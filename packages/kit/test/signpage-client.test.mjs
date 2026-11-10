@@ -543,6 +543,15 @@ test("the pool kinds (card signpage-pool-kinds): each builds from its own fields
   }
 });
 
+test("card pool-sell-share-across-wallets: pool.sell takes a share of the whole holding (share_bps, 1 to 10,000) or a typed amount, exactly one; an old amount-only request still builds", () => {
+  const T = "So11111111111111111111111111111111111111112";
+  const base = { chain: "solana", token: T, slippage_bps: 300 };
+  for (const good of [{ ...base, amount: "2" }, { ...base, share_bps: 10_000 }, { ...base, share_bps: 1 }, { ...base, share_bps: 7_500 }])
+    assert.deepEqual(C.signpageBuildRequest("pool.sell", good, "id"), { ...good, v: 1, id: "id", type: "pool.sell" }, JSON.stringify(good));
+  for (const b of [base, { ...base, amount: "2", share_bps: 5_000 }, { ...base, share_bps: 0 }, { ...base, share_bps: 10_001 }, { ...base, share_bps: 50.5 }, { ...base, share_bps: "5000" }])
+    assert.throws(() => C.signpageBuildRequest("pool.sell", b, "id"), TypeError, JSON.stringify(b));
+});
+
 test("the deposit sheet's reads (card kit-deposit-assets-dry): deposit.assets takes no field, deposit.dry an asset and a decimal amount only, never an address", () => {
   assert.deepEqual(C.signpageBuildRequest("deposit.assets", {}, "id"), { v: 1, id: "id", type: "deposit.assets" });
   assert.deepEqual(C.signpageBuildRequest("deposit.dry", { origin_asset: "nep141:usdc", amount: "25" }, "id"), { origin_asset: "nep141:usdc", amount: "25", v: 1, id: "id", type: "deposit.dry" });
