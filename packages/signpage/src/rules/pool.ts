@@ -234,6 +234,10 @@ function decimalsAnswer(chain: PoolChain, a: unknown): number {
   if (n > 255n) return refuse("decimals");
   return Number(n);
 }
+/** The token's decimals on one provider's answer, refused "decimals" when it does not parse: for a display only
+ *  (src/positions.ts, on the finder's own route), never for a request a device signs on, which takes both
+ *  (tokenDecimalsOf). */
+export const tokenDecimalsShown = (chain: PoolChain, read: unknown): number => decimalsAnswer(chain, read);
 /** The token's decimals: both providers' answers parsed, and the two the same; else refused "decimals". */
 export function tokenDecimalsOf(chain: PoolChain, reads: TokenDecimalsReads): number {
   if (!Array.isArray(reads) || reads.length !== 2) return refuse("decimals");

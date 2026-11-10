@@ -518,9 +518,11 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
   };
 };
 
+/** Where W's buy mints are: the wallet store's meta, by W's address. */
+export const BUY_MINTS_KEY = "owed/buy-sol";
 /** W's buy mints, in the wallet store's meta/owed/buy-sol, by W's address (pool-buy.ts BuyMints). */
 export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">>): BuyMints => {
-  const KEY = "owed/buy-sol";
+  const KEY = BUY_MINTS_KEY;
   type All = Record<string, { mint: string; program: string }>;
   return {
     get: async (address) => {

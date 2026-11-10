@@ -58,7 +58,7 @@ import { solanaSettleReserved, solanaSettleSpent } from "../../wallet/src/pool/s
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
 import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
@@ -67,7 +67,7 @@ import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
-import { checkPoolRequest, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest, type TokenDecimalsReads } from "./rules/pool.ts";
+import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
 import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
@@ -501,6 +501,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
     positions.clear();
+    awaited.clear();
     follows.abort();
     follows = new AbortController();
     // every queue, Solana's and each EVM pool's: its notes freed, its seed copy zeroed, its note store closed
@@ -809,10 +810,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64.fill(0);
     }
   };
-  // state.positions (src/positions.ts, card signpage-state-holdings): this device's buy records, each from the finder's
-  // one read of its W (the helper's keyed route on mainnet; no read here names a W to a public provider, nor a mint no
-  // buy record names); one pass at a time, run at the sign-in's first state read and again when a pool buy or sell
-  // ends; the last whole pass kept in the wallet store for the first read after a load
+  // the Ws of the buys this page ran to filled or sent, this sign-in: the finder reads at finalized, so one it does not
+  // list yet is looked for again (src/positions.ts awaited)
+  const awaited = new Set<string>();
+  // state.positions (src/positions.ts, card signpage-state-holdings): this device's buys (W's buy mint, written before
+  // every send, and its buy record when the run told the amount), each from the finder's one read of its W (the
+  // helper's keyed route on mainnet; no read here names a W to a public provider, nor a mint no buy of W's named); one
+  // pass at a time, run at the sign-in's first state read and again when a pool buy or sell ends; the last whole pass
+  // kept in the wallet store for the first read after a load
   const positions = positionsCache(
     async (memo, run) => {
       if (scope === null) return { positions: [], whole: true };
@@ -826,11 +831,15 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         signal: run.signal,
         // the sell's own read when one was fed, else the finder's read of the Ws with a buy record
         wallets: async (only) => (run.found ?? (await recordedWallets(st, r, only, run.signal))).filter((w) => only.has(w.address)),
+        bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
+        awaited: () => awaited,
         sold: async () => new Set(Object.entries(await meta(POSITIONS_SOLD_KEY)).flatMap(([a, ms]) => (Array.isArray(ms) ? ms.filter((m): m is string => typeof m === "string").map((m) => `${a} ${m}`) : []))),
         kept: async () => st.get("meta", POSITIONS_KEPT_KEY),
         keep: async (k) => void (await st.put("meta", POSITIONS_KEPT_KEY, k)),
-        decimals: async (mint) => tokenDecimalsOf("solana", (await Promise.all(r.map((rpc) => rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])))) as unknown as TokenDecimalsReads),
+        // one read on the finder's own route (pageSolanaRpcs: the helper's keyed route is the second on mainnet, the
+        // testnet finder's devnet RPC the first), never a public provider: a display's, never a sell's
+        decimals: async (mint) => tokenDecimalsShown("solana", await (POOL_TESTNET ? r[0] : r[1])("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }])),
       }, memo);
     },
     {
@@ -838,7 +847,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       kept: async () => {
         if (scope === null) return null;
         const st = await page.store();
-        return keptPositions(await st.get("meta", POSITIONS_KEPT_KEY), (await st.get("meta", POSITION_COSTS_KEY)) ?? {});
+        return keptPositions(await st.get("meta", POSITIONS_KEPT_KEY), (await st.get("meta", POSITION_COSTS_KEY)) ?? {}, (await st.get("meta", BUY_MINTS_KEY)) ?? {});
       },
     },
   );
@@ -923,6 +932,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       if (facts.wallet !== undefined) {
         facts.decimals = boughtDecimals.get(facts.wallet);
         boughtDecimals.delete(facts.wallet);
+        if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.add(facts.wallet);
       }
       void (async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))()
         .catch(() => {})
@@ -935,6 +945,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
       ctx.progress(stage);
       if (TRADE_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
+      // the run ended "sent" (its spend not read as final): no records, its W looked for, its decimals let go
+      else if (stage === "sent" && !done && facts.wallet !== undefined) {
+        boughtDecimals.delete(facts.wallet);
+        awaited.add(facts.wallet);
+        positions.refresh();
+      }
     };
     r = buy(ask, { ...ctx, progress, route: routeInto(facts, ctx.route) });
     const run = r;
@@ -974,13 +990,21 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes: store,
       ops: page.store,
       seed64: page.seed64,
-      // the sell's own read stops a running positions pass (one finder queue: it never waits behind the display) and
-      // is the next pass's read
+      // the sell's own read holds the positions' passes off while it runs (the running one stopped, a booked retry
+      // dropped: one finder queue, so it never waits behind the display), then is the next pass's read; a read that
+      // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
       wallets: async () => {
-        positions.preempt();
-        const got = await poolBuyWallets(await store(), r);
-        positions.feed(got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) })));
-        return got;
+        const hold = positions.preempt();
+        let found: FoundWallet[] | null = null;
+        try {
+          const got = await poolBuyWallets(await store(), r);
+          found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
+          return got;
+        } finally {
+          // read: the next pass's read; failed (the sell refuses, or a rent back at load waits): the next pass reads
+          if (found === null) hold.release();
+          else hold.feed(found);
+        }
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
       owed: owedNoted(page.store),
@@ -1361,11 +1385,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     host: () => host(),
     settle,
     stateRead,
-    positions: async () => {
-      await positions.ready();
-      positions.first();
-      return positions.get();
-    },
+    positions: () => positions.read(),
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in
