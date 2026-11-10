@@ -52,7 +52,7 @@ const M = [
   ["review F4: the walk's end taken from the default gap, not the restore's laneWalked", WAL, [["const walked = r.laneWalked[lane]!;", "const walked = (h ?? lane - RESTORE_LANES) + RESTORE_LANES * 10_000;"]], RW, "step 5"],
   ["review F4: a walk end that is not the lane's, or below its highest note, taken", WAL, [["      throw new Error(`lane ${lane}: its walk end", "      void new Error(`lane ${lane}: its walk end"]], RW, "step 5"],
   ["review F5: a lane past its walk's end stops the restore instead of returning what it found", WAL, [["        reach = highest;\n        break;\n      }\n    }", "        throw new Error(`lane ${lane}: past the walk's end`);\n      }\n    }"]], RW, "step 5"],
-  ["review F5: the lane's reach not returned", WAL, [["highest, readTo, reach });", "highest, readTo, reach: null });"]], RW, "step 5"],
+  ["review F5: the lane's reach not returned", WAL, [["highest, readTo, reach };", "highest, readTo, reach: null };"]], RW, "step 5"],
   ["R29: a failed id read past the walk's end does not stop the lane", WAL, [["to be retried`);\n        if (highest > walked) {", "to be retried`);\n        if (false) {"]], RW, "step 5"],
   ["review 2 R27: a never-used id restarts the failure count", WAL, [['      if (state === "unused") continue;', '      if (state === "unused") { failed = 0; continue; }']], RW, "step 5"],
   ["review 2 R28: history at the walk's last index stops", WAL, [["      failed = 0;\n      if (highest > walked) {", "      failed = 0;\n      if (highest >= walked) {"]], RW, "step 5"],

@@ -5,8 +5,9 @@
 //   (kind "restore", src/state.ts's op contract: no secret in it) and, for a request, as its progress events: "reading"
 //   at the start and again every RESTORE_BEAT_MS while it reads (the kit's client gives restore no timeout and the app
 //   shows it stalled when progress stops: packages/kit/src/signpage/client.ts restore, at least every 10 s), then
-//   "done" once every pinned pool's walk is read and its notes written, or "stalled" when any pool's walk failed (the
-//   app's Retry asks a new restore; a run again writes only what is missing). That is the whole wait the user sees
+//   "done" once every pinned pool's walk is read and its notes written, or "stalled" when any pool's walk failed or a
+//   walked pool's ids or U_X are ones this build cannot read (POOL_UX_UNREAD_TESTNET, POOL_CHAIN_UNREAD: known before
+//   step 5 starts, so never done first) (the app's Retry asks a new restore; a run again writes only what is missing). That is the whole wait the user sees
 //   (card restore-first-sign-in-under-two-minutes): step 5 below reads on after it, in the same run, and a request that
 //   comes while it does (a Retry, Sync) is told the walk's end at once.
 // - A sign-in with the words (or a passkey that opens an existing account) on a note store with no note runs it once
@@ -608,6 +609,18 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           } else why.push(`${label(pools[k]!)}: ${r.reason instanceof Error ? r.reason.message : "the walk failed"}`);
         });
         signal.throwIfAborted();
+        // a walk that failed: the next load walks that pool again, so step 5 stays owed after it (the marker)
+        const walkFailed = why.length > 0;
+        // what this build cannot read for a walked pool is known before step 5 starts, so the walk's end names it and
+        // is stalled, never done (review P3 of card wallet-restore-reads-ux): the testnet build reads no deposit id nor
+        // any U_X (no 1Click quote there); a pool chain with no U_X reads on this page leaves its ids' money unread.
+        // Step 5 still reads what it can after it; a lane past the walk's end is known only from an id read, so that
+        // one is a finding of step 5 (`named`), told after done
+        for (const w of walked) {
+          if (ids === null) {
+            if (POOL_TESTNET) why.push(`${w.label}: ${POOL_UX_UNREAD_TESTNET}`);
+          } else if (w.ux === null) why.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
+        }
         // the floor: the walk's notes are written before any id is read. First each walked scope's deposit counter goes
         // past the walk's highest note in this store's lane (step 7's, on the notes alone; step 5 raises it again once
         // the lane's ids are read, and a counter only goes up), so the naming the notes' write sets off names past them
@@ -630,22 +643,22 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         if (owes) await seedHeld(async () => (await h.store()).put("meta", RESTORE_IDS_KEY, { scopes: pools.map((p) => p.scope.toString()) }));
         signal.throwIfAborted();
         // the wait the user sees ends here: their notes are back, shown and spendable
-        end(why.length > 0 ? "stalled" : "done");
+        const stage: RestoreStage = why.length > 0 ? "stalled" : "done";
+        end(stage);
 
         // step 5, after the walk's end: it holds no lock a money kind takes, and tells the user only of a finding
-        // about their money (`named`: a stalled op of its own, once a run); a read that did not answer is asked again
-        // by itself, the pauses growing, then left to the marker
-        let surfaced = false;
+        // about their money (`named`: a stalled op of its own, once a run, unless the walk's end was stalled already,
+        // whose sheet the user has); a read that did not answer is asked again by itself, the pauses growing, then left
+        // to the marker
+        let surfaced = stage === "stalled";
         const tell = async (r: Step5End): Promise<void> => {
           h.step5?.(r);
           if (r.named.length === 0 || surfaced) return;
           surfaced = true;
           await seedHeld(async () => (await h.store()).put("ops", crypto.randomUUID(), { kind: "restore", stage: "stalled", txs: [], created_ms: now() }));
         };
-        if (ids === null) {
-          if (POOL_TESTNET && walked.length > 0) await tell({ retry: [], held: [], named: walked.map((w) => `${w.label}: ${POOL_UX_UNREAD_TESTNET}`), tries: 1, last: true });
-          return;
-        }
+        // the testnet build: named at the walk's end above, nothing for step 5 to read
+        if (ids === null) return;
         if (walked.length === 0) return;
         // the scope's deposit indices the note store holds now (the floor's notes among them), for the U_X carry
         const noted = async (scope: bigint): Promise<ReadonlySet<number>> => {
@@ -672,7 +685,7 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           await tell(last ? { retry: out.retry, held: [], named: [...out.named, ...out.held], tries: t, last } : { ...out, tries: t, last });
           if (answered) {
             // every id read: nothing is owed, unless a pool's walk failed (the next load walks it and reads its ids)
-            if (why.length === 0) await seedHeld(async () => (await h.store()).delete("meta", RESTORE_IDS_KEY));
+            if (!walkFailed) await seedHeld(async () => (await h.store()).delete("meta", RESTORE_IDS_KEY));
             return;
           }
           if (last) return;
