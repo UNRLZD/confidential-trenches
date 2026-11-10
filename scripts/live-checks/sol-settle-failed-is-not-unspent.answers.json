@@ -1,0 +1,22 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js at ac45924c (build-app.mjs); a PR build, judged as scripts/ci/bundle-checks.mjs judges it (ledger: false) until release-111 is cut and its list names the served bundle",
+    "bad": "SIGN_HOST's release-110: packages/signpage/index.html and public/app.js built at its commit 73b79695 (build-app.mjs), sha384 equal to the one release-110.json names for SIGN_HOST /app.js; its settle that throws reads as unspent"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-9aJ8u53lNjMhgZdomWTEzFMtAPea6psNjNIbVIEFid+cEFXckPp4dh/gBlMjcNZQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-9aJ8u53lNjMhgZdomWTEzFMtAPea6psNjNIbVIEFid+cEFXckPp4dh/gBlMjcNZQ",
+    "settle": true,
+    "verdict": true,
+    "hosts": true,
+    "old": false
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+    "settle": false,
+    "verdict": false,
+    "hosts": false,
+    "old": true
+  }
+}

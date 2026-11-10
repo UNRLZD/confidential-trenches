@@ -798,13 +798,14 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
-      settle: async (noteId) => {
+      // minSlots: the not_landed verdict's slots (pool-buy.ts pastAt), every read at or past them
+      settle: async (noteId, minSlots) => {
         // the stop's signal of this call, taken before its first wait: a sign out during the seed read stops it
         const signal = solanaStop.signal;
         const seed64 = await page.seed64();
         try {
           notes ??= await openNoteStore(await page.store());
-          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+          return await solanaSettleSpent({ seed64, notes, noteId, program: pin!.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
         } finally {
           seed64.fill(0);
         }
@@ -1147,11 +1148,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
             ...(q ? { drop: (id: string) => q.drop(id) } : {}),
             seed64: page.seed64,
             send: (p, tx) => helperPoolSend(p, tx, over.fetch),
-            settle: async (noteId) => {
+            settle: async (noteId, minSlots) => {
               const signal = solanaStop.signal;
               const seed64 = await page.seed64();
               try {
-                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
+                return await solanaSettleSpent({ seed64, notes, noteId, program: pin.program, minSlots, rpcs: settleRpcs(), lister: lister(), signal, cache, markBatches: PAGE_SOL_MARK_BATCHES });
               } finally {
                 seed64.fill(0);
               }
