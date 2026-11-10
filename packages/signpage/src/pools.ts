@@ -103,7 +103,8 @@ const utf8 = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v))
 /**
  * `state` with `pools` from the notes `readNotes` gives, when signed in. `ready`: the proof queue's ready proofs;
  * undefined while no queue runs, and then no entry has `ready`. `price`: the page's own USD price read per chain
- * (src/pool-price.ts, card signpage-pool-price); an entry gets `price` only when it gives one.
+ * (src/pool-price.ts, card signpage-pool-price); an entry gets `price` only when it gives one. `open`: the pool ids
+ * whose queue runs (src/pool-testnet.ts readyWith); a chain with none of them has no `ready` (poolBalances).
  */
 export async function withPools(
   state: SignpageState,
@@ -111,11 +112,12 @@ export async function withPools(
   pools: readonly BalancePool[],
   ready?: readonly BalanceProof[],
   price?: (chain: Chain) => PoolStatePrice | null,
+  open?: ReadonlySet<string>,
 ): Promise<SignpageState> {
   if (!state.signed_in) return state;
   try {
     const notes = pools.length === 0 ? [] : await readNotes();
-    const sums = poolBalances(notes, pools, ready).map((e) => {
+    const sums = poolBalances(notes, pools, ready, open).map((e) => {
       const p = price?.(e.chain) ?? null;
       return p === null ? e : { ...e, price: p };
     });
