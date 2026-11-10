@@ -1344,6 +1344,116 @@ test("Ctrl-C and SIGTERM say last how the funder's SOL comes back: the resume li
   }
 });
 
+test("--return is read on both RPCs: a token account on the second RPC's read is refused, nothing made", async () => {
+  const k = fakeCluster({ view: (i, a, c, v) => (i === 1 && a === RETURN ? { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: Buffer.alloc(165), lamports: 2_039_280n } : v) });
+  const base = keyBase();
+  await assert.rejects(vt.run(await planOn(k, "pumpswap", recordDir()), { returnTo: RETURN, base, say: k.say, wait: k.wait, now: k.now }), (e) => e.message.startsWith(`--return ${RETURN} `));
+  assert.deepEqual(readdirSync(base), []);
+  assert.equal(k.sends.length, 0);
+});
+
+test("a stopped run's folder stops a fresh paste for each reason it may still hold SOL or a table, and says which", async () => {
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const cases = [
+    ["a live run holds its lock", {}, (kd) => writeFileSync(path.join(kd, "run.lock"), `${process.pid}\n${spawnSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8" }).stdout.trim()}\n`), /another run \(pid \d+, started .*\) holds its lock/],
+    ["its run did not stop with its funder read", { stopped_left: undefined }, null, /its run did not stop with its funder read/],
+    ["its funder held more than a fee when it stopped", { stopped_left: "20000" }, null, /its funder held 20000 lamports when it stopped/],
+    ["its funder holds SOL on one RPC's read", {}, null, /its funder \w+ holds 1000000 lamports/, { balanceOn1: 1_000_000n }],
+    ["the chain holds its table", { table: T }, null, new RegExp(`its journal names lookup table ${T}, which the chain holds`), { table: T }],
+    ["its funder's balance is not read", {}, null, /not read: /, { failBalance: true }],
+    ["its journal is not read", {}, (kd) => writeFileSync(path.join(kd, "journal.json"), "{"), /its journal is not read/],
+  ];
+  for (const [what, jx, touch, why, o = {}] of cases) {
+    let funderId = null;
+    const k = fakeCluster({
+      fin: 0,
+      view: (i, a, c, v) => {
+        if (a === funderId && o.failBalance) throw new Error("node down");
+        if (a === funderId && o.balanceOn1) return i === 1 ? { owner: SYSTEM, data: Buffer.alloc(0), lamports: o.balanceOn1 } : null;
+        return v;
+      },
+    });
+    const base = keyBase();
+    const dir = recordDir();
+    const p = await planOn(k, "pumpswap", dir);
+    const { dir: kd, funder } = keptFolder(base, p, { table: jx.table ?? null });
+    funderId = funder.id;
+    const j = journalAt(kd);
+    const nj = { ...j, stopped_left: "0", ...jx };
+    if ("stopped_left" in jx && jx.stopped_left === undefined) delete nj.stopped_left;
+    writeFileSync(path.join(kd, "journal.json"), JSON.stringify(nj));
+    if (o.table) k.set(o.table, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 28)), lamports: rentMin(56 + 32 * 28) }, 0);
+    if (touch) touch(kd);
+    await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir), base), (e) => e.message.includes(kd) && why.test(e.message), what);
+    assert.equal(k.sends.length, 0, what);
+  }
+});
+
+test("a run's release leaves a lock that is not its own", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "venue-table-lock-"));
+  const release = vt.lockFolder(dir, { say: () => {} });
+  writeFileSync(path.join(dir, "run.lock"), "1\nThu Jan  1 00:00:00 1970\n");
+  release();
+  assert.equal(existsSync(path.join(dir, "run.lock")), true);
+});
+
+test("a journaled create is open while its last valid height is past at confirmed but not at finalized: the resume stops, nothing sent", async () => {
+  const k = fakeCluster();
+  k.advance(60_000);
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const lastValid = 5_000 + Math.floor((k.now() - 3_000) / 400); // the finalized height now: not past it
+  assert.ok(5_000 + Math.floor(k.now() / 400) > lastValid, "the confirmed height is past it");
+  const { dir: kd, funder } = keptFolder(base, p, { table: T, txs: [{ step: "lookup table: create and extend with 28 addresses", signature: sigOf(1), state: "sent", table: T, last_valid: lastValid }] });
+  fund(k, funder.id, 50_000_000n);
+  await assert.rejects(resumeOn(k, dir, kd, base), /may still land/);
+  assert.equal(sent(k, "create").length + sent(k, "extend").length + sent(k, "freeze").length, 0, "nothing sent to a table");
+});
+
+test("a journaled freeze that may still land stops a resume like a create or an extend does, nothing sent", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const { dir: kd, funder } = keptFolder(base, p, { table: T, txs: [{ step: "lookup table: freeze (authority none)", signature: sigOf(3), state: "sent", table: T, last_valid: 5_000 + Math.floor(k.now() / 400) + 150 }] });
+  fund(k, funder.id, 50_000_000n);
+  await assert.rejects(resumeOn(k, dir, kd, base), (e) => e.message.includes(sigOf(3)) && /may still land/.test(e.message));
+  assert.equal(sent(k, "create").length + sent(k, "extend").length + sent(k, "freeze").length, 0, "nothing sent to a table");
+});
+
+test("a journal's table read at confirmed and not yet at finalized is not \"no table\": the resume stops, nothing sent", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const { dir: kd, funder } = keptFolder(base, p, { table: T });
+  fund(k, funder.id, 50_000_000n);
+  k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 28)), lamports: rentMin(56 + 32 * 28) });
+  await assert.rejects(resumeOn(k, dir, kd, base), /the same at confirmed and at finalized/);
+  assert.equal(sent(k, "create").length + sent(k, "extend").length + sent(k, "freeze").length, 0, "nothing sent to a table");
+});
+
+test("the record is read back after its write: a row for the table with another list is refused, the key kept", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const say = (s) => {
+    k.say(s);
+    const m = /^lookup table (\w+) is frozen/.exec(s);
+    if (!m) return;
+    const r = JSON.parse(readFileSync(p.file, "utf8"));
+    r.tables.pumpswap = [...(r.tables.pumpswap ?? []), { table: m[1], pages: p.range, made_at: p.sizes, addresses: p.list.slice(1), txs: [] }];
+    writeFileSync(p.file, JSON.stringify(r, null, 2) + "\n");
+  };
+  await assert.rejects(runOn(k, p, base, { say }), /does not read back one tables\.pumpswap row/);
+  assert.equal(readdirSync(base).length, 1, "the key folder is kept");
+});
+
 test("--return is refused before anything is made or printed: the pool program, the pool account, the system program, wSOL's mint", async () => {
   const k = fakeCluster();
   k.set(MAINNET.program_id, { owner: "BPFLoaderUpgradeab1e11111111111111111111111", data: Buffer.alloc(36), lamports: 1_141_440n }, 0);
@@ -1562,6 +1672,13 @@ test("the mainnet source gate: a HEAD behind main whose mainnet.json differs is 
   w3.tables.pumpswap.unshift({ table: T, pages: SWAP_G1.pages, made_at: SWAP_G1.made_at, addresses: [], txs: [] });
   writeFileSync(path.join(before, REC), JSON.stringify(w3, null, 2) + "\n");
   assert.match(gate(before, { venue: "pumpswap", table: T }).join(), /mainnet\.json has changes not committed/, "own row before the older generation");
+  // the own row twice: refused
+  const twice = cloneAt(o, o.head);
+  const w4 = JSON.parse(readFileSync(path.join(twice, REC), "utf8"));
+  const row = { table: T, pages: SWAP_G1.pages, made_at: SWAP_G1.made_at, addresses: [], txs: [] };
+  w4.tables.pumpswap.push(row, row);
+  writeFileSync(path.join(twice, REC), JSON.stringify(w4, null, 2) + "\n");
+  assert.match(gate(twice, { venue: "pumpswap", table: T }).join(), /mainnet\.json has changes not committed/, "own row twice");
   // the own row beside a change to another tracked file: refused for that file
   put(r, OUTSIDE[0], readFileSync(path.join(r, OUTSIDE[0]), "utf8") + "// changed\n");
   assert.match(gate(r, { venue: "pumpswap", table: T }).join(), /deploy\.mjs has changes not committed/);

@@ -552,6 +552,8 @@ async function keptFolders(p, base, say) {
 /** Why `returnTo` cannot take the funder's rest, as deploy.mjs's returnProblems reads it on both RPCs (a wallet: on the
  *  curve, a system account holding lamports), or as the record's program or pool. */
 async function returnRefusal(p, returnTo) {
+  // the record's own two accounts are refused from the record itself, before any read: the RPCs' reads below refuse
+  // them too (a program, a program's account), and these two lines keep that refusal from resting on an RPC's answer
   if (returnTo === p.record.program_id) return "is the pool's program, not a wallet";
   if (returnTo === p.record.pool) return "is the pool's account, not a wallet";
   for (const u of p.c.rpcs) {
