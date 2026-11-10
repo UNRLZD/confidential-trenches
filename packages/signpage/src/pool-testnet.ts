@@ -754,9 +754,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       seed64: page.seed64,
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
+      send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy)
       outDecimals: (wallet, d) => void boughtDecimals.set(wallet, d),
-      send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
       settle: async (noteId) => {
         const seed64 = await page.seed64();
         try {
