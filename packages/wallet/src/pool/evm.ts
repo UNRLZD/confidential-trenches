@@ -77,7 +77,7 @@
 // Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
 // that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
@@ -1818,13 +1818,16 @@ export type EvmPoolArgs = {
    * (evmPair). */
   rpcs: readonly EvmRpc[];
   /**
-   * The two RPCs bind reads the chain fee on, at the epoch's first block's hash, always given (never `rpcs` in their
-   * place: card evm-buy-hookdata-fee, fold 4 LOW-1): each must keep
-   * state that far back (card evm-buy-hookdata-fee, review fold 2 MEDIUM-A): the kit's fee pair (evmPoolVenues
-   * feeProviders, held to 600 s by live check evm-buy-hookdata-fee), never its quote providers, some of which keep no
-   * state that far back (card evm-quote-warm-round fold 8). The sync's pair needs wide log pages instead, and on Robinhood
-   * testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of state and
-   * pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old logs).
+   * The list bind reads the chain fee on, at the epoch's first block's hash, always given (never `rpcs` in their
+   * place: card evm-buy-hookdata-fee, fold 4 LOW-1), each with its `url`: read as two operators of it (the kit's
+   * evmTwoOperators, card device-evm-fee-read-walks-operators), so one operator that refuses that block's state, hangs
+   * or answers an error is walked past, and the fee binds only when two operators' answers agree. Each must keep state a
+   * minute back (the epoch's first block): the kit's read list (evmReadProvidersOf(evmPoolVenues()[network])), never its
+   * quote providers, some of which keep no state back (card evm-quote-warm-round fold 8; bloXroute, Globalstake and
+   * daybreak refuse a block 5 s back, read 2026-11-10 20:44Z). The sync's pair needs wide log pages instead, and on
+   * Robinhood testnet no second free provider gives both (read 2026-11-04 20:09-20:44Z: PublicNode keeps about 15 s of
+   * state and pages 50,000 blocks of logs; dRPC keeps 600 s and more but refuses a 1,000-block page of the pool's old
+   * logs).
    */
   feeRpcs: readonly EvmRpc[];
   /** Where the device holds the pool's sync between syncs (EvmSyncArgs held). */
@@ -1843,7 +1846,10 @@ export type EvmPoolArgs = {
 
 export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
   const rpcs = evmPair(a.rpcs);
-  const feeRpcs = evmPair(a.feeRpcs, "feeRpcs");
+  if (!Array.isArray(a.feeRpcs) || a.feeRpcs.length < 2 || a.feeRpcs.some((r) => typeof r !== "function")) throw new Error("feeRpcs: two or more");
+  if (a.feeRpcs.some((r) => typeof r.url !== "string")) throw new Error("feeRpcs: each with its url (its operator)");
+  for (let i = 0; i < a.feeRpcs.length; i++) for (let j = i + 1; j < a.feeRpcs.length; j++) if (solanaSameProvider(a.feeRpcs[i]!, a.feeRpcs[j]!)) throw new Error("feeRpcs: one provider twice is one read");
+  const feeRpcs = evmTwoOperators(a.feeRpcs.map((rpc) => ({ url: rpc.url!, rpc })));
   if (typeof a.epochFee !== "function" || typeof a.relayFee !== "function") throw new Error("epochFee and relayFee: functions");
   const pool = lower(a.pin.pool);
   const feeRecipient = lower(a.pin.feeRecipient);
@@ -1883,8 +1889,21 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
         const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
         const depth = await sync.depthAt(block.number, signal, block.hash);
         const reads = evmPoolChainFeeReads(a.pin.network, evmPoolGas(depth));
-        const [x, y] = await both(feeRpcs, (rpc, k, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${k} chain fee`, sig, sleep))), signal);
-        if (x.some((v, i) => v !== y[i])) throw new Error(`the two RPCs differ on the chain fee at block ${block.number} (${block.hash})`);
+        // two operators' answers, equal (a difference is refused, EvmOperatorsDiffer, never asked of a third)
+        let x: bigint[];
+        try {
+          [{ value: x }] = await feeRpcs.read(
+            `the chain fee at block ${block.number} (${block.hash})`,
+            (rpc, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${new URL(rpc.url!).host} chain fee`, sig, sleep))),
+            (p, q) => p.length === q.length && p.every((v, i) => v === q[i]),
+            signal,
+          );
+        } catch (e) {
+          // a lag on the side left with no operator is a retry; any other failure is its own (a read that failed by name
+          // is never tried again around it: evmAnswered)
+          if (e instanceof EvmOperatorsUnanswered) throw e.cause instanceof EvmLagError ? new EvmLagError(e.message) : (e.cause ?? e);
+          throw e;
+        }
         return { block, depth, chainFee: evmPoolChainFee(a.pin.network, EVM_POOL_TX_BYTES, x) };
       }, sleep, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
