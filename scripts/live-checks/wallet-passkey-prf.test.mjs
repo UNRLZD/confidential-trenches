@@ -440,3 +440,46 @@ test("a press that missed its control, or was never made, stays BAD wherever it 
     }
   }
 });
+
+// Card sign-live-checks-read-a-pinned-page: the page pins the mainnet Solana pool (release 111), so each signed-in page
+// polls the pool price on the helper's Solana route, whose budget every caller shares; the sign live run opens the page
+// in 78 jobs at once, and its 429 there (run 42882854987) is the run's load. That one line, exactly as console-errors.mjs
+// keeps it, is counted and passes; every other line is still an error.
+// the line as console-errors.mjs keeps a 429 on the helper's Solana route (origin and path only)
+const HELPER_SOLANA_429 = "console: Failed to load resource: the server responded with a status of 429 () (https://ct-api.unrealized.trade/v1/rpc/solana)";
+test("a 429 from the helper's own Solana route is the run's load: counted and PASS; every other error still FAIL", () => {
+  const r = clone(answers.good);
+  r.errors.push(HELPER_SOLANA_429, HELPER_SOLANA_429);
+  const j = judge(r);
+  assert.equal(j.verdict, "PASS", j.lines.join("\n"));
+  assert.ok(j.lines.includes("ok  no page error or CSP violation (0); the helper's Solana route refused 2 reads for its shared budget (429), the run's load"), j.lines.join("\n"));
+  const text = "console: Failed to load resource: the server responded with a status of";
+  for (const [name, line] of [
+    ["a 429 on another helper route", `${text} 429 () (https://ct-api.unrealized.trade/v1/rpc/solana-marks)`],
+    ["a 429 on the relay", `${text} 429 () (https://ct-api.unrealized.trade/v1/relay/status)`],
+    ["a 503 on the Solana route", `${text} 503 () (https://ct-api.unrealized.trade/v1/rpc/solana)`],
+    ["a 429 from a public provider", `${text} 429 () (https://solana-rpc.publicnode.com/)`],
+    ["a 429 from a lookalike host", `${text} 429 () (https://ct-api.unrealized.trade.evil.example/v1/rpc/solana)`],
+    ["a 429 with no address", `${text} 429 ()`],
+    ["a CSP violation", "console: Refused to connect to 'https://evil.example/' because it violates the following Content Security Policy directive"],
+    ["a page error", "pageerror: boom"],
+  ]) {
+    const x = clone(answers.good);
+    x.errors.push(HELPER_SOLANA_429, line);
+    const v = judge(x);
+    assert.equal(v.verdict, "FAIL", name);
+    assert.ok(v.lines.some((l) => l.startsWith("BAD no page error or CSP violation (1): ") && l.includes(line)), `${name}\n${v.lines.join("\n")}`);
+  }
+});
+
+// live111: the live page on release 111, this card's check, on the Mac (20:01Z): three 429s from the helper's Solana
+// route, counted as the run's load. Its one BAD is the two-tab race (tab a's ceremony cancelled on this Mac's Chrome,
+// twice), which the same release passed on GitHub's runner in run 42882854987; the page's errors line is ok.
+test("recorded live run on release 111: the helper's 429s are counted, the errors line ok; on it any other error is BAD", () => {
+  const j = judge(answers.live111);
+  assert.ok(j.lines.includes("ok  no page error or CSP violation (0); the helper's Solana route refused 3 reads for its shared budget (429), the run's load"), j.lines.join("\n"));
+  assert.deepEqual(bad(answers.live111).map((l) => l.split(" (")[0]), ["BAD prf: two tabs that create at once end on one account, the one stored"]);
+  const r = clone(answers.live111);
+  r.errors.push("console: Refused to connect to 'https://evil.example/' because it violates the following Content Security Policy directive");
+  assert.ok(bad(r).some((l) => l.startsWith("BAD no page error or CSP violation (1): console: Refused to connect")), bad(r).join("\n"));
+});

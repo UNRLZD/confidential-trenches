@@ -80,6 +80,9 @@ export const PRF_INPUT = "confidential-trenches/v1/seed";
 export const WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt";
 export const WORDLIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"; // BIP-39's own pin
 const WAIT_MS = 15_000;
+/** The one console line that is the live run's load, not a page error (judge): a 429 from the helper's own Solana RPC
+ *  route, as console-errors.mjs keeps it (origin and path only). */
+export const HELPER_SOLANA_429 = "console: Failed to load resource: the server responded with a status of 429 () (https://ct-api.unrealized.trade/v1/rpc/solana)";
 export const PROTECT_MS = 500; // Chromium's InputEventActivationProtector default, the page's guard
 // Sign out's draw time on the page's own clock: performance.now() when a Sign out button is inserted. Run before the
 // page's scripts; a press's distance from it bounds the press's distance from the page's own guard time from above.
@@ -263,7 +266,13 @@ export function judge(rec) {
   const ty = n.typed ?? {};
   say(ty.state === "signed-in" && HEX64.test(ty.expected ?? "") && ty.account === ty.expected && ty.codeSaved === "true" && ty.seedWrapped === true,
     `no-prf: the typed 12 words of A.8's seed sign in as its T_0 with code_saved true (${ty.state}, ${ty.account === ty.expected ? "equal to the check's own" : "differs"}, code_saved ${ty.codeSaved})`);
-  say((rec.errors ?? []).length === 0, `no page error or CSP violation (${(rec.errors ?? []).length})${(rec.errors ?? []).length ? `: ${rec.errors.join("; ")}` : ""}`);
+  // the helper's own Solana route refusing for its shared budget (429) is the live run's load, never this page's error:
+  // the sign live run opens the page in 78 jobs at once, each polling the pool price on that route (card
+  // sign-live-checks-read-a-pinned-page, run 42882854987); counted, never kept as an error. Any other line stays one:
+  // another status, path or host, a CSP violation, a page error.
+  const errs = (rec.errors ?? []).filter((e) => e !== HELPER_SOLANA_429);
+  const load = (rec.errors ?? []).length - errs.length;
+  say(errs.length === 0, `no page error or CSP violation (${errs.length})${errs.length ? `: ${errs.join("; ")}` : ""}${load ? `; the helper's Solana route refused ${load} read${load === 1 ? "" : "s"} for its shared budget (429), the run's load` : ""}`);
   const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : lines.some((l) => l.startsWith("INCONCLUSIVE")) ? "INCONCLUSIVE" : "PASS";
   return { verdict, pass: verdict === "PASS", lines };
 }
