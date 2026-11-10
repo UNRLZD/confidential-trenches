@@ -271,6 +271,22 @@ test("(2) a start 30 s into a period whose fee's state is gone says ready at the
   assert.equal(calls.length, n);
 });
 
+test("(2b) the start's wait for the period's fee waits on the timer's read of it, never a second read: one read ahead, one line, then the next period's", async (t) => {
+  const at = { T: E + evm.EVM_FEE_WARM_DELAY_MS };
+  // every operator but Robinhood's own refuses the state of this period's blocks, all through its read-ahead window
+  const calls = chain(t, (host, method, ageS, T) => (method === "eth_call" && host !== OWN && T / 1000 - ageS >= E / 1000 && T / 1000 - ageS < E / 1000 + 60 ? PRUNED(ageS) : null), at);
+  const lines: string[] = [];
+  const s = sendersOf(ENV_RH, lines).get(RH)!;
+  const sleep = async (ms: number) => void (at.T += ms);
+  // the timer's read ahead of the period, and the start's check beside it
+  const timer = s.warm(E, sleep);
+  await s.ready(sleep);
+  await timer;
+  assert.equal(lines.filter((l) => l.includes("read ahead failed")).length, 1, lines.join("\n"));
+  assert.equal((await s.fee(at.T))?.epoch_start_ms, E + 60_000);
+  assert.ok(calls.length > 0);
+});
+
 test("(4) /v1/health's ready stays false while any pool has no fee for the period the start is in or the next: Base's fee read at once, Robinhood's only at the next period's read", async (t) => {
   const S = await import("../server.ts");
   const at = { T: E + 30_000 };
