@@ -152,7 +152,7 @@ export const TESTNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonl
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"]),
 });
 export const MAINNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.drpc.org"]),
+  base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"]),
 });
 /** An EVM chain's fee list as the page reads it (testnetRpc each). */

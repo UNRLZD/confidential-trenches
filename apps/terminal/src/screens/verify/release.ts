@@ -59,7 +59,7 @@ export const VERIFY_RELEASES: Readonly<Record<NearNetwork, VerifyRelease>> = {
       },
       base: {
         chain: "base",
-        rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.drpc.org"],
+        rpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"],
         pin: {
           address: "0xaa080e74ec99cf5c684548c77ca145edfcf899cf", // gitleaks:allow (a public contract address)
           codeHash: "0xcac5a62a0ac95b9dd1323c57a2561fe3eb56292c82c5d3a5390c95e522ff786d", // gitleaks:allow (a public code hash)

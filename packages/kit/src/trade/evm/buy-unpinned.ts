@@ -227,10 +227,11 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // answered eth_chainId 8453, a CORS preflight from https://sign.confidential.unrealized.trade and
       // https://ct-app.unrealized.trade (200 or 204, allow-origin that origin or *), and the bind's own fee read (the
       // OP oracle's getL1FeeUpperBound, by blockHash) at blocks 5, 60, 120 and 600 s back, 224-318 ms each. Four
-      // operators: Coinbase's own (base.org), Allnodes' publicnode, Pocket's gateway and dRPC (drpc.org), each on
-      // its own domain (evmRpcOperator). blastapi, tenderly and sentio answered the same reads and are left as the quote's
-      // and the scan's.
-      readProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.drpc.org"]),
+      // operators, each on its own domain (evmRpcOperator) and each already in both pages' connect-src (the quote's and
+      // the scan's lists): Coinbase's own (base.org), Allnodes' publicnode, Pocket's gateway and Tenderly's gateway
+      // (read 21:17Z, 268-272 ms). base.drpc.org, blastapi and sentio answered the same reads; base.drpc.org is in
+      // neither page's connect-src.
+      readProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
       // The pool's list (card evm-pool-lists-mainnet): the quote list's second, blastapi, pages 10 blocks ("-32600: You
       // can make eth_getLogs requests with up to a 10 block range"), so it never seats the pool's sync. Read 2026-11-09
       // 05:50-05:55Z from this Mac, keyless, the pool's filter (its address; deploy block 54,325,671, tx 0x2e0cba4b…c23c7)

@@ -160,5 +160,5 @@ test("each venue's read list: two operators at least, one seat each, Base and Ro
     assert.ok(list.length >= 2, chain);
   }
   assert.deepEqual(evmReadProvidersOf(v.robinhood!), [RH, PK, PN, DR]);
-  assert.deepEqual(evmReadProvidersOf(v.base!)!.map(evmRpcOperator), ["base.org", "publicnode.com", "pocket.network", "drpc.org"]);
+  assert.deepEqual(evmReadProvidersOf(v.base!)!.map(evmRpcOperator), ["base.org", "publicnode.com", "pocket.network", "tenderly.co"]);
 });

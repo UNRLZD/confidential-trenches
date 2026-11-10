@@ -242,7 +242,8 @@ test("harness: Verify's mainnet pool reads are answered from the recorded reads 
       assert.equal(want.status, "ok", `${c}: the recording reads ok`);
       assert.deepEqual(view.rows[i], want, c);
     }
-    const origins = new Set(POOL_CHAINS.flatMap((c) => pools[c].rpcs.map((u) => new URL(u).origin)));
+    // the seats asked while both answer: Solana's pair, an EVM list's first two operators (its spares only on a refusal)
+    const origins = new Set(POOL_CHAINS.flatMap((c) => pools[c].rpcs.slice(0, 2).map((u) => new URL(u).origin)));
     assert.deepEqual(new Set(asked.map(([o]) => o)), origins, "every pair the release names was read");
     assert.ok(asked.every(([, k]) => k === "fulfill"), "no pool read aborted");
     const sol = pools.solana.rpcs[0];

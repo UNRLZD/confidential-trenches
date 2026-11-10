@@ -1,0 +1,508 @@
+{
+ "good": {
+  "check": "device-evm-fee-read-walks-operators",
+  "at": "2026-11-10T21:18:10.003Z",
+  "chains": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.api.pocket.network",
+     "https://base.gateway.tenderly.co"
+    ],
+    "block": {
+     "number": "0x3530fd5",
+     "hash": "0x83e464f862c33b25bd5545dd52cf5ab3d6762f0983bfa3490beae4eed19210dc",
+     "timestamp": "0x6af389c5"
+    },
+    "seats": [
+     {
+      "url": "https://mainnet.base.org",
+      "operator": "base.org",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 200,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "Content-Type,Authorization,User-Agent"
+       },
+       {
+        "status": 200,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "Content-Type,Authorization,User-Agent"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "operator": "publicnode.com",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base.api.pocket.network",
+      "operator": "pocket.network",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base.gateway.tenderly.co",
+      "operator": "tenderly.co",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     }
+    ],
+    "walk": {
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ],
+     "agree": true
+    }
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood-rpc.publicnode.com",
+     "https://robinhood.drpc.org"
+    ],
+    "block": {
+     "number": "0x6a09c84",
+     "hash": "0x7d63cdcbab4c89a5e9ac4b88343911e7cd7fb2bbbd1e2e69eb8457d570d5c093",
+     "timestamp": "0x6af389cd"
+    },
+    "seats": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "operator": "robinhood.com",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "operator": "pocket.network",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "error": {
+        "code": -32000,
+        "message": "historical state 60b673612a41faf09f16e6a8e049da9d391cf9c398d18f965c97592abb2ca238 is not available"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood-rpc.publicnode.com",
+      "operator": "publicnode.com",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "error": {
+        "code": -32000,
+        "message": "historical state 60b673612a41faf09f16e6a8e049da9d391cf9c398d18f965c97592abb2ca238 is not available"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "operator": "drpc.org",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     }
+    ],
+    "walk": {
+     "hosts": [
+      "rpc.mainnet.chain.robinhood.com",
+      "robinhood.drpc.org"
+     ],
+     "operators": [
+      "robinhood.com",
+      "drpc.org"
+     ],
+     "agree": true
+    }
+   }
+  }
+ },
+ "bad": {
+  "check": "device-evm-fee-read-walks-operators",
+  "at": "2026-11-10T21:18:10.003Z",
+  "chains": {
+   "base": {
+    "list": [
+     "https://mainnet.base.org",
+     "https://base-rpc.publicnode.com",
+     "https://base.api.pocket.network",
+     "https://base.gateway.tenderly.co"
+    ],
+    "block": {
+     "number": "0x3530fd5",
+     "hash": "0x83e464f862c33b25bd5545dd52cf5ab3d6762f0983bfa3490beae4eed19210dc",
+     "timestamp": "0x6af389c5"
+    },
+    "seats": [
+     {
+      "url": "https://mainnet.base.org",
+      "operator": "base.org",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 200,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "Content-Type,Authorization,User-Agent"
+       },
+       {
+        "status": 200,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "Content-Type,Authorization,User-Agent"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base-rpc.publicnode.com",
+      "operator": "publicnode.com",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base.api.pocket.network",
+      "operator": "pocket.network",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://base.gateway.tenderly.co",
+      "operator": "tenderly.co",
+      "chainId": {
+       "result": "0x2105"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x00000000000000000000000000000000000000000000000000000005aad56b09",
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     }
+    ],
+    "walk": {
+     "hosts": [
+      "mainnet.base.org",
+      "base-rpc.publicnode.com"
+     ],
+     "operators": [
+      "base.org",
+      "publicnode.com"
+     ],
+     "agree": true
+    }
+   },
+   "robinhood": {
+    "list": [
+     "https://rpc.mainnet.chain.robinhood.com",
+     "https://robinhood.api.pocket.network",
+     "https://robinhood-rpc.publicnode.com",
+     "https://robinhood.drpc.org"
+    ],
+    "block": {
+     "number": "0x6a09c84",
+     "hash": "0x7d63cdcbab4c89a5e9ac4b88343911e7cd7fb2bbbd1e2e69eb8457d570d5c093",
+     "timestamp": "0x6af389cd"
+    },
+    "seats": [
+     {
+      "url": "https://rpc.mainnet.chain.robinhood.com",
+      "operator": "robinhood.com",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "result": [
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+       ]
+      }
+     },
+     {
+      "url": "https://robinhood.api.pocket.network",
+      "operator": "pocket.network",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "error": {
+        "code": 27,
+        "message": "Unknown state. First available state is 1"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood-rpc.publicnode.com",
+      "operator": "publicnode.com",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "*",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "error": {
+        "code": 27,
+        "message": "Unknown state. First available state is 1"
+       }
+      }
+     },
+     {
+      "url": "https://robinhood.drpc.org",
+      "operator": "drpc.org",
+      "chainId": {
+       "result": "0x1237"
+      },
+      "cors": [
+       {
+        "status": 204,
+        "acao": "https://sign.confidential.unrealized.trade",
+        "allowHeaders": "content-type"
+       },
+       {
+        "status": 204,
+        "acao": "https://ct-app.unrealized.trade",
+        "allowHeaders": "content-type"
+       }
+      ],
+      "fee": {
+       "error": {
+        "code": 27,
+        "message": "Unknown state. First available state is 1"
+       }
+      }
+     }
+    ],
+    "walk": {
+     "error": "robinhood fee: one operator alone never passes (side 1: robinhood.drpc.org: {\"code\":27,...}; no operator left that the other side did not ask)"
+    }
+   }
+  },
+  "note": "planted on the good run: every Robinhood seat but Robinhood`s own refuses the state of the block 60 s back (dRPC`s code 27 of 10 Nov 20:44Z, on all three): the bind could not bind"
+ }
+}

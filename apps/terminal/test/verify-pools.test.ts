@@ -168,7 +168,7 @@ test("one RPC of each pair down: every row amber, nothing logged; both of an EVM
     assert.ok(v.state === "read");
     assert.deepEqual(v.rows.map((r) => r.status), ["ok", "warn", "ok"]);
     assert.equal(logged.length, 1);
-    assert.match(logged[0]!, /^Verify read no head on two of mainnet\.base\.org, base-rpc\.publicnode\.com, base\.api\.pocket\.network, base\.drpc\.org$/);
+    assert.match(logged[0]!, /^Verify read no head on two of mainnet\.base\.org, base-rpc\.publicnode\.com, base\.api\.pocket\.network, base\.gateway\.tenderly\.co$/);
   } finally {
     console.error = was;
   }
