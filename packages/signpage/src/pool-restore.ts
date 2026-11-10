@@ -247,7 +247,7 @@ async function readDepositIds(
   out: Step5Reasons,
   noted: (scope: bigint) => Promise<ReadonlySet<number>>,
   own: { lane: number; raise(scope: bigint, min: number): Promise<void> },
-  kept: { of(scope: bigint): Promise<ReadonlyMap<number, number>>; add(scope: bigint, lane: number, readTo: number): Promise<void> },
+  kept: { of(scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>>; add(scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> },
 ): Promise<void> {
   const { rpcs, pass, reader } = await keptIdReader(POOL_DEPOSIT_NETWORK, ids.rpcs, keep, { ...ids.opts, signal });
   // what an id read as money holds, by asset on both providers at the same pass, opened now beside the id reader on the
@@ -266,15 +266,18 @@ async function readDepositIds(
   // this store's lane first; once read whole (no lane stopped past its walk's end) its counter goes past its highest
   // a lane read whole with nothing to tell (no reach, nothing unread, no id holding money: no finding can come of it)
   // is kept on the marker, so the next run reads only the others (review P2-3 of 53f5e92f)
-  const lanes = async (scope: bigint) => ({
-    first: own.lane,
-    signal,
-    done: await kept.of(scope),
-    laneRead: async (x: LaneIds) => {
-      if (x.lane === own.lane && x.reach === null) await own.raise(scope, coverTo(x));
-      if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo);
-    },
-  });
+  const lanes = async (scope: bigint, notes: readonly RestoredNote[]) => {
+    const { laneHighest } = lanesOf(notes, scope);
+    return {
+      first: own.lane,
+      signal,
+      done: await kept.of(scope, laneHighest),
+      laneRead: async (x: LaneIds) => {
+        if (x.lane === own.lane && x.reach === null) await own.raise(scope, coverTo(x));
+        if (x.reach === null && x.unread.length === 0 && x.money.length === 0) await kept.add(scope, x.lane, x.readTo, laneHighest[x.lane] ?? null);
+      },
+    };
+  };
   for (const w of walked) {
     // the walk's deposit notes are all of its pool's scope: one of another is a drift, never read on
     const drift = w.notes.filter((n) => n.ref.kind === "deposit" && n.ref.s !== w.scope);
@@ -284,7 +287,7 @@ async function readDepositIds(
     }
     const ux = w.ux;
     if (ux === null) {
-      const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, holds, await lanes(w.scope));
+      const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, holds, await lanes(w.scope, w.notes));
       ids.read?.(w.scope, r);
       undone(w.label, r);
       out.named.push(`${w.label}: ${POOL_CHAIN_UNREAD}`);
@@ -307,7 +310,7 @@ async function readDepositIds(
       held.set(i, { chain, s: w.scope.toString(), i, u, refund_id: id });
       return "money";
     };
-    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, both, await lanes(w.scope));
+    const r = await restoreDepositIds(seed, w.scope, { notes: [...w.notes], ...lanesOf(w.notes, w.scope) }, both, await lanes(w.scope, w.notes));
     ids.read?.(w.scope, r);
     undone(w.label, r);
     // each U_X found holding a balance, in index order, carried into the pool or named. The page's pool.deposit pays
@@ -465,18 +468,42 @@ export const STEP5_PAUSES_MS: readonly number[] = Object.freeze([30_000, 120_000
 /**
  * The marker that step 5 is owed (meta, under owed/, which the frame never reads or lists: ../../wallet/src/store): the
  * pinned pools' scopes, public and nothing else (no id, no index, no secret). Written once the walk's notes are written,
- * removed once a try of step 5 has read every id and found nothing; a sign out deletes it with the store. It keeps each
- * lane a try read whole with nothing to tell (no reach, no id unread, none holding money), with the index it read to,
- * by scope (`read`), and the next run reads only the others (review P2-3 of 53f5e92f: a reload read every lane again
- * from its start); a lane kept is kept for that marker's life only. A signed-in
+ * removed once a try of step 5 has read every id and found nothing, by the run that wrote it only (`run`: a tab never
+ * removes the marker another tab's later walk wrote); a sign out deletes it with the store. It keeps each lane a try
+ * read whole with nothing to tell (no reach, no id unread, none holding money), with the index it read to and its
+ * highest note then, by scope (`read`), and a resume (a load, a landing) reads only the others while their notes are
+ * unchanged (review P2-3 of 53f5e92f; delta review P2-A: a lane whose notes moved is read whole again). A run the user
+ * asks for (a Sync, a Retry) writes it fresh and reads every lane; a `read` of any other shape is dropped whole. A signed-in
  * load that finds it runs the restore again in the background (resume), so a page closed during step 5 never leaves it
  * unread for good.
  */
 export const RESTORE_IDS_KEY = "owed/restore-ids";
-/** The marker: the pools' scopes, and by scope each lane read whole with the index it read to. */
-type IdsOwed = { scopes: string[]; read?: Record<string, [number, number][]> };
-const owedOf = (v: unknown): IdsOwed | null =>
-  typeof v === "object" && v !== null && Array.isArray((v as IdsOwed).scopes) ? (v as IdsOwed) : null;
+/**
+ * The marker: the pools' scopes; by scope each lane read whole, with the index it read to and its highest note when it
+ * was kept (null: none); and the run that wrote it, so a run keeps lanes on and removes only its own marker.
+ */
+type IdsOwed = { scopes: string[]; read?: Record<string, [number, number, number | null][]>; run?: string };
+// a kept lane as the marker holds it: its lane, an index of the lane it read to within u32, its highest note at or below
+// that (or null); any other entry drops the marker's `read` whole, so a broken marker reads more, never less (delta
+// review P3-A)
+const keptEntry = (x: unknown): boolean =>
+  Array.isArray(x) &&
+  x.length === 3 &&
+  Number.isInteger(x[0]) &&
+  x[0] >= 0 &&
+  x[0] < RESTORE_LANES &&
+  Number.isInteger(x[1]) &&
+  x[1] >= 0 &&
+  x[1] <= 0xffff_ffff &&
+  x[1] % RESTORE_LANES === x[0] &&
+  (x[2] === null || (Number.isInteger(x[2]) && x[2] >= 0 && x[2] <= x[1] && x[2] % RESTORE_LANES === x[0]));
+const owedOf = (v: unknown): IdsOwed | null => {
+  const o = v as IdsOwed;
+  if (typeof v !== "object" || v === null || !Array.isArray(o.scopes) || !o.scopes.every((x) => typeof x === "string")) return null;
+  const r = o.read as unknown;
+  const read = typeof r === "object" && r !== null && !Array.isArray(r) && Object.values(r).every((xs) => Array.isArray(xs) && xs.every(keptEntry));
+  return { scopes: o.scopes, ...(read ? { read: o.read } : {}), ...(typeof o.run === "string" ? { run: o.run } : {}) };
+};
 
 /**
  * One try of step 5's end: its reasons, the try's number, and whether no try follows it in this page life. On the last
@@ -605,6 +632,8 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
       }) as Promise<T>;
     // the seed for one use
     const seed: SeedUse = (use) => seedHeld(async (s) => use(s));
+    // this run's own id on the marker it writes (a lane kept, the marker removed, only on its own: delta review P3-D)
+    const runId = crypto.randomUUID();
     // step 5 of this run, set at the walk's end and run after the restore lock is let go
     let step5: (() => Promise<void>) | null = null;
     // the restore lock, held for the walk and its floor (each tab's walks in turn), never for step 5 (review P2-4 of
@@ -666,13 +695,15 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         }
         // step 5 is owed from here until a try reads every id (the marker, the pools' scopes alone)
         const owes = ids !== null && pools.length > 0;
-        // (a marker already there for the same scopes keeps its lanes read whole: the next try reads only the others)
+        // (a resume, a load's or a landing's, keeps the lanes a marker for the same scopes holds read whole, so it reads
+        // only the others; a run the user asks for, a Sync or a Retry, writes it fresh and reads every lane whole: delta
+        // review P2-A)
         const scopes = pools.map((p) => p.scope.toString());
         if (owes)
           await seedHeld(async () =>
             (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
               const o = owedOf(v);
-              return o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes) ? o : { scopes };
+              return owed && o !== null && JSON.stringify(o.scopes) === JSON.stringify(scopes) ? { ...o, run: runId } : { scopes, run: runId };
             }),
           );
         signal.throwIfAborted();
@@ -689,7 +720,14 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         // leaves the screen saying done
         const tell = async (r: Step5End): Promise<void> => {
           h.step5?.(r);
-          if (r.named.length === 0) return;
+          if (r.named.length === 0) {
+            // the run's last try read every id with nothing to tell after a finding was told: the newest restore op is
+            // done again, so the stalled sheet never stands on nothing (delta review P3-B)
+            if (!r.last || !run.finding) return;
+            run.finding = false;
+            await seedHeld(async () => (await h.store()).put("ops", crypto.randomUUID(), { kind: "restore", stage: "done", txs: [], created_ms: now() }));
+            return;
+          }
           run.finding = true;
           await seedHeld(async () => {
             const st = await h.store();
@@ -713,16 +751,21 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
         const own = { lane: (await h.store()).lane, raise: (scope: bigint, min: number) => seedHeld(async () => void (await (await h.store()).raiseDepositIndex(scope, min))) };
         // the lanes the marker keeps read whole, by scope; a lane is added only while the marker is there (never one
         // written again after a try removed it)
+        // the lanes this run's marker keeps read whole, by scope: one is skipped only while its notes are what they were
+        // when it was kept (its highest note the same: delta review P2-A); a lane is added only to this run's own marker
         const lanesKept = {
-          of: async (scope: bigint): Promise<ReadonlyMap<number, number>> =>
-            new Map(owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)))?.read?.[scope.toString()] ?? []),
-          add: (scope: bigint, lane: number, readTo: number): Promise<void> =>
+          of: async (scope: bigint, laneHighest: readonly (number | null)[]): Promise<ReadonlyMap<number, number>> => {
+            const o = owedOf(await seedHeld(async () => (await h.store()).get("meta", RESTORE_IDS_KEY)));
+            if (o?.run !== runId) return new Map();
+            return new Map((o.read?.[scope.toString()] ?? []).filter(([l, , hi]) => hi === (laneHighest[l] ?? null)).map(([l, to]) => [l, to]));
+          },
+          add: (scope: bigint, lane: number, readTo: number, highest: number | null): Promise<void> =>
             seedHeld(async () =>
               void (await (await h.store()).update("meta", RESTORE_IDS_KEY, (v) => {
                 const o = owedOf(v);
-                if (o === null) return undefined;
+                if (o === null || o.run !== runId) return undefined;
                 const k = scope.toString();
-                return { ...o, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo]] } };
+                return { ...o, read: { ...o.read, [k]: [...(o.read?.[k] ?? []).filter(([l]) => l !== lane), [lane, readTo, highest]] } };
               })),
             ),
         };
@@ -742,7 +785,11 @@ export function poolRestore(h: PoolRestoreHost): PoolRestore {
           if (answered) {
             // every id read and nothing found: nothing is owed, unless a pool's walk failed (the next load walks it and
             // reads its ids); a finding keeps the marker, so the next load reads again (review P2-1)
-            if (!walkFailed && out.named.length === 0) await seedHeld(async () => (await h.store()).delete("meta", RESTORE_IDS_KEY));
+            if (!walkFailed && out.named.length === 0)
+              await seedHeld(async () => {
+                const st = await h.store();
+                if (owedOf(await st.get("meta", RESTORE_IDS_KEY))?.run === runId) await st.delete("meta", RESTORE_IDS_KEY);
+              });
             return;
           }
           if (last) return;

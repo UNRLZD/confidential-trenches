@@ -325,7 +325,7 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
     answered: "r.retry.length===0&&r.held.length===0",
     last: "a=i||n>x.length",
     told: "a?{retry:[],held:[],named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}",
-    gone: "!g&&r.named.length===0&&await _(async()=>(await e.store()).delete(`meta`,fG));return}",
+    gone: "!g&&r.named.length===0&&await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}",
     pause: "if(a)return;await mG(x[n-1],t)}",
   };
   const end = (o = {}) => {
@@ -343,8 +343,9 @@ test("ids_end, ids_ux_push and seed_per_use_lock match this build's lines, never
   assert.equal(n(end({ told: "a?{retry:[],held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the last try drops what is unread (silent: review P2-2)");
   assert.equal(n(end({ told: "a?{retry:r.retry,held:[],named:[...r.named,...r.held],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "the 53f5e92f end: unread kept off the finding");
   assert.equal(n(end({ told: "a?{retry:[],held:r.held,named:[...r.named,...r.held,...r.retry],tries:n,last:a}:{...r,tries:n,last:a}" }), "ids_end"), 0, "held told twice");
-  assert.equal(n(end({ gone: "!g&&await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
-  assert.equal(n(end({ gone: "await _(async()=>(await e.store()).delete(`meta`,fG));return}" }), "ids_end"), 0, "the marker removed after a failed walk");
+  assert.equal(n(end({ gone: "!g&&await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "the marker removed with a finding (review P2-1)");
+  assert.equal(n(end({ gone: "await _(async()=>{let t=await e.store();mG(await t.get(`meta`,`owed/restore-ids`))?.run===y&&await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "the marker removed after a failed walk");
+  assert.equal(n(end({ gone: "!g&&r.named.length===0&&await _(async()=>{let t=await e.store();await t.delete(`meta`,fG)});return}" }), "ids_end"), 0, "another tab's marker removed (delta review P3-D)");
   assert.equal(n(end({ pause: "return}" }), "ids_end"), 0, "no retry: no pause before the next try (review P3-5)");
   assert.equal(n(end({ pause: "if(a)return;await mG(x[0],t)}" }), "ids_end"), 0, "the pauses not growing");
   assert.equal(n(end({ told: "{...r,tries:n,last:a}" }), "ids_end"), 0, "held never a finding");
@@ -515,6 +516,7 @@ test("a build of this tree whose step 5 end loses a list or retries a seed gone 
     // review P3-5 of 53f5e92f: the walk's end always done, a finding written done, no retry at all
     ["ids_walk_end", /\?`stalled`:`done`/, "?`done`:`done`"],
     ["ids_tell", /stage:`stalled`,txs/, "stage:`done`,txs"],
+    ["ids_tell", /if\(![\w$]+\.last\|\|![\w$]+\.finding\)return;/, "return;"],
     ["ids_end", /if\(([\w$]+)\)return;await [\w$]+\([\w$]+\[[\w$]+-1\],[\w$]+\)\}$/, "return}"],
     ["seed_per_use_lock", /throw new [\w$]+\(`signed out/, "throw Error(`signed out"],
     ["seed_per_use_lock", /throw new [\w$]+\(`other words/, "throw Error(`other words"],

@@ -165,8 +165,8 @@ test("the bundle facts hold this build's lines, never a carry, a read or a held 
   assert.equal(dead(broken(/:([\w$]+)>1n&&/, ":!1&&"), `;${held.replace(/^async function ([\w$]+)/, "async function __dead_h")}`).id_held, false, "dead copy: held rule (real one names nothing)");
   assert.equal(dead(broken(/(ux:[\w$]+=>[\w$]+\([\w$]+,)([\w$]+)\(\{chain:/, "$1(()=>null)({chain:"), `;var __dead_w={signedIn:0,${wired}0}`).ux_wired, false, "dead copy: wired (real deps swapped)");
   assert.equal(dead(js, read).ux_read, false, "a second copy of the reader beside the real one");
-  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+),await ([\w$]+)\(\2\.scope\)\)/;
-  assert.equal(mut(handed, "$1l,await $4($2.scope))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
+  const handed = /(`money`\)\},[\w$]+=await [\w$]+\([\w$]+,([\w$]+)\.scope,\{notes:\[\.\.\.\2\.notes\],\.\.\.[\w$]+\(\2\.notes,\2\.scope\)\},)([\w$]+),await ([\w$]+)\(\2\.scope,\2\.notes\)\)/;
+  assert.equal(mut(handed, "$1l,await $4($2.scope,$2.notes))").ux_read, false, "the U_X reader not handed to restoreDepositIds");
 });
 
 test("the review's two plants, recorded as bad answers, fail on the bundle alone", () => {
