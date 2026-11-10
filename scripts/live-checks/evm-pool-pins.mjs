@@ -18,6 +18,7 @@ import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { CHAINS, pinnedBuild, poolFile, runtimeOf } from "./pool-evm-deploy.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
@@ -108,14 +109,29 @@ export async function checkPin(fetchFn, net, pin, tx, epochMs) {
       say(rt.length === b.length && rt.masked === b.masked, `the pool's code is its build (${rt.length} bytes, masked ${rt.masked.slice(0, 12)}…) ${on}`);
     } else if (code === null) say(false, `no code read ${on}`);
   }
-  let status = 0;
-  let f = {};
-  try {
-    const r = await fetchFn(`${HELPER}/v1/pool/fee?pool=${pin.pool}&epoch=${epochMs}`, { method: "GET" });
-    status = r.status;
-    f = (await r.json().catch(() => null)) ?? {};
-  } catch (e) {
-    f = { error: String(e?.message ?? e) };
+  // the epoch, and when the helper has no block in it yet (503 index_behind, or 404 before its change) the one before
+  // (evm-pool-fee-epoch.mjs); a text read, so a replay and the live read are judged alike
+  const ask = async (url) => {
+    try {
+      const r = await fetchFn(url, { method: "GET" });
+      return { status: r.status, body: await r.text().catch(() => "") };
+    } catch (e) {
+      return { status: 0, error: String(e?.message ?? e) };
+    }
+  };
+  const { answer } = await evmPoolFeeAsk(ask, HELPER, pin.pool, { epochMs });
+  if (noBlockYet(answer)) {
+    quiet = true;
+    lines.push(`QUIET ${net}: the helper has no block in the epoch or the one before (GET /v1/pool/fee answers HTTP ${answer.status} index_behind)`);
+    return { bad, quiet, lines };
+  }
+  const status = answer.status;
+  let f = answer.error !== undefined ? { error: answer.error } : null;
+  if (f === null) {
+    try {
+      f = JSON.parse(answer.body);
+    } catch {}
+    f ??= {};
   }
   say(status === 200 && f.network === net && String(f.pool).toLowerCase() === pin.pool && String(f.fee_recipient).toLowerCase() === pin.feeRecipient,
     `the helper's fee answer (HTTP ${status}) names ${f.network ?? "-"}, ${f.pool ?? "-"}, fee recipient ${f.fee_recipient ?? JSON.stringify(f.error ?? null)}; the pin: ${pin.feeRecipient}`);

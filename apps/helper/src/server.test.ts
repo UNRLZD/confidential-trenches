@@ -683,6 +683,40 @@ test("POST /v1/pool/evm/sell carries the body to the named EVM pool's sender wit
   assert.equal(Object.hasOwn(JSON.parse(f.body), "sender"), false);
 });
 
+// card evm-fee-quiet-epoch: an EVM epoch whose first block the helper's provider does not hold yet is 503 index_behind
+// with a wait, never 404 not_found, the answer for a pool this helper does not carry (helper live run 42726731385 read
+// robinhood-testnet's fee in the first half second of 10 Nov 00:15Z and got 404; the same ask answered 200 two minutes
+// later). The epoch before, which has its first block, answers 200. Test key only: sha256 of a label.
+test("GET /v1/pool/fee for an EVM epoch with no block yet is 503 index_behind with Retry-After; a pool not carried stays 404 not_found", async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { evmPoolSender } = await import("./pool/evm.ts");
+  const POOL = "0xb239a38af69b68e6c5c305df64985f283b5d5fe5";
+  const NOW = 1_800_000_000_500; // half a second into the epoch that starts at 1_800_000_000_000
+  // a chain whose newest block is a second before the epoch now, blocks 2 s apart, 1 gwei base fee
+  const chain = async (m: string, p: readonly unknown[]): Promise<unknown> => {
+    if (m === "eth_chainId") return "0x14a34";
+    if (m === "eth_call") return `0x${(2n).toString(16).padStart(64, "0")}`;
+    const n = p[0] === "latest" ? 1000n : BigInt(p[0] as string);
+    return { number: `0x${n.toString(16)}`, timestamp: `0x${(1_800_000_000n - 1n - 2n * (1000n - n)).toString(16)}`, hash: `0x${n.toString(16).padStart(64, "0")}`, baseFeePerGas: "0x3b9aca00" };
+  };
+  const key = new Uint8Array(createHash("sha256").update("evm-fee-quiet-epoch/server/EVM_SENDER").digest());
+  const pool = evmPoolSender({ network: "base-sepolia", pool: POOL, senderKey: key }, [chain, chain], () => NOW);
+  const h = own(createServer(handler(COMMIT, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, null, new Map(), new Map([[POOL, pool]]), () => NOW)));
+  t.after(() => closeServer(h));
+  await new Promise<void>((ok) => h.listen(0, "127.0.0.1", () => ok()));
+  const to = (h.address() as AddressInfo).port;
+  for (const q of [`pool=${POOL}`, `pool=${POOL}&epoch=1800000000000`]) {
+    const f = await call("GET", `/v1/pool/fee?${q}`, {}, undefined, to);
+    assert.deepEqual([f.status, JSON.parse(f.body)], [503, { error: { code: "index_behind" } }], q);
+    assert.equal(f.headers["retry-after"], "1", q);
+  }
+  const before = await call("GET", `/v1/pool/fee?pool=${POOL}&epoch=1799999940000`, {}, undefined, to);
+  assert.equal(before.status, 200, before.body);
+  assert.equal(JSON.parse(before.body).epoch_start_ms, 1_799_999_940_000);
+  const other = await call("GET", "/v1/pool/fee?pool=0x000000000000000000000000000000000000beef", {}, undefined, to);
+  assert.deepEqual([other.status, JSON.parse(other.body)], [404, { error: { code: "not_found" } }]);
+});
+
 // M362 (3): the helper's own main, as the host runs it, with one devnet Solana pool whose two RPCs are local stubs.
 // A failed rent read takes down only that pool (503 upstream) and the rest answers; a configured fee that is not the
 // kit's for the rent read makes the process exit 2. Test keys only: sha256 of a label.

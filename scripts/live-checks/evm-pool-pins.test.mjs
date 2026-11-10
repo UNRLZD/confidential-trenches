@@ -22,8 +22,18 @@ test("the recorded good answer passes: both testnet pins, read on two RPCs each 
   assert.ok(r.lines.every((l) => l.startsWith("ok  ")), r.lines.join("\n"));
 });
 
+// the recorded bad run asked the fee once (404); the check now asks the epoch before too (card evm-fee-quiet-epoch),
+// which a helper that does not carry the pool answers 404 as well: the recording has no such ask, so it answers it so
+const asksBefore = (log) => {
+  const left = replayer(log);
+  return async (url, init) => {
+    if (!url.includes("/v1/pool/fee") || !url.endsWith(`&epoch=${A.epochMs - 60_000}`)) return left(url, init);
+    const e = log.find((x) => x.url === url.replace(`&epoch=${A.epochMs - 60_000}`, `&epoch=${A.epochMs}`));
+    return new Response(e.text, { status: e.status });
+  };
+};
 test("the recorded bad answer fails: the 3 Nov pools, which no helper serves", async () => {
-  const r = await check(replayer(A.bad.log), { ...opts, pins: BEFORE, txOf: (n) => BEFORE[n].tx });
+  const r = await check(asksBefore(A.bad.log), { ...opts, pins: BEFORE, txOf: (n) => BEFORE[n].tx });
   assert.equal(r.verdict, "FAIL");
   const fails = r.lines.filter((l) => l.startsWith("FAIL"));
   assert.equal(fails.length, 2, r.lines.join("\n"));
@@ -49,4 +59,46 @@ test("a provider that answers nothing (HTTP 429) makes the good answers INCONCLU
   const r = await check(async (url, init) => (url === "https://sepolia.base.org" ? new Response("", { status: 429 }) : good(url, init)), opts);
   assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
   assert.ok(r.lines.some((l) => l.startsWith("QUIET base-sepolia: sepolia.base.org HTTP 429")));
+});
+
+// card evm-fee-quiet-epoch: the helper has no block yet in the first moment of a minute (503 index_behind; 404 not_found
+// before the helper's change); the check asks the epoch before, and a chain with no block for a minute is INCONCLUSIVE
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+const BEFORE_EPOCH = `&epoch=${A.epochMs - 60_000}`;
+/** A fetch that serves the good run, but the helper's fee for a pool: `first` for the epoch asked, `second` for the one before. */
+function planted(first, second) {
+  const asked = [];
+  const rest = replayer(A.good.log.filter((e) => !e.url.includes("/v1/pool/fee")));
+  const fetchFn = async (url, init) => {
+    if (!url.includes("/v1/pool/fee")) return rest(url, init);
+    asked.push(url);
+    const before = url.endsWith(BEFORE_EPOCH);
+    const a = before ? second : first;
+    if (a === "good") return new Response(A.good.log.find((e) => e.url === url.replace(BEFORE_EPOCH, `&epoch=${A.epochMs}`)).text, { status: 200 });
+    return new Response(a[1], { status: a[0] });
+  };
+  return { fetchFn, asked };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`the helper's first fee answer ${name} and the epoch before's 200 passes`, async () => {
+    const { fetchFn, asked } = planted(first, "good");
+    const r = await check(fetchFn, opts);
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.equal(asked.length, 4, "each pool asked the epoch, then the epoch before");
+    assert.equal(asked.filter((u) => u.endsWith(BEFORE_EPOCH)).length, 2);
+  });
+}
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why", async () => {
+  const r = await check(planted(NO_BLOCK, NO_BLOCK).fetchFn, opts);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("QUIET") && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const r = await check(planted(NOT_FOUND, NOT_FOUND).fetchFn, opts);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("FAIL") && /the helper's fee answer \(HTTP 404\)/.test(l)));
 });
