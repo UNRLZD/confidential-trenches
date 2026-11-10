@@ -1,8 +1,12 @@
 // node --test scripts/live-checks/app-a2-e2e.test.mjs: the live check's verdict replays recorded runs
-// (app-a2-e2e.answers.json), each read on 9 Nov 21:40Z from the deployed helper by app-a2-e2e.mjs collect():
-//   good: both reads from the shipped origins: 200, CORS for APP_HOST and SIGN_HOST, the stub's fields, a blockhash: PASS;
-//   bad:  the same reads from https://example.com (--as), an origin the helper does not serve: no CORS on either: FAIL.
-// Planted from the good run: a field added to or dropped from the market answer, a status that is not 200, no blockhash.
+// (app-a2-e2e.answers.json), each read on 10 Nov 21:29Z from the deployed APP_HOST (main 1cc9d048) and helper by
+// app-a2-e2e.mjs collect():
+//   good: APP_HOST's token route and its script with every mark the run drives; the helper's reads from the shipped
+//         origins: 200, CORS for APP_HOST and SIGN_HOST, the stub's fields, a blockhash: PASS;
+//   bad:  the helper's reads from https://example.com (--as), an origin the helper does not serve: no CORS on either: FAIL.
+// Planted from the good run: a mark the run drives gone from the scripts, APP_HOST framed by another origin or its
+// connect-src without the helper, a field added to or dropped from the market answer, a status that is not 200, no
+// blockhash.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -48,4 +52,18 @@ test("a status that is not 200, no blockhash or an error fails", () => {
   assert.equal(mut((r) => (r.devnet.status = 429)).ok, false);
   assert.equal(mut((r) => (r.devnet.blockhash = false)).ok, false);
   assert.equal(mut((r) => (r.error = "fetch failed")).ok, false);
+});
+
+test("APP_HOST: a mark the run drives gone, a wider frame-ancestors, a connect-src without the helper, or no script fails", () => {
+  let v = mut((r) => r.app.js.forEach((f) => (f.marks["sell-cta"] = 0)));
+  assert.equal(v.ok, false);
+  assert.match(bad(v), /lack the run's marks: sell-cta/);
+  v = mut((r) => (r.app.csp = r.app.csp.replace("frame-ancestors https://confidential.unrealized.trade", "frame-ancestors https://confidential.unrealized.trade https://evil.example")));
+  assert.equal(v.ok, false);
+  assert.match(bad(v), /framed only by SIGN_HOST/);
+  v = mut((r) => (r.app.csp = r.app.csp.replace("connect-src 'self' https://ct-api.unrealized.trade ", "connect-src 'self' ")));
+  assert.equal(v.ok, false);
+  assert.match(bad(v), /connect-src names the helper/);
+  assert.equal(mut((r) => (r.app.js = [])).ok, false);
+  assert.equal(mut((r) => (r.app.status = 404)).ok, false);
 });

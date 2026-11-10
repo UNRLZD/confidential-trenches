@@ -1,16 +1,20 @@
 #!/usr/bin/env node
-// Live check of card app-a2-e2e: the deployed helper still answers the two reads the devnet buy-and-sell run
-// (apps/terminal/test/e2e/buy/run.mjs, AE-11) takes from it, in the shape the run relies on:
+// Live check of card app-a2-e2e: the deployed APP_HOST and helper still give what the devnet buy-and-sell run
+// (apps/terminal/test/e2e/buy/run.mjs, AE-11) relies on, read only (it signs nothing, sends nothing, uses no account):
+//   - APP_HOST's token route, /token/solana/<mint> (the run's first page): 200 text/html, framed only by SIGN_HOST
+//     (frame-ancestors), its connect-src naming the helper; and the scripts the page names hold every mark the run
+//     drives (the trade box, its proof and Max line, its amount, its Buy, the Sell side, the sell box and its Sell): a
+//     mark renamed or dropped on the deployed build fails here, before a run drives a box no user sees;
 //   - /v1/market/token for a Solana mint, asked from APP_HOST's origin: 200, CORS for APP_HOST, and the same fields as the
 //     run's one stub (apps/terminal/test/e2e/buy/market-token.json): its top level, its row and its risk keys. The run
 //     answers that read itself for the devnet mint, so a field the helper adds or drops makes the stub a shape the
 //     deployed helper no longer gives, and this check fails before the run tests a token page no user sees;
 //   - /v1/rpc/solana-devnet, asked from SIGN_HOST's origin: getLatestBlockhash answers 200 with CORS for SIGN_HOST and a
 //     blockhash (the signing page's devnet reads and the run's second RPC).
-// After: helper
+// After: app helper
 //   node scripts/live-checks/app-a2-e2e.mjs [--as <origin>] [--record <file>]
-//     --as asks both reads from another origin (the recorded bad answer: an origin the helper does not serve)
-//     PASS exit 0, FAIL exit 1, error exit 2. The record holds statuses, CORS headers and field names, never the values.
+//     --as asks the helper's reads from another origin (the recorded bad answer: an origin the helper does not serve)
+//     PASS exit 0, FAIL exit 1, error exit 2. The record holds statuses, headers, mark counts and field names, never the values.
 import "../net-window.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +27,17 @@ export const APP_ORIGIN = "https://ct-app.unrealized.trade";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
 /** A Solana mint the helper's market data always holds (BONK, a public mint). */
 export const LIVE_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // gitleaks:allow (a public Solana mint)
+/** The marks the run drives, each a data-testid or a class as the source or the minified build writes it. */
+export const MARKS = ["trade-box", "trade-proof", "trade-max", "trade-cta", "trade-side-sell", "sell-box", "sell-cta", "trb-amount", "trb-input"];
+const Q = "[`\"']";
+const markRe = (m) => new RegExp(`${Q}${m}${Q}`, "g");
+/** Each mark's count in one script. */
+export const marksOf = (js) => Object.fromEntries(MARKS.map((m) => [m, (js.match(markRe(m)) ?? []).length]));
+/** One directive's sources in a policy, or null. */
+export const directive = (csp, name) => {
+  const d = (csp ?? "").split(";").map((x) => x.trim().split(/\s+/)).find((w) => w[0] === name);
+  return d ? d.slice(1) : null;
+};
 const STUB = path.join(HERE, "../../apps/terminal/test/e2e/buy/market-token.json");
 
 /** The field names the run's stub relies on: the top level, the row's and the risk's, each sorted. */
@@ -37,6 +52,15 @@ export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   if (rec?.error) say(false, `error: ${rec.error}`);
+  const a = rec?.app ?? {};
+  say(a.status === 200 && /^text\/html/.test(a.type ?? ""), `APP_HOST's token route answered ${a.status ?? "nothing"} ${a.type ?? ""}`.trim());
+  const anc = directive(a.csp, "frame-ancestors");
+  say(Array.isArray(anc) && anc.length === 1 && anc[0] === SIGN_ORIGIN, `APP_HOST framed only by SIGN_HOST: frame-ancestors ${anc?.join(" ") ?? "none"}`);
+  say((directive(a.csp, "connect-src") ?? []).includes(HELPER), `APP_HOST's connect-src names the helper`);
+  const js = a.js ?? [];
+  say(js.length > 0 && js.every((f) => f.status === 200), `${js.length} script(s) named by the page, each answering 200`);
+  const missing = MARKS.filter((k) => !js.some((f) => (f.marks?.[k] ?? 0) > 0));
+  say(missing.length === 0, missing.length ? `the deployed scripts lack the run's marks: ${missing.join(", ")}` : `the deployed scripts hold every mark the run drives: ${MARKS.join(", ")}`);
   const m = rec?.market ?? {};
   say(m.status === 200, `market token answered ${m.status ?? "nothing"}`);
   say(m.cors === APP_ORIGIN, `market token CORS for APP_HOST: ${m.cors ?? "none"}`);
@@ -58,6 +82,14 @@ export function judge(rec) {
 export async function collect({ as = null } = {}) {
   const rec = { at: new Date().toISOString(), helper: HELPER, as };
   try {
+    const pr = await fetch(`${APP_ORIGIN}/token/solana/${LIVE_MINT}`, { signal: AbortSignal.timeout(20_000) });
+    const html = pr.ok ? await pr.text() : "";
+    rec.app = { status: pr.status, type: pr.headers.get("content-type"), csp: pr.headers.get("content-security-policy"), js: [] };
+    for (const src of [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/gi)].map((x) => x[1])) {
+      const url = new URL(src, APP_ORIGIN).href;
+      const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      rec.app.js.push({ url, status: r.status, marks: r.ok ? marksOf(await r.text()) : null });
+    }
     const mr = await fetch(`${HELPER}/v1/market/token?chain=solana&token=${LIVE_MINT}`, { headers: { origin: as ?? APP_ORIGIN }, signal: AbortSignal.timeout(20_000) });
     const mj = mr.ok ? await mr.json() : null;
     rec.market = { status: mr.status, cors: mr.headers.get("access-control-allow-origin"), shape: mj ? shapeOf(mj) : null };
