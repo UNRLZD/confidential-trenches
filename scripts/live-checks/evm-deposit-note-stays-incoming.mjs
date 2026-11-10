@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Live check of card evm-deposit-note-stays-incoming: every state read of the signing page's EVM pool deposit
-// (packages/signpage/src/pool-deposit-evm.ts) is one the page's own providers answer. Robinhood is Arbitrum Nitro, whose
+// (packages/signpage/src/pool-deposit-evm.ts) is one the page's own providers answer.
+// SIGN_HOST (https://confidential.unrealized.trade/): its page's script, the bundle the device runs, must name each
+// pool pair's seats below, and must hold no state read (eth_getTransactionCount, eth_getBalance, eth_getCode,
+// eth_getStorageAt, eth_call, eth_estimateGas) at a "finalized" or "safe" tag, which is the read this card removed. Robinhood is Arbitrum Nitro, whose
 // public nodes keep about 10 to 24 s of state: U's nonce at "finalized" is refused there with -32000 "historical state
 // ... is not available", so a deposit whose verdict read it never settled. The path now reads state only at the newest
 // block both RPCs hold, and block headers. On each chain's pool pair as the deployed page seats it (the kit's
@@ -16,15 +19,47 @@
 //   node scripts/live-checks/evm-deposit-note-stays-incoming.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
 // --record writes every answer read as the good run, and as the bad run a real run of the read the path made before
-// (U's nonce at "finalized"), which Robinhood's providers refuse.
+// (U's nonce at "finalized"), which Robinhood's providers refuse; a bundle's facts (bundleFacts) are recorded, not its
+// 850 KB of text. --bundle <file> judges that file in place of SIGN_HOST's (a local build before its deploy).
 import "../net-window.mjs";
-import { writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { EXIT, rpcAnswer } from "./provider-answer.mjs";
 
 const KEY = "evm-deposit-note-stays-incoming";
+export const SIGN_HOST = "https://confidential.unrealized.trade/";
+/** A state read at an old block's tag, as the bundle's code makes it: the method, then its params ending in the tag. */
+export const OLD_STATE_READ = /[`"'](eth_getTransactionCount|eth_getBalance|eth_getCode|eth_getStorageAt|eth_call|eth_estimateGas)[`"'],\[[^\]]{0,200}?[`"'](finalized|safe)[`"']\]/g;
+/** What the check reads of a bundle: its hash, its old state reads (each up to 120 characters) and the seats it names. */
+export function bundleFacts(text, pairs) {
+  return {
+    sha256: createHash("sha256").update(text).digest("hex"),
+    bytes: text.length,
+    oldStateReads: [...text.matchAll(OLD_STATE_READ)].map((m) => m[0].slice(0, 120)),
+    seats: Object.fromEntries(pairs.flatMap((p) => p.seats).map((u) => [u, text.includes(u)])),
+  };
+}
+/** SIGN_HOST's bundle: its page's script, fetched (status, text). */
+export async function signBundle(fetchFn = fetch) {
+  const page = await fetchFn(SIGN_HOST);
+  const html = await page.text();
+  const src = html.match(/<script[^>]*\bsrc="([^"]+\.js)"/)?.[1];
+  if (page.status !== 200 || src === undefined) throw new Error(`SIGN_HOST ${SIGN_HOST} answered ${page.status} with ${src === undefined ? "no script" : "a script"}`);
+  const url = new URL(src, SIGN_HOST).href;
+  const js = await fetchFn(url);
+  if (js.status !== 200) throw new Error(`SIGN_HOST's script ${url} answered ${js.status}`);
+  return { url, text: await js.text() };
+}
+/** The bundle's verdict lines: throws on an old state read or a seat the bundle does not name. */
+function judgeBundle(b, pairs) {
+  if (b.oldStateReads.length > 0) throw new Error(`the bundle ${b.url} (${b.sha256.slice(0, 16)}) holds ${b.oldStateReads.length} state read(s) at an old block's tag: ${b.oldStateReads.join(" | ")}`);
+  const missing = pairs.flatMap((p) => p.seats).filter((u) => b.seats[u] !== true);
+  if (missing.length) throw new Error(`the bundle ${b.url} names no ${missing.join(", ")}: not the page's pairs`);
+  return `the bundle ${b.url} (${b.sha256.slice(0, 16)}, ${b.bytes} bytes): no state read at an old block's tag; it names every seat (${Object.keys(b.seats).length})`;
+}
 export const CHAINS = Object.freeze({ base: "0x2105", robinhood: "0x1237" });
 const TRIES = 3;
 const QTY = /^0x[0-9a-fA-F]{1,64}$/;
@@ -121,9 +156,11 @@ async function pairReads(transport, { chain, seats, address }, before) {
 }
 
 /** The check: { verdict, ok, lines }. */
-export async function check(transport, { pairs = pagePairs(), before = false } = {}) {
+export async function check(transport, { pairs = pagePairs(), before = false, bundle } = {}) {
   const lines = [];
   try {
+    if (bundle === undefined) throw new Error("no bundle read");
+    lines.push(judgeBundle(bundle, pairs));
     for (const p of pairs) {
       if (p.seats.length !== 2) throw new Error(`${p.chain}: the pool list seats ${p.seats.length} providers, not two`);
       lines.push(...(await pairReads(transport, p, before)));
@@ -137,16 +174,20 @@ export async function check(transport, { pairs = pagePairs(), before = false } =
 
 async function main(argv) {
   const record = argv.includes("--record") ? argv[argv.indexOf("--record") + 1] : undefined;
+  const file = argv.includes("--bundle") ? argv[argv.indexOf("--bundle") + 1] : undefined;
   const pairs = pagePairs();
+  const got = file === undefined ? await signBundle() : { url: `file:${path.basename(file)}`, text: readFileSync(file, "utf8") };
+  const bundle = { url: got.url, ...bundleFacts(got.text, pairs) };
   const rec = recorder();
-  const r = await check(rec.transport, { pairs });
+  const r = await check(rec.transport, { pairs, bundle });
   for (const l of r.lines) console.log(`${r.verdict} ${l}`);
   if (record) {
     if (r.verdict !== "PASS") throw new Error(`the good run is ${r.verdict}: no good run to record`);
     const bad = recorder();
-    const b = await check(bad.transport, { pairs, before: true });
+    const live = file === undefined ? bundle : await signBundle().then((x) => ({ url: x.url, ...bundleFacts(x.text, pairs) }));
+    const b = await check(bad.transport, { pairs, before: true, bundle: { ...live, oldStateReads: [] } });
     if (b.verdict !== "FAIL") throw new Error(`the read before is ${b.verdict}, not FAIL: no bad run to record`);
-    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { pairs, log: rec.log }, before: { pairs, log: bad.log } }, null, 1)}\n`);
+    writeFileSync(record, `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), good: { pairs, bundle, log: rec.log }, before: { pairs, bundle: live, log: bad.log } }, null, 1)}\n`);
     console.log(`recorded ${record}`);
   }
   console.log(`${r.verdict} ${KEY}`);

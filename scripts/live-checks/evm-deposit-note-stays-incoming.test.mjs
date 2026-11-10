@@ -1,15 +1,17 @@
 // node --test scripts/live-checks/evm-deposit-note-stays-incoming.test.mjs: card evm-deposit-note-stays-incoming's
 // live check, replayed. evm-deposit-note-stays-incoming.answers.json holds a real run of the EVM deposit path's state
-// reads on the page's Base and Robinhood mainnet pool pairs (good: every read answered on both seats) and a real run of
-// the read the path made before (U's nonce at "finalized": Robinhood's own node refuses it with -32000 "historical
-// state ... is not available"). Good passes, the read before fails, and planted refusals of the new reads fail too.
+// reads on the page's Base and Robinhood mainnet pool pairs (good: every read answered on both seats, with the facts of
+// this card's build of the bundle: no state read at an old tag) and the bad run: SIGN_HOST's bundle before this card's
+// deploy (two eth_getTransactionCount reads at "finalized") and a real run of that read on the same pairs (Robinhood's
+// own node refuses it with -32000 "historical state ... is not available"). Good passes, both bad answers fail, and
+// planted refusals of the new reads fail too.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { check, pagePairs, replayer } from "./evm-deposit-note-stays-incoming.mjs";
+import { bundleFacts, check, pagePairs, replayer } from "./evm-deposit-note-stays-incoming.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-deposit-note-stays-incoming.answers.json", import.meta.url), "utf8"));
-const run = (r, o = {}) => check(replayer(r.log), { pairs: r.pairs, ...o });
+const run = (r, o = {}) => check(replayer(r.log), { pairs: r.pairs, bundle: r.bundle, ...o });
 const REFUSED = { code: -32000, message: "historical state bac0f84b9ba5e79e767198a3fb6d8dacc874bc06b584baf3a3e35c8ebda3f78d is not available" };
 
 test("the check reads the page's own pool pairs, and the good run is a run on them", () => {
@@ -19,12 +21,20 @@ test("the check reads the page's own pool pairs, and the good run is a run on th
 test("the recorded good run passes: every state read of the path answered on both seats of Base and Robinhood", async () => {
   const r = await run(A.good);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.match(r.lines[0], /^base \(base-rpc\.publicnode\.com, base\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
-  assert.match(r.lines[1], /^robinhood \(rpc\.mainnet\.chain\.robinhood\.com, robinhood\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
+  assert.match(r.lines[0], /^the bundle file:app\.js \([0-9a-f]{16}, \d+ bytes\): no state read at an old block's tag; it names every seat \(4\)$/);
+  assert.match(r.lines[1], /^base \(base-rpc\.publicnode\.com, base\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
+  assert.match(r.lines[2], /^robinhood \(rpc\.mainnet\.chain\.robinhood\.com, robinhood\.api\.pocket\.network\): newest agreed block \d+; .* all answered$/);
+});
+
+test("the recorded bad run: SIGN_HOST's bundle before this card holds U's nonce read at finalized, and fails", async () => {
+  const r = await run(A.before);
+  assert.equal(r.verdict, "FAIL");
+  assert.equal(A.before.bundle.url, "https://confidential.unrealized.trade/app.js");
+  assert.match(r.lines.at(-1), /holds 2 state read\(s\) at an old block's tag: `eth_getTransactionCount`,\[i\.address,`finalized`\] \| `eth_getTransactionCount`,\[t\.u,`finalized`\]$/);
 });
 
 test("the recorded bad run, the read the path made before (U's nonce at finalized), fails on Robinhood's refusal", async () => {
-  const r = await run(A.before, { before: true });
+  const r = await run(A.before, { before: true, bundle: { ...A.before.bundle, oldStateReads: [] } });
   assert.equal(r.verdict, "FAIL");
   assert.match(r.lines.at(-1), /^rpc\.mainnet\.chain\.robinhood\.com: U's nonce at finalized: RPC error -32000: historical state [0-9a-f]+ is not available$/);
 });
@@ -47,6 +57,22 @@ test("planted: a seat whose finalized header is refused, or two seats on differe
   const r = await run({ ...A.good, log: fork });
   assert.equal(r.verdict, "FAIL");
   assert.match(r.lines.at(-1), /^base: the seats hold different final blocks at \d+$/);
+});
+
+test("bundleFacts: a state read at a finalized or safe tag is found in any quote style; reads at the newest block or a hash are not; a seat it lacks is named", () => {
+  const pairs = [{ chain: "base", seats: ["https://a.example", "https://b.example"] }];
+  const old = bundleFacts("x(`eth_getTransactionCount`,[u,`finalized`]);y(\"eth_getBalance\",[u,\"safe\"]);z('eth_call',[{to:p},'finalized'])", pairs);
+  assert.equal(old.oldStateReads.length, 3);
+  const fresh = bundleFacts("x(`eth_getTransactionCount`,[u,{blockHash:c.hash}]);y(`eth_getBalance`,[u,t]);h(`eth_getBlockByNumber`,[`finalized`,!1]);https://a.example", pairs);
+  assert.deepEqual(fresh.oldStateReads, []);
+  assert.deepEqual(fresh.seats, { "https://a.example": true, "https://b.example": false });
+});
+
+test("planted: a bundle that does not name a seat of the pairs fails; no bundle read fails", async () => {
+  const r = await run({ ...A.good, bundle: { ...A.good.bundle, seats: { ...A.good.bundle.seats, [A.good.pairs[1].seats[1]]: false } } });
+  assert.equal(r.verdict, "FAIL");
+  assert.match(r.lines.at(-1), /names no https:\/\/robinhood\.api\.pocket\.network: not the page's pairs$/);
+  assert.equal((await run(A.good, { bundle: undefined })).verdict, "FAIL");
 });
 
 test("planted: a seat that answers nothing on every try is INCONCLUSIVE, never a pass; a pair of one seat fails", async () => {
