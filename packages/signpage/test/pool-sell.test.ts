@@ -4300,3 +4300,45 @@ test("card pool-sell-share-across-wallets review: the next sale starts once the 
   const a = await done;
   assert.equal("stage" in a && a.stage, "filled");
 });
+
+// the 5-wallet devnet run: one provider's 429 before any signature refused the whole sell. A rate limit as the page's
+// RPC client throws it past its retry (the kit's SolanaRpcTransportError, its Retry-After kept) is waited out and read
+// again: in the plan's reads and in a sale's own, POOL_SELL_THROTTLE_WAITS times at most, then "down" with nothing signed
+test("card pool-sell-share-across-wallets: a provider's rate limit before any signature never fails the sell: the plan and each sale read again after its Retry-After; a limit that stays is down, nothing signed", async () => {
+  const limit = (afterMs: number | null) => new SolanaRpcTransportError("http_429", "HTTP 429", 1, "api.devnet.solana.com", afterMs);
+  for (const [what, hit, err, waitsWant] of [
+    // the plan's mint read on the second RPC, once
+    ["the plan", (m: string, p: readonly unknown[], k: number) => k === 1 && m === "getAccountInfo" && p[0] === MINT, limit(4_000), [4_000]],
+    // the second sale's own read of its token account (after the first sale's send), once, a -32029 throttle naming 3 s
+    ["a sale", (m: string, p: readonly unknown[], k: number, sends: number) => k === 0 && sends === 1 && m === "getAccountInfo" && p[0] === ataOfW(W.address), new SolanaRpcTransportError("rpc_throttled", "RPC error -32029: rate limited", 2, "api.devnet.solana.com", 3_000), [3_000]],
+    // a Retry-After past the cap waits the cap
+    ["a long Retry-After", (m: string, p: readonly unknown[], k: number) => k === 0 && m === "getAccountInfo" && p[0] === MINT, limit(60_000), [10_000]],
+  ] as const) {
+    const w = await twoBuys({ ataLamports: TOKEN_RENT });
+    let fired = false;
+    let sendsSeen = 0;
+    const gate = (k: 0 | 1, rpc: SolanaRpc): SolanaRpc =>
+      (async (method: string, params: readonly unknown[]) => {
+        if (method === "sendTransaction" && k === 0) sendsSeen++;
+        if (!fired && hit(method, params, k, sendsSeen)) {
+          fired = true;
+          throw err;
+        }
+        return rpc(method, params);
+      }) as SolanaRpc;
+    const waits: number[] = [];
+    const host = { ...w.host, rpcs: [gate(0, w.c.rpcs[0]), gate(1, w.c.rpcs[1])] as const, wait: async (ms: number) => void waits.push(ms) };
+    const a = await runPoolSell(host, share(10_000));
+    assert.ok(fired, what);
+    assert.equal("stage" in a && a.stage, "filled", `${what}: ${JSON.stringify(a)}`);
+    // the verdict reads' own waits (POOL_SELL_WAIT_MS) aside
+    assert.deepEqual(waits.filter((x) => x !== POOL_SELL_WAIT_MS), [...waitsWant], what);
+  }
+  // a limit on every read of the plan: three waits, then down, nothing built
+  const w = await twoBuys();
+  const always = (rpc: SolanaRpc): SolanaRpc => (async (m: string, p: readonly unknown[]) => { if (m === "getAccountInfo" && p[0] === MINT) throw limit(2_000); return rpc(m, p); }) as SolanaRpc;
+  const waits: number[] = [];
+  assert.deepEqual(await runPoolSell({ ...w.host, rpcs: [always(w.c.rpcs[0]), always(w.c.rpcs[1])] as const, wait: async (ms: number) => void waits.push(ms) }, share(10_000)), { error: "down" });
+  assert.deepEqual(waits, [2_000, 2_000, 2_000]);
+  nothingBuilt(w);
+});

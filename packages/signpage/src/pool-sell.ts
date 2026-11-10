@@ -505,7 +505,16 @@ async function goneOnBoth(rpcs: Rpcs, signature: string, last: number): Promise<
 
 /** What a sell leaves to run after its answer: the rent back, after a full sell filled; or the sell built again, its
  *  deposit having met a page another deposit filled first. */
-type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean };
+type Later = { back?: (locks: Locks | null) => Promise<unknown>; rebuild?: true; last?: boolean; throttle?: number | null };
+
+/** A provider's rate limit before any signature (review of the 5-wallet devnet run): a read that drew one, past the
+ *  page's own retry (kit send.ts SolanaRpcTransportError, HTTP 429 or a throttle code), makes the step it failed (the
+ *  plan, or one wallet's sale from its first read) again after the provider's Retry-After, at least POOL_SELL_WAIT_MS
+ *  and at most POOL_SELL_THROTTLE_MAX_MS, this many times; then "down", nothing signed. A new quote is read each time. */
+export const POOL_SELL_THROTTLE_WAITS = 3;
+export const POOL_SELL_THROTTLE_MAX_MS = 10_000;
+const throttled = (e: unknown): e is SolanaRpcTransportError => e instanceof SolanaRpcTransportError && (e.fault === "http_429" || e.fault === "rpc_throttled");
+const throttleWait = (afterMs: number | null): number => Math.min(Math.max(afterMs ?? 0, POOL_SELL_WAIT_MS), POOL_SELL_THROTTLE_MAX_MS);
 
 /** One W's rent back owed: W, its l and j (W again from the seed), the mints it traded, and its passes so far; `seen`,
  *  what W read as (heldSeen) when its last pass ended on W's own state (under the floor, holding, an account kept), so
@@ -566,11 +575,20 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
 async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet): Promise<LegAnswer> {
-  for (let i = 0; ; i++) {
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (let i = 0, waits = 0; ; ) {
     delete later.rebuild;
+    delete later.throttle;
     later.last = i >= POOL_SELL_REBUILDS;
     const a = await sellRun(h, ask, later, w);
+    // a provider's rate limit before W signed: the sale again from its first read, after the provider's wait
+    if ("error" in a && later.throttle !== undefined && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
+      await wait(throttleWait(later.throttle));
+      waits++;
+      continue;
+    }
     if (!later.rebuild || i >= POOL_SELL_REBUILDS) return a;
+    i++;
   }
 }
 
@@ -680,12 +698,21 @@ export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[
  */
 async function sellAll(h: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}): Promise<PoolSellAnswer> {
   let plan: PoolSellPlan;
-  try {
-    plan = await planPoolSell(h, ask);
-  } catch (e) {
-    if (e instanceof Refused) return { error: e.code };
-    if (e instanceof SolanaRpcTransportError) return { error: "down" };
-    return { error: "failed" };
+  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (let waits = 0; ; waits++) {
+    try {
+      plan = await planPoolSell(h, ask);
+      break;
+    } catch (e) {
+      if (e instanceof Refused) return { error: e.code };
+      // a provider's rate limit: the plan read again after its wait (POOL_SELL_THROTTLE_WAITS), then "down"
+      if (throttled(e) && waits < POOL_SELL_THROTTLE_WAITS && !h.stopped?.()) {
+        await wait(throttleWait(e.afterMs));
+        continue;
+      }
+      if (e instanceof SolanaRpcTransportError) return { error: "down" };
+      return { error: "failed" };
+    }
   }
   await hooks.planned?.(plan);
   const legs: PoolSellLeg[] = plan.legs.map((l) => ({ wallet: l.w.address, amount: l.units.toString(), tx: null, stage: null }));
@@ -991,7 +1018,10 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
     // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
-    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
+    if (!signing && e instanceof SolanaRpcTransportError) {
+      if (throttled(e)) later.throttle = e.afterMs;
+      return { error: "down" };
+    }
     return { error: "failed" };
   } finally {
     for (const x of seeds) x.fill(0);
