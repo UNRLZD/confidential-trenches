@@ -9,8 +9,11 @@
 //      money stays reachable after the run, then Saved;
 //   2. the header's Deposit opens the sheet, which asks pool.address for each pool's chain with no asset: Solana's
 //      answer is U, the pool's one-time address (the testnet build quotes nothing: pool-deposit-address.ts);
-//   3. the run's own devnet funder (FUNDER, a key in .keys/, gitignored) pays U exactly the deposit's need (the rung,
-//      the mark's rent, two page entries and the fee: pool-flow-devnet.mjs's NEED, from the rent both RPCs give);
+//   3. U is funded from outside the run: it prints one line `fund: <U> <lamports> devnet` (exactly the deposit's need: the
+//      rung, the mark's rent, two page entries and the fee, pool-flow-devnet.mjs's NEED, from the rent both RPCs give)
+//      and waits up to 10 minutes for that balance on both devnet RPCs at finalized, else ends "not funded". The run
+//      holds no key and reads no key file; before it prints anything it refuses any cluster but devnet (both RPCs'
+//      genesis hash);
 //   4. pool.deposit of 0.01 SOL, sent to the kit's frame of SIGN_HOST as the kit's own message (the testnet build has
 //      no screen that sends it: the sheet's deposit needs a 1Click quote, mainnet only);
 //   5. the token page of the devnet coin (its market row: market-token.json, a recorded mainnet answer with the devnet
@@ -20,13 +23,14 @@
 //   7. the box's Sell side opens once the signing page's state holds the position; 100% is sold in one tap and the box
 //      reaches Filled; W then holds none of the coin on both RPCs, and every transaction the page sent is read back on
 //      both (err null, confirmed).
-// Nothing here signs: SIGN_HOST signs, proves and sends; the run only funds U and reads.
-//   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant no-buy]
-//     PASS exit 0, FAIL exit 1, error exit 2. --plant no-buy stops before the buy's tap, --plant no-sell before the
-//     sell's (the red runs).
-// Needs the terminal's build (pnpm --filter terminal build), Playwright's Chromium and a funded FUNDER.
-import { createHash, createPrivateKey, sign as edSign } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+// Nothing here signs or sends: SIGN_HOST signs, proves and sends; the run only reads. What is left on U, W or in the
+// pool after the run stays there.
+//   node apps/terminal/test/e2e/buy/run.mjs [--record <file>] [--shots <dir>] [--plant free|no-buy|no-sell]
+//     PASS exit 0, FAIL exit 1, error exit 2. --plant free stops once U is answered, before the fund line (the free
+//     part: no money); no-buy stops before the buy's tap, no-sell before the sell's (the red runs).
+// Needs the terminal's build (pnpm --filter terminal build) and the installed Chrome (scripts/browsers.mjs).
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -46,7 +50,9 @@ const PROOF_MS = 6 * 60_000;
 const FILL_MS = 90_000;
 const PRICE_MS = 7 * 60_000;
 const HELD_MS = 60_000;
-const FUNDER_FILE = path.join(REPO, ".keys", "app-a2-e2e-funder");
+const FUND_MS = 10 * 60_000;
+/** Solana devnet's genesis hash (getGenesisHash on api.devnet.solana.com); any other cluster is refused. */
+export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 
 // ------------------------------------------------------------------------------------------------ the verdict
 /** The run's verdict lines from its record. */
@@ -83,7 +89,7 @@ export function judge(rec) {
 }
 const ALLOWED = new Set([REAL.app, REAL.sign, REAL.api, new URL(DEVNET_RPC).hostname]);
 
-// ------------------------------------------------------------------------------------------------ devnet reads and the funder
+// ------------------------------------------------------------------------------------------------ devnet reads and the fund wait
 async function rpc(url, method, params) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", origin: `https://${REAL.sign}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
   const j = await r.json();
@@ -111,33 +117,22 @@ export function unb58(s) {
   const zeros = s.match(/^1*/)[0].length;
   return Buffer.concat([Buffer.alloc(zeros), n === 0n ? Buffer.alloc(0) : body]);
 }
-const pad32 = (b) => Buffer.concat([Buffer.alloc(32 - b.length), b]);
-function funderKey() {
-  if (!existsSync(FUNDER_FILE)) throw new Error(`no funder key at ${FUNDER_FILE}`);
-  const d = Buffer.from(readFileSync(FUNDER_FILE, "utf8").trim(), "hex");
-  if (d.length !== 32) throw new Error("the funder file holds no 32-byte key");
-  const key = createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), d]), format: "der", type: "pkcs8" });
-  const pub = Buffer.from(key.export({ format: "jwk" }).x, "base64url");
-  return { key, pub, address: b58(pub) };
+/** Refuses a run on any cluster but devnet: both RPCs' genesis hashes, as read, must be devnet's. */
+export function devnetOnly(hashes) {
+  if (hashes.length !== 2 || !hashes.every((h) => h === DEVNET_GENESIS)) throw new Error(`not devnet: genesis ${hashes.join(" / ")}`);
 }
-/** One legacy system transfer from the funder to `to`, sent on both RPCs and read confirmed on both: its signature. */
-async function transfer(f, to, lamports) {
-  const [{ value }] = await both("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const data = Buffer.alloc(12);
-  data.writeUInt32LE(2, 0);
-  data.writeBigUInt64LE(lamports, 4);
-  const msg = Buffer.concat([Buffer.from([1, 0, 1, 3]), f.pub, pad32(unb58(to)), Buffer.alloc(32), pad32(unb58(value.blockhash)), Buffer.from([1, 2, 2, 0, 1, 12]), data]);
-  const sig = edSign(null, msg, f.key);
-  const wire = Buffer.concat([Buffer.from([1]), sig, msg]).toString("base64");
-  const s = b58(sig);
-  await Promise.allSettled([DEVNET_RPC, HELPER_RPC].map((u) => rpc(u, "sendTransaction", [wire, { encoding: "base64", preflightCommitment: "confirmed" }])));
-  for (let i = 0; i < 60; i++) {
-    const st = (await both("getSignatureStatuses", [[s], { searchTransactionHistory: true }])).map((x) => x.value[0]);
-    if (st.some((x) => x?.err)) throw new Error(`transfer ${s} failed`);
-    if (st.every((x) => x && (x.confirmationStatus === "confirmed" || x.confirmationStatus === "finalized"))) return s;
-    await new Promise((r) => setTimeout(r, 1_000));
+/** U's balance reaching `need` on both RPCs at finalized, bounded by FUND_MS: the funding signatures, or null. */
+async function fundedBy(u, need) {
+  const by = Date.now() + FUND_MS;
+  while (Date.now() < by) {
+    const bal = await both("getBalance", [u, { commitment: "finalized" }]).catch(() => null);
+    if (bal && bal.every((x) => BigInt(x.value) >= need)) {
+      const [sigs] = await both("getSignaturesForAddress", [u, { commitment: "finalized" }]);
+      return sigs.map((x) => x.signature);
+    }
+    await new Promise((r) => setTimeout(r, 3_000));
   }
-  throw new Error(`transfer ${s} not confirmed on both RPCs`);
+  return null;
 }
 /** U's need, as pool-flow-devnet.mjs's NEED: the rung, the mark's rent (17 B), two page entries (72 B each), the fee. */
 async function needOf() {
@@ -225,8 +220,7 @@ const PROBE = ({ app, sign }) => {
 
 export async function run({ plant = null, shots = null } = {}) {
   const rec = { started: new Date().toISOString(), plant, txs: [], csp: [], hosts: [], dialogs: 0 };
-  const f = funderKey();
-  rec.funder = f.address;
+  devnetOnly(await both("getGenesisHash", []));
   rec.stub = `market read for ${MINT} answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json`;
   const signRoot = testnetSign();
   const h = await startHarness({ realNames: true, through: [new URL(DEVNET_RPC).hostname, REAL.api], edit: (s) => void (s[HOSTS.sign] = { root: signRoot, spa: true }) });
@@ -309,19 +303,11 @@ export async function run({ plant = null, shots = null } = {}) {
     await app.locator(".dep-box").waitFor({ state: "detached", timeout: WAIT_MS });
     if (!rec.u) throw new Error("no pool.address answer for Solana");
 
-    // 3. U funded, exactly its need
-    step = "fund";
-    const need = await needOf();
-    const fundSig = await transfer(f, rec.u, need);
-    rec.funded = { ok: true, lamports: String(need), sig: fundSig };
-    rec.txs.push({ step: "fund", sig: fundSig });
-
-    // 4. pool.deposit of 0.01 SOL, the kit's message to its own SIGN_HOST frame
-    step = "deposit";
+    // 4. pool.deposit of 0.01 SOL, the kit's message to its own SIGN_HOST frame (asked once unfunded in the free part:
+    // the page reads U short and answers not_funded, nothing sent, pool-deposit.ts)
     const appFrame = page.frames().find((x) => x.url().startsWith(`https://${REAL.app}/`));
     if (!appFrame) throw new Error("no APP_HOST frame");
-    const depositAt = Date.now();
-    rec.deposit = await appFrame.evaluate(
+    const depositAsk = () => appFrame.evaluate(
       ({ sign, ms }) =>
         new Promise((ok) => {
           // the kit's peer: its own frame of SIGN_HOST, or the shell that frames the terminal (the kit's `parent`)
@@ -339,6 +325,24 @@ export async function run({ plant = null, shots = null } = {}) {
         }),
       { sign: REAL.sign, ms: 120_000 },
     );
+    if (plant === "free") {
+      step = "deposit";
+      rec.deposit = await depositAsk();
+      throw new Error(`planted: the free part ends at U, its deposit asked unfunded (no fund line)`);
+    }
+
+    // 3. U funded from outside the run, exactly its need, read at finalized on both RPCs
+    step = "fund";
+    const need = await needOf();
+    console.log(`fund: ${rec.u} ${need} devnet`);
+    const fundSigs = await fundedBy(rec.u, need);
+    if (!fundSigs) throw new Error(`not funded: ${rec.u} short of ${need} lamports after ${FUND_MS / 60_000} minutes`);
+    rec.funded = { ok: true, lamports: String(need) };
+    for (const sig of fundSigs) rec.txs.push({ step: "fund", sig });
+
+    step = "deposit";
+    const depositAt = Date.now();
+    rec.deposit = await depositAsk();
     if (!rec.deposit.ok) throw new Error(`pool.deposit answered ${JSON.stringify(rec.deposit)}`);
 
     // 5. the trade box: the pool path, the proof made in this browser, then Buy at the line's Max
@@ -433,7 +437,7 @@ export async function run({ plant = null, shots = null } = {}) {
   } catch (e) {
     rec.error = String(e?.message ?? e).slice(0, 300);
   } finally {
-    // 10. every transaction the page sent, and the funder's, read back on both RPCs
+    // 10. every transaction the page sent, and U's funding, read back on both RPCs
     await Promise.allSettled(answers);
     for (const s of sent) if (!rec.txs.some((t) => t.sig === s.sig)) rec.txs.push(s);
     for (const t of rec.txs) t.reads = await readBack(t.sig).catch((e) => [{ status: null, err: String(e?.message).slice(0, 80) }]);

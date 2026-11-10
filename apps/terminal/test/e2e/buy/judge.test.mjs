@@ -1,13 +1,16 @@
 // node --test apps/terminal/test/e2e/buy/judge.test.mjs (card app-a2-e2e): the devnet buy and sell's verdict replayed
 // from recorded runs (run.answers.json), so the judge's rules are held without a browser or money.
 //   good: a green run as recorded (run.mjs --record): the buy and the sell filled, every tx read back on both RPCs;
-//   cut:  a real run with the buy cut (run.mjs --plant no-buy: no tap, no pool.buy, no buy transaction), which must fail.
+//   cut:  a real run with no money (run.mjs --plant free: signed in and U answered, then cut before the fund line: no
+//         funding, no deposit, no tap, no buy transaction), which must fail.
 // Planted from the good run: the sell cut, W still holding the coin after the sell, the two RPCs reading W apart, a buy
 // tx not read back on one RPC, a host past the devnet RPC and the helper.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { b58, judge, unb58 } from "./run.mjs";
+import { b58, DEVNET_GENESIS, devnetOnly, judge, unb58 } from "./run.mjs";
+
+const SRC = readFileSync(new URL("./run.mjs", import.meta.url), "utf8");
 
 const answers = JSON.parse(readFileSync(new URL("./run.answers.json", import.meta.url), "utf8"));
 const bad = (v) => v.lines.filter((l) => l.startsWith("BAD")).join("\n");
@@ -59,4 +62,21 @@ test("a host past the devnet RPC and the helper fails", () => {
 
 test("base58 round-trips a signature and a key", () => {
   for (const s of answers.good.txs.map((t) => t.sig).concat(answers.good.u, answers.good.w)) assert.equal(b58(unb58(s)), s);
+});
+
+test("any cluster but devnet is refused: mainnet's genesis, a split pair, a missing read", () => {
+  assert.doesNotThrow(() => devnetOnly([DEVNET_GENESIS, DEVNET_GENESIS]));
+  const MAINNET = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"; // mainnet-beta's genesis hash
+  assert.throws(() => devnetOnly([MAINNET, MAINNET]), /not devnet/);
+  assert.throws(() => devnetOnly([DEVNET_GENESIS, MAINNET]), /not devnet/);
+  assert.throws(() => devnetOnly([DEVNET_GENESIS]), /not devnet/);
+});
+
+test("the run checks the cluster before it prints, starts a browser or asks for money, and holds no key", () => {
+  const body = SRC.slice(SRC.indexOf("export async function run("));
+  const at = (s) => body.indexOf(s);
+  assert.ok(at("devnetOnly(") > 0);
+  for (const later of ["console.log(", "startHarness(", "fund: "]) assert.ok(at("devnetOnly(") < at(later), later);
+  for (const no of [".keys", "createPrivateKey", "PRIVATE"]) assert.equal(SRC.includes(no), false, no);
+  assert.equal(/rpc\([^)]*"sendTransaction"/.test(SRC), false, "the run sends no transaction itself");
 });
