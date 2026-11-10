@@ -54,7 +54,9 @@
 //     sends the funder's lamports back when it can, says how otherwise, and keeps the folder and its journal. A funder
 //     left with one fee or less is said so with what to do; that folder does not stop a later paste unless its journal
 //     names a table the chain holds or may still make.
-//  A resume whose journal names a table goes on only when both RPCs read that same lookup table at confirmed and at
+//  A resume whose journal names a table goes on only when every journaled send to it (create, extend or freeze) that is
+//  not landed can no longer land (an error status, or no status and its last valid block height passed on both RPCs at
+//  finalized) and both RPCs read that same lookup table at confirmed and at
 //  finalized, all four the same bytes (a prefix of the list under the funder: extend the rest and freeze; the list
 //  frozen: record, nothing sent), or all read nothing and no create of it landed or can still land; anything else stops
 //  with the table named, nothing sent and the key kept ("resume again in a minute"), and the journal's table is never
@@ -291,6 +293,18 @@ async function createMayHaveLanded(p, jr, table) {
   return null;
 }
 
+/** Why a journaled send to `table` that is not marked landed may still land (a reason naming it), or null: each one's
+ *  createState read (a confirmed status: landed; an error: failed; no status on either RPC and both past its last valid
+ *  block height at finalized: expired), the journal updated with what it reads. */
+async function sendMayLand(p, jr, table) {
+  for (const x of jr.j.txs.filter((t) => t.table === table && /^lookup table: /.test(t.step) && !["landed", "failed", "expired"].includes(t.state))) {
+    const s = await createState(p, x);
+    if (s === "open") return `its ${x.step.replace(/^lookup table: /, "")} ${x.signature} may still land${x.last_valid == null ? "" : ` (valid until block height ${x.last_valid})`}`;
+    if (x.state !== s) (x.state = s), jr.save();
+  }
+  return null;
+}
+
 /** What the chain holds of the journal's table: null (none, and no create of it landed or can still land) or the
  *  account both RPCs read at confirmed and at finalized, all four the same bytes, a lookup table. Anything else stops
  *  with nothing sent and the key kept: a finalized read behind the confirmed one (an extend landed a moment ago) would
@@ -304,6 +318,11 @@ async function journalTable(p, jr) {
     if (why) throw new Error(`lookup table ${T}: ${why}, and neither RPC reads it at finalized yet: nothing is sent and the key is kept; resume again in a minute`);
     if (!cf[0] && !cf[1]) return null;
   }
+  // every journaled send to the table (create, extend or freeze) not landed must be past landing: one refused by this
+  // node may be taken by another while its blockhash lives, and an extend that lands after these reads would put its
+  // addresses in the table a second time beside the resume's own
+  const why = await sendMayLand(p, jr, T);
+  if (why) throw new Error(`lookup table ${T}: ${why}: nothing is sent and the key is kept; resume again in a minute`);
   const r = [...cf, ...fin];
   if (r[0] && r[0].owner === ALT_PROGRAM && same2(r)) return fin[0];
   const what = (x) => (!x ? "nothing" : x.owner !== ALT_PROGRAM ? `an account of ${x.owner}` : `a table of ${(x.data.length - TABLE_META) / 32} addresses, authority ${x.data[21] === 1 ? b58encode(x.data.subarray(22, 54)) : "none"}`);

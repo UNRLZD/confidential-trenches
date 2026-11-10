@@ -903,34 +903,71 @@ test("the success path keeps the key folder when an RPC stops reading the frozen
   assert.ok(k.logs.some((l) => /do not read lookup table .* the same/.test(l) && /the key stays/.test(l)));
 });
 
-test("a resume reads the journal's table at confirmed and at finalized on both RPCs and goes on only when all four agree: 0 s and 5 s after a refused extend it stops, nothing sent; at 20 s it finishes", async () => {
-  for (const after of [0, 5_000, 20_000]) {
-    let n = 0;
-    // finality 13 s behind confirmed; each send takes 2 s to confirm; the node refuses the eighth extend at preflight
-    const k = fakeCluster({ fin: 13_000, onSend: ({ kinds }) => (k.advance(2_000), kinds.includes("extend") && ++n === 8 ? { refuse: "Transaction simulation failed: Error processing Instruction 1: invalid account data for instruction" } : "land") });
-    const dir = recordDir();
-    const base = keyBase();
-    const p = await planOn(k, "pumpswap", dir);
-    await assert.rejects(runOn(k, p, base), /invalid account data/);
-    const kd = folderOf(base);
-    const T = journalAt(kd).table;
-    k.advance(after);
-    if (after < 20_000) {
-      const before = k.sends.length;
-      await assert.rejects(resumeOn(k, dir, kd, base), /resume again in a minute/, `${after / 1000} s`);
-      assert.equal(k.sends.length, before, `${after / 1000} s: nothing sent`);
-      const got = addressesOf(k.get(T));
-      assert.deepEqual(got, p.list.slice(0, got.length), `${after / 1000} s: still the list's prefix`);
-      k.advance(20_000);
-    }
-    await resumeOn(k, dir, kd, base);
-    const v = k.get(T, "finalized");
-    const got = addressesOf(v);
-    assert.equal(new Set(got).size, 256, `${after / 1000} s`);
-    assert.deepEqual(got, p.list);
-    assert.equal(v.data[21], 0, "frozen");
-    assert.equal(recOf(dir).tables.pumpswap.length, 1);
+test("a resume after a refused extend stops, nothing sent, while that extend can still land (0 s, 5 s and 20 s after the stop); once its last valid height has passed on both RPCs at finalized, it finishes", async () => {
+  let n = 0;
+  // finality 13 s behind confirmed; each send takes 2 s to confirm; the node refuses the eighth extend at preflight (another
+  // node may still take it while its blockhash lives)
+  const FIN = 13_000;
+  const k = fakeCluster({ fin: FIN, onSend: ({ kinds }) => (k.advance(2_000), kinds.includes("extend") && ++n === 8 ? { refuse: "Transaction simulation failed: Error processing Instruction 1: invalid account data for instruction" } : "land") });
+  const dir = recordDir();
+  const base = keyBase();
+  const p = await planOn(k, "pumpswap", dir);
+  await assert.rejects(runOn(k, p, base), /invalid account data/);
+  const kd = folderOf(base);
+  const T = journalAt(kd).table;
+  const refused = journalAt(kd).txs.find((x) => /^lookup table: extend/.test(x.step) && x.state === "sent");
+  assert.ok(refused && refused.last_valid, "the refused extend is journaled with its last valid height");
+  for (const [at, step] of [[0, 0], [5_000, 5_000], [20_000, 15_000]]) {
+    k.advance(step);
+    const before = k.sends.length;
+    await assert.rejects(resumeOn(k, dir, kd, base), (e) => /resume again in a minute/.test(e.message) && e.message.includes(refused.signature) && /extend/.test(e.message), `${at / 1000} s`);
+    assert.equal(k.sends.length, before, `${at / 1000} s: nothing sent`);
+    const got = addressesOf(k.get(T));
+    assert.deepEqual(got, p.list.slice(0, got.length), `${at / 1000} s: still the list's prefix`);
+    assert.ok(existsSync(path.join(kd, "funder.json")), `${at / 1000} s: the key is kept`);
   }
+  // past its last valid block height on both RPCs at finalized (the fake's height: 5,000 + t / 400 ms, finalized FIN behind)
+  k.advance(Math.max(0, (refused.last_valid - 5_000 + 1) * 400 + FIN - k.now()) + 400);
+  await resumeOn(k, dir, kd, base);
+  const v = k.get(T, "finalized");
+  const got = addressesOf(v);
+  assert.equal(new Set(got).size, 256);
+  assert.deepEqual(got, p.list);
+  assert.equal(v.data[21], 0, "frozen");
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
+  assert.deepEqual(readdirSync(base), []);
+});
+
+test("a journaled extend with no status and a live blockhash stops a resume even when all four table reads agree: it could land after the reads and put addresses in twice", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const extend = { step: "lookup table: extend with 30 addresses", signature: sigOf(2), state: "sent", table: T, last_valid: k.heightAt() + 100 };
+  const { dir: kd, funder } = keptFolder(base, p, { table: T, txs: [{ step: "lookup table: create and extend with 28 addresses", signature: sigOf(1), state: "landed", table: T, last_valid: 1 }, extend] });
+  fund(k, funder.id, 50_000_000n);
+  k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 28)), lamports: rentMin(56 + 32 * 28) }, 0);
+  // the journaled extend lands the moment after the resume read the table: just before the resume's own first send
+  let landedLate = false;
+  const fetchFn = async (url, init) => {
+    if (!landedLate && methodOf(init) === "sendTransaction" && decodeTx(Buffer.from(JSON.parse(init.body).params[0], "base64")).ixs.map(kindOf).includes("extend")) {
+      landedLate = true;
+      k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 58)), lamports: rentMin(56 + 32 * 58) });
+    }
+    return k.fetchFn(url, init);
+  };
+  const q = await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait, journal: journalAt(kd) });
+  await assert.rejects(runOn(k, q, base, { keyDir: kd }), (e) => /resume again in a minute/.test(e.message) && e.message.includes(extend.signature));
+  assert.equal(landedLate, false, "no extend sent");
+  assert.equal(sent(k, "extend").length + sent(k, "create").length + sent(k, "freeze").length, 0, "nothing sent to the table");
+  assert.ok(existsSync(path.join(kd, "funder.json")));
+  // that extend expired unlanded: the resume extends the funder's prefix, freezes and records
+  k.advance(200_000);
+  await runOn(k, await planOn(k, "pumpswap", dir, { journal: journalAt(kd) }), base, { keyDir: kd });
+  const got = addressesOf(k.get(T, "finalized"));
+  assert.deepEqual([new Set(got).size, got.length], [256, 256]);
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
 });
 
 test("one run per key folder: a resume beside a live run stops at once naming its pid, and so does a fresh paste; the live run finishes alone", async () => {
