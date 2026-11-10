@@ -9,6 +9,7 @@
 //     the keccak256 of eth_getCode is the pinned code hash (scripts/live-checks/pool-evm-deploy.mjs reads the same).
 // Nothing here throws on an RPC's answer.
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { evmTwoOperators, type EvmTwoOperators } from "@blindfill/kit";
 import { short, type VerifyStatus, type VerifyValue } from "./model.ts";
 
 export type PoolChain = "solana" | "base" | "robinhood";
@@ -23,7 +24,9 @@ export type EvmPoolPin = { address: string; codeHash: string };
 export type PoolPin<C extends PoolChain = PoolChain> = {
   chain: C;
   /** The two RPCs the row reads, each another operator's, both on the page's connect-src. */
-  rpcs: readonly [string, string];
+  /** Solana: its pair. Base and Robinhood: the kit's read list (evmReadProvidersOf), two operators of it read (the
+   *  kit's evmTwoOperators, card device-evm-fee-read-walks-operators). */
+  rpcs: readonly string[];
   pin: C extends "solana" ? SolanaPoolPin : EvmPoolPin;
 };
 export type PoolPins = { readonly [C in PoolChain]: PoolPin<C> | null };
@@ -45,6 +48,7 @@ export function poolExplorers(chain: PoolChain, address: string): PoolExplorer[]
 // ------------------------------------------------------------------------------------------------ the reads
 /** One JSON-RPC call to a URL; a status other than 200, a body that is not JSON or no answer in time throws. */
 export type PoolRpc = (url: string, method: string, params: unknown[], signal?: AbortSignal) => Promise<unknown>;
+/** One call's bound: Solana's pair reads under it alone; an EVM read is cut sooner by the walk (EVM_READ_CALL_MS, 4 s). */
 export const POOL_READ_MS = 10_000;
 export function poolRpc(fetchFn: typeof fetch = fetch): PoolRpc {
   return async (url, method, params, signal) => {
@@ -82,7 +86,40 @@ const headOf = (a: unknown): number | null => {
   return typeof h === "string" && /^0x[0-9a-f]{1,16}$/i.test(h) ? Number(BigInt(h)) : null;
 };
 
-/** Reads one pool on its two RPCs: Solana's two accounts at finalized; an EVM pool's six reads at the lower of the two heads. */
+/** An EVM list's walk, one per list (its rested operators kept between reads). */
+const WALKS = new Map<string, EvmTwoOperators<string>>();
+/** Tests only: every walk forgotten, so a test starts with no operator resting from another test's reads. */
+export const forgetPoolWalks = (): void => WALKS.clear();
+const walkOf = (urls: readonly string[]): EvmTwoOperators<string> => {
+  const key = urls.join(" ");
+  let w = WALKS.get(key);
+  if (w === undefined) WALKS.set(key, (w = evmTwoOperators(urls.map((url) => ({ url, rpc: url })))));
+  return w;
+};
+/** One JSON-RPC answer as a seat's answer: its result, or, on the owner read alone (`revertOk`), the chain's own revert
+ *  (every list host answers a pool's owner() with code 3 "execution reverted": it has none); any other error, or a body
+ *  that is no JSON-RPC answer, is the seat's failure (an HTTP 200 carrying dRPC's code 27 "Unknown state" or a pruned
+ *  node's -32000, a revert on any other read), so the walk asks another operator. */
+const answered = (a: unknown, revertOk = false): unknown => {
+  if (isObj(a) && a.result !== undefined && a.error === undefined) return a;
+  const e = isObj(a) ? a.error : undefined;
+  if (revertOk && isObj(e) && (e.code === 3 || /revert/i.test(String(e.message)))) return a;
+  throw new Error(isObj(e) ? `RPC error ${String(e.code)}: ${String(e.message).slice(0, 80)}` : "no JSON-RPC answer");
+};
+
+/**
+ * Reads one pool: Solana's two accounts at finalized on its pair; an EVM pool on two operators of its list (the kit's
+ * evmTwoOperators, card device-evm-fee-read-walks-operators): each side's head, then its six reads at the lower of the
+ * two heads, a side walking past an operator that fails a read (an HTTP status, no answer, an error that is not the
+ * chain's revert, no block at that height). The two answers are judged by poolRow, never by the walk: two that differ
+ * are the row's "disagree", and no third operator is asked once two answered.
+ */
+/** How far apart two operators' heads may be, in seconds of the chain's blocks: both are read inside one walk's 8 s
+ *  budget (each call cut at 4 s), and an honest operator trails the chain by a few seconds; 30 s is that with room.
+ *  Past it the lower head is taken as no answer, never as the height (one operator naming head 1 would read the pool
+ *  at block 1 and turn the row red on its word). */
+export const HEAD_APART_S = 30;
+const BLOCK_S: Readonly<Record<string, number>> = { base: 0.2, robinhood: 0.1 };
 export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): Promise<PoolReads> {
   const ask = (url: string, method: string, params: unknown[]) => rpc(url, method, params, signal).catch(failed);
   if (p.chain === "solana") {
@@ -91,28 +128,71 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
       name: url,
       answers: { accounts: await ask(url, "getMultipleAccounts", [[pin.program, pin.programdata], { encoding: "base64", commitment: "finalized" }]) },
     });
-    const [a, b] = await Promise.all(p.rpcs.map(one));
+    const [a, b] = await Promise.all(p.rpcs.slice(0, 2).map(one));
     return { chain: p.chain, height: null, rpcs: [a!, b!] };
   }
   const pin = p.pin as EvmPoolPin;
-  const heads = await Promise.all(p.rpcs.map((u) => ask(u, "eth_blockNumber", []).then(headOf)));
-  const known = heads.filter((h): h is number => h !== null);
-  if (known.length === 0) throw new Error(`Verify read no head on ${p.rpcs.join(" or ")}`);
-  const height = Math.min(...known);
-  const at = `0x${height.toString(16)}`;
-  const one = async (url: string): Promise<PoolRpcReads> => {
-    const got = await Promise.all([
-      ask(url, "eth_getBlockByNumber", [at, false]),
-      ask(url, "eth_getCode", [pin.address, at]),
-      ask(url, "eth_call", [{ to: pin.address, data: OWNER }, at]),
-      ask(url, "eth_getStorageAt", [pin.address, EIP1967.implementation, at]),
-      ask(url, "eth_getStorageAt", [pin.address, EIP1967.admin, at]),
-      ask(url, "eth_getStorageAt", [pin.address, EIP1967.beacon, at]),
-    ]);
-    return { name: url, answers: Object.fromEntries(EVM_READS.map((id, i) => [id, got[i]])) };
+  const asked: string[] = [];
+  const call = (url: string, method: string, params: unknown[], sig: AbortSignal) => {
+    if (!asked.includes(url)) asked.push(url);
+    return rpc(url, method, params, signal ? AbortSignal.any([signal, sig]) : sig);
   };
-  const [a, b] = await Promise.all(p.rpcs.map(one));
-  return { chain: p.chain, height, rpcs: [a!, b!] };
+  // an error names the operators actually asked (the last two), for the Unverified row
+  const fail = (m: string, cause: unknown): never => {
+    throw Object.assign(new Error(m, { cause }), { asked: asked.slice(-2) });
+  };
+  const apart = Math.ceil(HEAD_APART_S / (BLOCK_S[p.chain] ?? 1));
+  const headRead = (urls: readonly string[]) =>
+    walkOf(urls).read(
+      "head",
+      async (url, sig) => {
+        const h = headOf(answered(await call(url, "eth_blockNumber", [], sig)));
+        if (h === null) throw new Error("no head");
+        return h;
+      },
+      () => true,
+      signal,
+    );
+  // two heads a few blocks apart are both honest, and the lower is the block both are read at; two far apart: the lower
+  // is walked past (the list without its seat) and the two read then must be close, else the row is Unverified
+  let walk = walkOf(p.rpcs);
+  let heads: number[] = [];
+  try {
+    let two = await headRead(p.rpcs);
+    if (Math.abs(two[0].value - two[1].value) > apart) {
+      const low = two[0].value < two[1].value ? two[0].url : two[1].url;
+      const rest = p.rpcs.filter((u) => u !== low);
+      walk = walkOf(rest);
+      two = await headRead(rest);
+      if (Math.abs(two[0].value - two[1].value) > apart) throw new Error(`heads ${two[0].value} and ${two[1].value} are more than ${apart} blocks apart`);
+    }
+    heads = two.map((x) => x.value);
+  } catch (e) {
+    signal?.throwIfAborted();
+    fail(`Verify read no head on two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e);
+  }
+  const height = Math.min(...heads);
+  const at = `0x${height.toString(16)}`;
+  const two = await walk.read(
+    "pool",
+    async (url, sig) => {
+      const got = await Promise.all([
+        call(url, "eth_getBlockByNumber", [at, false], sig),
+        call(url, "eth_getCode", [pin.address, at], sig),
+        call(url, "eth_call", [{ to: pin.address, data: OWNER }, at], sig),
+        call(url, "eth_getStorageAt", [pin.address, EIP1967.implementation, at], sig),
+        call(url, "eth_getStorageAt", [pin.address, EIP1967.admin, at], sig),
+        call(url, "eth_getStorageAt", [pin.address, EIP1967.beacon, at], sig),
+      ]);
+      got.forEach((g, i) => answered(g, EVM_READS[i] === "owner"));
+      // a seat behind that height has no block there: not an answer
+      if (!isObj((got[0] as Record<string, unknown>).result)) throw new Error(`no block ${height}`);
+      return { name: url, answers: Object.fromEntries(EVM_READS.map((id, i) => [id, got[i]])) } as PoolRpcReads;
+    },
+    () => true,
+    signal,
+  ).catch((e: unknown) => fail(`Verify read the pool on no two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e));
+  return { chain: p.chain, height, rpcs: [two[0].value, two[1].value] };
 }
 
 // ------------------------------------------------------------------------------------------------ the decode
@@ -293,7 +373,9 @@ export async function livePools(pins: PoolPins, fetchFn: typeof fetch = fetch, s
         return await poolRow(await readPool(p, rpc, signal), p);
       } catch (e) {
         if (!signal?.aborted) console.error(e instanceof Error ? e.message : String(e));
-        return unverifiedPoolRow(chain, p, p.rpcs);
+        // the operators it last asked (an EVM read names them), else the first two, as the row names two
+        const asked = (e as { asked?: unknown })?.asked;
+        return unverifiedPoolRow(chain, p, Array.isArray(asked) && asked.length === 2 ? (asked as string[]) : p.rpcs.slice(0, 2));
       }
     }),
   );

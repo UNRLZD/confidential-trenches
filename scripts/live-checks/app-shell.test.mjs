@@ -391,6 +391,34 @@ test("a failed load is let through only for Chrome's own failed-load lines of 5x
   }
 });
 
+// card device-evm-fee-read-walks-operators: Verify reads an EVM pool on two operators of its list, walking past one that
+// fails; a failed load of a listed host (dRPC's 400 "Unknown state" on 10 Nov, or a 5xx) passes only when the row shows ok
+// on two other listed hosts of two operators, neither failing a load
+test("planted: a walked-past EVM read is let through only when its row shows ok on two other operators of its list", () => {
+  const DR = "https://robinhood.drpc.org";
+  const line = (n) => failed(DR, `the server responded with a status of ${n} ()`);
+  const dom = (status, hosts) => ({ state: "read", code: "ok", funds: "ok", pools: { solana: "ok", base: "ok", robinhood: status }, poolRpcs: { robinhood: hosts } });
+  const good = ["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"];
+  for (const n of [400, 503, 429]) {
+    // PASS: ok on two others, two operators
+    assert.deepEqual(outages([line(n)], dom("ok", good)), { kept: [], down: [DR], refused: [], verifyDown: [] }, String(n));
+    // FAIL: ok shown on the host that failed
+    assert.equal(outages([line(n)], dom("ok", ["robinhood.drpc.org", "robinhood.api.pocket.network"])).kept.length, 1, `${n} ok on the failed host`);
+    // FAIL: one other operator only
+    assert.equal(outages([line(n)], dom("ok", ["rpc.mainnet.chain.robinhood.com"])).kept.length, 1, `${n} one host`);
+    // FAIL: a host the list does not name
+    assert.equal(outages([line(n)], dom("ok", ["rpc.mainnet.chain.robinhood.com", "robinhood.rpc.blxrbdn.com"])).kept.length, 1, `${n} unlisted host shown`);
+    // FAIL: a named host failed a load too
+    assert.equal(outages([line(n), failed("https://robinhood.api.pocket.network", "net::ERR_CONNECTION_RESET")], dom("ok", good)).kept.length, 2, `${n} a named host failed too`);
+  }
+  // FAIL: two hosts of one operator (Robinhood's own RPC is Offchain Labs')
+  assert.equal(outages([line(400)], dom("ok", ["rpc.mainnet.chain.robinhood.com", "customer-origin.offchainlabs.com"])).kept.length, 1, "one operator twice");
+  // FAIL: a failed load of a host the list does not name, whatever the row shows
+  assert.equal(outages([failed("https://robinhood.rpc.blxrbdn.com", "the server responded with a status of 400 ()")], dom("ok", good)).kept.length, 1, "an unlisted host's failed load");
+  // a 400 with the row amber is no walk: an error, as any 4xx (the page shows it did not read)
+  assert.equal(outages([line(400)], dom("warn", [])).kept.length, 1, "a 4xx and an amber row");
+});
+
 test("the NEAR pair feeds the Code and Funds rows: both must show amber, not one", () => {
   const near = (code, funds) => outages([failed(NEAR)], { state: "read", code, funds, pools: {} });
   assert.deepEqual(near("warn", "warn").kept, []);

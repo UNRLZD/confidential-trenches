@@ -67,6 +67,12 @@ export type EvmPoolVenue = {
    *  which live check evm-buy-hookdata-fee reads after every deploy; `providers` need not (a quote reads the latest
    *  block). */
   readonly feeProviders?: readonly [string, string];
+  /** The list every device read at a named block or at the newest walks (card device-evm-fee-read-walks-operators; the
+   *  kit's evmTwoOperators): the bind's chain fee at an epoch's first block (up to a minute back) and the Verify page's
+   *  pool reads, two operators of it agreeing on each read. Each entry another operator than the others, keyless,
+   *  answering a browser on the signing page's and the app's origins, each keeping state a minute back at least. Absent:
+   *  `feeProviders`. */
+  readonly readProviders?: readonly string[];
   /** The pool's own list, where `providers` cannot page the pool's logs (card robinhood-mainnet-rpcs): the wallet's pool
    *  sync and pool reads take it as a pair with spares (the wallet's evmPair: the first two the seats, the rest spares),
    *  each of another operator, each seat paging the pool's eth_getLogs over the sync's page (packages/wallet/src/pool/
@@ -118,6 +124,13 @@ export type EvmPoolVenueList = Readonly<Partial<Record<EvmPoolChain, EvmPoolVenu
  *  prototype is not the venue's. */
 export function evmPoolProvidersOf(venue: EvmPoolVenue): readonly string[] | undefined {
   return Object.hasOwn(venue, "poolProviders") ? venue.poolProviders : Object.hasOwn(venue, "providers") ? venue.providers : undefined;
+}
+/** The list a device read at a named block or at the newest walks (card device-evm-fee-read-walks-operators): the
+ *  venue's own `readProviders`, or its `feeProviders` when it has none. Own fields only, as evmPoolProvidersOf. Each
+ *  mainnet's list holds its helper pair and three operators at least (a kit test). The testnets name no read list: theirs
+ *  is their fee pair, two operators, a pair with no spare to walk to (no third keyless testnet operator was read). */
+export function evmReadProvidersOf(venue: EvmPoolVenue): readonly string[] | undefined {
+  return Object.hasOwn(venue, "readProviders") ? venue.readProviders : Object.hasOwn(venue, "feeProviders") ? venue.feeProviders : undefined;
 }
 /** The deep public sources an EVM pool's old logs are read from past its pool list (card evm-pool-sync-holds): the
  *  signing page reads each after the helper's keyed-only route, each held to the pool's root like any source and never
@@ -210,6 +223,17 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // fold 8, 2026-11-05 01:15Z from this Mac): Base's own and publicnode, the pair evm-buy-hookdata-fee recorded at
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
+      // The device's read list (card device-evm-fee-read-walks-operators), read 2026-11-10 20:44Z from this Mac: each
+      // answered eth_chainId 8453 and the bind's own fee read (the
+      // OP oracle's getL1FeeUpperBound, by blockHash) at blocks 5, 60, 120 and 600 s back, 224-318 ms each. Four
+      // operators, each on its own domain (evmRpcOperator) and each already in both pages' connect-src (the quote's and
+      // the scan's lists): Coinbase's own (base.org), Allnodes' publicnode, Pocket's gateway and Tenderly's gateway
+      // (read 21:17Z, 268-272 ms). base.drpc.org, blastapi and sentio answered the same reads; base.drpc.org is in
+      // neither page's connect-src.
+      // CORS, from both pages' own origins (scripts/live-checks/page-evm-rpc-csp.mjs PAGES), read 21:48Z by live check
+      // device-evm-fee-read-walks-operators, which reads it again after every deploy: every seat's preflight 200 or 204,
+      // allow-origin that origin or *.
+      readProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
       // The pool's list (card evm-pool-lists-mainnet): the quote list's second, blastapi, pages 10 blocks ("-32600: You
       // can make eth_getLogs requests with up to a 10 block range"), so it never seats the pool's sync. Read 2026-11-09
       // 05:50-05:55Z from this Mac, keyless, the pool's filter (its address; deploy block 54,325,671, tx 0x2e0cba4b…c23c7)
@@ -361,6 +385,26 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // POOL_EVM_RPCS_ROBINHOOD (the same order, apps/helper/deploy/compose.yaml), so they draw on dRPC's pace (15 a
       // second) and leave Robinhood's own (1 a second) to the pool sync, whose seat it is
       feeProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"] as const),
+      // The device's read list (card device-evm-fee-read-walks-operators), read 2026-11-10 20:44Z from this Mac: each
+      // answered eth_chainId 4663. The bind's own fee read (ArbGasInfo's
+      // getL1BaseFeeEstimate, by blockHash) at blocks 5, 60, 120 and 600 s back: Robinhood's own (Offchain Labs) all
+      // four, 290-448 ms; publicnode (Allnodes) 5, 60 and 120 s, 232-244 ms, and -32000 "historical state ... is not
+      // available" at 600 s; Pocket 5, 120 and 600 s and one HTTP 502 at 60 s; dRPC HTTP 400 {"code":27,"message":
+      // "Unknown state. First available state is 1"} at 5, 60 and 120 s and an answer at 600 s. publicnode's backends
+      // differ: 6 of 12 reads at blocks 15, 30, 45 and 55 s back answered -32000 "historical state ... is not
+      // available", Pocket 12 of 12 (21:03Z). The walk over this list at 5, 15, 30 and 55 s into 10 periods
+      // (20:52-21:02Z): 39 of 40 bound, the fixed pair [dRPC, Robinhood's own] 26 of 40, every failure dRPC's code 27.
+      // The order is by measured speed among the operators that keep the state: a read costs its slower side, and both
+      // sides ask at once. dRPC about 195 ms and Pocket 1.0 to 1.25 s a read (21:1xZ), so dRPC is second: when it
+      // refuses a block's state it answers in one fast call and then rests EVM_READ_REST_MS, so side 1 walks on to
+      // Pocket at about the cost Pocket alone has; with dRPC answering, the read costs what the fixed pair did. With
+      // Pocket second the walk's p50 was 1244 ms against the pair's 422 (5 periods, 21:03Z). publicnode, whose
+      // backends refuse half of the state 15 to 55 s back, is last. Read the order again whenever the list changes.
+      // bloXroute, Globalstake and daybreak answered the same -32000 at every age, 5 s included: none is listed.
+      // CORS, from both pages' own origins (scripts/live-checks/page-evm-rpc-csp.mjs PAGES), read 21:48Z by live check
+      // device-evm-fee-read-walks-operators, which reads it again after every deploy: every seat's preflight 200 or 204,
+      // allow-origin that origin or *.
+      readProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"]),
       // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
       // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
       // and dRPC named) and the chainid.network and DefiLlama chainlist entries for 4663 name, read 2026-11-07
