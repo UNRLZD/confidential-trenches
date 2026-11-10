@@ -4,7 +4,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.core.json",
     "test": "tsc -p tsconfig.json && tsc -p tsconfig.core.json && node -e \"import('@blindfill/kit').then(m => { if (!m.SIGNPAGE_KINDS || !m.ZK_SETUP_FILES) process.exit(1) })\" && node --test \"test/*.test.mjs\" \"test/*.test.ts\" \"test/prover/*.test.mjs\"",
-    "test:mutants": "node --test \"test/mutants/*.test.mjs\" && node test/evm-quote-mutants.mjs",
+    "test:mutants": "MUTANT_PART=1/2 node --test test/mutants/evm-pool-mutants.test.mjs && MUTANT_PART=2/2 node --test test/mutants/evm-pool-mutants.test.mjs && node --test test/mutants/pool-deposit-mutants.test.mjs && MUTANT_PART=1/2 node --test test/mutants/pool-usd-mutants.test.mjs && MUTANT_PART=2/2 node --test test/mutants/pool-usd-mutants.test.mjs && node --test test/mutants/vault-settle-mutants.test.mjs && node test/evm-quote-mutants.mjs 1/2 && node test/evm-quote-mutants.mjs 2/2",
     "test:e2e": "node test/prover/chromium.e2e.mjs"
   },
   "exports": {

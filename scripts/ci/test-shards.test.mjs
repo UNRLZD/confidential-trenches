@@ -12,7 +12,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { e2ePart, mutantCommands, mutantParts, mutantsPart, runPart, MUTANT_SECONDS, NEW_SWEEP_SECONDS, PART_BUDGET_SECONDS } from "./test-shards.mjs";
+import {
+  e2ePart, listedSeconds, mutantCommands, mutantParts, mutantsPart, packageItems, packageKey, packageParts, packagesPart, runPart, selectedPackages, staleWarning,
+  testFilters, typecheckArgs, unnamedMutantFiles, MAX_SWEEP_SECONDS, MUTANT_SECONDS, NEW_PACKAGE_SECONDS, NEW_SWEEP_SECONDS, PACKAGE_PART_BUDGET_SECONDS,
+  PACKAGE_SECONDS, PART_BUDGET_SECONDS, STALE_FACTOR,
+} from "./test-shards.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CI = readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -168,12 +172,15 @@ const PLANTED = {
   "the wallet's sweeps by pnpm --filter, no run": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm --filter @blindfill/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by pnpm -C": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: pnpm -C packages/wallet test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
   "the wallet's sweeps by npm in a run block": ["        run: pnpm --filter @blindfill/wallet run test\n", "        run: pnpm --filter @blindfill/wallet run test\n      - run: |\n          cd packages/wallet && npm run test:mutants\n", "a ci.yml line runs a test:mutants script beside the split"],
-  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
-  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
-  "seven mutant parts once the rent back's sweep grew": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1, 2, 3, 4, 5, 6, 7]", "test-mutants' heaviest of 7 part(s) is planned at"],
-  "eight mutant parts once the sell's deposit back floor grew the rent back": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8]", "test-mutants' heaviest of 8 part(s) is planned at"],
-  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
-  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]", "test-mutants: the sweeps are"],
+  "too few mutant parts for the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1]", "test-mutants' heaviest of 1 part(s) is planned at"],
+  "five mutant parts once the wallet's sweeps joined": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5]", "test-mutants' heaviest of 5 part(s) is planned at"],
+  "seven mutant parts once the rent back's sweep grew": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7]", "test-mutants' heaviest of 7 part(s) is planned at"],
+  "eight mutant parts once the sell's deposit back floor grew the rent back": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8]", "test-mutants' heaviest of 8 part(s) is planned at"],
+  // card ci-mutant-shards-true-times: nine parts planned 536 s by the table that had gone stale; the true one plans 780 s there
+  "nine mutant parts, the count before the table read the true times": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9]", "test-mutants' heaviest of 9 part(s) is planned at"],
+  "thirteen mutant parts, one short of the budget": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]", "test-mutants' heaviest of 13 part(s) is planned at"],
+  "a mutant matrix that skips a part": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [1, 2, 4]", "test-mutants has no matrix part"],
+  "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [" + Array.from({ length: 40 }, (_, i) => i + 1).join(", ") + "]", "test-mutants: the sweeps are"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
 };
@@ -309,7 +316,7 @@ test("planted: a part added to the matrix drops nothing and doubles nothing; pas
     const seen = Array.from({ length: total }, (_, i) => mutantsPart(SWEEPS, i, total)).flat().map(key);
     assert.deepEqual(seen.toSorted(), SWEEPS.map(key).toSorted(), `${total} parts`);
   }
-  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7, 8, 9)\]/, `$1, 10]`);
+  const more = CI.replace(/(\n {6}matrix:\n {8}part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)\]/, `$1, 15]`);
   assert.notEqual(more, CI);
   assert.deepEqual(shardProblems(more), []);
   assert.throws(() => mutantsPart(SWEEPS, 0, SWEEPS.length + 1), /fewer than/);
@@ -409,4 +416,274 @@ test("the mutants command line: a missing, non-number or out-of-range part is re
     assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}`);
     assert.equal(r.stdout, "");
   }
+});
+
+// ---- card ci-mutant-shards-true-times
+
+// every sweep command's listed seconds, and a stale-table warning on a sweep that ran long
+
+const overlong = (seconds) => Object.entries(seconds).filter(([, n]) => n > MAX_SWEEP_SECONDS).map(([k]) => k);
+
+test("no sweep is listed over 300 s, and a sweep listed over it is named (planted)", () => {
+  assert.equal(MAX_SWEEP_SECONDS, 300);
+  assert.deepEqual(overlong(MUTANT_SECONDS), [], "a sweep over 300 s fills a part alone on a slow runner: run it in parts (<k>/<n>, scripts/mutant-part.mjs)");
+  assert.deepEqual(overlong({ ...MUTANT_SECONDS, "packages/kit: node test/new.mjs": 301 }), ["packages/kit: node test/new.mjs"]);
+  assert.deepEqual(overlong({ a: 300, b: 299 }), []);
+  // the budget and the table together: the heaviest part of the matrix ci.yml lists is inside it
+  assert.equal(PART_BUDGET_SECONDS, 540);
+  const parts = Number(/\n {2}test-mutants:\n(?:.*\n)*? {8}part: \[([^\]]*)\]/.exec(CI)[1].split(",").length);
+  assert.ok(Math.max(...mutantParts(SWEEPS, parts).map((x) => x.seconds)) <= PART_BUDGET_SECONDS);
+  assert.ok(Math.max(...mutantParts(SWEEPS, parts - 1).map((x) => x.seconds)) > PART_BUDGET_SECONDS, "a part fewer would also fit: the matrix lists more parts than it needs");
+});
+
+test("a stale table shows itself: a sweep past 1.25 times its listed seconds prints a ::warning:: naming it, the listed and the measured time", () => {
+  const c = { dir: "packages/a", name: "a", command: "node s.mjs 1/2" };
+  const table = { "packages/a: node s.mjs 1/2": 100 };
+  assert.equal(STALE_FACTOR, 1.25);
+  assert.equal(staleWarning(c, 125, table), null, "exactly 1.25 times is no warning");
+  assert.equal(staleWarning(c, 99, table), null);
+  const w = staleWarning(c, 125.1, table);
+  assert.match(w, /^::warning::packages\/a: node s\.mjs 1\/2 took 125\.1 s, listed 100 s: /);
+  // a sweep with no listed time is planned at NEW_SWEEP_SECONDS and says so
+  assert.equal(staleWarning({ ...c, command: "node new.mjs" }, NEW_SWEEP_SECONDS * 1.25, table), null);
+  assert.match(staleWarning({ ...c, command: "node new.mjs" }, NEW_SWEEP_SECONDS * 1.25 + 1, table), /took 251 s, no listed time, planned at 200 s/);
+  // the data of a workflow command escapes %, CR and LF, so a sweep's text cannot end the annotation or start a command
+  const evil = staleWarning({ dir: "packages/a", command: "echo 100%\r\n::error::x" }, 1000, table);
+  assert.ok(!/[\r\n]/.test(evil) && evil.includes("100%25%0D%0A::error::x"), evil);
+});
+
+test("a part prints the warning after the slow sweep's own line, never fails on it, and says nothing for a sweep inside its time (fake clock)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "test-shards-clock-"));
+  try {
+    mkdirSync(path.join(dir, "packages/a"), { recursive: true });
+    writeFileSync(path.join(dir, "packages/a/package.json"), JSON.stringify({ name: "a" }));
+    const cmds = [
+      { dir: "packages/a", command: "true" },
+      { dir: "packages/a", command: "exit 3" },
+      { dir: "packages/a", command: "true && true" },
+    ];
+    // the clock answers a start and an end per sweep: 100 s (listed 100: no warning), 130 s (listed 100: warning, and the
+    // sweep also failed), 400 s (no listed time: planned at 200: warning)
+    const times = [0, 100_000, 100_000, 230_000, 230_000, 630_000];
+    const clock = () => times.shift();
+    const lines = [];
+    const ran = runPart(cmds, dir, (l) => lines.push(l), { clock, seconds: { "packages/a: true": 100, "packages/a: exit 3": 100 } });
+    assert.deepEqual(ran.map((r) => [r.ok, r.seconds]), [[true, 100], [false, 130], [true, 400]]);
+    const warnings = lines.filter((l) => l.startsWith("::warning::"));
+    assert.equal(warnings.length, 2, lines.join("\n"));
+    assert.match(warnings[0], /packages\/a: exit 3 took 130 s, listed 100 s/);
+    assert.match(warnings[1], /packages\/a: true && true took 400 s, no listed time, planned at 200 s/);
+    // the warning follows the sweep's own "== failed" line
+    assert.ok(lines.findIndex((l) => l.startsWith("== failed")) < lines.indexOf(warnings[0]));
+    assert.equal(lines.filter((l) => /^== ok in 100 s: packages\/a: true$/.test(l)).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the kit's mutants folder: a test file no test:mutants command names is found; named by path or by glob, it is not (planted)", () => {
+  assert.deepEqual(unnamedMutantFiles(ROOT), [], "a file of a test/mutants folder that no test:mutants command runs: add a command for it to the package's script");
+  const dir = mkdtempSync(path.join(tmpdir(), "test-shards-files-"));
+  try {
+    const put = (f, text) => {
+      mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+      writeFileSync(path.join(dir, f), text);
+    };
+    const pkg = (name, mutants) => JSON.stringify({ name, scripts: { test: "node --test", "test:mutants": mutants } });
+    put("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n');
+    put("packages/k/package.json", pkg("@x/k", "node --test test/mutants/a.test.mjs && MUTANT_PART=1/2 node --test test/mutants/b.test.mjs"));
+    put("packages/g/package.json", pkg("@x/g", 'node --test "test/mutants/*.test.mjs"'));
+    put("packages/o/package.json", pkg("@x/o", "node --test test/mutants/a.test.mjs"));
+    for (const f of ["packages/k/test/mutants/a.test.mjs", "packages/k/test/mutants/b.test.mjs", "packages/g/test/mutants/x.test.mjs", "packages/g/test/mutants/y.test.mjs", "packages/o/test/mutants/a.test.mjs", "packages/o/test/other.test.mjs"]) put(f, "");
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["add", "."], { cwd: dir });
+    assert.deepEqual(unnamedMutantFiles(dir), []);
+    // a new file in each: the glob names it, the paths do not
+    put("packages/k/test/mutants/c.test.mjs", "");
+    put("packages/g/test/mutants/z.test.mjs", "");
+    put("packages/o/test/mutants/c.test.ts", "");
+    execFileSync("git", ["add", "."], { cwd: dir });
+    assert.deepEqual(unnamedMutantFiles(dir), ["packages/k/test/mutants/c.test.mjs", "packages/o/test/mutants/c.test.ts"]);
+    // another package's command naming the same file name vouches for nothing
+    put("packages/o/package.json", pkg("@x/o", "node --test test/mutants/a.test.mjs && node --test test/mutants/b.test.mjs"));
+    execFileSync("git", ["add", "."], { cwd: dir });
+    assert.ok(unnamedMutantFiles(dir).includes("packages/k/test/mutants/c.test.mjs"));
+    assert.ok(!unnamedMutantFiles(dir).includes("packages/k/test/mutants/b.test.mjs"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- the packages' tests: ci.yml's test-packages matrix
+
+const ITEMS = packageItems(ROOT);
+const ITEM_COMMANDS = ITEMS.map((i) => ({ dir: "packages", name: packageKey(i), command: packageKey(i), item: i }));
+
+test("the packages' items: each workspace package's test script but the wallet's, and the four steps, each with a measured time", () => {
+  const names = ITEMS.filter((i) => i.kind === "tests").map((i) => i.name);
+  assert.deepEqual(names.toSorted(), ["@blindfill/exit", "@blindfill/kit", "@confidential-trenches/helper", "signpage", "terminal"]);
+  assert.deepEqual(ITEMS.filter((i) => i.kind === "step").map((i) => i.name), ["typecheck", "deploy gate", "live-check replays", "bundle checks"]);
+  assert.deepEqual(ITEMS.map(packageKey).filter((k) => !Object.hasOwn(PACKAGE_SECONDS, k)), [], "an item with no PACKAGE_SECONDS time: read it off the test-packages job log and add it");
+  assert.deepEqual(Object.keys(PACKAGE_SECONDS).filter((k) => !ITEMS.some((i) => packageKey(i) === k)), [], "a PACKAGE_SECONDS key names no item");
+  assert.equal(NEW_PACKAGE_SECONDS, 200);
+});
+
+test("the packages' parts: every item in exactly one part, for every count of parts from 1 to one part per item", () => {
+  assert.deepEqual(splitProblems(ITEM_COMMANDS, (i, n) => packagesPart(ITEMS, i, n).map((x) => ITEM_COMMANDS.find((c) => c.item === x))), []);
+  for (let total = 1; total <= ITEMS.length; total++) {
+    const parts = packageParts(ITEMS, total);
+    assert.equal(parts.reduce((s, x) => s + x.seconds, 0), ITEMS.reduce((s, i) => s + PACKAGE_SECONDS[packageKey(i)], 0));
+    assert.deepEqual(parts.map((x) => x.items), parts.map((_, i) => packagesPart(ITEMS, i, total)));
+  }
+  assert.throws(() => packagesPart(ITEMS, 0, ITEMS.length + 1), /fewer than/);
+  assert.throws(() => packagesPart(ITEMS, 3, 3), /not a part of 3/);
+  assert.throws(() => packagesPart([], 0, 1), /no workspace package/);
+});
+
+test("planted: a split that leaves a package in no part, puts one in two parts, or runs the typecheck in every part fails", () => {
+  const find = (k) => ITEM_COMMANDS.find((c) => packageKey(c.item) === k);
+  const own = (i, n) => packagesPart(ITEMS, i, n).map((x) => ITEM_COMMANDS.find((c) => c.item === x));
+  const kit = find("tests @blindfill/kit");
+  const typecheck = find("typecheck");
+  for (const [name, split, want] of [
+    ["a package in no part", (i, n) => own(i, n).filter((c) => c !== kit), `${kit.dir}: ${kit.command} runs in 0 part(s)`],
+    ["a package in two parts", (i, n) => [...new Set([...own(i, n), ...(i === 0 ? [kit] : [])])], `${kit.dir}: ${kit.command} runs in 2 part(s)`],
+    ["the typecheck in every part", (i, n) => [...new Set([...own(i, n), typecheck])], `${typecheck.dir}: ${typecheck.command} runs in`],
+    ["a part with nothing to run", (i, n) => (i === 0 && n > 1 ? [] : own(i, n)), "part 0 of 2 runs nothing"],
+  ]) {
+    const found = splitProblems(ITEM_COMMANDS, split);
+    assert.ok(found.some((f) => f.startsWith(want)), `${name}: want "${want}", found ${JSON.stringify(found.slice(0, 4))}`);
+  }
+});
+
+test("the packages' parts: the heaviest of ci.yml's matrix is planned inside 8 minutes, so 1.5 times slower ends inside 15", () => {
+  const job = jobs(CI)["test-packages"];
+  const list = /^ {8}part:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((x) => x.trim());
+  assert.ok(list?.every((x, i) => x === String(i + 1)), "test-packages has a matrix part: [1, ..., N]");
+  const worst = Math.max(...packageParts(ITEMS, list.length).map((x) => x.seconds));
+  assert.equal(PACKAGE_PART_BUDGET_SECONDS, 480);
+  assert.ok(worst <= PACKAGE_PART_BUDGET_SECONDS, `${worst} s over ${PACKAGE_PART_BUDGET_SECONDS} s`);
+  assert.ok(worst * 1.5 <= 15 * 60 - 60, `${worst} s on a runner 1.5 times slower`);
+  // and the pull request's own job log: the whole was 503 s for the tests and the typecheck, replays and bundle 105 s on top
+  assert.ok(ITEMS.reduce((s, i) => s + PACKAGE_SECONDS[packageKey(i)], 0) > PACKAGE_PART_BUDGET_SECONDS, "one part holds them all: the matrix needs no split");
+});
+
+// the wiring: each way test-packages can break, planted in a copy of ci.yml
+function packageJobProblems(ci) {
+  const job = jobs(ci)["test-packages"];
+  if (!job) return ["ci.yml has no test-packages shard"];
+  const p = [];
+  const parts = /^ {8}part:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((x) => x.trim());
+  if (!parts?.length || parts.some((x, i) => x !== String(i + 1))) p.push("test-packages has no matrix part: [1, ..., N]");
+  else {
+    try {
+      const worst = Math.max(...packageParts(ITEMS, parts.length).map((x) => x.seconds));
+      if (worst > PACKAGE_PART_BUDGET_SECONDS) p.push(`test-packages' heaviest of ${parts.length} part(s) is planned at ${worst} s, over ${PACKAGE_PART_BUDGET_SECONDS} s: add a part`);
+    } catch (e) {
+      p.push(`test-packages: ${e.message}`);
+    }
+  }
+  const stepsOf = (re) => job.split("\n").filter((l) => re.test(l)).length;
+  const need = [
+    ["plan", 'run: node scripts/ci/test-shards.mjs packages plan "$INDEX" "$TOTAL" >> "$GITHUB_OUTPUT"'],
+    ["tests", 'run: node scripts/ci/test-shards.mjs packages tests "$INDEX" "$TOTAL"'],
+    ["typecheck", 'run: node scripts/ci/test-shards.mjs packages typecheck "$INDEX" "$TOTAL"'],
+  ];
+  for (const [what, line] of need) if (!job.split("\n").some((l) => l.trim() === line)) p.push(`test-packages does not run packages ${what} through the split: ${line}`);
+  const inputs = job.split("\n").filter((l) => /^ {10}INDEX: \$\{\{ strategy\.job-index \}\}$/.test(l)).length;
+  const totals = job.split("\n").filter((l) => /^ {10}TOTAL: \$\{\{ strategy\.job-total \}\}$/.test(l)).length;
+  if (inputs !== 3 || totals !== 3) p.push("test-packages takes a part from strategy.job-index and strategy.job-total in fewer than its three split steps");
+  for (const [key, cmd] of [["deploy_gate", "node --test apps/terminal/scripts/check-deploy.test.ts"], ["replays", "node --test scripts/live-checks/*.test.mjs"], ["bundle", "pnpm --filter terminal build && node scripts/ci/bundle-checks.mjs"]]) {
+    const lines = job.split("\n");
+    const at = lines.map((l, i) => (l.trim() === `run: ${cmd}` ? i : -1)).filter((i) => i >= 0);
+    if (at.length !== 1) p.push(`test-packages runs "${cmd}" ${at.length} time(s), not once`);
+    else if (lines[at[0] - 1]?.trim() !== `if: steps.plan.outputs.${key} == 'true'`) p.push(`test-packages' step "${cmd}" is not gated on the plan's ${key}: it runs in every part`);
+  }
+  if (stepsOf(/^ {6}- name: which steps this part runs$/) !== 1 || !/^ {8}id: plan$/m.test(job)) p.push("test-packages has no plan step (id: plan)");
+  if (/\bpnpm\b.*\brun (test|typecheck)\b/.test(job.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n"))) p.push("test-packages runs a package's test or typecheck script beside the split: it runs in more than one part");
+  return p;
+}
+
+test("ci.yml: test-packages runs its share of the packages' tests, and each fixed step in one part", () => {
+  assert.deepEqual(packageJobProblems(CI), []);
+  assert.deepEqual(shardProblems(CI), []);
+});
+
+const PACKAGE_PLANTED = {
+  "a package part count set by hand": [/(this part's share\n {8}env:\n {10}SELECT: [^\n]*tests[^\n]*\n {10}INDEX: \$\{\{ strategy\.job-index \}\}\n {10})TOTAL: \$\{\{ strategy\.job-total \}\}/, "$1TOTAL: 3", "test-packages takes a part from strategy"],
+  "one package part": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1]", "test-packages' heaviest of 1 part(s) is planned at"],
+  "a package matrix that skips a part": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 3]", "test-packages has no matrix part"],
+  "more package parts than items": [/(\n {2}test-packages:\n(?:.*\n)*? {8}part: )\[1, 2, 3\]/, "$1[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]", "test-packages: the packages' items are"],
+  "the live-check replays in every part": ["        if: steps.plan.outputs.replays == 'true'\n", "", "it runs in every part"],
+  "the bundle checks on the wrong plan key": ["        if: steps.plan.outputs.bundle == 'true'\n", "        if: steps.plan.outputs.replays == 'true'\n", "is not gated on the plan's bundle"],
+  "the deploy gate's tests in every part": ["        if: steps.plan.outputs.deploy_gate == 'true'\n", "", "is not gated on the plan's deploy_gate"],
+  "the plan step dropped": ["      - name: which steps this part runs\n        id: plan\n", "      - name: which steps this part runs\n", "test-packages has no plan step"],
+  "the tests step dropped": ['        run: node scripts/ci/test-shards.mjs packages tests "$INDEX" "$TOTAL"\n', "        run: echo skipped\n", "does not run packages tests through the split"],
+  "every package's tests run whole beside the split": ["      - name: the deploy gate's own tests\n", "      - run: pnpm -r --filter '!@blindfill/wallet' --if-present --no-bail run test\n      - name: the deploy gate's own tests\n", "beside the split"],
+  "the typecheck run whole beside the split": ["      - name: the deploy gate's own tests\n", "      - run: pnpm -r --if-present run typecheck\n      - name: the deploy gate's own tests\n", "beside the split"],
+};
+for (const [name, [from, to, want]] of Object.entries(PACKAGE_PLANTED)) {
+  test(`planted: ${name} fails`, () => {
+    const planted = CI.replace(from, to);
+    assert.notEqual(planted, CI, `the plant for "${name}" matched nothing in ci.yml`);
+    const found = packageJobProblems(planted);
+    assert.ok(found.some((f) => f.startsWith(want) || f.includes(want)), `want "${want}", found: ${JSON.stringify(found)}`);
+  });
+}
+
+test("the packages' selectors: a part runs the packages pr-paths picked that it holds, none for none, every one for an empty selector", () => {
+  const part = packagesPart(ITEMS, 1, 3);
+  const mine = part.filter((i) => i.kind === "tests").map((i) => `--filter=${i.name}`);
+  assert.ok(mine.length > 0);
+  assert.deepEqual(testFilters(part, ""), mine);
+  assert.deepEqual(testFilters(part, undefined), mine);
+  assert.deepEqual(testFilters(part, "none"), []);
+  assert.deepEqual(testFilters(part, mine[0]), [mine[0]]);
+  assert.deepEqual(testFilters(part, "--filter=signpage --filter=@nope/x"), part.some((i) => i.name === "signpage") ? ["--filter=signpage"] : []);
+  assert.deepEqual(selectedPackages(" --filter=a --filter=@b/c.d "), ["a", "@b/c.d"]);
+  for (const bad of ["a", "--filter=!a", "--filter=a;b", "-r", "--filter=a --other", "--filter="]) assert.throws(() => selectedPackages(bad), /neither empty, none nor/, bad);
+  // the typecheck: in the one part that has it, all packages or the picked ones, none for none
+  for (let total = 1; total <= ITEMS.length; total++) {
+    const has = Array.from({ length: total }, (_, i) => typecheckArgs(packagesPart(ITEMS, i, total), "")).filter(Boolean);
+    assert.equal(has.length, 1, `${total} parts`);
+    assert.deepEqual(has[0], ["-r", "--if-present", "run", "typecheck"]);
+  }
+  const t = packagesPart(ITEMS, 0, 1);
+  assert.deepEqual(typecheckArgs(t, "--filter=a --filter=b"), ["-r", "--filter=a", "--filter=b", "--if-present", "run", "typecheck"]);
+  assert.equal(typecheckArgs(t, "none"), null);
+});
+
+test("the packages command line: plan names each of the three steps in exactly one part, and a part out of range or a step unknown is refused", () => {
+  const script = path.join(ROOT, "scripts/ci/test-shards.mjs");
+  const plan = (i, n) => spawnSync(process.execPath, [script, "packages", "plan", String(i), String(n)], { encoding: "utf8" });
+  for (const total of [1, 2, 3, 4]) {
+    const seen = { deploy_gate: 0, replays: 0, bundle: 0 };
+    for (let i = 0; i < total; i++) {
+      const r = plan(i, total);
+      assert.equal(r.status, 0, r.stderr);
+      const lines = r.stdout.trim().split("\n");
+      assert.deepEqual(lines.map((l) => l.split("=")[0]), ["deploy_gate", "replays", "bundle"]);
+      for (const l of lines) if (l.endsWith("=true")) seen[l.split("=")[0]]++;
+      assert.ok(lines.every((l) => /^[a-z_]+=(true|false)$/.test(l)), r.stdout);
+    }
+    assert.deepEqual(seen, { deploy_gate: 1, replays: 1, bundle: 1 }, `${total} parts`);
+  }
+  for (const args of [["plan", "3", "3"], ["plan", "x", "3"], ["plan", "0", "0"], ["plan", "0", "99"], ["bogus", "0", "3"], ["tests", "-1", "3"]]) {
+    const r = spawnSync(process.execPath, [script, "packages", ...args], { encoding: "utf8" });
+    assert.equal(r.status, 1, args.join(" "));
+    assert.equal(r.stdout, "");
+  }
+  // a malformed selector is refused with nothing run
+  const bad = spawnSync(process.execPath, [script, "packages", "tests", "0", "3"], { encoding: "utf8", env: { ...process.env, SELECT: "--filter=a;rm" } });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /neither empty, none nor/);
+  // a selector that keeps nothing of the part runs nothing and passes
+  const none = spawnSync(process.execPath, [script, "packages", "tests", "0", "3"], { encoding: "utf8", env: { ...process.env, SELECT: "none" } });
+  assert.equal(none.status, 0);
+  assert.match(none.stderr, /^skip: /m);
+});
+
+test("listedSeconds: a listed time, or NEW_SWEEP_SECONDS for a sweep that has none", () => {
+  assert.equal(listedSeconds({ dir: "a", command: "x" }, { "a: x": 7 }), 7);
+  assert.equal(listedSeconds({ dir: "a", command: "y" }, { "a: x": 7 }), NEW_SWEEP_SECONDS);
 });

@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runSync } from "../../../scripts/group-run.mjs";
+import { sweepPartOrExit } from "../../../scripts/mutant-part.mjs";
 const W = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const F = `${W}/src/deposit/moveout.ts`;
 const TESTS = ["test/deposit-moveout.test.ts", "test/deposit-moveout-keys.test.ts", "test/deposit-moveout-taken.test.ts", "test/deposit-moveout-forgotten.test.ts"];
@@ -202,40 +203,48 @@ const MF = [
   ["H8c (review 8, ruling 1) holdAll's SUCCESS read never keeps delivered", "  if (st.status === \"SUCCESS\" && f.delivered === undefined) read.delivered = (st.delivered ?? 0n).toString();\n", ""],
   ["H9a (review 9, ruling 2) holdAll reads each op's status before its held write", "    for (const [id, op] of all) await write(id, \"held\", legFacts(op, \"held\"), { why });\n    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n", "    for (const [id, op] of all) {\n      const st = await readDepositStatus(op.follow.address, U, fetchFn, signal, now());\n      await write(id, \"held\", legFacts(op, \"held\"), { why });\n"],
 ];
-let killed = 0;
 const ALL = [...M.map((m) => [F, TESTS, m]), ...MF.map((m) => [FF, ["test/deposit-follow.test.ts"], m])];
-const srcs = new Map([F, FF].map((f) => [f, readFileSync(f, "utf8")]));
-for (const [file, tests, [name, ...pairs]] of ALL) {
-  const src = srcs.get(file);
-  let s = src;
-  let bad = false;
-  for (let k = 0; k < pairs.length; k += 2) {
-    if (s.split(pairs[k]).length !== 2) {
-      console.log(`NOT ONCE [${name}]: ${pairs[k]}`);
-      bad = true;
-      break;
+// every mutant's name, in the order the parts take them
+export const NAMES = ALL.map(([, , [name]]) => name);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // <k>/<n>: part k of n only, mutant i in part (i % n) + 1 (scripts/mutant-part.mjs); test:mutants runs the parts, one
+  // command each, so ci.yml's split shares them out
+  const part = sweepPartOrExit(process.argv.slice(2), NAMES);
+  let killed = 0;
+  const srcs = new Map([F, FF].map((f) => [f, readFileSync(f, "utf8")]));
+  for (const [i, [file, tests, [name, ...pairs]]] of ALL.entries()) {
+    if (!part.pick(i)) continue;
+    const src = srcs.get(file);
+    let s = src;
+    let bad = false;
+    for (let k = 0; k < pairs.length; k += 2) {
+      if (s.split(pairs[k]).length !== 2) {
+        console.log(`NOT ONCE [${name}]: ${pairs[k]}`);
+        bad = true;
+        break;
+      }
+      s = s.replace(pairs[k], pairs[k + 1]);
     }
-    s = s.replace(pairs[k], pairs[k + 1]);
+    if (bad) {
+      process.exitCode = 1;
+      continue;
+    }
+    writeFileSync(file, s);
+    // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
+    let r;
+    try {
+      r = runSync("node", ["--test", ...tests], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
+    } finally {
+      writeFileSync(file, src);
+    }
+    const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
+    const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
+    const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
+    const dead = r.status !== 0 && Number(fail) > 0;
+    if (dead) killed++;
+    console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
   }
-  if (bad) {
-    process.exitCode = 1;
-    continue;
-  }
-  writeFileSync(file, s);
-  // a run past 120 s is killed, its process group with it (scripts/group-run.mjs)
-  let r;
-  try {
-    r = runSync("node", ["--test", ...tests], { cwd: W, encoding: "utf8", timeoutMs: 120_000 });
-  } finally {
-    writeFileSync(file, src);
-  }
-  const fail = (r.stdout.match(/ℹ fail (\d+)/) ?? [])[1];
-  const pass = (r.stdout.match(/ℹ pass (\d+)/) ?? [])[1];
-  const by = [...r.stdout.matchAll(/^✖ (.+?) \(\d/gm)].map((m) => m[1].slice(0, 70)).filter((v, i, a) => a.indexOf(v) === i);
-  const dead = r.status !== 0 && Number(fail) > 0;
-  if (dead) killed++;
-  console.log(`${dead ? "KILLED" : "SURVIVED"} [${name}] pass ${pass} fail ${fail}${by.length ? ` by: ${by.join(" | ")}` : ""}`);
+  console.log(`${killed}/${part.at.length} killed`);
+  console.log([...srcs].every(([f, src]) => readFileSync(f, "utf8") === src) ? "source restored" : "SOURCE NOT RESTORED");
+  if (killed !== part.at.length) process.exitCode = 1;
 }
-console.log(`${killed}/${ALL.length} killed`);
-console.log([...srcs].every(([f, src]) => readFileSync(f, "utf8") === src) ? "source restored" : "SOURCE NOT RESTORED");
-if (killed !== ALL.length) process.exitCode = 1;
