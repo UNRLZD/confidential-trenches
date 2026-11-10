@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -4365,4 +4365,11 @@ test("card pool-sell-share-across-wallets review P3-5: a sign out asked while a 
   const b = await runPoolSell({ ...v.host, sent: (sig: string) => void ((stop = true), (at.n = v.c.calls.length), v.sent.push(sig)), stopped: () => stop }, share(10_000));
   assert.equal("stage" in b && b.stage, "part_filled");
   assert.ok(!v.c.calls.slice(at.n).some((c) => c.method === "getAccountInfo" && c.params[0] === ataOfW(W.address)), "the stopped sale read its wallet");
+});
+
+test("card pool-sell-share-across-wallets: a sell whose every sale ended before its signature is refused (nothing moved), never not landed; one sale that signed and missed is not landed", () => {
+  assert.equal(stageOfLegs([{ stage: null, error: "down" }, { stage: null, error: "failed" }]), "refused");
+  assert.equal(stageOfLegs([{ stage: "not_landed" }, { stage: null, error: "down" }]), "refused");
+  assert.equal(stageOfLegs([{ stage: "not_landed" }, { stage: "not_landed" }]), "not_landed");
+  assert.equal(stageOfLegs([{ stage: "filled" }, { stage: null, error: "down" }]), "part_filled");
 });
