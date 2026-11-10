@@ -546,6 +546,69 @@ test("review P3-3 of e3489b3b: a sign out that comes while the RESERVED pass rea
   assert.deepEqual(await states(ns), ["RESERVED"]);
 });
 
+/** A page with one RESERVED Solana note whose pass's settle waits at its lister's first answer until `release`. */
+async function heldPass() {
+  const { w, ns } = await wallet();
+  const gates: (() => void)[] = [];
+  const calls: string[] = [];
+  const rpc = async (m: string) => {
+    calls.push(m);
+    if (m === "getSlot") return 700;
+    if (m === "getBlockTime") return Number(NOW / 1_000n);
+    throw new Error(`unexpected ${m}`);
+  };
+  const lister = async (m: string) => {
+    calls.push(`lister ${m}`);
+    await new Promise<void>((ok) => gates.push(ok));
+    return { context: { slot: 700 }, value: [{ pubkey: base58.encode(new Uint8Array(32).fill(3)) }] };
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], lister, cache: {}, prover: { vault: signalsProver(), stop: () => {} } });
+  const { land } = fakePool();
+  let n = await land(ns, await incoming(ns, null, 7));
+  n = await ns.move(n.id, "UNSPENT", "HELD", { deadlineMs: NOW + 60_000n, context: "1" });
+  await ns.move(n.id, "HELD", "RESERVED", { attempt: n.attempt! });
+  const listed = async (k: number) => {
+    while (calls.filter((c) => c === "lister getProgramAccounts").length < k) await new Promise((r) => setTimeout(r, 1));
+  };
+  return { t, ns, calls, listed, release: () => gates.splice(0).forEach((g) => g()) };
+}
+
+test("another tab's sign out (signedOut) stops the Solana RESERVED pass's settle at its next read, as this tab's signingOut does", async () => {
+  const { t, ns, calls, listed, release } = await heldPass();
+  const pass = t.stateRead();
+  await listed(1);
+  const before = calls.length;
+  const out = t.signedOut();
+  release();
+  await pass;
+  await out;
+  assert.deepEqual(calls.slice(before), []);
+  assert.deepEqual(await states(ns), ["RESERVED"]);
+});
+
+test("a sign out stops only the settles running then: the next pass after it reads again (the stop's controller is a new one)", async () => {
+  const { t, calls, listed, release } = await heldPass();
+  const first = t.stateRead();
+  await listed(1);
+  t.signingOut();
+  release();
+  await first;
+  const second = t.stateRead();
+  // the next pass reaches its lister: a stop that kept the aborted controller would stop it before any read
+  await Promise.race([listed(2), new Promise((_, no) => setTimeout(() => no(new Error(`the pass after the sign out read nothing: ${calls.join(",")}`)), 2_000))]);
+  release();
+  await second;
+});
+
+test("main.ts's sign out stops the pool settles (testnet?.signingOut()) before the store signs out, and closes the pools (signedOut) after", () => {
+  const src = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  const body = /async function signOut\(\): Promise<void> \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? "";
+  const at = (x: string) => body.indexOf(x);
+  assert.ok(at("testnet?.signingOut();") > 0, "signingOut is called");
+  assert.ok(at("testnet?.signingOut();") < at("await s.signOut();"), "before the store's sign out");
+  assert.ok(at("await s.signOut();") < at("await testnet?.signedOut();"), "signedOut after it");
+});
+
 test("the page's queue runs on solanaPool with the devnet pin and the page's two devnet RPCs: a landing reads the pool's time on both", async () => {
   const { w, ns } = await wallet();
   const calls: string[][] = [[], []];
