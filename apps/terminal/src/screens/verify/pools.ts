@@ -48,6 +48,7 @@ export function poolExplorers(chain: PoolChain, address: string): PoolExplorer[]
 // ------------------------------------------------------------------------------------------------ the reads
 /** One JSON-RPC call to a URL; a status other than 200, a body that is not JSON or no answer in time throws. */
 export type PoolRpc = (url: string, method: string, params: unknown[], signal?: AbortSignal) => Promise<unknown>;
+/** One call's bound: Solana's pair reads under it alone; an EVM read is cut sooner by the walk (EVM_READ_CALL_MS, 4 s). */
 export const POOL_READ_MS = 10_000;
 export function poolRpc(fetchFn: typeof fetch = fetch): PoolRpc {
   return async (url, method, params, signal) => {
@@ -87,19 +88,22 @@ const headOf = (a: unknown): number | null => {
 
 /** An EVM list's walk, one per list (its rested operators kept between reads). */
 const WALKS = new Map<string, EvmTwoOperators<string>>();
+/** Tests only: every walk forgotten, so a test starts with no operator resting from another test's reads. */
+export const forgetPoolWalks = (): void => WALKS.clear();
 const walkOf = (urls: readonly string[]): EvmTwoOperators<string> => {
   const key = urls.join(" ");
   let w = WALKS.get(key);
   if (w === undefined) WALKS.set(key, (w = evmTwoOperators(urls.map((url) => ({ url, rpc: url })))));
   return w;
 };
-/** One JSON-RPC answer as a seat's answer: its result, or the chain's own revert (an owner() a pool has none of); any
- *  other error, or a body that is no JSON-RPC answer, is the seat's failure (dRPC's code 27 "Unknown state", a pruned
- *  node's -32000), so the walk asks another operator. */
-const answered = (a: unknown): unknown => {
+/** One JSON-RPC answer as a seat's answer: its result, or, on the owner read alone (`revertOk`), the chain's own revert
+ *  (every list host answers a pool's owner() with code 3 "execution reverted": it has none); any other error, or a body
+ *  that is no JSON-RPC answer, is the seat's failure (an HTTP 200 carrying dRPC's code 27 "Unknown state" or a pruned
+ *  node's -32000, a revert on any other read), so the walk asks another operator. */
+const answered = (a: unknown, revertOk = false): unknown => {
   if (isObj(a) && a.result !== undefined && a.error === undefined) return a;
   const e = isObj(a) ? a.error : undefined;
-  if (isObj(e) && (e.code === 3 || /revert/i.test(String(e.message)))) return a;
+  if (revertOk && isObj(e) && (e.code === 3 || /revert/i.test(String(e.message)))) return a;
   throw new Error(isObj(e) ? `RPC error ${String(e.code)}: ${String(e.message).slice(0, 80)}` : "no JSON-RPC answer");
 };
 
@@ -110,6 +114,12 @@ const answered = (a: unknown): unknown => {
  * chain's revert, no block at that height). The two answers are judged by poolRow, never by the walk: two that differ
  * are the row's "disagree", and no third operator is asked once two answered.
  */
+/** How far apart two operators' heads may be, in seconds of the chain's blocks: both are read inside one walk's 8 s
+ *  budget (each call cut at 4 s), and an honest operator trails the chain by a few seconds; 30 s is that with room.
+ *  Past it the lower head is taken as no answer, never as the height (one operator naming head 1 would read the pool
+ *  at block 1 and turn the row red on its word). */
+export const HEAD_APART_S = 30;
+const BLOCK_S: Readonly<Record<string, number>> = { base: 0.2, robinhood: 0.1 };
 export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): Promise<PoolReads> {
   const ask = (url: string, method: string, params: unknown[]) => rpc(url, method, params, signal).catch(failed);
   if (p.chain === "solana") {
@@ -122,26 +132,44 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
     return { chain: p.chain, height: null, rpcs: [a!, b!] };
   }
   const pin = p.pin as EvmPoolPin;
-  const walk = walkOf(p.rpcs);
-  const call = (url: string, method: string, params: unknown[], sig: AbortSignal) => rpc(url, method, params, signal ? AbortSignal.any([signal, sig]) : sig);
-  // the heads are not compared (two operators a block apart are both honest): the lower is the block both are read at
-  let heads: number[];
+  const asked: string[] = [];
+  const call = (url: string, method: string, params: unknown[], sig: AbortSignal) => {
+    if (!asked.includes(url)) asked.push(url);
+    return rpc(url, method, params, signal ? AbortSignal.any([signal, sig]) : sig);
+  };
+  // an error names the operators actually asked (the last two), for the Unverified row
+  const fail = (m: string, cause: unknown): never => {
+    throw Object.assign(new Error(m, { cause }), { asked: asked.slice(-2) });
+  };
+  const apart = Math.ceil(HEAD_APART_S / (BLOCK_S[p.chain] ?? 1));
+  const headRead = (urls: readonly string[]) =>
+    walkOf(urls).read(
+      "head",
+      async (url, sig) => {
+        const h = headOf(answered(await call(url, "eth_blockNumber", [], sig)));
+        if (h === null) throw new Error("no head");
+        return h;
+      },
+      () => true,
+      signal,
+    );
+  // two heads a few blocks apart are both honest, and the lower is the block both are read at; two far apart: the lower
+  // is walked past (the list without its seat) and the two read then must be close, else the row is Unverified
+  let walk = walkOf(p.rpcs);
+  let heads: number[] = [];
   try {
-    heads = (
-      await walk.read(
-        "head",
-        async (url, sig) => {
-          const h = headOf(answered(await call(url, "eth_blockNumber", [], sig)));
-          if (h === null) throw new Error("no head");
-          return h;
-        },
-        () => true,
-        signal,
-      )
-    ).map((x) => x.value);
+    let two = await headRead(p.rpcs);
+    if (Math.abs(two[0].value - two[1].value) > apart) {
+      const low = two[0].value < two[1].value ? two[0].url : two[1].url;
+      const rest = p.rpcs.filter((u) => u !== low);
+      walk = walkOf(rest);
+      two = await headRead(rest);
+      if (Math.abs(two[0].value - two[1].value) > apart) throw new Error(`heads ${two[0].value} and ${two[1].value} are more than ${apart} blocks apart`);
+    }
+    heads = two.map((x) => x.value);
   } catch (e) {
     signal?.throwIfAborted();
-    throw new Error(`Verify read no head on two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, { cause: e });
+    fail(`Verify read no head on two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e);
   }
   const height = Math.min(...heads);
   const at = `0x${height.toString(16)}`;
@@ -156,14 +184,14 @@ export async function readPool(p: PoolPin, rpc: PoolRpc, signal?: AbortSignal): 
         call(url, "eth_getStorageAt", [pin.address, EIP1967.admin, at], sig),
         call(url, "eth_getStorageAt", [pin.address, EIP1967.beacon, at], sig),
       ]);
-      got.forEach(answered);
+      got.forEach((g, i) => answered(g, EVM_READS[i] === "owner"));
       // a seat behind that height has no block there: not an answer
       if (!isObj((got[0] as Record<string, unknown>).result)) throw new Error(`no block ${height}`);
       return { name: url, answers: Object.fromEntries(EVM_READS.map((id, i) => [id, got[i]])) } as PoolRpcReads;
     },
     () => true,
     signal,
-  );
+  ).catch((e: unknown) => fail(`Verify read the pool on no two of ${p.rpcs.map((u) => new URL(u).host).join(", ")}`, e));
   return { chain: p.chain, height, rpcs: [two[0].value, two[1].value] };
 }
 
@@ -345,8 +373,9 @@ export async function livePools(pins: PoolPins, fetchFn: typeof fetch = fetch, s
         return await poolRow(await readPool(p, rpc, signal), p);
       } catch (e) {
         if (!signal?.aborted) console.error(e instanceof Error ? e.message : String(e));
-        // the RPCs it asks first (an EVM list's first two operators), as the row names two
-        return unverifiedPoolRow(chain, p, p.rpcs.slice(0, 2));
+        // the operators it last asked (an EVM read names them), else the first two, as the row names two
+        const asked = (e as { asked?: unknown })?.asked;
+        return unverifiedPoolRow(chain, p, Array.isArray(asked) && asked.length === 2 ? (asked as string[]) : p.rpcs.slice(0, 2));
       }
     }),
   );

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { EIP1967, livePools, poolExplorers, poolRow, readPool, unverifiedPoolRow, type PoolPin, type PoolReads, type PoolRow } from "../src/screens/verify/pools.ts";
+import { EIP1967, forgetPoolWalks, livePools, poolExplorers, poolRow, readPool, unverifiedPoolRow, type PoolPin, type PoolReads, type PoolRow } from "../src/screens/verify/pools.ts";
 import { VERIFY_RELEASES } from "../src/screens/verify/release.ts";
 import { evmPoolVenues, evmReadProvidersOf } from "@blindfill/kit";
 
@@ -193,6 +193,66 @@ test("the list's first operator answers HTTP 400 \"Unknown state\" to every read
   for (const r of v.rows.filter((x) => x.chain !== "solana")) {
     assert.equal(r.status, "ok", `${r.chain}: ${JSON.stringify(r.checks)}`);
     assert.ok(r.rpcs.length === 2 && r.rpcs.every((x) => !blind.has(x)), `${r.chain}: ${r.rpcs}`);
+  }
+});
+
+// independent review of the walk (P3-2, P3-4, P3-6): the live refusals were HTTP 200 carrying an error object; a seat with
+// no block at the height, a revert on any read but owner(), and one operator's far-off head are walked past too
+const recorded = (url: string, init: RequestInit, over?: (method: string, params: unknown[]) => unknown) => {
+  const ids: Record<string, string> = { eth_getBlockByNumber: "block", eth_getCode: "code", eth_call: "owner" };
+  const slot = (p: unknown[]) => (Object.keys(EIP1967) as (keyof typeof EIP1967)[]).find((k) => EIP1967[k] === p[1])!;
+  const { method, params } = JSON.parse(String(init.body));
+  const o = over?.(method, params);
+  if (o !== undefined) return new Response(JSON.stringify(o), { status: 200 });
+  const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+  const answer = method === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${REC[c].height!.toString(16)}` } : (REC[c].rpcs[0]!.answers as any)[ids[method] ?? slot(params)];
+  return new Response(JSON.stringify(answer), { status: 200 });
+};
+for (const [name, bad] of [
+  ["HTTP 200 with dRPC's code 27", (m: string) => (m === "eth_blockNumber" ? undefined : { jsonrpc: "2.0", id: "verify", error: { code: 27, message: "Unknown state. First available state is 1" } })],
+  ["HTTP 200 with a pruned node's -32000", (m: string) => (m === "eth_getCode" ? { jsonrpc: "2.0", id: "verify", error: { code: -32000, message: "historical state 0xab is not available" } } : undefined)],
+  ["no block at the height (null)", (m: string) => (m === "eth_getBlockByNumber" ? { jsonrpc: "2.0", id: "verify", result: null } : undefined)],
+  ["a revert on eth_getCode", (m: string) => (m === "eth_getCode" ? { jsonrpc: "2.0", id: "verify", error: { code: 3, message: "execution reverted" } } : undefined)],
+] as const) {
+  test(`one operator answers ${name}: walked past, each EVM row ok on two others`, async () => {
+    forgetPoolWalks();
+    const blind = new Set(["base", "robinhood"].flatMap((c) => PINS[c as "base"]!.rpcs.slice(0, 2)));
+    // every first-two seat is bad, so whichever two a rest put first, the row stands on the other two
+    const v = await livePools(PINS, (async (url: string, init: RequestInit) => recorded(url, init, blind.has(url) ? bad : undefined)) as typeof fetch);
+    assert.ok(v.state === "read");
+    for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+      assert.equal(r.status, "ok", `${r.chain}: ${JSON.stringify(r.checks)}`);
+      assert.ok(r.rpcs.every((x) => !blind.has(x)), `${r.chain}: ${r.rpcs}`);
+    }
+  });
+}
+
+test("owner()'s revert is the honest answer there: every seat reverting it, the row still reads ok", async () => {
+  forgetPoolWalks();
+  const v = await livePools(PINS, (async (url: string, init: RequestInit) => recorded(url, init, (m) => (m === "eth_call" ? { jsonrpc: "2.0", id: "verify", error: { code: 3, message: "execution reverted" } } : undefined))) as typeof fetch);
+  assert.ok(v.state === "read");
+  for (const r of v.rows.filter((x) => x.chain !== "solana")) assert.equal(r.status, "ok", `${r.chain}: ${JSON.stringify(r.checks)}`);
+});
+
+test("one operator names head 1: walked past, never the height; two heads still far apart: Unverified, never danger", async () => {
+  forgetPoolWalks();
+  const liar = new Set(["base", "robinhood"].map((c) => PINS[c as "base"]!.rpcs[0]!));
+  const head1 = (m: string) => (m === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: "0x1" } : undefined);
+  const v = await livePools(PINS, (async (url: string, init: RequestInit) => recorded(url, init, liar.has(url) ? head1 : undefined)) as typeof fetch);
+  assert.ok(v.state === "read");
+  for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+    assert.equal(r.status, "ok", `${r.chain}: ${JSON.stringify(r.checks)}`);
+    assert.notEqual(r.height, 1);
+  }
+  // every seat but one names head 1: no two close heads, so Unverified with no danger
+  const all = new Set(["base", "robinhood"].flatMap((c) => PINS[c as "base"]!.rpcs.slice(1)));
+  forgetPoolWalks();
+  const w = await livePools(PINS, (async (url: string, init: RequestInit) => recorded(url, init, all.has(url) ? head1 : undefined)) as typeof fetch);
+  assert.ok(w.state === "read");
+  for (const r of w.rows.filter((x) => x.chain !== "solana")) {
+    assert.equal(r.status, "warn", `${r.chain}: ${r.status}`);
+    assert.ok(r.checks.every((c) => c.status !== "danger" && c.word === "unverified"));
+    assert.equal(r.rpcs.length, 2);
   }
 });
 
