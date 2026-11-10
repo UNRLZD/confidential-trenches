@@ -37,6 +37,12 @@
 //   node scripts/live-checks/kit-deposit-assets-dry.mjs --answer <file>     judge a recorded answer, no network
 // --record writes the answer: everything judge() reads, so the test can replay it. PASS exit 0, FAIL exit 1, error
 // exit 2; the last line is "PASS kit-deposit-assets-dry" or "FAIL kit-deposit-assets-dry", each failure a "BAD ..." line.
+// Card deposit-quote-no-liquidity: the run records each helper answer's status and a 400's message. These two reads ask
+// each quote once (wallet/src/deposit/quote.ts askDepositQuote; only the committed asks re-ask), so a read refused
+// not_available after 1Click's 400 "No liquidity available" to that one ask (an asset left out of deposit.assets, or
+// deposit.dry), and a keyless comparison quote 1Click answers that 400, are 1Click's liquidity, not the page's:
+// INCONCLUSIVE (exit 3, its last line "INCONCLUSIVE kit-deposit-assets-dry"), never PASS. Any other refusal, status or
+// answer stays a FAIL.
 import "../net-window.mjs";
 import { cpSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -85,11 +91,30 @@ export function dec(s) {
 const ONE = 10n ** BigInt(SCALE);
 const show = (v) => JSON.stringify(v);
 
+/** The asks the page makes of one display quote (wallet/src/deposit/quote.ts askDepositQuote): one; a page that asks a
+ *  display quote again on no liquidity is not this card's. */
+export const DEVICE_ASKS = 1;
+const NO_LIQUIDITY = /^No liquidity available\b/;
+const MESSAGE_MAX = 120;
+/** True when a recorded helper answer is 1Click's no-liquidity 400. */
+const noLiquidity = (r) => r?.status === 400 && typeof r.message === "string" && NO_LIQUIDITY.test(r.message);
+/** True when the page's asks of one quote (its phase, origin, and amount when named) were the device's DEVICE_ASKS, each
+ *  answered 1Click's no-liquidity 400. deposit.assets probes each asset at one amount, so its asks are named by origin. */
+export function noLiquidityAsks(a, phase, origin, amount) {
+  const asks = (a?.helper ?? []).filter((r) => r?.phase === phase && r.method === "POST" && r.url === `${HELPER_1CLICK}/v0/quote` && r.body?.originAsset === origin && (amount === undefined || r.body?.amount === amount));
+  return asks.length === DEVICE_ASKS && asks.every(noLiquidity);
+}
+/** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2), as scripts/ci/live-rerun.mjs reads them. */
+export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
+
 // ------------------------------------------------------------------------------------------------ the verdict
-/** The verdict on an answer (what collect() returns): { ok, lines }, each line a "BAD ..." failure. */
+/** The verdict on an answer (what collect() returns): { verdict, ok, lines }, each line a "BAD ..." failure, and on
+ *  INCONCLUSIVE each 1Click no-liquidity answer an "INCONCLUSIVE ..." line. */
 export function judge(a) {
   const lines = [];
+  const vendor = [];
   const bad = (m) => lines.push(`BAD ${m}`);
+  const liquidity = (m) => vendor.push(`INCONCLUSIVE ${m}: 1Click's liquidity, not the page's`);
   const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   if (!pin) bad("SIGN_HOST's index.html pins no /app.js");
   else if (pin !== a.appJs?.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
@@ -103,13 +128,17 @@ export function judge(a) {
     }
   })();
   const answerTo = (id) => (a?.log ?? []).filter((m) => m.fromParent && m.origin === signOrigin && id && m.data?.id === id).map((m) => m.data);
-  const answered = (kind, id) => {
+  const answered = (kind, id, noQuote = () => false) => {
     const got = answerTo(id);
     if (got.length !== 1) {
       bad(`${kind}: ${got.length} answer(s) to its id, want 1`);
       return null;
     }
     const r = got[0];
+    if (r.ok === false && r.error?.code === "not_available" && Object.keys(r).sort().join() === "error,id,ok,v" && noQuote()) {
+      liquidity(`${kind} answered not_available after 1Click's no-liquidity 400 to its ask`);
+      return null;
+    }
     if (r.ok !== true) {
       const code = r.error?.code;
       bad(`${kind} answered ${r.ok === false ? `refused ${show(code)}` : "neither ok nor refused"}, want ok`);
@@ -120,14 +149,19 @@ export function judge(a) {
   };
 
   // ---- deposit.assets
-  const result = answered("deposit.assets", a?.ids?.assets);
+  const probeNoQuote = (id) => noLiquidityAsks(a, "assets", id);
+  const result = answered("deposit.assets", a?.ids?.assets, () => Object.keys(ASSETS).every(probeNoQuote));
   if (result) {
     const list = Array.isArray(result.assets) ? result.assets : null;
     const tokens = a?.oneclick?.tokens ?? [];
     if (!list) bad("deposit.assets: no assets list");
     else {
       const seen = list.map((x) => x?.origin_asset);
-      for (const id of Object.keys(ASSETS)) if (!seen.includes(id)) bad(`deposit.assets does not list ${id}`);
+      for (const id of Object.keys(ASSETS)) {
+        if (seen.includes(id)) continue;
+        if (probeNoQuote(id)) liquidity(`deposit.assets does not list ${id}, whose probe 1Click answered 400 No liquidity available`);
+        else bad(`deposit.assets does not list ${id}`);
+      }
       for (const id of seen) if (!Object.hasOwn(ASSETS, id)) bad(`deposit.assets lists ${show(id)}, not one of the kit's three USDC assets`);
       if (new Set(seen).size !== seen.length) bad("deposit.assets lists an asset twice");
       for (const x of list) {
@@ -157,7 +191,7 @@ export function judge(a) {
   }
 
   // ---- deposit.dry
-  const dry = answered("deposit.dry", a?.ids?.dry);
+  const dry = answered("deposit.dry", a?.ids?.dry, () => noLiquidityAsks(a, "dry", SOL_USDC, ASKED_UNITS));
   if (dry) {
     const out = dec(dry.amount_out_usd);
     const floor = dec(dry.min_amount_out_usd);
@@ -174,7 +208,8 @@ export function judge(a) {
     const direct = a?.oneclick?.quote;
     // 1Click answers a quote 201 (wallet.md D52; read 6 Nov 14:37Z), 200 too
     const q = direct?.status === 200 || direct?.status === 201 ? direct.body?.quote : null;
-    if (!q) bad(`deposit.dry: no keyless 1Click dry quote to compare with${direct ? ` (HTTP ${show(direct.status)})` : ""}`);
+    if (!q && direct?.status === 400 && typeof direct.body?.message === "string" && NO_LIQUIDITY.test(direct.body.message)) liquidity("deposit.dry: the keyless 1Click dry quote to compare with answered 400 No liquidity available");
+    else if (!q) bad(`deposit.dry: no keyless 1Click dry quote to compare with${direct ? ` (HTTP ${show(direct.status)})` : ""}`);
     else {
       const units = typeof q.amountOut === "string" && /^[0-9]+$/.test(q.amountOut) ? BigInt(q.amountOut) * 10n ** BigInt(SCALE - 6) : null;
       if (units === null) bad(`deposit.dry: the keyless 1Click quote has amountOut ${show(q.amountOut)}`);
@@ -209,7 +244,9 @@ export function judge(a) {
   if (dryQuotes.length === 0) bad("no dry quote request was sent for deposit.dry");
   else if (!dryQuotes.some((r) => r.body.originAsset === SOL_USDC && r.body.amount === ASKED_UNITS)) bad("none of the dry quote requests for deposit.dry is for 25 USDC from Solana");
 
-  return { ok: lines.length === 0, lines };
+  const verdict = lines.length > 0 ? "FAIL" : vendor.length > 0 ? "INCONCLUSIVE" : "PASS";
+  if (verdict === "INCONCLUSIVE") lines.push(...vendor);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
 // ------------------------------------------------------------------------------------------------ the read
@@ -273,6 +310,21 @@ async function pageRun(browser, { signUrl, dir }) {
   await ctx.route((u) => u.origin === APP_HOST, (r) => r.fulfill({ status: 200, contentType: "text/html", body: appProbeHtml(signOrigin) }));
   if (dir) await ctx.route((u) => u.origin === signOrigin, serveDir(dir));
   const helper = [];
+  // each helper answer's status, and a 400's message (bounded), on the request's own entry; never a body
+  const asked = new Map();
+  const reads = [];
+  ctx.on("response", (res) => {
+    const entry = asked.get(res.request());
+    if (!entry) return;
+    entry.status = res.status();
+    if (res.status() === 400)
+      reads.push(res.text().then((t) => {
+        try {
+          const m = JSON.parse(t)?.message;
+          if (typeof m === "string") entry.message = m.slice(0, MESSAGE_MAX);
+        } catch {}
+      }, () => {}));
+  });
   let phase = "assets";
   let index = null;
   let appJs = null;
@@ -289,7 +341,9 @@ async function pageRun(browser, { signUrl, dir }) {
     try {
       body = JSON.parse(req.postData() ?? "null");
     } catch {}
-    helper.push({ phase, url: req.url(), method: req.method(), body });
+    const entry = { phase, url: req.url(), method: req.method(), body };
+    helper.push(entry);
+    asked.set(req, entry);
   });
   const page = await ctx.newPage();
   const errors = [];
@@ -319,6 +373,7 @@ async function pageRun(browser, { signUrl, dir }) {
     await page.waitForTimeout(SETTLE_MS);
     log = await read(log);
   }
+  await Promise.allSettled(reads);
   await ctx.close();
   return { signUrl, ready, ids, asked: ASKED, log, helper, index, appJs, errors };
 }
@@ -387,9 +442,10 @@ async function main() {
   }
   if (record) writeFileSync(record, `${JSON.stringify(answer, null, 1)}\n`);
   const v = judge(answer);
+  const exitCode = EXIT[v.verdict];
   for (const l of v.lines) console.log(l);
-  console.log(`${v.ok ? "PASS" : "FAIL"} ${KEY}`);
-  process.exit(v.ok ? 0 : 1);
+  console.log(`${v.verdict} ${KEY}`);
+  process.exit(exitCode);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
