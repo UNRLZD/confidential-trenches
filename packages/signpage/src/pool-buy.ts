@@ -517,10 +517,11 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
       // W's buy mint, written before the send (delta review 7 of 08290868): the rent back holds while W holds any of it
       await h.bought?.put(w.address, { mint: venue.mint, program: venue.tokenProgram });
       const decimals = (d: number): void => {
+        // a record's decimals never stop a buy: a listener that throws, or rejects
         try {
-          h.outDecimals?.(w.address, d);
+          void Promise.resolve(h.outDecimals?.(w.address, d)).catch(() => {});
         } catch {
-          /* a record's decimals never stop a buy */
+          /* thrown */
         }
       };
       return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals });

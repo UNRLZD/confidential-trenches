@@ -660,6 +660,22 @@ test("the decimals of the token W received, read with that amount on both RPCs, 
   assert.deepEqual(b, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
 });
 
+test("P3-8: an async decimals listener that rejects never stops a buy, and its rejection is caught (none left unhandled)", async () => {
+  const w0 = await world();
+  const w = await world({ received: [w0.E, w0.E] });
+  const loose: unknown[] = [];
+  const seen = (e: unknown) => void loose.push(e);
+  process.on("unhandledRejection", seen);
+  try {
+    const a = await runPoolBuy({ ...w.host, outDecimals: async () => { throw new Error("the record's store"); } }, ASK);
+    assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: SIG }] });
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    process.off("unhandledRejection", seen);
+  }
+  assert.deepEqual(loose, []);
+});
+
 test("a buy refused before its check passes tells no route; a route listener that throws never stops a buy", async () => {
   const w = await world({ venueOff: "reserves" });
   const told: unknown[] = [];
