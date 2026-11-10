@@ -163,6 +163,11 @@ test("a read tries its side's next provider only within its budget, never on the
   const r2 = side([p("a", fail("RPC error 3: execution reverted")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
   await assert.rejects(r2("eth_estimateGas", [{}, "pending"]), (e: Error) => e.message === "RPC error 3: execution reverted");
   assert.deepEqual(asked, ["a"]);
+  // a -32000 revert stays the chain's answer whatever its reason says (a contract's words may name a missing block)
+  asked.length = 0;
+  const r2b = side([p("a", fail("RPC error -32000: execution reverted: header not found")), p("b", async () => "0x1")], { log: (l) => void lines.push(l) });
+  await assert.rejects(r2b("eth_call", [{}, "pending"]), (e: Error) => /^RPC error -32000: execution reverted/.test(e.message));
+  assert.deepEqual(asked, ["a"]);
   // a held spare is passed over
   asked.length = 0;
   const r3 = side([p("a", fail("HTTP 502")), p("held", async () => "0x2", () => true), p("c", async () => "0x3")], { log: (l) => void lines.push(l) });
@@ -286,4 +291,9 @@ test("a test network reads past its pair too: Base Sepolia's first provider refu
   const f = await sendersOf(env, lines).get(SEPOLIA_PIN)!.fee(EPOCH + 1);
   assert.equal(f?.fee, opFee("base-sepolia").toString());
   assert.ok(stateReads(calls, "base-sepolia-rpc.publicnode.com") > 0 && stateReads(calls, "base-testnet.api.pocket.network") > 0, "publicnode and Pocket answered");
+});
+
+test("a read each side fails, one side on a throttle: the answer stays a throttle (429 with its wait), never the other side's 503", async (t) => {
+  chainStub(t, (host, method) => (method !== "eth_call" ? null : host === "rpc.mainnet.chain.robinhood.com" ? { status: 429, body: { code: -32005, message: "too many requests" } } : { status: 502, body: { code: -32603, message: "bad gateway" } }));
+  await assert.rejects(sendersOf(ENV3, []).get(PIN)!.fee(EPOCH + 1), (e: Error) => throttleOf(e) > 0);
 });

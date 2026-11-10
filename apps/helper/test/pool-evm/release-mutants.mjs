@@ -23,6 +23,8 @@ const EVM = "src/pool/evm.ts";
 const T = "src/pool/evm-release.test.ts";
 const T2 = "src/pool/evm.test.ts";
 const T3 = "src/pool/evm-buy-gas-depth.test.ts";
+const T4 = "src/pool/evm-failover.test.ts";
+const T5 = "src/pool/evm-sell.test.ts";
 
 const EVM_TEXT = readFileSync(join(HELPER, EVM), "utf8");
 /** [the text from `line` through `after` in evm.ts, the same with `line` moved to just after `after`]: a check moved later. */
@@ -147,6 +149,25 @@ export const MUTANTS = [
   [EVM, "        if (was === epoch && how === w.method) return no(422, \"reverted\");", "        if (was === epoch) return no(422, \"reverted\");", T, HOLD],
   // a withdraw's request read as before (evm.test.ts's signed requests)
   [EVM, '  if (word(d, 18) !== BigInt(32 * (HEAD_WORDS + W_WORDS))) throw new Error("the signature\'s offset");\n', "", T2, "withdraw's signature is read in its one canonical form"],
+  // card helper-evm-read-two-operators: every read checked against another is two operators' answers from the network's
+  // one list of seats; a side walks past an operator that cannot answer, never into one the other side asked
+  [EVM, "      if (theirs.has(op)) continue;\n", "", T4, "a read on both sides never asks one operator for both"],
+  [EVM, "      mine.add(op);\n", "", T4, "a read on both sides never asks one operator for both"],
+  [EVM, "  const orders = first.map((f, k) => [f, ...operators.filter((x) => x !== f && x !== first[1 - k]), first[1 - k]!]) as [string[], string[]];", "  const orders = first.map((f) => [f, ...operators.filter((x) => x !== f)]) as [string[], string[]];", T2, "a withdraw whose read one operator fails"],
+  [EVM, '          if (BLOCK_READS.has(method) && (v === null || typeof v !== "object")) throw', '          if (false) throw', T4, "one operator answers a block by number null"],
+  [EVM, " && !(/^RPC error -32000: (?!execution reverted)/i.test(m) && STATE_MISS.test(m));", ";", T4, "Base: a provider's -32000"],
+  [EVM, " && !(/^RPC error -32000: (?!execution reverted)/i.test(m) && STATE_MISS.test(m));", " && !(/^RPC error -32000: /i.test(m) && STATE_MISS.test(m));", T4, "a read tries its side's next provider only within its budget"],
+  [EVM, "        if (asked > 0 && p.skip?.() === true) continue;\n", "", T4, "a read tries its side's next provider only within its budget"],
+  [EVM, "          if (e === CUT) break seats;", "", T4, "a read tries its side's next provider only within its budget"],
+  [EVM, "      if (same.some((x) => x.hash !== block.hash)) throw", "      if (same.slice(0, 1).some((x) => x.hash !== block.hash)) throw", T4, "two operators that both answered and differ on the block's hash"],
+  [EVM, "    const words = (await two(\"eth_call\", [{ to, data }, { blockHash: hash }])).map((v) => {", "    const words = (await two(\"eth_call\", [{ to, data }, { blockHash: hash }])).slice(0, 1).map((v) => {", T4, "two operators that both answered and differ on a state word"],
+  [EVM, "    throw errs.find((e) => throttleOf(e, true) > 0) ?? errs[0];", "    throw errs[0];", T4, "a read each side fails, one side on a throttle"],
+  [EVM, "  for (const k of keyed) add(k.url, k.name);", "", T4, "every seat of one operator refuses the state"],
+  [EVM, "  for (const u of listed) add(u, new URL(u).host);", "", T4, "a test network reads past its pair too"],
+  [EVM, '    const listed = v !== undefined && Object.hasOwn(v, "providers") && v.providers !== undefined ? v.providers : [];', "    const listed: readonly string[] = [];", T4, "a test network reads past its pair too"],
+  [EVM, "  if (reserve) holds.reserve(url);", "  holds.reserve(url);", T2, "review L-3"],
+  // a sale's receipts count as two only from two operators, whichever side each came on
+  [EVM, "        seen.delete(x.operator);\n        seen.set(x.operator, x.value as Record<string, unknown>);", "        seen.set(`${seen.size}`, x.value as Record<string, unknown>);", T5, "one operator's receipt on both sides"],
 ];
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "release-mutants.mjs");

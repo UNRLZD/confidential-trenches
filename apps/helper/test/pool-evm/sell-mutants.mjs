@@ -124,12 +124,12 @@ export const MUTANTS = [
   // the chain fee is the kit's whole rule (pool-fee.ts): the operator fee on Base, the poster fee on Robinhood. Which
   // chain reads which oracle is the kit's (its own tests and mutants); Base itself reading the oracle is held by the
   // test named for it
-  [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "the operator fee is in the bound"],
-  [EVM, "        return evmPoolChainFee(kitChain, txBytes, words);", "        return words[0]!;", T, "Robinhood's L1 poster fee"],
+  [EVM, "(await wordsOnBoth(reads)).map((words) => evmPoolChainFee(kitChain, txBytes, words));", "(await wordsOnBoth(reads)).map((words) => words[0]!);", T, "the operator fee is in the bound"],
+  [EVM, "(await wordsOnBoth(reads)).map((words) => evmPoolChainFee(kitChain, txBytes, words));", "(await wordsOnBoth(reads)).map((words) => words[0]!);", T, "Robinhood's L1 poster fee"],
   // the L1 bound read for the transaction's longest form (Base; ArbGasInfo's read takes no length, so on Robinhood the
   // bytes reach only evmPoolChainFee, which the poster fee mutant above holds)
   [EVM, "      const reads = evmPoolChainFeeReads(kitChain, gas, txBytes);", "      const reads = evmPoolChainFeeReads(kitChain, gas, 1n);", T, "a good sell:"],
-  [EVM, "      const fees = await Promise.all([a, b].map(async (r) => {", "      const fees = await Promise.all([a, a].map(async (r) => {", T, "the operator fee is in the bound"],
+  [EVM, "    return [got.map((w) => w[0]!), got.map((w) => w[1]!)];", "    return [got.map((w) => w[0]!), got.map((w) => w[0]!)];", T, "the operator fee is in the bound"],
   // the poster's gas inside the limit (Robinhood): the sim runs with what is left, at the lower base fee; none left refuses
   [EVM, 'const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set(["robinhood", "robinhood-testnet"]);', "const POSTER_GAS_CHAINS: ReadonlySet<string> = new Set([]);", T, "Robinhood's L1 poster fee"],
   [EVM, "      baseLow = x < y ? x : y;", "      baseLow = x > y ? x : y;", T, "Robinhood's L1 poster fee"],
@@ -169,7 +169,7 @@ export const MUTANTS = [
   [EVM, "    if (Math.floor(now()) <= deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", "    if (Math.floor(now()) < deadlineMs + EVM_SELL_DROP_MARGIN_MS) return \"waiting\";", T, "a dropped sale is freed at 61 s past"],
   [EVM, "export const EVM_SELL_DROP_MARGIN_MS = 60_000;", "export const EVM_SELL_DROP_MARGIN_MS = 58_000;", T, "a dropped sale with our clock 59 s ahead"],
   [EVM, '    return tx.every((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', '    return tx.some((x) => x.status === "fulfilled" && x.value === null) ? "dropped" : "waiting";', T, "a sale that reverted or was dropped"],
-  [EVM, '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash]), b("eth_getTransactionReceipt", [hash])]);\n    const got', '    const rc = await Promise.allSettled([a("eth_getTransactionReceipt", [hash])]);\n    const got', T, "a sale that reverted or was dropped"],
+  [EVM, '    const rc = await settled("eth_getTransactionReceipt", [hash]);\n    const got', '    const rc = (await settled("eth_getTransactionReceipt", [hash])).slice(0, 1);\n    const got', T, "a sale that reverted or was dropped"],
   // fold 1, H2.1: only a route the kit's sell builder makes (the kit's own checks: packages/kit/test/evm-sell-route-of.test.ts)
   [EVM, "      evmSellRouteOf(sellChain, { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data });", "      void { w, token: s.token, amount: s.amount, minOut: s.minOut, target: s.target, data: s.data };", T, "bad_route:"],
   // fold 1, H2.2: the unpaid-gas caps
@@ -185,7 +185,7 @@ export const MUTANTS = [
   // fold 1, H2.3: the sell sender's own key
   [EVM, '    if (cfg.sellKey === undefined || sellSender === null) return no(503, "not_configured"', '    if (false) return no(503, "not_configured"', T, "the sell sender:"],
   [EVM, "  if (sellSender === sender) throw", "  if (false) throw", T, "the sell sender:"],
-  [EVM, 'a("eth_getTransactionCount", [from, "pending"])', 'a("eth_getTransactionCount", [sender, "pending"])', T, "the sell sender:"],
+  [EVM, 'two("eth_getTransactionCount", [from, "pending"])', 'two("eth_getTransactionCount", [sender, "pending"])', T, "the sell sender:"],
   [EVM, "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), key);", "    const { raw, hash } = signEvmTx4(txAt(maxFeePerGas), cfg.senderKey);", T, "a good sell:"],
   [EVM, "landedSale(charge(keys, worst), s, w, maxFeePerGas, keys)", "landedSale(charge(keys, worst), s, w, 10n ** 30n, keys)", T, "a proven sale one provider reads at effectiveGasPrice 10^30"],
   [EVM, '      await a("eth_call", [{ from, to: w, data, gas:', '      await a("eth_call", [{ from: sender, to: w, data, gas:', T, "a good sell:"],
@@ -233,7 +233,7 @@ export const MUTANTS = [
   // fold 4, L1: a replacement's gas, 21,000, and on Robinhood the L1 poster's gas from the kit's ArbGasInfo read
   [EVM, "    let gas = EVM_SELF_TRANSFER_GAS;", "    let gas = EVM_POOL_SELL_GAS;", T, "a stuck sale on the sell lane"],
   [EVM, "    if (POSTER_GAS_CHAINS.has(cfg.network)) {", "    if (false) {", T, "the replacement's gas on Robinhood"],
-  [EVM, "[a, b].map(async (r) => evmPoolChainFee(net, txBytes", "[a, a].map(async (r) => evmPoolChainFee(net, txBytes", T, "the replacement's gas on Robinhood"],
+  [EVM, "    return [got.map((w) => w[0]!), got.map((w) => w[1]!)];", "    return [got.map((w) => w[0]!), got.map((w) => w[0]!)];", T, "the replacement's gas on Robinhood"],
   [EVM, "      gas += poster + (poster + 4n) / 5n;", "      gas += poster;", T, "the replacement's gas on Robinhood"],
   // fold 4, L1: a failing tend logs once and is never recorded as sent
   [EVM, "    if (sent.every((x) => x.status === \"rejected\")) throw new Error(`both providers refused the replacement at nonce ${n}:", "    if (false) throw new Error(`both providers refused the replacement at nonce ${n}:", T, "a tend that fails logs once"],
@@ -277,7 +277,7 @@ export const MUTANTS = [
   // fold 2, L-pin: a chain with no pin starts with sales off
   [EVM, '    const sells = sellKey !== "" && pin !== undefined;', '    const sells = sellKey !== "";', T2, "the EVM pool sell sender's address"],
   // fold 6, M1: a nonce is used once either provider returns a receipt for any send the lane made at it
-  [EVM, "    const rc = await Promise.allSettled([x.hash, ...x.prior].flatMap(", "    const rc = await Promise.allSettled([x.hash].flatMap(", T, "a replaced sale that mined is counted"],
+  [EVM, "    const rc = (await Promise.all([x.hash, ...x.prior].map(", "    const rc = (await Promise.all([x.hash].map(", T, "a replaced sale that mined is counted"],
   [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])].slice(-EVM_LANE_PRIOR_MAX);", "    const prior: string[] = [];", T, "a replaced sale that mined is counted"],
   [EVM, "    const prior = old === undefined ? [] : [...old.prior, ...(old.hash === hash ? [] : [old.hash])]", "    const prior = old === undefined ? [] : [...old.prior]", T, "a replaced sale that mined is counted"],
   [EVM, "        if (await usedAt(old!)) {", "        if (false) {", T, "a stuck replacement whose earlier send mined"],
@@ -305,7 +305,7 @@ export const MUTANTS = [
   [EVM, "      if (x === null && l < lane.nextNonce) x = {", "      if (x === null) x = {", T, "a provider whose latest count stays below"],
   [EVM, "    behindOf(sellLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
   [EVM, "    behindOf(withdrawLane, qty(ln), qty(lm));", "", T, "a provider whose latest count stays below"],
-  [EVM, "    behindOf(lane, la!, lb!);", "", T, "a held answer whose tend sent something"],
+  [EVM, "    behindOf(lane, la, lb);", "", T, "a held answer whose tend sent something"],
   // fold 7: a held answer's wait, one hold read per block, the prior hashes kept, a provider ahead
   [EVM, "    const mined = lane.heldSentAt + EVM_LANE_SENT_WINDOW_MS > now() ? now() + block : Infinity;", "    const mined = Infinity;", T, "callers obeying Retry-After through a heal"],
   [EVM, "      if (sent > 0) lane.heldSentAt = now();", "", T, "callers obeying Retry-After through a heal"],
@@ -332,7 +332,7 @@ export const MUTANTS = [
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\");", T, "a sale that landed with status 1 but no Paid log"],
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmSalePaid(r, sale.collector, sale.w, sale.fee));", T, "one provider's receipt never clears a charge"],
   [EVM, "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, sale.fee));", "evmRpcHex(r.status) === \"0x1\" && evmSalePaid(r, sale.collector, sale.w, 0n));", T, "each part of the Paid log is checked"],
-  [EVM, "        if (seen[0] !== null && seen[1] !== null) return landed(seen[0], seen[1]);", "        return landed(seen[0] ?? seen[1]!, seen[1] ?? seen[0]!);", T, "one provider's receipt never clears a charge"],
+  [EVM, "        if (seen.size >= 2) {\n          const [ra, rb] = [...seen.values()].slice(-2);", "        if (seen.size >= 1) {\n          const [ra, rb] = [[...seen.values()][0], [...seen.values()].at(-1)];", T, "one provider's receipt never clears a charge"],
   [EVM, "  const cost = ca > cb ? ca : cb;\n  " + SALE_OK, "  const cost = ca;\n  " + SALE_OK, T, "the cost is the higher of the two receipts'"],
   [EVM, "  const cost = ca > cb ? ca : cb;\n  " + SALE_OK, "  const cost = cb;\n  " + SALE_OK, T, "the cost is the higher of the two receipts'"],
   [EVM, "    const r = evmSaleUnpaid(ra, rb, { collector: feeCollector!, w, fee: s.fee, maxFeePerGas }, held.wei);", "    const r = evmSaleUnpaid(ra, rb, { collector: s.pool, w, fee: s.fee, maxFeePerGas }, held.wei);", T, "the same sale proven on both providers holds nothing"],
