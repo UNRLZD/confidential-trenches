@@ -87,7 +87,9 @@ export const MUTANT_SECONDS = {
   "packages/signpage: node --test test/rules-pool-mutants.test.mjs": 146, // queue (2) 145.3
   "packages/signpage: node --test test/rules-refund-mutants.test.mjs": 79, // (3) 78.1
   "packages/signpage: node --test test/kit-version-mutants.test.mjs": 30, // queue (7) 29.7
-  "packages/signpage: node --test test/pool-price-mutants.test.mjs": 14, // queue (8) 13.6
+  // card pool-usd-price-never-stale: 42 mutants, 28.3 s on the test box (Linux, 10 Nov 18:53Z; main's 17 took 13.6 s
+  // on the queue's runner (8)), the 30 min fake-clock runs drained by microtasks and each run's timers bounded
+  "packages/signpage: node --test test/pool-price-mutants.test.mjs": 30,
   "packages/signpage: node scripts/held-mutants.mjs": 145, // (4) 144.5
   // card sol-rent-back-dust-burn: the rent back's plants in parts, mutant i in part (i % n) + 1. Its 86 plants ran as six
   // parts of 14 or 15 on the queue's runner (jobs 129687360235 (7), 129687360305 (8), 129687360082 (9)): 304.5, 333.8,

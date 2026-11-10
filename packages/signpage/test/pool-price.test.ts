@@ -58,7 +58,9 @@ function holder(over: Partial<PoolPriceDeps> = {}) {
   p.watch(() => told.push(clock.ms));
   return { p, clock, ticks, told };
 }
-const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+// a turn of the event loop (setImmediate: a setTimeout(0) waits at least 1 ms, which made each of the sweep's runs
+// seconds long)
+const settle = () => new Promise<void>((r) => setImmediate(r));
 async function settled(): Promise<void> {
   for (let i = 0; i < 20; i++) await settle();
 }
@@ -329,6 +331,9 @@ test("a clock behind the feed never stretches the bound: a price stamped 60 s ah
 // the held price is looked at every 100 ms.
 const T = SOL_PUBLISHED_S;
 type Write = { atMs: number; pubS: number };
+/** A timeline's or a stepped run's bound on timers run: a page whose timers come due at the same instant forever (a
+ *  mutant of its schedule) fails at once, not at the test's timeout. A 30 min run sets about 1,500. */
+const TIMERS_MAX = 20_000;
 async function timeline(writes: Write[], fromMs: number, toMs: number, opts: { over?: Partial<PoolPriceDeps>; fault?: (ms: number, k: 0 | 1) => unknown; at?: (ms: number, h: ReturnType<typeof holder>) => boolean } = {}) {
   const pubAt = (ms: number) => writes.filter((w) => w.atMs <= ms).at(-1)!.pubS;
   const waits: { at: number; fn: () => void }[] = [];
@@ -357,12 +362,14 @@ async function timeline(writes: Write[], fromMs: number, toMs: number, opts: { o
   });
   const nulls: number[] = [];
   const heldAt = new Map<number, number>();
+  let fired = 0;
   h.clock.ms = fromMs;
   h.p.refresh(["solana"]);
   await settled();
   for (let t = fromMs; t <= toMs; t += 100) {
     waits.sort((a, b) => a.at - b.at);
     while (waits.length > 0 && waits[0]!.at <= t) {
+      if (++fired > TIMERS_MAX) throw new Error(`${TIMERS_MAX} timers run by ${(t - fromMs) / 1000} s: the page's timers never let the clock move`);
       const w = waits.shift()!;
       h.clock.ms = w.at;
       w.fn();
@@ -589,17 +596,23 @@ async function stepped({ minutes, stepMs = 1, shortMs = 0, readMs = 217 }: { min
     queued = true;
     events.push({ at: tau, fn: () => ((queued = false), p.refresh(["solana"])) });
   });
+  // nothing in a stepped run waits on a real timer (after, the read and the API's state read are its events), so
+  // microtasks settle it: a real timer turn per event made a 30 min run take 30 s
+  const drained = async () => {
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+  };
   p.refresh(["solana"]);
-  await settled();
-  let gone = 0, samples = 0, next = T0, held = false;
+  await drained();
+  let gone = 0, samples = 0, next = T0, held = false, fired = 0;
   while (tau < end) {
     events.sort((a, b) => a.at - b.at);
     const e = events[0];
     if (e && e.at <= next) {
+      if (++fired > TIMERS_MAX) throw new Error(`${TIMERS_MAX} events by ${(tau - T0) / 1000} s: the page's timers never let the clock move`);
       tau = Math.max(tau, e.at);
       events.shift();
       e.fn();
-      await settled();
+      await drained();
       continue;
     }
     tau = next;
@@ -616,6 +629,36 @@ test("at the feed's write, review P2-2: every timer run 1 ms short of its time: 
   assert.ok(r.pending > 0, "a timer is still set at the end");
   assert.ok(r.lastS > 10 * 60 - 20, `the last read ${r.lastS} s into a 600 s run`);
   assert.equal(r.gonePct, 0, `no price ${r.gonePct}% of the time`);
+});
+
+test("at the feed's write, review P2-2: a timer that is no longer the chain's (a wake read since) leaves the newer due time as it is: no read before it", async () => {
+  let reads = 0;
+  const timers: { at: number; fn: () => void }[] = [];
+  const read = async (): Promise<PoolUsdPrice> => (reads++, { chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000) - 2, source: "pyth", at: 1n });
+  const h = holder({ read, after: (ms, fn) => void timers.push({ at: h.clock.ms + ms, fn }), visible: () => true });
+  const t0 = h.clock.ms;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(reads, 1);
+  const first = timers.at(-1)!;
+  assert.equal(first.at, t0 + POOL_PRICE_REFRESH_MS, "a fresh price: read again in POOL_PRICE_REFRESH_MS");
+  // shown again 5 s on: read at once, due POOL_PRICE_REFRESH_MS from then
+  h.clock.ms = t0 + 5_000;
+  h.p.wake();
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(reads, 2);
+  // the first read's timer runs at its time: it is no longer the chain's, so the read stays due at t0 + 20 s
+  h.clock.ms = first.at;
+  first.fn();
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(reads, 2, "no read at the old timer's time, 5 s before the one due");
+  h.clock.ms = t0 + 5_000 + POOL_PRICE_REFRESH_MS;
+  timers.at(-1)!.fn();
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(reads, 3, "read at its own due time");
 });
 
 test("at the feed's write, review P2-2: a Date.now() in 16.67 ms steps (and in 100 ms steps): read on for 30 min, never stopped, never without a price", async () => {
