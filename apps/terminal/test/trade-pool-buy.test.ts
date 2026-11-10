@@ -71,8 +71,10 @@ test("pool.buy on Base and Robinhood spends a whole chunk: only the chunk's own 
 });
 
 test("pool.sell: the position's token units for the chain's pool, the proceeds back into it; none off a pool chain", () => {
-  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", "1200.5", 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", amount: "1200.5", slippage_bps: 1_000 } });
-  assert.deepEqual(poolSellAsk([base("0.01")], "base", "0xabc", "5", 1_000), { kind: "pool.sell", params: { chain: "base", token: "0xabc", amount: "5", slippage_bps: 1_000 } });
+  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", { amount: "1200.5" }, 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", amount: "1200.5", slippage_bps: 1_000 } });
+  assert.deepEqual(poolSellAsk([base("0.01")], "base", "0xabc", { amount: "5" }, 1_000), { kind: "pool.sell", params: { chain: "base", token: "0xabc", amount: "5", slippage_bps: 1_000 } });
+  // card pool-sell-share-across-wallets: a share of the whole holding, the page's own units
+  assert.deepEqual(poolSellAsk([sol("0", undefined)], "solana", "Mint1", { share_bps: 7_500 }, 1_000), { kind: "pool.sell", params: { chain: "solana", token: "Mint1", share_bps: 7_500, slippage_bps: 1_000 } });
   // no pool for the chain (signed out, notes unread, or NEAR): the vault's own sell stays
   assert.equal(poolSellAsk(undefined, "solana", "Mint1", "1", 1_000), null);
   assert.equal(poolSellAsk([sol("0.2")], "near", "x.near", "1", 1_000), null);

@@ -9,7 +9,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { HDKey } from "@scure/bip32";
 import { base58, base64 } from "@scure/base";
-import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaHelperRpc, solanaPacedRpc, type SolanaRpc } from "@blindfill/kit";
+import { SOLANA_TOKEN_2022_PROGRAM, SOLANA_TOKEN_PROGRAM, solanaHelperRpc, solanaJsonRpc, solanaPacedRpc, type SolanaRpc } from "@blindfill/kit";
 import * as d from "../src/derive/index.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
@@ -787,4 +787,55 @@ test("EVM: an upper-case provider reads as lower case (the block's hash is sent 
   await assert.rejects(evmReader(c(), bad("eth_getBalance", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /eth_getBalance: not a quantity/);
   await assert.rejects(evmReader(c(), bad("eth_getBalance", () => "0x7G")).read(evmW(L, 0)), /eth_getBalance: not a quantity/);
   await assert.rejects(evmReader(c(), bad("eth_call", (n) => n.replace("0x", "0X"))).read(evmW(L, 0)), /not one 32-byte word/);
+});
+
+// card pool-sell-share-across-wallets (its 5-wallet devnet run): the kit's own JSON-RPC client, past its retry, throws a
+// provider's throttle as a SolanaRpcTransportError ("HTTP 429 (http_429, 1 try at <host>)", or a -32029 in a 200); one
+// such 429 on the testnet build's devnet RPC failed every sell's wallet list. Each is a failed round like the helper's,
+// read again after the provider's own Retry-After when it is the longer wait (capped)
+test("a throttle as the kit's JSON-RPC client throws it (HTTP 429, or -32029 in a 200) is a failed round on both chains: read again after its Retry-After", async () => {
+  for (const [what, status, body, header, want] of [
+    ["HTTP 429, Retry-After 4", 429, "slow down", "4", 4_000],
+    ["HTTP 429, Retry-After 60 (capped)", 429, "slow down", "60", RETRY_AFTER_MAX_MS],
+    ["-32029 in a 200, no Retry-After", 200, null, null, 1234],
+  ] as const) {
+    for (const chain of ["sol", "evm"] as const) {
+      // the kit's own client, its fetch answering the throttle until the reader's first wait (each call's retry gives up:
+      // a 429's Retry-After is past its deadline at once; the -32029's next backoff after two tries, 60 ms apart)
+      let slept = false;
+      const fetch = (async (_u: string, init: RequestInit) => {
+        const { id } = JSON.parse(String(init.body)) as { id: string };
+        if (!slept) return new Response(body ?? JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32029, message: "rate limited" } }), { status, headers: header === null ? {} : { "retry-after": header } });
+        const m = (JSON.parse(String(init.body)) as { method: string }).method;
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id, result: chain === "sol" ? (m === "getBalance" ? { context: { slot: 5 }, value: 1 } : { context: { slot: 5 }, value: [] }) : m === "eth_getBlockByNumber" ? { number: "0x5", hash: "0x" + "ab".repeat(32) } : "0x0" }), { status: 200 });
+      }) as never;
+      const rpc = solanaJsonRpc("https://throttle.invalid", { fetch, retry: { deadlineMs: 100, backoffMs: 60 } });
+      const waits: number[] = [];
+      const opts = { wait429: () => 1234, sleep: async (ms: number) => { slept = true; waits.push(ms); } };
+      const reader = chain === "sol" ? solanaHoldingsReader(rpc, opts) : evmHoldingsReader(rpc, [], opts);
+      const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
+      assert.deepEqual(r.failed, [], `${what}, ${chain}`);
+      assert.deepEqual(waits, [Math.max(1234, want)], `${what}, ${chain}`);
+    }
+  }
+});
+
+// re-review of 29c72ffe: only a throttle is a failed round; the kit's own client's 5xx or timeout, past its retry, is the
+// list's refusal at once, with no wait
+test("the kit's JSON-RPC client's 5xx or timeout past its retry refuses the wallet list at once on both chains, with no wait", async () => {
+  const hang = (async (_u: string, init: RequestInit) =>
+    new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(init.signal!.reason)))) as never;
+  const five = (async () => new Response("down", { status: 503 })) as never;
+  for (const [what, fetch, want] of [["HTTP 503", five, /http 503/], ["a timeout", hang, /the call failed/]] as const) {
+    for (const chain of ["sol", "evm"] as const) {
+      const rpc = solanaJsonRpc("https://down.invalid", { fetch, timeoutMs: 20, retry: { deadlineMs: 60, backoffMs: 20 } });
+      const waits: number[] = [];
+      const opts = { wait429: () => 1234, sleep: async (ms: number) => void waits.push(ms) };
+      const reader = chain === "sol" ? solanaHoldingsReader(rpc, opts) : evmHoldingsReader(rpc, [], opts);
+      const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
+      assert.equal(r.failed.length, 1, `${what}, ${chain}`);
+      assert.match(r.failed[0]!.error, want, `${what}, ${chain}`);
+      assert.deepEqual(waits, [], `${what}, ${chain}: no wait`);
+    }
+  }
 });
