@@ -26,16 +26,16 @@ export const MUTANTS = [
   ["          failed.delete(chain);\n", ""],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS;"],
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = POOL_PRICE_RETRY_MS * 2 ** (n - 1);"],
-  ["due.set(chain, t + waitMs);", ""],
-  ["after(waitMs, tell);", "after(POOL_PRICE_REFRESH_MS, tell);"],
+  ["        due.set(chain, mine);\n", ""],
+  ["        after(waitMs, () => {", "        after(POOL_PRICE_REFRESH_MS, () => {"],
   ["if (at !== undefined && now() < at) continue;", "if (false) continue;"],
   // the cap of the backoff, the due time of a good read, a failed read's end told, the last good price kept on a failure,
   // and a failure's wait counted from its end
   ["waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), POOL_PRICE_REFRESH_MS);", "waitMs = Math.min(POOL_PRICE_RETRY_MS * 2 ** (n - 1), 2 * POOL_PRICE_REFRESH_MS);"],
   ["due.set(chain, now() + POOL_PRICE_REFRESH_MS);", "due.set(chain, now() + POOL_PRICE_RETRY_MS);"],
-  ["        tell();\n        after(waitMs, tell);", "        if (ok) tell();\n        after(waitMs, tell);"],
+  ["        due.set(chain, mine);\n        tell();", "        due.set(chain, mine);\n        if (ok) tell();"],
   ["POOL_PRICE_RETRY_AFTER_MAX_MS);\n        return false;", "POOL_PRICE_RETRY_AFTER_MAX_MS);\n        held.delete(chain);\n        return false;"],
-  ["due.set(chain, t + waitMs);", "due.set(chain, (due.get(chain) ?? t) - POOL_PRICE_REFRESH_MS + waitMs);"],
+  ["const mine = t + waitMs;", "const mine = (due.get(chain) ?? t) - POOL_PRICE_REFRESH_MS + waitMs;"],
   // a price past its bound as the read ends is never held, and a provider's Retry-After is waited, up to its cap
   ["if (!usable(chain, got)) {", "if (false) {"],
   ["waitMs = Math.max(waitMs, afterMs);", ""],
@@ -43,8 +43,10 @@ export const MUTANTS = [
   // card pool-usd-price-never-stale: the read at the feed's write, each second until a newer price; a late feed read
   // each second for the window past its end, then a failure; never while hidden; shown again, read at once; an older
   // price never held over a newer one
-  ["export const POOL_PRICE_WRITE_LEAD_MS = 25_000;", "export const POOL_PRICE_WRITE_LEAD_MS = 10_000;"],
-  ["export const POOL_PRICE_WRITE_POLL_MS = 1_000;", "export const POOL_PRICE_WRITE_POLL_MS = 3_000;"],
+  ["export const POOL_PRICE_WRITE_LEAD_MS = 20_000;", "export const POOL_PRICE_WRITE_LEAD_MS = 10_000;"],
+  ["export const POOL_PRICE_WRITE_LEAD_MS = 20_000;", "export const POOL_PRICE_WRITE_LEAD_MS = 25_000;"],
+  ["export const POOL_PRICE_WRITE_POLL_MS = 3_000;", "export const POOL_PRICE_WRITE_POLL_MS = 1_000;"],
+  ["export const POOL_PRICE_WRITE_POLL_MS = 3_000;", "export const POOL_PRICE_WRITE_POLL_MS = 5_000;"],
   ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = POOL_PRICE_REFRESH_MS;"],
   ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS);"],
   ["waitMs = visible() ? Math.min(Math.max(toWrite, POOL_PRICE_WRITE_POLL_MS), POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;", "waitMs = visible() ? Math.min(toWrite, POOL_PRICE_REFRESH_MS) : POOL_PRICE_REFRESH_MS;"],
@@ -53,9 +55,17 @@ export const MUTANTS = [
   ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (lateEndMs !== null && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {"],
   ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (lateEndMs !== null && visible()) {"],
   ["} else if (lateEndMs !== null && visible() && t <= lateEndMs + POOL_PRICE_WRITE_LEAD_MS) {", "} else if (visible() && t <= (lateEndMs ?? Infinity) + POOL_PRICE_WRITE_LEAD_MS) {"],
-  ["          lateEndMs = endMs(chain, got.published_s, got.read_ms);\n", ""],
+  ["          if (got.read_ms > end) lateEndMs = end;\n", ""],
+  // review of eb2dfdc5: a price ahead of the clock is no late feed (P3); the same publish leaves the held read as it
+  // was (P3); the timer makes its own read due (P2-2); wakeWhenShown wakes only when shown (P3)
+  ["          if (got.read_ms > end) lateEndMs = end;", "          lateEndMs = end;"],
+  ["if (!was || got.published_s > was.published_s) held.set(chain, got);", "if (!was || got.published_s >= was.published_s) held.set(chain, got);"],
+  ["          if (due.get(chain) === mine) due.set(chain, Math.min(mine, now()));\n", ""],
+  ["          if (due.get(chain) === mine) due.set(chain, Math.min(mine, now()));", "          due.set(chain, Math.min(mine, now()));"],
+  ['    if (doc.visibilityState === "visible") prices.wake();', "    prices.wake();"],
+  ['    if (doc.visibilityState === "visible") prices.wake();', '    if (doc.visibilityState === "visible") {}'],
   ['if (e instanceof Error && e.name === "PoolUsdStale" && Number.isSafeInteger', 'if (e instanceof Error && e.name === "PoolUsdLate" && Number.isSafeInteger'],
-  ["if (!was || got.published_s >= was.published_s) held.set(chain, got);", "held.set(chain, got);"],
+  ["if (!was || got.published_s > was.published_s) held.set(chain, got);", "held.set(chain, got);"],
   ['const visible = deps.visible ?? (() => typeof document === "undefined" || document.visibilityState !== "hidden");', "const visible = deps.visible ?? (() => true);"],
   ["      due.clear();\n      tell();", "      tell();"],
   ["      due.clear();\n      tell();", "      due.clear();"],

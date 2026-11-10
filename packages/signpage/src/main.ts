@@ -73,7 +73,7 @@ import { followRpc, readMoveAt } from "../../wallet/src/deposit/follow.ts";
 import { NEAR_NETWORKS } from "../../wallet/src/deposit/account.ts";
 import { POOL_ASSET_DECIMALS } from "../../kit/src/signpage/messages.ts";
 import { PAGE_POOLS, rentOnce, withPools, withSolanaRent } from "./pools.ts";
-import { poolPrices } from "./pool-price.ts";
+import { poolPrices, wakeWhenShown } from "./pool-price.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import { readSolanaRent } from "../../kit/src/trade/solana/pool-buy.ts";
 import { openNoteStore, readNotes, type NoteRecord, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -196,9 +196,7 @@ else {
   const poolDeps = testnetPoolDeps(testnet?.flow);
   const prices = poolPrices({ rpcs: (chain) => poolDeps.rpcs(chain) as readonly [SolanaRpc, SolanaRpc] | null });
   // a page shown again reads its prices at once: hidden, it read only every 15 s (src/pool-price.ts)
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") prices.wake();
-  });
+  wakeWhenShown(document, prices);
   // the Solana pool's tap spend (state.pools' tap_max, src/pools.ts withSolanaRent): the Rent sysvar, read once on the
   // pool kinds' own pair, and only while the table holds a Solana pool; its landing reads the state again
   const told = new Set<() => void>();

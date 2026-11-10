@@ -12,7 +12,7 @@ import { SIGNPAGE_RESULT_SCHEMAS } from "../../kit/src/signpage/schema.ts";
 import { SolanaRpcTransportError, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { NoteRecord } from "../../wallet/src/notes/store.ts";
 import type { BalancePool } from "../../wallet/src/pool/balances.ts";
-import { POOL_PRICE_REFRESH_MS, POOL_PRICE_RETRY_AFTER_MAX_MS, POOL_PRICE_RETRY_MS, POOL_PRICE_WRITE_LEAD_MS, POOL_PRICE_WRITE_POLL_MS, poolPrices, type PoolPriceDeps } from "../src/pool-price.ts";
+import { POOL_PRICE_REFRESH_MS, POOL_PRICE_RETRY_AFTER_MAX_MS, POOL_PRICE_RETRY_MS, POOL_PRICE_WRITE_LEAD_MS, POOL_PRICE_WRITE_POLL_MS, poolPrices, wakeWhenShown, type PoolPriceDeps } from "../src/pool-price.ts";
 import { withPools } from "../src/pools.ts";
 import { stateOf } from "../src/state.ts";
 
@@ -241,7 +241,7 @@ test("retry: a failed read is due POOL_PRICE_RETRY_MS after it ends, not after i
   assert.equal(asked.length, 2, "due then");
 });
 
-test("retry: a read whose price is past its bound as it ends is a failure: read again in POOL_PRICE_RETRY_MS, the last good price kept", async () => {
+test("retry: a read whose price is past its bound as it ends is not held: the last good price kept, read again in POOL_PRICE_WRITE_POLL_MS (a late feed, card pool-usd-price-never-stale)", async () => {
   const maxS = POOL_USD_FEEDS.solana.maxAgeS;
   let ageS = 0;
   const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000) - ageS, source: "pyth", at: 1n });
@@ -257,7 +257,7 @@ test("retry: a read whose price is past its bound as it ends is a failure: read 
   h.clock.ms += POOL_PRICE_REFRESH_MS;
   h.p.refresh(["solana"]);
   await settled();
-  assert.equal(waits.at(-1), POOL_PRICE_RETRY_MS, "a failure: read again soon");
+  assert.equal(waits.at(-1), POOL_PRICE_WRITE_POLL_MS, "a late feed: read again soon");
   assert.deepEqual(h.p.get("solana"), good, "the last good price stands");
 });
 
@@ -379,40 +379,43 @@ async function timeline(writes: Write[], fromMs: number, toMs: number, opts: { o
 }
 const gaps = (xs: number[]) => xs.slice(1).map((x, i) => x - xs[i]!);
 
-test("at the feed's write: a write landing at T+55.5 s (its price 54 s old) is held within 2 s, and the price is never gone from T to T+120 (card pool-usd-price-never-stale)", async () => {
+test("at the feed's write: a write landing at T+55.5 s (its price 54 s old) is held within POOL_PRICE_WRITE_POLL_MS, and the price is never gone from T to T+120 (card pool-usd-price-never-stale)", async () => {
   const w: Write[] = [{ atMs: 0, pubS: T }, { atMs: (T + 55.5) * 1000, pubS: T + 54 }];
   const r = await timeline(w, (T + 3) * 1000, (T + 120) * 1000);
   // at main 53b56ccd: no price from T+60 s to T+63 s (the 60 s bound, and the next read 15 s after the last)
   assert.deepEqual(r.nulls, [], `no price at ${r.nulls.slice(0, 3).map((ms) => ms / 1000 - T).join(", ")} s past T`);
   const held = r.heldAt.get(T + 54)!;
-  assert.ok(held - w[1]!.atMs <= 2_000, `the write is held ${(held - w[1]!.atMs) / 1000} s after it lands`);
-  // read again POOL_PRICE_WRITE_POLL_MS apart from publish + 50 s until the write is in, then POOL_PRICE_REFRESH_MS on
-  const near = r.readsAt.filter((ms) => ms >= (T + 50) * 1000 && ms <= held);
-  assert.ok(near.length >= 5, String(near.length));
-  assert.equal(near[0], (T + 50) * 1000, "the first read at publish + 50 s");
+  assert.ok(held - w[1]!.atMs <= POOL_PRICE_WRITE_POLL_MS, `the write is held ${(held - w[1]!.atMs) / 1000} s after it lands`);
+  // read again POOL_PRICE_WRITE_POLL_MS apart from publish + 55 s (the bound less POOL_PRICE_WRITE_LEAD_MS) until the
+  // write is in, then POOL_PRICE_REFRESH_MS on
+  const first = T * 1000 + POOL_USD_FEEDS.solana.maxAgeS * 1000 - POOL_PRICE_WRITE_LEAD_MS;
+  assert.equal(first, (T + 55) * 1000);
+  const near = r.readsAt.filter((ms) => ms >= first && ms <= held);
+  assert.ok(near.length >= 2, String(near.length));
+  assert.equal(near[0], first, "the first read at publish + 55 s");
   assert.deepEqual(gaps(near), near.slice(1).map(() => POOL_PRICE_WRITE_POLL_MS), "each POOL_PRICE_WRITE_POLL_MS, no backoff");
   const next = r.readsAt.find((ms) => ms > held)!;
   assert.equal(next - held, POOL_PRICE_REFRESH_MS, "a newer price: back to POOL_PRICE_REFRESH_MS");
-  assert.ok(gaps(r.readsAt.filter((ms) => ms < (T + 50) * 1000)).every((g) => g === POOL_PRICE_REFRESH_MS), "before publish + 50 s: every POOL_PRICE_REFRESH_MS");
+  assert.ok(gaps(r.readsAt.filter((ms) => ms < first - POOL_PRICE_REFRESH_MS)).every((g) => g === POOL_PRICE_REFRESH_MS), "before the window: every POOL_PRICE_REFRESH_MS");
 });
 
-test("at the feed's write: a late write at T+70 s is held within 2 s and the price is never gone; none by T+80 s: gone from T+75 s, read each second (no backoff), back within 2 s of the write", async () => {
+test("at the feed's write: a late write at T+70 s is held within POOL_PRICE_WRITE_POLL_MS and the price is never gone; none by T+80 s: gone from T+75 s, read each POOL_PRICE_WRITE_POLL_MS (no backoff), back within POOL_PRICE_WRITE_POLL_MS of the write", async () => {
   const late: Write[] = [{ atMs: 0, pubS: T }, { atMs: (T + 70) * 1000, pubS: T + 68 }];
   const a = await timeline(late, (T + 3) * 1000, (T + 100) * 1000);
   assert.deepEqual(a.nulls, []);
-  assert.ok(a.heldAt.get(T + 68)! - late[1]!.atMs <= 2_000);
+  assert.ok(a.heldAt.get(T + 68)! - late[1]!.atMs <= POOL_PRICE_WRITE_POLL_MS);
   const later: Write[] = [{ atMs: 0, pubS: T }, { atMs: (T + 80) * 1000, pubS: T + 78 }];
   const b = await timeline(later, (T + 3) * 1000, (T + 100) * 1000);
   const maxMs = POOL_USD_FEEDS.solana.maxAgeS * 1000;
   assert.equal(b.nulls[0], T * 1000 + maxMs + 100, "gone just past the bound, not before");
-  assert.ok(b.nulls.at(-1)! < later[1]!.atMs + 2_000, `back ${(b.nulls.at(-1)! - later[1]!.atMs) / 1000} s after the write`);
-  assert.ok(b.heldAt.get(T + 78)! - later[1]!.atMs <= 2_000);
-  const between = b.readsAt.filter((ms) => ms >= T * 1000 + maxMs && ms <= later[1]!.atMs + 1_000);
-  assert.ok(between.length >= 4, String(between.length));
+  assert.ok(b.nulls.at(-1)! < later[1]!.atMs + POOL_PRICE_WRITE_POLL_MS, `back ${(b.nulls.at(-1)! - later[1]!.atMs) / 1000} s after the write`);
+  assert.ok(b.heldAt.get(T + 78)! - later[1]!.atMs <= POOL_PRICE_WRITE_POLL_MS);
+  const between = b.readsAt.filter((ms) => ms >= T * 1000 + maxMs - POOL_PRICE_WRITE_POLL_MS && ms <= later[1]!.atMs + POOL_PRICE_WRITE_POLL_MS);
+  assert.ok(between.length >= 3, String(between.length));
   assert.ok(gaps(between).every((g) => g === POOL_PRICE_WRITE_POLL_MS), `a late feed read each POOL_PRICE_WRITE_POLL_MS: ${gaps(between)}`);
 });
 
-test("at the feed's write: a late feed is read each second for POOL_PRICE_WRITE_LEAD_MS past its end, then backs off as a failure", async () => {
+test("at the feed's write: a late feed is read each POOL_PRICE_WRITE_POLL_MS for POOL_PRICE_WRITE_LEAD_MS past its end, then backs off as a failure", async () => {
   const r = await timeline([{ atMs: 0, pubS: T }], (T + 3) * 1000, (T + 160) * 1000);
   const end = T * 1000 + POOL_USD_FEEDS.solana.maxAgeS * 1000;
   const after = r.readsAt.filter((ms) => ms > end + POOL_PRICE_WRITE_LEAD_MS);
@@ -421,15 +424,16 @@ test("at the feed's write: a late feed is read each second for POOL_PRICE_WRITE_
 
 test("at the feed's write: a provider that fails inside the window still backs off; Retry-After still wins", async () => {
   const w: Write[] = [{ atMs: 0, pubS: T }, { atMs: (T + 58) * 1000, pubS: T + 56 }];
-  // provider 1 answers nothing from T+50 s to T+57 s: the kit's read fails as unreachable, not as a late feed
-  const down = (ms: number, k: 0 | 1) => (k === 1 && ms >= (T + 50) * 1000 && ms < (T + 57) * 1000 ? new SolanaRpcTransportError("http_5xx", "HTTP 503", 1, "rpc.example") : undefined);
+  // provider 1 answers nothing from T+55 s to T+62 s: the kit's read fails as unreachable, not as a late feed
+  const down = (ms: number, k: 0 | 1) => (k === 1 && ms >= (T + 55) * 1000 && ms < (T + 62) * 1000 ? new SolanaRpcTransportError("http_5xx", "HTTP 503", 1, "rpc.example") : undefined);
   const a = await timeline(w, (T + 3) * 1000, (T + 70) * 1000, { fault: down });
-  const inside = a.readsAt.filter((ms) => ms >= (T + 50) * 1000 && ms < (T + 57) * 1000);
+  const inside = a.readsAt.filter((ms) => ms >= (T + 55) * 1000 && ms < (T + 62) * 1000);
+  assert.ok(inside.length >= 3, String(inside.length));
   assert.deepEqual(gaps(inside), [1_000, 2_000, 4_000].slice(0, inside.length - 1), `a failing provider backs off: ${gaps(inside)}`);
-  // a 429 with Retry-After 5 s at T+50 s: not asked again for 5 s
-  const busy = (ms: number, k: 0 | 1) => (k === 0 && ms === (T + 50) * 1000 ? new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example", 5_000) : undefined);
+  // a 429 with Retry-After 5 s at T+55 s: not asked again for 5 s
+  const busy = (ms: number, k: 0 | 1) => (k === 0 && ms === (T + 55) * 1000 ? new SolanaRpcTransportError("http_429", "HTTP 429", 1, "rpc.example", 5_000) : undefined);
   const b = await timeline(w, (T + 3) * 1000, (T + 70) * 1000, { fault: busy });
-  const i = b.readsAt.indexOf((T + 50) * 1000);
+  const i = b.readsAt.indexOf((T + 55) * 1000);
   assert.ok(i >= 0);
   assert.equal(b.readsAt[i + 1]! - b.readsAt[i]!, 5_000);
 });
@@ -510,10 +514,10 @@ test("at the feed's write: the live check's follower (scripts/live-checks/pool-u
   // a script, not a package file: its URL, so the type check reads it as the module it is at run time
   const CHECK = new URL("../../../scripts/live-checks/pool-usd-price-never-stale.mjs", import.meta.url).href;
   const { SCHEDULE, follow } = (await import(CHECK)) as {
-    SCHEDULE: { refreshMs: number; leadMs: number; pollMs: number; retryMs: number };
+    SCHEDULE: { refreshMs: number; leadMs: number; pollMs: number; retryMs: number; retryAfterMaxMs: number };
     follow: (o: object) => Promise<{ reads: { startMs: number }[] }>;
   };
-  assert.deepEqual(SCHEDULE, { refreshMs: POOL_PRICE_REFRESH_MS, leadMs: POOL_PRICE_WRITE_LEAD_MS, pollMs: POOL_PRICE_WRITE_POLL_MS, retryMs: POOL_PRICE_RETRY_MS });
+  assert.deepEqual(SCHEDULE, { refreshMs: POOL_PRICE_REFRESH_MS, leadMs: POOL_PRICE_WRITE_LEAD_MS, pollMs: POOL_PRICE_WRITE_POLL_MS, retryMs: POOL_PRICE_RETRY_MS, retryAfterMaxMs: POOL_PRICE_RETRY_AFTER_MAX_MS });
   // one timeline: a write at T+55.5 s, a late one at T+136 s (its price 132 s old: past the first's bound of T+129 s)
   const w: Write[] = [{ atMs: 0, pubS: T }, { atMs: (T + 55.5) * 1000, pubS: T + 54 }, { atMs: (T + 136) * 1000, pubS: T + 132 }];
   const page = await timeline(w, (T + 3) * 1000, (T + 160) * 1000);
@@ -543,4 +547,127 @@ test("at the feed's write: a chain with no RPCs yet (a read never started) is as
   }
   assert.equal(asked, 3, "at 0, 15 and 30 s");
   assert.equal(h.p.get("solana"), null);
+});
+
+// ------------------------------------------------------------------------------------------------ the timer's own read
+// Review of eb2dfdc5, P2-2 (its probes early.mjs and coarse.mjs, as tests): each timer set the read due at its own end
+// and, if the clock ran a hair short of that end as it fired, the state read it started found nothing due and no timer
+// was set again: the chain was never read again. Fake clock, fake read (the feed's write each 52 to 58 s).
+/** A run of `minutes` on a clock `now()` that may lag the true time `tau` (steps of `stepMs`, timers `shortMs` early). */
+async function stepped({ minutes, stepMs = 1, shortMs = 0, readMs = 217 }: { minutes: number; stepMs?: number; shortMs?: number; readMs?: number }) {
+  let seed = 4242;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  let tau = 1_800_000_000_123;
+  const T0 = tau, end = T0 + minutes * 60_000;
+  const writes = [{ at: T0 - 20_000, pub: Math.floor((T0 - 22_000) / 1000) }];
+  for (;;) {
+    const last = writes.at(-1)!;
+    const at = last.pub * 1000 + Math.round((52 + rnd() * 6) * 1000);
+    if (at > end + 120_000) break;
+    writes.push({ at, pub: Math.floor(at / 1000 - (1 + rnd() * 2)) });
+  }
+  const pubAt = (t: number) => writes.filter((w) => w.at <= t).at(-1)!.pub;
+  const events: { at: number; fn: () => void }[] = [];
+  let reads = 0;
+  let lastRead = T0;
+  const p = poolPrices({
+    rpcs: () => SOL_RPCS,
+    now: () => Math.floor(Math.floor(tau / stepMs) * stepMs),
+    visible: () => true,
+    after: (ms, fn) => void events.push({ at: tau + ms - shortMs, fn }),
+    read: () =>
+      new Promise((res) => {
+        reads++;
+        lastRead = tau;
+        events.push({ at: tau + readMs, fn: () => res({ chain: "solana", asset: "SOL", decimals: 9, price: 1n, expo: -8, publishedS: pubAt(tau), source: "pyth", at: 1n }) });
+      }),
+  });
+  // the API: one state read after each tell
+  let queued = false;
+  p.watch(() => {
+    if (queued) return;
+    queued = true;
+    events.push({ at: tau, fn: () => ((queued = false), p.refresh(["solana"])) });
+  });
+  p.refresh(["solana"]);
+  await settled();
+  let gone = 0, samples = 0, next = T0, held = false;
+  while (tau < end) {
+    events.sort((a, b) => a.at - b.at);
+    const e = events[0];
+    if (e && e.at <= next) {
+      tau = Math.max(tau, e.at);
+      events.shift();
+      e.fn();
+      await settled();
+      continue;
+    }
+    tau = next;
+    if (p.get("solana")) held = true;
+    else if (held) gone++;
+    samples++;
+    next += 100;
+  }
+  return { reads, lastS: (lastRead - T0) / 1000, gonePct: (100 * gone) / samples, pending: events.length };
+}
+
+test("at the feed's write, review P2-2: every timer run 1 ms short of its time: the chain is read on to the end, never stopped", async () => {
+  const r = await stepped({ minutes: 10, shortMs: 1 });
+  assert.ok(r.pending > 0, "a timer is still set at the end");
+  assert.ok(r.lastS > 10 * 60 - 20, `the last read ${r.lastS} s into a 600 s run`);
+  assert.equal(r.gonePct, 0, `no price ${r.gonePct}% of the time`);
+});
+
+test("at the feed's write, review P2-2: a Date.now() in 16.67 ms steps (and in 100 ms steps): read on for 30 min, never stopped, never without a price", async () => {
+  for (const stepMs of [16.67, 100]) {
+    const r = await stepped({ minutes: 30, stepMs });
+    assert.ok(r.lastS > 30 * 60 - 20, `steps of ${stepMs} ms: the last read ${r.lastS} s into the run, after ${r.reads} reads`);
+    assert.equal(r.gonePct, 0, `steps of ${stepMs} ms: no price ${r.gonePct}% of the time`);
+    // about a read at the write and two polls a minute, never each 100 ms
+    assert.ok(r.reads / 30 < 8, `${(r.reads / 30).toFixed(1)} reads a minute`);
+  }
+});
+
+test("at the feed's write, review P3: a price ahead of the device's clock as the read ends is no late feed: it backs off as a failure", async () => {
+  const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: Math.floor(h.clock.ms / 1000) + 120, source: "pyth", at: 1n });
+  const waits: number[] = [];
+  const h = holder({ read, after: (ms) => void waits.push(ms), visible: () => true });
+  for (let i = 0; i < 3; i++) {
+    h.p.refresh(["solana"]);
+    await settled();
+    h.clock.ms += waits.at(-1)!;
+  }
+  assert.deepEqual(waits, [POOL_PRICE_RETRY_MS, 2 * POOL_PRICE_RETRY_MS, 4 * POOL_PRICE_RETRY_MS]);
+  assert.equal(h.p.get("solana"), null);
+});
+
+test("at the feed's write, review P3: a read of the price already held leaves the held read as it was (its first read_ms): the state is the same, so no state event goes to the app", async () => {
+  const pub = Math.floor(FX.nowMs / 1000) - 10;
+  const read = async (): Promise<PoolUsdPrice> => ({ chain: "solana", asset: "SOL", decimals: 9, price: SOL_PRICE, expo: -8, publishedS: pub, source: "pyth", at: 1n });
+  const h = holder({ read, visible: () => true });
+  h.p.refresh(["solana"]);
+  await settled();
+  const first = h.p.get("solana");
+  const state = await withPools(SIGNED_IN, async () => [note], [SOL], [], h.p.get);
+  h.clock.ms += POOL_PRICE_REFRESH_MS;
+  h.p.refresh(["solana"]);
+  await settled();
+  assert.equal(h.p.get("solana"), first, "the same object: not replaced");
+  assert.deepEqual(await withPools(SIGNED_IN, async () => [note], [SOL], [], h.p.get), state, "the same state");
+});
+
+test("at the feed's write, review P3: wakeWhenShown (main.ts) wakes the prices when the document is shown again, never when it is hidden", () => {
+  const doc = { visibilityState: "hidden" as DocumentVisibilityState, fn: null as null | (() => void), addEventListener(type: string, fn: () => void) {
+    assert.equal(type, "visibilitychange");
+    this.fn = fn;
+  } };
+  let woke = 0;
+  wakeWhenShown(doc as unknown as Document, { wake: () => void woke++ });
+  doc.fn!();
+  assert.equal(woke, 0, "hidden: no wake");
+  doc.visibilityState = "visible";
+  doc.fn!();
+  assert.equal(woke, 1, "shown: woken");
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+  assert.match(main, /\n {2}wakeWhenShown\(document, prices\);\n/, "main.ts wires the page's own document to its prices");
 });
