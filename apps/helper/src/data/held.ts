@@ -15,7 +15,7 @@
 // Display only: nothing here feeds a signature. Every upstream answer is hostile input: an entry is used only when it
 // names the asked token, strings are bounded and a price is a plain decimal or null.
 import type { GeckoBudget } from "./gecko.ts";
-import { GT_PAGE_WAIT_MS, takeOrWait, throttledUntil } from "./gecko.ts";
+import { GT_SERVE_MS, throttledUntil } from "./gecko.ts";
 import { evmAddress, GT_BASE, GT_NETWORK, type EvmChain } from "./evm/lists.ts";
 import { address, text } from "./solana/lists.ts";
 import { CACHE_MAX, type DataAnswer } from "./solana/token.ts";
@@ -25,6 +25,9 @@ export const HELD_MAX = 30;
 /** A token's GeckoTerminal answer is held this long, so a refresh inside a minute makes no call [design: a price is
  *  display data; one batch a minute a chain keeps a device's refresh to 1 of the budget's 5 calls in 75 s]. */
 export const HELD_FRESH_MS = 60_000;
+/** A token's name and price read this long ago is served when it cannot be read again (the budget refused or the call
+ *  failed): the market routes' freshness bound (gecko.ts GT_SERVE_MS). */
+export const HELD_SERVE_MS = GT_SERVE_MS;
 const ANSWER_MAX = 256 * 1024;
 const TIMEOUT_MS = 8_000;
 /** A plain decimal string of at most 30 digits and 40 decimals: no sign, exponent, "NaN" or hex. */
@@ -94,9 +97,11 @@ type Deps = {
 
 export function createHeld(deps: Deps) {
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
-  const kept = bounded<{ entry: Entry | null; at: number }>(CACHE_MAX);
+  // the names read, and apart from them the addresses GeckoTerminal named nothing for, so addresses nobody holds (a
+  // stranger's random ones) never push out a name a device reads
+  const kept = bounded<{ entry: Entry; at: number }>(CACHE_MAX);
+  const absent = bounded<number>(CACHE_MAX);
   const running = new Map<string, Promise<"ok" | "refused" | "failed">>();
   const rowsOf = new Map<EvmChain, { body: string; rows: Map<string, Entry> }>();
 
@@ -147,7 +152,10 @@ export function createHeld(deps: Deps) {
 
   /** One tokens/multi call for `missing` (lowercase addresses), its answer kept per token. */
   async function gecko(chain: EvmChain, missing: string[]): Promise<"ok" | "refused" | "failed"> {
-    if ((await takeOrWait(deps.gecko, "pages", `${chain} held`, now() + GT_PAGE_WAIT_MS, now, sleep)) !== null) return "refused";
+    // the "refresh" lane: it never takes the COLD_RESERVE calls a cold token page, a chart's first bars and the lists'
+    // urgent read need, and never waits, so callers sending fresh addresses on every call cannot starve them (a token
+    // page reads nothing for an address no list holds); refused, a token named before is served (HELD_SERVE_MS)
+    if (!deps.gecko.take("refresh", false, false, `${chain} held`)) return "refused";
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/multi/${missing.join(",")}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -175,7 +183,11 @@ export function createHeld(deps: Deps) {
         const entry = entryOf(a.symbol, a.name, a.price_usd);
         if (entry !== null) found.set(token, entry);
       }
-      for (const t of missing) kept.set(`${chain}:${t}`, { entry: found.get(t) ?? null, at });
+      for (const t of missing) {
+        const e = found.get(t);
+        if (e === undefined) absent.set(`${chain}:${t}`, at);
+        else kept.set(`${chain}:${t}`, { entry: e, at });
+      }
       return "ok";
     } catch {
       return "failed";
@@ -196,18 +208,26 @@ export function createHeld(deps: Deps) {
   async function evm(chain: EvmChain, tokens: string[]): Promise<Outcome[]> {
     const { rows, at: listsAt } = await listed(chain);
     const lower = tokens.map((t) => evmAddress(t)!);
-    const fresh = (t: string) => {
+    const read = (t: string): Outcome | undefined => {
       const k = kept.get(`${chain}:${t}`);
-      return k !== undefined && now() - k.at < HELD_FRESH_MS;
+      const a = absent.get(`${chain}:${t}`);
+      // the newer of the two reads of the token
+      if (a !== undefined && (k === undefined || a > k.at) && now() - a < HELD_FRESH_MS) return { kind: "absent" };
+      if (k !== undefined && now() - k.at < HELD_FRESH_MS) return { kind: "named", source: { entry: k.entry, src: "geckoterminal", at: k.at } };
+      return undefined;
     };
+    const fresh = (t: string) => read(t) !== undefined;
     const missing = lower.filter((t) => !rows.has(t) && !fresh(t));
-    const read = missing.length === 0 ? "ok" : await batch(chain, missing);
+    const got = missing.length === 0 ? "ok" : await batch(chain, missing);
     return lower.map((t): Outcome => {
       const row = rows.get(t);
       if (row !== undefined) return { kind: "named", source: { entry: row, src: "geckoterminal", at: listsAt } };
+      const done = read(t);
+      if (done !== undefined) return done;
+      // not read again this time: a name read within HELD_SERVE_MS is served, dated by its read (the answer's as_of_ms)
       const k = kept.get(`${chain}:${t}`);
-      if (k !== undefined && now() - k.at < HELD_FRESH_MS) return k.entry === null ? { kind: "absent" } : { kind: "named", source: { entry: k.entry, src: "geckoterminal", at: k.at } };
-      return { kind: read === "refused" ? "refused" : "failed" };
+      if (k !== undefined && now() - k.at < HELD_SERVE_MS) return { kind: "named", source: { entry: k.entry, src: "geckoterminal", at: k.at } };
+      return { kind: got === "refused" ? "refused" : "failed" };
     });
   }
 

@@ -10,7 +10,8 @@ import { HELPER_FETCHED_AT_HEADER, HELPER_SOURCE_HEADER } from "@blindfill/kit";
 import { start } from "../server.ts";
 import { geckoBudget, GT_PAGE_WAIT_MS, type GeckoBudget } from "./gecko.ts";
 import { GT_BASE } from "./evm/lists.ts";
-import { createHeld, HELD_FRESH_MS, HELD_MAX, parseHeld } from "./held.ts";
+import { createHeld, HELD_FRESH_MS, HELD_MAX, HELD_SERVE_MS, parseHeld } from "./held.ts";
+import { createEvmToken } from "./evm/token.ts";
 import { NOT_FOUND, UPSTREAM, type DataAnswer } from "./solana/token.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -255,4 +256,59 @@ test("server: without a held reader the route answers 404", async () => {
   } finally {
     await new Promise<void>((done) => (s.closeAllConnections(), s.close(() => done())));
   }
+});
+
+// Card market-token-reads (abuse): a stranger sending 30 fresh random addresses on every call. Through the real
+// GeckoTerminal budget (gecko.ts, GT_LIMIT_PER_MIN calls in WINDOW_MS shared by every user): the held read may never
+// take the calls a cold token page, a chart's first bars or the lists' urgent refresh need, and a user whose held token
+// was named keeps it while the stranger runs. Compared with GET /v1/market/token, which reads nothing for an address no
+// list holds.
+test("abuse: a stranger's held reads of random addresses never take the calls a cold page, a chart or the lists' urgent read need; a named token stays named", async () => {
+  let t = NOW;
+  const clock = () => t;
+  const gecko = geckoBudget(clock);
+  const hits: Hit[] = [];
+  const h = held({ hits, gecko, now: clock, sleep: async (ms: number) => void (t += ms) });
+  // a user's off-list Base token, named once before the stranger starts
+  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, "GKO");
+  const rand = () => `0x${Array.from({ length: 40 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("")}`;
+  const before = hits.length;
+  for (let i = 0; i < 40; i++) {
+    await h.read(i % 2 === 0 ? "base" : "robinhood", Array.from({ length: HELD_MAX }, rand));
+    t += 2_000;
+  }
+  const strangerCalls = hits.length - before;
+  // 80 s later than the user's read: its token is past HELD_FRESH_MS, and the stranger holds the window
+  const user = (await body(await h.read("base", [A]))).tokens[0]!;
+  const window = gecko.calls().length;
+  // the two calls the held reads leave go to the first cold reads, as they did before any held read: here a cold
+  // token page (or a chart's first bars) and the lists' urgent read
+  const page = gecko.take("pages");
+  const lists = gecko.take("lists", true);
+  console.log(`stranger: 40 reads, ${strangerCalls} GeckoTerminal calls; window ${window} of 5 when the user reads; user's token ${user.symbol}; then a cold page ${page}, the lists' urgent read ${lists}`);
+  assert.ok(window <= 3, `the held reads left ${5 - window} calls free, COLD_RESERVE needs 2`);
+  assert.ok(page && lists, "a cold token page and the lists' urgent read still find their calls");
+  assert.equal(user.symbol, "GKO", "the user's named token is served while the stranger runs");
+
+  // GET /v1/market/token today: an address no list holds is 404 with no GeckoTerminal call
+  const evmHits: Hit[] = [];
+  const page2 = createEvmToken("base", { lists: { get: listsOf("base", []).get, listed: async () => false }, gecko: geckoBudget(clock), fetch: fakeFetch(evmHits, () => []) as never, now: clock, sleep: async () => {} });
+  for (let i = 0; i < 30; i++) assert.equal((await page2.page(rand())).status, 404);
+  assert.equal(evmHits.length, 0);
+});
+
+test("a name read within HELD_SERVE_MS is served, dated, while the budget refuses; past it the entry is null", async () => {
+  let t = NOW;
+  const clock = () => t;
+  const gecko = geckoBudget(clock);
+  const h = held({ gecko, now: clock });
+  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, "GKO");
+  t += 2 * HELD_FRESH_MS;
+  for (let i = 0; i < 20; i++) gecko.take("pages");
+  const j = await body(await h.read("base", [A]));
+  assert.equal(j.tokens[0]!.symbol, "GKO");
+  assert.equal(j.as_of_ms, NOW, "dated by its read");
+  t = NOW + HELD_SERVE_MS + 1;
+  for (let i = 0; i < 20; i++) gecko.take("pages");
+  assert.equal((await body(await h.read("base", [A]))).tokens[0]!.symbol, null);
 });
