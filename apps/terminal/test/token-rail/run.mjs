@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { LIST_CHAINS, REFRESH_MS } from "../../src/screens/discover/data.ts";
 import { columnRows } from "../../src/screens/discover/model.ts";
@@ -171,7 +172,7 @@ const readPage = (f) =>
   });
 
 const dir = await build();
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 try {
   for (const k of KINDS) {

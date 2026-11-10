@@ -19,10 +19,13 @@
 //   node scripts/live-checks/evm-sell-hook-converge.mjs [--base <url>] [--record <file>]
 //   node scripts/live-checks/evm-sell-hook-converge.mjs --local [--record <file>]   (the same plants through this tree's
 //     helper sender in process, throwaway keys, no provider: what a deploy of this tree answers)
-// PASS exit 0, FAIL exit 1, error exit 2. Reads and refused POSTs only: no key of ours, no transaction, no money moves.
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
+// fee is read through evm-pool-fee-epoch.mjs, and a pool with no fee to read has no plant sent). Reads and refused POSTs only: no key of ours, no transaction, no money moves.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 import { BASE, evmPoolRecords, feeCollectorOf, plantsOf, randomKey, v4PathThrough } from "./helper-evm-sender.mjs";
 
 const KEY = "evm-sell-hook-converge";
@@ -54,34 +57,51 @@ export function plants({ network, pool, feeRecipient, nowMs = Date.now() }) {
 export function judge(run) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const pools = Array.isArray(run?.pools) ? run.pools : [];
   say(pools.length > 0, `pools read: ${pools.map((p) => `${p.network} ${p.pool}`).join(", ") || "none"}`);
   for (const p of pools) {
     const reads = Array.isArray(p.reads) ? p.reads : [];
     const f = reads.find((r) => r.asked === "fee");
     const c = feeCollectorOf(f?.body ?? "");
-    say(f?.status === 200 && typeof c === "string" && ADDRESS.test(c), `[${p.network} fee] GET /v1/pool/fee answers ${f?.status}, fee collector ${c ?? "none"}`);
-    for (const [asked, status, code] of PLANTS) {
-      const r = reads.find((x) => x.asked === asked);
-      const e = json(r?.body ?? "");
-      say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${p.network} ${asked}] POST /v1/pool/evm/sell answers ${r?.status} ${String(r?.body ?? "").slice(0, 120)} (want ${status} ${code})`);
+    if (noBlockYet(f)) {
+      // the chain made no block for over a minute: no fee to read, so no plant was sent
+      quiet = true;
+      lines.push(`QUIET [${p.network} fee] the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${f.status} index_behind)`);
+    } else {
+      say(f?.status === 200 && typeof c === "string" && ADDRESS.test(c), `[${p.network} fee] GET /v1/pool/fee answers ${f?.status}, fee collector ${c ?? "none"}`);
+      for (const [asked, status, code] of PLANTS) {
+        const r = reads.find((x) => x.asked === asked);
+        const e = json(r?.body ?? "");
+        say(r?.status === status && e?.error?.code === code && e?.hash === undefined, `[${p.network} ${asked}] POST /v1/pool/evm/sell answers ${r?.status} ${String(r?.body ?? "").slice(0, 120)} (want ${status} ${code})`);
+      }
     }
     for (const r of reads) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${p.network} ${r.asked}] X-Helper-Commit: ${r.headers?.["x-helper-commit"] ?? "none"}`);
   }
-  return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
-/** The run on the helper at `base`. */
+/** The run on the helper at `base`. The fee is asked for the epoch and, when the helper has no block in it yet, the one
+ *  before (evm-pool-fee-epoch.mjs): both asks are recorded, the first as "fee_first". */
 export async function read(base, fetchFn = fetch) {
   const pools = [];
   for (const [network, pool] of Object.entries(evmPoolRecords())) {
     const reads = [];
     const get = async (asked, url, init = {}) => {
       const r = await fetchFn(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15_000) });
-      reads.push({ asked, readAt: new Date().toISOString(), status: r.status, headers: { "x-helper-commit": r.headers.get("x-helper-commit") }, body: (await r.text()).slice(0, 2_000) });
+      const read = { asked, readAt: new Date().toISOString(), status: r.status, headers: { "x-helper-commit": r.headers.get("x-helper-commit") }, body: (await r.text()).slice(0, 2_000) };
+      reads.push(read);
+      return read;
     };
-    await get("fee", `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`);
-    const ps = plants({ network, pool, feeRecipient: feeCollectorOf(reads[0].body) ?? "0x000000000000000000000000000000000000dead" });
+    const fee = await evmPoolFeeAsk((url) => get("fee", url), base, pool);
+    if (fee.first) fee.first.asked = "fee_first";
+    // no fee to read (no block in the epoch or the one before): no plant is sent
+    if (noBlockYet(fee.answer)) {
+      pools.push({ network, pool, reads });
+      continue;
+    }
+    const ps = plants({ network, pool, feeRecipient: feeCollectorOf(fee.answer.body) ?? "0x000000000000000000000000000000000000dead" });
     for (const [asked] of PLANTS) await get(asked, `${base}/v1/pool/evm/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(ps[asked]) });
     pools.push({ network, pool, reads });
   }
@@ -126,8 +146,8 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const r = judge(run);
     for (const l of r.lines) console.log(l);
-    console.log(r.ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-    process.exit(r.ok ? 0 : 1);
+    console.log(`${r.verdict} ${KEY}`);
+    process.exit(EXIT[r.verdict]);
   } catch (e) {
     console.error(`${KEY}: ${e.message}`);
     process.exit(2);

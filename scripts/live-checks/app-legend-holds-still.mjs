@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live check of card app-legend-holds-still: the token page's live numbers hold still. Headless Chromium opens
-// APP_HOST/ (the token page: the helper's top Trending token) at 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), finds
+// a token page, picked from the helper's lists (below), at 390 x 844 (dpr 2, touch) and 1440 x 900 (dpr 1), finds
 // the terminal's frame inside SIGN_HOST's shell and waits for the chart's legend. Then for at least HOLD_MS and STEPS
 // steps it lets the live reads tick (the chart's last bar, the footer's prices and block, the header's reads) while the
 // crosshair walks the bars, so the legend shows values of many lengths. On the desktop the second half runs in Price
@@ -21,16 +21,26 @@
 // following that press (hadRecentInput, 500 ms); no page error. Under MIN_TEXTS crosshair texts on a chart of MIN_BARS
 // bars or more, every step paced, the crosshair did not move the legend: FAIL; on a chart of fewer bars the walk cannot
 // tell: INCONCLUSIVE, never a PASS.
+// The token (card live-checks-quiet-chart-and-receipt): the top Trending token's chart can hold too few bars to walk (4 bars
+// at app run 42716137594, three INCONCLUSIVE runs), so the check picks its own. From the helper's lists (GET
+// /v1/market/lists?chain=<c> for solana, base and robinhood, in that order) it takes the Trending column as Discover orders it
+// (model.ts columnRows), and for each token in turn reads the bars the token page reads at its default interval
+// (candles.ts: DEFAULT_TF, CANDLES_URL, toCandleData, the page's own mapping; bars = the mapped bars) until one holds MIN_BARS
+// or more, at most MAX_READS tokens. That token's own page, /token/<chain>/<id>, is the route. Every run prints the picked
+// token and each one skipped, with its bars or why it was not read. No token to walk in the lists: INCONCLUSIVE, saying how
+// many it read and why each was skipped; the check never passes on a chart it could not walk.
 // After: app
 //   node scripts/live-checks/app-legend-holds-still.mjs [--build <dir>] [--path <route>] [--shots <dir>] [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
-// --path opens that route instead of / (a token page, /token/<chain>/<id>, to walk another token's chart); --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,
+// --path opens that route instead of a picked token (a token page, /token/<chain>/<id>, or / for the top Trending token); --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute,
 // signed out as a first visit to APP_HOST is), the helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
+import { CANDLES_URL, DEFAULT_TF, THROTTLE_RETRIES, THROTTLE_WAIT_MAX_S, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
 import { INIT, WIDTHS } from "./app-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
@@ -44,6 +54,11 @@ export const STEPS = 12;
 /** Crosshair texts each width needs; and the bars a chart needs before fewer is a FAIL rather than INCONCLUSIVE. */
 export const MIN_TEXTS = 3;
 export const MIN_BARS = 24;
+/** The chains whose lists the pick reads, in order, and the most tokens it reads bars for. */
+export const CHAINS = ["solana", "base", "robinhood"];
+export const MAX_READS = 30;
+/** The answer header the page reads the candles' source from (the kit's HELPER_SOURCE_HEADER; a script imports no kit file). */
+const SOURCE_HEADER = "x-helper-source";
 /** A tap after the library's 500 ms double-tap window closed (Delay.ResetClick); the desktop's mouse has none. */
 const TAP_MS = 650;
 const READ_MS = 250;
@@ -69,10 +84,27 @@ export function crosshairTexts(reads) {
 /** A verdict's exit code: PASS 0, FAIL 1, INCONCLUSIVE 3 (an error exits 2). */
 export const EXIT = Object.freeze({ PASS: 0, FAIL: 1, INCONCLUSIVE: 3 });
 
+const SHOWN = 8;
+/** The pick's lines: the token picked and each one skipped (at most SHOWN named), or why none was. */
+export function pickLines(pick) {
+  const read = pick.read ?? [];
+  const name = (r) => `${r.chain}/${r.addr} (${r.bars === null ? r.why : `${r.bars} bar${r.bars === 1 ? "" : "s"}`})`;
+  const skipped = read.filter((r) => !(pick.picked && r.chain === pick.picked.chain && r.addr === pick.picked.addr));
+  const list = skipped.length ? `${skipped.length} skipped: ${skipped.slice(0, SHOWN).map(name).join(", ")}${skipped.length > SHOWN ? `, and ${skipped.length - SHOWN} more` : ""}` : "none skipped";
+  const lists = (pick.lists ?? []).map((l) => `${l.chain} ${l.status === 200 ? `${l.rows} Trending` : `lists ${l.status}`}`).join(", ");
+  if (pick.picked) return [`ok  picked ${pick.picked.chain}/${pick.picked.addr}, ${pick.picked.bars} bars at ${pick.tf} (${MIN_BARS} needed), read ${read.length} token${read.length === 1 ? "" : "s"} for it, ${list} (${lists})`];
+  return [`INCONCLUSIVE no listed token holds ${MIN_BARS} bars or more at ${pick.tf}: read ${read.length} token${read.length === 1 ? "" : "s"}, ${list} (${lists}): no chart to walk`];
+}
+
 /** The check on one recorded run: { verdict: PASS | FAIL | INCONCLUSIVE, ok, lines }. */
 export function judge(rec) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  if (rec.pick) {
+    lines.push(...pickLines(rec.pick));
+    // nothing picked, nothing opened: a quiet market, never a pass
+    if (!rec.pick.picked) return { verdict: "INCONCLUSIVE", ok: false, lines };
+  }
   const loads = rec.loads ?? [];
   say(loads.length === WIDTHS.length, `${loads.length} load(s) of ${WIDTHS.length} (both widths)`);
   for (const l of loads) {
@@ -127,6 +159,58 @@ const LEGEND = () => {
   const main = rects.filter((r) => r.y === top).sort((a, b) => b.width - a.width)[0];
   return l ? { text: l.textContent, bars: Number(kc?.dataset.bars ?? 0), main: main ? { x: main.x, y: main.y, w: main.width, h: main.height } : null } : null;
 };
+
+/** The pick (see the header): { tf, lists: [{ chain, status, rows }], read: [{ chain, addr, status, bars, why }], picked }.
+ *  `bars` is the token page's own count of the candles answer (null when the page would draw none, with `why`); a token's id
+ *  is kept under `addr` (an id under a `token` key reads to gitleaks as a secret). */
+export async function pickToken({ fetchFn = fetch, chains = CHAINS, max = MAX_READS, minBars = MIN_BARS, wait = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  const pick = { tf: DEFAULT_TF, lists: [], read: [], picked: null };
+  const asked = (u) => fetchFn(u, { signal: AbortSignal.timeout(10_000) });
+  for (const chain of chains) {
+    let rows = [];
+    let status = 0;
+    try {
+      const r = await asked(`${HELPER_HOST}/v1/market/lists?chain=${chain}`);
+      status = r.status;
+      const body = status === 200 ? await r.json() : null;
+      if (body && typeof body === "object" && body.lists && typeof body.lists === "object") rows = columnRows(body, "trending");
+      else if (status === 200) status = 0;
+    } catch {
+      status = 0;
+    }
+    pick.lists.push({ chain, status, rows: rows.length });
+    for (const row of rows) {
+      if (pick.read.length >= max) break;
+      const one = { chain, addr: row.token, status: 0, bars: null, why: "not read" };
+      pick.read.push(one);
+      try {
+        // a 429 is read again after its Retry-After, as the page does (candles.ts loadCandles)
+        let r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
+        for (let i = 0; r.status === 429 && i < THROTTLE_RETRIES; i++) {
+          const after = Number(r.headers.get("Retry-After"));
+          await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
+          r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
+        }
+        one.status = r.status;
+        if (r.status === 404) one.why = "no bars held (404)";
+        else if (r.status !== 200) one.why = `bars ${r.status}`;
+        else {
+          const d = toCandleData(await r.json().catch(() => null), DEFAULT_TF, r.headers.get(SOURCE_HEADER));
+          if (d === null) one.why = "bars not an answer the page takes";
+          else if (d.status !== "ready") one.why = "no bars";
+          else one.bars = d.bars.length;
+        }
+      } catch {
+        one.why = "bars not read";
+      }
+      if (one.bars !== null && one.bars >= minBars) {
+        pick.picked = { chain, addr: row.token, bars: one.bars };
+        return pick;
+      }
+    }
+  }
+  return pick;
+}
 
 async function watch(browser, w, harness, shots, route) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark" });
@@ -199,15 +283,18 @@ async function watch(browser, w, harness, shots, route) {
   }
 }
 
-export async function collect({ build = null, route = "/", shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
+export async function collect({ build = null, route = "/", pick = null, shots = path.join(tmpdir(), `${KEY}-${Date.now()}`) } = {}) {
   mkdirSync(shots, { recursive: true });
+  // a pick that found no chart to walk opens nothing
+  if (pick && !pick.picked) return { rec: { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", route: null, pick, at: new Date().toISOString(), browser: null, loads: [] }, shots };
+  if (pick) route = `/token/${pick.picked.chain}/${encodeURIComponent(pick.picked.addr)}`;
   let harness = null;
   if (build) {
     const { harnessRoute } = await import("./app-in-shell.mjs");
     harness = await harnessRoute(path.resolve(build), "signed", { state: SIGNED_OUT });
   }
   const browser = await launchBrowser("chromium");
-  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", route, at: new Date().toISOString(), browser: browser.version(), loads: [] };
+  const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", route, ...(pick ? { pick } : {}), at: new Date().toISOString(), browser: browser.version(), loads: [] };
   try {
     for (const w of WIDTHS) rec.loads.push(await watch(browser, w, harness, shots, route));
   } finally {
@@ -222,12 +309,13 @@ async function main() {
     const i = args.indexOf(n);
     return i >= 0 ? args[i + 1] : d;
   };
-  const { rec, shots } = await collect({ build: opt("--build", null), route: opt("--path", "/"), shots: opt("--shots", undefined) });
+  const fixed = opt("--path", null);
+  const { rec, shots } = await collect({ build: opt("--build", null), route: fixed ?? "/", pick: fixed === null ? await pickToken() : null, shots: opt("--shots", undefined) });
   const record = opt("--record", null);
   if (record) writeFileSync(record, `${JSON.stringify(rec, null, 2)}\n`);
   const r = judge(rec);
   for (const l of r.lines) console.log(l);
-  console.log(`CARD ${KEY} / ${rec.source} ${rec.route}: ${r.verdict} (Chrome ${rec.browser}, shots ${shots})`);
+  console.log(`CARD ${KEY} / ${rec.source} ${rec.route ?? "no token"}: ${r.verdict} (Chrome ${rec.browser ?? "not started"}, shots ${shots})`);
   process.exit(EXIT[r.verdict]);
 }
 

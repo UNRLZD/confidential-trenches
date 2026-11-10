@@ -27,8 +27,13 @@ const DECIMAL = /^\d{1,40}(\.\d{1,40})?$/;
 
 export type Side = "buy" | "sell";
 
-/** One trade as the helper sends it: `usd` and `amt` are positive decimal strings, `trader` is null when the helper
- *  could not name the wallet. */
+/** The helper's side of a trade (06b `Trades`, side "b" | "s"; apps/helper/src/data/candles.ts TapeRow), as the page
+ *  names it. Any other word, "buy" and "sell" included, is not of the shape (card market-data-push: the page asked for
+ *  "buy" | "sell", so it refused every tape the deployed helper sent, read 9 Nov 21:58Z on Solana and Base). */
+const SIDE: Readonly<Record<string, Side>> = { b: "buy", s: "sell" };
+
+/** One trade as the page draws it, read from the helper's row: `usd` and `amt` are positive decimal strings, `trader`
+ *  is null when the helper could not name the wallet. */
 export interface Trade {
   t_ms: number;
   side: Side;
@@ -46,11 +51,12 @@ function toTrade(r: unknown): Trade | null {
   if (!isObject(r)) return null;
   const { t_ms, side, usd, amt, trader, tx } = r;
   if (typeof t_ms !== "number" || !Number.isSafeInteger(t_ms) || t_ms < 0) return null;
-  if (side !== "buy" && side !== "sell") return null;
+  const s = typeof side === "string" && Object.hasOwn(SIDE, side) ? SIDE[side]! : null;
+  if (s === null) return null;
   if (!positive(usd) || !positive(amt)) return null;
   if (trader !== null && !named(trader)) return null;
   if (!named(tx)) return null;
-  return { t_ms, side, usd, amt, trader: trader as string | null, tx };
+  return { t_ms, side: s, usd, amt, trader: trader as string | null, tx };
 }
 
 /** The answer as trades, or null when any part of it is not of the shape. */
@@ -65,15 +71,23 @@ export function toTrades(body: unknown): Trade[] | null {
   return out;
 }
 
+/** A tape's text, a read's body or a pushed message, as trades: null when it is over BODY_MAX, not JSON or not of the shape. */
+function parseTape(text: string): Trade[] | null {
+  if (text.length > BODY_MAX) return null;
+  try {
+    return toTrades(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 /** One read of the helper; no marks (null) on a non-200, a throw or an answer not of the shape. */
 export async function readTrades(chain: MarketChain, token: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<Trade[] | null> {
   try {
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
     const r = await fetchFn(TRADES_URL(chain, token), { ...HELPER_FETCH_INIT, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (r.status !== 200) return null;
-    const text = await r.text();
-    if (text.length > BODY_MAX) return null;
-    return toTrades(JSON.parse(text));
+    return parseTape(await r.text());
   } catch {
     return null;
   }
@@ -92,37 +106,157 @@ export interface Tape {
 }
 const LOADING: Tape = { trades: NONE, status: "loading" };
 
-/** The token's newest trades: read on mount and every 3 s while mounted (longer after failed reads, none while hidden); stopped on unmount and when the chain or the
- *  token change (then the list starts from loading). A failed read leaves no marks. */
+// ------------------------------------------------------------------------------------------------------------- push
+// The tape is pushed (card market-data-push): the helper's push socket (GET /v1/market/push, a WebSocket that answers
+// APP_HOST's Origin only, apps/helper/src/data/push.ts) sends the token's whole tape, the trades route's answer at its
+// longest, first as it is and then each time its rows change. Each message replaces the tape drawn, as a read does, so a
+// trade is never drawn twice however reads and messages cross. While the socket is down the tape is read every
+// TRADES_POLL_MS as before (longer after failed reads), and the socket is opened again after the same doubling wait.
+
+/** HELPER_HOST's push socket for a token's tape (the CSP's connect-src names wss://HELPER_HOST, public/_headers). */
+export const PUSH_URL = (chain: MarketChain, token: string): string =>
+  `${BASE.replace(/^https:/, "wss:")}/v1/market/push?chain=${encodeURIComponent(chain)}&token=${encodeURIComponent(token)}`;
+/** While the socket sends tapes, the tape is still read this long after the last one: a socket a network change left
+ *  open but dead (a phone's, which a page cannot see closing) never holds the tape longer [design: TRADES_BACKOFF_MAX_MS]. */
+export const TRADES_PUSHED_POLL_MS = 30_000;
+
+/** The part of a browser WebSocket the follow uses. */
+export interface PushSocket {
+  onmessage: ((e: { data: unknown }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: (() => void) | null;
+  close(): void;
+}
+export interface TapeDeps {
+  fetchFn?: typeof fetch;
+  /** Opens the push socket; none (a runtime with no WebSocket) is the tape read every TRADES_POLL_MS. */
+  socket?: ((url: string) => PushSocket) | null;
+  /** Runs `fn` after `ms`; returns its cancel. */
+  later?: (fn: () => void, ms: number) => () => void;
+  /** The page is out of sight (document.hidden): no read is made until it is back. */
+  hidden?: () => boolean;
+}
+
+const laterReal = (fn: () => void, ms: number): (() => void) => {
+  const t = setTimeout(fn, ms);
+  return () => clearTimeout(t);
+};
+const socketReal = (): ((url: string) => PushSocket) | null =>
+  typeof WebSocket === "undefined" ? null : (url) => new WebSocket(url) as unknown as PushSocket;
+
+/**
+ * Follows a token's tape: the push socket's tapes, and reads of the trades route on mount, while the socket is down
+ * (every TRADES_POLL_MS, doubling after each failed read to TRADES_BACKOFF_MAX_MS) and TRADES_PUSHED_POLL_MS after the
+ * last pushed tape. `onTape` gets the tape when it changes: `ready` with the rows of the last good read or message,
+ * `none` when the last read failed and no socket is sending. A message is hostile input: one that is not a tape (over
+ * BODY_MAX, not text, not JSON, a row not of the shape) drops the socket, as its close does; then the tape is read at
+ * once and the socket opened again after nextWait of the drops in a row. A pushed tape aborts a read still out, so an
+ * older answer never lands over it. Returns the stop.
+ */
+export function followTape(chain: MarketChain, token: string, onTape: (t: Tape) => void, deps: TapeDeps = {}): () => void {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const later = deps.later ?? laterReal;
+  const hidden = deps.hidden ?? (() => typeof document !== "undefined" && document.hidden);
+  const open = deps.socket === undefined ? socketReal() : deps.socket;
+  let stopped = false;
+  let cur: Tape = LOADING;
+  /** The socket has sent a tape and not closed since. */
+  let pushed = false;
+  let fails = 0;
+  let drops = 0;
+  let ws: PushSocket | null = null;
+  let out: AbortController | null = null;
+  let cancelRead: () => void = () => undefined;
+  let cancelOpen: () => void = () => undefined;
+
+  const show = (t: Tape) => {
+    if (t.status === cur.status && (t.trades === cur.trades || same(t.trades, cur.trades))) return;
+    cur = t;
+    onTape(t);
+  };
+  const readIn = (ms: number) => {
+    cancelRead();
+    if (!stopped) cancelRead = later(() => void read(), ms);
+  };
+  async function read(): Promise<void> {
+    if (stopped || out !== null) return;
+    // a page out of sight reads nothing until it is back
+    if (hidden()) return readIn(TRADES_POLL_MS);
+    const mine = new AbortController();
+    out = mine;
+    const t = await readTrades(chain, token, fetchFn, mine.signal);
+    if (stopped || mine.signal.aborted) return;
+    out = null;
+    // a failed read draws no marks and waits longer each time (nextWait), unless a socket sends the tape; a good read
+    // goes back to TRADES_POLL_MS
+    fails = t === null ? fails + 1 : 0;
+    if (t !== null) show({ trades: t, status: "ready" });
+    else if (!pushed) show({ trades: NONE, status: "none" });
+    readIn(pushed ? TRADES_PUSHED_POLL_MS : nextWait(fails));
+  }
+  /** The socket closed, failed or sent what is not a tape: read now, open again after nextWait of the drops. */
+  const dropped = (s: PushSocket | null) => {
+    if (stopped || s !== ws) return;
+    if (s !== null) {
+      s.onmessage = s.onclose = s.onerror = null;
+      s.close();
+    }
+    ws = null;
+    pushed = false;
+    if (out === null) {
+      cancelRead();
+      void read();
+    }
+    cancelOpen = later(connect, nextWait(drops++));
+  };
+  function connect(): void {
+    if (stopped || open === null) return;
+    let s: PushSocket;
+    try {
+      s = open(PUSH_URL(chain, token));
+    } catch {
+      return dropped(null);
+    }
+    ws = s;
+    s.onclose = s.onerror = () => dropped(s);
+    s.onmessage = (e) => {
+      if (stopped || s !== ws) return;
+      const t = typeof e.data === "string" ? parseTape(e.data) : null;
+      if (t === null) return dropped(s);
+      pushed = true;
+      drops = 0;
+      fails = 0;
+      out?.abort();
+      out = null;
+      readIn(TRADES_PUSHED_POLL_MS);
+      show({ trades: t, status: "ready" });
+    };
+  }
+
+  void read();
+  connect();
+  return () => {
+    stopped = true;
+    out?.abort();
+    cancelRead();
+    cancelOpen();
+    if (ws !== null) {
+      ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.close();
+      ws = null;
+    }
+  };
+}
+
+/** The token's newest trades (followTape): pushed by the helper's socket, read on mount and every 3 s while it is down
+ *  (longer after failed reads, none while hidden); stopped on unmount and when the chain or the token change (then the
+ *  list starts from loading). A failed read leaves no marks. */
 export function useTrades(chain: MarketChain | null, token: string | null): Tape {
   const [state, setState] = useState<{ key: string; tape: Tape }>({ key: "", tape: LOADING });
   const key = chain !== null && token !== null ? `${chain}\n${token}` : "";
   useEffect(() => {
     if (chain === null || token === null) return;
-    const stop = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let fails = 0;
-    const tick = async (): Promise<void> => {
-      // a page out of sight reads nothing until it is back
-      if (document.hidden) {
-        timer = setTimeout(() => void tick(), TRADES_POLL_MS);
-        return;
-      }
-      const t = await readTrades(chain, token, fetch, stop.signal);
-      if (stop.signal.aborted) return;
-      setState((s) =>
-        s.key === key && t !== null && s.tape.status === "ready" && same(s.tape.trades, t) ? s : { key, tape: t === null ? { trades: NONE, status: "none" } : { trades: t, status: "ready" } },
-      );
-      // a failed read draws no marks and waits longer each time (nextWait), so a helper that cannot answer is not asked
-      // every 3 s; a good read goes back to TRADES_POLL_MS
-      fails = t === null ? fails + 1 : 0;
-      timer = setTimeout(() => void tick(), nextWait(fails));
-    };
-    void tick();
-    return () => {
-      stop.abort();
-      clearTimeout(timer);
-    };
+    return followTape(chain, token, (tape) => setState({ key, tape }));
   }, [chain, token, key]);
   return state.key === key ? state.tape : LOADING;
 }

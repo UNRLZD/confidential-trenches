@@ -1,0 +1,644 @@
+{
+ "good": {
+  "at": "2026-11-10T00:49:16.018Z",
+  "base": "http://127.0.0.1:59220",
+  "turnMs": 1794271740000,
+  "runs": [
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "turn": [
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 0,
+      "askedMs": 1794271740003,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 80,
+      "askedMs": 1794271740082,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 160,
+      "askedMs": 1794271740161,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 240,
+      "askedMs": 1794271740242,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 320,
+      "askedMs": 1794271740322,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 480,
+      "askedMs": 1794271740482,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x34d70e6\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0xdcfc9a80e1d97a3f5adf1b662bc2bed664b870d1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271680000,\"block\":\"0x34d6fba\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "turn": [
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 0,
+      "askedMs": 1794271740008,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 80,
+      "askedMs": 1794271740082,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 160,
+      "askedMs": 1794271740162,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 240,
+      "askedMs": 1794271740243,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 320,
+      "askedMs": 1794271740323,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 480,
+      "askedMs": 1794271740483,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x695e5ca\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x6b08c082317105701e94badd8e50f176903ff755\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271680000,\"block\":\"0x695e383\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "turn": [
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 0,
+      "askedMs": 1794271740008,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 80,
+      "askedMs": 1794271740082,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 160,
+      "askedMs": 1794271740162,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 240,
+      "askedMs": 1794271740243,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 320,
+      "askedMs": 1794271740323,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 480,
+      "askedMs": 1794271740483,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271740000,\"block\":\"0x361ed2c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x9bf400bedf4c235a38c92ee6a65465eabf48bda1\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271680000,\"block\":\"0x361ec00\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "turn": [
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 0,
+      "askedMs": 1794271740008,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 80,
+      "askedMs": 1794271740083,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 160,
+      "askedMs": 1794271740162,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 240,
+      "askedMs": 1794271740243,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 320,
+      "askedMs": 1794271740323,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 480,
+      "askedMs": 1794271740483,
+      "answer": {
+       "status": 503,
+       "retryAfter": "1",
+       "body": "{\"error\":{\"code\":\"index_behind\"}}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xed9fac860e6bc5e932455232eedca8b71c44da4d\",\"fee_recipient\":\"0xa2846747651cb6fb24e6ed7861f0ec1c8d9fd262\",\"sell_sender\":null,\"fee_collector\":null,\"epoch_ms\":60000,\"epoch_start_ms\":1794271680000,\"block\":\"0x901ade5\",\"fee\":\"30000000000000\",\"step\":\"10000000000000\"}"
+    }
+   }
+  ],
+  "notCarried": {
+   "status": 404,
+   "retryAfter": null,
+   "body": "{\"error\":{\"code\":\"not_found\"}}"
+  },
+  "from": "local, this card (server.ts handler in process at 127.0.0.1)"
+ },
+ "bad": {
+  "at": "2026-11-10T00:45:04.490Z",
+  "base": "https://ct-api.unrealized.trade",
+  "turnMs": 1794271500000,
+  "runs": [
+   {
+    "network": "base",
+    "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+    "turn": [
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 0,
+      "askedMs": 1794271500003,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 80,
+      "askedMs": 1794271500080,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 160,
+      "askedMs": 1794271500162,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 240,
+      "askedMs": 1794271500242,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 320,
+      "askedMs": 1794271500322,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base",
+      "pool": "0xaa080e74ec99cf5c684548c77ca145edfcf899cf",
+      "offsetMs": 480,
+      "askedMs": 1794271500482,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x34d6c36\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"base\",\"pool\":\"0xaa080e74ec99cf5c684548c77ca145edfcf899cf\",\"fee_recipient\":\"0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d\",\"sell_sender\":\"0x2139756ab61ad861b4e25a009f092683e7454ee9\",\"fee_collector\":\"0xad33ac6fb59b0b06ca6bbf9d56d51990dc06a047\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271440000,\"block\":\"0x34d6b0a\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood",
+    "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+    "turn": [
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 0,
+      "askedMs": 1794271500031,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 80,
+      "askedMs": 1794271500081,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 160,
+      "askedMs": 1794271500163,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 240,
+      "askedMs": 1794271500242,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 320,
+      "askedMs": 1794271500324,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "robinhood",
+      "pool": "0x9306359433127c4f3be426f6faeb00a3c41f66db",
+      "offsetMs": 480,
+      "askedMs": 1794271500483,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x695dcee\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood\",\"pool\":\"0x9306359433127c4f3be426f6faeb00a3c41f66db\",\"fee_recipient\":\"0x63c4b707b319d3f1643a7d0d61c188d76ec8f23d\",\"sell_sender\":\"0x92874bbc2638f644872d911d8b72d734978e24ae\",\"fee_collector\":\"0xdc41efe2174d6ba6db3f6f96672672bafc1b88e7\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271440000,\"block\":\"0x695dabe\",\"fee\":\"60000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "base-sepolia",
+    "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+    "turn": [
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 0,
+      "askedMs": 1794271500032,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 80,
+      "askedMs": 1794271500082,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 160,
+      "askedMs": 1794271500164,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 240,
+      "askedMs": 1794271500243,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 320,
+      "askedMs": 1794271500326,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     },
+     {
+      "network": "base-sepolia",
+      "pool": "0xeb967dfc1b4ffb22942f833c76866ea85fc42266",
+      "offsetMs": 480,
+      "askedMs": 1794271500483,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x361e87c\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"base-sepolia\",\"pool\":\"0xeb967dfc1b4ffb22942f833c76866ea85fc42266\",\"fee_recipient\":\"0x6c830ac1b22d96baf692af4dd17d822ba61c32ec\",\"sell_sender\":\"0xd378cda68babba6a9dc1d52335bb76ca9e6a7553\",\"fee_collector\":\"0x9cc4788af51677aaa7770d78277c41fb864b35e1\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271440000,\"block\":\"0x361e750\",\"fee\":\"20000000000000\",\"step\":\"10000000000000\"}"
+    }
+   },
+   {
+    "network": "robinhood-testnet",
+    "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+    "turn": [
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 0,
+      "askedMs": 1794271500032,
+      "answer": {
+       "status": 404,
+       "retryAfter": null,
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 80,
+      "askedMs": 1794271500082,
+      "answer": {
+       "status": 404,
+       "retryAfter": null,
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 160,
+      "askedMs": 1794271500165,
+      "answer": {
+       "status": 404,
+       "retryAfter": null,
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 240,
+      "askedMs": 1794271500243,
+      "answer": {
+       "status": 404,
+       "retryAfter": null,
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 320,
+      "askedMs": 1794271500327,
+      "answer": {
+       "status": 404,
+       "retryAfter": null,
+       "body": "{\"error\":{\"code\":\"not_found\"}}"
+      }
+     },
+     {
+      "network": "robinhood-testnet",
+      "pool": "0xed9fac860e6bc5e932455232eedca8b71c44da4d",
+      "offsetMs": 480,
+      "askedMs": 1794271500483,
+      "answer": {
+       "status": 200,
+       "retryAfter": null,
+       "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xed9fac860e6bc5e932455232eedca8b71c44da4d\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271500000,\"block\":\"0x901a9f6\",\"fee\":\"30000000000000\",\"step\":\"10000000000000\"}"
+      }
+     }
+    ],
+    "before": {
+     "status": 200,
+     "retryAfter": null,
+     "body": "{\"chain\":\"evm\",\"network\":\"robinhood-testnet\",\"pool\":\"0xed9fac860e6bc5e932455232eedca8b71c44da4d\",\"fee_recipient\":\"0xe40f67e8502a3e2ebf4caf7bdee8ac8758b472a7\",\"sell_sender\":\"0xd12d83097671d731df2db731e973ad9a07673607\",\"fee_collector\":\"0xb174f0e859f00a7b593baca38394327e3d6bf638\",\"epoch_ms\":60000,\"epoch_start_ms\":1794271440000,\"block\":\"0x901a8a7\",\"fee\":\"30000000000000\",\"step\":\"10000000000000\"}"
+    }
+   }
+  ],
+  "notCarried": {
+   "status": 404,
+   "retryAfter": null,
+   "body": "{\"error\":{\"code\":\"not_found\"}}"
+  },
+  "from": "https://ct-api.unrealized.trade, helper f8945cd4"
+ }
+}

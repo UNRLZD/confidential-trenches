@@ -9,7 +9,8 @@ import { ActivityList } from "./Activity.tsx";
 import type { ActUi } from "./Activity.tsx";
 import { ExitIc, Ic } from "./icons.tsx";
 import { activity, amount, calendar, cents, closedRows, EDGES, filterActivity, filterRows, held, line, NO_FILTER, pct, portfolio, restored, shortAddress, stats, units, usd, walletRows } from "./model.ts";
-import type { ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
+import type { CashPart, ClosedRow, PoolRow, Pools, Range, Row, Stats, Totals, WalletRow } from "./model.ts";
+import { chainOf } from "../market/pads.ts";
 import { usePortfolioSource } from "./source.tsx";
 import type { PortfolioAction, PortfolioSource } from "./source.tsx";
 import { W } from "./W.tsx";
@@ -256,19 +257,54 @@ function Where({ t, loading, phone }: { t: Totals | null; loading: boolean; phon
     { id: "positions", w: "positions" as const, v: t?.inPos ?? 0n, col: "var(--acc)" },
     { id: "onway", w: "onTheWay" as const, v: t?.onWay ?? 0n, col: "var(--blue)" },
   ];
+  const body = (p: (typeof parts)[number]) => (
+    <>
+      <div className="pvk"><W id={p.w} /></div>
+      <div className="pvvr"><span className="pvv num">{usd(p.v)}</span><span className="pvp num">{tot > 0n ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
+      <Strip lit={tot > 0n ? Number((p.v * 40n) / tot) : 0} col={p.col} />
+    </>
+  );
   return (
     <div className="pvtiles">
-      {parts.map((p) => (
-        <div className="pvt" key={p.id} data-tile={p.id} style={{ ["--tc" as string]: p.col }}>
-          <div className="pvk"><W id={p.w} /></div>
-          <div className="pvvr"><span className="pvv num">{usd(p.v)}</span><span className="pvp num">{tot > 0n ? pct(Number((p.v * 10000n) / tot)).replace("+", "") : "—"}</span></div>
-          <Strip lit={tot > 0n ? Number((p.v * 40n) / tot) : 0} col={p.col} />
-        </div>
-      ))}
+      {parts.map((p) =>
+        p.id === "cash" ? (
+          <CashTile key={p.id} parts={t?.parts ?? []} col={p.col}>{body(p)}</CashTile>
+        ) : (
+          <div className="pvt" key={p.id} data-tile={p.id} style={{ ["--tc" as string]: p.col }}>{body(p)}</div>
+        ),
+      )}
       <div className="pvt pvtot" data-tile="total">
         <div className="pvk"><W id="total" /></div>
         <div className="pvvr"><span className="pvv num">{usd(tot)}</span></div>
         <Strip lit={tot > 0n ? 40 : 0} col="var(--acc)" />
+      </div>
+    </div>
+  );
+}
+
+/** The Cash tile with each chain's part (card portfolio-one-balance): the chain's mark and name (pads.ts CHAINS, data),
+ *  its part in dollars, a dash for a pool with no fresh price, and Processing while a deposit of its money is on neither
+ *  side (model.ts CASH_MOVING). Shown on hover or focus on desktop and by a tap on the phone; data-part names each row's
+ *  chain and cents for the checks. */
+function CashTile({ parts, col, children }: { parts: readonly CashPart[]; col: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const flip = () => setOpen((o) => !o);
+  return (
+    <div className={`pvt pvcash${open ? " open" : ""}`} data-tile="cash" style={{ ["--tc" as string]: col }} role="button" tabIndex={0} aria-expanded={open} onClick={flip} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), flip())}>
+      {children}
+      <div className="pvparts" data-parts={parts.length}>
+        {parts.map((p) => {
+          const m = chainOf(p.chain);
+          return (
+            <div className="pvpr" key={p.chain} data-part={p.chain} data-cents={p.cents === null ? "none" : p.cents.toString()} data-moving={p.moving || undefined}>
+              {m && <img className="pvpl" src={m.logo} alt="" style={{ padding: Math.round(16 * m.inset) }} />}
+              <span className="ell">{m?.name ?? p.chain}</span>
+              <span className="grow" />
+              {p.moving && <span className="tag blue"><W id="processing" /></span>}
+              <span className="num">{p.cents === null ? DASH : usd(p.cents)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

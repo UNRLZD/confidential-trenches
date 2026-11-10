@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { APP_HOST, SIGN_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { INIT, MEASURE } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, "../..");
@@ -179,7 +180,7 @@ async function rules(tag, f, w, errors, dialogs, page) {
 
 const dir = await build();
 const route = await harnessRoute(dir, "tap");
-const browser = await launchBrowser("chromium");
+const browser = await launchHarnessBrowser("chromium");
 let n = 0;
 const shot = async (page, name, w, scheme) => {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}-${w.name}-${scheme}.png`) });

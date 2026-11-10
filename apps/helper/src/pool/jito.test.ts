@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SOLANA_JITO_TIP_MIN } from "@blindfill/kit";
-import { JITO_QUEUE_MAX_MS, JITO_REGION_INTERVAL_MS, JITO_TIMEOUT_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES } from "./jito.ts";
+import { JITO_QUEUE_MAX_MS, JITO_REGION_INTERVAL_MS, JITO_TICK_SLACK_MS, JITO_TIMEOUT_MS, jitoSender, SOLANA_JITO_BLOCK_ENGINES, type JitoSleep } from "./jito.ts";
 
 const SIG = "5".repeat(88);
+const R0 = SOLANA_JITO_BLOCK_ENGINES[0]!;
 const answer = (body: string, status = 200) => async () => new Response(body, { status });
 
 test("the block engines are Jito's eight mainnet regions, each bundle-only, not the global name; the least tip is the kit's 1,000 lamports", () => {
@@ -92,10 +93,9 @@ test("M369 (M1): a rebroadcast goes only to its region, only in a second nobody 
   const first = await j.send("AA==", SIG);
   assert.equal(first.kind, "ok");
   const region = (first as { region: string }).region;
-  assert.equal((await j.rebroadcast(region, "AA==", SIG)).kind, "busy", "the first send's second");
-  assert.equal(e.seen.length, 1, "nothing sent");
-  await new Promise((r) => setTimeout(r, 210));
+  // inside the first send's second: it waits for the region's next one, then goes (card helper-pace-tick-refused-flake)
   assert.equal((await j.rebroadcast(region, "AA==", SIG)).kind, "ok");
+  assert.ok(e.seen[1]!.at - e.seen[0]!.at >= 200, `it went ${(e.seen[1]!.at - e.seen[0]!.at).toFixed(1)} ms after the first send`);
   assert.deepEqual(e.seen.map((x) => x.host), [new URL(region).host, new URL(region).host]);
   assert.equal((await j.rebroadcast("https://example.invalid/", "AA==", SIG)).kind, "refused", "not a block engine");
   // its region busy: one request, no other region asked
@@ -110,15 +110,18 @@ test("M369 (M1): a first send books its region's next second ahead of every rebr
   const j = jitoSender({ fetch: e.fetch, intervalMs: 300 });
   // every region's second just taken by a rebroadcast
   for (const r of SOLANA_JITO_BLOCK_ENGINES) assert.equal((await j.rebroadcast(r, "AA==", SIG)).kind, "ok");
-  const f = j.send("AA==", SIG); // books the region whose second ends first, and waits for it
-  await new Promise((r) => setTimeout(r, 400));
-  const sent = await f;
-  assert.equal(sent.kind, "ok");
-  const booked = (sent as { region: string }).region;
-  // the first send took that region's second: a rebroadcast there now is refused unsent; the others go
+  const f = j.send("AA==", SIG); // books the region whose second ends first (the first one taken), and waits for it
+  // the first send booked that region's next second: a rebroadcast there is refused unsent at once, never waits for it
   const before = e.seen.length;
-  for (const r of SOLANA_JITO_BLOCK_ENGINES) assert.equal((await j.rebroadcast(r, "AA==", SIG)).kind, r === booked ? "busy" : "ok", r);
-  assert.equal(e.seen.length, before + 7);
+  const t0 = performance.now();
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "busy");
+  assert.ok(performance.now() - t0 < 100, "it did not wait");
+  assert.equal(e.seen.length, before, "nothing sent");
+  const sent = await f;
+  assert.deepEqual(sent, { kind: "ok", region: R0 });
+  const at = e.seen.filter((x) => x.host === new URL(R0).host).map((x) => x.at);
+  assert.equal(at.length, 2);
+  assert.ok(at[1]! - at[0]! >= 300, `the first send went ${(at[1]! - at[0]!).toFixed(1)} ms after the rebroadcast`);
 });
 
 test("the request: POST sendTransaction, base64, no redirect followed", async () => {
@@ -170,8 +173,9 @@ test("M374 (2): an event loop that stalls past two booked seconds never sends tw
   assert.ok(r.every((x) => x.kind === "ok"));
   assert.equal(at.length, 3);
   for (let k = 1; k < at.length; k++) assert.ok(at[k]! - at[k - 1]! >= 199, `sends ${k - 1} and ${k} went ${(at[k]! - at[k - 1]!).toFixed(1)} ms apart`);
-  // and a rebroadcast is held to the last actual send too, not to the booking
-  assert.equal((await j.rebroadcast(SOLANA_JITO_BLOCK_ENGINES[0]!, "AA==", SIG)).kind, "busy");
+  // and a rebroadcast is held to the last actual send too, not to the booking: it waits out that send's interval
+  assert.equal((await j.rebroadcast(SOLANA_JITO_BLOCK_ENGINES[0]!, "AA==", SIG)).kind, "ok");
+  assert.ok(at[3]! - at[2]! >= 199, `the rebroadcast went ${(at[3]! - at[2]!).toFixed(1)} ms after the last send`);
 });
 
 // The review's G2 (fold 4, R4f): the default queue limit is in use, not only a constant. Every region booked 3 s ahead:
@@ -219,8 +223,6 @@ const okFetch = () => {
   const at: number[] = [];
   return { at, fetch: async () => (at.push(performance.now()), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG }))) };
 };
-const R0 = SOLANA_JITO_BLOCK_ENGINES[0]!;
-
 // G6 (F2g): a rebroadcast never takes a second a first send booked and has not yet used, even when that send's timer
 // is late (here the loop stalls past it): the booking, not the last actual send, is what holds the rebroadcast back.
 test("G6: a rebroadcast is refused while a booked first send is overdue", async () => {
@@ -310,4 +312,121 @@ test("a burst of 24 first sends at once (three a region) all go, the last a regi
     assert.equal(at.length, 3, host);
     for (let k = 1; k < at.length; k++) assert.ok(at[k]! - at[k - 1]! >= JITO_REGION_INTERVAL_MS, `${host}: ${(at[k]! - at[k - 1]!).toFixed(1)} ms apart`);
   }
+});
+
+// Card helper-pace-tick-refused-flake: the kit's pacer stamps its tick in Date.now() and the gate stamps the request's
+// hand-off in performance.now(); whatever runs between the two (the thread descheduled, a collection, the fetch call's
+// own work) delays the gate's stamp. A tick stamped late makes the next on-time tick look early by that much: past
+// JITO_TICK_SLACK_MS it was refused unsent ("1 of 200 ticks refused", PR #553's fresh-run job, 9 Nov 22:13Z and
+// 22:38Z). The sender's time here is a fake one, so every gap is exact.
+function fakeTime() {
+  let t = 0;
+  const timers: { at: number; fire: (v: boolean) => void }[] = [];
+  const clock = () => t;
+  const sleep: JitoSleep = (ms, signal) =>
+    new Promise((done) => {
+      if (signal?.aborted) return done(false);
+      const e = { at: t + ms, fire: done };
+      timers.push(e);
+      signal?.addEventListener("abort", () => {
+        const k = timers.indexOf(e);
+        if (k >= 0) timers.splice(k, 1);
+        done(false);
+      }, { once: true });
+    });
+  const settle = () => new Promise((r) => setImmediate(r));
+  /** Moves the time on by `ms`, firing each timer due on the way at its own time, in order. */
+  async function advance(ms: number) {
+    const end = t + ms;
+    for (;;) {
+      await settle();
+      timers.sort((a, b) => a.at - b.at);
+      if (timers.length === 0 || timers[0]!.at > end) break;
+      const next = timers.shift()!;
+      t = Math.max(t, next.at);
+      next.fire(true);
+    }
+    t = end;
+    await settle();
+  }
+  const at: number[] = [];
+  const fetch = async () => (at.push(t), new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: SIG })));
+  return { clock, sleep, advance, at, fetch, waiting: () => timers.length, now: () => t };
+}
+const gaps = (at: number[]) => at.slice(1).map((x, k) => x - at[k]!);
+
+test("a tick the kit sent on time but the gate stamped late by more than the slack waits for the region's next second and goes; it is never refused", async () => {
+  const f = fakeTime();
+  const j = jitoSender({ fetch: f.fetch, regions: [R0], clock: f.clock, sleep: f.sleep });
+  const pace = j.intervalMs + JITO_TICK_SLACK_MS; // the kit's minIntervalMs (solana.ts)
+  const PAUSE = 5; // between the kit's stamp and the gate's, over the 2 ms slack
+  // tick 1 at the kit's 0, stamped by the gate at 5
+  await f.advance(PAUSE);
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok");
+  // tick 2 on time, at the kit's 1,052, stamped at once: 1,047 ms after the gate's stamp of tick 1
+  await f.advance(pace - PAUSE);
+  const second = j.rebroadcast(R0, "AA==", SIG);
+  await f.advance(0);
+  assert.equal(f.at.length, 1, "not before the region's next second");
+  await f.advance(JITO_REGION_INTERVAL_MS + PAUSE - pace - 1);
+  assert.equal(f.at.length, 1, "1 ms before it");
+  await f.advance(1);
+  assert.equal((await second).kind, "ok", "the on-time tick was refused");
+  assert.deepEqual(f.at, [PAUSE, PAUSE + JITO_REGION_INTERVAL_MS], "it went at the region's next second, not before");
+});
+
+test("the gate never lets two sends reach a region inside its interval when it waits: one tick waits at a time, a second is refused, a first send's booking wins, the send's end drops it", async () => {
+  const f = fakeTime();
+  const I = 1_000;
+  const j = jitoSender({ fetch: f.fetch, regions: [R0], intervalMs: I, clock: f.clock, sleep: f.sleep });
+  assert.equal((await j.rebroadcast(R0, "AA==", SIG)).kind, "ok"); // at 0
+  // a tick inside the interval waits; a third tick while it waits is refused at once, unsent
+  await f.advance(400);
+  const held = j.rebroadcast(R0, "AA==", SIG);
+  await f.advance(0);
+  assert.deepEqual(await j.rebroadcast(R0, "AA==", SIG), { kind: "busy", detail: "a rebroadcast already waits for the region's second" });
+  await f.advance(600);
+  assert.equal((await held).kind, "ok");
+  assert.deepEqual(f.at, [0, 1_000]);
+  // a first send that books the second a tick waits for takes it: the tick is refused when it wakes, the send goes
+  await f.advance(500);
+  const tick = j.rebroadcast(R0, "AA==", SIG);
+  await f.advance(0);
+  const first = j.send("AA==", SIG); // books 2,000, the region's next second
+  await f.advance(500);
+  assert.deepEqual(await tick, { kind: "busy", detail: "the region's second is taken" });
+  assert.deepEqual(await first, { kind: "ok", region: R0 });
+  assert.deepEqual(f.at, [0, 1_000, 2_000]);
+  // a tick waiting when its send ends is dropped unsent, and frees the region's place for the next one
+  const ended = new AbortController();
+  await f.advance(300);
+  const dropped = j.rebroadcast(R0, "AA==", SIG, ended.signal);
+  await f.advance(0);
+  ended.abort();
+  assert.deepEqual(await dropped, { kind: "busy", detail: "the send ended" });
+  assert.equal(f.waiting(), 0, "its timer cleared");
+  const next = j.rebroadcast(R0, "AA==", SIG);
+  await f.advance(700);
+  assert.equal((await next).kind, "ok");
+  assert.deepEqual(f.at, [0, 1_000, 2_000, 3_000]);
+  for (const g of gaps(f.at)) assert.ok(g >= I, `${g} ms apart`);
+});
+
+test("200 kit ticks at the path's pace, each stamped by the gate up to 500 ms late: none refused, no two sends inside the region's interval", async () => {
+  const f = fakeTime();
+  const j = jitoSender({ fetch: f.fetch, regions: [R0], clock: f.clock, sleep: f.sleep });
+  const pace = j.intervalMs + JITO_TICK_SLACK_MS;
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31), seed / 2 ** 31);
+  const answers: Promise<{ kind: string }>[] = [];
+  for (let n = 0; n < 200; n++) {
+    const late = Math.floor(rand() * 500);
+    await f.advance(late); // the gate's stamp, `late` after the kit's
+    answers.push(j.rebroadcast(R0, "AA==", SIG));
+    await f.advance(pace - late); // the kit's next tick
+  }
+  await f.advance(2 * pace);
+  assert.deepEqual((await Promise.all(answers)).filter((a) => a.kind !== "ok"), [], "a tick was refused");
+  assert.equal(f.at.length, 200);
+  for (const g of gaps(f.at)) assert.ok(g >= JITO_REGION_INTERVAL_MS, `two sends ${g} ms apart`);
 });
