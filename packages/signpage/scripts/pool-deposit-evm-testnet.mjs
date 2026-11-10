@@ -3,6 +3,7 @@
 // card evm-pool-pins), read on the testnet build's two RPCs of the chain (src/pool-testnet.ts TESTNET_RPCS), its tree
 // read by the wallet's evmTreeSync as the page reads it.
 //   node packages/signpage/scripts/pool-deposit-evm-testnet.mjs <base|robinhood> <out.json> [--settle] [--keep-seed]
+//   FLOW_RESUME=<kept seed file> runs again with that seed (its U), never writing it again
 // - A seed made in this run only (16 random bytes), never printed: its note's secrets end with the run, so the
 //   0.001 ETH stays in the pool as a test deposit. With --keep-seed it is written, before U is asked for, to
 //   ~/.ct-devnet-runs/evm-buy-<chain>-<time>.seed (the folder 0700, the file 0600, its path logged, never its bytes), as
@@ -15,7 +16,7 @@
 //   until it settles the note UNSPENT with its leaf (a Deposited is final only after ~22 min), 40 min at most.
 // - It writes U, the deposit's tx, the answers and the note to <out.json>. Nothing here logs a key or the words.
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
@@ -77,8 +78,11 @@ const rpcs = [traced(0, rpcOf(RPCS[0])), traced(1, rpcOf(RPCS[1]))];
 for (const r of rpcs) if (BigInt(await r("eth_chainId", [])) !== EVM_CHAIN_IDS[NETWORK]) throw new Error(`not ${NETWORK}`);
 
 const w = await openWalletStore({ indexedDB: new IDBFactory() });
-const entropy = randomBytes(16);
-if (KEEP) {
+// FLOW_RESUME=<seed file>: a kept seed again (a run whose reads failed after U was funded), so the same U deposits
+const resumed = process.env.FLOW_RESUME;
+const entropy = resumed ? Buffer.from(readFileSync(resumed, "utf8").trim(), "hex") : randomBytes(16);
+if (entropy.length !== 16) throw new Error("FLOW_RESUME: not a kept seed");
+if (KEEP && !resumed) {
   const dir = join(homedir(), ".ct-devnet-runs");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);

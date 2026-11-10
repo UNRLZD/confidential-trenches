@@ -17,9 +17,13 @@ Tx: robinhood-testnet 0xd0951815432c66af3d2ef4f4c5130fe44d660a361297beb95b9821df
 Tx: robinhood-testnet 0x102b23d3dca9e168eac747afe92dee1fe49d29b1f36401b9edba4a93d911438f
 Tx: robinhood-testnet 0xc983514b18f8134dd64e586e6ee7803ac9d227d15f3c904ee32e7c47459caecb
 Tx: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
+Tx: robinhood-testnet 0xb2cb6539a527ca4061b7181bbc32d67d026d0facd36427f2077e0e5492977a83
+Tx: robinhood-testnet 0xd4e91f7ebc2a662d5e25d32be3484f5d647d247711eeecd8acb11130d5ec2d35
+Tx: robinhood-testnet 0xd8c9f878aa3eed048d5006645a677c33311c3da6822d32cc79df732b7dbef672
 Buy: base-sepolia 0x41ddc17fc2ca900a6c50541125e326f7871407e8645bcc916a6ff729191aaa0c
 Buy: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
 Buy: base-sepolia 0xd5b86cb358f400ae60ae0316810fb956cf9d4a1da9bcfe57bb933723e03adce4
+Buy: robinhood-testnet 0xd8c9f878aa3eed048d5006645a677c33311c3da6822d32cc79df732b7dbef672
 
 One real private buy on each testnet through the signing page's own code path: the page's pool kinds
 (src/pool-kinds.ts over src/pool-testnet.ts testnetPool, as main.ts wires them) on the testnet build's own pins, pool
@@ -98,4 +102,18 @@ RPCs' Bought in block 56852469 for 2.069392 USDC; W's holding was completed with
 block. Only the helper's POST /v1/pool/evm/send named W and the nullifier; every pool RPC request named none of W, the
 nullifier or the transaction. A try at 06:30Z answered failed before the take: the run script's page gave no open store
 (main.ts gives held: opened()), so the pending write failed and nothing was signed into a send or left the device; the
-script now gives it. Robinhood testnet was not run: E holds 0.00017 ETH there, under the 0.001 ETH a deposit needs.
+script now gives it.
+
+The fourth run (07:46Z to 08:02Z), Robinhood testnet, on the read-back of the second review's fixes and the pending
+record's end (the run that wrote it removes it on a coded refusal of the first POST or on not_landed): its three Tx lines
+(after the second run's Robinhood buy) are E funding U 0x1E6443051AB821bAd2E4941090b6f842d09d80c1 with 0.00103692 ETH,
+U's deposit of 0.001 ETH (block 151254215 on both pool RPCs), and the buy, the last Buy line. The buy of tSPILL at
+08:02:02Z: the chunk 1000000000000000 wei, the fee 30000000000000 wei, W 0x32e484e88Ee8c17B2E8fdd7b22cd1EEEAE91d47d,
+route Uniswap v4 native to tSPILL (fee 10000, tick spacing 200, no hook) through the pinned v4 adapter. Sent 4.3 s after
+the tap, filled 3.3 s later from both RPCs' Bought in block 151254752 for 0.000960299999981614 tSPILL; W's holding was
+completed with that amount, the transaction and the block. Only the helper's POST /v1/pool/evm/send named W and the
+nullifier. Before it, the run's first deposit try (07:46Z) lost its reads to this machine's network (EHOSTUNREACH on
+IPv6, timeouts on IPv4) and E's funding send was tried again while the first had gone through: U
+0xF0C51401645ce7CA50B54EB6f309dD480Ac41Eb5 holds 0.00207384 ETH from E's nonces 24 and 25 and made no deposit. The
+deposit script then ran again on the kept seed (FLOW_RESUME), which named a new U, funded once at nonce 26 after E's
+pending and latest nonces were read equal on both RPCs.
