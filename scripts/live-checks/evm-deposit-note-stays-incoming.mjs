@@ -14,7 +14,18 @@
 //   - the dead-send judgment's (spentFinal): eth_getTransactionCount at that block's hash (EIP-1898), the "finalized"
 //     header on both at or below that block, and the header at the lower finalized number with one hash on both.
 // Each must answer a well-formed value on both seats. A seat that refuses one (a state miss is judged a wrong answer,
-// judgeStateMiss) fails the check; a seat that answers nothing usable on its last try makes it INCONCLUSIVE.
+// judgeStateMiss) fails the check at once, as the page fails on it; a seat that answers nothing usable is asked again
+// (the page's client retries a transport fault too) and on its last try makes the check INCONCLUSIVE. Two seats on
+// different blocks at one number (a moment's fork, or a seat behind) are read again from the newest block, FORK_TRIES
+// times FORK_WAIT_MS apart, as the page's own lag retry reads them (the wallet's EVM_LAG_TRIES and EVM_LAG_WAIT_MS),
+// and fail only if they still differ.
+// What the bundle rule (OLD_STATE_READ) sees: a state method named as a string literal, then within one list of params
+// with no nested list, a "finalized" or "safe" literal as the last param, in any quote style, with no space after the
+// commas: the shape the page's minified build makes, so SIGN_HOST's bundle before this card is caught by it. It does not
+// see the tag or the method passed through a variable or a loop, a state read at the hash or number of a block read at
+// "finalized", a nested list before the tag, or an unminified bundle's spacing: a rewrite of the path in such a shape
+// passes it, and the provider reads below and the page's own tests (pool-deposit-evm.test.ts, "no step of the deposit
+// asks a block's state by a tag other than the newest") hold that case.
 // After: sign
 //   node scripts/live-checks/evm-deposit-note-stays-incoming.mjs [--record <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
@@ -62,6 +73,8 @@ function judgeBundle(b, pairs) {
 }
 export const CHAINS = Object.freeze({ base: "0x2105", robinhood: "0x1237" });
 const TRIES = 3;
+export const FORK_TRIES = 5;
+export const FORK_WAIT_MS = 2_000;
 const QTY = /^0x[0-9a-fA-F]{1,64}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 
@@ -99,6 +112,8 @@ export function replayer(log) {
   };
 }
 
+/** Two seats on different blocks at one number: read again from the newest block. */
+class Fork extends Error {}
 class ReadFailed extends Error {
   constructor(message, quiet) {
     super(message);
@@ -111,6 +126,7 @@ async function ask(transport, url, method, params, what) {
   for (let t = 1; t <= TRIES; t++) {
     a = await transport(url, method, params);
     if (a?.noAnswer === undefined && a?.error === undefined) return a?.result;
+    if (a?.noAnswer === undefined) break; // an RPC error: the page does not ask again either
   }
   if (a.noAnswer !== undefined) throw new ReadFailed(`${what}: no answer: ${a.noAnswer}`, true);
   throw new ReadFailed(`${host(url)}: ${what}: RPC error ${a.error?.code}: ${a.error?.message ?? JSON.stringify(a.error)}`, false);
@@ -126,7 +142,17 @@ const header = (x, what) => {
 const hx = (n) => `0x${n.toString(16)}`;
 
 /** The deposit path's reads on one pair (`before`: the read the path made before this card, U's nonce at "finalized"). */
-async function pairReads(transport, { chain, seats, address }, before) {
+async function pairReads(transport, pair, before, sleep) {
+  for (let t = 1; ; t++) {
+    try {
+      return await pairReadsOnce(transport, pair, before);
+    } catch (e) {
+      if (!(e instanceof Fork) || t >= FORK_TRIES) throw e;
+      await sleep(FORK_WAIT_MS);
+    }
+  }
+}
+async function pairReadsOnce(transport, { chain, seats, address }, before) {
   const lines = [];
   const both = (f) => Promise.all(seats.map((u, k) => f(u, k)));
   for (const u of seats) {
@@ -141,7 +167,7 @@ async function pairReads(transport, { chain, seats, address }, before) {
   const tops = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", ["latest", false], "the latest block"), `${host(u)}: the latest block`));
   const n = tops[0].number < tops[1].number ? tops[0].number : tops[1].number;
   const at = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", [hx(n), false], `block ${n}`), `${host(u)}: block ${n}`));
-  if (at[0].hash !== at[1].hash) throw new Error(`${chain}: the seats hold different blocks at ${n}`);
+  if (at[0].hash !== at[1].hash) throw new Fork(`${chain}: the seats hold different blocks at ${n} on ${FORK_TRIES} reads`);
   const blk = at[0];
   for (const [method, what] of [["eth_getTransactionCount", "U's nonce"], ["eth_getBalance", "U's balance"]])
     await both(async (u) => qty(await ask(transport, u, method, [address, hx(n)], `${what} at the newest block ${n}`), `${host(u)}: ${what}`));
@@ -150,20 +176,20 @@ async function pairReads(transport, { chain, seats, address }, before) {
   const low = fin[0].number < fin[1].number ? fin[0].number : fin[1].number;
   if (low > n) throw new Error(`${chain}: a finalized header ${low} above the newest agreed block ${n}`);
   const f = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", [hx(low), false], `block ${low}`), `${host(u)}: block ${low}`));
-  if (f[0].hash !== f[1].hash) throw new Error(`${chain}: the seats hold different final blocks at ${low}`);
+  if (f[0].hash !== f[1].hash) throw new Fork(`${chain}: the seats hold different final blocks at ${low} on ${FORK_TRIES} reads`);
   lines.push(`${chain} (${seats.map(host).join(", ")}): newest agreed block ${n}; U's nonce and balance at it, U's nonce at its hash, the finalized header ${low} (${n - low} blocks behind) with one hash on both: all answered`);
   return lines;
 }
 
 /** The check: { verdict, ok, lines }. */
-export async function check(transport, { pairs = pagePairs(), before = false, bundle } = {}) {
+export async function check(transport, { pairs = pagePairs(), before = false, bundle, sleep = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
   const lines = [];
   try {
     if (bundle === undefined) throw new Error("no bundle read");
     lines.push(judgeBundle(bundle, pairs));
     for (const p of pairs) {
       if (p.seats.length !== 2) throw new Error(`${p.chain}: the pool list seats ${p.seats.length} providers, not two`);
-      lines.push(...(await pairReads(transport, p, before)));
+      lines.push(...(await pairReads(transport, p, before, sleep)));
     }
     return { verdict: "PASS", ok: true, lines };
   } catch (e) {

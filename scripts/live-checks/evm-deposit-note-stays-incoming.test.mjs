@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { bundleFacts, check, pagePairs, replayer } from "./evm-deposit-note-stays-incoming.mjs";
 
 const A = JSON.parse(readFileSync(new URL("./evm-deposit-note-stays-incoming.answers.json", import.meta.url), "utf8"));
-const run = (r, o = {}) => check(replayer(r.log), { pairs: r.pairs, bundle: r.bundle, ...o });
+const run = (r, o = {}) => check(replayer(r.log), { pairs: r.pairs, bundle: r.bundle, sleep: async () => {}, ...o });
 const REFUSED = { code: -32000, message: "historical state bac0f84b9ba5e79e767198a3fb6d8dacc874bc06b584baf3a3e35c8ebda3f78d is not available" };
 
 test("the check reads the page's own pool pairs, and the good run is a run on them", () => {
@@ -56,7 +56,23 @@ test("planted: a seat whose finalized header is refused, or two seats on differe
   const fork = A.good.log.map((e) => (e === last ? { ...e, result: { ...e.result, hash: `0x${"22".repeat(32)}` } } : e));
   const r = await run({ ...A.good, log: fork });
   assert.equal(r.verdict, "FAIL");
-  assert.match(r.lines.at(-1), /^base: the seats hold different final blocks at \d+$/);
+  assert.match(r.lines.at(-1), /^base: the seats hold different final blocks at \d+ on 5 reads$/);
+});
+
+test("planted: a moment's fork (two seats on different blocks at one number, then one block) is read again and passes, as the page's lag retry reads it; an RPC error is never asked again", async () => {
+  const seat = A.good.pairs[0].seats[1];
+  for (const final of [false, true]) {
+    const at = A.good.log.filter((e) => e.url === seat && e.method === "eth_getBlockByNumber" && /^0x/.test(e.params[0]))[final ? 1 : 0];
+    const log = A.good.log.flatMap((e) => (e === at ? [{ ...e, result: { ...e.result, hash: `0x${"22".repeat(32)}` } }, e] : [e]));
+    const waits = [];
+    const r = await run({ ...A.good, log }, { sleep: async (ms) => void waits.push(ms) });
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.deepEqual(waits, [2_000], final ? "the final blocks" : "the newest block");
+  }
+  const once = A.good.log.flatMap((e) => (e.url === A.good.pairs[1].seats[0] && e.method === "eth_getBalance" ? [{ url: e.url, method: e.method, params: e.params, error: REFUSED }, e] : [e]));
+  const r = await run({ ...A.good, log: once });
+  assert.equal(r.verdict, "FAIL", "refused once: failed, as the page fails");
+  assert.match(r.lines.at(-1), /U's balance at the newest block \d+: RPC error -32000/);
 });
 
 test("bundleFacts: a state read at a finalized or safe tag is found in any quote style; reads at the newest block or a hash are not; a seat it lacks is named", () => {
