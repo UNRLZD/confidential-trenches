@@ -1,0 +1,187 @@
+{
+ "recorded_at": "2026-11-09T16:53:47.092Z",
+ "helper": {
+  "fee": {
+   "url": "https://ct-api.unrealized.trade/v1/pool/fee?cluster=mainnet&pool=7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+   "origin": "https://confidential.unrealized.trade",
+   "status": 200,
+   "commit": "ed0f714a0332ebe1be41cc5343266ca5281f6542",
+   "body": {
+    "chain": "solana",
+    "cluster": "mainnet",
+    "program": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+    "pool": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+    "fee_payer": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+    "epoch_ms": 60000,
+    "epoch_start_ms": 1794243180000,
+    "fee": "1300000",
+    "step": "100000"
+   }
+  }
+ },
+ "program": {
+  "address": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+  "getAccountInfo": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 467391731
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": true,
+       "lamports": 833120,
+       "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+       "rentEpoch": 18446744073709552000,
+       "space": 36
+      }
+     },
+     "id": 1
+    }
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 467391731
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": true,
+       "lamports": 833120,
+       "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+       "rentEpoch": 18446744073709552000,
+       "space": 36
+      }
+     },
+     "id": 1
+    }
+   }
+  ]
+ },
+ "pool": {
+  "address": "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+  "getAccountInfo": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 467391733
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": false,
+       "lamports": 11719560,
+       "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "rentEpoch": 18446744073709552000,
+       "space": 2179
+      }
+     },
+     "id": 1
+    }
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 467391732
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": false,
+       "lamports": 11719560,
+       "owner": "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+       "rentEpoch": 18446744073709552000,
+       "space": 2179
+      }
+     },
+     "id": 1
+    }
+   }
+  ]
+ },
+ "fee_payer": {
+  "address": "CPWhFyFL8naX5W8DEB5XTrEUR2XtkHv7kyXdavpqDTTU",
+  "getAccountInfo": [
+   {
+    "url": "https://api.mainnet-beta.solana.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.0",
+       "slot": 467391733
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": false,
+       "lamports": 10000000,
+       "owner": "11111111111111111111111111111111",
+       "rentEpoch": 18446744073709552000,
+       "space": 0
+      }
+     },
+     "id": 1
+    }
+   },
+   {
+    "url": "https://solana-rpc.publicnode.com",
+    "status": 200,
+    "json": {
+     "jsonrpc": "2.0",
+     "result": {
+      "context": {
+       "apiVersion": "4.4.1",
+       "slot": 467391733
+      },
+      "value": {
+       "data": [
+        "",
+        "base64"
+       ],
+       "executable": false,
+       "lamports": 10000000,
+       "owner": "11111111111111111111111111111111",
+       "rentEpoch": 18446744073709552000,
+       "space": 0
+      }
+     },
+     "id": 1
+    }
+   }
+  ]
+ }
+}

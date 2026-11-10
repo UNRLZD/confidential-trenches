@@ -433,6 +433,25 @@ test("evm-pool-sync-holds: a start with a keyed Robinhood URL whose operator run
   assert.ok(!err.includes("FAKEKEY123") && !err.includes("grove.city"), "the URL or its key was printed");
 });
 
+// card sol-pools-mainnet-pin (review P3-4 W13 of e3489b3b): the start runs env-check.ts checkSolanaPairOperators beside
+// the other readers, so a keyed Solana URL of the signing page's direct seat's operator (PublicNode) stops it with exit 2
+test("a start with a keyed Solana URL whose operator is the signing page's direct seat's exits 2 naming the variable, never the URL or its key", async (t) => {
+  const { spawn } = await import("node:child_process");
+  const dir = mkdtempSync(join(tmpdir(), "start-sol-op-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const env = { PATH: process.env.PATH, HELPER_COMMIT: COMMIT, PORT: "0", HELPER_STORE_DIR: dir, JUPITER_API_KEY: "test-jupiter-0001", RELAY_API_KEY: "test-relay-0001", LIFI_API_KEY: "test-lifi-0001", ONECLICK_JWT: "test-oneclick-0001", SOLANA_RPC_URL_QUICKNODE: "https://solana-rpc.publicnode.com/FAKEKEY123" };
+  const c = spawn(process.execPath, [join(import.meta.dirname, "server.ts")], { env, stdio: ["ignore", "ignore", "pipe"] });
+  let err = "";
+  c.stderr.on("data", (d) => (err += d));
+  const code = await new Promise<number | string>((done) => {
+    const timer = setTimeout(() => (c.kill("SIGKILL"), done("still running after 5 s")), 5_000);
+    c.on("exit", (n) => (clearTimeout(timer), done(n ?? "signal")));
+  });
+  assert.equal(code, 2, `exit ${code}; stderr: ${err.replace(/\(node:\d+\) ExperimentalWarning[^\n]*\n(\(Use[^\n]*\n)?/g, "")}`);
+  assert.match(err, /helper: SOLANA_RPC_URL_QUICKNODE: its operator publicnode\.com is the signing page's direct Solana seat/);
+  assert.ok(!err.includes("FAKEKEY123"), "the key was printed");
+});
+
 test("card helper-ready-without-gt: a new helper whose GeckoTerminal window is full of the old helper's calls, and held for the handover, still turns ready: readiness reads the lists the warm file handed over, the Solana list, a token page and its holders, never GeckoTerminal", async () => {
   let now = Date.parse("2026-11-03T11:36:00Z");
   const fx = (f: string) => readFileSync(new URL(`./data/evm/fixtures/${f}`, import.meta.url), "utf8");

@@ -12,6 +12,7 @@ import { base58, base64 } from "@scure/base";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { entropyToWords, freshWallet, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { SOLANA_POOL_FEE_STEP, solanaPoolFee, solanaPoolPage } from "../../kit/src/trade/solana/pool-buy.ts";
+import { SOLANA_PUMP_PROGRAM } from "../../kit/src/checks/solana/checks.ts";
 import { solanaDecodeMessage } from "../../kit/src/checks/solana/message.ts";
 import type { SolanaRpc } from "../../kit/src/trade/solana/send.ts";
 import type { VaultSnarkjsProof, VaultWithdrawSignals } from "../../kit/src/vault/shapes.ts";
@@ -95,6 +96,8 @@ type World = {
   curve: string;
 };
 type Plant = {
+  /** our lookup table as served lacks the venue's program (a table made for another venue) */
+  tableNotForVenue?: boolean;
   /** the slot of the device's blockhash read, past the quote's */
   slotAhead?: number;
   /** provider B's curve account changed at one byte: "reserves" (the top byte of its virtual SOL reserves: far past
@@ -173,7 +176,7 @@ async function world(plant: Plant = {}, proof = readyProof()): Promise<World> {
   const heightReads = [0, 0];
   const txReads = [0, 0];
   const accounts = (p: 0 | 1): Record<string, { owner: string; data: Uint8Array }> => ({
-    [s.tableAddr]: { owner: ALT, data: s.tableData },
+    [s.tableAddr]: { owner: ALT, data: plant.tableNotForVenue ? s.tableData.filter((_, i) => i < 56 || Math.floor((i - 56) / 32) !== s.addresses.indexOf(SOLANA_PUMP_PROGRAM)) : s.tableData },
     [POOL]: { owner: PROGRAM, data: poolAccount() },
     [solanaPoolPage(PROGRAM, 0, 0)]: { owner: PROGRAM, data: page(plant.rootOnOne && p === 1 ? 77n : STATE_ROOT) },
     [solanaPoolPage(PROGRAM, 1, 0)]: { owner: PROGRAM, data: page(LABEL_ROOT) },
@@ -351,6 +354,16 @@ test("a quote off the request (older than the device's slot allows) is refused: 
   assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "quote_check_failed" });
   assert.equal(w.state(), "HELD", "the proof stays ready for the next tap");
   assert.ok(!w.log.includes("send") && !w.log.some((x) => x.startsWith("take")));
+});
+
+// review P3-4 of a34c1626: a buy on a venue our lookup table is not made for (PumpSwap on the mainnet's curve-only table)
+// threw a plain Error and answered "failed"; the kit's SolanaPoolBuyError venue_not_in_table answers not_allowed, as a page
+// with no table does, before W signs
+test("a buy whose venue our lookup table is not made for is refused not_allowed, never failed: nothing signed or sent", async () => {
+  const w = await world({ tableNotForVenue: true });
+  assert.deepEqual(await runPoolBuy(w.host, ASK), { error: "not_allowed" });
+  assert.ok(!w.log.includes("send") && !w.log.includes("seed"), "nothing signed or sent");
+  assert.notEqual(w.state(), "RESERVED");
 });
 
 test("a venue the two RPCs disagree on is refused: nothing taken or sent", async () => {
