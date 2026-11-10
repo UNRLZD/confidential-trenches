@@ -705,7 +705,7 @@ test("(m07) the rule checks the quote's own amount in, never the run's sum: a de
   // kit (here) answers its genuine quote of the recording's amount
   const r0 = readyOf();
   const c2 = CHUNK + 1n;
-  const ready = { ...r0, chunk: c2, publicSignals: r0.publicSignals.map((x, i) => (i === 2 ? c2.toString() : x)) };
+  const ready = { ...r0, chunk: c2, publicSignals: r0.publicSignals.map((x, i) => (i === 2 ? c2.toString() : x)) as typeof r0.publicSignals };
   const { h, seen } = host({ ready: [ready] });
   h.quote = async () => fixtureQuote();
   assert.deepEqual(await runEvmPoolBuy(h, { ...ASK, amount: c2 }), { error: "quote_check_failed" });
