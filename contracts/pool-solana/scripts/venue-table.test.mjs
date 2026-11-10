@@ -1427,6 +1427,19 @@ test("Ctrl-C and SIGTERM say last how the funder's SOL comes back: the resume li
   }
 });
 
+test("--return refuses the record's program and pool from the record itself, though both RPCs answer them as wallets", async () => {
+  let lie = false;
+  const k = fakeCluster({ view: (i, a, c, v) => (lie && (a === MAINNET.program_id || a === MAINNET.pool) ? { owner: SYSTEM, data: Buffer.alloc(0), lamports: 1_000_000_000n } : v) });
+  const p = await planOn(k, "pumpswap", recordDir());
+  lie = true;
+  for (const [a, why] of [[MAINNET.program_id, "is the pool's program, not a wallet"], [MAINNET.pool, "is the pool's account, not a wallet"]]) {
+    const base = keyBase();
+    await assert.rejects(vt.run(p, { returnTo: a, base, say: k.say, wait: k.wait, now: k.now }), (e) => e.message === `--return ${a} ${why}: nothing is made or sent`);
+    assert.deepEqual(readdirSync(base), []);
+  }
+  assert.equal(k.sends.length, 0);
+});
+
 test("--return is read on both RPCs: a token account on the second RPC's read is refused, nothing made", async () => {
   const k = fakeCluster({ view: (i, a, c, v) => (i === 1 && a === RETURN ? { owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", data: Buffer.alloc(165), lamports: 2_039_280n } : v) });
   const base = keyBase();
