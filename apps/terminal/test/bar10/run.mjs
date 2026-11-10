@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { APP_HOST, harnessRoute } from "../../../../scripts/live-checks/app-in-shell.mjs";
 import { collect, INIT, judge, MEASURE, WIDTHS, withOutage } from "../../../../scripts/live-checks/app-shell.mjs";
 import { browserLabel, launchBrowser } from "../../../../scripts/browsers.mjs";
+import { launchHarnessBrowser } from "../../../../scripts/harness-sockets.mjs";
 import { edgy, solana } from "../discover-screens/snapshots.ts";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -189,7 +190,7 @@ try {
     ok &&= j.ok;
     loads += rec.loads.length;
   }
-  const browser = await launchBrowser("chromium");
+  const browser = await launchHarnessBrowser("chromium");
   const okStates = await states(browser, route, prepare).finally(() => browser.close());
   console.log(`${ok && okStates ? "PASS" : "FAIL"} BAR-10 and the shell's rules on ${loads} loads (every routed path, 390 and 1440, answers at once and late) and Discover's offline and empty states${SHOTS ? `; shots in ${SHOTS}` : ""} on ${browserLabel(browser)}`);
   code = ok && okStates ? 0 : 1;

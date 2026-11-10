@@ -5,7 +5,15 @@
 // buy's limit (eth_estimateGas, which lands on that floor, x 1.2) is about twice its gas used; the kit's G(depth)
 // (packages/kit/src/trade/evm/pool-fee.ts) covers it at every depth, which packages/kit/test/evm-pool-fee.test.ts holds
 // against the measured table. For each EVM pool a deploy record names (scripts/ci/helper-live-checks.mjs evmPools):
-//   - GET <helper>/v1/pool/fee?pool=<pool>: 200, this network and pool, the epoch's first block and its fee in wei;
+//   - the chain's head on two of the network's providers (below): the newest epoch both hold a block in, E, the
+//     epoch it judges (card evm-fee-quiet-epoch: helper live run 42726731385 asked the epoch now in the first half
+//     second of 10 Nov 00:15Z, before the helper's provider held a block in it, and went red on a 404 that answered
+//     200 two minutes later);
+//   - GET <helper>/v1/pool/fee?pool=<pool>&epoch=<E> (evm-pool-fee-epoch.mjs evmPoolFeeAsk: on the helper's
+//     "no block yet", 503 index_behind, or 404 not_found, E less one epoch, which both providers are a minute past):
+//     200, this network, pool and epoch, the epoch's first block and its fee in wei. A pool the helper does not carry
+//     answers 404 to both: FAIL. Fewer than two providers answering the head, two heads over an epoch apart, or no
+//     epoch within a proof's life (POOL_LIFE_MAX_MS) with a block: INCONCLUSIVE, never a pass on nothing;
 //   - that block, read by number on the kit's providers for the network (evmPoolVenues: its fee providers first, then
 //     its quote providers): one hash and one base fee on every provider that answered, and the pool's
 //     currentTreeDepth() at that hash, one word on each, with at least two answering;
@@ -31,6 +39,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { evmPoolGas, evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { evmPools } from "../ci/helper-live-checks.mjs";
 import { EXIT, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { epochOf, evmPoolFeeAsk, feeUrl, noBlockYet, POOL_EPOCH_MS, POOL_LIFE_MAX_MS } from "./evm-pool-fee-epoch.mjs";
 
 export const BASE = "https://ct-api.unrealized.trade";
 /** currentTreeDepth() (State.sol), as evm-buy-hookdata-fee.mjs reads it */
@@ -44,14 +53,55 @@ export const providersOf = (network) => {
   return [...new Set([...(v?.feeProviders ?? []), ...(v?.providers ?? [])])];
 };
 
-/** One run: each pool's fee answer and the reads of its block on each provider. `feeOf(network, pool)` gives the
- *  helper's answer as { status, body }. A read is { host, noAnswer } or { host, hash, baseFeePerGas, depth } with any
- *  JSON-RPC error kept as `error`, judged. */
-export async function collect(feeOf, fetchFn = fetch, pools = evmPools()) {
+/** A proof's oldest epoch the helper still prices is POOL_LIFE_MAX_MS back on its clock: the check keeps this much
+ *  clear of that edge, so a clock a few seconds apart never turns an old epoch into a 404. */
+const LIFE_EDGE_MS = 5_000;
+
+/** The chain's head on the network's providers, in order, until two answer: [{ host, number, timestamp } | { host,
+ *  noAnswer }]. */
+async function headsOf(network, fetchFn) {
+  const heads = [];
+  for (const url of providersOf(network)) {
+    if (heads.filter((h) => h.noAnswer === undefined).length === 2) break;
+    const host = new URL(url).host;
+    const b = await rpcAnswer(url, "eth_getBlockByNumber", ["latest", false], { fetchFn, nullNoAnswer: true });
+    if (b.noAnswer !== undefined) heads.push({ host, noAnswer: b.noAnswer });
+    else if (b.error !== undefined || typeof b.result?.number !== "string" || !HEX.test(b.result.number) || typeof b.result?.timestamp !== "string" || !HEX.test(b.result.timestamp)) heads.push({ host, noAnswer: `${host}: no answer (not a block: ${JSON.stringify(b.error ?? b.result).slice(0, 120)})` });
+    else heads.push({ host, number: b.result.number, timestamp: b.result.timestamp });
+  }
+  return heads;
+}
+
+/** The epoch to judge from the heads and the time now, ms: { epochMs } or { inconclusive: why }. */
+export function epochToJudge(heads, nowMs) {
+  const got = (Array.isArray(heads) ? heads : []).filter((h) => h?.noAnswer === undefined && typeof h?.timestamp === "string" && HEX.test(h.timestamp));
+  if (got.length < 2) return { inconclusive: `${got.length} of ${Array.isArray(heads) ? heads.length : 0} providers answered the chain's head` };
+  const [a, b] = got.map((h) => Number(BigInt(h.timestamp)) * 1000);
+  if (Math.abs(a - b) > POOL_EPOCH_MS) return { inconclusive: `the providers' heads are ${Math.abs(a - b) / 1000} s apart (${got.map((h) => `${h.host} block ${BigInt(h.number)} at ${new Date(Number(BigInt(h.timestamp)) * 1000).toISOString()}`).join(", ")})` };
+  const epochMs = epochOf(Math.min(a, b, nowMs));
+  // the epoch before it, asked when the helper has no block in it yet, must still be inside a proof's life
+  if (epochMs - POOL_EPOCH_MS < nowMs - POOL_LIFE_MAX_MS + LIFE_EDGE_MS) return { inconclusive: `no epoch within a proof's life has a block: the newest both providers hold is from ${new Date(Math.min(a, b)).toISOString()}` };
+  return { epochMs };
+}
+
+/** One run: per pool, the chain's head on two providers, the epoch judged, the fee answer for it (and the first answer
+ *  when the epoch before was asked) and the reads of its block on each provider. `feeOf(network, pool, epochMs)` gives
+ *  the helper's answer as { status, body }. A read is { host, noAnswer } or { host, hash, baseFeePerGas, depth } with
+ *  any JSON-RPC error kept as `error`, judged. */
+export async function collect(feeOf, fetchFn = fetch, pools = evmPools(), now = Date.now) {
   const runs = [];
   for (const [network, pool] of Object.entries(pools)) {
     if (pool === null) continue;
-    const fee = await feeOf(network, pool);
+    const heads = await headsOf(network, fetchFn);
+    const nowMs = now();
+    const e = epochToJudge(heads, nowMs);
+    if (e.inconclusive !== undefined) {
+      runs.push({ network, pool, heads, nowMs, inconclusive: e.inconclusive, fee: null, reads: [] });
+      continue;
+    }
+    // the shared rule for which epoch is asked; feeOf makes its own request, so only the epoch is read from the URL
+    const asked = await evmPoolFeeAsk((url) => feeOf(network, pool, Number(new URL(url).searchParams.get("epoch"))), "http://helper.invalid", pool, { epochMs: e.epochMs, nowMs });
+    const fee = asked.answer;
     const reads = [];
     const block = fee?.body?.block;
     if (fee?.status === 200 && typeof block === "string" && HEX.test(block)) {
@@ -75,7 +125,7 @@ export async function collect(feeOf, fetchFn = fetch, pools = evmPools()) {
         reads.push({ host, hash: hash ?? null, baseFeePerGas: b.result?.baseFeePerGas ?? null, depth: d.result ?? null, ...(d.error !== undefined ? { error: d.error } : {}) });
       }
     }
-    runs.push({ network, pool, fee, reads });
+    runs.push({ network, pool, heads, nowMs, epochMs: asked.epochMs, ...(asked.first === null ? {} : { first: { epochMs: e.epochMs, answer: asked.first } }), fee, reads });
   }
   return runs;
 }
@@ -89,9 +139,22 @@ export function judge(runs) {
   if (!Array.isArray(runs) || runs.length === 0) say(false, "no EVM pool to check");
   for (const r of Array.isArray(runs) ? runs : []) {
     const n = `${r?.network} ${r?.pool}`;
+    // card evm-fee-quiet-epoch: a provider that did not answer the head is named as any other no-answer; a run that
+    // could not name an epoch with a block is judged on nothing, so it is INCONCLUSIVE, never a pass
+    for (const h of Array.isArray(r?.heads) ? r.heads.filter((x) => x?.noAnswer !== undefined) : []) lines.push(`--- ${n} ${h.host}: no answer: ${h.noAnswer}`);
+    if (r?.heads !== undefined) {
+      const e = epochToJudge(r.heads, r.nowMs);
+      if (e.inconclusive !== undefined || r.inconclusive !== undefined || e.epochMs !== (r.first?.epochMs ?? r.epochMs)) {
+        quiet = true;
+        lines.push(`INCONCLUSIVE ${n}: ${e.inconclusive ?? r.inconclusive ?? `the run judged epoch ${r.first?.epochMs ?? r.epochMs}, the heads name ${e.epochMs}`}`);
+        continue;
+      }
+      if (r.first !== undefined) lines.push(`--- ${n}: the helper answered ${r.first.answer?.status} ${JSON.stringify(r.first.answer?.body?.error ?? r.first.answer?.body ?? null).slice(0, 80)} for epoch ${new Date(r.first.epochMs).toISOString()}, which the providers hold a block in; judged the epoch before`);
+    }
     const b = r?.fee?.body;
-    if (r?.fee?.status !== 200 || b?.network !== r.network || b?.pool !== r.pool || typeof b?.fee !== "string" || !DEC.test(b.fee) || typeof b?.block !== "string" || !HEX.test(b.block)) {
-      say(false, `${n}: the fee answer ${JSON.stringify(r?.fee).slice(0, 300)}`);
+    if (r?.fee?.status !== 200 || b?.network !== r.network || b?.pool !== r.pool || typeof b?.fee !== "string" || !DEC.test(b.fee) || typeof b?.block !== "string" || !HEX.test(b.block) || (r.epochMs !== undefined && b?.epoch_start_ms !== r.epochMs)) {
+      // the epoch before the one the heads name is a minute behind both providers: no block there is the helper's fault
+      say(false, `${n}: the fee answer${r.epochMs === undefined ? "" : ` for epoch ${new Date(r.epochMs).toISOString()}`} ${JSON.stringify(r?.fee).slice(0, 300)}${noBlockYet(r?.fee) ? " (the helper holds no block in an epoch both providers are past)" : ""}`);
       continue;
     }
     const all = Array.isArray(r.reads) ? r.reads : [];
@@ -132,8 +195,8 @@ export function judge(runs) {
   return { verdict, ok: verdict === "PASS", lines };
 }
 
-const httpFee = (base, fetchFn) => async (_network, pool) => {
-  const r = await fetchFn(`${base}/v1/pool/fee?pool=${pool}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+const httpFee = (base, fetchFn) => async (_network, pool, epochMs) => {
+  const r = await fetchFn(feeUrl(base, pool, epochMs), { cache: "no-store", signal: AbortSignal.timeout(20_000) });
   let body = null;
   try {
     body = await r.json();
@@ -146,12 +209,13 @@ const httpFee = (base, fetchFn) => async (_network, pool) => {
 /** This tree's helper code, in process, with a throwaway sender key: the answer GET /v1/pool/fee gives (server.ts). */
 async function localFee() {
   const { evmPoolSendersFromEnv } = await import("../../apps/helper/src/pool/evm.ts");
-  return async (network, pool) => {
+  return async (network, pool, epochMs) => {
     const NAME = network.toUpperCase().replace(/-/g, "_");
     const senders = evmPoolSendersFromEnv({ [`POOL_EVM_ADDRESS_${NAME}`]: pool, [`POOL_EVM_SENDER_KEY_${NAME}`]: `0x${randomBytes(32).toString("hex")}` });
     const s = senders.get(pool);
-    const body = await s.fee(Date.now());
-    return body === null ? { status: 404, body } : { status: 200, body };
+    const body = await s.fee(epochMs ?? Date.now());
+    // as server.ts answers it: no block in the epoch yet is 503 index_behind
+    return body === null ? { status: 503, body: { error: { code: "index_behind" } } } : { status: 200, body };
   };
 }
 
@@ -160,7 +224,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
   try {
     const feeOf = args.includes("--local") ? await localFee() : httpFee(opt("--base") ?? BASE, fetch);
-    const runs = await collect(feeOf);
+    // --pool <network>=<address>: that one pool instead of the deploy records' (how the not-carried answer was recorded)
+    const one = opt("--pool")?.split("=");
+    const runs = await collect(feeOf, fetch, one === undefined ? evmPools() : { [one[0]]: one[1]?.toLowerCase() ?? null });
     const r = judge(runs);
     for (const l of r.lines) console.log(l);
     const file = opt("--record");

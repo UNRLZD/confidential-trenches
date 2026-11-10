@@ -10,7 +10,8 @@
 // are one shared resource of the helper's address. Each region has one pacer, shared by every carry: one request a
 // second plus JITO_PACE_MARGIN_MS, counted from when the request was handed to fetch. A carry's first send books the
 // region whose next second comes first and waits for it, ahead of every rebroadcast (a rebroadcast goes only into a
-// second nobody booked, and never waits); a 429, a 5xx or a transport
+// second nobody booked: one that comes before the region's interval since its last request is over waits for the rest
+// of it, one at a time a region, and gives way to a first send that books that second); a 429, a 5xx or a transport
 // failure goes on to the next region. A rebroadcast goes only to the region that took the carry's first send and never
 // walks the regions. So rebroadcasts, however many carries are in flight, never keep a first send out of a region for
 // more than the second already started there.
@@ -44,8 +45,11 @@ export const JITO_PACE_MARGIN_MS = 50;
 export const JITO_REGION_INTERVAL_MS = SOLANA_KEYLESS_PATH_INTERVAL_MS + JITO_PACE_MARGIN_MS;
 /** What a pacer that drives rebroadcast() adds over the region's interval: the kit's (packages/kit send.ts paceArm)
  *  counts whole Date.now() ms from its tick, the gate here performance.now() from the request's hand-off, so at an
- *  equal interval a tick lands a fraction of a ms early and is refused unsent (review of 48c11e3c: 5-10% of ticks, one
- *  gap 2,100.8 ms) [design: 2 ms, two of the kit clock's whole-ms steps]. */
+ *  equal interval a tick lands a fraction of a ms early (review of 48c11e3c: 5-10% of ticks, one gap 2,100.8 ms)
+ *  [design: 2 ms, two of the kit clock's whole-ms steps]. It keeps the usual tick from waiting; a tick early by more
+ *  (a pause between the kit's stamp and the gate's: the thread descheduled, a collection, the fetch call's own work;
+ *  1 of 200 under load on CI, card helper-pace-tick-refused-flake) waits for the rest of the interval instead of being
+ *  refused (rebroadcast). */
 export const JITO_TICK_SLACK_MS = 2;
 /** How long one region gets before its try counts as a transport failure [design: a block engine answers in well under 1 s]. */
 export const JITO_TIMEOUT_MS = 2_000;
@@ -66,9 +70,26 @@ export type JitoSender = {
   readonly intervalMs: number;
   /** A carry's first send; `queueMaxMs` (default the sender's) is the longest it waits for a region's second. */
   send(base64Tx: string, signature: string, queueMaxMs?: number): Promise<JitoSend>;
-  /** A rebroadcast to `region` (the one that took the first send) only, only in a second nobody booked. */
-  rebroadcast(region: string, base64Tx: string, signature: string): Promise<JitoTry>;
+  /** A rebroadcast to `region` (the one that took the first send) only, only in a second nobody booked; one inside
+   * the interval of the region's last request waits for the rest of it (one at a time a region), unless `signal`
+   * aborts first. */
+  rebroadcast(region: string, base64Tx: string, signature: string, signal?: AbortSignal): Promise<JitoTry>;
 };
+/** Resolves true after `ms`, or false at once when `signal` aborts (the timer cleared). */
+export type JitoSleep = (ms: number, signal?: AbortSignal) => Promise<boolean>;
+const realSleep: JitoSleep = (ms, signal) =>
+  new Promise((done) => {
+    if (signal?.aborted) return done(false);
+    const stop = () => {
+      clearTimeout(t);
+      done(false);
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      done(true);
+    }, ms);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
 export type JitoFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 async function bounded(r: Response): Promise<string> {
@@ -89,20 +110,23 @@ async function bounded(r: Response): Promise<string> {
   return Buffer.concat(parts).toString("utf8");
 }
 
-export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number; intervalMs?: number; queueMaxMs?: number } = {}): JitoSender {
+/** `clock` and `sleep` are the sender's time (a test's fake one; by default performance.now() and setTimeout). */
+export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetch; timeoutMs?: number; intervalMs?: number; queueMaxMs?: number; clock?: () => number; sleep?: JitoSleep } = {}): JitoSender {
   const regions = opts.regions ?? SOLANA_JITO_BLOCK_ENGINES;
   if (regions.length === 0) throw new Error("no block engine");
   const doFetch = opts.fetch ?? ((u: string, i: RequestInit) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? JITO_TIMEOUT_MS;
   const interval = opts.intervalMs ?? JITO_REGION_INTERVAL_MS;
   const queueMax = opts.queueMaxMs ?? JITO_QUEUE_MAX_MS;
-  const clock = () => performance.now(); // monotonic: a wall clock set back never books a second twice
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const clock = opts.clock ?? (() => performance.now()); // monotonic: a wall clock set back never books a second twice
+  const sleep = opts.sleep ?? realSleep;
   /** Per region: when its next second starts (no request before it); a first send books it ahead. */
   const free = regions.map(() => -Infinity);
   /** Per region: when its last request actually went (M374 (2)): a timer that fires late never brings two inside one
    * interval, as two sends booked a second apart would be after an event loop that stalled past both. */
   const sent = regions.map(() => -Infinity);
+  /** Per region: a rebroadcast waits for its next second (at most one; another early one is refused). */
+  const holding = regions.map(() => false);
   /** Marks region i's request as gone at `now`: called in the same turn, right after the request is handed to fetch,
    * so no pause between the mark and the request can shorten the next gap (card helper-jito-pace-margin). */
   const mark = (i: number, now: number) => {
@@ -188,12 +212,25 @@ export function jitoSender(opts: { regions?: readonly string[]; fetch?: JitoFetc
       }
       return transportOnly ? { kind: "transport", detail: last } : { kind: "busy", detail: last, throttled };
     },
-    async rebroadcast(region, b64, signature) {
+    async rebroadcast(region, b64, signature, signal) {
       const i = regions.indexOf(region);
       if (i < 0) return { kind: "refused", detail: "not a block engine" };
-      const now = clock();
-      // free is never under the last actual request plus the interval (mark), so this holds both
-      if (free[i]! > now) return { kind: "busy", detail: "the region's second is taken" };
+      // free is never under the last actual request plus the interval (mark), so the loop's test holds both. Early
+      // inside only the last request's interval (free is that, no first send booked past it), the rebroadcast waits
+      // out the rest, at most one interval since that request was at or before now, then reads again: a first send
+      // that booked the second meanwhile, or a late timer's second taken, refuses it then as now.
+      let held = false;
+      try {
+        for (let now = clock(); free[i]! > now; now = clock()) {
+          if (free[i]! > sent[i]! + interval) return { kind: "busy", detail: "the region's second is taken" };
+          if (holding[i] && !held) return { kind: "busy", detail: "a rebroadcast already waits for the region's second" };
+          holding[i] = held = true;
+          if (!(await sleep(free[i]! - now, signal))) return { kind: "busy", detail: "the send ended" };
+        }
+      } finally {
+        if (held) holding[i] = false;
+      }
+      // in the same turn as the read above: nothing can take the second between them
       return one(i, b64, signature);
     },
   };
