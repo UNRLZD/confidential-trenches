@@ -125,7 +125,10 @@ export const M = [
   ["review F4 the record kept after its verdict", SELL, T, "        await h.kept?.drop(signature).catch(() => {});\n", ""],
   // review of fcd67b72: P1 the load settles a kept sell with no note; P2 the kept record before the request's record
   ["review P1 the load settles sells only on a note", TESTNET, TT, " || (await keptSells(page.store).list().catch(() => [])).length > 0) await settleSells();", ") await settleSells();"],
-  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n", ""], ["    await h.signed?.(signature);\n", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n"]]],
+  ["review P2 the kept record after the request's record", SELL, T, [["    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n", ""], ["    await h.signed?.(signature);\n    sent = signature;\n", "    await h.signed?.(signature);\n    if (kept) await h.kept?.put({ signature, tx: base64.encode(signed), last: bh.lastHeight });\n    sent = signature;\n"]]],
+  // card pool-sell-share-across-wallets: each sale of a sell names its signature on the request's record (its leg) before
+  // the run's own signed hook and before the send; the leg's write moved after the send would let a sale leave unnamed
+  ["a sell leg's record names its signature only after the send", SELL, T, [["        await hooks.signed?.(i, signature);\n        await h.signed?.(signature);\n", "        await h.signed?.(signature);\n"], ["        open();\n        hooks.sent?.(i, signature);\n", "        open();\n        void hooks.signed?.(i, signature);\n        hooks.sent?.(i, signature);\n"]]],
   // review of 5de2165e: P3-2 the state read's kept list read unguarded (one that always fails ends the read early)
   ["review P3-2 the kept list read unguarded", TESTNET, TT, "(await keptSells(page.store).list().catch(() => [])).length > 0", "(await keptSells(page.store).list()).length > 0"],
 ];

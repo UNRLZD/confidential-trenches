@@ -1,0 +1,31 @@
+{
+ "_note": {
+  "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js as build-app.mjs wrote them at 99400052: the share or amount schema, the units from the device's own total, each wallet's sale as units and the rule refusing a share: PASS against a release list holding it",
+  "bad": "4efc012f's build (main before this card, mainnet): a sell is units alone from one wallet: FAIL",
+  "liveBefore": "SIGN_HOST read 2026-11-10T00:22Z, before this card's deploy: FAIL"
+ },
+ "good": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-H3qLKvafMeeznMoPx6ceK2te75lokuQ/rmKK7VW9OZOZKVoRlALsZhpO6FIcHcxQ\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-H3qLKvafMeeznMoPx6ceK2te75lokuQ/rmKK7VW9OZOZKVoRlALsZhpO6FIcHcxQ",
+  "schema": true,
+  "units": true,
+  "legs": true,
+  "rule": true
+ },
+ "bad": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+  "schema": false,
+  "units": false,
+  "legs": false,
+  "rule": false
+ },
+ "liveBefore": {
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
+  "schema": false,
+  "units": false,
+  "legs": false,
+  "rule": false
+ }
+}
