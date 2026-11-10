@@ -223,6 +223,16 @@ test("the selector: the smallest of the given tables, one tip account for all; n
   // a table that holds no account of the venue's program is no generation of it: passed over beside the venue's own,
   // and refused venue_not_in_table by name when no given table is made for the venue
   assert.equal(buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve), g1!.table], { pick: () => 3 }).table, g1!.table);
+  // a table not made for the venue beside a venue's table too small for the buy: no_table_fits, never venue_not_in_table
+  // (the page answers no_table_fits for the one and venue_not_pinned for the other)
+  // (a table holding PumpSwap's program and nothing else: made for the venue, every other account static)
+  const short = tableOf(g1!.list.filter((a) => a === "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"), 9);
+  assert.equal(short.table.addresses.length, 1);
+  assert.throws(() => buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve), short], { pick: () => 3 }), /^Error: no_table_fits: the smallest is \d+ bytes > 1232$/);
+  // the tip account is drawn once for every table, so each is sized with the same transaction
+  let draws = 0;
+  buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [g1!.table, g2!.table, twin], { pick: () => (draws++, 3) });
+  assert.equal(draws, 1);
   assert.throws(
     () => buildSolanaPoolBuyOnTables(cfg, release, ven, r, { ...bare, stateSize: 6 }, [tableOf(curve), tableOf(curve, 8)], {}),
     (e: unknown) => e instanceof SolanaPoolBuyError && e.code === "venue_not_in_table" && /^venue_not_in_table: none of the 2 tables holds an account of the pumpswap program$/.test(e.message),
