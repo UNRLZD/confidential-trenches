@@ -2,30 +2,60 @@
  "good": {
   "key": "signpage-state-holdings",
   "url": "local build",
-  "at": "2026-11-10T00:28:23.266Z",
+  "at": "2026-11-10T04:20:22.060Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-cnae4C3S4DHaVkBsb9nlruqbhId0COEaHpPXSIm4O30U3gaFwDmLKGVt8vJ5pQ1s",
+   "integrity": "sha384-JWA0ZlcAjhM/7Kkf50Yx6WjYBB2Y7vKV1jFJN07n9wQpxETMfP0LTNNS4Vs1HGYD",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 862806,
-   "sha384": "sha384-cnae4C3S4DHaVkBsb9nlruqbhId0COEaHpPXSIm4O30U3gaFwDmLKGVt8vJ5pQ1s",
+   "bytes": 864074,
+   "sha384": "sha384-JWA0ZlcAjhM/7Kkf50Yx6WjYBB2Y7vKV1jFJN07n9wQpxETMfP0LTNNS4Vs1HGYD",
    "marks": {
     "sum": 1,
     "fill": 1,
     "set": 1,
     "pass": 1,
-    "costs": 1,
+    "costs": 2,
     "kept": 1,
     "sold": 1,
     "first": 1,
     "run": 1,
     "records": 1,
     "preempt": 1
+   }
+  }
+ },
+ "bad_release_110": {
+  "key": "signpage-state-holdings",
+  "url": "https://confidential.unrealized.trade",
+  "at": "2026-11-10T03:38:53.965Z",
+  "index": {
+   "status": 200,
+   "scripts": 1,
+   "src": "/app.js",
+   "integrity": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+   "module": true
+  },
+  "app": {
+   "status": 200,
+   "bytes": 853801,
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+   "marks": {
+    "sum": 1,
+    "fill": 1,
+    "set": 0,
+    "pass": 0,
+    "costs": 0,
+    "kept": 0,
+    "sold": 0,
+    "first": 0,
+    "run": 0,
+    "records": 0,
+    "preempt": 0
    }
   }
  },

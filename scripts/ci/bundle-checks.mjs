@@ -40,7 +40,8 @@ export const IN_PROCESS = [
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
-  viaRead("signpage-state-holdings", () => import("../live-checks/signpage-state-holdings.mjs")),
+  // cut as a release only after its merge: the marks and the pin, not the ledger
+  { key: "signpage-state-holdings", host: "sign", load: () => import("../live-checks/signpage-state-holdings.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("evm-sell-no-release-in-flight", () => import("../live-checks/evm-sell-no-release-in-flight.mjs")),
   viaRead("evm-sell-unfunded-sim-keeps-route", () => import("../live-checks/evm-sell-unfunded-sim-keeps-route.mjs")),
   viaRead("kit-deposit-calls", () => import("../live-checks/kit-deposit-calls.mjs")),

@@ -1,41 +1,52 @@
 #!/usr/bin/env node
-// Live check of card signpage-state-holdings: SIGN_HOST's state carries the vault's USDC from the device's own notes,
-// never a fixed "0". A signed-out page shows no balance, so the check reads the deployed build's code path. The page is
-// one script: src/main.ts and all it imports are bundled into /app.js (packages/signpage/scripts/build-app.mjs), which
-// / names with its sha384, and the bundler keeps only code the page reaches, so the sum in /app.js is the state step's
-// (src/main.ts withVaultBalance, src/vault-balance.ts). The check reads what SIGN_HOST serves at / and at that script:
+// Live check of card signpage-state-holdings on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
+// only that:
 //   - / names exactly one module script, /app.js, with its integrity, and /app.js's sha384 is that integrity;
-//   - /app.js holds the sum's refusal of a counted note with no leaf value (a string literal, which minifying keeps);
-//   - /app.js sets vault_balance from that sum at USDC's 6 decimals over an awaited notes read (FILL, whatever names
-//     the minifier gives), where the build before it only ever wrote vault_balance:`0`;
-//   - /app.js sets positions from the device's own pass (src/positions.ts): the state step's `{...state,positions:p}`
-//     (SET, withPositions), the pass's Solana position with an amount at its decimals and a cost worked out from the
-//     buy records (PASS, positionsPass), the buy records' meta key (COSTS), the kept pass's (KEPT, the first state read
-//     after a load) and the device's full sells' (SOLD, the gone rule), where the build before it only ever sent
-//     positions:[];
-//   - /app.js runs that pass: the state read's positions() reads the kept pass, starts the sign-in's first pass and
-//     answers the last (FIRST), the cache calls the pass with its stop signal and a sell's read when one was fed (RUN),
-//     the pass asks the finder for the Ws of this device's buy records only (RECORDS), and a sell's own read of the Ws
-//     stops a running pass first (PREEMPT). A build whose state read never starts a pass, or whose cache never runs
-//     one, fails.
-// What it cannot see from outside: a signed-in device's positions. They need the device's seed and a buy on it, and a
-// runner holds neither, so the page's behaviour is held by its tests (packages/signpage/test/positions.test.ts and
-// positions-requests.test.ts, the mainnet build's every request); this check holds that the deployed script is the
-// build that wires it.
+//   - that /app.js is the /app.js of a written release list from this card's release on
+//     (packages/signpage/releases/release-<N>.json, N >= FIRST_RELEASE): its bytes are a build of a main that holds this
+//     card's commit, whose tests ran on it. This is what tells the fix from its absence: the marks below are shapes
+//     a broken build keeps (the review's seven broken builds all had them), and only the ledger ties the served bytes
+//     to the source the card's tests hold;
+//   - and in it, as minified, the state step's wiring: vault_balance from the device's own notes (SUM, FILL), positions
+//     from the device's own pass (SET, PASS, COSTS, KEPT, SOLD), the state read asking the pass (FIRST), the cache
+//     running it with its stop and a sell's read (RUN), the pass reading only the Ws this device bought (RECORDS), and a
+//     sell's read holding the passes off until it ends (PREEMPT). A build that drops any of them fails; one that keeps
+//     the shapes and breaks what they do is the ledger's to fail.
+// What it cannot see from outside: a signed-in device's positions, its requests, or a pass's timing. They need the
+// device's seed and a buy on it, and a runner holds neither; they are held by the card's tests, on the source the
+// release names (packages/signpage/test/positions.test.ts, positions-requests.test.ts: the mainnet build's every
+// request; pool-buy.test.ts: the buy's decimals). The recorded answers are probe()'s records of SIGN_HOST, or of a tree's
+// build (--local). The PR's own build runs judge(read, { ledger: false }) in scripts/ci/bundle-checks.mjs, since it is
+// cut as a release only after its merge.
 // After: sign
 //   node scripts/live-checks/signpage-state-holdings.mjs [--url <origin>] [--record <file>]
-//   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's committed build
+//   node scripts/live-checks/signpage-state-holdings.mjs --local [--record <file>]   this tree's build (no ledger)
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
 //   mark's count, never the bytes.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-state-holdings";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
+/** This card's release: the first signing page release list cut from a main holding this card's commit (release-110 is
+ *  the last before it; raise this to the first one cut after its merge if another release is cut first). */
+export const FIRST_RELEASE = 111;
+const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
+/** The SIGN_HOST /app.js of every written release list from `from` on: its sha384 to its release. */
+export function releasedAppJs(dir = RELEASES, from = FIRST_RELEASE) {
+  const out = new Map();
+  for (const f of readdirSync(dir)) {
+    const n = /^release-(\d+)\.json$/.exec(f)?.[1];
+    if (n === undefined || Number(n) < from) continue;
+    const app = JSON.parse(readFileSync(path.join(dir, f), "utf8")).hosts?.SIGN_HOST?.files?.find((x) => x.path === "/app.js");
+    if (typeof app?.sha384 === "string") out.set(app.sha384, `release-${n}`);
+  }
+  return out;
+}
 /** The sum's refusal, as src/vault-balance.ts writes it. */
 export const SUM = "vault balance: a counted note has no leaf value";
 /** vault_balance set from the sum of an awaited notes read, at 6 decimals: `vault_balance:f(g(await r(),s),6)`. */
@@ -50,18 +61,21 @@ export const COSTS = "owed/cost-sol";
 export const KEPT = "owed/positions-sol";
 /** The full sells' key (src/positions.ts POSITIONS_SOLD_KEY). */
 export const SOLD = "owed/sold-sol";
-/** The state read's positions(): `positions:async()=>(await c.ready(),c.first(),c.get())` (src/pool-testnet.ts). */
-export const FIRST = /positions:async\(\)=>\(await ([\w$]+)\.ready\(\),\1\.first\(\),\1\.get\(\)\)/g;
+/** The state read's positions(): the cache's read, which reads the kept pass, asks the sign-in's first pass and answers
+ *  the last unless a sign out overtook it: `read:async()=>{let e=s;if(await c.ready(),e!==s)return null;return c.first(),l}`
+ *  (src/positions.ts), and the page's `positions:()=>c.read()` (src/pool-testnet.ts). */
+export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)/g;
 /** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`. */
 export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,\.\.\.[\w$]+===null\?\{\}:\{found:[\w$]+\}\}\)/g;
-/** positionsPass asks the finder for the recorded Ws only: `.wallets(new Set(o.map(([e])=>e)))`. */
-export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\[[\w$]+\]\)=>[\w$]+\)\)\)/g;
-/** The sell host's read stops a running pass first: `wallets:async()=>{c.preempt();`. */
-export const PREEMPT = /wallets:async\(\)=>\{[\w$]+\.preempt\(\);/g;
+/** positionsPass asks the finder for the Ws this device bought only: `.wallets(new Set(c.map(({address:e})=>e)))`. */
+export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\{address:[\w$]+\}\)=>[\w$]+\)\)\)/g;
+/** The sell host's read holds the passes off first, then feeds or releases them in a finally: `wallets:async()=>{let
+ *  e=c.preempt(),t=null;try{...}finally{t===null?e.release():e.feed(t)}`. */
+export const PREEMPT = /wallets:async\(\)=>\{let ([\w$]+)=[\w$]+\.preempt\(\),([\w$]+)=null;try\{[^]{0,400}?\}finally\{\2===null\?\1\.release\(\):\1\.feed\(\2\)\}/g;
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
-/** The verdict on a record: { pass, lines }. */
-export function judge(rec) {
+/** The verdict on a record: { pass, lines }, against the release lists' /app.js files (none with `ledger: false`). */
+export function judge(rec, { ledger = true, released = ledger ? releasedAppJs() : null } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
   const s = rec?.index ?? {};
@@ -70,6 +84,7 @@ export function judge(rec) {
   const a = rec?.app ?? {};
   say(a.status === 200 && Number.isSafeInteger(a.bytes) && a.bytes > 0 && a.sha384 === s.integrity,
     `/app.js is the script / names: its sha384 is the integrity (HTTP ${a.status ?? "?"}, ${a.bytes ?? "?"} bytes)`);
+  if (released) say(released.has(a.sha384), `/app.js is a release from release-${FIRST_RELEASE} on, a build of the source this card's tests hold (${released.get(a.sha384) ?? `none: ${a.sha384 ?? "not read"}`})`);
   const m = a.marks ?? {};
   const sum = Number.isSafeInteger(m.sum) && m.sum >= 1;
   const fill = Number.isSafeInteger(m.fill) && m.fill >= 1;
@@ -124,7 +139,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const rec = await probe(local ? SIGN_ORIGIN : (opt("--url") ?? SIGN_ORIGIN), local ? localFetch : fetch);
     if (local) rec.url = "local build";
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(rec, null, 1)}\n`);
-    const r = judge(rec);
+    // a tree's own build is cut as a release only after its merge: its marks and its pin, not the ledger
+    const r = judge(rec, { ledger: !local });
     for (const l of r.lines) console.log(l);
     console.log(`${KEY}: ${r.pass ? "PASS" : "FAIL"} (${rec.url})`);
     process.exit(r.pass ? 0 : 1);
