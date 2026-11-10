@@ -41,9 +41,9 @@
 //   naming W; the testnet choice above). With no pin on the page's network, every pool kind is refused not_allowed and
 //   nothing is read: the state read, the queue and the flow all stop at the missing pin. The testnet constants sit
 //   behind POOL_TESTNET, folded at build time, so SIGN_HOST's bundle carries none of them.
-import { base64 } from "@scure/base";
+import { base58, base64 } from "@scure/base";
 import { SOLANA_RPC_RETRY, SOLANA_RPC_WINDOW_RETRY, solanaJsonRpc, solanaPacedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
-import { pageHelperRpc, pageRpc } from "./page-rpc.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "./page-rpc.ts";
 import { HELPER_FETCH_INIT, HELPER_V1_PATHS } from "../../kit/src/helper/v1.ts";
 import type { VaultProver } from "../../kit/src/prover/prove.ts";
 import { WALLET_SEED_LOCK, type WalletStore } from "@blindfill/wallet/store";
@@ -58,18 +58,19 @@ import { SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX, solanaSettleReserved, sol
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
-import { buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf } from "../../wallet/src/pool/buy-wallets.ts";
+import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
+import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
 import { evmSettleReserved } from "../../wallet/src/pool/evm-settle.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { poolDepositEvmKind, type EvmDepositRound } from "./pool-deposit-evm.ts";
 import type { PoolKindsDeps, PoolRpc } from "./pool-kinds.ts";
-import { checkPoolRequest, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
+import { checkPoolRequest, tokenDecimalsShown, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 import { readSolanaRent, solanaPoolFee } from "../../kit/src/trade/solana/pool-buy.ts";
-import type { TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
+import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpage/messages.ts";
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
@@ -313,6 +314,8 @@ export type TestnetPage = {
   seed64(): Promise<Uint8Array>;
   /** pool.withdraw: the page's own screen opened for the chain and the request's op id (src/main.ts); null refuses. */
   openWithdraw?(chain: PoolChain, ctx: KindContext): HostAnswer<"pool.withdraw"> | null;
+  /** The page's own USD price of a chain's pool asset (src/pool-price.ts), for a pool buy's cost; null when none is fresh. */
+  price?(chain: PoolChain): PoolStatePrice | null;
 };
 
 /** Tests only: the pool, the prover, the RPCs, the fee's fetch and the thread count the page would use. */
@@ -353,6 +356,10 @@ export type TestnetOver = {
   /** The trade kinds (poolBuyKind, poolSellKind otherwise): a test reads the hosts this page wires into them (W's buy
    *  record, written by the buy host and read by the sell host; delta review 8 of 5697d7a1). */
   tradeKinds?: { buy?: typeof poolBuyKind; sell?: typeof poolSellKind };
+  /** The buy wallets' finder reader for the page's RPCs (the helper's or a devnet RPC's otherwise; tests). */
+  holdings?: (rpcs: readonly [SolanaRpc, SolanaRpc]) => HoldingsReader;
+  /** The positions cache's retry and timers (src/positions.ts; tests). */
+  positions?: Parameters<typeof positionsCache>[1];
 };
 
 /** The devnet pool's lookup table (card signpage-pool-flow-run, packages/signpage/scripts/pool-table-devnet.mjs): the pool,
@@ -450,6 +457,9 @@ export type TestnetPool = {
   settle(): Promise<void>;
   /** A signed-in state read, when no pass runs: settle the pool's INCOMING notes, then its RESERVED ones. */
   stateRead(): Promise<void>;
+  /** state.positions (src/positions.ts): the last pass, or the kept one before it, null before either; the first
+   *  signed-in read starts a pass. */
+  positions(): Promise<readonly Position[] | null>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
@@ -541,6 +551,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // the deposit ends' reads after a run (pool-deposit-sent-end): stopped when the page leaves the deposit (sign out)
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
+    positions.clear();
+    awaited.clear();
     follows.abort();
     follows = new AbortController();
     stopSolana();
@@ -798,6 +810,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // W's buy mint, written before the send: the rent back after a later sell holds while W holds any of it
       bought: buyMints(page.store),
       send: (pool, tx) => helperPoolSend(pool, tx, over.fetch),
+      // the received token's decimals, for W's buy record (src/positions.ts recordPoolBuy)
+      outDecimals: (wallet, d) => void boughtDecimals.set(wallet, d),
       // minSlots: the not_landed verdict's slots (pool-buy.ts pastAt), every read at or past them
       settle: async (noteId, minSlots) => {
         // the stop's signal of this call, taken before its first wait: a sign out during the seed read stops it
@@ -813,6 +827,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       end: () => notes?.close(),
     };
   };
+  // each buy's W and the decimals of the token it received, told by the run (pool-buy.ts outDecimals) until its records
+  // are written; a W takes one buy only
+  const boughtDecimals = new Map<string, number>();
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
   const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
@@ -835,6 +852,251 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     return p;
   };
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
+  // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
+  // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER));
+  const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
+    const spent = await spentNotesOf(notes, scope!);
+    if (spent.length === 0) return [];
+    const seed64 = await page.seed64();
+    try {
+      const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }]);
+      if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
+      return got.wallets;
+    } finally {
+      seed64.fill(0);
+    }
+  };
+  // the Ws of the buys this page ran to filled or sent, this sign-in: the finder reads at finalized, so one it does not
+  // list yet is looked for again (src/positions.ts awaited)
+  const awaited = new Map<string, string>();
+  // state.positions (src/positions.ts, card signpage-state-holdings): this device's buys (W's buy mint, written before
+  // every send, and its buy record when the run told the amount), each from the finder's one read of its W (the
+  // helper's keyed route on mainnet; no read here names a W to a public provider, nor a mint no buy of W's named); one
+  // pass at a time, run at the sign-in's first state read and again when a pool buy or sell ends; the last whole pass
+  // kept in the wallet store for the first read after a load
+  const positions = positionsCache(
+    async (memo, run) => {
+      if (scope === null) return { positions: [], whole: true };
+      const r = rpcs();
+      const st = await page.store();
+      const meta = async (k: string): Promise<Record<string, unknown>> => {
+        const v = await st.get("meta", k);
+        return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+      };
+      return await positionsPass({
+        signal: run.signal,
+        // the sell's own read when one was fed, else the finder's read of the Ws with a buy record
+        wallets: async (only) => (run.found ?? (await recordedWallets(st, r, only, run.signal))).filter((w) => only.has(w.address)),
+        bought: async () => meta(BUY_MINTS_KEY),
+        costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
+        awaited: () => awaited,
+        // each by the sell that marked it (its signatures), so a later sell of it is looked for afresh
+        sold: async () => {
+          const by = await meta(POSITIONS_SOLD_TX_KEY);
+          return new Map(Object.entries(await meta(POSITIONS_SOLD_KEY)).flatMap(([a, ms]) => (Array.isArray(ms) ? ms.filter((m): m is string => typeof m === "string").map((m) => [`${a} ${m}`, String(by[`${a} ${m}`] ?? "")] as const) : [])));
+        },
+        kept: async () => st.get("meta", POSITIONS_KEPT_KEY),
+        keep: async (k) => void (await st.put("meta", POSITIONS_KEPT_KEY, k)),
+        // one read on the finder's own route (pageSolanaRpcs: the helper's keyed route is the second on mainnet, the
+        // testnet finder's devnet RPC the first), never a public provider: a display's, never a sell's. On mainnet it
+        // carries the pass's stop in its every fetch, in the helper route's own queue: nothing of a signed-out account's
+        // is sent after the sign out, queued or tried again
+        decimals: async (mint) => {
+          const rpc = POOL_TESTNET ? r[0] : over.rpcs ? r[1] : solanaPacedRpc(pageHelperRpcStopped(TRADE_HELPER, run.signal));
+          run.signal.throwIfAborted();
+          return tokenDecimalsShown("solana", await rpc("getAccountInfo", [mint, { encoding: "base64", commitment: "confirmed" }]));
+        },
+      }, memo);
+    },
+    {
+      ...over.positions,
+      kept: async () => {
+        if (scope === null) return null;
+        const st = await page.store();
+        return keptPositions(await st.get("meta", POSITIONS_KEPT_KEY), (await st.get("meta", POSITION_COSTS_KEY)) ?? {}, (await st.get("meta", BUY_MINTS_KEY)) ?? {});
+      },
+    },
+  );
+  // The Ws of `only` as the finder reads them. Derived under the seed's shared lock, the seed copy zeroed as soon as
+  // they are (a sign out waits only for that derive, never for a read), then read with the pass's stop: one W's failed
+  // read is that W's alone (the finder fails a whole pool on one; a sell keeps that rule). No Web Locks: no read.
+  const recordedWallets = async (st: WalletStore, r: readonly [SolanaRpc, SolanaRpc], only: ReadonlySet<string>, signal: AbortSignal): Promise<FoundWallet[]> => {
+    if (!locks) throw new Error("no Web Locks: the seed is not read");
+    const inner = finderOf(r);
+    const unread = new Set<string>();
+    const reader: HoldingsReader = {
+      chain: inner.chain,
+      read: async (address, s) => {
+        try {
+          return await inner.read(address, s);
+        } catch (e) {
+          if (s?.aborted) throw e;
+          unread.add(address);
+          return { native: 0n, tokens: new Map(), unreadable: [] };
+        }
+      },
+    };
+    const notes = await openNoteStore(st);
+    let spent: Awaited<ReturnType<typeof spentNotesOf>>;
+    try {
+      spent = await spentNotesOf(notes, scope!);
+    } finally {
+      notes.close();
+    }
+    if (spent.length === 0) return [];
+    const derived = await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+      const seed64 = await page.seed64();
+      try {
+        return derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader }]);
+      } finally {
+        seed64.fill(0);
+      }
+    });
+    const got = await derived.read({ signal, only });
+    if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
+    return got.wallets.map((w) => ({ address: w.address, tokens: unread.has(w.address) ? null : new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
+  };
+  // a full sell this device signs (W's rent-back record names it, written before the sell leaves the device): noted for
+  // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell. The store's own
+  // rent-back records (pool-sell.ts owedRentBacks) underneath, as the host has always named them (scripts/live-checks/
+  // sol-w-sweep.mjs reads the host's owed: and bought: from its store)
+  const asRecord = (v: unknown): Record<string, unknown> => ({ ...(typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}) });
+  const asList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  // a signed Solana tx's signatures (base58): its count (one byte, under 128), then 64 bytes each
+  const signaturesOf = (tx: string): string[] => {
+    try {
+      const b = base64.decode(tx);
+      const n = b[0] ?? 0;
+      if (n === 0 || n > 127 || b.length < 1 + 64 * n) return [];
+      return Array.from({ length: n }, (_, i) => base58.encode(b.subarray(1 + 64 * i, 65 + 64 * i)));
+    } catch {
+      return [];
+    }
+  };
+  // a sell that ended not landed (the chain's answer, never before it): its full-sell marks taken back, its signature
+  // kept so the same sell never marks again; the positions read again after
+  const unsold = async (signature: string): Promise<void> => {
+    const st = await page.store();
+    await st.update("meta", POSITIONS_UNLANDED_KEY, (v) => [...new Set([...asList(v), signature])]);
+    const by = asRecord(await st.get("meta", POSITIONS_SOLD_TX_KEY));
+    const gone = Object.entries(by).filter(([, sigs]) => typeof sigs === "string" && sigs.split(" ").includes(signature)).map(([k]) => k);
+    if (gone.length === 0) return;
+    await st.update("meta", POSITIONS_SOLD_KEY, (v) => {
+      const all = asRecord(v);
+      for (const k of gone) {
+        const [a, m] = k.split(" ") as [string, string];
+        all[a] = asList(all[a]).filter((x) => x !== m);
+      }
+      return all;
+    });
+    await st.update("meta", POSITIONS_SOLD_TX_KEY, (v) => {
+      const all = asRecord(v);
+      for (const k of gone) delete all[k];
+      return all;
+    });
+  };
+  const owedNoted = (store: TestnetPage["store"]): ReturnType<typeof owedRentBacks> => {
+    const owed = owedRentBacks(store);
+    return {
+      ...owed,
+      put: async (rec) => {
+        await owed.put(rec);
+        if (Object.keys(rec.sell ?? {}).length === 0) return;
+        try {
+          const st = await page.store();
+          // a sell that ended not landed marks nothing again (a rent back's later write carries its record)
+          const unlanded = new Set(asList(await st.get("meta", POSITIONS_UNLANDED_KEY)));
+          const sells = Object.entries(rec.sell ?? {}).map(([m, by]) => [m, signaturesOf(by.tx)] as const).filter(([, sigs]) => !sigs.some((g) => unlanded.has(g)));
+          if (sells.length === 0) return;
+          await st.update("meta", POSITIONS_SOLD_TX_KEY, (v) => ({ ...asRecord(v), ...Object.fromEntries(sells.map(([m, sigs]) => [`${rec.address} ${m}`, sigs.join(" ")])) }));
+          await st.update("meta", POSITIONS_SOLD_KEY, (v) => {
+            const all = asRecord(v);
+            all[rec.address] = [...new Set([...asList(all[rec.address]), ...sells.map(([m]) => m)])];
+            return all;
+          });
+        } catch {
+          /* a note that fails changes nothing in the sell */
+        }
+      },
+    };
+  };
+  positions.watch(() => {
+    for (const f of watchers) f();
+  });
+  const TRADE_ENDS: ReadonlySet<string> = new Set(["filled", "part_filled", "not_landed"]);
+  // a pool buy, its records written once its run ends (src/positions.ts recordPoolBuy: its ops record, and W's buy record
+  // for the cost), the positions read again after them; its W and the amount W received come from the run's own route
+  // facts, the price is the page's own read at the request. The kind's `after` settles at its first answer, which may be
+  // "sent" while the run goes on (poolBuyKind): the run's end stage is the progress it always posts at its end, so the
+  // records wait for an end stage, from the answer or from that progress, whichever comes first; once.
+  const recordedBuy = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof buy> => {
+    const facts: PoolBuyFacts = { token: ask.token!, spend: ask.amount, spendDecimals: ask.decimals, price: page.price?.("solana") ?? null, createdMs: Date.now() };
+    let done = false;
+    let r: ReturnType<typeof buy> | null = null;
+    const finish = (end: Parameters<typeof recordPoolBuy>[3]): void => {
+      if (done) return;
+      done = true;
+      if (facts.wallet !== undefined) {
+        facts.decimals = boughtDecimals.get(facts.wallet);
+        boughtDecimals.delete(facts.wallet);
+        if (end !== null && "result" in end && end.result.stage !== "not_landed") awaited.set(facts.wallet, ctx.id);
+      }
+      void (async () => recordPoolBuy((await page.store()) as unknown as BuyRecordStore, ctx.id, facts, end))()
+        .catch(() => {})
+        .finally(() => positions.refresh());
+    };
+    const txsOf = (): TxRef[] => {
+      const a = r && "answer" in r ? (r.answer() as { result?: { txs?: TxRef[] } }) : null;
+      return a?.result?.txs ?? [];
+    };
+    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
+      ctx.progress(stage);
+      if (TRADE_ENDS.has(stage)) finish({ result: { stage, txs: txsOf() } });
+      // the run ended "sent" (its spend not read as final): no records, its W looked for, its decimals let go
+      else if (stage === "sent" && !done && facts.wallet !== undefined) {
+        boughtDecimals.delete(facts.wallet);
+        awaited.set(facts.wallet, ctx.id);
+        positions.refresh();
+      }
+    };
+    r = buy(ask, { ...ctx, progress, route: routeInto(facts, ctx.route) });
+    const run = r;
+    if ("after" in run)
+      void run.after.then(() => {
+        const a = run.answer() as Parameters<typeof recordPoolBuy>[3];
+        if (a !== null && ("error" in a || TRADE_ENDS.has(a.result.stage))) finish(a);
+        else positions.refresh();
+      });
+    return run;
+  };
+  // a pool sell's run, the positions read again once it ends: its `after` settles at its first answer, which may be "sent"
+  // while the run goes on (poolSellKind answers at the send), so as for the buy, an end stage from the answer or from the
+  // progress the run posts at its end; a refusal ran nothing, read again all the same. A sell a closed page left is
+  // read again when the settle on load writes its end (settleSells).
+  const recordedSell = (ask: PoolAsk, ctx: KindContext): ReturnType<typeof sell> => {
+    // not landed: its marks taken back first (the signature from its ops record, written before the send)
+    const ended = (stage: string | undefined): void => {
+      if (stage !== "not_landed") return positions.refresh();
+      void (async () => {
+        const hash = ((await (await page.store()).get("ops", ctx.id)) as { txs?: { hash?: unknown }[] } | undefined)?.txs?.[0]?.hash;
+        if (typeof hash === "string") await unsold(hash);
+      })()
+        .catch(() => {})
+        .finally(() => positions.refresh());
+    };
+    const progress = (stage: Parameters<KindContext["progress"]>[0]): void => {
+      ctx.progress(stage);
+      if (TRADE_ENDS.has(stage)) ended(stage);
+    };
+    const run = sell(ask, { ...ctx, progress });
+    if ("after" in run)
+      void run.after.then(() => {
+        const a = run.answer() as { result?: { stage?: string } };
+        if (a.result?.stage !== "sent") ended(a.result?.stage);
+      });
+    return run;
+  };
   // pool.sell: W from the page's buy wallets; one run per tap, one at a time (the sell kind's lock)
   const sellHost = (): PoolSellKindHost & { end(): void } => {
     const r = rpcs();
@@ -849,22 +1111,24 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       notes: store,
       ops: page.store,
       seed64: page.seed64,
-      // the pool's Ws with their holdings: on mainnet through the helper's keyed route, in the testnet build on one devnet
-      // RPC (the header's testnet-only choice); none: no read
+      // the sell's own read holds the positions' passes off while it runs (the running one stopped, a booked retry
+      // dropped: one finder queue, so it never waits behind the display), then is the next pass's read; a read that
+      // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
       wallets: async () => {
-        const spent = await spentNotesOf(await store(), scope!);
-        if (spent.length === 0) return [];
-        const seed64 = await page.seed64();
+        const hold = positions.preempt();
+        let found: FoundWallet[] | null = null;
         try {
-          const got = await buyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER) }]);
-          if (got.failed.length > 0) throw new Error("the buy wallets' holdings could not be read");
-          return got.wallets;
+          const got = await poolBuyWallets(await store(), r);
+          found = got.map((w) => ({ address: w.address, tokens: new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
+          return got;
         } finally {
-          seed64.fill(0);
+          // read: the next pass's read; failed (the sell refuses, or a rent back at load waits): the next pass reads
+          if (found === null) hold.release();
+          else hold.feed(found);
         }
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
-      owed: owedRentBacks(page.store),
+      owed: owedNoted(page.store),
       bought: buyMints(page.store),
       // each rent-back fault and end, on the page's console: public words only (W's address, a step, a fault's name)
       told: (t) => console.warn(`rent back ${t.address} ${t.step} ${t.state}: ${t.detail}`),
@@ -888,7 +1152,12 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       try {
         const ops = await page.store();
         // each sell's stage written before its record goes (a write that fails keeps it for the next read)
-        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: (signature, stage) => settleSellOps(ops, signature, stage) }, locks);
+        await settlePoolSells({ pin: pin!, rpcs: rpcs(), notes: async () => notes, kept: keptSells(page.store), settled: async (signature, stage) => {
+          await settleSellOps(ops, signature, stage);
+          // a sell's end, written: its tokens read again (card signpage-state-holdings), a not landed one's marks back
+          if (stage === "not_landed") await unsold(signature).catch(() => {});
+          positions.refresh();
+        } }, locks);
       } finally {
         notes.close();
       }
@@ -1233,9 +1502,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         : ask.kind === "pool.deposit"
           ? deposit(ask, ctx)
           : ask.kind === "pool.buy" && table !== null
-            ? buy(ask, ctx)
+            ? recordedBuy(ask, ctx)
             : ask.kind === "pool.sell"
-              ? sell(ask, ctx)
+              ? recordedSell(ask, ctx)
               : ask.kind === "pool.withdraw" && page.openWithdraw
                 ? (page.openWithdraw(ask.chain, ctx) ?? { error: "not_allowed" })
                 : { error: "not_allowed" },
@@ -1251,6 +1520,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     host: () => host(),
     settle,
     stateRead,
+    positions: () => positions.read(),
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in

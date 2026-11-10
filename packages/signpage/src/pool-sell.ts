@@ -560,6 +560,9 @@ export const owedRentBacks = (store: () => Promise<Pick<TradeStore, "get" | "upd
   };
 };
 
+/** Where W's buy mints are: the wallet store's meta, by W's address; the key buyMints writes (its own literal there is
+ *  the shape scripts/live-checks/sol-w-sweep.mjs reads in the bundle; positions.test holds the two the same). */
+export const BUY_MINTS_KEY = "owed/buy-sol";
 /** W's buy mints, in the wallet store's meta/owed/buy-sol, by W's address (pool-buy.ts BuyMints). */
 export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">>): BuyMints => {
   const KEY = "owed/buy-sol";
