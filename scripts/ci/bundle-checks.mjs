@@ -127,6 +127,7 @@ export const OUT = {
   "signpage-prover-host": "a browser",
   "signpage-prover-threads": "a browser",
   "signpage-pool-price": "a browser",
+  "pool-usd-price-never-stale": "three minutes of mainnet Pyth reads on the page's own pair (its test holds its bundle marks on this tree's own build, planted)",
   "signpage-pool-mainnet": "a browser",
   "pool-restore-wired": "a browser",
   "kit-deposit-assets-dry": "a browser",

@@ -12,11 +12,18 @@
 //         state schema refuses a pool entry carrying a price, so with a fresh or stale price the box reads signed out
 //         on the vault path and asks for nothing: FAIL.
 // Recorded again on 10 Nov (card live-check-pool-price-own-token), on the token's own page /token/solana/<DJT>, which
-// also reads the token and chain the page drew, and with the price read again until it is at most 20 s old (youngRead):
+// also reads the token and chain the page drew, and with the price read again until it is at most 20 s old (youngRead,
+// since replaced by the page's own schedule, pageFeed, card pool-usd-price-never-stale):
 //   good: the deployed APP_HOST (entry /assets/index-XvbkxnaR.js) and SIGN_HOST: DJT on Solana at both widths, a fresh
 //         price priced and tapped, a stale and no price shut: PASS;
 //   wrongChain: the same check opening / (its old path), when the live Trending column's top was "Anthropic"
 //         (0xecc4...1627) on Robinhood: the box is on the vault path, and the verdict names the token and chain: FAIL.
+// Recorded again on 10 Nov 07:00Z (card pool-usd-price-never-stale, review P2-5), with an aged run: the same price
+// published AGED_S (62) s before the run, past the 60 s bound the app held before that card and inside its 75 s:
+//   good: --harness, this tree's terminal build (the kit's 75 s) in the stand-in shell, this tree's signing page bundle
+//         as SIGN_HOST's: fresh and aged priced and tapped, stale and none shut, 8 runs: PASS;
+//   agedBad: the deployed APP_HOST then (still on 60 s): the aged runs show no USD and Buy off: FAIL. So a run against
+//         the deployed app proves it holds 75 s (deploy APP_HOST before SIGN_HOST).
 // Planted from the good run: a wrong amount, a vault buy, Buy on or USD drawn with a stale price, a disagreeing or
 // stale read, the page's pair changed, a missing run.
 import assert from "node:assert/strict";
@@ -24,8 +31,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { POOL_USD_FEEDS } from "../../packages/kit/src/index.ts";
 import { MINT } from "./app-sell-mount.mjs";
-import { CHAIN, expectedSol, judge, PAGE_PAIR, poolWith, YOUNG_S, youngRead } from "./signpage-pool-price.mjs";
+import { AGED_S, CHAIN, expectedSol, judge, PAGE_PAIR, pageFeed, poolWith } from "./signpage-pool-price.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-pool-price.answers.json"), "utf8"));
@@ -46,14 +54,22 @@ test("the amount: $0.05 in SOL at the read's price, rounded down; the states the
   assert.equal(expectedSol({ price: "5000000000", expo: -8 }), "0.001");
   const p = { price: "9388311299", expo: -8, published_s: 1_793_803_309, read_ms: 1_793_803_311_000 };
   assert.deepEqual(poolWith("fresh", p, 1_793_803_312_000).price, p);
-  assert.equal(poolWith("stale", p, 1_793_803_312_000).price.published_s, 1_793_803_312 - 60 - 30);
+  assert.equal(poolWith("stale", p, 1_793_803_312_000).price.published_s, 1_793_803_312 - POOL_USD_FEEDS.solana.maxAgeS - 30, "30 s past the kit's bound");
   assert.equal(Object.hasOwn(poolWith("none", p, 0), "price"), false);
 });
 
 test("recorded good answer: the page's pair agrees, a fresh price turns Buy on with a priced pool.buy, a stale or no price keeps it off: PASS", () => {
   const r = judge(ANSWERS.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
-  assert.equal(ANSWERS.good.runs.length, 6);
+  assert.equal(ANSWERS.good.runs.length, 8);
+  assert.ok(ANSWERS.good.runs.filter((x) => x.price === "aged").length === 2);
+});
+
+test("recorded aged answer (card pool-usd-price-never-stale, review P2-5): the deployed app on the 60 s bound shuts a price 62 s old: FAIL on the aged runs", () => {
+  const r = judge(ANSWERS.agedBad);
+  assert.equal(r.ok, false);
+  for (const w of ["desktop", "phone"]) assert.ok(bad(r).some((l) => new RegExp(`^BAD ${w} aged: Bal shows .*not USD; Buy is off with a price ${AGED_S} s old`).test(l)), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith("ok  phone fresh")), "a fresh price still turns Buy on there");
 });
 
 test("recorded bad answer: the deployed app before this card reads a priced state as signed out: FAIL", () => {
@@ -65,7 +81,9 @@ test("recorded bad answer: the deployed app before this card reads a priced stat
 });
 
 test("planted: a pool.buy of another amount or chain, a vault buy, two asks, or none with a fresh price fail", () => {
-  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000517402")), /^BAD desktop fresh: its pool\.buy is 0\.000517402 SOL on solana, not 0\.000583828/);
+  const want = expectedSol(run(ANSWERS.good, "desktop", "fresh").read ?? ANSWERS.good.read).replace(".", "\\.");
+  fails(mut((rec) => (run(rec, "desktop", "fresh").asked[0].params.amount = "0.000517402")), new RegExp(`^BAD desktop fresh: its pool\\.buy is 0\\.000517402 SOL on solana, not ${want}`));
+  fails(mut((rec) => (run(rec, "phone", "aged").asked[0].params.amount = "0.000517402")), /^BAD phone aged: its pool\.buy is 0\.000517402 SOL on solana/);
   fails(mut((rec) => (run(rec, "phone", "fresh").asked[0].params.chain = "base")), /^BAD phone fresh: its pool\.buy is .* on base/);
   fails(mut((rec) => (run(rec, "desktop", "fresh").asked = [{ type: "buy", params: {} }])), /^BAD desktop fresh: the tap asked for buy, not one pool\.buy/);
   fails(mut((rec) => run(rec, "phone", "fresh").asked.push(run(rec, "phone", "fresh").asked[0])), /^BAD phone fresh: the tap asked for pool\.buy, pool\.buy/);
@@ -83,10 +101,10 @@ test("planted: USD, Buy on or an ask with a stale or no price fail", () => {
 
 test("planted: the page's read disagreeing, stale, on another pair or one host; a missing run, outside the shell, no shot fail", () => {
   fails(mut((rec) => { delete rec.read.price; rec.read.error = "the two RPCs disagree on the Pyth account"; }), /^BAD the two agree on Pyth's SOL\/USD: the two RPCs disagree/);
-  fails(mut((rec) => (rec.read.published_s -= 61)), /^BAD the price is fresh: published 6\d s before the run/);
+  fails(mut((rec) => (rec.read.published_s -= POOL_USD_FEEDS.solana.maxAgeS + 1)), /^BAD the price is fresh: published \d+ s before the run/);
   fails(mut((rec) => (rec.read.rpcs = ["https://api.mainnet-beta.solana.com", PAGE_PAIR[1]])), /^BAD the page's Solana pair read/);
   fails(mut((rec) => (rec.read.rpcs = [PAGE_PAIR[0], PAGE_PAIR[0]])), /^BAD the page's Solana pair read/);
-  fails(mut((rec) => rec.runs.pop()), /^BAD 5 run\(s\) of 6/);
+  fails(mut((rec) => rec.runs.pop()), /^BAD 7 run\(s\) of 8/);
   fails(mut((rec) => (run(rec, "desktop", "fresh").framed = false)), /^BAD desktop fresh: not inside SIGN_HOST's shell/);
   fails(mut((rec) => (run(rec, "phone", "stale").shot = null)), /^BAD phone stale: no screenshot/);
   fails(mut((rec) => (rec.entry = null)), /^BAD the served \/ names its entry script none/);
@@ -120,25 +138,35 @@ test("planted: a page of another token or chain, or one that names neither, fail
   fails(mut((rec) => (run(rec, "phone", "fresh").mint = null)), /^BAD phone fresh: the token page drew no token on solana/);
 });
 
-test("youngRead: the page's read again until its price is at most 20 s old, the last read when none is, a failed read at once", async () => {
+test("pageFeed (card pool-usd-price-never-stale): part 1 follows the feed on the page's schedule; a run sends the price held at its start, a newer one once its write is read; a failed first read answers its error", async () => {
   let t = 1_794_281_200_000;
   const now = () => t;
   const sleep = async (ms) => void (t += ms);
-  const at = (ages) => {
-    let n = 0;
-    return { calls: () => n, read: async () => ({ price: "1", expo: -8, published_s: Math.floor(t / 1000) - ages[Math.min(n++, ages.length - 1)] }) };
+  // the account: written at 54 s of its price's age, landing 1 s later; the first read 40 s after its publish
+  const pub0 = Math.floor(t / 1000) - 40;
+  const read = async () => {
+    const s = Math.floor(t / 1000);
+    const publishedS = s >= pub0 + 55 ? pub0 + 54 : pub0;
+    return { chain: "solana", asset: "SOL", decimals: 9, price: BigInt(publishedS), expo: -8, publishedS, source: "pyth", at: 1n };
   };
-  const old = at([51, 40, 12]); // the 10 Nov read: 51 s old, so stale before the phone run
-  const r = await youngRead({ read: old.read, now, sleep });
-  assert.equal(old.calls(), 3);
-  assert.equal(Math.floor(t / 1000) - r.published_s, 12);
-  assert.ok(12 <= YOUNG_S);
-  const always = at([50]);
-  const last = await youngRead({ read: always.read, now, sleep, waitMs: 9_000, everyMs: 3_000 });
-  assert.equal(always.calls(), 4);
-  assert.equal(last.price, "1");
-  let n = 0;
-  const failed = await youngRead({ read: async () => (n++, { error: "the two RPCs disagree" }), now, sleep });
-  assert.equal(n, 1);
-  assert.equal(failed.error, "the two RPCs disagree");
+  const feed = pageFeed({ read, now, sleep });
+  const first = await feed.first();
+  assert.equal(first.published_s, pub0);
+  assert.deepEqual(first.rpcs, PAGE_PAIR);
+  while (Math.floor(t / 1000) < pub0 + 58) await sleep(100);
+  assert.equal(feed.now().published_s, pub0 + 54, "the write that landed at 55 s is held by 58 s");
+  assert.equal(feed.now().price, String(pub0 + 54));
+  await feed.stop();
+  const down = pageFeed({ read: async () => Promise.reject(new Error("the two RPCs disagree")), now, sleep });
+  assert.equal((await down.first()).error, "the two RPCs disagree");
+  await down.stop();
+});
+
+test("a run's own price (card pool-usd-price-never-stale): a fresh run is judged on the price it sent, not the first read", () => {
+  const rec = structuredClone(ANSWERS.good);
+  const f = rec.runs.find((x) => x.price === "fresh");
+  f.read = { price: String(BigInt(rec.read.price) * 2n), expo: rec.read.expo, published_s: rec.read.published_s };
+  const v = judge(rec);
+  assert.equal(v.ok, false);
+  assert.ok(v.lines.some((l) => new RegExp(`^BAD ${f.width} fresh: its pool\\.buy is ${f.asked.find((m) => m.type === "pool.buy").params.amount} SOL on solana, not ${expectedSol(f.read).replace(".", "\\.")} SOL`).test(l)), v.lines.join("\n"));
 });

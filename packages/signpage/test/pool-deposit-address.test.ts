@@ -255,3 +255,127 @@ test("pool-deposit-follow floor: readSolanaPoolFloor reads the rent on both RPCs
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://b.example", 5_000, 6_000n)], program, SOL_U));
   await assert.rejects(readSolanaPoolFloor([rpcOf("https://a.example", 5_000), rpcOf("https://a.example", 5_000)], program, SOL_U));
 });
+
+test("card pool-usd-price-never-stale: a quote into the Solana pool is priced by the page's own price within the kit's one bound: asked at 74 s, none at 76 s", async () => {
+  const { poolPrices } = await import("../src/pool-price.ts");
+  const { poolQuotePricing } = await import("../src/pool-deposit-address.ts");
+  const { POOL_USD_FEEDS } = await import("../../kit/src/price/pool-usd.ts");
+  assert.equal(POOL_USD_FEEDS.solana.maxAgeS, 75);
+  const pubS = 1_793_778_006;
+  const clock = { ms: pubS * 1000 + 2_000 };
+  const prices = poolPrices({
+    rpcs: (c) => (c === "solana" ? ([Object.assign(async () => null, { url: "https://a.example" }), Object.assign(async () => null, { url: "https://b.example" })] as never) : null),
+    now: () => clock.ms,
+    read: async () => ({ chain: "solana", asset: "SOL", decimals: 9, price: 9_301_048_308n, expo: -8, publishedS: pubS, source: "pyth", at: 1n }),
+    after: () => {},
+  });
+  prices.refresh(["solana"]);
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+  const q = { chain: "solana", origin_asset: BASE_USDC, amount: "25" };
+  const at = (s: number) => {
+    clock.ms = (pubS + s) * 1000;
+    const w = world();
+    w.deps.priced = (_chain, origin) => poolQuotePricing(prices.get("solana"), origin);
+    return w;
+  };
+  assert.deepEqual(poolQuotePricing(prices.get("solana"), BASE_USDC), { decimalsIn: 6, pricing: { in: ["1", "1"], out: ["93.01048308", "93.01048308"] } });
+  assert.equal(poolQuotePricing(prices.get("solana"), "nep141:wrap.near"), null, "only USDC in");
+  const young = at(74);
+  await ask(young, q);
+  assert.equal(young.sent.length, 1, "74 s: a quote is asked");
+  const old = at(76);
+  assert.deepEqual(await ask(old, q), { error: "not_allowed" });
+  assert.equal(old.sent.length, 0, "76 s: no quote");
+});
+
+// review of eb2dfdc5, D1: the price as a decimal keeps its leading zero under 1 USD and every digit; none for SOL or ETH
+// today, but the pricing is the 1Click check's input
+test("card pool-usd-price-never-stale, review D1: poolQuotePricing writes the price's decimal whole: under 1 USD with its leading zero, at whole units, and at expo 0", async () => {
+  const { poolQuotePricing } = await import("../src/pool-deposit-address.ts");
+  const at = (price: string, expo: number) => poolQuotePricing({ price, expo, published_s: 1, read_ms: 1000, rpcs: ["https://a.example", "https://b.example"] } as never, BASE_USDC)?.pricing.out[0];
+  assert.equal(at("5", -8), "0.00000005");
+  assert.equal(at("99999999", -8), "0.99999999");
+  assert.equal(at("100000000", -8), "1.00000000");
+  assert.equal(at("9301048308", -8), "93.01048308");
+  assert.equal(at("150", 0), "150");
+});
+
+// review of eb2dfdc5, P1 (the review's probe, flipped): the price was taken once, before the floor read and the quote,
+// and used after them with no second look at its bound
+test("card pool-usd-price-never-stale, review P1: the quote is checked at the price as it is at the check: a price 74 s old at the ask and past its bound by the answer refuses the quote (not_allowed, nothing to the follow); a newer price then is the one checked", async () => {
+  const { poolPrices } = await import("../src/pool-price.ts");
+  const { poolQuotePricing } = await import("../src/pool-deposit-address.ts");
+  const { POOL_USD_FEEDS } = await import("../../kit/src/price/pool-usd.ts");
+  const max = POOL_USD_FEEDS.solana.maxAgeS;
+  const pubS = 1_793_778_006;
+  const run = async (newer: boolean) => {
+    const clock = { ms: pubS * 1000 + 2_000 };
+    let pub = pubS;
+    let price = 9_301_048_308n;
+    const prices = poolPrices({
+      rpcs: (c) => (c === "solana" ? ([Object.assign(async () => null, { url: "https://a.example" }), Object.assign(async () => null, { url: "https://b.example" })] as never) : null),
+      now: () => clock.ms,
+      read: async () => ({ chain: "solana", asset: "SOL", decimals: 9, price, expo: -8, publishedS: pub, source: "pyth", at: 1n }),
+      after: () => {},
+      visible: () => true,
+    });
+    prices.refresh(["solana"]);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    clock.ms = (pubS + max - 1) * 1000; // 74 s old: inside the bound as the quote is asked
+    const stale = poolQuotePricing(prices.get("solana"), BASE_USDC)!;
+    assert.ok(stale);
+    const ages: number[] = [];
+    const took: unknown[] = [];
+    const deps: Deps = {
+      pools: () => [{ chain: "solana", scope: SOL_S }],
+      network: "mainnet",
+      read: async () => ({ status: STATUS, deposit: RECORDS[SOL_S.toString()] }) as never,
+      named: async () => {},
+      now: () => clock.ms,
+      priced: (_c, origin) => (ages.push(clock.ms / 1000 - pubS), poolQuotePricing(prices.get("solana"), origin)),
+      checked: async (id, chain, quote, u) => void took.push({ id, chain, quote, u }),
+      // the floor read: 4 s
+      floor: async () => ((clock.ms += 4_000), 10_000_000n),
+      // the quote: 9 s, its answer exactly on the floor the 74-s-old price gives
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        const req = JSON.parse(String(init?.body));
+        clock.ms += 9_000;
+        if (newer) {
+          // a write landed meanwhile, SOL 1% lower: the page holds a newer price at the check, whose floor is 1% more SOL
+          pub = Math.floor(clock.ms / 1000) - 2;
+          price = (price * 99n) / 100n;
+          prices.wake();
+          prices.refresh(["solana"]);
+          for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+        }
+        const { minAmountOut } = oneClickFloors({ amountIn: BigInt(req.amount), withdrawFee: 5_000n, slippageBps: req.slippageTolerance, feeBps: 20, pricing: stale.pricing, decimalsIn: 6, decimalsOut: 9, intoVault: false });
+        const fmt = (v: bigint, d: number) => { const s = v.toString().padStart(d + 1, "0"); return `${s.slice(0, -d)}.${s.slice(-d)}`; };
+        const a: Answer = {
+          quote: {
+            amountIn: req.amount, amountInFormatted: fmt(BigInt(req.amount), 6), amountInUsd: "25.0", minAmountIn: req.amount,
+            amountOut: minAmountOut.toString(), amountOutFormatted: fmt(minAmountOut, 9), amountOutUsd: "24.9", minAmountOut: minAmountOut.toString(),
+            depositAddress: ADDRESS, deadline: new Date(Date.parse(req.deadline) + H72).toISOString(),
+            timeWhenInactive: new Date(Date.parse(req.deadline) + H72).toISOString(), timeEstimate: 20, refundFee: "0", withdrawFee: "5000",
+          },
+          quoteRequest: { ...req, depositMode: "SIMPLE", confidentiality: "public", quoteWaitingTimeMs: 0, insured: false, appFees: [{ recipient: COLLECTOR, fee: 20 }] },
+          signature: "", timestamp: new Date(clock.ms - 500).toISOString(), correlationId: "00000000-0000-4000-8000-000000000000",
+        };
+        signAnswer(a, mockKey.privateKey);
+        return new Response(JSON.stringify(a), { status: 201, headers: { "content-type": "application/json" } });
+      }) as typeof fetch,
+    };
+    const d = poolAddressHost(deps)({ chain: "solana", origin_asset: BASE_USDC, amount: "25" }, { id: "op-1" });
+    await d.after;
+    return { out: d.answer() as { error?: string }, took, ages, held: prices.get("solana") };
+  };
+  const late = await run(false);
+  assert.equal(late.held, null, "the page itself no longer uses the price by the answer");
+  assert.deepEqual(late.out, { error: "not_allowed" }, "a price past its bound at the check: no quote");
+  assert.equal(late.took.length, 0, "nothing handed to the follow");
+  assert.deepEqual(late.ages, [max - 1, max - 1 + 13], "the price is taken at the ask and again at the check");
+  // a newer price at the check is the floor's: the answer on the old price's floor is 1% short of it, refused
+  const fresh = await run(true);
+  assert.notEqual(fresh.held, null, "the page holds the newer price");
+  assert.ok(fresh.out.error === "not_allowed" || fresh.out.error === "quote_check_failed", JSON.stringify(fresh.out));
+  assert.equal(fresh.took.length, 0);
+});
