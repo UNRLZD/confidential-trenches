@@ -11,7 +11,7 @@ import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { WALLET_SEED_LOCK, openWalletStore, type WalletStore } from "@blindfill/wallet/store";
 import { VaultTree } from "../../kit/src/vault/inputs.ts";
 import { VAULT_FIELD_P, vaultLabelOf } from "../../kit/src/vault/shapes.ts";
-import { evmPoolVenues } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { evmPoolVenues, evmReadProvidersOf } from "../../kit/src/trade/evm/buy-unpinned.ts";
 import { evmPoolFee, evmPoolGas } from "../../kit/src/trade/evm/pool-fee.ts";
 import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, refKey, type NoteStore } from "../../wallet/src/notes/store.ts";
@@ -81,12 +81,12 @@ const unread = (): readonly EvmRpc[] => ["https://a.example", "https://b.example
 const ev = (block: bigint, e: Partial<EvmPoolEvent> & Pick<EvmPoolEvent, "kind" | "state" | "value">): EvmPoolEvent => ({ block, blockHash: `0x${"11".repeat(32)}`, logIndex: 0n, bytes: "", label: null, precommitment: null, nullifier: null, recipient: null, token: null, ...e });
 const page = (w: WalletStore, signedIn = () => true) => ({ store: async () => w, seed64: async () => (signedIn() ? SEED64.slice() : Promise.reject(new Error("no seed is stored"))) });
 
-test("each EVM chain's fee pair is the kit's (evmPoolVenues feeProviders), and the epoch fee rule is the kit's evmPoolFee", () => {
+test("each EVM chain's fee list is the kit's read list (evmReadProvidersOf), and the epoch fee rule is the kit's evmPoolFee", () => {
   const v = evmPoolVenues();
-  assert.deepEqual(TESTNET_EVM_FEE_RPCS.base, v["base-sepolia"].feeProviders);
-  assert.deepEqual(TESTNET_EVM_FEE_RPCS.robinhood, v["robinhood-testnet"].feeProviders);
-  assert.deepEqual(MAINNET_EVM_FEE_RPCS.base, v.base.feeProviders);
-  assert.deepEqual(MAINNET_EVM_FEE_RPCS.robinhood, v.robinhood.feeProviders);
+  assert.deepEqual(TESTNET_EVM_FEE_RPCS.base, evmReadProvidersOf(v["base-sepolia"]));
+  assert.deepEqual(TESTNET_EVM_FEE_RPCS.robinhood, evmReadProvidersOf(v["robinhood-testnet"]));
+  assert.deepEqual(MAINNET_EVM_FEE_RPCS.base, evmReadProvidersOf(v.base));
+  assert.deepEqual(MAINNET_EVM_FEE_RPCS.robinhood, evmReadProvidersOf(v.robinhood));
   const at = { block: 9n, baseFeePerGas: 1_000_000n, depth: 5, chainFee: 7n * 10n ** 9n };
   assert.equal(evmEpochFee(at), evmPoolFee({ gas: evmPoolGas(5), gasPrice: 1_000_000n, chainFee: 7n * 10n ** 9n }));
 });

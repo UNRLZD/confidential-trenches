@@ -38,7 +38,7 @@ const EVM_PIN: EvmPoolPin = {
   feeRecipient: "0x49f2425b7f33f3a10912de8add6839226ce663a2",
   fromBlock: 1n,
 };
-const evmKind = (pin: EvmPoolPin) => evmPool({ pin, rpcs: RPCS, feeRpcs: [async () => null, async () => 1] as const, relayFee: never, epochFee: () => 0n });
+const evmKind = (pin: EvmPoolPin) => evmPool({ pin, rpcs: RPCS, feeRpcs: [Object.assign(async () => null, { url: "https://a.example" }), Object.assign(async () => 1, { url: "https://b.example" })] as const, relayFee: never, epochFee: () => 0n });
 // a Rent sysvar at the older rate: 3,480 lamports per byte-year, exempt at 2 years (the live check read mainnet 5 Nov 16:29Z: 5,080 per byte, factor 1)
 const RENT = { lamportsPerByte: 3480n, factor: 2n } as const;
 const CHUNK = 50_000_000n; // 0.05 SOL

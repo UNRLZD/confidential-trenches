@@ -141,19 +141,21 @@ export const pageEvmPoolRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] 
   const urls = pageEvmPoolUrls(chain);
   return urls.length < 2 ? null : urls.map((u) => testnetRpc(u));
 };
-/** Each EVM chain's fee pair, the two RPCs an EVM proof's bind reads the chain fee on at the epoch's first block
- *  (../../wallet/src/pool/evm.ts EvmPoolArgs feeRpcs): the kit's evmPoolVenues()[network].feeProviders, copied as
+/** Each EVM chain's fee list, the RPCs an EVM proof's bind reads the chain fee on at the epoch's first block, two
+ *  operators of it agreeing (../../wallet/src/pool/evm.ts EvmPoolArgs feeRpcs, the kit's evmTwoOperators; card
+ *  device-evm-fee-read-walks-operators): the kit's evmReadProvidersOf(evmPoolVenues()[network]), copied as
  *  MAINNET_POOL_RPCS is, so SIGN_HOST's build carries no testnet provider (scripts/build-network.test.mjs);
- *  test/pool-testnet-evm-queue.test.ts holds each equal to the kit's. */
+ *  test/pool-testnet-evm-queue.test.ts holds each equal to the kit's, and SIGN_HOST's connect-src allows each. A
+ *  testnet's is its fee pair, two: no spare to walk to. */
 export const TESTNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
   base: /* @__PURE__ */ Object.freeze(["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"]),
   robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.testnet.chain.robinhood.com", "https://robinhood-testnet.drpc.org"]),
 });
 export const MAINNET_EVM_FEE_RPCS: Readonly<Record<"base" | "robinhood", readonly string[]>> = /* @__PURE__ */ Object.freeze({
-  base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"]),
-  robinhood: /* @__PURE__ */ Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"]),
+  base: /* @__PURE__ */ Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.drpc.org"]),
+  robinhood: /* @__PURE__ */ Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com", "https://robinhood.drpc.org"]),
 });
-/** An EVM chain's fee pair as the page reads it (testnetRpc each). */
+/** An EVM chain's fee list as the page reads it (testnetRpc each). */
 export const pageEvmFeeRpcs = (chain: "base" | "robinhood"): readonly EvmRpc[] => (POOL_TESTNET ? TESTNET_EVM_FEE_RPCS[chain] : MAINNET_EVM_FEE_RPCS[chain]).map((u) => testnetRpc(u));
 /** The kit's epoch fee rule (../../wallet/src/pool/evm.ts EvmEpochFeeRule): the helper's own (apps/helper pool/evm.ts). */
 export const evmEpochFee = (at: { baseFeePerGas: bigint; depth: number; chainFee: bigint }): bigint => evmPoolFee({ gas: evmPoolGas(at.depth), gasPrice: at.baseFeePerGas, chainFee: at.chainFee });

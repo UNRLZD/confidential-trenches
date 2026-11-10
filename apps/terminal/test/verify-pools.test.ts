@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { EIP1967, livePools, poolExplorers, poolRow, readPool, unverifiedPoolRow, type PoolPin, type PoolReads, type PoolRow } from "../src/screens/verify/pools.ts";
 import { VERIFY_RELEASES } from "../src/screens/verify/release.ts";
+import { evmPoolVenues, evmReadProvidersOf } from "@blindfill/kit";
 
 const REC = JSON.parse(readFileSync(new URL("./verify/pool-reads.json", import.meta.url), "utf8")) as Record<"solana" | "base" | "robinhood", PoolReads>;
 const PINS = VERIFY_RELEASES.mainnet.pools;
@@ -112,13 +113,15 @@ test("readPool: an EVM pool is read at the lower head on both RPCs, every read a
   const fetchFn = (async (url: string, init: RequestInit) => {
     const { method, params } = JSON.parse(String(init.body));
     calls.push({ url, method, params });
-    const result = method === "eth_blockNumber" ? (url.includes("publicnode") ? "0x64" : "0x65") : method === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null, null] } : "0x";
+    // a block read answers a block (a seat with no block at the height asked is walked past)
+    const result = method === "eth_blockNumber" ? (url.includes("publicnode") ? "0x64" : "0x65") : method === "getMultipleAccounts" ? { context: { slot: 1 }, value: [null, null] } : method === "eth_getBlockByNumber" ? { number: params[0], hash: `0x${"ab".repeat(32)}` } : "0x";
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: "verify", result }), { status: 200 });
   }) as typeof fetch;
   const v = await livePools(PINS, fetchFn);
   assert.equal(v.state, "read");
   const base = calls.filter((c) => c.url.includes("base"));
-  assert.deepEqual(new Set(base.map((c) => c.url)), new Set(PINS.base!.rpcs));
+  // two operators of the list, the first two, both answering: no other asked
+  assert.deepEqual(new Set(base.map((c) => c.url)), new Set(PINS.base!.rpcs.slice(0, 2)));
   for (const c of base.filter((x) => x.method !== "eth_blockNumber")) assert.equal(c.method === "eth_getBlockByNumber" ? c.params[0] : c.params.at(-1), "0x64", `${c.method} at the lower head`);
   assert.deepEqual(base.filter((c) => c.method === "eth_getStorageAt").map((c) => c.params[1]).sort(), [EIP1967.admin, EIP1967.beacon, EIP1967.implementation, EIP1967.admin, EIP1967.beacon, EIP1967.implementation].sort());
   const sol = calls.filter((c) => c.method === "getMultipleAccounts");
@@ -126,7 +129,7 @@ test("readPool: an EVM pool is read at the lower head on both RPCs, every read a
   assert.deepEqual(sol[0]!.params, [[(PINS.solana!.pin as any).program, (PINS.solana!.pin as any).programdata], { encoding: "base64", commitment: "finalized" }]);
   // no pool is read through anything but its pair: no helper, no other host
   const hosts = new Set(calls.map((c) => new URL(c.url).host));
-  assert.deepEqual([...hosts].sort(), [...new Set(Object.values(PINS).flatMap((p) => p!.rpcs.map((u) => new URL(u).host)))].sort());
+  assert.deepEqual([...hosts].sort(), [...new Set(Object.values(PINS).flatMap((p) => p!.rpcs.slice(0, 2).map((u) => new URL(u).host)))].sort());
   await assert.rejects(readPool(pin("base"), async () => ({ error: "down" })), /no head/);
 });
 
@@ -140,28 +143,63 @@ test("one RPC of each pair down: every row amber, nothing logged; both of an EVM
     (async (url: string, init: RequestInit) => {
       if (down(url)) throw new TypeError("Failed to fetch");
       const { method, params } = JSON.parse(String(init.body));
-      const c = (Object.keys(REC) as (keyof typeof REC)[]).find((k) => k !== ("notes" as string) && REC[k].rpcs?.some((x) => x.name === url))!;
-      const answer = method === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${REC[c].height!.toString(16)}` } : (REC[c].rpcs.find((x) => x.name === url)!.answers as any)[ids[method] ?? slot(params)];
+      // every seat of a chain's list answers that chain's recording (its two recorded seats agree)
+      const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+      const rec = REC[c].rpcs.find((x) => x.name === url) ?? REC[c].rpcs[0]!;
+      const answer = method === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${REC[c].height!.toString(16)}` } : (rec.answers as any)[ids[method] ?? slot(params)];
       return new Response(JSON.stringify(answer), { status: 200 });
     }) as unknown as typeof fetch;
   const logged: string[] = [];
   const was = console.error;
   console.error = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
   try {
+    // card device-evm-fee-read-walks-operators: Solana's pair has no spare, so its row is amber; an EVM row walks its
+    // list to two other operators and stays ok, naming them
     for (const side of [0, 1]) {
       const firsts = new Set(Object.values(PINS).map((p) => p!.rpcs[side]));
       const v = await livePools(PINS, replay((u) => firsts.has(u)));
-      assert.ok(v.state === "read" && v.rows.every((r) => r.status === "warn"), `side ${side} down`);
+      assert.ok(v.state === "read");
+      assert.deepEqual(v.rows.map((r) => r.status), ["warn", "ok", "ok"], `side ${side} down`);
+      for (const r of v.rows.slice(1)) assert.ok(r.rpcs.length === 2 && !r.rpcs.some((x) => firsts.has(x)) && r.rpcs[0] !== r.rpcs[1], `side ${side} down: ${r.rpcs}`);
       assert.deepEqual(logged, [], `side ${side} down: nothing logged`);
     }
     const base = new Set(PINS.base!.rpcs);
     const v = await livePools(PINS, replay((u) => base.has(u)));
     assert.ok(v.state === "read");
     assert.deepEqual(v.rows.map((r) => r.status), ["ok", "warn", "ok"]);
-    assert.deepEqual(logged, [`Verify read no head on ${PINS.base!.rpcs.join(" or ")}`]);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0]!, /^Verify read no head on two of mainnet\.base\.org, base-rpc\.publicnode\.com, base\.api\.pocket\.network, base\.drpc\.org$/);
   } finally {
     console.error = was;
   }
+});
+
+// card device-evm-fee-read-walks-operators: robinhood.drpc.org answered every Verify read HTTP 400 code 27 "Unknown
+// state" on 10 Nov (app live run 42895457692), and the row was Unverified; an operator that refuses every read is
+// walked past, and the row is read on two others
+test("the list's first operator answers HTTP 400 \"Unknown state\" to every read: each EVM row is ok on two other operators", async () => {
+  const blind = new Set(["base", "robinhood"].map((c) => PINS[c as "base"]!.rpcs[0]!));
+  const ids: Record<string, string> = { eth_getBlockByNumber: "block", eth_getCode: "code", eth_call: "owner", getMultipleAccounts: "accounts" };
+  const slot = (p: unknown[]) => (Object.keys(EIP1967) as (keyof typeof EIP1967)[]).find((k) => EIP1967[k] === p[1])!;
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    if (blind.has(url)) return new Response(JSON.stringify({ error: { message: "Unknown state. First available state is 1", code: 27 } }), { status: 400 });
+    const { method, params } = JSON.parse(String(init.body));
+    const c = (Object.keys(PINS) as (keyof typeof REC)[]).find((k) => PINS[k]!.rpcs.includes(url))!;
+    const answer = method === "eth_blockNumber" ? { jsonrpc: "2.0", id: "verify", result: `0x${REC[c].height!.toString(16)}` } : (REC[c].rpcs[0]!.answers as any)[ids[method] ?? slot(params)];
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as typeof fetch;
+  const v = await livePools(PINS, fetchFn);
+  assert.ok(v.state === "read");
+  for (const r of v.rows.filter((x) => x.chain !== "solana")) {
+    assert.equal(r.status, "ok", `${r.chain}: ${JSON.stringify(r.checks)}`);
+    assert.ok(r.rpcs.length === 2 && r.rpcs.every((x) => !blind.has(x)), `${r.chain}: ${r.rpcs}`);
+  }
+});
+
+test("each EVM row's list is the kit's read list", () => {
+  const v = evmPoolVenues();
+  assert.deepEqual(PINS.base!.rpcs, evmReadProvidersOf(v.base!));
+  assert.deepEqual(PINS.robinhood!.rpcs, evmReadProvidersOf(v.robinhood!));
 });
 
 test("the testnet build names no pool: every row Unverified, nothing asked", async () => {
