@@ -77,7 +77,7 @@
 // Nothing here holds a secret, and no read names a note of the user's: only the pool's own logs and views. The one read
 // that names a wallet is evmTokensSentTo, one W a call, for the restore.
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
+import { EVM_POOL_TX_BYTES, EvmOperatorsUnanswered, evmPoolChainFee, evmPoolChainFeeReads, evmPoolGas, evmRpcOperator, evmTwoOperators, SOLANA_RPC_RETRY, solanaSameProvider, VAULT_FIELD_P, VaultTree, type EvmTwoOperators, type EvmTwoOperatorsOpts, type SolanaRpc } from "@blindfill/kit";
 import { evmAddress } from "../derive/index.ts";
 import type { Ladder } from "./ladder.ts";
 import { POOL_TESTNET } from "./network.ts";
@@ -1739,6 +1739,30 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   };
 }
 
+/**
+ * The bind's chain fee at the epoch's first block (bind's own read, and a live check's: device-evm-fee-read-walks-
+ * operators): the kit's evmPoolChainFeeReads at `depth`, by the block's hash, on two operators of the fee list, their
+ * answers equal (a difference is refused, EvmOperatorsDiffer, never asked of a third and never a lag). No two answered:
+ * a lag (a retry, its words the walk's, every host and the read named) only when every seat the refusing side asked
+ * lagged, whatever their order; else the walk's own refusal, by name, never tried again around it (evmAnswered).
+ */
+export async function evmBindChainFee(feeRpcs: EvmTwoOperators<EvmRpc>, network: EvmNetwork, block: EvmBlock, depth: number, signal?: AbortSignal, sleep: Sleep = wait): Promise<bigint> {
+  const reads = evmPoolChainFeeReads(network, evmPoolGas(depth));
+  let x: bigint[];
+  try {
+    [{ value: x }] = await feeRpcs.read(
+      `the chain fee at block ${block.number} (${block.hash})`,
+      (rpc, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${new URL(rpc.url!).host} chain fee`, sig, sleep))),
+      (p, q) => p.length === q.length && p.every((v, i) => v === q[i]),
+      signal,
+    );
+  } catch (e) {
+    if (e instanceof EvmOperatorsUnanswered) throw e.errors.length > 0 && e.errors.every((y) => y instanceof EvmLagError) ? new EvmLagError(e.message) : e;
+    throw e;
+  }
+  return evmPoolChainFee(network, EVM_POOL_TX_BYTES, x);
+}
+
 /** The pool's time: the newest block both RPCs agree on (evmAgreedBlock at EVM_NEWEST_TAG), ms; never one RPC's word. */
 export async function evmNow(rpcs: readonly [EvmRpc, EvmRpc], signal?: AbortSignal, sleep: Sleep = wait): Promise<bigint> {
   checkEvmRpcs(rpcs);
@@ -1890,24 +1914,7 @@ export function evmPool(a: EvmPoolArgs): Pool<EvmPoolRequest> {
       const { block, depth, chainFee } = await evmRetryLag(async () => {
         const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
         const depth = await sync.depthAt(block.number, signal, block.hash);
-        const reads = evmPoolChainFeeReads(a.pin.network, evmPoolGas(depth));
-        // two operators' answers, equal (a difference is refused, EvmOperatorsDiffer, never asked of a third)
-        let x: bigint[];
-        try {
-          [{ value: x }] = await feeRpcs.read(
-            `the chain fee at block ${block.number} (${block.hash})`,
-            (rpc, sig) => Promise.all(reads.map((r) => view(rpc, r.to, r.data.slice(2), block.hash, `fee rpc ${new URL(rpc.url!).host} chain fee`, sig, sleep))),
-            (p, q) => p.length === q.length && p.every((v, i) => v === q[i]),
-            signal,
-          );
-        } catch (e) {
-          // no two operators answered: a retry (a lag, its words the walk's, every host and the read named) only when every
-          // seat the refusing side asked lagged, whatever their order; else the walk's own refusal, by name, never tried
-          // again around it (a read that failed by name: evmAnswered). Two that differ (EvmOperatorsDiffer) are never a lag
-          if (e instanceof EvmOperatorsUnanswered) throw e.errors.length > 0 && e.errors.every((x) => x instanceof EvmLagError) ? new EvmLagError(e.message) : e;
-          throw e;
-        }
-        return { block, depth, chainFee: evmPoolChainFee(a.pin.network, EVM_POOL_TX_BYTES, x) };
+        return { block, depth, chainFee: await evmBindChainFee(feeRpcs, a.pin.network, block, depth, signal, sleep) };
       }, sleep, signal);
       const fee = a.epochFee({ block: block.number, baseFeePerGas: block.baseFeePerGas!, depth, chainFee });
       if (typeof fee !== "bigint" || fee < 0n) throw new Error("epochFee: not a fee");

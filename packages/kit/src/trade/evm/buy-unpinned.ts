@@ -224,13 +224,15 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // 600 s (fold 3, 2026-11-04 20:12Z)
       feeProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const),
       // The device's read list (card device-evm-fee-read-walks-operators), read 2026-11-10 20:44Z from this Mac: each
-      // answered eth_chainId 8453, a CORS preflight from https://sign.confidential.unrealized.trade and
-      // https://ct-app.unrealized.trade (200 or 204, allow-origin that origin or *), and the bind's own fee read (the
+      // answered eth_chainId 8453 and the bind's own fee read (the
       // OP oracle's getL1FeeUpperBound, by blockHash) at blocks 5, 60, 120 and 600 s back, 224-318 ms each. Four
       // operators, each on its own domain (evmRpcOperator) and each already in both pages' connect-src (the quote's and
       // the scan's lists): Coinbase's own (base.org), Allnodes' publicnode, Pocket's gateway and Tenderly's gateway
       // (read 21:17Z, 268-272 ms). base.drpc.org, blastapi and sentio answered the same reads; base.drpc.org is in
       // neither page's connect-src.
+      // CORS, from both pages' own origins (scripts/live-checks/page-evm-rpc-csp.mjs PAGES), read 21:48Z by live check
+      // device-evm-fee-read-walks-operators, which reads it again after every deploy: every seat's preflight 200 or 204,
+      // allow-origin that origin or *.
       readProviders: Object.freeze(["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.api.pocket.network", "https://base.gateway.tenderly.co"]),
       // The pool's list (card evm-pool-lists-mainnet): the quote list's second, blastapi, pages 10 blocks ("-32600: You
       // can make eth_getLogs requests with up to a 10 block range"), so it never seats the pool's sync. Read 2026-11-09
@@ -384,8 +386,7 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // second) and leave Robinhood's own (1 a second) to the pool sync, whose seat it is
       feeProviders: Object.freeze(["https://robinhood.drpc.org", "https://rpc.mainnet.chain.robinhood.com"] as const),
       // The device's read list (card device-evm-fee-read-walks-operators), read 2026-11-10 20:44Z from this Mac: each
-      // answered eth_chainId 4663 and a CORS preflight from https://sign.confidential.unrealized.trade and
-      // https://ct-app.unrealized.trade (204, allow-origin that origin or *). The bind's own fee read (ArbGasInfo's
+      // answered eth_chainId 4663. The bind's own fee read (ArbGasInfo's
       // getL1BaseFeeEstimate, by blockHash) at blocks 5, 60, 120 and 600 s back: Robinhood's own (Offchain Labs) all
       // four, 290-448 ms; publicnode (Allnodes) 5, 60 and 120 s, 232-244 ms, and -32000 "historical state ... is not
       // available" at 600 s; Pocket 5, 120 and 600 s and one HTTP 502 at 60 s; dRPC HTTP 400 {"code":27,"message":
@@ -400,6 +401,9 @@ export const evmPoolVenues = (): Readonly<Record<EvmPoolChain, EvmPoolVenue>> =>
       // Pocket second the walk's p50 was 1244 ms against the pair's 422 (5 periods, 21:03Z). publicnode, whose
       // backends refuse half of the state 15 to 55 s back, is last. Read the order again whenever the list changes.
       // bloXroute, Globalstake and daybreak answered the same -32000 at every age, 5 s included: none is listed.
+      // CORS, from both pages' own origins (scripts/live-checks/page-evm-rpc-csp.mjs PAGES), read 21:48Z by live check
+      // device-evm-fee-read-walks-operators, which reads it again after every deploy: every seat's preflight 200 or 204,
+      // allow-origin that origin or *.
       readProviders: Object.freeze(["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org", "https://robinhood.api.pocket.network", "https://robinhood-rpc.publicnode.com"]),
       // The pool's list (card robinhood-mainnet-rpcs): the quote list's first two cannot page the pool's logs.
       // Every keyless Robinhood mainnet RPC the chain's docs (docs.robinhood.com/chain/connecting: its own RPC; GlobalStake
