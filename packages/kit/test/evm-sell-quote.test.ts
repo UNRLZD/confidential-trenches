@@ -19,7 +19,7 @@ import { evmQuotedSell } from "../src/trade/evm/quoted.ts";
 import * as quoteMod from "../src/checks/evm/quote.ts";
 import type { EvmRpc, EvmRpcCall } from "../src/checks/evm/quote.ts";
 import * as releasesMod from "../src/trade/evm/sell-releases.ts";
-import { AMOUNT, BOUGHT, NATIVE, TOKEN, TOPIC_BOUGHT, TOPIC_WITHDRAWN, V3_POOL, WALLET, flat, provider, req, sell, sellQuoteWith, verdict, type Model, type Pool, type Release, type Seen } from "./evm-sell-quote-fx.ts";
+import { AMOUNT, BOUGHT, NATIVE, TOKEN, TOPIC_BOUGHT, TOPIC_WITHDRAWN, V3_POOL, WALLET, flat, provider, refreshHead, req, sell, sellQuoteWith, verdict, type Model, type Pool, type Release, type Seen } from "./evm-sell-quote-fx.ts";
 
 const keccak = (t: string) => keccak_256(new TextEncoder().encode(t));
 
@@ -369,11 +369,12 @@ test("planted: a sell quote takes the buy's block (boughtBlock): none, 0, a nega
 const E01_BASE = () => ({ precommitment: 0x5e11n, feeRecipient: evmPoolVenues()["base-sepolia"].feeCollector!, deadline: BigInt(Math.floor(Date.now() / 1000) + 300), nonce: 0n });
 // the fixture's head is block 0x100 (256), its finalized block 0xe0 (224), 900 s before the head; the buy that paid W
 // the token landed in block 256 (req's boughtBlock) and bought TOKEN
-// the head's time, 2 s before each test's start (a quote refuses a block more than 30 s old, and the file runs longer)
-let E01_HEAD = Math.floor(Date.now() / 1000) - 2;
+// the head's time, 2 s before each test's start (a quote refuses a block more than 30 s old, and the file runs longer):
+// every provider of the test gives it, however far apart they are built
+let E01_HEAD = refreshHead();
 let E01_FIN_MS = (BigInt(E01_HEAD) - 900n) * 1000n;
 beforeEach(() => {
-  E01_HEAD = Math.floor(Date.now() / 1000) - 2;
+  E01_HEAD = refreshHead();
   E01_FIN_MS = (BigInt(E01_HEAD) - 900n) * 1000n;
 });
 const e01Quote = (m: Partial<Model> = {}, o: Record<string, unknown> = {}, m2: Partial<Model> = m) =>
@@ -439,6 +440,17 @@ test("card evm-sell-no-release-in-flight: a release the device sent holds the se
     assert.deepEqual(await verdict(e01Quote({}, { sent: bad })), { accepted: false, code: "bad_request" }, JSON.stringify(bad, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
   }
 }));
+
+// PR #563's fresh run (10 Nov 00:10Z) refused the log-twice case below as rpc_disagree: its providers are built per batch,
+// and two built in different wall seconds gave the head block two times. Every provider of a test gives one head time.
+test("two providers built a second and a half apart give the same head block, time included", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_400 });
+  refreshHead();
+  const head = async (p: EvmRpc) => (await p([{ method: "eth_getBlockByNumber", params: ["latest", false] }]))[0];
+  const first = provider({ price: flat });
+  t.mock.timers.tick(1_500);
+  assert.deepEqual(await head(provider({ price: flat })), await head(first));
+});
 
 test("card evm-sell-no-release-in-flight: W's releases up to the quote's block must be the same on both providers; a lie, a malformed log or the wrong block refuses the quote", () => onTestClock(async () => {
   const w = { releases: [{ kind: "withdraw" as const, block: 240n, nullifier: 7n }] };

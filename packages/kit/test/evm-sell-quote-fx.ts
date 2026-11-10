@@ -107,10 +107,20 @@ export const releaseLog = (pool: string, r: Release, i = 0) => ({
   removed: false,
 });
 export type Seen = { pools: Pool[]; probes: { w: string; token: string; to: string; amount: bigint; code: string }[] };
+// The head block's time of every provider whose model names none: one value until refreshHead() sets the next (the test
+// file runs it before each test), never the moment a provider is built. Two providers built in different wall seconds
+// (a provider built per batch, a busy runner) otherwise gave one block two times, which the quote rightly refuses as
+// rpc_disagree (PR #563's fresh run, 10 Nov 00:10Z).
+let headSecNow = Math.floor(Date.now() / 1000) - 2;
+/** The head time from now on: 2 s before this moment (a quote refuses a block more than 30 s old). */
+export function refreshHead(): number {
+  headSecNow = Math.floor(Date.now() / 1000) - 2;
+  return headSecNow;
+}
 /** A provider on the modelled chain; every quote it is asked lands in `seen`. */
 export function provider(m: Model, seen: Seen = { pools: [], probes: [] }): EvmRpc {
   const fee = m.baseFee === undefined ? 5_000_000n : m.baseFee;
-  const head = { number: "0x100", hash: HASH, timestamp: "0x" + (m.headSec ?? Math.floor(Date.now() / 1000) - 2).toString(16), ...(fee === null ? {} : { baseFeePerGas: "0x" + fee.toString(16) }) };
+  const head = { number: "0x100", hash: HASH, timestamp: "0x" + (m.headSec ?? headSecNow).toString(16), ...(fee === null ? {} : { baseFeePerGas: "0x" + fee.toString(16) }) };
   const one = (data: string): bigint | null => {
     const sel = data.slice(0, 8);
     if (sel === "c45a0155") return BigInt(FACTORY);
