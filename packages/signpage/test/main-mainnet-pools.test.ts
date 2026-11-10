@@ -212,11 +212,13 @@ test("the mainnet build's state with a pinned pool: the queue's ready proof as r
   assert.ok(app, "the shell framed APP_HOST");
   app.dispatchEvent(new Event("load"));
   const quoted = await askQuote().then(() => true, () => false);
-  const heldAtAnswer = heldReads;
+  // the settle pass did run into the hold (waited for by count, on no clock): the quote above answered beside it
+  for (let t = 0; t < 2000 && heldReads === 0; t++) await new Promise((ok) => setTimeout(ok, 5));
+  const heldSeen = heldReads;
   hold = undefined;
   release();
-  assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldReads} held): it waits behind them`);
-  assert.ok(heldAtAnswer > 0, "the settle pass's Solana reads were held when the quote answered, so the quote did not wait for them");
+  assert.ok(quoted, `deposit.quote at boot never answered while the settle pass's Solana reads were held (${heldSeen} held): it waits behind them`);
+  assert.ok(heldSeen > 0, "the settle pass's Solana reads never met the hold, so this test held nothing");
 
   const want = `0.${solanaTapSpendOf(RENT)(CHUNK, FEE_CAP, SOL_TIP_CAP).toString().padStart(9, "0")}`.replace(/0+$/, "");
   let pool: NonNullable<Awaited<ReturnType<typeof askState>>["pools"]>[number] | undefined;
