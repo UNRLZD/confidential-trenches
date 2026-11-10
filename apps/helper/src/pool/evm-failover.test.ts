@@ -140,9 +140,12 @@ test("a read on both sides never asks one operator for both: each side claims an
   [p, q] = await run(new Set(["x", "y"]));
   assert.equal([p, q].filter((r) => r.ok).length, 1);
   assert.equal([p, q].filter((r) => r.ok && r.operator === "z").length, 1);
-  // a side's one read never sees the other's claims: one(0) goes on to y
-  const pair = evm.evmReadPair([seat("x", "x", () => Promise.reject(new Error("HTTP 502"))), seat("y", "y", async () => "0x1")], ["x", "y"], { log: () => {} });
-  assert.equal(await pair.one(0, "eth_blockNumber", []), "0x1");
+  // a side's own read goes past its operator to the list's next, the other side's first last: x failing, z answers;
+  // z failing too, y (side 1's) answers, as no claim of the other side's holds a read one side makes alone
+  const down = (op: string, fails: ReadonlySet<string>) => seat(op, op, async () => (fails.has(op) ? Promise.reject(new Error("HTTP 502")) : `0x${op.charCodeAt(0).toString(16)}`));
+  const alone = (fails: ReadonlySet<string>) => evm.evmReadPair(["x", "y", "z"].map((op) => down(op, fails)), ["x", "y"], { log: () => {} }).one(0, "eth_blockNumber", []);
+  assert.equal(await alone(new Set(["x"])), "0x7a");
+  assert.equal(await alone(new Set(["x", "z"])), "0x79");
 });
 
 // A read past its budget would wait on the hung spare forever: the test's own timeout is the bound, and the refusal names
