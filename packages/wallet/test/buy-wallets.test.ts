@@ -716,3 +716,23 @@ test("a throttle as the kit's JSON-RPC client throws it (HTTP 429, or -32029 in 
     }
   }
 });
+
+// re-review of 29c72ffe: only a throttle is a failed round; the kit's own client's 5xx or timeout, past its retry, is the
+// list's refusal at once, with no wait
+test("the kit's JSON-RPC client's 5xx or timeout past its retry refuses the wallet list at once on both chains, with no wait", async () => {
+  const hang = (async (_u: string, init: RequestInit) =>
+    new Promise((_res, rej) => init.signal?.addEventListener("abort", () => rej(init.signal!.reason)))) as never;
+  const five = (async () => new Response("down", { status: 503 })) as never;
+  for (const [what, fetch, want] of [["HTTP 503", five, /http 503/], ["a timeout", hang, /the call failed/]] as const) {
+    for (const chain of ["sol", "evm"] as const) {
+      const rpc = solanaJsonRpc("https://down.invalid", { fetch, timeoutMs: 20, retry: { deadlineMs: 60, backoffMs: 20 } });
+      const waits: number[] = [];
+      const opts = { wait429: () => 1234, sleep: async (ms: number) => void waits.push(ms) };
+      const reader = chain === "sol" ? solanaHoldingsReader(rpc, opts) : evmHoldingsReader(rpc, [], opts);
+      const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
+      assert.equal(r.failed.length, 1, `${what}, ${chain}`);
+      assert.match(r.failed[0]!.error, want, `${what}, ${chain}`);
+      assert.deepEqual(waits, [], `${what}, ${chain}: no wait`);
+    }
+  }
+});
