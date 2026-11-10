@@ -63,12 +63,12 @@ export function facts(index, js) {
   };
 }
 
-/** SIGN_HOST's /app.js sha384 in every release list from FIXED_FROM on (packages/signpage/releases/). */
-export function fixedReleases(dir = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases")) {
+/** SIGN_HOST's /app.js sha384 in every release list from `from` (FIXED_FROM) on (packages/signpage/releases/). */
+export function fixedReleases(dir = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases"), from = FIXED_FROM) {
   const out = new Set();
   for (const f of readdirSync(dir)) {
     const n = /^release-(\d+)\.json$/.exec(f)?.[1];
-    if (n === undefined || Number(n) < FIXED_FROM) continue;
+    if (n === undefined || Number(n) < from) continue;
     const list = JSON.parse(readFileSync(path.join(dir, f), "utf8"));
     for (const x of list.hosts?.SIGN_HOST?.files ?? []) if (x.path === "/app.js") out.add(x.sha384);
   }

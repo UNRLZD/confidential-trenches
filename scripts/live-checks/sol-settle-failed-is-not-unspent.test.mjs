@@ -46,9 +46,8 @@ test("the ledger: release-110's bundle (the bad answer) is below release-111, an
   const listed = fixedReleases();
   assert.ok(!listed.has(A.bad.sha384));
   assert.ok(!listed.has(A.good.sha384), "this branch's build is cut as a release only after its merge");
-  const ledger110 = JSON.parse(readFileSync(new URL("../../packages/signpage/releases/release-110.json", import.meta.url), "utf8"));
-  const served110 = new Set(ledger110.hosts.SIGN_HOST.files.filter((f) => f.path === "/app.js").map((f) => f.sha384));
-  assert.ok(served110.has(A.bad.sha384), "the bad answer is release-110's served bundle");
+  // a list from release-110 on names it, and none from release-111 on: release-110's served bundle
+  assert.ok(fixedReleases(undefined, 110).has(A.bad.sha384), "the bad answer is release-110's served bundle");
 });
 
 test("planted in the bundle's excerpt: each rule broken in place FAILs", () => {
