@@ -74,7 +74,7 @@
 import "../../../scripts/net-window.mjs";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -176,6 +176,8 @@ export async function recentSlot(call) {
 /** The paste line for a venue on a cluster. */
 export const runLine = (cluster, venue) => `node contracts/pool-solana/scripts/venue-table.mjs --cluster ${cluster} --venue ${venue} --return <your Solana address, where the run's leftover SOL goes back>`;
 const resumeLine = (keyDir, returnTo) => `node contracts/pool-solana/scripts/venue-table.mjs --resume ${keyDir} --return ${returnTo}`;
+/** The last line of a run stopped by Ctrl-C or SIGTERM: nothing is given back on a signal, so it says how. */
+const signalLine = (keyDir, returnTo) => `stopped by a signal: whatever SOL the funder holds stays on it, and the key in ${keyDir}; it comes back to ${returnTo} (or the run goes on) with: ${resumeLine(keyDir, returnTo)}`;
 const pagesText = (r) => `state pages ${r.state[0]} to ${r.state[1]}, label pages ${r.label[0]} to ${r.label[1]}`;
 const isRange = (r) => r && [r.state, r.label].every((x) => Array.isArray(x) && x.length === 2 && x.every(Number.isSafeInteger) && x[0] >= 0 && x[0] <= x[1]);
 const holds = (outer, inner) => ["state", "label"].every((t) => outer[t][0] <= inner[t][0] && outer[t][1] >= inner[t][1]);
@@ -282,7 +284,10 @@ async function createState(p, x) {
   if (x.state === "landed" || x.state === "failed") return x.state;
   const st = await Promise.all(p.call.map((f) => f("getSignatureStatuses", [[x.signature], { searchTransactionHistory: true }]).then((r) => r.value[0])));
   if (st.some((s) => s && !s.err && LANDED.includes(s.confirmationStatus))) return "landed";
-  if (st.some((s) => s?.err)) return "failed";
+  // an error status counts once confirmed: that block holds the transaction (its fee taken, its signature spent), so it
+  // can never land again, and one RPC's confirmed word is enough, as for "landed"; a processed one may be on a fork
+  // that is dropped, while the same transaction lands on another
+  if (st.some((s) => s?.err && LANDED.includes(s.confirmationStatus))) return "failed";
   if (st.some((s) => s) || x.last_valid == null) return "open";
   const h = await Promise.all(p.call.map((f) => f("getBlockHeight", [{ commitment: "finalized" }])));
   return h.every((v) => BigInt(v) > BigInt(x.last_valid)) ? "expired" : "open";
@@ -398,8 +403,9 @@ async function tableNeedsFolder(p, jr) {
   return why && `lookup table ${T}: ${why}`;
 }
 
-/** The lock of a key folder: one run at a time. Its file holds the pid, made whole before it is visible (a hard link of
- *  a written file), so a reader never sees a half-written lock. */
+/** The lock of a key folder: one run at a time. Its file holds the pid and that process's start time, made whole before
+ *  it is visible (a hard link of a written file), so a reader never sees a half-written lock, and a pid that now
+ *  belongs to another process (a restart, pids reused) is a dead lock. */
 export const LOCK = "run.lock";
 const alive = (pid) => {
   try {
@@ -409,45 +415,77 @@ const alive = (pid) => {
     return e.code === "EPERM";
   }
 };
-/** The live pid that holds `dir`'s lock, or null (no lock, or its pid is gone). */
-function lockHolder(dir) {
-  let pid;
+/** A process's start time as ps prints it (lstart), or null when there is none. */
+const startOf = (pid) => {
   try {
-    pid = Number(readFileSync(path.join(dir, LOCK), "utf8").trim());
+    return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
-  return Number.isSafeInteger(pid) && pid > 0 && alive(pid) ? pid : null;
+};
+const lockText = () => `${process.pid}\n${startOf(process.pid) ?? ""}\n`;
+/** The live run a lock file names ({ pid, start }), or null: no file, no pid, the pid gone, or the pid now another
+ *  process's (its start time not the one the lock holds). A lock with no start time (an older run's) goes by its pid. */
+function liveIn(file) {
+  let pid, start;
+  try {
+    [pid, start] = readFileSync(file, "utf8").split("\n").map((x) => x.trim());
+    pid = Number(pid);
+  } catch {
+    return null;
+  }
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !alive(pid)) return null;
+  if (start && startOf(pid) !== start) return null;
+  return { pid, start: start || "unknown" };
 }
-/** Takes `dir`'s lock for this process, or throws when a live run holds it; a dead pid's lock is taken over and said
- *  so. Returns release(), which runs on every exit: the run's own end, process.exit, SIGINT (exit 130), SIGTERM (143). */
-export function lockFolder(dir, { say = log } = {}) {
+/** The live run that holds `dir`'s lock ({ pid, start }), or null. */
+const lockHolder = (dir) => liveIn(path.join(dir, LOCK));
+/** Takes `dir`'s lock for this process, or throws when a live run holds it; a dead lock is taken over and said so (moved
+ *  aside by a rename, so of two runs taking over the same dead lock only one does). Returns release(), which runs on
+ *  every exit: the run's own end, process.exit, SIGINT (exit 130), SIGTERM (143), each saying `onSignal` first. */
+export function lockFolder(dir, { say = log, onSignal = null } = {}) {
   const file = path.join(dir, LOCK);
   const take = () => {
     const tmp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}`;
-    writeFileSync(tmp, `${process.pid}\n`, { mode: 0o600 });
+    writeFileSync(tmp, lockText(), { mode: 0o600 });
     try {
       linkSync(tmp, file);
     } finally {
       rmSync(tmp, { force: true });
     }
   };
-  const held = (pid) => new Error(`another run (pid ${pid}) holds this folder (${dir}): nothing is sent; let that run end or stop it, then paste this line again`);
+  const held = (h) => new Error(`another run (pid ${h?.pid ?? "unknown"}, started ${h?.start ?? "unknown"}) holds ${file}: nothing is sent; let that run end or stop it, then paste this line again`);
   try {
     take();
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    const pid = lockHolder(dir);
-    if (pid !== null) throw held(pid);
+    const h = lockHolder(dir);
+    if (h !== null) throw held(h);
     let was = "unknown";
     try {
-      was = readFileSync(file, "utf8").trim() || was;
+      was = readFileSync(file, "utf8").split("\n")[0].trim() || was;
     } catch {}
-    rmSync(file, { force: true });
+    const aside = `${file}.gone.${process.pid}.${randomBytes(6).toString("hex")}`;
+    try {
+      renameSync(file, aside);
+    } catch (x) {
+      if (x.code !== "ENOENT") throw x;
+    }
+    // what was moved aside is a live run's lock when another run took the dead one over between the read and the rename:
+    // it goes back, and this run stops
+    const moved = existsSync(aside) ? liveIn(aside) : null;
+    if (moved) {
+      try {
+        linkSync(aside, file);
+      } catch {}
+      rmSync(aside, { force: true });
+      throw held(moved);
+    }
+    rmSync(aside, { force: true });
     try {
       take();
     } catch (x) {
-      if (x.code === "EEXIST") throw held(lockHolder(dir) ?? "unknown");
+      if (x.code === "EEXIST") throw held(lockHolder(dir));
       throw x;
     }
     say(`the lock of a run that is gone (pid ${was}) in ${dir} is taken over`);
@@ -460,11 +498,11 @@ export function lockFolder(dir, { say = log } = {}) {
     process.off("SIGTERM", onTerm);
     process.off("exit", release);
     try {
-      if (readFileSync(file, "utf8").trim() === String(process.pid)) unlinkSync(file);
+      if (readFileSync(file, "utf8").split("\n")[0].trim() === String(process.pid)) unlinkSync(file);
     } catch {}
   };
-  const onInt = () => (release(), process.exit(130));
-  const onTerm = () => (release(), process.exit(143));
+  const onInt = () => (onSignal && say(onSignal), release(), process.exit(130));
+  const onTerm = () => (onSignal && say(onSignal), release(), process.exit(143));
   process.on("SIGINT", onInt);
   process.on("SIGTERM", onTerm);
   process.on("exit", release);
@@ -475,8 +513,8 @@ export function lockFolder(dir, { say = log } = {}) {
  *  live run holds it, or its run did not stop here with one fee or less on its funder, or its funder holds more now, or
  *  its journal names a table the chain holds or may still make. A read that fails stops the paste too. */
 async function inTheWay(p, dir) {
-  const pid = lockHolder(dir);
-  if (pid !== null) return `another run (pid ${pid}) holds it`;
+  const h = lockHolder(dir);
+  if (h !== null) return `another run (pid ${h.pid}, started ${h.start}) holds its lock ${path.join(dir, LOCK)}`;
   let j;
   try {
     j = JSON.parse(readFileSync(path.join(dir, "journal.json"), "utf8"));
@@ -536,8 +574,9 @@ export async function run(p, { returnTo, keyDir = null, base, say = log, wait = 
   const refused = await returnRefusal(p, returnTo);
   if (refused) throw new Error(`--return ${returnTo} ${refused}: nothing is made or sent`);
   let funder, release;
+  const resumed = keyDir !== null;
   if (keyDir) {
-    release = lockFolder(keyDir, { say });
+    release = lockFolder(keyDir, { say, onSignal: signalLine(keyDir, returnTo) });
     try {
       const raw = Uint8Array.from(JSON.parse(readFileSync(path.join(keyDir, "funder.json"), "utf8")));
       funder = { secret: raw.slice(0, 32), pub: raw.slice(32), id: b58encode(raw.slice(32)) };
@@ -553,17 +592,17 @@ export async function run(p, { returnTo, keyDir = null, base, say = log, wait = 
     keyDir = path.join(base, `venue-table-${cluster}-${venue}-${new Date(now()).toISOString().replace(/[:.]/g, "-")}`);
     mkdirSync(keyDir, { recursive: true, mode: 0o700 });
     chmodSync(keyDir, 0o700);
-    release = lockFolder(keyDir, { say });
+    release = lockFolder(keyDir, { say, onSignal: signalLine(keyDir, returnTo) });
     writeFileSync(path.join(keyDir, "funder.json"), JSON.stringify([...funder.secret, ...funder.pub]), { mode: 0o600 });
   }
   try {
-    await runLocked(p, { returnTo, keyDir, funder, say, wait, now });
+    await runLocked(p, { returnTo, keyDir, funder, say, wait, now, resumed });
   } finally {
     release();
   }
 }
 
-async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
+async function runLocked(p, { returnTo, keyDir, funder, say, wait, now, resumed = false }) {
   const { cluster, venue, c, list, range, sizes } = p;
   const jr = journalOf(keyDir, { cluster, venue, funder: funder.id, return_to: returnTo, table: null, slot: null, bump: null, pages: range, made_at: sizes, list });
   // a stop's mark holds only until a run takes the folder again: one killed in its funding wait leaves none
@@ -581,6 +620,19 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     // nothing (create), a prefix of the list under the funder (extend the rest), the list under the funder (freeze),
     // the list frozen (record); anything else stops with the table named
     const held = await journalTable(p, jr);
+    // a resume that has made no table first asks the fresh paste's "nothing to add": another run may have made this
+    // generation since (the record holds it); then it only gives the SOL back. Otherwise it goes on with its journal's
+    // range, as a resume does
+    if (!held && resumed) {
+      let why = null;
+      try {
+        await plan(cluster, venue, { fetchFn: p.fetchFn, dir: path.dirname(p.file), wait: p.wait });
+      } catch (e) {
+        if (!/^nothing to add/.test(String(e?.message))) throw e;
+        why = e.message;
+      }
+      if (why) throw Object.assign(new Error(`this stopped run made no table, and ${why}: nothing is made; the funder's SOL goes back to ${returnTo}`), { noTable: true });
+    }
     let t = held ? { address: jr.j.table, slot: BigInt(jr.j.slot), bump: jr.j.bump } : null;
     const got = [];
     if (held) for (let i = TABLE_META; i < held.data.length; i += 32) got.push(b58encode(held.data.subarray(i, i + 32)));
@@ -673,7 +725,7 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     for (let i = 0; i < 30; i++, await wait(5_000)) {
       if ((await balances(p, funder.id, "finalized")).every((x) => x === 0n)) {
         rmSync(keyDir, { recursive: true, force: true });
-        return say(`the funder reads 0 on both RPCs at finalized: its key folder is removed`);
+        return say(`the funder reads 0 on both RPCs at finalized: its key folder is removed, so any SOL that reaches the funder ${funder.id} from now on is lost (no key is left for it)`);
       }
     }
     say(`the funder does not read 0 on both RPCs yet: the key folder ${keyDir} is kept`);
@@ -690,7 +742,7 @@ async function runLocked(p, { returnTo, keyDir, funder, say, wait, now }) {
     if (why) say(`${why}: the key stays in ${keyDir}`);
     const table = await tableNeedsFolder(p, jr).catch((x) => `the table was not read (${x.message})`);
     if (most !== null && most <= FEE_PER_SIGNATURE && !table) {
-      say(`the funder ${funder.id} holds ${most} lamports, too little to send back: nothing is left to do, unless SOL sent to it is still on its way; once that lands, go on with: ${resume}. This folder does not stop a fresh paste.`);
+      say(`the funder ${funder.id} holds ${most} lamports, too little to send back: nothing is left to do, and this folder does not stop a fresh paste. SOL that lands on the funder later comes back with: ${resume} (a resume makes no table once a paste made this generation, it only gives back).`);
     }
     // a table no resume can finish: its recovery, said last (after the sweep, which it does not need)
     if (e?.stranded) for (const l of recoveryLines(c.rpcs[0], jr.j.table, keyDir, funder.id, returnTo)) say(l);

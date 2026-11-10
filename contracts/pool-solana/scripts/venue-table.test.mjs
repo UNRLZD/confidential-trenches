@@ -153,7 +153,7 @@ function fakeCluster({ cluster = "mainnet", sizes = [{ state: 0, label: 0 }, { s
     if (lam(tx.keys[0]) < fee) return { err: "Attempt to debit an account but found no record of a prior credit." };
     add(tx.keys[0], -fee);
     for (const [k, x] of tx.ixs.entries()) {
-      const fail = (m) => ({ err: `Error processing Instruction ${k}: ${m}` });
+      const fail = (m) => ({ err: `Error processing Instruction ${k}: ${m}`, fee });
       if (x.prog === CB) continue;
       if (x.prog === SYSTEM) {
         const amount = x.data.readBigUInt64LE(4);
@@ -198,8 +198,8 @@ function fakeCluster({ cluster = "mainnet", sizes = [{ state: 0, label: 0 }, { s
       } else return fail("invalid instruction data");
     }
     for (const [a, v] of st) {
-      if (v.lamports < 0n) return { err: `${a} would go below 0` };
-      if (v.owner === SYSTEM && v.data.length === 0 && v.lamports > 0n && v.lamports < rentMin(0)) return { err: `Transaction results in an account (${a}) with insufficient funds for rent` };
+      if (v.lamports < 0n) return { err: `${a} would go below 0`, fee };
+      if (v.owner === SYSTEM && v.data.length === 0 && v.lamports > 0n && v.lamports < rentMin(0)) return { err: `Transaction results in an account (${a}) with insufficient funds for rent`, fee };
     }
     return { changes: st };
   }
@@ -209,8 +209,15 @@ function fakeCluster({ cluster = "mainnet", sizes = [{ state: 0, label: 0 }, { s
     for (const x of late.filter((x) => x.at <= t)) {
       late.splice(late.indexOf(x), 1);
       const sim = simulate(x.tx);
+      // as the chain does: a transaction whose fee payer cannot pay never lands (no status); one that fails after that
+      // lands with its error, its fee taken and nothing else changed
+      if (sim.err && /^Attempt to debit/.test(sim.err)) continue;
       if (!sim.err) for (const [a, v] of sim.changes) set(a, v);
-      statuses.set(x.tx.sig, { at: t, slot: slotAt(t) });
+      else if (sim.fee) {
+        const v = get(x.tx.keys[0]);
+        set(x.tx.keys[0], { ...v, lamports: BigInt(v.lamports) - sim.fee });
+      }
+      statuses.set(x.tx.sig, { at: t, slot: slotAt(t), err: sim.err ?? null });
     }
     const i = c.rpcs.indexOf(url);
     assert.ok(i >= 0, `a read of ${url}, not one of the cluster's RPCs`);
@@ -260,7 +267,7 @@ function fakeCluster({ cluster = "mainnet", sizes = [{ state: 0, label: 0 }, { s
     if (method === "getSignatureStatuses") {
       return answer({ context: ctx, value: params[0].map((s) => {
         const x = statuses.get(s);
-        return x ? { slot: Number(x.slot), confirmations: null, err: null, confirmationStatus: t - x.at >= fin ? "finalized" : "confirmed" } : null;
+        return x ? { slot: Number(x.slot), confirmations: null, err: x.err ? { InstructionError: x.err } : null, confirmationStatus: t - x.at >= fin ? "finalized" : "confirmed" } : null;
       }) });
     }
     if (method === "sendTransaction") {
@@ -1088,6 +1095,56 @@ test("two journaled extends open at once: the resume stops while either can land
   }
 });
 
+test("a resume inside the finality lag after an extend the journal marks landed (confirmed reads 57, finalized 28) stops, nothing sent; a minute later it finishes (reviewer's probe P)", async () => {
+  const k = fakeCluster({ fin: 13_000 });
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const T = b58encode(new Uint8Array(32).fill(4));
+  const { dir: kd, funder } = keptFolder(base, p, { table: T, txs: [{ step: "lookup table: create and extend with 28 addresses", signature: sigOf(1), state: "landed", table: T, last_valid: 1 }, { step: "lookup table: extend with 29 addresses", signature: sigOf(2), state: "landed", table: T, last_valid: 2 }] });
+  fund(k, funder.id, 50_000_000n);
+  k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 28)), lamports: rentMin(56 + 32 * 28) }, 0);
+  k.advance(60_000);
+  k.set(T, { owner: ALT, data: tableData(funder.id, p.list.slice(0, 57)), lamports: rentMin(56 + 32 * 57) });
+  k.advance(2_000);
+  await assert.rejects(resumeOn(k, dir, kd, base), /do not read lookup table .* the same at confirmed and at finalized.*resume again in a minute/);
+  assert.equal(sent(k, "extend").length + sent(k, "freeze").length, 0, "nothing sent");
+  k.advance(60_000);
+  await resumeOn(k, dir, kd, base);
+  const got = addressesOf(k.get(T, "finalized"));
+  assert.deepEqual(got, p.list);
+  assert.equal(k.get(T, "finalized").data[21], 0);
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
+});
+
+test("an error status counts as failed only once confirmed: a processed one is a send that may still land, a confirmed one is past landing", async () => {
+  for (const [level, open] of [["processed", true], ["confirmed", false]]) {
+    const c = await countCase();
+    const S = sigOf(2);
+    const fetchFn = async (url, init) => {
+      const b = JSON.parse(init.body);
+      if (b.method === "getSignatureStatuses" && b.params[0].includes(S)) return answer({ context: { slot: 1 }, value: [{ slot: 1, confirmations: 0, err: { InstructionError: [1, "InvalidInstructionData"] }, confirmationStatus: level }] });
+      return c.k.fetchFn(url, init);
+    };
+    const q = await plan("mainnet", "pumpswap", { fetchFn, dir: c.dir, wait: c.k.wait, journal: journalAt(c.kd) });
+    if (open) {
+      await assert.rejects(runOn(c.k, q, c.base, { keyDir: c.kd }), (e) => e.message.includes(S) && /may still land/.test(e.message), level);
+      assert.equal(c.toTable(), 0, level);
+    } else {
+      await runOn(c.k, q, c.base, { keyDir: c.kd });
+      c.finished();
+    }
+  }
+});
+
+test("the success path's last line says SOL that reaches the funder after its key is removed is lost", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  await runOn(k, await planOn(k, "pumpswap", recordDir()), base);
+  const funder = k.sends[0].tx.keys[0];
+  assert.equal(k.logs.at(-1), `the funder reads 0 on both RPCs at finalized: its key folder is removed, so any SOL that reaches the funder ${funder} from now on is lost (no key is left for it)`);
+});
+
 test("a run whose own landed extend shows in the account reads only after a while: the next extend waits for both RPCs to read it, and the table is the list once", async () => {
   let table = null, lag = 0, prev = null;
   const k = fakeCluster({
@@ -1167,8 +1224,9 @@ test("one run per key folder: a resume beside a live run stops at once naming it
     const kd = folderOf(base);
     const before = k.sends.length;
     const saidB = [];
-    const pid = new RegExp(`another run \\(pid ${process.pid}\\) holds`);
-    await assert.rejects(vt.run(await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait, journal: journalAt(kd) }), { returnTo: RETURN, base, keyDir: kd, say: (s) => (saidB.push(s), k.say(s)), wait: k.wait, now: k.now }), (e) => pid.test(e.message) && e.message.includes("holds this folder"));
+    const pid = new RegExp(`another run \\(pid ${process.pid}, started \\w{3} \\w{3} +\\d+ [\\d:]+ \\d{4}\\) holds`);
+    // the refusal names the lock file's full path
+    await assert.rejects(vt.run(await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait, journal: journalAt(kd) }), { returnTo: RETURN, base, keyDir: kd, say: (s) => (saidB.push(s), k.say(s)), wait: k.wait, now: k.now }), (e) => pid.test(e.message) && e.message.includes(`holds ${path.join(kd, "run.lock")}:`));
     assert.deepEqual(saidB, [], "the resume beside it printed nothing");
     await assert.rejects(vt.run(await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait }), { returnTo: RETURN, base, say: () => {}, wait: k.wait, now: k.now }), (e) => pid.test(e.message) && e.message.includes(kd));
     assert.equal(k.sends.length, before, "nothing sent beside the live run");
@@ -1211,7 +1269,7 @@ test("the lock is released on SIGINT and on SIGTERM, and when a run stops", asyn
       child.stdout.on("data", (d) => ((out += d), out.includes("locked") && res()));
       exited.then((c) => rej(new Error(`exited ${c} before it locked: ${err}`)));
     });
-    assert.equal(readFileSync(path.join(dir, "run.lock"), "utf8").trim(), String(child.pid), `${sig}: the lock holds the pid`);
+    assert.equal(readFileSync(path.join(dir, "run.lock"), "utf8").split("\n")[0], String(child.pid), `${sig}: the lock holds the pid`);
     child.kill(sig);
     assert.equal(await exited, code, sig);
     assert.equal(existsSync(path.join(dir, "run.lock")), false, `${sig}: the lock is released`);
@@ -1223,6 +1281,67 @@ test("the lock is released on SIGINT and on SIGTERM, and when a run stops", asyn
   const { dir: kd } = keptFolder(base, p, { list: p.list.slice(1) });
   await assert.rejects(runOn(k, await planOn(k, "pumpswap", recordDir(), { journal: journalAt(kd) }), base, { keyDir: kd }), /list now differs/);
   assert.equal(existsSync(path.join(kd, "run.lock")), false);
+});
+
+test("a lock whose pid now belongs to another live process (a restart, pids reused) is a dead lock: the resume takes it over and said so, and it never stops a fresh paste (reviewer's probe H)", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const { dir: kd, funder } = keptFolder(base, p);
+  fund(k, funder.id, 50_000_000n);
+  // the parent process is alive, and started before the run that wrote this lock
+  writeFileSync(path.join(kd, "run.lock"), `${process.ppid}\nThu Jan  1 00:00:00 1970\n`);
+  const said = [];
+  await resumeOn(k, dir, kd, base, { say: (x) => (said.push(x), k.say(x)) });
+  assert.ok(said.some((l) => l.includes(`the lock of a run that is gone (pid ${process.ppid})`)), said.slice(0, 3).join("\n"));
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
+  assert.deepEqual(readdirSync(base), [], "finished, the folder removed, no lock left aside");
+});
+
+test("Ctrl-C and SIGTERM say last how the funder's SOL comes back: the resume line in full", async () => {
+  for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+    const dir = mkdtempSync(path.join(tmpdir(), "venue-table-sig-"));
+    const src = `const m = await import(${JSON.stringify(pathToFileURL(path.join(HERE, "venue-table.mjs")).href)}); m.lockFolder(${JSON.stringify(dir)}, { say: (s) => console.log(s), onSignal: "LAST LINE" }); console.log("locked"); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", src], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    const exited = new Promise((r) => child.on("exit", (c) => r(c)));
+    await new Promise((res) => child.stdout.on("data", (d) => ((out += d), out.includes("locked") && res())));
+    child.kill(sig);
+    assert.equal(await exited, code);
+    assert.deepEqual(out.trim().split("\n").at(-1), "LAST LINE", sig);
+  }
+  // the line the run passes: the resume line in full, with the key folder and --return
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  const { dir: kd } = keptFolder(base, p);
+  // the funder's balance read never answers: the run waits there, as one does for the owner's SOL
+  let waiting = false;
+  const fetchFn = async (url, init) => (methodOf(init) === "getBalance" ? ((waiting = true), new Promise(() => {})) : k.fetchFn(url, init));
+  const said = [];
+  let line = null;
+  const orig = process.on.bind(process);
+  process.on = (ev, f) => ((ev === "SIGINT" && (line = f)), orig(ev, f));
+  try {
+    const q = await plan("mainnet", "pumpswap", { fetchFn, dir, wait: k.wait, journal: journalAt(kd) });
+    const run = vt.run(q, { returnTo: RETURN, base, keyDir: kd, say: (x) => said.push(x), wait: k.wait, now: k.now });
+    while (!waiting) await tick();
+    const exit = process.exit;
+    let code = null;
+    process.exit = (c) => void (code = c);
+    try {
+      line();
+    } finally {
+      process.exit = exit;
+    }
+    assert.equal(code, 130);
+    assert.equal(said.at(-1), `stopped by a signal: whatever SOL the funder holds stays on it, and the key in ${kd}; it comes back to ${RETURN} (or the run goes on) with: node contracts/pool-solana/scripts/venue-table.mjs --resume ${kd} --return ${RETURN}`);
+    run.catch(() => {});
+  } finally {
+    process.on = orig;
+  }
 });
 
 test("--return is refused before anything is made or printed: the pool program, the pool account, the system program, wSOL's mint", async () => {
@@ -1270,6 +1389,26 @@ test("a stopped run's folder whose journal marks its create landed stops a fresh
   assert.equal(k.sends.length, 0);
 });
 
+test("an old folder's resume after another run made the same generation makes no second table: it only gives back (reviewer's probe I: 2 record rows, 42,550,080 lamports locked)", async () => {
+  const k = fakeCluster();
+  const base = keyBase();
+  const dir = recordDir();
+  const p = await planOn(k, "pumpswap", dir);
+  // run 1 stopped before its create with nothing on its funder; a fresh paste then made the generation
+  const { dir: kd, funder } = keptFolder(base, p);
+  writeFileSync(path.join(kd, "journal.json"), JSON.stringify({ ...journalAt(kd), stopped_left: "0" }));
+  await runOn(k, await planOn(k, "pumpswap", dir), base);
+  assert.equal(recOf(dir).tables.pumpswap.length, 1);
+  const creates = sent(k, "create").length;
+  // SOL lands on run 1's funder later; its printed resume line runs
+  fund(k, funder.id, 50_000_000n);
+  const before = k.get(RETURN).lamports;
+  await assert.rejects(resumeOn(k, dir, kd, base), /made no table, and nothing to add: pumpswap's generation 1 .*the funder's SOL goes back/);
+  assert.equal(sent(k, "create").length, creates, "no second create");
+  assert.equal(recOf(dir).tables.pumpswap.length, 1, "one record row");
+  assert.equal(k.get(RETURN).lamports - before, 50_000_000n - 5_000n, "given back");
+});
+
 test("a stop that leaves the funder 5,000 lamports or less says what to do, and its folder does not stop a later fresh paste", async () => {
   const k = fakeCluster();
   const base = keyBase();
@@ -1279,7 +1418,7 @@ test("a stop that leaves the funder 5,000 lamports or less says what to do, and 
   fund(k, funder.id, 3_000n);
   await assert.rejects(runOn(k, await planOn(k, "pumpswap", dir, { journal: journalAt(kd) }), base, { keyDir: kd }), /list now differs/);
   const resume = `node contracts/pool-solana/scripts/venue-table.mjs --resume ${kd} --return ${RETURN}`;
-  assert.ok(k.logs.includes(`the funder ${funder.id} holds 3000 lamports, too little to send back: nothing is left to do, unless SOL sent to it is still on its way; once that lands, go on with: ${resume}. This folder does not stop a fresh paste.`), k.logs.join("\n"));
+  assert.ok(k.logs.includes(`the funder ${funder.id} holds 3000 lamports, too little to send back: nothing is left to do, and this folder does not stop a fresh paste. SOL that lands on the funder later comes back with: ${resume} (a resume makes no table once a paste made this generation, it only gives back).`), k.logs.join("\n"));
   assert.ok(existsSync(path.join(kd, "funder.json")), "its key stays");
   // a fresh paste goes on beside it, and says so
   await runOn(k, await planOn(k, "pumpswap", dir), base);
