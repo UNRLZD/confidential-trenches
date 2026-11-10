@@ -120,5 +120,102 @@
    }
   ],
   "errors": []
+ },
+ "live111": {
+  "source": "live https://confidential.unrealized.trade",
+  "at": "2026-11-10T20:03:35.059Z",
+  "browser": "Chrome 157.0.8103.38, sandbox on",
+  "steps": {
+   "signedOut": {
+    "answer": {
+     "v": 1,
+     "id": "589e94ea-ee06-45fd-8cec-521aa7d7f254",
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "signedIn": {
+    "signed_in": true,
+    "way": "words"
+   },
+   "auto": {
+    "state": {
+     "ops": [
+      {
+       "id": "6be9c4a6-2338-4f51-8d7f-ab6ec3be4f42",
+       "kind": "restore",
+       "stage": "reading",
+       "txs": [],
+       "created_ms": 1794341018438
+      }
+     ]
+    }
+   },
+   "asked": {
+    "answer": {
+     "v": 1,
+     "id": "aaadb5f2-26b3-49f7-9fae-c27bc74f73d9",
+     "ok": true,
+     "result": {
+      "stage": "started"
+     }
+    },
+    "stages": [
+     "reading",
+     "reading",
+     "reading",
+     "reading",
+     "reading"
+    ]
+   }
+  },
+  "connect": [
+   "ct-api.unrealized.trade",
+   "1click.chaindefuser.com",
+   "rpc.mainnet.fastnear.com",
+   "rpc.mainnet.near.org",
+   "near.drpc.org",
+   "archival-rpc.mainnet.near.org",
+   "archival-rpc.mainnet.fastnear.com",
+   "solana-rpc.publicnode.com",
+   "solana.api.pocket.network",
+   "sender.helius-rpc.com",
+   "mainnet.block-engine.jito.wtf",
+   "api.mainnet-beta.solana.com",
+   "base-rpc.publicnode.com",
+   "base-mainnet.public.blastapi.io",
+   "mainnet.base.org",
+   "base.api.pocket.network",
+   "base.gateway.tenderly.co",
+   "rpc.sentio.xyz",
+   "robinhood-rpc.publicnode.com",
+   "robinhood.drpc.org",
+   "rpc.mainnet.chain.robinhood.com",
+   "robinhood.rpc.blxrbdn.com",
+   "rpc-robinhood.globalstake.io",
+   "robinhood.api.pocket.network",
+   "robinhood.daybreak-rpc.network",
+   "base-sepolia-rpc.publicnode.com",
+   "base-testnet.api.pocket.network",
+   "sepolia.base.org",
+   "rpc.testnet.chain.robinhood.com",
+   "robinhood-sepolia-rpc.publicnode.com",
+   "robinhood-testnet.drpc.org",
+   "base.rpc.blxrbdn.com"
+  ],
+  "hosts": {
+   "confidential.unrealized.trade": 2,
+   "ct-app.unrealized.trade": 2,
+   "ct-api.unrealized.trade": 10,
+   "solana-rpc.publicnode.com": 10,
+   "rpc.mainnet.fastnear.com": 16,
+   "near.drpc.org": 17,
+   "solana.api.pocket.network": 4
+  },
+  "stray": [],
+  "console": [],
+  "errors": []
  }
 }
