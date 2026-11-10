@@ -29,3 +29,20 @@ note UNSPENT at 0.001 ETH, leaf index 10 ("filled"). The seed lived only in the 
 pool as a test deposit.
 Tx: robinhood-testnet 0x8d7e34350896e967d7dde1b73a4988b9558c3b8279bf1bbbd09d6cf91924ff6c
 Tx: robinhood-testnet 0x161c85b6577eb089e49237e0ee25e3936e30a8495c44b10ac11a6b59e5ca5d4f
+
+Both chains again on commit f4ede686, whose pass (runPoolDepositEvm, the path the script drives) is the shipped one:
+the later commits change only the end's reads after an ask (noteEndEvm) and tests. The same script, the same pins and RPCs.
+- base-sepolia at 08:25Z: U 0x7e2C2eA6f7B2E659b847ba175198fFBd1490DeC0 funded with 0.00103 ETH (read back succeeded on
+  both RPCs in block 56887198); U's deposit of 0.001 ETH (nonce 0) answered "sent" at 08:28:43Z, read back succeeded on
+  both RPCs in block 56887257; 22 passes answered not_landed while it was not final, and the pass at 08:53:27Z settled
+  the note UNSPENT at 0.001 ETH, leaf index 20 ("filled").
+- robinhood-testnet at 08:28Z: U 0xA8d6413A86C594daAD3496643AFe847BEfde6832 funded with 0.00104 ETH (read back
+  succeeded on both RPCs in block 151264337); U's deposit of 0.001 ETH (nonce 0) answered "sent" at 08:29:06Z, read back
+  succeeded on both RPCs in block 151264380; 22 passes answered not_landed while it was not final (never failed), and the
+  pass at 08:54:07Z settled the note UNSPENT at 0.001 ETH, leaf index 13 ("filled"). A first start of this run at 08:24Z
+  answered failed before planning any note, with nothing signed or sent: one RPC refused a pool read at a recent block
+  (-32000 historical state not available) before the ask.
+Tx: base-sepolia 0x02e7c91d820b4848eb07c053c8465d9da528f8accfce2ff494e77b72f62ee6c3
+Tx: base-sepolia 0xf9e418a43b19cef4a3426a6304cfaf2b4d3f8077ce7f8e91f8e2e7267902422d
+Tx: robinhood-testnet 0xfe73579b72c200884f3fb8966e83d7640af0f43cc56de28c8efffc4bf165e240
+Tx: robinhood-testnet 0x4adf0a1fd619bc69c31479bcc6f12d43bc02bf1bfdfbeb067c41e20a177e3066
