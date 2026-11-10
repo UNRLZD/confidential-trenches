@@ -751,7 +751,8 @@ export async function sendAndSettle(
   const seen = [false, false];
   let ours = false;
   let landed = false;
-  // each RPC's slot of this very transaction at confirmed, as it said it: the settle waits for its finalized slot
+  // each RPC's slot of this very transaction at confirmed, as it said it: the settle waits for its finalized slot. An
+  // RPC that names none is held to the other's (one transaction lands in one slot), so its gate is never open
   let txSlots: readonly (number | undefined)[] = [undefined, undefined];
   for (let i = 0; i < reads && !landed && (i === 0 || inTime()); i++) {
     if (i > 0) await waitIn(pace);
@@ -763,7 +764,7 @@ export async function sendAndSettle(
       return [{ got: "none" }, { got: "none" }];
     });
     if (!fault) pace = POOL_BUY_POLL_MS;
-    txSlots = metas.map((m) => m.slot);
+    txSlots = metas.map((m, k) => m.slot ?? metas[1 - k]?.slot);
     const got: readonly Got[] = metas.map((m) => m.got);
     metas.forEach((m, p) => void (seen[p] ||= m.mine === true));
     // another transaction under that name on both RPCs: the helper's signature is not this one's

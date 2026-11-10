@@ -1377,10 +1377,10 @@ test("card pool-buy-filled-2s: a lying slot (far ahead) keeps the settle unasked
   assert.ok(w.log.filter((x) => x === "1:getSlot").length <= 20, "the wait caps at the back-off's most, never the pace");
 });
 
-test("card pool-buy-filled-2s: an RPC that names no slot for the transaction opens its gate, and the settle's own slots still hold it: an early settle answers unspent, the spend final later fills", async () => {
-  // the spend at the transaction's slot: a settle held to a slot below it on either RPC answers unspent. RPC 1 names no
-  // slot, so its gate is open while its finalized slot (390 at first) is below the spend's; RPC 0's is past it (405)
+test("card pool-buy-filled-2s: an RPC that names no slot for the transaction is held to the other's: the settle is asked once, when both finalized slots reach it", async () => {
+  // the spend at the transaction's slot: a settle held to a slot below it on either RPC answers unspent (nothing
+  // written, the note RESERVED). RPC 1 names no slot; its finalized slot is 390 at first, then 410; RPC 0's is 405
   const w = await world({ noTxSlotOn1: true, spendSlot: TX_SLOT, finalizedSlot: (p, i) => (p === 0 ? TX_SLOT + 5 : i < 1 ? TX_SLOT - 10 : TX_SLOT + 10) });
   assert.equal((await runPoolBuy({ ...w.host, reads: 10 }, ASK) as { stage?: string }).stage, "filled");
-  assert.deepEqual(w.settleSlots, [[TX_SLOT + 5, TX_SLOT - 10], [TX_SLOT + 5, TX_SLOT + 10]], "one early settle, held to the slots read, then the spend's");
+  assert.deepEqual(w.settleSlots, [[TX_SLOT + 5, TX_SLOT + 10]], "no early settle: RPC 1's gate is RPC 0's slot of the transaction");
 });
