@@ -268,7 +268,8 @@ test("(ruling 2) never not_landed before the deadline on both RPCs: a send with 
   let moved = false;
   const stuck = host({ ready: [readyOf(relayOf({ deadlineMs: NOW + 100_000n }))], b: { time: () => (moved ? stuck.seen.clock.t : NOW) } });
   assert.deepEqual(await runEvmPoolBuy(stuck.h, ASK), { stage: "sent", txs: [] });
-  while (stuck.seen.clock.t < NOW + 100_000n + 3_600_000n) await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 20_000 && stuck.seen.clock.t < NOW + 100_000n + 3_600_000n; i++) await new Promise((r) => setImmediate(r));
+  assert.ok(stuck.seen.clock.t >= NOW + 100_000n + 3_600_000n, "the reads go on an hour past the deadline");
   assert.deepEqual(stuck.seen.late, [], "no end while one RPC is behind the deadline");
   const rounds = stuck.seen.calls.filter((c) => c.method === "eth_getLogs").length;
   assert.ok(rounds < 2 * (EVM_BUY_SETTLE_MS / 2_000 + (100_000 + 300_000) / 2_000 + 3_600_000 / 30_000) + 20, `slow past the follow window: ${rounds} reads`);
