@@ -95,6 +95,8 @@ test("a no-liquidity answer is asked again, the same request, and the quote that
   assert.deepEqual(await askDepositQuote(request, r.fetchFn, r.sleep), QUOTED);
   assert.deepEqual(r.bodies, Array(3).fill(JSON.stringify(request)));
   assert.deepEqual(r.waits, [...NO_LIQUIDITY_PAUSES_MS]);
+  // scripts/live-checks/deposit-quote-no-liquidity.mjs PAUSES_MS holds the served page to these
+  assert.deepEqual([...NO_LIQUIDITY_PAUSES_MS], [500, 1_000]);
 });
 
 test("no liquidity on every ask: three asks in all, then the last answer comes back for the caller to refuse", async () => {
@@ -145,6 +147,7 @@ test("a re-ask that fails leaves the no-liquidity answer standing: a throw, a ti
 test("any other answer is the one ask's: a 400 of another message, 429, 503, a quote", async () => {
   for (const a of [{ status: 400, body: { message: "amount is too low" } }, { status: 400, body: { error: { code: "upstream" } } },
     { status: 400, body: "No liquidity available" }, { status: 200, body: { message: "No liquidity available" } },
+    { status: 503, body: { message: "No liquidity available" } }, { status: 400, body: { message: "Not: No liquidity available" } },
     { status: 429, body: {} }, { status: 503, body: {} }, QUOTED]) {
     const r = replay([a, QUOTED]);
     assert.deepEqual(await askDepositQuote(depositQuoteRequest(U, SOL_USDC, 1n, NOW), r.fetchFn, r.sleep), a, JSON.stringify(a));

@@ -1,0 +1,160 @@
+{
+ "_note": "Card deposit-quote-no-liquidity. good: this card's signing page (packages/signpage's build at the card's tree, served by Playwright as SIGN_HOST under its own _headers) read 2026-11-10T19:12:41Z with the real helper: deposit.dry for 25 USDC from Solana, the first two quote requests answered with 1Click's no-liquidity 400 (the body the deployed helper passed at 19:06:57Z), the third sent to the helper (201 in 1.2 s): the same request three times, re-asks 507 and 1003 ms after the answers before them, the quote lines 2.76 s after the first ask: PASS. bad: the deployed SIGN_HOST read 2026-11-10T19:12:28Z (release before this card), the same run: one ask, then not_available: FAIL. The test plants on good: the real ask's own no-liquidity 400 or 1Click's 503 timeout (INCONCLUSIVE), and a re-ask of another request, too soon, a fourth ask, lines from a 400 and an answer past the deadline (FAIL each).",
+ "good": {
+  "source": "local, SIGN_HOST answered from packages/signpage's build (index.html and public/ copied)",
+  "at": "2026-11-10T19:12:41.647Z",
+  "browser": "157.0.8103.38",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "id": "51d31223-4edc-4dc6-9d1d-ea34d5c1c890",
+  "log": [
+   {
+    "t": 1794337958841.0999,
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "t": 1794337961607.2998,
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "51d31223-4edc-4dc6-9d1d-ea34d5c1c890",
+     "ok": true,
+     "result": {
+      "amount_out_usd": "24.990474",
+      "min_amount_out_usd": "24.740569",
+      "fee_usd": "0.009526",
+      "time_estimate_s": 20
+     }
+    }
+   }
+  ],
+  "quotes": [
+   {
+    "t": 1794337958846,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-10T19:42:38.844Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794337958851
+   },
+   {
+    "t": 1794337959353,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-10T19:42:38.844Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794337959353
+   },
+   {
+    "t": 1794337960356,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-10T19:42:38.844Z"
+    },
+    "status": 201,
+    "answeredT": 1794337961600
+   }
+  ],
+  "answeredT": 1794337961607.2998,
+  "errors": []
+ },
+ "bad": {
+  "source": "live",
+  "at": "2026-11-10T19:12:28.815Z",
+  "browser": "157.0.8103.38",
+  "signUrl": "https://confidential.unrealized.trade/",
+  "ready": true,
+  "id": "937346e6-24b7-43c2-8b6d-82edffdb801e",
+  "log": [
+   {
+    "t": 1794337948752.9001,
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "type": "ready",
+     "release": "unreleased",
+     "api": 1
+    }
+   },
+   {
+    "t": 1794337948761.9001,
+    "fromParent": true,
+    "data": {
+     "v": 1,
+     "id": "937346e6-24b7-43c2-8b6d-82edffdb801e",
+     "ok": false,
+     "error": {
+      "code": "not_available"
+     }
+    }
+   }
+  ],
+  "quotes": [
+   {
+    "t": 1794337948760,
+    "body": {
+     "dry": true,
+     "swapType": "EXACT_INPUT",
+     "slippageTolerance": 100,
+     "originAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+     "depositType": "ORIGIN_CHAIN",
+     "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+     "amount": "25000000",
+     "refundTo": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "refundType": "INTENTS",
+     "recipient": "4b742e2fa54135408f95d6be00483527709b33281f3d1836ae3e83371caae5c0",
+     "recipientType": "DESTINATION_CHAIN",
+     "deadline": "2026-11-10T19:42:28.759Z"
+    },
+    "status": 400,
+    "message": "No liquidity available",
+    "planted": true,
+    "answeredT": 1794337948761
+   }
+  ],
+  "answeredT": 1794337948761.9001,
+  "errors": []
+ }
+}
