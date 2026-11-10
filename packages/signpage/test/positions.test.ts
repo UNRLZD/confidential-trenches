@@ -24,7 +24,7 @@ import { jOf } from "../../wallet/src/pool/queue.ts";
 import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
 import { testnetPool } from "../src/pool-testnet.ts";
-import { BUY_MINTS_KEY } from "../src/pool-sell.ts";
+import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
 
 const MINT = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 7 : 0))); // a 32-byte key, as a mint is (low entropy: gitleaks reads a recorded "token" as a key otherwise)
 const MINT2 = "Mint2222222222222222222222222222222222222222";
@@ -922,6 +922,16 @@ test("P1-1: a W's buy mint is a position though its run wrote no buy record: at 
 test("P1-1 (PROBE I): a buy that filled with no amount told: the finder lists the token in W, W's buy mint names it, so it is a position (the terminal's row and Sell)", async () => {
   const got = await positionsPass({ ...reads({ [W1]: { [MINT]: 5_000_000n } }), bought: async () => ({ [W1]: BUY(MINT) }) });
   assert.deepEqual(got, { positions: [{ chain: "solana", token: MINT, amount: "5", cost: "0", wallets: [W1], decimals: 6 }], whole: true });
+});
+
+test("BUY_MINTS_KEY is where buyMints writes W's buy mint, the key the positions read", async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  try {
+    await buyMints(async () => w).put("W", BUY("M"));
+    assert.deepEqual(await w.get("meta", BUY_MINTS_KEY), { W: BUY("M") });
+  } finally {
+    w.close();
+  }
 });
 
 test("keptPositions: a kept pass is cut to the tokens the buy mints or records name", () => {
