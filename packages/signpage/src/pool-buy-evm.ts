@@ -233,7 +233,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
     }
   };
   try {
-    type Out = { answer: EvmPoolBuyAnswer } | { watch: Watch };
+    type Out = { answer: EvmPoolBuyAnswer } | { watch: Watch } | { refused: Watch };
     const out = await hold(async (): Promise<Out> => {
       if (ask.kind !== "pool.buy" || ask.chain !== h.chain || ask.token === null) return no("not_allowed");
       const token = ask.token;
@@ -302,7 +302,7 @@ export async function runEvmPoolBuy(h: EvmPoolBuyHost, ask: PoolAsk): Promise<Ev
             // a refusal is the helper's word, and the device never drops what it may own on a server's word: the run
             // answers refused, its pending record stays, and the chain ends it (the follow below: a Bought fills W's
             // holding, no release by the two-round safe rule removes it, as the note's settle frees the note)
-            return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null } as Watch };
+            return { refused: { want, from, holding, w: w.address, stops: [null, null], none: null } };
           }
           if (e instanceof EvmSendBusy && !stopped() && clock() + BigInt(e.retryAfterMs) < r.deadlineMs - EVM_SEND_MARGIN_MS) {
             busied = true;
