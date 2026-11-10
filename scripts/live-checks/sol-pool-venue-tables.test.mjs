@@ -1,5 +1,5 @@
 // Replays sol-pool-venue-tables.answers.json through the sol-pool-venue-tables live check, with no network. The good
-// answer (recorded live: the mainnet pump curve's generation 1, devnet's pump curve and PumpSwap generation 1; mainnet
+// answer (recorded live: the mainnet pump curve's generation 1, devnet's pump curve and PumpSwap generations 1 and 2; mainnet
 // PumpSwap not deployed yet) passes and names the venue not deployed yet apart from the passes. Each recorded bad answer
 // is one patch on it and fails on its own line: a table missing an address, a table with an authority, the two RPCs
 // answering different bytes, a deactivated table, and a table and record that agree but differ from the kit's list.
@@ -64,7 +64,7 @@ test("the good answer passes: three deployed generations ok on both RPCs, mainne
   assert.equal(r.summary, "PASS (3 deployed, 1 not deployed yet, 0 not pinned yet)");
   assert.deepEqual(r.lines.filter((l) => l.endsWith("not deployed yet")), ["mainnet pumpswap: not deployed yet"]);
   assert.ok(r.lines.every((l) => l.endsWith("not deployed yet") || l.startsWith("ok   ")), r.lines.join("\n"));
-  for (const want of [/^ok   mainnet pump-curve g1: the table is active, authority none \(frozen\), and holds exactly the record's list \(25 addresses, in order\)$/m, /^ok   devnet pumpswap g1: the newest generation holds exactly the kit's list/m, /^ok   devnet pumpswap: the state tree at \d+ is under 80 percent of generation 1/m, /^ok   mainnet pump-curve g1: lookup table: freeze \(authority none\) \S+ reads back succeeded/m])
+  for (const want of [/^ok   mainnet pump-curve g1: the table is active, authority none \(frozen\), and holds exactly the record's list \(25 addresses, in order\)$/m, /^ok   devnet pumpswap g2: the newest generation holds exactly the kit's list for this program, pool and pages \(256 addresses, in order\)$/m, /^ok   devnet pumpswap: pinned g2 J1R9px8LFg597sGfaME1qf7L5WGHGnn2YL2Vs2CwaWvU is the record's generation 2$/m, /^ok   devnet pumpswap g2: lookup table: freeze \(authority none\) \S+ reads back succeeded/m, /^ok   devnet pumpswap: the state tree at \d+ is under 80 percent of generation 2 \(warns at 111411, ends at 139264\)/m, /^ok   mainnet pump-curve g1: lookup table: freeze \(authority none\) \S+ reads back succeeded/m])
     assert.match(r.lines.join("\n"), want);
   // the curve has no tree alarm: it fits at any tree size (packages/kit/test/solana-pool-venue-tables.test.ts)
   assert.deepEqual(GROWS, ["pumpswap"]);
@@ -87,7 +87,7 @@ test("a pinned table with no record row fails: a generation past the record's, o
   const pins = structuredClone(PINS);
   pins.devnet.pumpswap = [...pins.devnet.pumpswap, "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"];
   let r = await run(A.answers, REC, pins);
-  assert.match(failLines(r), /^FAIL devnet pumpswap: pinned g2 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin is the record's generation 2: the record has no row$/m);
+  assert.match(failLines(r), /^FAIL devnet pumpswap: pinned g3 9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin is the record's generation 3: the record has no row$/m);
   const other = structuredClone(PINS);
   other.mainnet.pumpswap = ["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"];
   r = await run(A.answers, REC, other);
@@ -103,9 +103,15 @@ test("a record generation past the pins is the named state not pinned yet, its t
   pins.devnet.pumpswap = [];
   const r = await run(A.answers, REC, pins);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.equal(r.summary, "PASS (3 deployed, 1 not deployed yet, 1 not pinned yet)");
-  assert.ok(r.lines.includes(`devnet pumpswap g1: deployed, not pinned yet (${REC.devnet.tables.pumpswap[0].table})`));
-  assert.ok(r.lines.some((l) => l.startsWith("ok   devnet pumpswap g1: the table is active")));
+  assert.equal(r.summary, "PASS (3 deployed, 1 not deployed yet, 2 not pinned yet)");
+  for (const k of [0, 1]) assert.ok(r.lines.includes(`devnet pumpswap g${k + 1}: deployed, not pinned yet (${REC.devnet.tables.pumpswap[k].table})`));
+  assert.ok(r.lines.some((l) => l.startsWith("ok   devnet pumpswap g2: the table is active")));
+  // generation 2 recorded but only generation 1 pinned: the record's newer generation is named, the alarm reads the pin's
+  const one = structuredClone(PINS);
+  one.devnet.pumpswap = [PINS.devnet.pumpswap[0]];
+  const r1 = await run(A.answers, REC, one);
+  assert.equal(r1.summary, "PASS (3 deployed, 1 not deployed yet, 1 not pinned yet)");
+  assert.match(r1.lines.join("\n"), /^ok   devnet pumpswap: the state tree at \d+ is under 80 percent of generation 1 \(warns at 1638, ends at 2048\)/m);
   // no pinned generation: no tree alarm to judge
   assert.ok(!r.lines.some((l) => /devnet pumpswap: the state tree/.test(l)));
 });
@@ -123,17 +129,18 @@ test("a generation's tx that failed, or that one reader does not hold, fails the
 });
 
 test("a tree past 80 percent of the newest pinned generation fails, naming the entries left", async () => {
-  // devnet PumpSwap's generation 1 holds pages 0 and 1: it warns at 1,638 entries of each tree
-  for (const [tree, at] of [["state", 49], ["label", 49 + 8 + 1 + 33 * 32]]) {
+  // devnet PumpSwap's generation 2 holds state pages 0 to 135 and label pages 0 to 89: it warns at 111,411 state and
+  // 73,728 label entries, 27,853 and 18,432 before its ends
+  for (const [tree, at, n, left] of [["state", 49, 111_411, 27_853], ["label", 49 + 8 + 1 + 33 * 32, 73_728, 18_432]]) {
     const answers = structuredClone(A.answers);
     for (const a of answers)
       if (a.method === "getAccountInfo" && a.params[0] === REC.devnet.pool && a.url === CLUSTERS.devnet.rpcs[1] && a.json?.result) {
         const d = Buffer.from(a.json.result.value.data[0], "base64");
-        d.writeBigUInt64LE(1638n, at);
+        d.writeBigUInt64LE(BigInt(n), at);
         a.json.result.value.data[0] = d.toString("base64");
       }
     const r = await run(answers);
-    assert.match(failLines(r), new RegExp(`^FAIL devnet pumpswap: the ${tree} tree at 1638 is past 80 percent of generation 1 \\(warns at 1638, ends at 2048\\): 410 entries left: make the next generation`, "m"));
+    assert.match(failLines(r), new RegExp(`^FAIL devnet pumpswap: the ${tree} tree at ${n} is past 80 percent of generation 2 \\(warns at ${n}, ends at ${n + left}\\): ${left} entries left: make the next generation`, "m"));
     assert.equal(r.failed, 1);
   }
 });
