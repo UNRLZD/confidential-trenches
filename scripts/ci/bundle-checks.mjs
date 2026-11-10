@@ -147,6 +147,7 @@ export const OUT = {
   "app-chains-evm": "a browser and the helper",
   "app-chains-evm-rail": "a browser and the helper",
   "app-trade-box-mount": "a browser",
+  "app-a2-e2e": "the helper's market and devnet RPC answers, and the response headers APP_HOST adds",
   "app-token-chart": "a browser and the helper",
   "app-chart-live": "a browser and the helper",
   "app-legend-holds-still": "a browser and the helper",

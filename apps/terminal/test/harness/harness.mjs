@@ -87,11 +87,14 @@ const hostOf = (u) => {
 
 /**
  * Starts the server and Chromium. Close with close(); it deletes the certificate and the signing page's build.
- * @param {{ edit?: (sites: Record<string, { root: string, spa?: boolean }>) => void, headless?: boolean, realNames?: boolean }} [opts]
- *   edit changes the default sites before the server starts; realNames maps REAL's names too, served after edit
+ * @param {{ edit?: (sites: Record<string, { root: string, spa?: boolean }>) => void, headless?: boolean, realNames?: boolean, through?: string[] }} [opts]
+ *   edit changes the default sites before the server starts; realNames maps REAL's names too, served after edit;
+ *   through names real hosts the browser reaches as they are (a devnet run's RPCs and the helper, card app-a2-e2e):
+ *   never mapped to the harness, and every other name still fails as not found
  */
 export async function startHarness(opts = {}) {
-  const mapped = opts.realNames ? [...MAPPED, ...Object.values(REAL)] : MAPPED;
+  const through = opts.through ?? [];
+  const mapped = (opts.realNames ? [...MAPPED, ...Object.values(REAL)] : MAPPED).filter((d) => !through.includes(d));
   const cert = makeCert(mapped);
   const signRoot = buildSignpage();
   const sites = defaultSites(signRoot);
@@ -105,11 +108,11 @@ export async function startHarness(opts = {}) {
   let browser;
   try {
     server = await startServer({ cert: cert.cert, key: cert.key, sites });
-    const rules = [...mapped.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND"].join(", ");
+    const rules = [...mapped.map((d) => `MAP ${d} 127.0.0.1:${server.port}`), "MAP * ~NOTFOUND", ...through.map((d) => `EXCLUDE ${d}`)].join(", ");
     browser = await launchHarnessBrowser("chromium", {
       headless: opts.headless ?? true,
       args: [`--host-resolver-rules=${rules}`, `--ignore-certificate-errors-spki-list=${cert.spki}`],
-    }, { hosts: mapped, refuseHttp: true });
+    }, { hosts: [...mapped, ...through], refuseHttp: true });
   } catch (e) {
     await browser?.close();
     await server?.close();

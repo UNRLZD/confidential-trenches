@@ -1,0 +1,466 @@
+{
+  "free": {
+    "started": "2026-11-10T21:27:47.476Z",
+    "plant": "free",
+    "txs": [],
+    "csp": [],
+    "hosts": [
+      "api.devnet.solana.com",
+      "confidential.unrealized.trade",
+      "ct-api.unrealized.trade",
+      "ct-app.unrealized.trade"
+    ],
+    "dialogs": 0,
+    "stub": "market read for AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json",
+    "words": 12,
+    "wordsFile": "app-a2-e2e-2026-11-10T21-27-47-476Z.words",
+    "signedIn": true,
+    "u": "Fo8m5c4ubbTTWuNnmar7rDisRxkU2ewZXGPjyN2NtwCg",
+    "deposit": {
+      "ok": false,
+      "code": "not_funded"
+    },
+    "error": "planted: the free part ends at U, its deposit asked unfunded (no fund line)",
+    "pages": null
+  },
+  "run2": {
+    "started": "2026-11-10T21:42:03.382Z",
+    "plant": null,
+    "txs": [
+      {
+        "step": "fund",
+        "sig": "5aJQMpTwQXs83KQUBptmhzPXzvm7HB8Gs74kzvmgGN95pQNBrqjfHQ7X6VFMMBUjXCjYBJoiwhG4QZ6SJgsEwpH8",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "deposit",
+        "sig": "2QX1sS2vAdT65nwGDkaLa6kfQFCtyjoeF8p8TytjJ6YPbwkLPomyE6FVXWTKt4u595HdSHuqCbrGkVbuGMHLPJGZ",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "buy",
+        "sig": "4EYAzqJYuP5wUUyBqzYygDftyAEe4r1SqWL2mro8eMamRWqg6J1KLYaQVAJoGsuu5qw5RJRRrDNanWNq3qqwcDoT",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      }
+    ],
+    "csp": [],
+    "hosts": [
+      "api.devnet.solana.com",
+      "confidential.unrealized.trade",
+      "ct-api.unrealized.trade",
+      "ct-app.unrealized.trade"
+    ],
+    "dialogs": 0,
+    "stub": "market read for AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json",
+    "words": 12,
+    "wordsFile": "app-a2-e2e-2026-11-10T21-42-03-382Z.words",
+    "signedIn": true,
+    "u": "3Y97hs268NZEWpPspAJgNT7MU5B4aQVWaN1DEgTe9R4n",
+    "funded": {
+      "ok": true,
+      "lamports": "11473120"
+    },
+    "deposit": {
+      "ok": true,
+      "stage": "sent",
+      "txs": 1
+    },
+    "box": {
+      "path": "pool",
+      "proofReady": true,
+      "proofMs": 10401,
+      "line": "Proof ready Max $0.03",
+      "priceMs": 208002
+    },
+    "buy": {
+      "taps": 1,
+      "asks": 1,
+      "amountUsd": "0.03",
+      "end": "Filled 14.9s Final",
+      "timing": {
+        "sentMs": 3492,
+        "answers": [
+          {
+            "ms": 3492,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 3493,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5589,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5589,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5589,
+            "type": null,
+            "stage": "sent",
+            "ok": true
+          },
+          {
+            "ms": 14916,
+            "type": "progress",
+            "stage": "filled",
+            "ok": null
+          }
+        ],
+        "endMs": 15091,
+        "end": "Filled 14.9s Final",
+        "tapAt": "2026-11-10T21:45:54.956Z"
+      },
+      "kind": "pool.buy"
+    },
+    "w": "2WEd4HWw3d2TAFcoTXyoKSxBgX7Wvfs1v2q7hxr5FV4B",
+    "error": "getTokenAccountsByOwner: {\"code\":429}",
+    "pages": null
+  },
+  "run3": {
+    "started": "2026-11-10T21:50:44.528Z",
+    "plant": null,
+    "txs": [
+      {
+        "step": "fund",
+        "sig": "25xywAJGmA8zUiC7EQqozp4jprqnwZ59nvb3Uiaf8Fz9Hpbg1t1nr2KCwREgCqJ8s9TzhXakZT7xJo7CirJqvpN3",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "deposit",
+        "sig": "286oCq66ShyRkETeHMVtbicM14AKLvgK1ofurAopwbypXgZWCnnS2ESViWo6c2iHWgGRjv2XwEhNSvQAeevN5Qm4",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "buy",
+        "sig": "3PxjERqgceLx61rLmhGpBV44p7bGJiY3pjxn7KM9dEDJxhB5yH3PpHymuvnoeXASC75Ftvm2U6HzLvBDqEAXwYA",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      }
+    ],
+    "csp": [],
+    "hosts": [
+      "api.devnet.solana.com",
+      "confidential.unrealized.trade",
+      "ct-api.unrealized.trade",
+      "ct-app.unrealized.trade"
+    ],
+    "dialogs": 0,
+    "stub": "market read for AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json",
+    "words": 12,
+    "wordsFile": "app-a2-e2e-2026-11-10T21-50-44-528Z.words",
+    "signedIn": true,
+    "u": "Fp7syRnc39gogqxKkWsXnu92JfJK2RiPv67xd3LnrjLK",
+    "funded": {
+      "ok": true,
+      "lamports": "11473120"
+    },
+    "deposit": {
+      "ok": true,
+      "stage": "sent",
+      "txs": 1
+    },
+    "box": {
+      "path": "pool",
+      "proofReady": true,
+      "proofMs": 10829,
+      "line": "Proof ready Max $0.03",
+      "priceMs": 10832
+    },
+    "buy": {
+      "taps": 1,
+      "asks": 1,
+      "amountUsd": "0.03",
+      "end": "Slow 89.9s",
+      "timing": {
+        "sentMs": 3954,
+        "answers": [
+          {
+            "ms": 3955,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 3955,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 6107,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 6107,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 6107,
+            "type": null,
+            "stage": "sent",
+            "ok": true
+          }
+        ],
+        "endMs": 90239,
+        "end": "Slow 89.9s",
+        "tapAt": "2026-11-10T21:51:32.785Z"
+      },
+      "kind": "pool.buy"
+    },
+    "error": "the buy ended \"Slow 89.9s\"",
+    "pages": null
+  },
+  "run4": {
+    "started": "2026-11-10T22:05:25.789Z",
+    "plant": null,
+    "txs": [
+      {
+        "step": "fund",
+        "sig": "4qP5fg6ugydZrtbypYAj7h6KeiWrP97SKivZQpMSjjbcMZqMmDKnzVzfterrVmzNpCYk3tXyUafUKt98D2oJaJ7J",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "deposit",
+        "sig": "5zK9pEWC42wbFMA7eaYhxtgJBkCR5N54bCYMWBcEXW9LhqsVGKGTfLLkTBZnErxUQb4nxTFZCs7DfyyG4AWjQ6Kk",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "buy",
+        "sig": "ujyWmAXxDtPXjEJFus6FSNLsejLu95vH4kt1A3UmSvavTLfjcu194964yzUdmCECNWdeUpGH5wwwYzzZsw2nJ6m",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      }
+    ],
+    "csp": [],
+    "hosts": [
+      "api.devnet.solana.com",
+      "confidential.unrealized.trade",
+      "ct-api.unrealized.trade",
+      "ct-app.unrealized.trade"
+    ],
+    "dialogs": 0,
+    "stub": "market read for AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json",
+    "words": 12,
+    "wordsFile": "app-a2-e2e-2026-11-10T22-05-25-789Z.words",
+    "signedIn": true,
+    "u": "GHdoo4NJoHnBjfVfEc4E6Nas7qM2NxYeSxraRjN56KxS",
+    "funded": {
+      "ok": true,
+      "lamports": "11473120"
+    },
+    "deposit": {
+      "ok": true,
+      "stage": "sent",
+      "txs": 1
+    },
+    "box": {
+      "path": "pool",
+      "proofReady": true,
+      "proofMs": 10694,
+      "line": "Proof ready Max $0.03",
+      "priceMs": 19257
+    },
+    "buy": {
+      "taps": 1,
+      "asks": 1,
+      "amountUsd": "0.03",
+      "end": "Filled 7.8s Final",
+      "seen": [
+        {
+          "word": "Slow",
+          "label": "Slow 5.0s",
+          "ms": 5074
+        }
+      ],
+      "timing": {
+        "sentMs": 3628,
+        "answers": [
+          {
+            "ms": 3628,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 3628,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": null,
+            "stage": "sent",
+            "ok": true
+          },
+          {
+            "ms": 7849,
+            "type": "progress",
+            "stage": "filled",
+            "ok": null
+          }
+        ],
+        "endMs": 7865,
+        "end": "Filled 7.8s Final",
+        "tapAt": "2026-11-10T22:06:32.590Z"
+      },
+      "kind": "pool.buy"
+    },
+    "readErrors": [],
+    "w": "2FEnUTndzUHhFwWLq46gZHeFquox5cjVdLFUmEv6Ufgz",
+    "heldAfterBuy": [
+      "974924498778",
+      "974924498778"
+    ],
+    "sell": {
+      "taps": 1,
+      "asks": 1,
+      "end": "Retry",
+      "seen": [
+        {
+          "word": "Slow",
+          "label": "Slow 5.0s",
+          "ms": 5081
+        }
+      ],
+      "timing": {
+        "sentMs": null,
+        "answers": [
+          {
+            "ms": 9999,
+            "type": null,
+            "stage": null,
+            "ok": true
+          },
+          {
+            "ms": 23670,
+            "type": null,
+            "stage": null,
+            "ok": false
+          },
+          {
+            "ms": 23670,
+            "type": "progress",
+            "stage": "refused",
+            "ok": null
+          }
+        ],
+        "endMs": 300210,
+        "end": "Retry",
+        "tapAt": "2026-11-10T22:06:41.504Z"
+      },
+      "kind": "pool.sell"
+    },
+    "pages": 1,
+    "heldAfterSell": [
+      "974924498778",
+      "974924498778"
+    ]
+  }
+}
