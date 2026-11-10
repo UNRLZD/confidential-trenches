@@ -6,8 +6,10 @@
 //     it (flow.ts gives its paced providers), never on a pair of its own;
 //   - pair: the page's Solana pair (pool-testnet.ts pageSolanaRpcs, which every pool buy, sell, withdraw, settle and
 //     restore read takes) is the same two providers, each under the paced wrapper alone, so provider A's reads go to
-//     provider A and nowhere else; and the page's mark lister (pageSolanaLister) is the helper's solana-marks route,
-//     paced too (card sol-pools-mainnet-pin): it only names the marks, which the pair reads by address;
+//     provider A and nowhere else; the pair every settle and the restore read on (pageSolanaSettleRpcs) is the same two
+//     providers, each paced alone, the helper's with its own retry (review P2-1 of e3489b3b: it waits out the helper's
+//     window); and the page's mark lister (pageSolanaLister) is the helper's solana-marks route, paced too (card
+//     sol-pools-mainnet-pin): it only names the marks, which the pair reads by address;
 //   - timed: the kit's timed reads (send.ts solanaTimedRpc) call the provider inside its turn and time that call, then
 //     pace the timed call under the limit the provider's queue already holds, so a wait for a turn never counts
 //     against the read's timeout; and the reference's reads (pool.ts readSolanaReference), the rent read (pool-buy.ts
@@ -62,8 +64,9 @@ export function facts(index, js) {
   const m = marks.length ? `(?:${marks.join("|")})` : undefined;
   const pair =
     !!(p && a && h && m) &&
-    // MAINNET_MARKS_ROUTE, pageSolanaRpcs and pageSolanaLister, as pool-testnet.ts declares them in turn
-    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\)[,;]`).test(js);
+    // MAINNET_MARKS_ROUTE, pageSolanaRpcs, pageSolanaLister, pageSolanaSettleRpcs (the helper's seat with its retry) and
+    // PAGE_SOL_MARK_BATCHES, as pool-testnet.ts declares them in turn
+    new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\),${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h},${N}\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
     // the reference's reads, a failed one read as no answer (pool.ts readSolanaReference)

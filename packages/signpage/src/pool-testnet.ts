@@ -177,6 +177,9 @@ export const pageSolanaRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
   POOL_TESTNET
     ? [solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[0])), solanaPacedRpc(testnetRpc(TESTNET_RPCS.solana[1]))]
     : [solanaPacedRpc(pageRpc(SOLANA_PROVIDER_A)), solanaPacedRpc(pageHelperRpc(TRADE_HELPER))];
+/** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
+ *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
+export const pageSolanaLister = (): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE)));
 /** The pair every Solana pool settle and the restore read the marks and pages on (review P2-1 of e3489b3b): pageSolanaRpcs'
  *  two providers, in their same paced queues, the helper's seat with SOLANA_RPC_WINDOW_RETRY. The helper answers a
  *  caller's 17th call in a 10 s window with 429 and a Retry-After of up to 10 s (apps/helper/src/rpc/rpc.ts
@@ -190,9 +193,6 @@ export const pageSolanaSettleRpcs = (): readonly [SolanaRpc, SolanaRpc] =>
  *  provider's 10 (publicnode's cap; api.devnet.solana.com held to the same), the helper's route getMultipleAccounts' own
  *  100, so a cold read draws a tenth of the calls from the helper's share a user's trade reads also draw on. */
 export const PAGE_SOL_MARK_BATCHES: readonly [number, number] = Object.freeze([SOL_MARK_READ_BATCH, SOL_MARK_READ_BATCH_MAX] as const);
-/** The page's mark lister (the wallet's solanaMarksListed): MAINNET_MARKS_ROUTE, paced, on mainnet; none in the testnet
- *  build, where the wallet lists on the pair's first devnet RPC. It only names addresses: the pair reads each. */
-export const pageSolanaLister = (): SolanaRpc | undefined => (POOL_TESTNET ? undefined : solanaPacedRpc(testnetRpc(MAINNET_MARKS_ROUTE)));
 /** The page's marks and pages of PAGE_SOL_PIN's pool on pageSolanaRpcs' pair (the wallet's SolanaPoolCache): every settle
  *  of the page and its restore read only the marks and pages none of them has read yet, so a settle after the first
  *  reads the newest page of each tree and the newest bucket of each mark size, at any pool size (review P2-2 of
