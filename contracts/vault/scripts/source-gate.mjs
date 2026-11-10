@@ -177,7 +177,7 @@ export function cloneProblems({ root, commit, onMain = true, installed = true, r
 }
 
 /** [] when `commit` is an ancestor of main as `remote` answers it now: its sha read by ls-remote, fetched when the clone lacks it. */
-function mainProblems(git, commit, remote) {
+export function mainProblems(git, commit, remote) {
   const no = (why) => [`commit ${commit} is not on ${REPO}'s main (${why}): the paste runs only a reviewed, merged commit`];
   let lines;
   try {
