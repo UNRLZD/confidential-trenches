@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { accountOfEntropy, APP_HOST, entropyOfPrf, judge, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
+import { accountOfEntropy, APP_HOST, entropyOfPrf, judge, refusedRead, SIGN_HOST, watch } from "./wallet-passkey-prf.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "wallet-passkey-prf.answers.json"), "utf8"));
@@ -439,4 +439,89 @@ test("a press that missed its control, or was never made, stays BAD wherever it 
       assert.equal(judge(r).verdict, "FAIL", line);
     }
   }
+});
+
+// Card sign-live-checks-read-a-pinned-page: the page pins the mainnet Solana pool (release 111), so each signed-in page
+// polls the pool's price and display reads on the helper's Solana route, whose budget every caller shares; the sign live
+// run opens the page in 78 jobs at once, and its 429s there (run 42882854987) are the run's load. A 429 the page's own
+// response shows was a price or display read takes its console line into a WARN line with the count; every other side
+// fails.
+const HELPER_SOLANA_429 = "console: Failed to load resource: the server responded with a status of 429 () (https://ct-api.unrealized.trade/v1/rpc/solana)";
+const PRICE = { calls: [{ method: "getMultipleAccounts", accounts: ["7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"] }], display: true };
+const RENT = { calls: [{ method: "getAccountInfo", accounts: ["SysvarRent111111111111111111111111111111111"] }], display: true };
+const POOL = { calls: [{ method: "getAccountInfo", accounts: ["7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8"] }], display: true };
+const withRefused = (refused, errors) => {
+  const r = clone(answers.good);
+  r.refused = refused;
+  r.errors.push(...errors);
+  return judge(r);
+};
+
+test("refusedRead: a price or display read is one by method and account only", () => {
+  const body = (method, p) => JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: [p, { encoding: "base64" }] });
+  assert.deepEqual(refusedRead(body("getMultipleAccounts", ["7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"])), PRICE);
+  assert.equal(refusedRead(body("getAccountInfo", "SysvarRent111111111111111111111111111111111")).display, true);
+  assert.equal(refusedRead(body("getAccountInfo", "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8")).display, true);
+  for (const [name, b] of [
+    ["a wallet's account", body("getAccountInfo", "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T")],
+    ["a price read batched with a wallet", body("getMultipleAccounts", ["7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE", "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T"])],
+    ["a blockhash for a send", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestBlockhash", params: [] })],
+    ["a send", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "sendTransaction", params: ["AQID"] })],
+    ["the pool's marks", body("getProgramAccounts", "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF")],
+    ["a batch with one other read", JSON.stringify([JSON.parse(body("getAccountInfo", "SysvarRent111111111111111111111111111111111")), { method: "getBalance", params: ["4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T"] }])],
+    ["no body", null],
+    ["an empty batch", "[]"],
+  ]) assert.equal(refusedRead(b).display, false, name);
+});
+
+test("a 429 on a price or display read on the helper's Solana route is a WARN line with its count: PASS", () => {
+  const j = withRefused([PRICE, RENT, POOL], [HELPER_SOLANA_429, HELPER_SOLANA_429, HELPER_SOLANA_429]);
+  assert.equal(j.verdict, "PASS", j.lines.join("\n"));
+  assert.ok(j.lines.includes("WARN the helper's Solana route refused 3 price or display reads for its shared budget (429), the run's load"), j.lines.join("\n"));
+  assert.ok(j.lines.includes("ok  no page error or CSP violation (0)"), j.lines.join("\n"));
+  assert.ok(!judge(answers.good).lines.some((l) => l.startsWith("WARN")), "no WARN with no 429");
+});
+
+test("planted: a 429 on any other read there, a 429 line no refused display read explains, and every other error: FAIL", () => {
+  const other = { calls: [{ method: "getLatestBlockhash", accounts: [] }], display: false };
+  let j = withRefused([PRICE, other], [HELPER_SOLANA_429, HELPER_SOLANA_429]);
+  assert.equal(j.verdict, "FAIL");
+  assert.ok(j.lines.some((l) => l.startsWith("BAD no read but a price or display read is refused (429) on the helper's Solana route (1: ") && l.includes("getLatestBlockhash")), j.lines.join("\n"));
+  j = withRefused([], [HELPER_SOLANA_429]); // a 429 line with no refused read recorded under it
+  assert.equal(j.verdict, "FAIL");
+  assert.ok(j.lines.includes(`BAD no page error or CSP violation (1): ${HELPER_SOLANA_429}`), j.lines.join("\n"));
+  j = withRefused([PRICE], [HELPER_SOLANA_429, HELPER_SOLANA_429]); // more lines than refused display reads
+  assert.equal(j.verdict, "FAIL");
+  assert.ok(j.lines.includes(`BAD no page error or CSP violation (1): ${HELPER_SOLANA_429}`), j.lines.join("\n"));
+  const text = "console: Failed to load resource: the server responded with a status of";
+  for (const [name, line] of [
+    ["a 429 on the marks route", `${text} 429 () (https://ct-api.unrealized.trade/v1/rpc/solana-marks)`],
+    ["a 429 on the relay", `${text} 429 () (https://ct-api.unrealized.trade/v1/relay/status)`],
+    ["a 429 on the pool send", `${text} 429 () (https://ct-api.unrealized.trade/v1/pool/solana/send)`],
+    ["a 503 on the Solana route", `${text} 503 () (https://ct-api.unrealized.trade/v1/rpc/solana)`],
+    ["a 429 from a public provider", `${text} 429 () (https://solana-rpc.publicnode.com/)`],
+    ["a 429 from a lookalike host", `${text} 429 () (https://ct-api.unrealized.trade.evil.example/v1/rpc/solana)`],
+    ["a 429 with no address", `${text} 429 ()`],
+    ["a failed request with no status", "console: Failed to load resource: net::ERR_CONNECTION_RESET (https://ct-api.unrealized.trade/v1/rpc/solana)"],
+    ["a CSP violation", "console: Refused to connect to 'https://evil.example/' because it violates the following Content Security Policy directive"],
+    ["a console error", "console: Uncaught TypeError: x is undefined"],
+    ["a page error", "pageerror: boom"],
+  ]) {
+    const v = withRefused([PRICE], [HELPER_SOLANA_429, line]);
+    assert.equal(v.verdict, "FAIL", name);
+    assert.ok(v.lines.some((l) => l.startsWith("BAD no page error or CSP violation (1): ") && l.includes(line)), `${name}\n${v.lines.join("\n")}`);
+  }
+});
+
+// live111: the live page on release 111, this card's check, on the Mac: the helper's 429s there each a price or display
+// read (its responses' bodies), so a WARN line; its one BAD is the two-tab race (tab a's ceremony cancelled on this Mac's
+// Chrome), which the same release passed on GitHub's runner in run 42882854987.
+test("recorded live run on release 111: the helper's 429s on display reads WARN, the errors line ok; any other error is BAD", () => {
+  const j = judge(answers.live111);
+  assert.ok(j.lines.includes("ok  no page error or CSP violation (0)"), j.lines.join("\n"));
+  assert.ok(j.lines.includes("ok  no read but a price or display read is refused (429) on the helper's Solana route (0)"), j.lines.join("\n"));
+  assert.deepEqual(bad(answers.live111).map((l) => l.split(" (")[0]).filter((l) => !l.startsWith("BAD prf: two tabs")), []);
+  const r = clone(answers.live111);
+  r.errors.push("console: Refused to connect to 'https://evil.example/' because it violates the following Content Security Policy directive");
+  assert.ok(bad(r).some((l) => l.startsWith("BAD no page error or CSP violation (1): console: Refused to connect")), bad(r).join("\n"));
 });

@@ -5796,5 +5796,2834 @@
     "errors": []
    }
   }
+ },
+ "release111": {
+  "chromium": {
+   "desktop": {
+    "engine": "chromium",
+    "view": {
+     "name": "desktop",
+     "width": 1440,
+     "height": 900,
+     "inner": 1440
+    },
+    "source": "live https://confidential.unrealized.trade",
+    "at": "2026-11-10T19:51:42.373Z",
+    "browser": "Chrome 157.0.8103.38, sandbox on",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "e2fed1b9-9623-40d9-a321-3079ad5e9ea7"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "196904a5-af81-4d27-9f97-2ac463682bd0",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1794340305162,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1794340309208,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "bef48495-fa5e-4f60-8cdd-3500398b0638"
+     },
+     "passkeyOut": {
+      "t": 1794340312435,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "b7b45d27-a5eb-421c-853c-17f85f2ca65c",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1794340319683,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "b982de6e-d0cb-4d4f-aac9-24e159d3db75"
+     },
+     "nav": {
+      "t": 1794340337954,
+      "okId": "a652ca21-bbc4-4568-9fb5-ca5dd654172c",
+      "evilId": "32accb33-0f26-4d9d-abf6-85f7b169e4ff",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1794340338161,
+      "reloadId": "f6ffc85e-509d-41aa-999e-5904a01b3c1b",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "488b4def-9688-46dd-b363-2feb198caf85"
+     },
+     "statusGone": {
+      "id": "1205c95e-a9f8-4740-b598-5e6c8dd76bd5"
+     },
+     "backfill": {
+      "t": 1794340338774,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "2aa7714a-5ffa-4646-9035-7954984fba74"
+     },
+     "wordsOut": {
+      "t": 1794340342371,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "4a0e4d67-05ce-4b4f-80b5-b7d3ba541a2f"
+     },
+     "stranger": {
+      "t": 1794340345476,
+      "done": true
+     }
+    },
+    "messages": [
+     {
+      "t": 1794340303041,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340303049,
+      "data": {
+       "v": 1,
+       "id": "e2fed1b9-9623-40d9-a321-3079ad5e9ea7",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340304154,
+      "data": {
+       "v": 1,
+       "id": "196904a5-af81-4d27-9f97-2ac463682bd0",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794340309257,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340309262,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8283377385",
+           "expo": -8,
+           "published_s": 1794340294,
+           "read_ms": 1794340306107
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340312335,
+      "data": {
+       "v": 1,
+       "id": "bef48495-fa5e-4f60-8cdd-3500398b0638",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8283377385",
+           "expo": -8,
+           "published_s": 1794340294,
+           "read_ms": 1794340306107
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340312437,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340315444,
+      "data": {
+       "v": 1,
+       "id": "b7b45d27-a5eb-421c-853c-17f85f2ca65c",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794340319722,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340319723,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8283377385",
+           "expo": -8,
+           "published_s": 1794340294,
+           "read_ms": 1794340306107
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340337860,
+      "data": {
+       "v": 1,
+       "id": "b982de6e-d0cb-4d4f-aac9-24e159d3db75",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8283377385",
+           "expo": -8,
+           "published_s": 1794340294,
+           "read_ms": 1794340306107
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340337957,
+      "data": {
+       "v": 1,
+       "id": "a652ca21-bbc4-4568-9fb5-ca5dd654172c",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794340338059,
+      "data": {
+       "v": 1,
+       "id": "32accb33-0f26-4d9d-abf6-85f7b169e4ff",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1794340338152,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8285500169",
+           "expo": -8,
+           "published_s": 1794340334,
+           "read_ms": 1794340338150
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340338164,
+      "data": {
+       "v": 1,
+       "id": "f6ffc85e-509d-41aa-999e-5904a01b3c1b",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794340338528,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340338570,
+      "data": {
+       "v": 1,
+       "id": "488b4def-9688-46dd-b363-2feb198caf85",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340338673,
+      "data": {
+       "v": 1,
+       "id": "1205c95e-a9f8-4740-b598-5e6c8dd76bd5",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340338891,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8285500169",
+           "expo": -8,
+           "published_s": 1794340334,
+           "read_ms": 1794340338890
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340339165,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340339270,
+      "data": {
+       "v": 1,
+       "id": "2aa7714a-5ffa-4646-9035-7954984fba74",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340339565,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "b3306523-3dff-4a01-b7f3-ea9d94280210",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340319723
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8285500169",
+           "expo": -8,
+           "published_s": 1794340334,
+           "read_ms": 1794340339564
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340342373,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340345374,
+      "data": {
+       "v": 1,
+       "id": "4a0e4d67-05ce-4b4f-80b5-b7d3ba541a2f",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     }
+    ],
+    "requests": [
+     {
+      "t": 1794340303033,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340305340,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340305340,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340305341,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340305342,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340305369,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340305370,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340309251,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340309270,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340309271,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340319717,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340319725,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340319770,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340319770,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340320072,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340320346,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340320346,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340320644,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 467844665,
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340320916,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 467844665,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340337854,
+      "host": "rpc.mainnet.fastnear.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "query",
+        "params": {
+         "request_type": "view_account",
+         "account_id": "intents.near",
+         "finality": "final"
+        }
+       }
+      ]
+     },
+     {
+      "t": 1794340337854,
+      "host": "near.drpc.org",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "query",
+        "params": {
+         "request_type": "view_account",
+         "account_id": "intents.near",
+         "finality": "final"
+        }
+       }
+      ]
+     },
+     {
+      "t": 1794340337860,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340337861,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338512,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794340338542,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338542,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338570,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338570,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338571,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340338571,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339149,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794340339191,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339191,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339270,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339270,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339271,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340339271,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "connect": [
+     "ct-api.unrealized.trade",
+     "1click.chaindefuser.com",
+     "rpc.mainnet.fastnear.com",
+     "rpc.mainnet.near.org",
+     "near.drpc.org",
+     "archival-rpc.mainnet.near.org",
+     "archival-rpc.mainnet.fastnear.com",
+     "solana-rpc.publicnode.com",
+     "solana.api.pocket.network",
+     "sender.helius-rpc.com",
+     "mainnet.block-engine.jito.wtf",
+     "api.mainnet-beta.solana.com",
+     "base-rpc.publicnode.com",
+     "base-mainnet.public.blastapi.io",
+     "mainnet.base.org",
+     "base.api.pocket.network",
+     "base.gateway.tenderly.co",
+     "rpc.sentio.xyz",
+     "robinhood-rpc.publicnode.com",
+     "robinhood.drpc.org",
+     "rpc.mainnet.chain.robinhood.com",
+     "robinhood.rpc.blxrbdn.com",
+     "rpc-robinhood.globalstake.io",
+     "robinhood.api.pocket.network",
+     "robinhood.daybreak-rpc.network",
+     "base-sepolia-rpc.publicnode.com",
+     "base-testnet.api.pocket.network",
+     "sepolia.base.org",
+     "rpc.testnet.chain.robinhood.com",
+     "robinhood-sepolia-rpc.publicnode.com",
+     "robinhood-testnet.drpc.org",
+     "base.rpc.blxrbdn.com"
+    ],
+    "errors": []
+   },
+   "phone": {
+    "engine": "chromium",
+    "view": {
+     "name": "phone",
+     "width": 390,
+     "height": 844,
+     "inner": 390
+    },
+    "source": "live https://confidential.unrealized.trade",
+    "at": "2026-11-10T19:52:28.702Z",
+    "browser": "Chrome 157.0.8103.38, sandbox on",
+    "topology": "shell",
+    "steps": {
+     "open": {
+      "frameHref": "https://ct-app.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell",
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "attrs": {
+       "sandbox": "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox",
+       "allow": null,
+       "referrerpolicy": "no-referrer"
+      }
+     },
+     "first": {
+      "id": "314ef82e-77e1-4641-8342-59eef932bec4"
+     },
+     "topNav": {
+      "tried": true,
+      "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+     },
+     "passkeyIn": {
+      "openId": "2bdc113b-d778-4a2a-878f-9f7db0cfb929",
+      "layer": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "created": {
+      "t": 1794340351357,
+      "top": {
+       "state": "backup",
+       "codeSaved": "false",
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "saved": {
+      "t": 1794340355402,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "4688610c-fcc7-476f-b317-2de7d1d91b4f"
+     },
+     "passkeyOut": {
+      "t": 1794340358631,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      }
+     },
+     "wordsIn": {
+      "openId": "6f189cd5-8ede-49e2-b035-e67012eba35d",
+      "clickedWithFrames": 0,
+      "layer": {
+       "state": "words",
+       "codeSaved": null,
+       "layerHidden": false,
+       "frames": 0,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "typed": {
+       "shellHasWords": true,
+       "appChars": 0
+      }
+     },
+     "words": {
+      "t": 1794340365886,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/solana/So11111111111111111111111111111111111111112?tab=trades&from=shell"
+      },
+      "id": "e3089696-9cd9-4dc8-80e8-5b8701fb4e81"
+     },
+     "nav": {
+      "t": 1794340384108,
+      "okId": "5936b4c5-9adc-4cfc-90d7-eb7fd50dcbec",
+      "evilId": "96f9bd3d-bd9f-4943-8be6-612732060bf3",
+      "after": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "afterEvil": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "frames": 1
+     },
+     "reload": {
+      "t": 1794340384316,
+      "reloadId": "28e4f083-a09e-44c1-b664-b34022a4e464",
+      "frameHref": "https://ct-app.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders",
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "68471fed-751f-42b4-9e14-0c1c3844612f"
+     },
+     "statusGone": {
+      "id": "2534171c-a6f1-4767-b5e8-23b5280a5726"
+     },
+     "backfill": {
+      "t": 1794340384931,
+      "top": {
+       "state": "signed-in",
+       "codeSaved": "true",
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      },
+      "id": "100316a4-ed78-4bd5-bf8a-c1084bf722f8"
+     },
+     "wordsOut": {
+      "t": 1794340388431,
+      "top": {
+       "state": "signed-out",
+       "codeSaved": null,
+       "layerHidden": true,
+       "frames": 1,
+       "href": "https://confidential.unrealized.trade/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913?tab=holders"
+      }
+     },
+     "last": {
+      "id": "bb8d36e9-ad43-4c75-80b0-b2f96eb3b495"
+     },
+     "stranger": {
+      "t": 1794340391535,
+      "done": true
+     }
+    },
+    "messages": [
+     {
+      "t": 1794340349337,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340349343,
+      "data": {
+       "v": 1,
+       "id": "314ef82e-77e1-4641-8342-59eef932bec4",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340350451,
+      "data": {
+       "v": 1,
+       "id": "2bdc113b-d778-4a2a-878f-9f7db0cfb929",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794340355452,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340358531,
+      "data": {
+       "v": 1,
+       "id": "4688610c-fcc7-476f-b317-2de7d1d91b4f",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "passkey",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288445353",
+           "expo": -8,
+           "published_s": 1794340344,
+           "read_ms": 1794340352304
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340358633,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340361640,
+      "data": {
+       "v": 1,
+       "id": "6f189cd5-8ede-49e2-b035-e67012eba35d",
+       "ok": true,
+       "result": {
+        "pending": true
+       }
+      }
+     },
+     {
+      "t": 1794340365935,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340365935,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288445353",
+           "expo": -8,
+           "published_s": 1794340344,
+           "read_ms": 1794340352304
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340384013,
+      "data": {
+       "v": 1,
+       "id": "e3089696-9cd9-4dc8-80e8-5b8701fb4e81",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288445353",
+           "expo": -8,
+           "published_s": 1794340344,
+           "read_ms": 1794340352304
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340384111,
+      "data": {
+       "v": 1,
+       "id": "5936b4c5-9adc-4cfc-90d7-eb7fd50dcbec",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794340384213,
+      "data": {
+       "v": 1,
+       "id": "96f9bd3d-bd9f-4943-8be6-612732060bf3",
+       "ok": false,
+       "error": {
+        "code": "not_allowed"
+       }
+      }
+     },
+     {
+      "t": 1794340384304,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "reading",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288414740",
+           "expo": -8,
+           "published_s": 1794340374,
+           "read_ms": 1794340384303
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340384319,
+      "data": {
+       "v": 1,
+       "id": "28e4f083-a09e-44c1-b664-b34022a4e464",
+       "ok": true,
+       "result": {}
+      }
+     },
+     {
+      "t": 1794340384710,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340384727,
+      "data": {
+       "v": 1,
+       "id": "68471fed-751f-42b4-9e14-0c1c3844612f",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340384830,
+      "data": {
+       "v": 1,
+       "id": "2534171c-a6f1-4767-b5e8-23b5280a5726",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340385026,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288414740",
+           "expo": -8,
+           "published_s": 1794340374,
+           "read_ms": 1794340385024
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340385223,
+      "data": {
+       "v": 1,
+       "type": "ready",
+       "release": "unreleased",
+       "api": 1
+      }
+     },
+     {
+      "t": 1794340385330,
+      "data": {
+       "v": 1,
+       "id": "100316a4-ed78-4bd5-bf8a-c1084bf722f8",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340385614,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": true,
+        "way": "words",
+        "code_saved": true,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": [
+         {
+          "id": "ae074e3f-695b-4c35-8c08-00188439e635",
+          "kind": "restore",
+          "stage": "stalled",
+          "txs": [],
+          "created_ms": 1794340365936
+         }
+        ],
+        "pools": [
+         {
+          "chain": "solana",
+          "asset": "SOL",
+          "balance": "0",
+          "price": {
+           "price": "8288414740",
+           "expo": -8,
+           "published_s": 1794340374,
+           "read_ms": 1794340385613
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "t": 1794340388433,
+      "data": {
+       "v": 1,
+       "type": "state",
+       "state": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     },
+     {
+      "t": 1794340391434,
+      "data": {
+       "v": 1,
+       "id": "bb8d36e9-ad43-4c75-80b0-b2f96eb3b495",
+       "ok": true,
+       "result": {
+        "release": "unreleased",
+        "api": 1,
+        "signed_in": false,
+        "code_saved": false,
+        "vault_balance": "0",
+        "wallets": [],
+        "positions": [],
+        "orders": [],
+        "held": [],
+        "ops": []
+       }
+      }
+     }
+    ],
+    "requests": [
+     {
+      "t": 1794340349331,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340351533,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340351533,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340351534,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340351534,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340351561,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340351561,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340355448,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340365930,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/solana/So11111111111111111111111111111111111111112",
+      "method": "GET",
+      "query": "tab=trades&from=shell"
+     },
+     {
+      "t": 1794340365938,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340365984,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340365984,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340366248,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340366521,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340366521,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "ELkTShr5bKWSwntTpF238dq3r5ha2oVsNyApMk19x4AJ",
+          "ECSchKJGQPtfHC4TLFp78Ao9g51EawTgmQPbmA1cFb5y",
+          "7x7AFBzgkuJg3gTVASmwJLtvC2kPJE7CY5fQhjqNUHqN",
+          "5ovwS2VUQgNL1Kwz7q9M5LjmmnJAt1khBoDchUfe6Gzv",
+          "EesTGaxwD6izcU1Nr78dk346UqoNA11SQbsbRQkg2pYn",
+          "9uZjezZDJjNyqz4gvQkALs9ksHA7UqmdPHsJi5Zjv7Ge",
+          "AaFx2d9QXh6xk4pCAijWUcYUv1fdYqdzLTPxnTVKfC2x",
+          "CnzexD5xzToXy3vHLSATA8zNoj4WVqg8ENDhDANCHP7c"
+         ],
+         {
+          "commitment": "finalized",
+          "encoding": "base64"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340366807,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 467844879,
+          "filters": [
+           {
+            "dataSize": 13
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "1112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340367075,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana-marks",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getProgramAccounts",
+        "params": [
+         "EN1Wb2iWTw7ihNHTNW3SU2DkUCbw7yEEGR7ywWgWn8MF",
+         {
+          "commitment": "finalized",
+          "encoding": "base64",
+          "withContext": true,
+          "dataSlice": {
+           "offset": 0,
+           "length": 0
+          },
+          "minContextSlot": 467844879,
+          "filters": [
+           {
+            "dataSize": 17
+           },
+           {
+            "memcmp": {
+             "offset": 9,
+             "bytes": "11111112"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384007,
+      "host": "rpc.mainnet.fastnear.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "query",
+        "params": {
+         "request_type": "view_account",
+         "account_id": "intents.near",
+         "finality": "final"
+        }
+       }
+      ]
+     },
+     {
+      "t": 1794340384007,
+      "host": "near.drpc.org",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "query",
+        "params": {
+         "request_type": "view_account",
+         "account_id": "intents.near",
+         "finality": "final"
+        }
+       }
+      ]
+     },
+     {
+      "t": 1794340384013,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384013,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384695,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794340384724,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384724,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384727,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384727,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384728,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340384728,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385208,
+      "host": "ct-app.unrealized.trade",
+      "path": "/token/base/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "method": "GET",
+      "query": "tab=holders"
+     },
+     {
+      "t": 1794340385249,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385249,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "7ijWvp3xEk5yUfGYQJfgoabReCTpSyZhiWjmCt3TQDz8",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385329,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385330,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getAccountInfo",
+        "params": [
+         "SysvarRent111111111111111111111111111111111",
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385330,
+      "host": "solana-rpc.publicnode.com",
+      "path": "/",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": 1794340385331,
+      "host": "ct-api.unrealized.trade",
+      "path": "/v1/rpc/solana",
+      "method": "POST",
+      "rpc": [
+       {
+        "method": "getMultipleAccounts",
+        "params": [
+         [
+          "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+         ],
+         {
+          "encoding": "base64",
+          "commitment": "confirmed"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "connect": [
+     "ct-api.unrealized.trade",
+     "1click.chaindefuser.com",
+     "rpc.mainnet.fastnear.com",
+     "rpc.mainnet.near.org",
+     "near.drpc.org",
+     "archival-rpc.mainnet.near.org",
+     "archival-rpc.mainnet.fastnear.com",
+     "solana-rpc.publicnode.com",
+     "solana.api.pocket.network",
+     "sender.helius-rpc.com",
+     "mainnet.block-engine.jito.wtf",
+     "api.mainnet-beta.solana.com",
+     "base-rpc.publicnode.com",
+     "base-mainnet.public.blastapi.io",
+     "mainnet.base.org",
+     "base.api.pocket.network",
+     "base.gateway.tenderly.co",
+     "rpc.sentio.xyz",
+     "robinhood-rpc.publicnode.com",
+     "robinhood.drpc.org",
+     "rpc.mainnet.chain.robinhood.com",
+     "robinhood.rpc.blxrbdn.com",
+     "rpc-robinhood.globalstake.io",
+     "robinhood.api.pocket.network",
+     "robinhood.daybreak-rpc.network",
+     "base-sepolia-rpc.publicnode.com",
+     "base-testnet.api.pocket.network",
+     "sepolia.base.org",
+     "rpc.testnet.chain.robinhood.com",
+     "robinhood-sepolia-rpc.publicnode.com",
+     "robinhood-testnet.drpc.org",
+     "base.rpc.blxrbdn.com"
+    ],
+    "errors": []
+   }
+  }
  }
 }
