@@ -3,12 +3,13 @@
 // -32029 or -32429 in a 200), an answer that is not JSON, a stall or a dropped connection is tried again within the
 // call's 3.5 s, its Retry-After honoured; a call that still fails rejects naming its fault (SolanaRpcTransportError).
 import { readSolanaReference, type SolanaReference, type SolanaReferenceRequest } from "../../kit/src/trade/solana/pool.ts";
-import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaRpc } from "../../kit/src/trade/solana/send.ts";
+import { SOLANA_RPC_RETRY, SolanaRpcTransportError, solanaHelperRpc, solanaJsonRpc, solanaSameProvider, solanaWrappedRpc, type SolanaRpc, type SolanaRpcRetry } from "../../kit/src/trade/solana/send.ts";
 
 /** A provider the device reaches directly. */
 export const pageRpc = (url: string): SolanaRpc => solanaJsonRpc(url, { retry: SOLANA_RPC_RETRY });
-/** The helper's POST /v1/rpc/solana, `origin` the helper's origin only. */
-export const pageHelperRpc = (origin: string): SolanaRpc => solanaHelperRpc(origin, { retry: SOLANA_RPC_RETRY });
+/** The helper's POST /v1/rpc/solana, `origin` the helper's origin only; the page's retry unless a read names its own
+ *  (a pool settle's and restore's, SOLANA_RPC_WINDOW_RETRY: src/pool-testnet.ts pageSolanaSettleRpcs). */
+export const pageHelperRpc = (origin: string, retry: SolanaRpcRetry = SOLANA_RPC_RETRY): SolanaRpc => solanaHelperRpc(origin, { retry });
 
 /**
  * The kit's readSolanaReference on the page's two providers, where a provider whose read still failed after the page's

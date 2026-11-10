@@ -11,11 +11,20 @@
 // serves more without a key.
 import { CHAINS, HELPER_RPC_BATCH_MAX, HELPER_RPC_METHODS, HELPER_V1_PATHS, type Chain, type HelperV1Path } from "@blindfill/kit";
 
+//
+// And "solana-marks" (card sol-pools-mainnet-pin): the mainnet mark list, on another company than /v1/rpc/solana's
+// first name (rpc.ts RPC_UPSTREAMS, marksRoutes), whose one method is getProgramAccounts in the note restore's exact
+// shape (rpc.ts scanAllowed), addresses only. The page lists the marks on this route alone (packages/signpage/src/
+// pool-testnet.ts pageSolanaLister), since no keyless mainnet provider answers that scan (publicnode 403 "Indexed
+// requests require a personal token", api.mainnet-beta 403, read 9 Nov 17:23Z), and reads each listed address on its
+// pair, PublicNode directly and /v1/rpc/solana, which must give the same bytes (packages/wallet/src/pool/
+// solana-restore.ts solanaMarksListed): this route can name addresses, never make a mark count.
 export const SOLANA_DEVNET = "solana-devnet";
-export const RPC_CHAINS: readonly RpcChain[] = Object.freeze([...CHAINS, SOLANA_DEVNET]);
-export type RpcChain = Chain | typeof SOLANA_DEVNET;
+export const SOLANA_MARKS = "solana-marks";
+export const RPC_CHAINS: readonly RpcChain[] = Object.freeze([...CHAINS, SOLANA_DEVNET, SOLANA_MARKS]);
+export type RpcChain = Chain | typeof SOLANA_DEVNET | typeof SOLANA_MARKS;
 
-export const RPC_METHODS: Readonly<Record<RpcChain, readonly string[]>> = Object.freeze({ ...HELPER_RPC_METHODS, [SOLANA_DEVNET]: [...HELPER_RPC_METHODS.solana, "getGenesisHash"] });
+export const RPC_METHODS: Readonly<Record<RpcChain, readonly string[]>> = Object.freeze({ ...HELPER_RPC_METHODS, [SOLANA_DEVNET]: [...HELPER_RPC_METHODS.solana, "getGenesisHash"], [SOLANA_MARKS]: ["getProgramAccounts"] });
 
 /** A batch holds 1 to this many requests. */
 export const RPC_BATCH_MAX = HELPER_RPC_BATCH_MAX;
