@@ -190,6 +190,107 @@ test("a stop's drain tells every push socket the helper goes away (1001)", async
   assert.equal(await s.closed, 1001);
 });
 
+// A peer's message pieces (card helper-ws-fragment-flood). ws before 8.21.0 holds every fragment of an unfinished
+// message and every data chunk of an unfinished frame, up to maxPayload (ws 8.21.0 release notes, fix 2b2abd45: a
+// flood of tiny fragments and chunks exhausts a server's memory). The client below writes client frames by hand: FIN,
+// the opcode, a set mask bit with a zero key (so the payload is sent as is), a 7-bit or 16-bit length.
+const frame = (fin: boolean, op: number, payload: Buffer): Buffer => {
+  const len = payload.length < 126 ? Buffer.from([payload.length | 0x80]) : Buffer.from([126 | 0x80, payload.length >> 8, payload.length & 0xff]);
+  return Buffer.concat([Buffer.from([(fin ? 0x80 : 0) | op]), len, Buffer.alloc(4), payload]);
+};
+const PING = frame(true, 0x9, Buffer.alloc(0));
+
+/** An APP_HOST socket that `feed` writes to; resolves with the server's close code, "pong" when the server answered the
+ *  last ping (so it took every byte before it and is still open), or "cut" when the connection ended with neither. */
+function attack(port: number, feed: (socket: Socket, closed: () => boolean) => Promise<void>): Promise<number | "pong" | "cut"> {
+  return new Promise((ok, fail) => {
+    const req = request({ host: "127.0.0.1", port, path: PATH, headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Origin: APP } });
+    req.on("error", fail);
+    req.on("response", (res) => fail(new Error(`not upgraded: ${res.statusCode}`)));
+    req.on("upgrade", (_res, socket: Socket, head) => {
+      let buf = head;
+      let end: number | "pong" | "cut" | null = null;
+      const done = (v: number | "pong" | "cut") => {
+        if (end !== null) return;
+        end = v;
+        socket.destroy();
+        ok(v);
+      };
+      socket.setNoDelay(true);
+      socket.on("data", (d: Buffer) => {
+        buf = Buffer.concat([buf, d]);
+        while (buf.length >= 2) {
+          let len = buf[1]! & 0x7f;
+          let at = 2;
+          if (len === 126) [len, at] = [buf.length < 4 ? Infinity : buf.readUInt16BE(2), 4];
+          if (buf.length < at + len) return;
+          const op = buf[0]! & 0x0f;
+          if (op === 0x8) return done(buf.readUInt16BE(at));
+          if (op === 0xa) return done("pong");
+          buf = buf.subarray(at + len);
+        }
+      });
+      socket.on("error", () => done("cut"));
+      socket.on("close", () => done("cut"));
+      void feed(socket, () => end !== null).then(() => end === null && socket.write(PING));
+    });
+    req.end();
+  });
+}
+
+test("a message in more fragments than PUSH_IN_FRAGMENTS is closed 1008; before, all PUSH_IN_MAX were held", async (t) => {
+  const h = helper([]);
+  t.after(() => h.server.close());
+  await listening(h.server);
+  const { PUSH_IN_MAX } = await import("./push.ts");
+  // one unfinished binary message of PUSH_IN_MAX one-byte fragments, the most maxPayload lets a message carry, then a ping
+  const pieces = [frame(false, 0x2, Buffer.from([0]))];
+  for (let i = 1; i < PUSH_IN_MAX; i++) pieces.push(frame(false, 0x0, Buffer.from([0])));
+  const end = await attack(h.port(), async (s) => void s.write(Buffer.concat(pieces)));
+  assert.equal(end, 1008, `the server answered ${end}: "pong" means it held all ${PUSH_IN_MAX} fragments and stayed open`);
+});
+
+test("a frame sent in more data chunks than PUSH_IN_CHUNKS is closed 1008; before, all PUSH_IN_MAX were held", async (t) => {
+  const h = helper([]);
+  t.after(() => h.server.close());
+  await listening(h.server);
+  const { PUSH_IN_MAX } = await import("./push.ts");
+  // a binary frame of PUSH_IN_MAX bytes, its header in one write and its payload one byte a write, each read on its own
+  // (the server's read of each byte comes before the next write: setImmediate runs after the loop's I/O poll)
+  const header = frame(true, 0x2, Buffer.alloc(PUSH_IN_MAX)).subarray(0, 8);
+  const end = await attack(h.port(), async (s, closed) => {
+    s.write(header);
+    for (let i = 0; i < PUSH_IN_MAX && !closed(); i++) {
+      await new Promise((go) => setImmediate(go));
+      if (!s.destroyed) s.write(Buffer.from([0]));
+    }
+    await new Promise((go) => setImmediate(go));
+  });
+  assert.equal(end, 1008, `the server answered ${end}: "pong" means it held all ${PUSH_IN_MAX} chunks and stayed open`);
+});
+
+test("a message within the bounds, and the pongs, keep the socket open and pushed to", async (t) => {
+  const h = helper([]);
+  t.after(() => h.server.close());
+  await listening(h.server);
+  const { PUSH_IN_FRAGMENTS, PUSH_IN_CHUNKS, PUSH_IN_MAX } = await import("./push.ts");
+  assert.ok(Number.isSafeInteger(PUSH_IN_FRAGMENTS) && PUSH_IN_FRAGMENTS >= 2 && PUSH_IN_FRAGMENTS < PUSH_IN_MAX, "PUSH_IN_FRAGMENTS is a bound below what maxPayload alone allows");
+  assert.ok(Number.isSafeInteger(PUSH_IN_CHUNKS) && PUSH_IN_CHUNKS >= 2 && PUSH_IN_CHUNKS < PUSH_IN_MAX, "PUSH_IN_CHUNKS is a bound below what maxPayload alone allows");
+  // PUSH_IN_FRAGMENTS fragments of one text message, the last FIN, then a ping: answered, the socket open
+  const pieces = [frame(false, 0x1, Buffer.from("{"))];
+  for (let i = 1; i < PUSH_IN_FRAGMENTS; i++) pieces.push(frame(i === PUSH_IN_FRAGMENTS - 1, 0x0, Buffer.from(i === PUSH_IN_FRAGMENTS - 1 ? "}" : " ")));
+  assert.equal(await attack(h.port(), async (s) => void s.write(Buffer.concat(pieces))), "pong");
+  // the largest message taken, PUSH_IN_MAX bytes in one frame, in two writes as two TCP segments carry it
+  const big = frame(true, 0x2, Buffer.alloc(PUSH_IN_MAX));
+  assert.equal(await attack(h.port(), async (s) => {
+    s.write(big.subarray(0, 536));
+    await new Promise((go) => setImmediate(go));
+    s.write(big.subarray(536));
+  }), "pong");
+  // a subscriber is still sent the tape
+  assert.ok((await upgrade(h.port(), PATH, APP)).frame !== undefined, "APP_HOST still receives an update");
+});
+
 test("a plain GET of the push path, with no upgrade, is answered 426 and reads nothing", async (t) => {
   const reads: string[] = [];
   const h = helper(reads);
