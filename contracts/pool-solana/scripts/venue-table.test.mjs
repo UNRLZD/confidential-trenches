@@ -1780,6 +1780,20 @@ test("the mainnet source gate: a HEAD behind main whose mainnet.json differs is 
   assert.match(gate(r, { venue: "pumpswap", table: T }).join(), /deploy\.mjs has changes not committed/);
 });
 
+test("the mainnet source gate: a HEAD behind main whose venue-table.mjs or pool-buy.ts is not main's is refused, the checkout clean", async () => {
+  for (const f of ["contracts/pool-solana/scripts/venue-table.mjs", "packages/kit/src/trade/solana/pool-buy.ts"]) {
+    const o = gateRepo();
+    const src = path.join(o.root, "src");
+    gitT(src, "checkout", "-q", "main");
+    put(src, f, readFileSync(path.join(src, f), "utf8") + "// main moved on\n");
+    gitT(src, "commit", "-q", "-am", "main moves");
+    gitT(src, "push", "-q", o.bare, "main");
+    const c = cloneAt(o, o.head);
+    assert.equal(gitT(c, "status", "--porcelain"), "", f);
+    assert.match(vt.sourceProblems({ root: c, remote: o.bare }).join("\n"), new RegExp(`${f.replace(/[./]/g, "\\$&")} at HEAD \\w+ is not main's`), f);
+  }
+});
+
 test("the CLI holds a mainnet run and a mainnet resume to the source gate before any read; a dry run is not gated", async () => {
   const k = fakeCluster();
   const reads = [];
