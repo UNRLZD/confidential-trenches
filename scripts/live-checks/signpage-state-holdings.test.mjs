@@ -16,7 +16,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as check from "./signpage-state-holdings.mjs";
-import { COSTS, FILL, FIRST, FIRST_RELEASE, judge, KEPT, localFetch, PASS, PREEMPT, probe, RECORDS, releasedAppJs, RUN, SET, SIGN_ORIGIN, SOLD, SUM } from "./signpage-state-holdings.mjs";
+import { CARD_COMMIT, COSTS, FILL, FIRST, judge, KEPT, localFetch, PASS, PREEMPT, probe, RECORDS, releasedAppJs, RUN, SET, SIGN_ORIGIN, SOLD, SUM } from "./signpage-state-holdings.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
@@ -24,9 +24,12 @@ import { copyChange, dropRule, plantedFetch } from "./planted-build.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const answers = JSON.parse(readFileSync(path.join(HERE, "signpage-state-holdings.answers.json"), "utf8"));
 const BAD = (rec, o) => judge(rec, o).lines.filter((l) => l.startsWith("BAD")).map((l) => l.split(" (")[0].slice(4));
-const LEDGER = `/app.js is a release from release-${FIRST_RELEASE} on, a build of the source this card's tests hold`;
+const LEDGER = `/app.js is a release whose commit holds ${CARD_COMMIT.slice(0, 8)}, a build of the source this card's tests hold`;
+/** The release lists in this tree, each judged by whether its commit holds the card's (no git here: no list written
+ *  today does, every one cut from a main before it; the CO's run on SIGN_HOST after the release reads git). */
+const TODAY = { released: releasedAppJs(undefined, () => false) };
 /** The good answer's ledger: the real one once it is SIGN_HOST's record, else one naming its bundle (see the header). */
-const goodLedger = answers.good.url === SIGN_ORIGIN ? {} : { released: new Map([[answers.good.app.sha384, `release-${FIRST_RELEASE}`]]) };
+const goodLedger = answers.good.url === SIGN_ORIGIN ? {} : { released: new Map([[answers.good.app.sha384, "the card's release"]]) };
 const NO_LEDGER = { ledger: false };
 const MARKS = "/app.js fills vault_balance from the device's own notes";
 const SAME = "/app.js is the script / names: its sha384 is the integrity";
@@ -42,34 +45,43 @@ test("the recorded good answer (the card's build) passes", () => {
 
 test("the recorded SIGN_HOST at release-110, the last release before this card, fails: no release of the card's on, and no positions", () => {
   assert.equal(answers.bad_release_110.url, SIGN_ORIGIN);
-  assert.equal(judge(answers.bad_release_110).pass, false);
-  assert.deepEqual(BAD(answers.bad_release_110), [LEDGER, POS, RUNS]);
+  assert.equal(judge(answers.bad_release_110, TODAY).pass, false);
+  assert.deepEqual(BAD(answers.bad_release_110, TODAY), [LEDGER, POS, RUNS]);
 });
 
 test("the recorded live SIGN_HOST before the card's first build fails, on the ledger and the marks", () => {
   assert.equal(answers.bad_live_before.url, SIGN_ORIGIN);
-  assert.equal(judge(answers.bad_live_before).pass, false);
-  assert.deepEqual(BAD(answers.bad_live_before), [LEDGER, MARKS, POS, RUNS]);
+  assert.equal(judge(answers.bad_live_before, TODAY).pass, false);
+  assert.deepEqual(BAD(answers.bad_live_before, TODAY), [LEDGER, MARKS, POS, RUNS]);
 });
 
 test("the recorded build the first review rejected fails, on the ledger and the run's marks", () => {
-  assert.equal(judge(answers.bad_review_build).pass, false);
-  assert.deepEqual(BAD(answers.bad_review_build), [LEDGER, RUNS]);
+  assert.equal(judge(answers.bad_review_build, TODAY).pass, false);
+  assert.deepEqual(BAD(answers.bad_review_build, TODAY), [LEDGER, RUNS]);
 });
 
 test("the good build served with no release naming it fails on the ledger alone: the marks cannot tell a broken build that keeps them", () => {
-  assert.deepEqual(BAD(answers.good), [LEDGER]);
+  assert.deepEqual(BAD(answers.good, TODAY), [LEDGER]);
   assert.deepEqual(BAD(answers.good, { released: new Map([[answers.bad_release_110.app.sha384, "release-110"]]) }), [LEDGER], "a release before the card's");
 });
 
-test("the ledger: SIGN_HOST's /app.js of every release list from release-${FIRST_RELEASE} on, and none before", () => {
+test("the ledger: a release counts by its commit holding the card's, never by its number: a later number cut without it fails, and the lists in this tree are asked by their commits", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ssh-ledger-"));
-  const list = (n, sha) => writeFileSync(path.join(dir, `release-${n}.json`), JSON.stringify({ release: `release-${n}`, hosts: { SIGN_HOST: { files: [{ path: "/", sha384: "sha384-index" }, { path: "/app.js", sha384: sha }] }, APP_HOST: { files: [{ path: "/app.js", sha384: "sha384-app" }] } } }));
-  list(FIRST_RELEASE - 1, "sha384-before");
-  list(FIRST_RELEASE, "sha384-card");
-  list(FIRST_RELEASE + 1, "sha384-later");
-  assert.deepEqual(releasedAppJs(dir), new Map([["sha384-card", `release-${FIRST_RELEASE}`], ["sha384-later", `release-${FIRST_RELEASE + 1}`]]));
-  assert.equal(releasedAppJs().has(answers.bad_release_110.app.sha384), false, "release-110, cut before this card, is not in it");
+  const WITH = "a".repeat(40), WITHOUT = "b".repeat(40);
+  const list = (n, sha, commit) => writeFileSync(path.join(dir, `release-${n}.json`), JSON.stringify({ release: `release-${n}`, commit, hosts: { SIGN_HOST: { files: [{ path: "/", sha384: "sha384-index" }, { path: "/app.js", sha384: sha }] }, APP_HOST: { files: [{ path: "/app.js", sha384: "sha384-app" }] } } }));
+  list(110, "sha384-before", WITHOUT);
+  list(111, "sha384-cut-without", WITHOUT); // a release cut after this card's number, from a main without it
+  list(112, "sha384-card", WITH);
+  list(113, "sha384-no-commit", undefined);
+  const asked = [];
+  const holds = (c) => (asked.push(c), c === WITH);
+  assert.deepEqual(releasedAppJs(dir, holds), new Map([["sha384-card", "release-112"]]));
+  assert.deepEqual(asked.sort(), [WITH, WITHOUT, WITHOUT]);
+  // this tree's lists: each asked by its own commit; release-110's (73b79695) is the bad answer's bundle
+  const real = [];
+  releasedAppJs(undefined, (c) => (real.push(c), false));
+  assert.ok(real.includes("73b79695759999a948862055c1b54f24cca39559"), "release-110 asked by its commit");
+  assert.equal(releasedAppJs(undefined, (c) => c === "73b79695759999a948862055c1b54f24cca39559").get(answers.bad_release_110.app.sha384), "release-110", "the commit decides");
 });
 
 test("the good script under a page whose integrity names another script fails; each mark gone fails", () => {

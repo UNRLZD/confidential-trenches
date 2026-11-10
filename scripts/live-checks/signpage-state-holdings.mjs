@@ -2,9 +2,10 @@
 // Live check of card signpage-state-holdings on SIGN_HOST (https://confidential.unrealized.trade). What it holds, and
 // only that:
 //   - / names exactly one module script, /app.js, with its integrity, and /app.js's sha384 is that integrity;
-//   - that /app.js is the /app.js of a written release list from this card's release on
-//     (packages/signpage/releases/release-<N>.json, N >= FIRST_RELEASE): its bytes are a build of a main that holds this
-//     card's commit, whose tests ran on it. This is what tells the fix from its absence: the marks below are shapes
+//   - that /app.js is the /app.js of a written release list whose commit holds this card's commit (CARD_COMMIT) in its
+//     history (packages/signpage/releases/release-<N>.json, its `commit`, read with git): its bytes are a build of a
+//     main that holds this card's fix, whose tests ran on it; a release cut from a main without it fails, whatever its
+//     number. This is what tells the fix from its absence: the marks below are shapes
 //     a broken build keeps (the review's seven broken builds all had them), and only the ledger ties the served bytes
 //     to the source the card's tests hold;
 //   - and in it, as minified, the state step's wiring: vault_balance from the device's own notes (SUM, FILL), positions
@@ -24,6 +25,7 @@
 //   PASS exit 0, FAIL exit 1, error exit 2. The record holds the script's path, integrity, size, sha384 and each
 //   mark's count, never the bytes.
 import "../net-window.mjs";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -32,18 +34,36 @@ import { signBuilt } from "../signpage-built.mjs";
 
 const KEY = "signpage-state-holdings";
 export const SIGN_ORIGIN = "https://confidential.unrealized.trade";
-/** This card's release: the first signing page release list cut from a main holding this card's commit (release-110 is
- *  the last before it; raise this to the first one cut after its merge if another release is cut first). */
-export const FIRST_RELEASE = 111;
-const RELEASES = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."), "packages/signpage/releases");
-/** The SIGN_HOST /app.js of every written release list from `from` on: its sha384 to its release. */
-export function releasedAppJs(dir = RELEASES, from = FIRST_RELEASE) {
+/** This card's commit: its fix (positions.ts's looked-for rule, the stops), which a release's commit must hold. */
+export const CARD_COMMIT = "e24c15fb0bdb47464e1407232880842c50b6c71a";
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const RELEASES = path.join(ROOT, "packages/signpage/releases");
+const SHA = /^[0-9a-f]{40}$/;
+const git = (args) => spawnSync("git", args, { cwd: ROOT, encoding: "utf8", timeout: 300_000 });
+let fetched = false;
+/** Whether `commit` holds `card` in its history, by this checkout's git; a shallow checkout (a runner's) is fetched whole
+ *  once, blobs left out. Throws when git still cannot tell, so the check fails rather than guesses. */
+export function gitHolds(card, commit) {
+  if (!SHA.test(card) || !SHA.test(commit)) return false;
+  for (;;) {
+    const r = git(["merge-base", "--is-ancestor", card, commit]);
+    if (r.status === 0) return true;
+    if (r.status === 1) return false;
+    if (fetched) throw new Error(`git cannot tell whether ${commit} holds ${card}: ${String(r.stderr).trim().slice(0, 200)}`);
+    fetched = true;
+    const shallow = git(["rev-parse", "--is-shallow-repository"]).stdout.trim() === "true";
+    git(["fetch", "--quiet", "--no-tags", "--filter=blob:none", ...(shallow ? ["--unshallow"] : []), "origin"]);
+  }
+}
+/** The SIGN_HOST /app.js of every written release list whose commit holds this card's: its sha384 to its release. */
+export function releasedAppJs(dir = RELEASES, holds = (commit) => gitHolds(CARD_COMMIT, commit)) {
   const out = new Map();
   for (const f of readdirSync(dir)) {
     const n = /^release-(\d+)\.json$/.exec(f)?.[1];
-    if (n === undefined || Number(n) < from) continue;
-    const app = JSON.parse(readFileSync(path.join(dir, f), "utf8")).hosts?.SIGN_HOST?.files?.find((x) => x.path === "/app.js");
-    if (typeof app?.sha384 === "string") out.set(app.sha384, `release-${n}`);
+    if (n === undefined) continue;
+    const rec = JSON.parse(readFileSync(path.join(dir, f), "utf8"));
+    const app = rec.hosts?.SIGN_HOST?.files?.find((x) => x.path === "/app.js");
+    if (typeof app?.sha384 === "string" && typeof rec.commit === "string" && holds(rec.commit)) out.set(app.sha384, `release-${n}`);
   }
   return out;
 }
@@ -84,7 +104,7 @@ export function judge(rec, { ledger = true, released = ledger ? releasedAppJs() 
   const a = rec?.app ?? {};
   say(a.status === 200 && Number.isSafeInteger(a.bytes) && a.bytes > 0 && a.sha384 === s.integrity,
     `/app.js is the script / names: its sha384 is the integrity (HTTP ${a.status ?? "?"}, ${a.bytes ?? "?"} bytes)`);
-  if (released) say(released.has(a.sha384), `/app.js is a release from release-${FIRST_RELEASE} on, a build of the source this card's tests hold (${released.get(a.sha384) ?? `none: ${a.sha384 ?? "not read"}`})`);
+  if (released) say(released.has(a.sha384), `/app.js is a release whose commit holds ${CARD_COMMIT.slice(0, 8)}, a build of the source this card's tests hold (${released.get(a.sha384) ?? `none: ${a.sha384 ?? "not read"}`})`);
   const m = a.marks ?? {};
   const sum = Number.isSafeInteger(m.sum) && m.sum >= 1;
   const fill = Number.isSafeInteger(m.fill) && m.fill >= 1;
