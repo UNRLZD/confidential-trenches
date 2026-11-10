@@ -137,6 +137,55 @@
 .dsc-csinput { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: var(--text-1); font: inherit; font-size: 14px; padding: 0; }
 .dsc-csinput::placeholder { color: var(--text-3); }
 .dsc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* the column filter panel (card app-discover-filter-panel): R5 discover.css .fpanel2 and its parts, .ct-hb[data-on] and
+   .ct-hbdot, the launchpad rows .dd-padRow (the toolbar menu's .dsc-padrow), values unchanged */
+.dsc-col { position: relative; }
+.dsc-hb[data-on="true"] { background: var(--bg-raised); color: var(--text-1); }
+.dsc-hbdot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+.dsc-mfun { display: none; }
+.dsc-fpanel { --paper: #f4f4f2; --on-paper: #0a0a0a; position: absolute; z-index: 40; top: 62px; left: 8px; right: 8px; max-height: calc(100% - 56px); display: flex; flex-direction: column; border-radius: 14px; background: #121212; box-shadow: 0 0 0 1px var(--border-strong), 0 24px 60px rgba(0, 0, 0, 0.55); overflow: hidden; }
+.dsc-fhd { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 14px; box-shadow: inset 0 -1px 0 rgba(244, 244, 242, 0.06); flex: none; }
+.dsc-ft { font: 600 14px var(--font-ui); color: var(--text-1); }
+.dsc-fcol { font: 500 12px var(--font-ui); color: var(--text-3); }
+.dsc-fx { width: 28px; height: 28px; border: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-2); background: var(--bg-raised); cursor: pointer; }
+.dsc-fbody { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 14px 10px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.dsc-fsec { padding: 10px 0 4px; }
+.dsc-fsec + .dsc-fsec { box-shadow: inset 0 1px 0 rgba(244, 244, 242, 0.05); }
+.dsc-fst { font: 500 11px var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+.dsc-fpc { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.dsc-fpch { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--font-ui); color: var(--text-3); }
+.dsc-fcmark { flex: none; border-radius: 50%; background: #050505; }
+.dsc-fpadlist { padding: 0; }
+.dsc-fr { display: grid; grid-template-columns: minmax(0, 1fr) 92px 10px 92px; align-items: center; gap: 6px; min-height: 34px; }
+.dsc-fk { font: 400 12px var(--font-ui); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dsc-fdash { color: var(--text-3); text-align: center; font: 12px var(--font-num); }
+.dsc-fin { width: 100%; min-width: 0; height: 28px; border: 0; outline: none; border-radius: 8px; background: #0a0a0a; box-shadow: inset 0 0 0 1px var(--border-strong); padding: 0 9px; font: 400 12px var(--font-num); color: var(--text-1); }
+.dsc-fin::placeholder { color: var(--text-3); font-family: var(--font-ui); }
+.dsc-fin[data-set="true"] { box-shadow: inset 0 0 0 1px var(--paper); }
+.dsc-fin:focus { box-shadow: inset 0 0 0 1px var(--border-active); }
+.dsc-fin[data-bad="true"] { box-shadow: inset 0 0 0 1px var(--sell); }
+.dsc-ffoot { flex: none; display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 10px 0 14px; box-shadow: inset 0 1px 0 rgba(244, 244, 242, 0.06); }
+.dsc-fdev { display: inline-flex; align-items: center; gap: 6px; font: 400 11px var(--font-ui); color: var(--text-3); white-space: nowrap; }
+.dsc-fn { font: 400 12px var(--font-num); color: var(--text-2); white-space: nowrap; }
+.dsc-freset { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; font: 500 12px var(--font-ui); color: var(--text-1); background: var(--bg-raised); cursor: pointer; }
+.dsc-fscrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 89; }
+/* the phone: the same panel as a sheet, every control 44 px tall (R5 .fpanel2.ph) */
+.dsc-fpanel.ph { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 86vh; border-radius: 20px 20px 0 0; z-index: 90; }
+.dsc-fpanel.ph .dsc-fhd { height: 52px; }
+.dsc-fpanel.ph .dsc-fx { width: 44px; height: 44px; margin-right: -6px; background: transparent; }
+.dsc-fpanel.ph .dsc-fr { min-height: 48px; grid-template-columns: minmax(0, 1fr) 96px 10px 96px; }
+.dsc-fpanel.ph .dsc-fin { height: 44px; border-radius: 10px; font-size: 14px; }
+.dsc-fpanel.ph .dsc-fr .dsc-fk { font-size: 13px; }
+.dsc-fpanel.ph .dsc-ffoot { height: auto; min-height: 64px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.dsc-fpanel.ph .dsc-freset { height: 44px; padding: 0 16px; font-size: 14px; }
+/* R5 .md-padRow in the sheet */
+.dsc-fpanel.ph .dsc-fpadlist { padding: 0 0 8px; }
+.dsc-fpanel.ph .dsc-padrow { min-height: 44px; padding: 0 16px; gap: 10px; border-radius: 0; color: var(--text-1); }
+.dsc-fpanel.ph .dsc-padbox { width: 18px; height: 18px; border-radius: 5px; border: 0; box-shadow: inset 0 0 0 1px #3a3a3a; color: #0a0a0a; }
+.dsc-fpanel.ph .dsc-padrow[aria-checked="true"] .dsc-padbox { background: var(--text-1); box-shadow: none; }
+.dsc-fpanel.ph .dsc-padicon { border-radius: 5px; }
+.dsc-fpanel.ph .dsc-padname { font-size: 14px; }
+.dsc-fpanel.ph .dsc-padcount { font-size: 12px; color: #6e6e6e; }
 /* the phone's parts: hidden on the desktop */
 .dsc-mpause, .dsc-dock { display: none; }
 
@@ -167,6 +216,11 @@
   .dsc-mpad { position: static; }
   .dsc-mfilters .dsc-padmenu { left: 16px; right: 16px; width: auto; max-width: none; top: calc(100% - 4px); }
   .dsc-padrow { min-height: 44px; font-size: 14px; }
+  /* R5 .md-win.ct-mfun: the sheet's funnel at the end of the chips */
+  .dsc-mfun { position: relative; min-width: 44px; height: 30px; padding: 0 10px; display: flex; align-items: center; justify-content: center; flex: none; border: 0; border-radius: 9px; background: #141414; color: #a3a3a3; cursor: pointer; }
+  .dsc-mfun::after { content: ""; position: absolute; inset: -7px -1px; }
+  .dsc-mfun[data-on="true"] { color: var(--text-1); }
+  .dsc-mfun .dsc-hbdot { top: 4px; right: 6px; }
   /* R5 S5.8's held pill */
   .dsc-mpend { display: flex; justify-content: center; padding: 10px 0 2px; }
   .dsc-ppill { position: relative; height: 28px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 14px; background: #1c1c1c; box-shadow: inset 0 0 0 1px #2a2a2a; color: var(--blue); font: 600 12px var(--font-ui); cursor: pointer; }
