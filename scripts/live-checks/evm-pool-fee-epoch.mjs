@@ -8,7 +8,7 @@
 // Every EVM fee reader in scripts/live-checks asks through evmPoolFeeAsk: the epoch it asks (the helper's now, or the
 // one it names), and on either of those two answers the epoch before it, whose first block the helper holds unless the
 // chain made no block for a minute. A pool the helper does not carry answers 404 to both, so it still fails.
-// Runs: no check of its own; the EVM fee readers import it, and evm-pool-fee-epoch.test.mjs holds its rules.
+// Runs: once, no check: a module the EVM fee readers share; evm-pool-fee-epoch.test.mjs holds its rules.
 
 /** The helper's epoch grid and the oldest epoch it prices (apps/helper/src/pool/fee.ts POOL_EPOCH_MS, pool/evm.ts
  *  POOL_LIFE_MAX_MS). */
