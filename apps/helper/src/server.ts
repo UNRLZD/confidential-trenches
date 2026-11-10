@@ -113,6 +113,9 @@ export const SENDERS_WAIT_MS = 60_000;
  */
 export const UPSTREAM_RETRY_AFTER_S = 2;
 const UPSTREAM_WAIT = { "Retry-After": String(UPSTREAM_RETRY_AFTER_S) } as const;
+/** GET /v1/pool/fee for an EVM epoch whose first block the provider does not hold yet: a block comes within a second or
+ *  two on Base and Robinhood (card evm-fee-quiet-epoch). */
+const EPOCH_WAIT = { "Retry-After": "1" } as const;
 const SENDERS_LATE = { status: 503, headers: UPSTREAM_WAIT, body: JSON.stringify({ error: { code: "upstream" } }) };
 /** UPSTREAM_WAIT on a route's own 503 upstream answer, none on any other. */
 const upstreamWait = (a: { status: number; body: unknown }): Headers | undefined =>
@@ -325,10 +328,12 @@ export function handler(
         if (pool === undefined || epochs.length > 1) return send(404, { error: { code: "not_found" } }, cors(req));
         const nowMs = now();
         if (epochs.length === 1 && (!/^[1-9][0-9]{0,15}$/.test(epochs[0]!) || Number(epochs[0]) % POOL_EPOCH_MS !== 0 || Number(epochs[0]) > nowMs || Number(epochs[0]) < nowMs - POOL_LIFE_MAX_MS)) return send(404, { error: { code: "not_found" } }, cors(req));
-        // a Solana fee is the host's; an EVM fee is read from the epoch's first block (null: no block in it yet)
+        // a Solana fee is the host's; an EVM fee is read from the epoch's first block (null: the provider holds no block
+        // in it yet, 503 index_behind with a wait, never not_found, which names a pool this helper does not carry: card
+        // evm-fee-quiet-epoch)
         void Promise.resolve()
           .then((): unknown => pool.fee(epochs.length === 1 ? Number(epochs[0]) : nowMs))
-          .then((a) => (a === null ? send(404, { error: { code: "not_found" } }, cors(req)) : send(200, a, cors(req))))
+          .then((a) => (a === null ? send(503, { error: { code: "index_behind" } }, { ...cors(req), ...EPOCH_WAIT }) : send(200, a, cors(req))))
           // a provider's throttle is a wait (429), any other failed read 503
           .catch((e) => (res.headersSent ? res.destroy() : throttleOf(e) > 0 ? reply(throttled(throttleOf(e), undefined, "provider limit")) : send(503, { error: { code: "upstream" } }, { ...cors(req), ...UPSTREAM_WAIT })));
         return;
