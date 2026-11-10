@@ -76,6 +76,8 @@ export const WORDS = {
   newWallet: draft("New one-time wallet", "buy-route-strip-spec.md Words on screen; design-lock-r5 P.pvTrade PV-02"),
   poolSuffix: ok("pool", "owner 8 Nov 07:55Z, kept; drafted from buy-route-strip-spec.md Words on screen: `<Venue> pool` (PV-03, the venue's name + ` pool`)"),
   final: draft("Final", "buy-route-strip-spec.md Words on screen: the tag beside Filled (S8.12)"),
+  // every orders place (the Limit and TP/SL tabs, the exit plan): orders are out of the plan for now
+  soon: ok("Coming soon", "owner 10 Nov, owner-decisions row \"Order of the returned feature groups\": orders are out of the plan for now, the UI says Coming soon (card app-orders-coming-soon)"),
   poolBare: ok("Pool", "owner 8 Nov 07:55Z, kept; drafted on card app-buy-route-strip: the pool step's label before an event names the venue (words-pending)"),
 } as const satisfies Record<string, Word>;
 

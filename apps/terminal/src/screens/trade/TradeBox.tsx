@@ -34,6 +34,8 @@ import { FillToast, RouteStrip } from "./RouteStrip.tsx";
 import { fromOutcome, fromStage, IDLE, routeEvent, routeTap, toastLine, usd2 } from "./route.ts";
 import type { Route } from "./route.ts";
 import { txLink } from "../withdraw/model.ts";
+import { OrderTabs, OrdersSoon } from "./OrderTabs.tsx";
+import type { OrderTab } from "./OrderTabs.tsx";
 import { useTradeSource } from "./source.tsx";
 import type { SetPreview } from "./source.tsx";
 import { WORDS } from "./words.ts";
@@ -45,9 +47,11 @@ import "./trade.css";
 // ticket; unrlzd.css .tk-*): the side switch, the order tabs with `Bal`, the amount box, the four presets that buy on one
 // click, `You receive`, the max line, the main button and the Route & fees and settings line. States: S8.3 Ready,
 // S8.9 Sending, S8.10 Landing, S8.11 Slow, S8.12 Filled, and a buy the kit ended (States.tsx): S8.23 Failed, S8.24 Not
-// landed, each with Retry, and part filled, with the ready label back. Seams for the next cards: Limit and TP/SL
-// are drawn off; Route & fees opens on its own card. Signed out (S8.1, card app-trade-box-mount): `Bal —`, the exit plan
-// block off, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No dialog, no confirm, ever.
+// landed, each with Retry, and part filled, with the ready label back. Orders are out of the plan for now (card
+// app-orders-coming-soon): Limit and TP/SL draw `Coming soon` in the box's place (OrderTabs.tsx) and the exit plan block
+// `Coming soon` where its switch was, with no order control; Route & fees opens on its own card. Signed out (S8.1,
+// card app-trade-box-mount): `Bal —`, the main button `Sign in to trade` (and a preset) opens the sign-in sheet. No
+// dialog, no confirm, ever.
 // The Sell side (card app-sell-mount): the switch's Sell is on while the signing page's state holds a position of this
 // token on this chain (Portfolio's own Row, heldOf) and draws the sell side (positions/SellBox.tsx) from the same trade
 // state, whose sell (positions/source.tsx useSell) asks pool.sell on a chain with a pool: the request names the chain
@@ -279,6 +283,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
   const { chain, token, slippageBps, src, account, signedOut, text, setText, phase, route, dismissed, amount, pools, onPool, price, proof, balance, max, askable, running, ready, buy, presets, presetOff, tapPreset, preview } = t;
   const { kit } = src;
   const { setOpen: openSignin } = useSigninSheet();
+  const [tab, setTab] = useState<OrderTab>("market");
   // the page's own symbol: Portfolio's Row names a token by its market read, which the live source has none of yet
   if (t.onSell) return <SellBox row={{ ...t.held!, symbol }} s={t.sell} slippageBps={slippageBps} onBuy={() => t.setSide("buy")} footer={footer} />;
   const shown = preview && amount !== null && preview.amount === amount && setMatches(preview.p.slices, amount) ? preview.p : null;
@@ -314,15 +319,14 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
         <button type="button" className="trb-side" aria-pressed="false" disabled={t.heldNow === null || running} onClick={() => t.setSide("sell")} data-testid="trade-side-sell"><W id="sell" /></button>
       </div>
       <div className="trb-ot">
-        <div className="trb-tabs" role="tablist">
-          <button type="button" role="tab" className="trb-tab" aria-selected="true"><W id="market" /></button>
-          <button type="button" role="tab" className="trb-tab" aria-selected="false" disabled><W id="limit" /></button>
-          <button type="button" role="tab" className="trb-tab" aria-selected="false" disabled><W id="tpsl" /></button>
-        </div>
+        <OrderTabs tab={tab} setTab={setTab} running={running} W={W} />
         <span className="trb-avail" data-testid="trade-balance">
           {WORDS.bal.text} {balance === null ? "—" : fmtUsd(balance)}
         </span>
       </div>
+      {/* Limit and TP/SL: Coming soon in the box's place; Market: the box (two parts, the toast between them as before) */}
+      {tab !== "market" && <OrdersSoon place={tab === "limit" ? "buy-limit" : "buy-tpsl"} W={W} />}
+      {tab === "market" && (<>
       <label className="trb-amount" data-bad={!signedOut && amount !== null && amount > 0n && (onPool ? amountWrong(poolBuyAsk(pools, chain, token, amount, price, slippageBps)) : !amountOk(amount, max, balance))}>
         <input
           className="trb-input"
@@ -360,7 +364,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
           <span><W id="exitPlan" /></span>
           <span><W id="exitPlanSub" /></span>
         </div>
-        <button type="button" className="trb-toggle" data-on="false" aria-pressed="false" aria-label={WORDS.exitPlan.text} disabled />
+        <span className="trb-soonTag" data-testid="orders-soon" data-place="buy-exit"><W id="soon" /></span>
       </div>
       <div className="trb-receive">
         <span><W id="receive" /></span>
@@ -397,7 +401,9 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
         {label}
       </button>
       <RouteStrip route={route} symbol={symbol} outText={route.out === null ? null : fmtOut(route.out)} />
+      </>)}
       {toast && phase.k === "filled" && dismissed !== phase.id && <TradeFillToast t={t} symbol={symbol} />}
+      {tab === "market" && (<>
       <div className="trb-line">
         <button type="button" className="trb-row" aria-expanded="false" disabled>
           <Swap />
@@ -410,6 +416,7 @@ export function TradeView({ t, symbol, footer, toast = true }: { t: Trade; symbo
           <span className="trb-pair" title={WORDS.fee.text}><Coins /><span data-testid="trade-fee">{(shown ?? last) ? pct((shown ?? last)!.fee_bps) : "—"}</span></span>
         </div>
       </div>
+      </>)}
       {footer}
     </div>
   );

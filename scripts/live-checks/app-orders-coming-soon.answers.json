@@ -1,0 +1,74 @@
+{
+ "good": {
+  "source": "a local build read from dist",
+  "at": "2026-11-10T18:54:29.153Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-C1vh7r38.js",
+    "status": 200,
+    "marks": {
+     "words": 3,
+     "myOrders": 1,
+     "soonEl": 6,
+     "place:buy-limit": 1,
+     "place:buy-tpsl": 1,
+     "place:buy-exit": 1,
+     "place:sell-limit": 1,
+     "place:sell-tpsl": 1,
+     "place:token-orders": 1,
+     "place:portfolio-exit": 1,
+     "place:portfolio-sheet-exit": 1,
+     "place:orders": 1,
+     "exitSwitch": 0,
+     "addExit": 0,
+     "tabOff": 0
+    }
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-DCZ9xpEg.css",
+    "status": 200,
+    "rule": true
+   }
+  ],
+  "note": "this card: apps/terminal built fresh (vite build, 10 Nov 2026) and read from disk (--root): Coming soon at each of the nine orders places, no order control"
+ },
+ "bad": {
+  "source": "https://ct-app.unrealized.trade/",
+  "at": "2026-11-10T18:54:29.525Z",
+  "pageStatus": 200,
+  "js": [
+   {
+    "url": "/assets/index-CXIbayXZ.js",
+    "status": 200,
+    "marks": {
+     "words": 0,
+     "myOrders": 0,
+     "soonEl": 0,
+     "place:buy-limit": 0,
+     "place:buy-tpsl": 0,
+     "place:buy-exit": 0,
+     "place:sell-limit": 0,
+     "place:sell-tpsl": 0,
+     "place:token-orders": 0,
+     "place:portfolio-exit": 0,
+     "place:portfolio-sheet-exit": 0,
+     "place:orders": 0,
+     "exitSwitch": 1,
+     "addExit": 2,
+     "tabOff": 4
+    }
+   }
+  ],
+  "css": [
+   {
+    "url": "/assets/style-C-5fvaec.css",
+    "status": 200,
+    "rule": false
+   }
+  ],
+  "note": "APP_HOST as deployed before this card (read 10 Nov 2026 over https): no Coming soon anywhere; the exit plan switch, the Add exit plan button and the four order tabs drawn off"
+ }
+}

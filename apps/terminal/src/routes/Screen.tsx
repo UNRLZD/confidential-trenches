@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { DiscoverRoute } from "../screens/discover/Discover.tsx";
+import { OrdersRoute } from "../screens/portfolio/Orders.tsx";
 import { PhoneAccountMenu } from "../screens/signin/Account.tsx";
 import { headerModel } from "../screens/signin/model.ts";
 import { useSigninSheet, useSigninSource } from "../screens/signin/source.tsx";
@@ -11,8 +12,8 @@ import type { RouteId } from "./routes.ts";
 
 // The route map: the screen each route draws. No link or tab opens an empty main (card app-no-blank-pages): a page
 // that needs an account draws the header's Sign in signed out; Verify draws over Trenches, opened directly or from the
-// footer's pill. A route its card has not filled yet and no link reaches (Orders, the legal pages' cards) draws an
-// empty main.
+// footer's pill. Orders draws `Coming soon` (card app-orders-coming-soon). A route its card has not filled yet and no
+// link reaches (the legal pages' cards) draws an empty main.
 
 /** Signed out, the header's Sign in (S1.1, the same word and the same sheet) in place of a page that needs an account. */
 function SignedOut() {
@@ -52,6 +53,8 @@ const SCREENS: Partial<Record<RouteId, ComponentType>> = {
   profile: needsAccount(PhoneAccountMenu),
   // Portfolio and Activity, each tap mounted (PortfolioMount.tsx)
   portfolio: needsAccount(PortfolioMount),
+  // orders are out of the plan for now: Coming soon, signed in or out (card app-orders-coming-soon)
+  orders: OrdersRoute,
 };
 
 export function Screen({ id }: { id: RouteId }) {
