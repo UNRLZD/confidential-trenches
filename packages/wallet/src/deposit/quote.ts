@@ -214,7 +214,8 @@ export async function askDepositQuoteAgain(request: OneClickRequest, fetchFn: ty
   for (const ms of NO_LIQUIDITY_PAUSES_MS) {
     if (!noLiquidity(reply) || end - clock() - ms < NO_LIQUIDITY_ASK_MIN_MS) break;
     await sleep(ms);
-    const left = Math.floor(end - clock());
+    // never more than the one ask's own window, whatever the clock reads (a wall clock set back mid-ask)
+    const left = Math.min(Math.floor(end - clock()), DEPOSIT_QUOTE_TIMEOUT_MS);
     if (!(left >= NO_LIQUIDITY_ASK_MIN_MS)) break;
     let next: DepositQuoteReply;
     try {

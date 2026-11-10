@@ -190,6 +190,32 @@ test("the re-ask's own timeout is what is left of the window, in whole ms", asyn
   assert.deepEqual(asked, [DEPOSIT_QUOTE_TIMEOUT_MS, NO_LIQUIDITY_ASK_MIN_MS]);
 });
 
+// review of c5959619, P3-a: the window is read on a clock that can be set back while the ask is out
+test("a clock set back mid-ask never gives a re-ask more than the one ask's own window", async () => {
+  let m = 0;
+  const hangs = ((_u: string | URL | Request, init?: RequestInit) => {
+    if (m++ === 0) return Promise.resolve(new Response(JSON.stringify(NO_LIQ.body), { status: 400 }));
+    return Promise.reject(init!.signal!.reason);
+  }) as typeof fetch;
+  const asked: number[] = [];
+  const real = AbortSignal.timeout;
+  AbortSignal.timeout = ((ms: number) => {
+    asked.push(ms);
+    return AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError"));
+  }) as typeof AbortSignal.timeout;
+  try {
+    for (const back of [5_000, 60_000, 3_600_000]) {
+      m = 0;
+      asked.length = 0;
+      const times = [0, 0, -back];
+      assert.deepEqual(await askDepositQuoteAgain(req(), hangs, async () => {}, () => times.shift() ?? 1e9), NO_LIQ);
+      assert.deepEqual(asked, [DEPOSIT_QUOTE_TIMEOUT_MS, DEPOSIT_QUOTE_TIMEOUT_MS], String(back));
+    }
+  } finally {
+    AbortSignal.timeout = real;
+  }
+});
+
 test("any other answer is the one ask's: a 400 of another message, 429, 503, a quote", async () => {
   for (const a of [{ status: 400, body: { message: "amount is too low" } }, { status: 400, body: { error: { code: "upstream" } } },
     { status: 400, body: "No liquidity available" }, { status: 200, body: { message: "No liquidity available" } },
