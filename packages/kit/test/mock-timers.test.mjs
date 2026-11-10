@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { enableTimers, resetTimers } from "./mock-timers.ts";
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const HELPERS = ["packages/kit/test/mock-timers.ts", "packages/signpage/test/mock-timers.ts", "apps/helper/test/mock-timers.ts"];
+const HELPERS = ["packages/kit/test/mock-timers.ts", "packages/signpage/test/mock-timers.ts", "packages/wallet/test/mock-timers.ts", "apps/helper/test/mock-timers.ts"];
 const DIRECT = /\.timers\s*\.\s*(enable|reset)\s*\(/;
 
 /** The lines of `text` that mock or reset timers directly, not through the helper. */

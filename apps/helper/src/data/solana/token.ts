@@ -1093,6 +1093,20 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     },
     /** 06b TokenPage for a Solana mint: 404 when it is no mint or Jupiter does not list it, 503 on an upstream failure. */
     page: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : page.get(mint, client)),
+    /** A mint's row for GET /v1/market/held (../held.ts, card market-token-reads): Discover's own row, else Jupiter's
+     *  search row, with no chain read, so the tokens a device holds never spend that caller's RPC share (its own token
+     *  page and trade reads keep it): 200 {row}, 404 when Jupiter does not list it, 503 when its row is not read within
+     *  JUP_PAGE_WAIT_MS (the search goes on and its row is held for the next read, as the page's). */
+    async named(mint: string): Promise<DataAnswer> {
+      if (address(mint) === null) return NOT_FOUND;
+      const listed = await listedRow(mint);
+      if (listed !== null) return { status: 200, body: JSON.stringify({ row: listed.row }), src: "jupiter", asOfMs: listed.at };
+      const j = await jupiterWithin(mint, true);
+      if (j === null || j.later === true) return UPSTREAM;
+      if (j.row === null) return NOT_FOUND;
+      const row = toRow(j.row, j.at);
+      return row === null || row.token !== mint ? NOT_FOUND : { status: 200, body: JSON.stringify({ row }), src: "jupiter", asOfMs: j.at };
+    },
     /** 06b Holders (20 rows, merged per owner), or Jupiter's fallback. */
     holders: (mint: string, client?: string) => (address(mint) === null ? Promise.resolve(NOT_FOUND) : holders.get(mint, client)),
     /** 06b Candles: up to `limit` bars of `tf` ending before `to` (unix seconds) when it is set. */
