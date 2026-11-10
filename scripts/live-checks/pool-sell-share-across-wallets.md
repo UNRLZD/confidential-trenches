@@ -50,10 +50,57 @@ Tx: solana-devnet 2jREx3fWoWzjh97thsaeGX8RHcxYEzQ82DU7xPXYjWU5iAPoPmZZvwsoej6qAv
 Tx: solana-devnet 54NEUp1N2EaLzxBrxEb5peus1cvfQNcmdtDKsBngtNSAAPjCBnw3zZmL4XhD9qVDShCZQHDdCrxTH6G1edGAWXNT
 Tx: solana-devnet wKSkWU4ec2VHsDFCdAKZDS9tPgNpuaqNb44SRVuL6xWQB3tUyMRLb1jH3bcCoN5pJ8j5kLxU6Tx7n7rQMs7YxnV
 Tx: solana-devnet 9QNRG6hstZsKZxFVHW9KCqU1hc3JxYzsasrhLXVMYkfdm15rttycdoKHARbqUXh8GAXWnAMatXUBkLA7S3v9Zx9
+Tx: solana-devnet 4Mcx9JrDz3m7rpSShVPFtP9KHDDr2EZwBWHoAjT2oC4oCPh36JdeBZsj9KM8QpkyTj8YSRQ8AS6QpFKajkeF8qsM
+Tx: solana-devnet 49fbmhjsSk7xHnnyRhhHgL3pEKcVWVLKj59ezwacuxRPDKvKxjBRQTwfA61p1d4JBrE5Ezr71Vp22wbKma5WatPo
+Tx: solana-devnet 3KezChN5xBct9ECiwx6y3nN9oqQh7rEwVLxBiC7v9MUSKirxDkv31HfovpRi4HS8rhKek7Rm3ucxVzyWKnLahQFr
+Tx: solana-devnet 58nndLYUQmE6UY9xG6QnME9b2TxywyA2dKm35T2wPPk8q2DWL11i9GxAhBHSqu2aXPnFoxiZiPBChtSsy6vh2VEW
+Tx: solana-devnet 3uQ4bn82Av1NpXeYqEeUZTYp9MPYkzqaaJeCgYZmcjKteC4Cr3VhaFtNVC2mc48YHN6xWb15NW2UxSXUNk1pJ5tL
+Tx: solana-devnet d43L3DSeG5N5gJGeoFv4J1mtnvb9Gvmk5iWguo8uxcoZEMWW39kWn6KwaLc5mPgH3fFqmXgugRno7FUP6mtLC3X
+Tx: solana-devnet 4PLKFwcqud45NGdBiuvSVjJedASsDM5t5XU9i17GBaRmC2kSYavvZJf6uG53mwi9PJpJEsbg3FwWJyxE4eogWMDE
+Tx: solana-devnet 4jUcGExJc68wcY3oSpADcDqCMfJJXKYcysvK5ZfMBLoGubEzPR8sDZ8mBbUVmWMeWucdgaSn5E4k2GViQh1pJBeY
+Tx: solana-devnet 5gUpJG9wVoNb4cTqqxMmb5yN5Hhs8xhbgmk986oyq34hkqKBhtcwmE5ekrHzbKeRdikPY2c9qxafQ21usKtpRqYx
+Tx: solana-devnet 3oKTHzRfwW2Gdkg8kYzM74gAVJoFDkfgyFHBDx3gaDaj6pmZdGtYm8f5EZ5JtQnfXnYxRboawJPaGe1ompgjBqE3
+Tx: solana-devnet 58KLiBwCoqbLiSYQhweEFgQRN519DiosbgEWbDveDR76mgGcbK2u6rPijSBxPPgMjcNdT6PRrjdhBCsEmuVcacnG
+Tx: solana-devnet 4KeNPpt24HMQM8WMuZ5wWWtKM3ozgTJ2KSim61kEyfScp222cp3fjxboyDgKDSkdJhTdksvxYbnvVn7cXMgUqzBt
+Tx: solana-devnet 4isEsQiJm6FMLtEYjGvmhBufhrnuqXxcpMwr9JYVNEHsDv4fPbfyAgb6D4n6tFcL2x8KVY1Ub1ojkm7b8BmJjzkj
+Tx: solana-devnet 26ZLvQ7qZX2kS6uyZLhCqhHLcxcVVzWJawmRnmFDJfj5n6xGWSuYp2wuB1xNz4GpikncZBqMGze4xZWkt9XyJGeg
+Tx: solana-devnet 3DGKEikdsPck6wejLokp1k8d1FL75KbCgezyr9HhgpZvyXmDwCqXutRXw7aTDbftFW5uGtvki4PhqZvTKHQdpk5Q
+Tx: solana-devnet 4zRkiTKksuUN8HVuZpmctdmvgEkqUrTn9F7sewf6TyX3n7EeuW3WYVjdhiEWT9XuLsbRxzYomdL1X51kZaaevpgU
+Tx: solana-devnet 59iyWg49mpMzX1H4L6L1bFoCza1o5yDa2DHoRHXzM9WCdounnrTrWXDPu8cjtbbJH259HnN46CDoEHHXaqw7Vrcq
+Tx: solana-devnet 4KMpruJGXgswMALxwscsdasgQmi5pYYczUGfzt5x4Hid9juAtcSYcRDQuL9BWKSzFbnUStvqAnX6GncvZtuSdsCB
+Tx: solana-devnet 49E2EUnyESKmmxF9spHexoHgWPv7r3U3xkgtgHRJn4CDEv7mk8JdhB4J5qWRqCnNzwxS4KEgPxXSpUk6NsM3zk33
+Tx: solana-devnet 4vVPHLF6Bv5s9pwpHDPfTTeePPFsmJVxYUoVDhe1mWe1bg7YAzo5p8zD54hDbXnbS54CEcaCNqTfSkBoiT15BoN4
+Tx: solana-devnet 62xWieT4Du8QzRW2d8mKzszUn6uAAavvbtu6Vv7WPcgccY1uQQRh1qkR1UUmGTRikcot91xTqCmr9MUL3wHyBTSb
+Tx: solana-devnet 4tDNSLRiRdMUjpHQkeLKYiN61rVPWjpQo825vi7WiNaBNNBHchMwbxhKjerq8woe7XBkGa3MhMccMSMYmGsWuQuL
+Tx: solana-devnet 2xxCy5Lx8oroMdTnjphx2M9PrKH5cG2guBfvurtfhaxLCqbyvF38UKap89d7o6c6P8WQUJN2nwK97SbNgsqnPx5b
+Tx: solana-devnet 5mPEkch3MvfrevxS8ymAfAgjjPhCrYdxCkxUxsU4TVY9rKcAk3nsenNJKo6xHjZNCx51YnzRu4o46h8hkH2XhxEa
+Tx: solana-devnet 2UyxwCqY4ysaniNzWTiQUfanYCsczzcPNLj1MrnedFLMxKwGKApAhARTQW4v8SLmtWbcLRdkP8RXi8oDKWm7aUE2
+Tx: solana-devnet 4VRAWm9QjfaqsWtJdmjGxsBN1hw2B1PGbjynknmdCyDyJ7h2prS28JdHA1NyVNf4PpHwJfMAXwgDeykmj1Vx9WbB
+Tx: solana-devnet 2pYujB9UpadELsA5fHezsAjN6ARjH2YVZ1kQZkP9q8jQBkbphT9pwhZsVWpe9BUwgFiGPLEgQfsiSsZTgRA1ANob
+Tx: solana-devnet 5mje6CUGVj8cW4txQiHW9G6MpAQHcJU5vpndTict1bmb6KUJZZGmhiSD12tVeny21wxJqMDHuAizUqEY7KjneQwu
+Tx: solana-devnet gRa4VP1TC7iYtufv581cnt6wkc3aNKZhj5S3DEYyeCGWneQW8TjpNYsmDX3owF954qqDERma51FYGw46KbFjQva
+Tx: solana-devnet 4WSxaE3Jg3P7ide3p1BBtwqUhiP9KvbNgPJiBeMjkMwSC9vigDYSjmoyY7c2TEfCzqw624iniSYPtzbUjyn4ka6x
+Tx: solana-devnet nW7Kjac5RRKPKvDcMeY79a6hifwMSyBVFhoHob2qLNSs4udWinex2Uc6TwLbpPB9EGnC6LBMN2Gq5SGFMpHerTY
+Tx: solana-devnet 2aSPvsXT9BN2WSMY3VHaLTduNdtRx5Khz1udyjVZQ3h6KeNW1Hd1ogKpPjPYgxeXV3MPtZGYkiVbMtvS3ruprGVx
+Tx: solana-devnet 2xtqh4q95AHAdvxGQHRBzry5dQVBeL2bNerb15tuadXEHWAdHz4CrDymuDf34yYq7jUxoVxBFeAeLm1B3FWahydK
+Tx: solana-devnet qhXdRxft9a1MA4pQXv8XYaxnBENtomGmrDUvuMR88sjzLUncpH3v1KzZfb1ExcXM9rhU5QQhyfs9c42s9iKhB8E
+Tx: solana-devnet 4UtzY6Z5MAXbw8iBAb2pxrkPUXxW6iT6iaXEvTLSMrkzNMfbhi13qHs1D95VgTdDobJyimv54fXd7f6WqbrTBXeT
+Tx: solana-devnet 3XgLG4nLJn9HYTi7zZeTyGtEA6fCW7qweMfUKQrATpgHvKE4wbSiGg6JV4zTpPfqJ5ihNgSSizAjrMuiUUyeDAwX
+Tx: solana-devnet 5TAnYz2QBBTHzuQQNjEwmjSmPkGxLBMPUp2ahx8nFXDmBZ8pNfB7Eo9M8j1hV1AyKLbtgW4bWcXG5bbowZgRryox
+Tx: solana-devnet 64wsyvymBgDAhhgUSMYi5RZyTwHkby8eGFoESz3KtGs5wcFwM1dSu5se7dTuGN1hmAm3e36rmA1CBC3VYe2Hq76u
+Tx: solana-devnet 64v5Bhxik5UjcnADKzz69Ytz9Kk1oh91G9rhz2dvfgZsPvvVnpWQ3PSjNVm6c71h5ygWmUJyhDGe4GRpy1oKh9bR
+Tx: solana-devnet 2imRJSZ17kg9KRQnejxhEYQywtPydZ7EWVukveBD4hoJo7h56uD79JnjYeTqLSy3CgMaS5JwLvjj7FZLwwpwRTFn
+Tx: solana-devnet 2JEE3Pne9xTGnu155qnihmLUNT51n4uEyUTX6aaMLgBRcWFgPyrQjSTA7GLKgSg3DGECjH7ourmL9etovpBHzMuB
+Tx: solana-devnet 9ccETV5mfK1vWKUvHLgZXYBazXfcWYfLW8BwLkW9Wfqzh7ytxx77gxSaWDQ2U4rNm9fCnQ8Tcjm4WVSiTccPUD5
+Tx: solana-devnet 2yW2MpsCAqxxusBuc3D75AsT9DUndEro7LZZq7Gz337z6bLadDrS1CkngPHuyxFVmBeX3zQGDe7TyrDYb8rrcSov
+Tx: solana-devnet 2ZYPyH5tTaJ2NrUWhRb769aAuPfr4E1ytFYHkpJwA1cFGQYFE2ZHdfuvTT2sywGJqGE4gyVqrnLazmg4YnvE9WJc
+Tx: solana-devnet 5rthtUWnNzLGoktBXJ72rzN4BVcfk1qYNqgz8cGQJXZBqa7aRGUJuLnqXKrV96Jz684G7RZUkYiVdAdyo3fQwSBV
+Tx: solana-devnet 5httmW8ayBAxXzy4sfHnzEya1SLo6v12QbbwJvh4LcTM5w9ycoSpb446uLNhDi1WdK3rCL53388w3xpp2HAncXLW
+Tx: solana-devnet 2zfqPADB7ZEKdCszMXk2RxdWJ7eUxtcHsnFpapprr441RSaZe7g93K6MoFYLPmrnAHcYzwVA65wJifKTSNT2UZw5
 
 Every line above was read back finalized and succeeded on api.devnet.solana.com and the helper's /v1/rpc/solana-devnet
 (the run's own read-back, slots agreeing); the money gate reads each one again on two public devnet RPCs. The device code
-is this card's (packages/signpage/src/pool-sell.ts at 99400052, unchanged since). Every run used
+is this card's: packages/signpage/src/pool-sell.ts at 99400052 for runs 1-4, at 51d936be for runs 5-6. Every run used
 packages/signpage/scripts/pool-sell-share-devnet.mjs: the page's own pool kinds over its testnet flow, the deployed
 helper, lookup table 6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ and coin AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P
 (pump curve). Each buy spends "max", so each fresh wallet holds a little over 12.9M of the coin.
@@ -99,3 +146,33 @@ Click to all sales filled (the sell's tap to its end stage, every wallet's sale 
 | 3 (run 3) | 7374 | 20413 | 44290 |
 Each sale's turn runs up to its send, one sale after another (the pacing every send shares), and the verdicts are read
 together. So each extra wallet adds about 6 s, one sale's build, quote check and send on devnet's public RPC.
+
+Lines 53-54: D paid F (2kbVUqSzQ6HjRfRcDN5xVxGX3n4K4HLNfqhYDqWs6pqW) 0.06 SOL, then 0.05543144 SOL after run 5.
+
+Lines 55-69, run 5 (03:35-03:50Z): five rounds of F paying the deposit's source, pool.deposit of 0.01 SOL and pool.buy
+(lines 55-64 F's payments and the deposits, 65-69 the buys), then one 100% sell. The sell signed nothing and answered failed: one 429 from
+api.devnet.solana.com, with a Retry-After past the client's deadline, ended the holdings list. The list's reader did not
+read the kit client's text as a rate limit; it now reads the client's fault and waits out its Retry-After, and a sale
+that meets one waits and reads again (51d936be). That run's five wallets still hold the coin on devnet.
+
+Lines 70-99, run 6 (04:10-04:16Z), on 51d936be: the same five rounds (lines 70-79 F's payments and the deposits, 80-84
+the buys), then one 100% sell (lines 85-89, one sale per wallet, smallest holding first) and the five rent backs (two
+teardown frames each, lines 90-99). The sell request names no amount. The device's record reads stage filled, one leg
+per wallet, times from the tap:
+- leg 1: wallet Cnj68v9VF3WFYzz3ZAN7g7nzKJ4CoS8kPvUzibksRJzC, units 10617693.431678, sent at 18840 ms, filled at 20556 ms
+- leg 2: wallet 9Jase2tASUMHGz5yvAtSkWcUq8HwoCZSu88RodWA5mZc, units 10874971.05797, sent at 23984 ms, filled at 25591 ms
+- leg 3: wallet FbMSQ7Y2QzUhLtcCtdofP4wtFXBNMbP3hETHfq71Qruo, units 11141714.520135, sent at 30364 ms, filled at 32040 ms
+- leg 4: wallet DAoqb9CZxaHXL8HzZ2UoxK4jSJ7B6Sd7jLdUwT9pfSQi, units 11418393.943692, sent at 49151 ms, filled at 52791 ms
+- leg 5: wallet 2xcjRLQ5EQqi7E8uq6Nm1cRACWeBeyHqj2oYEoTGLvbg, units 11705509.007384, sent at 53526 ms, filled at 55213 ms
+The app's stage over the run: pending until the first sale signed at 18.9 s, sent from 19.3 s, filled at 55.2 s, when
+the last sale filled. Calls in the run, per provider, against the page's limit of 100 in any 10 s and 40 of one method:
+api.devnet.solana.com 254 calls, at most 44 in 10 s and 20 of one method; the helper's devnet RPC
+253 calls, at most 45 and 21. Devnet's public RPC still answered 429 six times during the sell; each was waited
+out and read again, and no sale was refused for a quote's age. After the rent backs every wallet's coin account and both
+pump volume accounts read null; each wallet keeps 3627456 lamports (the rent back's floor, as in run 1), and five return
+notes of 3482099 are UNSPENT.
+
+F's sweep did not run: after run 6 F holds 650240 lamports, exactly devnet's rent floor for an empty account, and a
+transaction F pays the fee for is refused (InsufficientFundsForRent on F, read on two RPCs), since F would be left under
+the floor. Every one of lines 53-99 was read back finalized with no error on api.devnet.solana.com,
+solana-devnet.gateway.tatum.io and solana-devnet.api.onfinality.io (one getSignatureStatuses call each).
