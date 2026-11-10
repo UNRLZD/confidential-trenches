@@ -212,14 +212,19 @@ test("every mutant sweep and its test spawns its test runs only through scripts/
 test("a sync sweep of runs in a row ends at its own run's bound, not after every run: a run inside a run ends by the outer one's end", { timeout: 30_000 }, async () => {
   const dir = plant();
   try {
-    const sweep = `import { runSync } from ${JSON.stringify(RUNNER)};
-for (let i = 0; i < 5; i++) runSync(process.execPath, ["--test", "never.test.mjs"], { cwd: ${JSON.stringify(dir)}, timeoutMs: 4_000 });`;
-    const t = Date.now();
+    const runs = path.join(dir, "runs");
+    const sweep = `import { appendFileSync } from "node:fs";
+import { runSync } from ${JSON.stringify(RUNNER)};
+for (let i = 0; i < 5; i++) {
+  appendFileSync(${JSON.stringify(runs)}, "x");
+  runSync(process.execPath, ["--test", "never.test.mjs"], { cwd: ${JSON.stringify(dir)}, timeoutMs: 4_000 });
+}`;
     const r = runSync(process.execPath, ["--input-type=module", "-e", sweep], { encoding: "utf8", timeoutMs: 3_000, killSignal: "SIGTERM" });
-    const ms = Date.now() - t;
     assert.equal(r.timedOut, true);
     assert.ok(existsSync(path.join(dir, "started")), "the planted test never started");
-    assert.ok(ms < 4_500, `the sweep ended ${ms} ms in, past its 3 s bound (five runs of 4 s each: 20 s)`);
+    // counted, not timed: the first run is cut to the 3 s bound and the sweep exits at its next one; before, all five started
+    const started = readFileSync(runs, "utf8").length;
+    assert.ok(started <= 3, `the sweep started ${started} of its five 4 s runs past a 3 s bound`);
     assert.deepEqual(await leftovers(dir), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
