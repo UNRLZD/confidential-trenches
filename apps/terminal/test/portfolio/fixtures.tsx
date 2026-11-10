@@ -96,6 +96,22 @@ export const FIXTURES: Record<string, Fx> = {
   sheet: { ui: { sheet: "near:NEARLY" } },
   notrades: { data: { closed: [], fees: null } },
   activity: { ui: act() },
+  // the owner's labels (owner 10 Nov 18:12Z): failed buys and sells, each Transaction failed with its reason on hover
+  // (Price check failed, Unavailable, none for a code the app has no words for, Not landed); a filled buy has none
+  failed: {
+    state: {
+      ops: [
+        { id: "f1", kind: "buy", stage: "refused", code: "quote_check_failed", txs: [], created_ms: NOW - 60_000, chain: "solana", token: "ALPENGLOW", amount_usd: "10" },
+        { id: "f2", kind: "buy", stage: "refused", code: "venue_not_pinned", txs: [], created_ms: NOW - 120_000, chain: "solana", token: "ALPENGLOW", amount_usd: "25" },
+        { id: "f3", kind: "sell", stage: "refused", code: "not_allowed", txs: [], created_ms: NOW - 180_000, chain: "near", token: "HOOT", units: "4465.8702" },
+        { id: "f4", kind: "sell", stage: "not_landed", txs: [], created_ms: NOW - 240_000, chain: "near", token: "HOOT", units: "4465.8702" },
+        ...STATE.ops,
+      ],
+    },
+    ui: act(),
+  },
+  // a price that reads zero is no read: KINU's value is the dash, never $0.00 (owner 10 Nov 18:12Z)
+  zeroprice: { data: { market: (c, t) => (t === "KINU" ? { ...MARKET.get(`${c}:${t}`)!, price: "0" } : MARKET.get(`${c}:${t}`) ?? null) } },
   "activity-empty": { state: { ops: [] }, ui: act() },
   restored: {
     state: { ops: [{ id: "rs", kind: "restore", stage: "done", txs: [] }, ...STATE.ops.filter((o) => o.kind === "buy" || o.kind === "sell")] },

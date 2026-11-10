@@ -170,14 +170,24 @@ test("the re-ask's own timeout is what is left of the window, in whole ms", asyn
   let m = 0;
   const hangs = ((_u: string | URL | Request, init?: RequestInit) => {
     if (m++ === 0) return Promise.resolve(new Response(JSON.stringify(NO_LIQ.body), { status: 400 }));
-    return new Promise<Response>((_ok, no) => init?.signal?.addEventListener("abort", () => no(init.signal!.reason), { once: true }));
+    return Promise.reject(init!.signal!.reason);
   }) as typeof fetch;
-  const t0 = Date.now();
-  const times = [0.5, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS + 0.1, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_ASK_MIN_MS - 0.3];
-  assert.deepEqual(await askDepositQuoteAgain(req(), hangs, async () => {}, () => times.shift() ?? 1e9), NO_LIQ);
-  const took = Date.now() - t0;
+  // each ask's timeout as it is asked of AbortSignal.timeout, which answers a signal already cut: no real wait
+  const asked: number[] = [];
+  const real = AbortSignal.timeout;
+  AbortSignal.timeout = ((ms: number) => {
+    asked.push(ms);
+    return AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError"));
+  }) as typeof AbortSignal.timeout;
+  try {
+    const times = [0.5, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_PAUSES_MS[0]! - NO_LIQUIDITY_ASK_MIN_MS + 0.1, DEPOSIT_QUOTE_TIMEOUT_MS - NO_LIQUIDITY_ASK_MIN_MS - 0.3];
+    assert.deepEqual(await askDepositQuoteAgain(req(), hangs, async () => {}, () => times.shift() ?? 1e9), NO_LIQ);
+  } finally {
+    AbortSignal.timeout = real;
+  }
   assert.equal(m, 2);
-  assert.ok(took >= NO_LIQUIDITY_ASK_MIN_MS - 50 && took < NO_LIQUIDITY_ASK_MIN_MS + 1_000, `cut at what was left: ${took} ms`);
+  // the window ends at 10,000.5; the clock reads 7,999.7 after the pause: 2,000.8 is left, asked as 2,000 whole ms
+  assert.deepEqual(asked, [DEPOSIT_QUOTE_TIMEOUT_MS, NO_LIQUIDITY_ASK_MIN_MS]);
 });
 
 test("any other answer is the one ask's: a 400 of another message, 429, 503, a quote", async () => {

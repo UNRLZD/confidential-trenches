@@ -536,7 +536,7 @@ function PosTr({ r, now, menu, setMenu, act }: { r: Row; now: number; menu: "mor
       <td>{usd(r.bought)}</td>
       <td>{r.sold ? usd(r.sold) : DASH}</td>
       <td>{units(r.units)}<div className="s2">{r.symbol}</div></td>
-      <td data-value>{r.value === null ? DASH : usd(r.value)}</td>
+      <td data-value data-unread={r.value === null || undefined}>{r.value === null ? DASH : usd(r.value)}</td>
       <td className={sgn(r.pnl)} data-pnl>{r.pnl === null ? DASH : <>{usd(r.pnl, true)}<div className={`s2 ${sgn(r.pnl)}`}>{pct(r.pnlBps)}</div></>}</td>
       <td className={r.realized ? sgn(r.realized) : ""}>{r.realized ? usd(r.realized, true) : DASH}</td>
       <td className="l">
@@ -732,7 +732,7 @@ function PhoneRow({ r, onOpen, act }: { r: Row; onOpen(): void; act(a: Portfolio
           <div className="v sell-live" data-selling={r.selling.stage}><Selling r={r} /></div>
         ) : (
           <>
-            <div className="v num" data-value>{r.value === null ? "—" : usd(r.value)}</div>
+            <div className="v num" data-value data-unread={r.value === null || undefined}>{r.value === null ? "—" : usd(r.value)}</div>
             <span className={`pl num ${r.pnl === null ? "" : r.pnl >= 0n ? "g" : "r"}`}>{pct(r.pnlBps)}</span>
           </>
         )}

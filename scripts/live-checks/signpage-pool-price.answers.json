@@ -1,27 +1,27 @@
 {
  "good": {
   "check": "signpage-pool-price",
-  "at": "2026-11-10T03:32:46.255Z",
-  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "at": "2026-11-10T07:00:45.336Z",
+  "source": "harness, terminal build apps/terminal/dist, the stand-in shell signed in with the devnet pool and the page's own price read",
   "host": "sign",
-  "browser": "156.0.8078.79",
+  "browser": "157.0.8103.38",
   "read": {
    "rpcs": [
     "https://solana-rpc.publicnode.com",
     "https://ct-api.unrealized.trade/v1/rpc/solana"
    ],
-   "price": "8564162588",
+   "price": "8601206428",
    "expo": -8,
-   "published_s": 1794281561,
-   "read_ms": 1794281566255
+   "published_s": 1794294025,
+   "read_ms": 1794294045195
   },
   "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
-  "treeBundle": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm",
+  "treeBundle": "sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL",
   "signBundle": {
    "status": 200,
-   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+   "sha384": "sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL"
   },
-  "entry": "/assets/index-XvbkxnaR.js",
+  "entry": "/assets/index-q2hg04R4.js",
   "runs": [
    {
     "width": "desktop",
@@ -32,7 +32,7 @@
     "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.85",
+     "bal": "Bal $0.86",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -41,13 +41,18 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000583828",
+       "amount": "0.000581313",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
      }
     ],
-    "shot": "desktop-fresh.png"
+    "shot": "desktop-fresh.png",
+    "read": {
+     "price": "8601206428",
+     "expo": -8,
+     "published_s": 1794294025
+    }
    },
    {
     "width": "phone",
@@ -58,7 +63,7 @@
     "chain": "solana",
     "box": {
      "path": "pool",
-     "bal": "Bal $0.85",
+     "bal": "Bal $0.86",
      "ctaOn": true,
      "cta": "Buy DJT"
     },
@@ -67,13 +72,80 @@
       "type": "pool.buy",
       "params": {
        "chain": "solana",
-       "amount": "0.000583828",
+       "amount": "0.000581313",
        "slippage_bps": 1000,
        "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
       }
      }
     ],
-    "shot": "phone-fresh.png"
+    "shot": "phone-fresh.png",
+    "read": {
+     "price": "8601206428",
+     "expo": -8,
+     "published_s": 1794294025
+    }
+   },
+   {
+    "width": "desktop",
+    "price": "aged",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.86",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000581313",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "desktop-aged.png",
+    "read": {
+     "price": "8601206428",
+     "expo": -8,
+     "published_s": 1794294025
+    }
+   },
+   {
+    "width": "phone",
+    "price": "aged",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.86",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000581313",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "phone-aged.png",
+    "read": {
+     "price": "8601206428",
+     "expo": -8,
+     "published_s": 1794294025
+    }
    },
    {
     "width": "desktop",
@@ -367,6 +439,195 @@
      "bal": "Bal $73.18",
      "ctaOn": false,
      "cta": "Buy Anthropic"
+    },
+    "asked": [],
+    "shot": "phone-none.png"
+   }
+  ]
+ },
+ "agedBad": {
+  "check": "signpage-pool-price",
+  "at": "2026-11-10T07:01:06.207Z",
+  "source": "live https://ct-app.unrealized.trade, the stand-in shell signed in with the devnet pool and the page's own price read",
+  "host": "sign",
+  "browser": "157.0.8103.38",
+  "read": {
+   "rpcs": [
+    "https://solana-rpc.publicnode.com",
+    "https://ct-api.unrealized.trade/v1/rpc/solana"
+   ],
+   "price": "8606598862",
+   "expo": -8,
+   "published_s": 1794294058,
+   "read_ms": 1794294065971
+  },
+  "signCsp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://solana.api.pocket.network https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org https://base.rpc.blxrbdn.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-+pd1hit+HgRxuOaiO8ioKzTzbHb/RE3xgvjR5lymeUa+6HbY4KbTBFlREISJhHYL",
+  "signBundle": {
+   "status": 200,
+   "sha384": "sha384-oUIEN6z1exLkaGoWf+SNc3ACV1i9/8gipl6XdIXnN3A/dtJSutHa2sRRVvp/4NQm"
+  },
+  "entry": "/assets/index-CUQtT7cp.js",
+  "runs": [
+   {
+    "width": "desktop",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.86",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000580949",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "desktop-fresh.png",
+    "read": {
+     "price": "8606598862",
+     "expo": -8,
+     "published_s": 1794294058
+    }
+   },
+   {
+    "width": "phone",
+    "price": "fresh",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal $0.86",
+     "ctaOn": true,
+     "cta": "Buy DJT"
+    },
+    "asked": [
+     {
+      "type": "pool.buy",
+      "params": {
+       "chain": "solana",
+       "amount": "0.000580949",
+       "slippage_bps": 1000,
+       "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF"
+      }
+     }
+    ],
+    "shot": "phone-fresh.png",
+    "read": {
+     "price": "8606598862",
+     "expo": -8,
+     "published_s": 1794294058
+    }
+   },
+   {
+    "width": "desktop",
+    "price": "aged",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "desktop-aged.png",
+    "read": {
+     "price": "8610094435",
+     "expo": -8,
+     "published_s": 1794294073
+    }
+   },
+   {
+    "width": "phone",
+    "price": "aged",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "phone-aged.png",
+    "read": {
+     "price": "8610094435",
+     "expo": -8,
+     "published_s": 1794294073
+    }
+   },
+   {
+    "width": "desktop",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "mint": null,
+    "chain": null,
+    "box": null,
+    "asked": null,
+    "shot": "desktop-stale.png"
+   },
+   {
+    "width": "phone",
+    "price": "stale",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "phone-stale.png"
+   },
+   {
+    "width": "desktop",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —",
+     "ctaOn": false,
+     "cta": "Buy DJT"
+    },
+    "asked": [],
+    "shot": "desktop-none.png"
+   },
+   {
+    "width": "phone",
+    "price": "none",
+    "framed": true,
+    "route": "token",
+    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+    "chain": "solana",
+    "box": {
+     "path": "pool",
+     "bal": "Bal —",
+     "ctaOn": false,
+     "cta": "Buy DJT"
     },
     "asked": [],
     "shot": "phone-none.png"

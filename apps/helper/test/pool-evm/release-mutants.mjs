@@ -27,6 +27,7 @@ const T2 = "src/pool/evm.test.ts";
 const T3 = "src/pool/evm-buy-gas-depth.test.ts";
 const T4 = "src/pool/evm-failover.test.ts";
 const T5 = "src/pool/evm-sell.test.ts";
+const T6 = "src/pool/evm-fee-warm.test.ts";
 
 const EVM_TEXT = readFileSync(join(HELPER, EVM), "utf8");
 /** [the text from `line` through `after` in evm.ts, the same with `line` moved to just after `after`]: a check moved later. */
@@ -198,9 +199,13 @@ export const MUTANTS = [
   [EVM, "/already known|already imported|\\bknown transaction/i", "/already known|already imported|known transaction/i", T4, "A-3: a send refused"],
   [EVM, "        if ((e as Error | undefined)?.message !== DIFFERENT) throw e;\n        return agreed(b);", "        throw e;", T4, "A-2: the first search names a block"],
   [EVM, "        if ((e as Error | undefined)?.message !== DIFFERENT) throw e;", "        if (true) throw e;", T4, "A-2: the first search names a block"],
-  [EVM, "    if (known && (known.until === undefined || now() < known.until)) return known.p;", "    if (known && known.until === undefined) return known.p;", T4, "A-4: 30 requests"],
-  [EVM, "    if (known && (known.until === undefined || now() < known.until)) return known.p;", "    if (known) return known.p;", T4, "A-4: 30 requests"],
+  [EVM, "    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;", "    if (known && known.until === undefined) return known.p;", T4, "A-4: 30 requests"],
+  [EVM, "    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;", "    if (known) return known.p;", T4, "A-4: 30 requests"],
   [EVM, "() => void (entry.until = now() + EVM_FEE_MISS_MS));", "() => fees.delete(epochStartMs));", T4, "A-4: 30 requests"],
+  // card helper-evm-fee-at-epoch-start: the read ahead reads past a kept failure, and a window with no block says so
+  [EVM, "        if ((await feeOf(epochStartMs, true)) !== null) return;", "        if ((await feeOf(epochStartMs)) !== null) return;", T6, "a request's read that failed half a second into the period"],
+  [EVM, "    if (known && (known.until === undefined || (!fresh && now() < known.until))) return known.p;", "    if (known && (known.until === undefined || now() < known.until)) return known.p;", T6, "a request's read that failed half a second into the period"],
+  [EVM, "    else log(`evm ${cfg.network}: fee read ahead: no block in the period", "    else (`evm ${cfg.network}: fee read ahead: no block in the period", T6, "a read ahead that fails is tried again inside the window"],
 ];
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) sweepMain(MUTANTS, "release-mutants.mjs");

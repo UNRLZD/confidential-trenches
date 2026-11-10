@@ -60,10 +60,26 @@ test("each chain's own bound: Base's and Robinhood's from their feeds; the end i
   assert.equal(poolPriceEnd(sol()), null);
 });
 
-test("a clock behind the feed never stretches the bound: a price stamped 60 s ahead of its read is refused 61 s after the read (review L2)", () => {
+test("a clock behind the feed never stretches the bound: a price stamped 60 s ahead of its read is refused a second past its bound after the read (review L2)", () => {
   const readS = PUBLISHED_S;
+  const maxS = POOL_USD_FEEDS.solana.maxAgeS;
   const ahead = [sol({ ...PRICE, published_s: readS + 60, read_ms: readS * 1000 })];
-  assert.notEqual(statePoolPrice(ahead, "solana", (readS + 60) * 1000), null, "60 s after the read: used");
-  assert.equal(statePoolPrice(ahead, "solana", (readS + 61) * 1000), null, "61 s after the read: refused");
+  assert.notEqual(statePoolPrice(ahead, "solana", (readS + maxS) * 1000), null, "the bound after the read: used");
+  assert.equal(statePoolPrice(ahead, "solana", (readS + maxS + 1) * 1000), null, "a second past it: refused");
   assert.equal(poolPriceEnd(ahead[0]!), (readS + POOL_USD_FEEDS.solana.maxAgeS) * 1000, "the end counts from the earlier of the two times");
+});
+
+test("between the feed's writes (card pool-usd-price-never-stale): a Solana price 70 s old still prices the tap and Buy is on; at 76 s it is none and Buy is off", () => {
+  // Pyth's sponsored SOL/USD is written when its price is 50 to 57 s old and lands 1 to 3 s later; its bound is the
+  // kit's, heartbeat 60 s + 15 s
+  assert.equal(POOL_USD_FEEDS.solana.maxAgeS, 75);
+  const pools = [sol(PRICE)];
+  const at70 = statePoolPrice(pools, "solana", (PUBLISHED_S + 70) * 1000);
+  assert.deepEqual(at70, { price: 9_301_048_308n, expo: -8, decimals: 9 });
+  assert.equal(poolBuyAsk(pools, "solana", "Mint111", 10n, at70, 1000).ok, true, "Buy on at 70 s");
+  assert.equal(poolView(pools, "solana", at70)?.balance, 93n, "Bal in USD at 70 s");
+  const at76 = statePoolPrice(pools, "solana", (PUBLISHED_S + 76) * 1000);
+  assert.equal(at76, null);
+  assert.deepEqual(poolBuyAsk(pools, "solana", "Mint111", 10n, at76, 1000), { ok: false, why: "no_price" }, "Buy off at 76 s");
+  assert.equal(poolPriceEnd(sol(PRICE)), (PUBLISHED_S + 75) * 1000, "the box's timer ends it at the kit's bound");
 });

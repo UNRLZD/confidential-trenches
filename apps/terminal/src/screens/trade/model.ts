@@ -169,14 +169,23 @@ export const SLOW_MS = 5_000;
 export const isSlow = (p: Phase, now: number): boolean => busy(p) && now - p.at >= SLOW_MS;
 
 /** A reason the app has words for, by the kit's code (words.ts). */
-export type Reason = "priceCheck" | "notSent";
+export type Reason = "priceCheck" | "notSent" | "unavailable";
 
 /**
- * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), and the
- * signing page down, so the request was never posted (the kit's client code, S8.28 Not sent). Any other code draws
- * Failed alone: the app never makes up a reason.
+ * The kit's codes the app has a reason for: the device's quote check refused (S8.20 Price check failed), the signing
+ * page down, so the request was never posted (the kit's client code, S8.28 Not sent), and a Solana pool buy the pool
+ * cannot make yet: the token's venue has no pinned lookup table (venue_not_pinned) or no table fits the buy
+ * (no_table_fits), Unavailable (owner 10 Nov 18:12Z). Any other code draws Failed alone: the app never makes up a
+ * reason, and never draws a code.
  */
-const REASONS: Record<string, Reason> = { quote_check_failed: "priceCheck", signpage_down: "notSent" };
+const REASONS: Readonly<Record<string, Reason>> = Object.freeze({ quote_check_failed: "priceCheck", signpage_down: "notSent", venue_not_pinned: "unavailable", no_table_fits: "unavailable" });
+
+/** The app's reason for a kit code; null for a code it has no words for, or none. Own keys only. */
+export const reasonOf = (code: ErrorCode | undefined): Reason | null => (code !== undefined && Object.hasOwn(REASONS, code) ? REASONS[code]! : null);
+
+/** A buy the pool cannot make on this token yet (Unavailable): the box keeps Buy and its presets off, with no Retry,
+ *  since the same buy would be refused again; a new token page starts ready. */
+export const unavailable = (p: Phase): boolean => p.k === "ended" && p.stage === "refused" && reasonOf(p.code) === "unavailable";
 
 /** How an ended trade is drawn: Failed, Not landed (CH-050: the money never left W), or part filled (CH-045). */
 export interface EndView {
@@ -189,13 +198,13 @@ export interface EndView {
  * to its ready label, so any further tap is a new trade of the amount on screen: a retry of the whole amount would
  * trade more than the user asked (a buy), or re-apply a share to the smaller balance (a sell).
  */
-export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled";
+export const showsRetry = (p: Phase): boolean => p.k === "ended" && p.stage !== "part_filled" && !unavailable(p);
 
 export function endView(p: Phase): EndView | null {
   if (p.k !== "ended") return null;
   if (p.stage === "not_landed") return { k: "notLanded", reason: null };
   if (p.stage === "part_filled") return { k: "partial", reason: null };
-  return { k: "failed", reason: (p.code && REASONS[p.code]) || null };
+  return { k: "failed", reason: reasonOf(p.code) };
 }
 
 // ------------------------------------------------------------------------------------------------ the pool's proof

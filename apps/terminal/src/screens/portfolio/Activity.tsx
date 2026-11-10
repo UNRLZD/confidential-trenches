@@ -8,6 +8,7 @@ import { Ic } from "./icons.tsx";
 import { W } from "./W.tsx";
 import { WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
+import { WORDS as TRADE } from "../trade/words.ts";
 
 // Activity (S14; 09-design-brief S14): what this browser did, newest first, under day headers (Today, Yesterday, then
 // the date), with the type chips (CN-28's labels), the min size and the token search (CN-103), a tap-only tx link per
@@ -95,6 +96,11 @@ function Row({ r, d, src, tzMin, open, onOpen }: { r: ActRow; d: PortfolioData; 
             {r.kind === "export" ? <W id="keyExported" /> : <W id={KIND[r.kind]} />} {m && <span>{m.symbol}</span>}
             {pending && <span className="tag blue"><W id="processing" /></span>}
             {r.stage === "refunded" && <span className="tag warn"><W id="refunded" /></span>}
+            {r.failed && (
+              <span className="tag sell" data-failed={r.failed.reason ?? ""} title={r.failed.reason ? TRADE[r.failed.reason].text : undefined}>
+                <W id="txFailed" />
+              </span>
+            )}
           </div>
           <div className="at2">{r.at !== null ? hhmm(r.at, tzMin) : "—"}{r.address && <> · {r.address}</>}</div>
         </div>
