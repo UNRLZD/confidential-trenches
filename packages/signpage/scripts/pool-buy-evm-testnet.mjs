@@ -103,7 +103,8 @@ const helperFetch = async (url, init) => {
   log(`helper ${init?.method ?? "GET"} ${new URL(url).pathname}: HTTP ${r.status}${body === null ? "" : ` ${body} (Retry-After ${r.headers.get("retry-after")})`}`);
   return r;
 };
-const page = { store: async () => w, seed64: async () => seed64.slice() };
+// the page's open store as main.ts gives it (held: opened()), which the buy writes W's holding to
+const page = { store: async () => w, held: async () => w, seed64: async () => seed64.slice() };
 const t = testnetPool(page, { prover: { vault, stop: () => {} }, fetch: helperFetch });
 const kinds = poolKinds(testnetPoolDeps(t.flow));
 

@@ -7,6 +7,9 @@ Tx: base-sepolia 0x72c36797ea3644e342a5b40d0387e6d4013c96064326f6f16bcdfa45ccb1e
 Tx: base-sepolia 0xf745626323ba2a560b144b8b2dbf112b88e9d56f32c6e6830d014ecb20c93519
 Tx: base-sepolia 0xd79d7ff9535883b129b2f7bb5145f66e157ff688c683758e5474e078d4f9fe14
 Tx: base-sepolia 0x41ddc17fc2ca900a6c50541125e326f7871407e8645bcc916a6ff729191aaa0c
+Tx: base-sepolia 0xfb54d7cdeaf75c7aaf9790139bcf019d7588be96d9714c076505a7448809ae98
+Tx: base-sepolia 0xd69bad77d3454db55e78bcc24d4d5a143de40273fa9905d47733dccf89fcc3df
+Tx: base-sepolia 0xd5b86cb358f400ae60ae0316810fb956cf9d4a1da9bcfe57bb933723e03adce4
 Tx: robinhood-testnet 0xe5bcf64c21316fd48dc6b4a9e06878623216666f57edb9d66ea2f9f7195f5572
 Tx: robinhood-testnet 0xbf8bbb2283a092e49944c0c45d197bc07a7ac0febe9c60cb77c20aaf4db6ceaa
 Tx: robinhood-testnet 0x43543fc6b78cc9cf6fff800cd5338e7df1e8ef747c60e87174cbbca6205c05fb
@@ -16,6 +19,7 @@ Tx: robinhood-testnet 0xc983514b18f8134dd64e586e6ee7803ac9d227d15f3c904ee32e7c47
 Tx: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
 Buy: base-sepolia 0x41ddc17fc2ca900a6c50541125e326f7871407e8645bcc916a6ff729191aaa0c
 Buy: robinhood-testnet 0xf190dfafacf70bf629155a1cc8eb12ef428657bd7f23380d9f62e8d707d33d84
+Buy: base-sepolia 0xd5b86cb358f400ae60ae0316810fb956cf9d4a1da9bcfe57bb933723e03adce4
 
 One real private buy on each testnet through the signing page's own code path: the page's pool kinds
 (src/pool-kinds.ts over src/pool-testnet.ts testnetPool, as main.ts wires them) on the testnet build's own pins, pool
@@ -82,3 +86,16 @@ Who learned what, from each run's request log (every request from the tap to the
 /v1/pool/evm/send carried the calldata, so it learned W, the proof's nullifier and the route; every other request went to
 the chain's two pool RPCs (eth_call for the quote and the token's decimals, eth_blockNumber, eth_getBlockByNumber,
 eth_getLogs, eth_chainId) and named none of W, the nullifier or the transaction hash.
+
+The third run (06:26Z to 06:33Z), on the read-back of the second review's fixes (not_landed judged on each RPC's safe
+block on two rounds 10 s apart, block hashes compared, the log range stopped at the deadline's safe block, the holding
+written only to the open store): Base Sepolia only. Its three Tx lines (after the second run's Base buy) are E funding U
+0x131E1D3c5f7cfe41404083A8Cf17d53307AE64ec with 0.0010257 ETH, U's deposit of 0.001 ETH (block 56850956 on both pool
+RPCs), and the buy, the last Buy line. The buy of Base Sepolia USDC at 06:32:32Z: the chunk 1000000000000000 wei, the fee
+20000000000000 wei, W 0x24818f99F03808a2A8BeAB6978149a44D43e788d, route Uniswap v3 WETH to USDC (fee 100) through the
+pinned v3 adapter 0xee89916bc4bdeee46dbcaf8fad2b7604724b5645. Sent 10.2 s after the tap, filled 3.3 s later from both
+RPCs' Bought in block 56852469 for 2.069392 USDC; W's holding was completed with that amount, the transaction and the
+block. Only the helper's POST /v1/pool/evm/send named W and the nullifier; every pool RPC request named none of W, the
+nullifier or the transaction. A try at 06:30Z answered failed before the take: the run script's page gave no open store
+(main.ts gives held: opened()), so the pending write failed and nothing was signed into a send or left the device; the
+script now gives it. Robinhood testnet was not run: E holds 0.00017 ETH there, under the 0.001 ETH a deposit needs.
