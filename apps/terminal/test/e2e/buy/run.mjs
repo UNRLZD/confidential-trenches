@@ -156,24 +156,26 @@ async function readBack(sig) {
   const st = (await both("getSignatureStatuses", [[sig], { searchTransactionHistory: true }])).map((x) => x.value[0]);
   return st.map((x) => ({ status: x?.confirmationStatus ?? null, err: x ? x.err : "none" }));
 }
-/** The wallet the buy filled: the owner whose MINT balance the buy's transactions raised, as each RPC reads them. */
+/** The wallet the buy filled, the owner whose MINT balance the buy's transactions raised, and what it held once that
+ *  transaction landed (its post balance), as each RPC reads them: { w, held: [a, b] }. Read from the transaction, never
+ *  from a token-account scan, so the sell is never held up by the public RPC's per-method limit on that scan. */
 async function buyWallet(sigs) {
   const per = await Promise.all([DEVNET_RPC, HELPER_RPC].map(async (u) => {
     for (const sig of sigs) {
       const tx = await rpc(u, "getTransaction", [sig, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
       const amt = (list, owner) => BigInt(list?.find((b) => b.mint === MINT && b.owner === owner)?.uiTokenAmount.amount ?? "0");
       const up = (tx?.meta?.postTokenBalances ?? []).filter((b) => b.mint === MINT).map((b) => b.owner).find((o) => amt(tx.meta.postTokenBalances, o) > amt(tx.meta.preTokenBalances, o));
-      if (up) return up;
+      if (up) return { w: up, held: String(amt(tx.meta.postTokenBalances, up)) };
     }
     return null;
   }));
-  if (!per[0] || per[0] !== per[1]) throw new Error(`the buy's wallet reads ${per.join(" / ")} on the two RPCs`);
-  return per[0];
+  if (!per[0] || per[0].w !== per[1]?.w) throw new Error(`the buy's wallet reads ${per.map((x) => x?.w).join(" / ")} on the two RPCs`);
+  return { w: per[0].w, held: per.map((x) => x.held) };
 }
 /** MINT held by `owner` (its base units, a string) as each of the two RPCs reads it at confirmed. */
-async function heldOn(owner) {
+async function heldOn(owner, opts) {
   return Promise.all([DEVNET_RPC, HELPER_RPC].map(async (u) => {
-    const r = await rpc(u, "getTokenAccountsByOwner", [owner, { mint: MINT }, { encoding: "jsonParsed", commitment: "confirmed" }]);
+    const r = await rpc(u, "getTokenAccountsByOwner", [owner, { mint: MINT }, { encoding: "jsonParsed", commitment: "confirmed" }], opts);
     return String(r.value.reduce((n, a) => n + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n));
   }));
 }
@@ -426,8 +428,7 @@ export async function run({ plant = null, shots = null } = {}) {
     // 7. the buy's wallet W and what it holds, read on both RPCs
     step = "held";
     await Promise.allSettled(answers);
-    rec.w = await buyWallet(sent.filter((x) => x.step === "buy").map((x) => x.sig));
-    rec.heldAfterBuy = await heldOn(rec.w);
+    ({ w: rec.w, held: rec.heldAfterBuy } = await buyWallet(sent.filter((x) => x.step === "buy").map((x) => x.sig)));
 
     // 8. the sell side, once the signing page's state holds the position: 100% sold in one tap, back into the pool
     const side = vis('[data-testid="trade-side-sell"]');
@@ -462,9 +463,6 @@ export async function run({ plant = null, shots = null } = {}) {
     rec.sell.kind = sellAsks[0]?.type ?? null;
     await shot("7-sold");
 
-    // 9. W holds none of the coin, read on both RPCs
-    step = "after";
-    rec.heldAfterSell = await heldOn(rec.w);
     rec.pages = context.pages().length;
   } catch (e) {
     rec.error = String(e?.message ?? e).slice(0, 300);
@@ -478,6 +476,12 @@ export async function run({ plant = null, shots = null } = {}) {
     rec.pages ??= null;
     await h.close();
     rmSync(signRoot, { recursive: true, force: true });
+    // 9. W holds none of the coin, read on both RPCs once the page is closed (its own polling no longer shares the
+    // public RPC's limit), with a longer patience for a rate limit
+    if (rec.w && rec.sell?.taps === 1) {
+      step = "after";
+      rec.heldAfterSell = await heldOn(rec.w, { tries: 12 }).catch((e) => ((rec.error ??= String(e?.message ?? e).slice(0, 300)), null));
+    }
   }
   return rec;
 }
