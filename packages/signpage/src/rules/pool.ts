@@ -180,9 +180,12 @@ const refuse = (rule: string): never => {
 // ---------- the request ----------
 
 /** A pool request's params as the kit's schema let them through: still hostile in value. */
-export type PoolRequest = { kind: PoolKind; chain: string; token?: string; amount?: string; slippage_bps?: number };
-/** The request in the device's terms: the amount in base units of the pool's asset, or of the token for a sell. */
-export type PoolAsk = { kind: PoolKind; chain: PoolChain; token: string | null; amount: bigint; slippageBps: number; decimals: number };
+export type PoolRequest = { kind: PoolKind; chain: string; token?: string; amount?: string; slippage_bps?: number; share_bps?: number };
+/** The request in the device's terms: the amount in base units of the pool's asset, or of the token for a sell. A sell
+ *  by share (card pool-sell-share-across-wallets) carries `shareBps`, the share of the user's whole holding of the token
+ *  in basis points, and an amount of 0: the device turns it into units from its own reads of each wallet
+ *  (src/pool-sell.ts), and no rule that checks signed bytes takes such an ask (each wallet's sale is checked as units). */
+export type PoolAsk = { kind: PoolKind; chain: PoolChain; token: string | null; amount: bigint; slippageBps: number; decimals: number; shareBps?: number };
 
 /** Whether `token` is an address on `chain` (a 32-byte base58 key on Solana, 0x and 40 hex on EVM): checked before
  *  the device reads anything for it. */
@@ -254,6 +257,15 @@ export function checkPoolRequest(p: PoolRequest, tokenReads?: TokenDecimalsReads
   const token = p.token;
   if (p.kind !== "pool.deposit" && (typeof token !== "string" || !(chain === "solana" ? SOL_KEY(token) : EVM_ADDRESS.test(token)))) return refuse("token");
   const decimals = p.kind === "pool.sell" ? tokenDecimalsOf(chain, tokenReads as TokenDecimalsReads) : asset;
+  // a sell by share: a whole number of basis points, 1 to 10,000, and no amount beside it (the kit's schema refuses both
+  // or neither; checked again here, the page's own rule); any other kind takes none
+  if (p.share_bps !== undefined) {
+    const b = p.share_bps;
+    if (p.kind !== "pool.sell" || p.amount !== undefined || typeof b !== "number" || !Number.isInteger(b) || b < 1 || b > 10_000) return refuse("amount");
+    const s = p.slippage_bps;
+    if (typeof s !== "number" || !Number.isInteger(s) || s < 0 || s > POOL_MAX_SLIPPAGE_BPS) return refuse("slippage");
+    return { kind: p.kind, chain, token: token!, amount: 0n, slippageBps: s, decimals, shareBps: b };
+  }
   const m = typeof p.amount === "string" ? DECIMAL.exec(p.amount) : null;
   if (!m || (m[2] ?? "").length > decimals) return refuse("amount");
   const amount = BigInt(m[1]! + (m[2] ?? "").padEnd(decimals, "0"));
@@ -565,6 +577,8 @@ export function checkSolanaSell(
   surplus?: SolanaSellSurplus,
 ): PoolDraw {
   if (ask.kind !== "pool.sell" || ask.chain !== "solana") return refuse("kind");
+  // each wallet's sale is checked as the units it sells, never as a share (src/pool-sell.ts turns a share into units)
+  if (ask.shareBps !== undefined) return refuse("amount");
   const pin = pinOf(ctx);
   if (venue.mint !== ask.token) return refuse("token");
   if (reference.slippageBps !== ask.slippageBps) return refuse("slippage");
@@ -844,6 +858,8 @@ export function checkEvmWithdraw(pool: string, given: EvmPoolProofBinding, relay
  *  unexpired. */
 export function checkEvmSell(built: EvmPoolSell, ask: PoolAsk, ctx: PoolContext & { precommitment: bigint }, floor: bigint, testnet = false): PoolDraw {
   if (ask.kind !== "pool.sell") return refuse("kind");
+  // a share is turned into units before any sale is built; a share ask never reaches signed bytes
+  if (ask.shareBps !== undefined) return refuse("amount");
   // only a sell built from the device's own sell quote: never a server's route, min out or fee cap
   if (!evmIsQuotedSell(built)) return refuse("not_quoted");
   const chain = evmChainOf(ask, testnet);

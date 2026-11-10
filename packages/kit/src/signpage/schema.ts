@@ -369,6 +369,11 @@ deepFreeze(SIGNPAGE_RESULT_SCHEMAS);
 
 const exit = obj({ trigger_price: dec, share_bps: bps(1) });
 
+/** pool.sell's params: a typed amount in units, or a share of the whole holding in basis points; exactly one of them
+ *  (card pool-sell-share-across-wallets: a request with neither or both is refused, so the page never guesses which). */
+const poolSellBase = obj({ chain: poolChain, token: str, slippage_bps: bps(0) }, { amount: dec, share_bps: bps(1) });
+const poolSell: SignpageSchema = (v) => poolSellBase(v) && Object.hasOwn(v as object, "amount") !== Object.hasOwn(v as object, "share_bps");
+
 /** The params of each kind, as SignpageParams names them: exactly its allowed fields (W §2.8 rows; APU-02). */
 export const SIGNPAGE_PARAM_SCHEMAS = {
   "deposit.quote": obj({ origin_asset: str, amount: dec }),
@@ -390,7 +395,7 @@ export const SIGNPAGE_PARAM_SCHEMAS = {
   reload: obj({}),
   "pool.deposit": obj({ chain: poolChain, amount: dec }),
   "pool.buy": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
-  "pool.sell": obj({ chain: poolChain, token: str, amount: dec, slippage_bps: bps(0) }),
+  "pool.sell": poolSell,
   "pool.withdraw": obj({ return_key: returnKey, chain: poolChain }),
   "deposit.assets": obj({}),
   "deposit.dry": obj({ origin_asset: str, amount: dec }),
