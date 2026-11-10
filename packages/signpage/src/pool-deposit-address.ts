@@ -208,6 +208,10 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
       if (reply.status === 503) return void (out = { error: "down" });
       if (!DEPOSIT_ANSWERED.includes(reply.status)) return void (out = { error: "not_available" });
       const decimalsOut = POOL_ASSET_DECIMALS[asset];
+      // the price as it is now, at the check (card pool-usd-price-never-stale, review P1): the floor read and the quote
+      // took seconds, and the price taken at the ask may be past its bound by now. None, or other decimals: no quote
+      const atCheck = deps.priced?.(chain, origin) ?? null;
+      if (atCheck === null || atCheck.decimalsIn !== priced.decimalsIn) return;
       let checked;
       try {
         checked = checkPoolDepositQuote(request, reply.body, {
@@ -215,7 +219,7 @@ export function poolAddressHost(deps: PoolAddressDeps): (params: Record<string, 
           chain,
           wallet: before.wallet,
           refundId: before.record.id,
-          check: { path: DEPOSIT_QUOTE_PATH, pricing: priced.pricing, decimalsIn: priced.decimalsIn, decimalsOut, now: now() },
+          check: { path: DEPOSIT_QUOTE_PATH, pricing: atCheck.pricing, decimalsIn: atCheck.decimalsIn, decimalsOut, now: now() },
           floor,
         });
       } catch (e) {
