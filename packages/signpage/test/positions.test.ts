@@ -1190,6 +1190,65 @@ test("P1-1 (ZZPROBE 4): the page: a buy whose run ends sent (its spend not read 
   assert.deepEqual((await tp.positions())!.map((p) => [p.amount, p.decimals]), [["4", 6]], "the decimals of one read on the finder's route");
 });
 
+test("P1-1: the page: a buy that ends filled with no amount told, the finder not listing W's token yet: looked for again until it does, then shown", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  const timers: (() => void)[] = [];
+  let progress!: (s: string) => void;
+  let told = false;
+  const buy = (host: () => { bought?: { put(a: string, m: { mint: string; program: string }): Promise<void> } }) => (_ask: unknown, ctx: { route(r: unknown): void; progress(s: string): void }) => {
+    progress = ctx.progress;
+    const ran = (async () => {
+      await host().bought!.put(solanaWallet(), BUY(MINT));
+      ctx.route({ wallet: solanaWallet() });
+      told = true;
+    })();
+    return { running: true as const, after: ran, answer: () => ({ result: { stage: "filled", txs: [] } }) };
+  };
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  await until(async () => (await tp.positions()) !== null);
+  tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
+  await until(() => told);
+  progress("filled"); // the run's end: filled, its amount never told
+  await until(() => timers.length === 1);
+  assert.deepEqual(await tp.positions(), [], "not on the finder yet");
+  c.amounts[0] = 4_000_000n;
+  timers.shift()!();
+  await until(async () => ((await tp.positions()) ?? []).length === 1);
+  assert.deepEqual((await tp.positions())!.map((p) => p.amount), ["4"]);
+});
+
+test("P1-1: a sign out lets go of the buys this page ran: after the next sign-in a W the finder lists without its token is not looked for again", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  const timers: (() => void)[] = [];
+  let progress!: (s: string) => void;
+  let told = false;
+  const buy = (host: () => { bought?: { put(a: string, m: { mint: string; program: string }): Promise<void> } }) => (_ask: unknown, ctx: { route(r: unknown): void; progress(s: string): void }) => {
+    progress = ctx.progress;
+    const ran = (async () => {
+      await host().bought!.put(solanaWallet(), BUY(MINT));
+      ctx.route({ wallet: solanaWallet() });
+      told = true;
+    })();
+    return { running: true as const, after: ran, answer: () => ({ result: { stage: "sent", txs: [] } }) };
+  };
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, table: "6bbfV79efN889c4iRTSTf4htv6EnurCJuz5CjMftjsyZ", rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: (f: () => void) => timers.push(f), clearTimer: () => {} } } as never);
+  await until(async () => (await tp.positions()) !== null);
+  tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 9 } as never, { id: "b1", sha: "00", progress: () => {}, route: () => {} } as never);
+  await until(() => told);
+  progress("sent");
+  await until(() => timers.length === 1);
+  timers.length = 0;
+  await tp.signedOut();
+  // the same account signs in again: W's buy mint is in its store, the finder lists W without the token
+  const reads = c.calls.finder;
+  await until(async () => (await tp.positions()) !== null && c.calls.finder > reads);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(await tp.positions(), []);
+  assert.equal(timers.length, 0, "a whole pass: no buy of this sign-in waits on the finder");
+});
+
 test("P3-7 (w12): a run that ended sent lets go of the decimals it told: the same page's next run on that W records none it did not tell", async () => {
   const w = await spentWallet();
   const c = chain();
