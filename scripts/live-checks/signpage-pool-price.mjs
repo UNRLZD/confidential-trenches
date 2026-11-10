@@ -14,8 +14,11 @@
 //   2. The terminal: APP_HOST's terminal, framed by a stand-in for SIGN_HOST's shell (app-in-shell.mjs) that sends a
 //      signed-in state holding the devnet Solana pool with its proof ready (trade-box-pool.mjs POOL.ready) and, as
 //      src/pool-price.ts puts it in state.pools[solana].price, the price part 1 read: fresh (as read), stale (the same
-//      price published past Pyth's 60 s bound) and none (no price). Headless Chromium opens / (the token route, a Solana
-//      token) at 1440 x 900 and 390 x 844 (dpr 2, the bar's Buy opens the trade sheet), types $0.05 and taps Buy:
+//      price published past Pyth's 60 s bound) and none (no price). Headless Chromium opens a Solana token's own page,
+//      /token/solana/<DJT> (app-sell-mount's PATH; never /, which draws the live Trending column's top, a token of any chain,
+//      on the deployed app), and reads the token and chain it drew, at 1440 x 900 and 390 x 844 (dpr 2, the bar's Buy opens
+//      the trade sheet), types $0.05 and taps Buy. The price it sends is the page's read taken again until it is at most
+//      20 s old (youngRead), so the fresh runs end inside Pyth's 60 s bound:
 //        - fresh: Bal shows USD, Buy is on, and the one tap asks the shell for exactly one pool.buy of $0.05 in SOL at
 //          that price, rounded down (5 x 10^15 / price lamports at exponent -8), never the vault's buy;
 //        - stale and none: Bal shows no USD, Buy is off, and the tap asks for nothing.
@@ -37,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { POOL_USD_FEEDS, poolUsdPrice, SOLANA_RPC_RETRY, solanaHelperRpc, solanaJsonRpc, solanaSameProvider } from "../../packages/kit/src/index.ts";
 import { launchBrowser } from "../browsers.mjs";
 import { harnessRoute } from "./app-in-shell.mjs";
+import { MINT, PATH } from "./app-sell-mount.mjs";
 import { POOL } from "./trade-box-pool.mjs";
 import { signBuilt } from "../signpage-built.mjs";
 
@@ -51,6 +55,8 @@ export const PRICES = ["fresh", "stale", "none"];
 /** The amount typed: $0.05, under the devnet pool's one-tap most (0.00173608 SOL) at any SOL price over $28.80. */
 export const TYPED = "0.05";
 const CENTS = 5n;
+/** The chain of the token the check opens (app-sell-mount's PATH is /token/solana/<MINT>). */
+export const CHAIN = "solana";
 export const WIDTHS = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
@@ -106,6 +112,7 @@ export function judge(rec) {
     const bad = [];
     if (x.framed !== true) bad.push("not inside SIGN_HOST's shell");
     if (x.route !== "token") bad.push(`drew ${x.route ?? "nothing"}, not the token route`);
+    else if (x.mint !== MINT || x.chain !== CHAIN) bad.push(`the token page drew ${x.mint ?? "no token"} on ${x.chain ?? "no chain"}, not the Solana token ${MINT} on ${CHAIN}`);
     if (!x.box) bad.push("no trade box");
     else {
       if (x.box.path !== "pool") bad.push(`the box is on the ${x.box.path ?? "unmarked"} path, not the pool's`);
@@ -144,6 +151,20 @@ export async function pageRead() {
   }
 }
 
+/** The read the runs use: the page's pair read again until the price is at most YOUNG_S old, so the fresh runs (some 10 s of
+ *  browser work each width) end inside Pyth's 60 s bound; a price already 50 s old when read went stale between the desktop and
+ *  the phone run (10 Nov, phone fresh read `Bal —`). With none that young by waitMs, or a read that failed, the last read stands
+ *  and the verdict says what it was. */
+export const YOUNG_S = 20;
+export async function youngRead({ read = pageRead, now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), waitMs = 90_000, everyMs = 3_000 } = {}) {
+  const until = now() + waitMs;
+  for (;;) {
+    const r = await read();
+    if (r.price === undefined || Math.floor(now() / 1000) - r.published_s <= YOUNG_S || now() + everyMs > until) return r;
+    await sleep(everyMs);
+  }
+}
+
 const READ = (sheet) => {
   const main = document.querySelector("main[data-route]");
   const scope = sheet ? document.querySelector('[data-sheet="trade"]') : main?.querySelector(".tkp-desk .tkp-trade");
@@ -151,6 +172,8 @@ const READ = (sheet) => {
   const cta = el?.querySelector('[data-testid="trade-cta"]');
   return {
     route: main?.dataset.route ?? null,
+    mint: main?.querySelector("section.tkp[data-token]")?.getAttribute("data-token") ?? null,
+    chain: main?.querySelector("section.tkp[data-token] .tkp-head .tok-cb[data-chain]")?.getAttribute("data-chain") ?? null,
     box: el ? { path: el.getAttribute("data-path"), bal: el.querySelector('[data-testid="trade-balance"]')?.textContent?.trim() ?? null, ctaOn: cta ? !cta.disabled : null, cta: cta?.textContent?.trim() ?? null } : null,
   };
 };
@@ -176,11 +199,11 @@ const askedSince = async (page, from) =>
 
 async function runOne(browser, w, price, shots, route) {
   const ctx = await browser.newContext({ viewport: w.viewport, deviceScaleFactor: w.deviceScaleFactor, isMobile: w.isMobile, hasTouch: w.hasTouch, colorScheme: "dark", reducedMotion: "reduce" });
-  const run = { width: w.name, price, framed: false, route: null, box: null, asked: null, shot: null };
+  const run = { width: w.name, price, framed: false, route: null, mint: null, chain: null, box: null, asked: null, shot: null };
   try {
     await ctx.route("**/*", route);
     const page = await ctx.newPage();
-    await page.goto(`${APP_HOST}/`, { waitUntil: "load" });
+    await page.goto(`${APP_HOST}${PATH}`, { waitUntil: "load" });
     const f = await terminal(page);
     run.framed = f !== null && originOf(page.url()) === SIGN_HOST;
     if (!f) return run;
@@ -215,8 +238,8 @@ async function entryOf(build) {
 
 export async function collect({ shots = path.join(tmpdir(), `${KEY}-${Date.now()}`), build = null, source, host = "sign" }) {
   mkdirSync(shots, { recursive: true });
+  const read = await youngRead();
   const at = new Date().toISOString();
-  const read = await pageRead();
   const entry = await entryOf(build);
   // SIGN_HOST's own policy as served: the page's pair must be in its connect-src
   const signCsp = (await fetch(`${SIGN_HOST}/`, { signal: AbortSignal.timeout(15_000) })).headers.get("content-security-policy");
