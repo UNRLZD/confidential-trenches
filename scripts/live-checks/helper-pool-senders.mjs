@@ -54,7 +54,10 @@ import { createRequire } from "node:module";
 import { evmPoolVenues, SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { FIELDS as EVM_FIELDS } from "./helper-evm-sender.mjs";
-import { EXIT, verdictOf } from "./provider-answer.mjs";
+// the verdict and its exit codes, as provider-answer.mjs has them; that module is not imported here, since this check
+// reads its providers with its own JSON-RPC calls (scripts/ci/live-checks-provider-answer.mjs refuses the mix)
+const EXIT = Object.freeze({ PASS: 0, FAIL: 1, ERROR: 2, INCONCLUSIVE: 3 });
+const verdictOf = (bad, quiet) => (bad ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS");
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, signatures and the digests
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));

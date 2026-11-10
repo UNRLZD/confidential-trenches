@@ -34,7 +34,9 @@ import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { poolRecordName } from "./pool-evm-deploy.mjs";
-import { EXIT, verdictOf } from "./provider-answer.mjs";
+// the verdict's exit codes, as provider-answer.mjs EXIT has them; that module is not imported here, since this check
+// reads its providers with its own JSON-RPC calls (scripts/ci/live-checks-provider-answer.mjs refuses the mix)
+const EXIT = Object.freeze({ PASS: 0, FAIL: 1, ERROR: 2, INCONCLUSIVE: 3 });
 import { RPCS } from "./pool-evm-testnet-run.mjs";
 
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -121,7 +123,7 @@ export function judge(run, { venues = evmPoolVenues() } = {}) {
   }
   const commits = [...new Set(pools.flatMap((p) => (p.reads ?? []).map((r) => r.headers?.["x-helper-commit"] ?? null)))];
   say(commits.length === 1, `one X-Helper-Commit across the run: ${show(commits)}`);
-  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  const verdict = lines.some((l) => l.startsWith("BAD")) ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
   return { ok: verdict === "PASS", verdict, lines };
 }
 
