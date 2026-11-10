@@ -9,7 +9,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { start } from "../server.ts";
 import { createEvmLists, GT_BASE, GT_READS } from "./evm/lists.ts";
-import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
+import { geckoBudget, GT_LIMIT_PER_MIN, LIST_FLOOR, PAGE_PER_CLIENT, REFRESH_URGENT_MS, WINDOW_MS } from "./gecko.ts";
 import { createSolanaToken } from "./solana/token.ts";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -94,7 +94,10 @@ test("five token pages in a minute while the lists keep ticking: the lists take 
     if (c.status === 200) answered++;
     else {
       assert.equal(c.status, 429, `page ${i + 1}`);
-      assert.ok(pagesHeld >= GT_LIMIT_PER_MIN - LIST_FLOOR, `page ${i + 1}: a 429 with only ${pagesHeld} page calls in the minute`);
+      // card market-reads-hold-under-load: one caller (these pages share one address) past its PAGE_PER_CLIENT leaves the
+      // window's last call for another caller, so with the lists' floor in the window it meets 429 at its share
+      const held = w.gt.filter((x) => w.clock.now - x.at < WINDOW_MS).length;
+      assert.ok(pagesHeld >= GT_LIMIT_PER_MIN - LIST_FLOOR || (pagesHeld >= PAGE_PER_CLIENT && held >= GT_LIMIT_PER_MIN - 1), `page ${i + 1}: a 429 with only ${pagesHeld} page calls and ${held} calls in the window`);
     }
     w.clock.now += 12_000; // a page every 12 s, a lists tick between each
     await w.lists.base.tick();
