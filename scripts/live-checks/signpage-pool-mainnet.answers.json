@@ -1,15 +1,99 @@
 {
  "good": {
   "check": "signpage-pool-mainnet",
-  "at": "2026-11-05T17:44:45.962Z",
+  "at": "2026-11-09T17:17:32.417Z",
   "source": "local, SIGN_HOST answered from this checkout's packages/signpage build",
   "browser": "157.0.8103.38",
-  "treeBundle": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "bundle": {
    "status": 200,
-   "sha384": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
+   "sha384": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
+   "queue": [
+    "ct-pool/deposit",
+    "ct-pool/sell",
+    "the proof queue is closed",
+    "/v1/pool/fee?cluster=",
+    "/v1/pool/solana/send"
+   ],
+   "testnet": []
+  },
+  "probe": {
+   "ready": true,
+   "answers": {
+    "pool.sell": {
+     "ok": false,
+     "error": {
+      "code": "down"
+     }
+    },
+    "pool.deposit": {
+     "ok": false,
+     "error": {
+      "code": "failed"
+     }
+    },
+    "pool.buy": {
+     "ok": false,
+     "error": {
+      "code": "failed"
+     }
+    },
+    "pool.withdraw": {
+     "ok": false,
+     "error": {
+      "code": "not_allowed"
+     }
+    }
+   },
+   "poolReads": [
+    {
+     "url": "https://solana-rpc.publicnode.com/",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"2\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com/",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"3\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"4\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com/",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"5\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"6\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://solana-rpc.publicnode.com/",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"7\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    },
+    {
+     "url": "https://ct-api.unrealized.trade/v1/rpc/solana",
+     "body": "{\"jsonrpc\":\"2.0\",\"id\":\"8\",\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"encoding\":\"base64\",\"commitment\":\"confirmed\"}]}"
+    }
+   ]
+  }
+ },
+ "bad": {
+  "check": "signpage-pool-mainnet",
+  "at": "2026-11-09T17:17:39.528Z",
+  "source": "live https://confidential.unrealized.trade/",
+  "browser": "157.0.8103.38",
+  "treeBundle": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "bundle": {
+   "status": 200,
+   "sha384": "sha384-1aGrtaUQWiKVzeAuTm2zzYpXpF0xmqXly2/JVa4pbGHalP+gNp+xnwQuH3VpjtYN",
    "queue": [
     "ct-pool/deposit",
     "ct-pool/sell",
@@ -50,18 +134,24 @@
    "poolReads": []
   }
  },
- "bad": {
+ "bad_unpinned_build": {
   "check": "signpage-pool-mainnet",
-  "at": "2026-11-05T17:44:48.849Z",
-  "source": "live https://confidential.unrealized.trade/",
+  "at": "2026-11-09T17:17:36.927Z",
+  "source": "local, SIGN_HOST answered from build",
   "browser": "157.0.8103.38",
-  "treeBundle": "sha384-vvJiAOJf6qepCaslFXZ+Dw24jPKyjF5xkHU6lwS8HXYB1+uX5LgKrjsgu6z0E2A4",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-4bxhEUjXnv5I+ljhxPIUhmcZ7FV+Mgqnwi5e3XWLcpNsgTqCmIoX34dG7Zf/+CWv\"></script>\n  </head>\n  <body></body>\n</html>\n",
-  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
+  "treeBundle": "sha384-Nxx5BtNcdg9dwyu43mcD9eNlIqJB+eKVXaW+69p+4u+0M+oUvlQONGFpGZPsH0za",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-hEIV0xyDTeS6vDKNODq/yZIobX11NHj7nNtv5eI4Z5juZq3dkELUtJPDXdFoc2k0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "csp": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://ct-api.unrealized.trade https://1click.chaindefuser.com https://rpc.mainnet.fastnear.com https://rpc.mainnet.near.org https://near.drpc.org https://archival-rpc.mainnet.near.org https://archival-rpc.mainnet.fastnear.com https://solana-rpc.publicnode.com https://sender.helius-rpc.com https://mainnet.block-engine.jito.wtf https://api.mainnet-beta.solana.com https://base-rpc.publicnode.com https://base-mainnet.public.blastapi.io https://mainnet.base.org https://base.api.pocket.network https://base.gateway.tenderly.co https://rpc.sentio.xyz https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://rpc.mainnet.chain.robinhood.com https://robinhood.rpc.blxrbdn.com https://rpc-robinhood.globalstake.io https://robinhood.api.pocket.network https://robinhood.daybreak-rpc.network https://base-sepolia-rpc.publicnode.com https://base-testnet.api.pocket.network https://sepolia.base.org https://rpc.testnet.chain.robinhood.com https://robinhood-sepolia-rpc.publicnode.com https://robinhood-testnet.drpc.org; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src https://ct-app.unrealized.trade; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types prover-worker",
   "bundle": {
    "status": 200,
-   "sha384": "sha384-4bxhEUjXnv5I+ljhxPIUhmcZ7FV+Mgqnwi5e3XWLcpNsgTqCmIoX34dG7Zf/+CWv",
-   "queue": [],
+   "sha384": "sha384-hEIV0xyDTeS6vDKNODq/yZIobX11NHj7nNtv5eI4Z5juZq3dkELUtJPDXdFoc2k0",
+   "queue": [
+    "ct-pool/deposit",
+    "ct-pool/sell",
+    "the proof queue is closed",
+    "/v1/pool/fee?cluster=",
+    "/v1/pool/solana/send"
+   ],
    "testnet": []
   },
   "probe": {

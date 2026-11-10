@@ -182,21 +182,33 @@ export type JsonRpc = (method: string, params: readonly unknown[]) => Promise<un
 class RpcFailed extends Error {
   readonly code: string | undefined;
   readonly http: number | undefined;
-  constructor(method: string, code: string | undefined, http: number | undefined) {
+  /** The provider's Retry-After, ms, when its throttle named one (the kit's SolanaRpcTransportError afterMs). */
+  readonly afterMs: number | null;
+  constructor(method: string, code: string | undefined, http: number | undefined, afterMs: number | null = null) {
     super(`${method}: ${code !== undefined ? `rpc error ${code}` : http !== undefined ? `http ${http}` : "the call failed"}`);
     this.code = code;
     this.http = http;
+    this.afterMs = afterMs;
   }
 }
 async function call(rpc: JsonRpc, method: string, params: readonly unknown[]): Promise<unknown> {
   try {
     return await rpc(method, params);
   } catch (e) {
-    const http = /^HTTP (\d{3})$/.exec(msg(e))?.[1]; // the kit's JSON-RPC client's text for a non-2xx answer
+    // a provider's throttle past the kit client's retry (kit send.ts SolanaRpcTransportError: HTTP 429, or a throttle
+    // code such as -32029 in a 200), read by its fault, never its words: a 429, its Retry-After kept
+    const t = e as { name?: unknown; fault?: unknown; afterMs?: unknown } | null;
+    if (t?.name === "SolanaRpcTransportError" && (t.fault === "http_429" || t.fault === "rpc_throttled")) throw new RpcFailed(method, undefined, 429, typeof t.afterMs === "number" ? t.afterMs : null);
+    // the kit's JSON-RPC client's text for a non-2xx answer: "HTTP 429", or past its retry "HTTP 503 (http_5xx, 1 try at
+    // <host>)"
+    const http = /^HTTP (\d{3})(?: \(|$)/.exec(msg(e))?.[1];
     throw new RpcFailed(method, /RPC error (-?\d+)/.exec(msg(e))?.[1], http === undefined ? undefined : Number(http));
   }
 }
 const is429 = (e: unknown): boolean => e instanceof RpcFailed && e.http === 429;
+/** The wait before the next round after a 429: the route's (wait429), or the provider's own Retry-After when longer,
+ *  capped at RETRY_AFTER_MAX_MS. */
+const waitAfter = (e: unknown, wait429: () => number): number => Math.max(wait429(), Math.min(e instanceof RpcFailed && e.afterMs !== null ? e.afterMs : 0, RETRY_AFTER_MAX_MS));
 
 /** A helper's 429 is a failed round: the reader waits this long (its Retry-After, capped), then reads again. */
 export const RETRY_AFTER_MAX_MS = 10_000;
@@ -292,6 +304,7 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
       // waits at most, as every Solana read of the wallet (./solana.ts solanaLagRetry): it waits for the chain.
       let r: Awaited<ReturnType<typeof once>> | undefined;
       let min: number | undefined;
+      let last: unknown = null;
       for (let round = 1, lags = 0; ; ) {
         signal?.throwIfAborted();
         let why = "met at no one slot";
@@ -309,9 +322,10 @@ export function solanaHoldingsReader(rpc: SolanaRpc, o: ReaderOpts = {}): Holdin
           }
           if (!is429(e)) throw e;
           why = "drew the helper's 429";
+          last = e;
         }
         if (round++ >= SOL_HOLDINGS_ROUNDS) throw new Error(`its reads ${why} in ${SOL_HOLDINGS_ROUNDS} rounds`);
-        if (why !== "met at no one slot") await sleep(wait429());
+        if (why !== "met at no one slot") await sleep(waitAfter(last, wait429));
       }
       if (r === undefined) throw new Error("no read");
       const keys = new Set<string>();
@@ -346,7 +360,7 @@ export function solanaSpentNotes(r: { notes: readonly SolanaRestoredNote[]; spen
 }
 
 /** Restore of the Solana pool (./solana-restore.ts on its two RPCs), then the Ws its buys used, read on `holdings`. */
-export async function solanaRestoreWallets(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; holdings: HoldingsReader; signal?: AbortSignal; gap?: number }) {
+export async function solanaRestoreWallets(a: { seed64: Uint8Array; program: string; rpcs: readonly [SolanaRpc, SolanaRpc]; lister?: SolanaRpc; holdings: HoldingsReader; signal?: AbortSignal; gap?: number }) {
   const r = await solanaRestoreNotes(a);
   const w = await buyWallets(a.seed64, [{ id: a.program, chain: "sol", spent: solanaSpentNotes(r), reader: a.holdings }], a.signal ? { signal: a.signal } : {});
   return { ...r, ...w };
@@ -369,13 +383,15 @@ export function evmHoldingsReader(rpc: JsonRpc, tokens: readonly string[], o: Re
       // the helper's 429 fails the round (after its wait): the next reads again from a new block, and
       // EVM_HOLDINGS_ROUNDS failed rounds are a refusal
       for (let round = 1; ; round++) {
+        let last: unknown;
         try {
           return await once(address, signal);
         } catch (e) {
           if (!is429(e)) throw e;
+          last = e;
         }
         if (round >= EVM_HOLDINGS_ROUNDS) throw new Error(`its reads drew the helper's 429 in ${EVM_HOLDINGS_ROUNDS} rounds`);
-        await sleep(wait429());
+        await sleep(waitAfter(last, wait429));
       }
     },
   };

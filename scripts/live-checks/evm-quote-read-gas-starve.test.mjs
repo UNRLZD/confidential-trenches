@@ -1,17 +1,22 @@
 // Replays card evm-quote-read-gas-starve's live check on its recorded answers (evm-quote-read-gas-starve.answers.json).
-// Good: `good`, a real run (its `at`) on every pinned mainnet quote provider (Base 4, Robinhood 5) at its latest
-// block: the kit's EVM_READ_GAS_CODE at Multicall3 with EVM_READ_CALL_GAS answers the six planted reads
+// Good: `good`, a real run (its `at`) on every pinned mainnet quote provider (Base 4, Robinhood 5), all of a chain at
+// one block, the lowest of their latest (rpc-robinhood.globalstake.io answered its call of 64 reads HTTP 500, a
+// no-answer, so Robinhood is judged on four): the kit's EVM_READ_GAS_CODE at Multicall3 with EVM_READ_CALL_GAS answers the six planted reads
 // [1 7, 2 empty, 1 7, 0 0xaa, 2 0xee, 1 7], 64 reads with the loop first 2 then 63 of 1, six reads, the first a revert
 // after 14M gas, [0 0xbb, then five of 1 7], and the loop then five reads of 1.5M [2, then five of 1 7], each answer
 // ending in the code's marker, each read's gas used beside its answer, the same on every provider of a chain (card
 // evm-quote-gas-used). Bad: `bad`, the same run
 // through Multicall3's own code, as the kit sent its reads before the card: the loop and the read that caught its
-// inner out of gas answer 0, a revert, as the kit priced them.
+// inner out of gas answer 0, a revert, as the kit priced them. Split: `split`, a real run as the check read before card
+// evm-read-gas-one-unit-apart, each provider at its own latest block: every read's answer right on each, and the loop's
+// gas used in the call of 64 one apart on Robinhood (29,533,497 and 29,533,498), as Nitro cuts a call's gas by its L1
+// data cost, which moves with the block's base fee and L1 price (live run 42755053001 failed so, its floor loop
+// 31,046,540 on publicnode and 31,046,541 on the four others); gas used is compared at one block only.
 //   node --test scripts/live-checks/evm-quote-read-gas-starve.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { collect, EXIT, judge } from "./evm-quote-read-gas-starve.mjs";
+import { collect, EXIT, gasOf, judge } from "./evm-quote-read-gas-starve.mjs";
 import { RETRY } from "./provider-answer.mjs";
 import { JUDGED_403, NO_ANSWERS } from "./provider-answer.plants.mjs";
 
@@ -24,16 +29,34 @@ test("the good answer (the kit's per-read gas code) passes on every provider of 
   const r = judge(A.good);
   assert.equal(r.ok, true, r.lines.join("\n"));
   assert.equal(r.verdict, "PASS");
-  const providers = A.good.chains.reduce((n, c) => n + c.reads.length, 0);
-  assert.ok(providers >= 4, `${providers} providers`);
-  assert.equal(r.lines.length, 4 + 2 * A.good.chains.length + 5 * providers);
+  const reads = A.good.chains.flatMap((c) => c.reads);
+  const answered = reads.filter((x) => x.noAnswer === undefined).length;
+  assert.ok(answered >= 4, `${answered} providers`);
+  // per chain its count, its one block and its gas used alike; per provider five lines, or one for a no-answer
+  assert.equal(r.lines.length, 4 + 3 * A.good.chains.length + 5 * answered + (reads.length - answered));
+  for (const c of A.good.chains) assert.ok(r.lines.includes(`ok  ${c.chain}: every provider answers the same gas used for each read`), r.lines.join("\n"));
+});
+
+test("the split answer (each provider at its own latest block, the loop's gas one apart) fails on its blocks, never on a provider's gas", () => {
+  const r = judge(A.split);
+  assert.equal(r.verdict, "FAIL");
+  // the recording holds the gap: Robinhood's loop in the call of 64 one apart, its providers at more than one block
+  const rh = A.split.chains.find((c) => c.chain === "robinhood").reads.filter((x) => x.noAnswer === undefined);
+  const loop = new Set(rh.map((x) => gasOf(x.sixtyFour)[0][1]));
+  assert.equal(loop.size, 2, [...loop].join(", "));
+  assert.equal(Math.max(...loop) - Math.min(...loop), 1);
+  assert.ok(new Set(rh.map((x) => x.block)).size > 1);
+  // every provider's own lines pass; the only BAD lines are each chain's blocks, and no gas comparison across blocks
+  const bad = r.lines.filter((l) => l.startsWith("BAD"));
+  assert.deepEqual(bad.map((l) => l.replace(/: \d+ blocks.*/, "")), ["BAD base: every provider read at one block", "BAD robinhood: every provider read at one block"], r.lines.join("\n"));
+  assert.ok(!r.lines.some((l) => l.includes("same gas used")), r.lines.join("\n"));
 });
 
 test("the bad answer (Multicall3's own code) fails: the loop and the caught out of gas answer as reverts on every provider", () => {
   const r = judge(A.bad);
   assert.equal(r.ok, false);
   assert.equal(r.verdict, "FAIL");
-  const providers = A.bad.chains.reduce((n, c) => n + c.reads.length, 0);
+  const providers = A.bad.chains.reduce((n, c) => n + c.reads.filter((x) => x.noAnswer === undefined).length, 0);
   assert.equal(r.lines.filter((l) => l.startsWith("BAD")).length, 1 + 5 * providers, r.lines.join("\n"));
 });
 
@@ -73,13 +96,69 @@ test("planted: one provider on a chain, a chain missing, a read answered 0 where
   };
   assert.equal(plant((a) => (a.chains[0].reads[2].heavy = usedFirst(a.chains[0].reads[2].heavy, 100_000))), false, "the 14M revert answered as using 100,000");
   assert.equal(plant((a) => (a.chains[1].reads[3].sixtyFour = usedFirst(a.chains[1].reads[3].sixtyFour, 29_533_582))), false, "one provider's gas used differs");
+  // at one block, one gas apart is a wrong answer (live run 42755053001's floor loop, 31,046,540 against 31,046,541):
+  // every provider of a chain answers the same gas there, as the kit requires of the two it agrees on
+  const loopOf = (r) => gasOf(r)[0][1];
+  for (const d of [1, -1]) assert.equal(plant((a) => (a.chains[1].reads[0].floor = usedFirst(a.chains[1].reads[0].floor, loopOf(a.chains[1].reads[0].floor) + d))), false, `the loop's gas used ${d} on one provider`);
+  assert.equal(plant((a) => (a.chains[0].reads[2].six = usedFirst(a.chains[0].reads[2].six, gasOf(a.chains[0].reads[2].six)[0][1] + 1))), false, "a return of 7's gas used one more on one Base provider");
+  // a provider read at another block: not judged alike, a FAIL
+  assert.equal(plant((a) => (a.chains[1].reads[1].block = "0x" + "11".repeat(32))), false, "one provider at another block");
+  // a provider's read answered with another value (7 as 8) at the same block and gas
+  const eight = (r) => {
+    const h = r.slice(2);
+    const e = 64 + Number(BigInt("0x" + h.slice(128, 192)));
+    assert.equal(BigInt("0x" + h.slice(2 * (e + 128), 2 * (e + 160))), 7n);
+    return "0x" + h.slice(0, 2 * (e + 128)) + "8".padStart(64, "0") + h.slice(2 * (e + 160));
+  };
+  assert.equal(plant((a) => (a.chains[1].reads[2].six = eight(a.chains[1].reads[2].six))), false, "a read's answer 7 as 8");
 });
+
+// card evm-read-gas-one-unit-apart: collect reads every provider of a chain at one block, the lowest of their latest,
+// whatever block each answers as its latest; a provider whose latest block is no block is a no-answer, never the block
+test("collect reads every provider of a chain at the lowest of their latest blocks", async () => {
+  const real = globalThis.fetch;
+  const at = new Map();
+  const byHost = new Map(A.good.chains.flatMap((c) => c.reads.filter((r) => r.noAnswer === undefined).map((r) => [r.provider, r])));
+  // each host's latest block its own: number 100 + its index, hash 0x<index>...
+  const hosts = [...byHost.keys()];
+  globalThis.fetch = async (url, init) => {
+    const host = new URL(url).host;
+    const { method, params } = JSON.parse(init.body);
+    const k = hosts.indexOf(host);
+    if (k < 0) return new Response("", { status: 200 });
+    if (method === "eth_getBlockByNumber") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { hash: "0x" + String(k).padStart(64, "0"), number: "0x" + (100 + ((k * 7) % 5)).toString(16) } }), { status: 200 });
+    append(at, host, params[1].blockHash);
+    const r = byHost.get(host);
+    const n = at.get(host).length;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: [r.six, r.sixtyFour, r.heavy, r.floor][n - 1] }), { status: 200 });
+  };
+  try {
+    const a = await collect();
+    for (const c of a.chains) {
+      const mine = c.reads.filter((r) => r.noAnswer === undefined);
+      const ks = mine.map((r) => hosts.indexOf(r.provider));
+      // the lowest number, the first in the provider order at it
+      const low = ks.reduce((m, k) => ((k * 7) % 5 < (m * 7) % 5 ? k : m));
+      const want = "0x" + String(low).padStart(64, "0");
+      for (const r of mine) {
+        assert.equal(r.block, want, `${c.chain} ${r.provider}`);
+        assert.deepEqual(at.get(r.provider), [want, want, want, want], `${c.chain} ${r.provider}: every call at the one block`);
+      }
+      assert.ok(new Set(mine.map((r) => r.head)).size > 1, `${c.chain}: the heads differ`);
+    }
+    const j = judge({ ...a, code: A.good.code });
+    assert.equal(j.verdict, "PASS", j.lines.join("\n"));
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+const append = (m, k, v) => m.set(k, [...(m.get(k) ?? []), v]);
 
 // live run 42552050303 died on a provider's empty body ("Unexpected end of JSON input", exit 2). The run itself, its
 // fetch answered from the recorded good answer by host and read (block, six, sixtyFour, heavy, floor), with a planted
 // answer on the hosts named in `down`: `answer(n)` is that host's nth answer
 async function run(down) {
-  const byHost = new Map(A.good.chains.flatMap((c) => c.reads.map((r) => [r.provider, [{ hash: r.block }, r.six, r.sixtyFour, r.heavy, r.floor]])));
+  const byHost = new Map(A.good.chains.flatMap((c) => c.reads.map((r) => [r.provider, [{ hash: r.block, number: r.head }, r.six, r.sixtyFour, r.heavy, r.floor]])));
   const seen = new Map();
   const planted = new Map();
   const real = globalThis.fetch;
