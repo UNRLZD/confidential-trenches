@@ -21,6 +21,9 @@
 //                     route while Verify's rows stay ok: PASS, the footer's failed read let through;
 //   outageFooterPair: both NEAR RPCs answering the footer's block reads 503 (--outage footer-pair): the footer shows
 //                     Offline: FAIL on every desktop route, a double outage failing closed.
+// Card app-phone-token-taps-and-rows re-recorded the good answer and the three outage answers by the same commands from
+// its own code, the token page's tape planted (app-shell.mjs plantTape): every token load holds marks, trade rows and
+// trades that arrived while it settled.
 // The other cases plant one fact on these answers. No RPC host is typed here: each is read from VERIFY_RELEASES.
 // Screenshot paths are kept as <shots>/<file>, a build's path as <build>.
 import assert from "node:assert/strict";
@@ -87,6 +90,45 @@ test("planted on the good answer: a shift inside the shell names its element and
   rec.inShell[1].cls = 0.0047;
   rec.inShell[1].shifts = [{ at: 490, value: 0.0047, input: false, sources: ["div.tkp-strip 234,50 861x49 -> 548,50 547x49", "div.tkp-idtext 59,59 165x30 -> 59,56 479x37"] }];
   assert.deepEqual(bad(judge(rec).lines), ["BAD desktop inside the shell, 5 link(s): CLS 0.0047 inside the shell [+490ms 0.0047: div.tkp-strip 234,50 861x49 -> 548,50 547x49 | div.tkp-idtext 59,59 165x30 -> 59,56 479x37]"]);
+});
+
+// card app-phone-token-taps-and-rows: run 42773072293 (main 09a5f2f6, 10 Nov 07:09Z) read a 12 px chart mark on the
+// phone's token page and behind Verify, and a trades row moved 44 px by a trade arriving above it; every run whose
+// token had no trades passed. The token page is now judged on a planted tape on every run.
+test("recorded good answer: the token page drew marks and trade rows, and trades arrived while it settled, at both widths", () => {
+  for (const w of WIDTHS) {
+    const t = ANSWERS.good.loads.find((l) => l.width === w.name && l.expect === "token").tape;
+    assert.ok(t.marks > 0 && t.rows > 0 && t.pushed >= 2, `${w.name}: ${JSON.stringify(t)}`);
+  }
+});
+
+test("planted on the good answer: a 12 px chart mark on the phone's token page and behind Verify: FAIL (run 42773072293)", () => {
+  const rec = structuredClone(ANSWERS.good);
+  for (const p of ["/", "/verify"]) rec.loads.find((l) => l.width === "phone" && l.path === p).smallTaps = ["button.tm:12x12"];
+  assert.deepEqual(bad(judge(rec).lines), ["BAD phone / (token): tap under 44 px: button.tm:12x12", "BAD phone /verify (verify): tap under 44 px: button.tm:12x12"]);
+});
+
+test("planted on the good answer: a trades row moved by a trade arriving above it: FAIL (run 42773072293)", () => {
+  const rec = structuredClone(ANSWERS.good);
+  const shift = { at: 1407, value: 0.0039, input: false, sources: ["div.tkl-trow.tkl-tr 0,781 390x44 -> 0,825 390x19", "div.tkl-trow.tkl-tr 0,825 390x19 -> 0,0 0x0"] };
+  Object.assign(rec.loads.find((l) => l.width === "phone" && l.path === "/"), { cls: 0.0039, shifts: [shift] });
+  assert.deepEqual(bad(judge(rec).lines), ["BAD phone / (token): CLS 0.0039 above 0 [+1407ms 0.0039: div.tkl-trow.tkl-tr 0,781 390x44 -> 0,825 390x19 | div.tkl-trow.tkl-tr 0,825 390x19 -> 0,0 0x0]"]);
+});
+
+test("planted on the good answer: a token load with no mark, no trade row, under 2 trades arrived, or no tape read: FAIL", () => {
+  const at = (rec, w) => rec.loads.find((l) => l.width === w && l.expect === "token");
+  for (const [tape, want] of [
+    [{ marks: 0, rows: 9, pushed: 5 }, "no trade mark on the chart"],
+    [{ marks: 6, rows: 0, pushed: 5 }, "no trade row"],
+    [{ marks: 6, rows: 9, pushed: 1 }, "1 trade(s) arrived while it settled, want 2 or more"],
+    [undefined, "no trade mark on the chart; no trade row; 0 trade(s) arrived while it settled, want 2 or more"],
+  ]) {
+    for (const w of ["phone", "desktop"]) {
+      const rec = structuredClone(ANSWERS.good);
+      at(rec, w).tape = tape;
+      assert.deepEqual(bad(judge(rec).lines), [`BAD ${w} / (token): ${want}`], `${w} ${JSON.stringify(tape)}`);
+    }
+  }
 });
 
 test("recorded bad answer: one script without its integrity: FAIL", () => {

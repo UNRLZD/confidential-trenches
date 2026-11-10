@@ -57,8 +57,11 @@ function Trades({ row, tape, phone, nowMs }: { row: MarketRow; tape: Tape; phone
         <Empty />
       ) : (
         <div className="tkl-list" data-testid="lower-rows-trades">
-          {rows.map((t) => (
-            <div key={t.key} className="tkl-trow tkl-tr" data-testid="lower-row" data-side={t.side}>
+          {/* each row is a slot keyed by its place, newest first: a trade arriving fills slot 0 and moves each trade's text
+              one slot down, so no row's box moves (BAR-10 CLS 0; keyed by trade, every row under the new one moved 44 px
+              on the phone, app-shell run 42773072293) */}
+          {rows.map((t, slot) => (
+            <div key={slot} className="tkl-trow tkl-tr" data-testid="lower-row" data-side={t.side}>
               <span className="tkl-c tkl-dim" data-col="age">{t.age}</span>
               <span className="tkl-c tkl-side" data-col="type">{phone ? <W id={t.side === "buy" ? "buyShort" : "sellShort"} /> : <W id={t.side} />}</span>
               {!phone && <span className="tkl-c" data-col="mc">{t.mc}</span>}

@@ -371,3 +371,18 @@ export function layoutMarks(wishes: readonly Wish[], { width, height, r }: Area)
   }
   return placed;
 }
+
+/** The mark a phone's tap at (x, y) in the pane's pixels opens (card app-phone-token-taps-and-rows). Each mark is tapped
+ *  through a 44 px area round its 2 r disc (marks.css), and areas of marks close together overlap, so the point decides:
+ *  on a disc, the disc drawn on top there (the last of `marks` in drawing order whose disc holds the point); off every
+ *  disc, the mark whose centre is nearest (the first drawn on a tie); null when no mark is drawn. */
+export function pickMark(marks: readonly { id: string; x: number; y: number }[], x: number, y: number, r: number): string | null {
+  const dist = (m: { x: number; y: number }): number => Math.hypot(m.x - x, m.y - y);
+  let on: string | null = null;
+  let near: { id: string; x: number; y: number } | null = null;
+  for (const m of marks) {
+    if (dist(m) <= r) on = m.id;
+    if (near === null || dist(m) < dist(near)) near = m;
+  }
+  return on ?? near?.id ?? null;
+}
