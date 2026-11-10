@@ -930,7 +930,11 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   const over = { pin: wd.host.pin, rpcs: wd.host.rpcs, pool: wd.host.pool as never, prover: { vault: signalsProver(), stop: () => {} }, fetch: fetchFn, ...quickClock() };
   const page = { store: async () => wd.w, seed64: async () => SEED64.slice() };
   const amount = 5_000_000n;
-  const t1 = testnetPool(page, over);
+  // the closed tab: its run makes no step past its first wait after the release (card pool-buy-filled-2s: the
+  // read-back's settle backs off, so a run left going no longer stays busy for 120 settles while the page opened again
+  // reads; a tab that is closed runs nothing), let go at the end
+  const closed: (() => void)[] = [];
+  const t1 = testnetPool(page, { ...over, wait: () => new Promise<void>((r) => closed.push(r)) });
   const run = t1.withdraw({ chain: "solana", to: TO, amount, maxFee: COST }, "op-w");
   for (let i = 0; wd.releases.length === 0 && i < 1_000; i++) await new Promise((r) => setTimeout(r, 5));
   assert.equal(wd.releases.length, 1, "the release went out");
@@ -960,7 +964,9 @@ test("a withdraw whose tab closed during the release's read-back: the reopened p
   assert.equal(after.txs.length, 1, "the onward send's tx");
   // the closed tab's run let go, so nothing of it outlives the test (fold 5: it held node ~120 s)
   wd.unhang();
+  const drain = setInterval(() => closed.splice(0).forEach((r) => r()), 0);
   await run;
+  clearInterval(drain);
 });
 
 // fold 4 (review LOW): the release's own signature is added to the send still stored, never a whole owe again
