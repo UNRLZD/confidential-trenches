@@ -4,3 +4,6 @@
 5d010eb2926e84db98875e2f846fa79712711d20:packages/kit/test/fixtures/solana-flow-dry.json:generic-api-key:4
 # a public Base token address in a test (0xd5e61aca87b9... USDDT, read on chain; card index-evm-swaps), before the variable was renamed
 7328a89bf2a8dff749624877376e7ba2a6f653a0:apps/helper/src/data/evm/swaps.test.ts:generic-api-key:123
+# a public Base Sepolia token address (Circle's testnet USDC 0x036c...cf7e) under a "token" key in two tests (card signpage-evm-pool-buy), moved into a named constant in the next commit
+676892e00484ebf7c051902a1487f330a454a895:packages/signpage/test/pool-network.test.ts:generic-api-key:28
+676892e00484ebf7c051902a1487f330a454a895:packages/signpage/test/pool-testnet-evm-queue.test.ts:generic-api-key:359

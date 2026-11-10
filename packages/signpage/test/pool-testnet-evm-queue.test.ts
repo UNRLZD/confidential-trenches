@@ -332,6 +332,9 @@ test("the EVM part of a state read runs beside the Solana part: a Solana proof i
   await t.signedOut();
 });
 
+// Circle's testnet USDC on Base Sepolia, a public address (contracts/pool-evm/script/testnet-run.mjs)
+const SEPOLIA_USDC = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+
 test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's queue; a chain with none is refused not_allowed (card signpage-evm-pool-buy)", async () => {
   const { w, ns } = await wallet();
   const prover = signalsProver();
@@ -356,7 +359,7 @@ test("pool.buy on a chain with its EVM pin goes to the EVM buy on that chain's q
   await t.stateRead();
   // the state read starts the chain's queue pass without waiting for it: its proof made
   for (let i = 0; i < 200 && ((await t.readyWith(async () => null)).ready?.length ?? 0) === 0; i++) await new Promise((r) => setTimeout(r, 10));
-  const ask = { kind: "pool.buy", chain: "base", token: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: RUNG, slippageBps: 100, decimals: 18 } as const;
+  const ask = { kind: "pool.buy", chain: "base", token: SEPOLIA_USDC, amount: RUNG, slippageBps: 100, decimals: 18 } as const;
   const got = t.flow(ask, null as never);
   assert.ok("after" in got, "the base buy runs");
   await got.after;
