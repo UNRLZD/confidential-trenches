@@ -8,8 +8,13 @@
 //     the kit asks them, both answering, the two prestates equal as JSON and each holding ArbOS's state account (Nitro's
 //     block-start state is in the trace);
 //   - the replay: an eth_call at the transaction's parent with the block's number, time and base fee and its prestate,
-//     ArbOS's state left out, as the state override, on two of the venue's quote providers: each runs it (an output or
-//     an execution revert), never a refusal of the override or the state. The outcome itself is shown, not judged: a
+//     ArbOS's state left out, as the state override, on two operators of the kit's Robinhood read list
+//     (evmReadProvidersOf; card device-evm-fee-read-walks-operators): each runs it (an output or an execution revert).
+//     A seat that refuses the block's state (dRPC's code 27 "Unknown state", a pruned node's "historical state ... is
+//     not available", "missing trie node") or gives no JSON-RPC answer is walked past to the list's next operator, and
+//     the replay holds only on two operators (the kit's evmRpcOperator) that ran it; any other refusal (the override
+//     refused, as with ArbOS's state kept) fails. Robinhood's own, Pocket and publicnode each ran an eth_call with a state
+//     and a block override at a parent block (read 2026-11-10 21:1xZ). The outcome itself is shown, not judged: a
 //     replay may differ from the real run (a 7 Nov 16:24Z read found one: 0xed59ff1c in block 108542534 succeeded, its
 //     replay reverted), which is why no ban rests on a replay alone.
 // A trace is kept as read time's digest (sha-256 of the prestate's sorted JSON, its accounts, the call frame's error and
@@ -23,6 +28,7 @@
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { evmRpcOperator } from "../../packages/kit/src/index.ts";
 
 const KEY = "evm-sell-hook-intrablock";
 const ARBOS = "0xa4b05fffffffffffffffffffffffffffffffffff";
@@ -38,6 +44,13 @@ const post = async (url, body, fetchFn) => {
   }
 };
 const qty = (v) => "0x" + BigInt(v).toString(16);
+const hostOf = (u) => {
+  try {
+    return new URL(u).host;
+  } catch {
+    return String(u);
+  }
+};
 /** The kit's override from a prestate: every account but ArbOS's state (the kit's preOverOf, without its bounds). */
 export function overOf(pre) {
   const out = {};
@@ -58,6 +71,12 @@ export function digestOf(answer) {
   return { ok: true, pre: createHash("sha256").update(sorted).digest("hex"), accounts: Object.keys(pre).map((a) => a.toLowerCase()).sort(), error: call.error ?? null, output: call.output ?? null };
 }
 
+/** A replay's answer: it ran (an output or an execution revert). */
+const ranOf = (a) => typeof a?.result === "string" || (a?.error?.code === 3 && /execution reverted/i.test(String(a?.error?.message ?? "")));
+/** A seat's refusal that is the seat's, not the replay's: the block's state not kept, or no JSON-RPC answer. */
+const STATE_REFUSED = /unknown state|historical state \S* ?is not available|missing trie node|header not found/i;
+const seatRefused = (a) => !ranOf(a) && (a?.http !== undefined || a?.error === undefined ? a?.result === undefined : STATE_REFUSED.test(String(a.error?.message ?? "")));
+
 /** The verdict on a run { trace: [url, url], quote: [url, url], txs: [{ hash, traces: [{ url, digest }], replays: [{ url, answer }] }] }. */
 export function judge(run) {
   const lines = [];
@@ -76,21 +95,26 @@ export function judge(run) {
     const replays = Array.isArray(t.replays) ? t.replays : [];
     for (const r of replays) {
       const a = r.answer ?? {};
-      const ran = typeof a.result === "string" || (a.error?.code === 3 && /execution reverted/i.test(String(a.error?.message ?? "")));
-      say(d[0] !== null && ran, `[${h}] the replay at its prestate runs on ${r.url}: ${JSON.stringify(a).slice(0, 160)} (the transaction ${reverted ? "reverted" : "succeeded"})`);
+      if (!ranOf(a) && seatRefused(a)) {
+        lines.push(`ok  [${h}] walked past ${hostOf(r.url)}: ${JSON.stringify(a).slice(0, 120)}`);
+        continue;
+      }
+      say(d[0] !== null && ranOf(a), `[${h}] the replay at its prestate runs on ${r.url}: ${JSON.stringify(a).slice(0, 160)} (the transaction ${reverted ? "reverted" : "succeeded"})`);
     }
-    say(replays.length === 2 && replays[0].url !== replays[1].url, `[${h}] replayed on two quote providers`);
+    const ran = replays.filter((r) => ranOf(r.answer));
+    const ops = new Set(ran.map((r) => evmRpcOperator(r.url)));
+    say(ran.length === 2 && ops.size === 2 && !ops.has(null), `[${h}] replayed on two operators: ${ran.map((r) => hostOf(r.url)).join(" and ") || "none"}`);
   }
   return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
 }
 
 /** The run: the kit's own pins, the newest Robinhood transactions that call a contract. */
 export async function read(fetchFn = fetch, over = overOf) {
-  const { evmPoolVenues } = await import("../../packages/kit/src/index.ts");
+  const { evmPoolVenues, evmReadProvidersOf } = await import("../../packages/kit/src/index.ts");
   const v = evmPoolVenues().robinhood;
   const trace = [...(v.traceProviders ?? [])];
-  // two quote providers that keep the state of the blocks read (publicnode dropped it 20 blocks back in the probe)
-  const quote = ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"].filter((u) => v.providers.includes(u));
+  // the kit's read list, walked for two operators that run the replay (card device-evm-fee-read-walks-operators)
+  const quote = [...evmReadProvidersOf(v)];
   const rpc = async (url, method, params) => post(url, { jsonrpc: "2.0", id: 1, method, params }, fetchFn);
   const head = BigInt((await rpc(quote[0], "eth_getBlockByNumber", ["latest", false])).result.number);
   const txs = [];
@@ -110,7 +134,18 @@ export async function read(fetchFn = fetch, over = overOf) {
       const call = { from: tx.from, to: tx.to, data: tx.input, gas: tx.gas, value: tx.value, ...(tx.maxFeePerGas ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : { gasPrice: tx.gasPrice }) };
       const env = { number: b.number, time: b.timestamp, baseFeePerGas: b.baseFeePerGas };
       const replays = [];
-      for (const url of quote) replays.push({ url, answer: await rpc(url, "eth_call", [call, { blockHash: b.parentHash }, over(pre), env]) });
+      // in the list's order until two operators ran it; a seat's own refusal (the state, no answer) walks on, any other
+      // answer ends the walk there (the verdict fails it)
+      const ran = new Set();
+      for (const url of quote) {
+        if (ran.size === 2) break;
+        const op = evmRpcOperator(url);
+        if (ran.has(op)) continue;
+        const answer = await rpc(url, "eth_call", [call, { blockHash: b.parentHash }, over(pre), env]).catch((e) => ({ http: 0, body: String(e?.message ?? e).slice(0, 120) }));
+        replays.push({ url, answer });
+        if (ranOf(answer)) ran.add(op);
+        else if (!seatRefused(answer)) break;
+      }
       txs.push({ hash: tx.hash, block: b.number, readAt: new Date().toISOString(), traces, replays });
     }
   }
