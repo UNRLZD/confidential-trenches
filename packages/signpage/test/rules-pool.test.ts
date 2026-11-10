@@ -102,6 +102,27 @@ test("a request: each pool kind's good params pass; every other kind, a chain th
   assert.deepEqual([...POOL_KINDS], ["pool.deposit", "pool.buy", "pool.sell", "pool.withdraw"]);
 });
 
+test("card pool-sell-share-across-wallets: a sell by share is 1 to 10,000 basis points of the whole holding with no amount beside it, the token's decimals still read; no other kind takes a share", () => {
+  const sol = key(5);
+  assert.deepEqual(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, share_bps: 7_500, slippage_bps: 300 }, solMint(6)), { kind: "pool.sell", chain: "solana", token: sol, amount: 0n, slippageBps: 300, decimals: 6, shareBps: 7_500 });
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, share_bps: 10_000, slippage_bps: 0 }, solMint(6)).shareBps, 10_000);
+  // an amount-only request is as before: no share
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "2", slippage_bps: 0 }, solMint(6)).shareBps, undefined);
+  for (const [p, rule] of [
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 0, slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 10_001, slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 50.5, slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: "5000", slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, amount: "1", slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.sell", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: 5_001 }, "slippage"],
+    [{ kind: "pool.buy", chain: "solana", token: sol, share_bps: 5_000, slippage_bps: 1 }, "amount"],
+    [{ kind: "pool.deposit", chain: "solana", share_bps: 5_000 }, "amount"],
+  ] as const) {
+    assert.throws(() => checkPoolRequest(p as never, solMint(6)), refusedAs(rule), JSON.stringify(p));
+  }
+});
+
 // The token's decimals as two providers answered: the mint (byte 44, initialized at 45) or decimals() (one word)
 const mintData = (dec: number, o: { len?: number; init?: number; type?: number } = {}) => {
   const d = new Uint8Array(o.len ?? 82);
@@ -419,6 +440,8 @@ test("Solana sell: the kit's venue sell from W at or above the device's floor, t
   const PART: SolanaSellSurplus = { full: false, lamports: 0n, fee: 5_000n, made: 0n, rent: { lamportsPerByte: 5_080n, factor: 1n }, held: { mark: [null, null], state: [null, null], label: [null, null] }, next: false, owed: 0 };
   const d = checkSolanaSell(sellWire(), ask, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART);
   assert.deepEqual([d.op, d.token, d.amount, d.pool, d.to, d.back, d.decimals], ["pool.sell", venue.mint, amount, POOL, POOL, floor - RESERVE, 6]);
+  // card pool-sell-share-across-wallets: a share is never checked as signed bytes; each wallet's sale is its units
+  assert.throws(() => checkSolanaSell(sellWire(), { ...ask, shareBps: 10_000 }, solCtx(), venue, reference, slot, SOL_READS, RESERVE, PART), refusedAs("amount"));
   assert.deepEqual(drawPool(d).map((l) => l[0]), ["Chain", "Token", "Amount", "To", "To private balance", "Max fee", "Pool"]);
   assert.deepEqual(drawPool(d)[2], ["Amount", "5"]);
   assert.deepEqual(drawPool(d)[4], ["To private balance", String(Number(floor - RESERVE) / 1e9)]);

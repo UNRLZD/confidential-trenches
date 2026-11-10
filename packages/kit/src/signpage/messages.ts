@@ -132,8 +132,15 @@ export interface SignpageParams {
   "pool.deposit": { chain: PoolChain; amount: string };
   /** A release from the chain's pool to a fresh wallet that buys `token` with `amount` of the pool's asset. */
   "pool.buy": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
-  /** The fresh wallet sells `amount` of `token`; the proceeds go back into the chain's pool in the same transaction. */
-  "pool.sell": { chain: PoolChain; token: string; amount: string; slippage_bps: number };
+  /**
+   * Sell `token` from the user's fresh wallets; the proceeds go back into the chain's pool in the same transaction as each
+   * wallet's sale. Either `amount`, the token amount in whole units at the token's decimals (a typed amount), or
+   * `share_bps`, a share of the user's whole holding of the token in basis points (1 to 10,000; 10,000 sells all of it),
+   * which the signing page turns into units from its own reads of each wallet that holds the token, never the app's or a
+   * server's number (card pool-sell-share-across-wallets). One of the two, never both. A sale that takes more than one
+   * wallet answers every wallet's transaction in `txs`, and part_filled when some of them did not fill.
+   */
+  "pool.sell": { chain: PoolChain; token: string; slippage_bps: number } & ({ amount: string; share_bps?: never } | { share_bps: number; amount?: never });
   /** Open SIGN_HOST's withdraw screen for the chain's pool. The address is typed there, never sent by the app. */
   "pool.withdraw": Open & { chain: PoolChain };
   /** The assets the device can quote a deposit from, each with its minimum and the most one deposit takes. Signs nothing

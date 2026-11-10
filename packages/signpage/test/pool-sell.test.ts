@@ -96,10 +96,10 @@ const nativeAccount = (owner: string, amount: bigint): Uint8Array => {
   new DataView(d.buffer).setUint32(109, 1, true);
   return d;
 };
-const tokenAccount = (amount: bigint, state = 1, mint = MINT): Uint8Array => {
+const tokenAccount = (amount: bigint, state = 1, mint = MINT, owner = W.address): Uint8Array => {
   const d = new Uint8Array(165);
   d.set(base58.decode(mint), 0);
-  d.set(base58.decode(W.address), 32);
+  d.set(base58.decode(owner), 32);
   new DataView(d.buffer).setBigUint64(64, amount, true);
   d[108] = state;
   return d;
@@ -215,6 +215,9 @@ type Plant = {
   /** W's buy record (pool-buy.ts BuyMints): the venue's mint when not given; null, none (a buy from before it was
    *  written, or a restored device) */
   buy?: { mint: string; program: string } | null;
+  /** More of the user's buy wallets holding the venue's token (card pool-sell-share-across-wallets: each buy lands in a
+   *  fresh W): each at (l, j), its token account holding `held`, its lamports (ENOUGH when not given) */
+  others?: { l: bigint; j: number; held: bigint; lamports?: number }[];
 };
 
 /** One chain: the planted accounts, the program's deposit applied to a signed sell. */
@@ -244,6 +247,14 @@ function chain(plant: Plant = {}) {
   accounts.set(fx.rent.account, { owner: fx.rent.answers[0].owner, lamports: 1, data: base64.decode(fx.rent.answers[0].data) });
   accounts.set(mint, { owner: mintRead.owner, lamports: 1, data: base64.decode(mintRead.data[0]) });
   accounts.set(ata, { owner: mintRead.owner, lamports: plant.ataLamports ?? 1, data: tokenAccount(plant.held ?? AMOUNT, 1, mint) });
+  for (const o of plant.others ?? []) {
+    const x = freshWallet(SEED64, "sol", o.l, o.j);
+    x.secretKey.fill(0);
+    accounts.set(solanaAta(x.address, mint, mintRead.owner), { owner: mintRead.owner, lamports: plant.ataLamports ?? 1, data: tokenAccount(o.held, 1, mint, x.address) });
+    if (o.lamports !== 0) accounts.set(x.address, { owner: "11111111111111111111111111111111", lamports: o.lamports ?? ENOUGH, data: new Uint8Array(0) });
+  }
+  // the token account a sale takes its tokens from: its signer's (W's, or another buy wallet's)
+  const ataOf = (signer: string): string => solanaAta(signer, mint, mintRead.owner);
   for (const vol of plant.volumes ?? []) {
     // UserVolumeAccumulator: discriminator, user @8, needs_claim @40 (kit checks.ts solanaTeardownPlan)
     const d = new Uint8Array(137);
@@ -433,11 +444,11 @@ function chain(plant: Plant = {}) {
       if (ends < 0n) throw new Error("InsufficientFunds");
       if (ends > 0n && ends < solanaRentMin(rent, 0)) throw new Error("InsufficientFundsForRent");
       if (dry) return;
-      const t = accounts.get(ata)!;
+      const t = accounts.get(ataOf(signer))!;
       const d = t.data.slice();
       const dv = new DataView(d.buffer, 64, 8);
       dv.setBigUint64(0, dv.getBigUint64(0, true) - sold, true);
-      accounts.set(ata, { ...t, data: d });
+      accounts.set(ataOf(signer), { ...t, data: d });
       for (const [x, owner, size] of made) accounts.set(x, { owner, lamports: Number(solanaRentMin(rent, size)), data: new Uint8Array(size) });
       accounts.set(signer, { ...(accounts.get(signer) ?? { owner: "11111111111111111111111111111111", data: new Uint8Array(0), lamports: 0 }), lamports: Number(ends) });
       return;
@@ -479,11 +490,11 @@ function chain(plant: Plant = {}) {
     if (sell) {
       const sold = new DataView(sell.data.buffer, sell.data.byteOffset + 8, 8).getBigUint64(0, true);
       got = new DataView(sell.data.buffer, sell.data.byteOffset + 16, 8).getBigUint64(0, true);
-      const t = accounts.get(ata)!;
+      const t = accounts.get(ataOf(signer))!;
       const d = t.data.slice();
       const dv = new DataView(d.buffer, 64, 8);
       dv.setBigUint64(0, dv.getBigUint64(0, true) - sold, true);
-      accounts.set(ata, { ...t, data: d });
+      accounts.set(ataOf(signer), { ...t, data: d });
       // a PumpSwap sell of a cashback coin makes W's cashback accounts it lacks, at W's cost (pool-sell.ts's `made`)
       if (m.staticKeys[sell.programIndex] === SOLANA_PUMP_AMM_PROGRAM && plant.cashback) {
         for (const [x, owner, size] of [[ammVol, SOLANA_PUMP_AMM_PROGRAM, 137], [ammAta, SOLANA_TOKEN_PROGRAM, 165]] as const) {
@@ -741,6 +752,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
   const told: RentBackTold[] = [];
   const bought = new Map<string, { mint: string; program: string }>();
   if (plant.buy !== null) bought.set(W.address, plant.buy ?? { mint: VF[plant.venue ?? "pump"].mint, program: VF[plant.venue ?? "pump"].mintRead.owner });
+  for (const o of plant.others ?? []) bought.set(freshWallet(SEED64, "sol", o.l, o.j).address, { mint: VF[plant.venue ?? "pump"].mint, program: VF[plant.venue ?? "pump"].mintRead.owner });
   const host: PoolSellHost = {
     pin: PIN,
     bought: { get: async (a) => bought.get(a), put: async (a, m) => void bought.set(a, m) },
@@ -754,7 +766,7 @@ async function world(plant: Plant = {}, wallets: BuyWallet[] = [wallet(AMOUNT, f
     },
     wallets: async () => wallets,
     sent: (s) => void sent.push(s),
-    owed: { list: async () => [...owed.values()].map((o) => structuredClone(o)), put: async (r) => void owed.set(r.address, structuredClone(r)), drop: async (a) => void owed.delete(a) },
+    owed: { list: async () => [...owed.values()].map((o) => structuredClone(o)), put: async (r) => void (c.log.push(`owed ${r.address}`), owed.set(r.address, structuredClone(r))), drop: async (a) => void owed.delete(a) },
     kept: { list: async () => [...kept.values()].map((o) => structuredClone(o)), put: async (r) => void kept.set(r.signature, structuredClone(r)), drop: async (s) => void kept.delete(s) },
     told: (t) => void told.push(t),
     now: () => 1_000n,
@@ -790,7 +802,7 @@ test("a sell: checked, simulated unsigned on both RPCs, signed by W, sent on bot
   const a = await runPoolSell(w.host, ASK);
   assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a, (_, v) => (typeof v === "bigint" ? String(v) : v)));
   const sig = (a as { txs: { hash: string }[] }).txs[0]!.hash;
-  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: sig }] });
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: sig }], legs: [{ wallet: W.address, amount: String(AMOUNT), tx: sig, stage: "filled" }] });
   assert.deepEqual(w.sent, [sig], "answered at the send with W's own signature");
   // the note: the return note of W's (l, j), UNSPENT, with the deposit's leaf (the next state leaf)
   assert.deepEqual(sells(w, await ours(w.ns)), [{ ref: RETURN, state: "UNSPENT", value: FULL, leafIndex: BigInt(N) }]);
@@ -844,11 +856,16 @@ test("an amount over W's holding as both RPCs read it is not_funded; two RPCs th
     assert.equal(x.seeds.length, 0, "the seed never read");
     assert.ok(!x.c.log.some((l) => /simulateTransaction|sendTransaction/.test(l)));
   }
-  // no W holds the amount (short, frozen, or none at all): not_funded with no read at all
-  for (const ws of [[wallet(AMOUNT - 1n)], [wallet(AMOUNT, true)], []]) {
+  // no W at all: not_funded with no read at all
+  const none = await world({}, []);
+  assert.deepEqual(await runPoolSell(none.host, ASK), { error: "not_funded" });
+  assert.deepEqual(none.c.log, [], "no read");
+  // card pool-sell-share-across-wallets: the page's listed holdings (on mainnet the helper's one read) saying short or
+  // frozen change nothing: W, named by its own buy record, is read on both RPCs, and what they read sells
+  for (const ws of [[wallet(AMOUNT - 1n)], [wallet(AMOUNT, true)]]) {
     const x = await world({}, ws);
-    assert.deepEqual(await runPoolSell(x.host, ASK), { error: "not_funded" });
-    assert.deepEqual(x.c.log, [], "no read");
+    const a = await runPoolSell(x.host, ASK);
+    assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
   }
   // a frozen token account on chain: not_allowed
   const f = await world();
@@ -1065,7 +1082,9 @@ test("a request id seen before never runs twice: answered from its ops record, w
   // the token amount asked in whole units at the token's decimals (card kit-portfolio-reads), nothing secret
   const rec = (await w.store.get("ops", "t1")) as Record<string, unknown>;
   assert.deepEqual(opOf("t1", rec), { id: "t1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sig }], created_ms: 1000, chain: "solana", token: MINT, units: UNITS });
-  assert.deepEqual(Object.keys(rec).sort(), ["chain", "created_ms", "kind", "pool", "sha", "stage", "token", "txs", "units"]);
+  assert.deepEqual(Object.keys(rec).sort(), ["chain", "created_ms", "kind", "legs", "pool", "sha", "stage", "token", "txs", "units"]);
+  // each wallet's sale, kept in the record only (card pool-sell-share-across-wallets): never in the op the app reads
+  assert.deepEqual(rec.legs, [{ wallet: W.address, units: UNITS, tx: sig, stage: "filled" }]);
   // the same id again (a reload, or the app's retry after client_timeout): its record's answer, no second sale
   // (the sell's own sends: the first run's rent back may still be sending its own)
   const sellSends = () => w.c.calls.filter((c) => c.method === "sendTransaction" && base58.encode(base64.decode(c.params[0] as string).subarray(1, 65)) === sig).length;
@@ -3776,3 +3795,172 @@ for (const kept of [false, true]) {
     assert.deepEqual({ ...afterRun, stages }, { stage: "sent", held: kept ? [sig] : ["INCOMING"], stages: ["sent"] });
   });
 }
+
+// ---------- card pool-sell-share-across-wallets: a token bought more than once sits in several fresh wallets ----------
+
+/** A second buy wallet of the user's, X at (8, 0), and its listed holding (the page's list: on mainnet the helper's read). */
+const X = freshWallet(SEED64, "sol", 8n, 0);
+X.secretKey.fill(0);
+const walletX = (amount: bigint | null): BuyWallet => ({
+  pool: PROGRAM, chain: "sol", note: "n2", l: 8n, j: 0, path: X.path, address: X.address,
+  holdings: { native: 0n, tokens: amount === null ? new Map() : new Map([[MINT, { amount, frozen: false }]]), unreadable: [] },
+});
+const listedW = (amount: bigint | null): BuyWallet => (amount === null ? { ...wallet(0n), holdings: { native: 0n, tokens: new Map(), unreadable: [] } } : wallet(amount));
+const T3 = 3_000_000_000_000n;
+const T5 = 5_000_000_000_000n;
+/** W holds 5,000,000 tokens and X 3,000,000: two buys of one coin. */
+const twoBuys = (plant: Plant = {}, listed: [bigint | null, bigint | null] = [T5, T3]) => world({ held: T5, others: [{ l: 8n, j: 0, held: T3 }], ...plant }, [listedW(listed[0]), walletX(listed[1])]);
+const share = (bps: number): PoolAsk => ({ ...ASK, amount: 0n, shareBps: bps });
+const ataOfW = (address: string) => solanaAta(address, MINT, TOKEN_PROGRAM);
+/** The units each signed sale sells (the venue's sell(amount, min_out): amount at byte 8), by its signer. */
+const soldBy = (w: World, sigs: readonly string[]) =>
+  sigs.map((sig) => {
+    const m = solanaDecodeMessage(w.c.txs.get(sig)!.tx.subarray(65));
+    const ix = m.instructions.find((x) => x.data.length === 24)!;
+    return { signer: m.staticKeys[0], units: new DataView(ix.data.buffer, ix.data.byteOffset + 8, 8).getBigUint64(0, true) };
+  });
+const saleSigs = (a: Awaited<ReturnType<typeof runPoolSell>>) => ("txs" in a ? a.txs.map((t) => t.hash) : []);
+
+test("card pool-sell-share-across-wallets: 100 percent of a coin bought twice (wallets holding 3 and 5) sells all 8 in two sales, smallest first, each a full sale whose rent comes back", async () => {
+  // each token account at its rent, as the buy paid it: what its close gives back
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  const a = await runPoolSell(w.host, share(10_000));
+  assert.equal("stage" in a && a.stage, "filled", JSON.stringify(a));
+  const [sx, sw] = saleSigs(a);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: sx }, { chain: "solana", hash: sw }], legs: [{ wallet: X.address, amount: String(T3), tx: sx, stage: "filled" }, { wallet: W.address, amount: String(T5), tx: sw, stage: "filled" }] });
+  assert.deepEqual(soldBy(w, [sx!, sw!]), [{ signer: X.address, units: T3 }, { signer: W.address, units: T5 }]);
+  // each W's rent back: its token account closed to it, then every lamport it holds swept into the pool, W at 0
+  for (const at of [X.address, W.address]) {
+    assert.equal(w.c.accounts.get(ataOfW(at)), undefined, `${at}'s token account closed`);
+    assert.equal(w.c.accounts.get(at)?.lamports ?? 0, 0, `${at} swept to 0 ${JSON.stringify(w.told)}`);
+    assert.ok(w.told.some((t) => t.address === at && t.step === "rent_back" && t.state === "sent"), JSON.stringify(w.told));
+  }
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 2, "one sweep per W");
+  // each sale's note stored UNSPENT: X's return note and W's, each W's own
+  const mine = sells(w, await ours(w.ns));
+  const key = (r: NoteRef) => `${r.kind}:${"l" in r ? r.l : ""}`;
+  assert.deepEqual(mine.map((n) => [key(n.ref), n.state]).sort(), [[key({ kind: "return", c: "sol", l: 8n, j: 0 }), "UNSPENT"], [key(RETURN), "UNSPENT"]].sort());
+});
+
+test("card pool-sell-share-across-wallets: 75 percent of 3 and 5 sells 6: the smaller wallet whole (its rent back), the larger in part (it keeps 2, no rent back)", async () => {
+  const w = await twoBuys({ ataLamports: TOKEN_RENT });
+  const a = await runPoolSell(w.host, share(7_500));
+  const [sx, sw] = saleSigs(a);
+  assert.deepEqual(a, { stage: "filled", txs: [{ chain: "solana", hash: sx }, { chain: "solana", hash: sw }], legs: [{ wallet: X.address, amount: String(T3), tx: sx, stage: "filled" }, { wallet: W.address, amount: String(T3), tx: sw, stage: "filled" }] });
+  assert.deepEqual(soldBy(w, [sx!, sw!]), [{ signer: X.address, units: T3 }, { signer: W.address, units: T3 }]);
+  assert.equal(w.c.accounts.get(ataOfW(X.address)), undefined, "X's token account closed");
+  assert.equal(w.c.accounts.get(X.address)?.lamports ?? 0, 0, "X swept");
+  const left = w.c.accounts.get(ataOfW(W.address))!;
+  assert.equal(new DataView(left.data.buffer, left.data.byteOffset + 64, 8).getBigUint64(0, true), T5 - T3, "W keeps the rest");
+  assert.ok(!w.told.some((t) => t.address === W.address), "no rent back for a part sale");
+  assert.equal(w.c.deposits.filter((d) => d.sweep).length, 1);
+});
+
+test("card pool-sell-share-across-wallets: what the page's list says each wallet holds (on mainnet the helper's one read: under, over, or none) changes nothing the page signs", async () => {
+  const honest = await twoBuys();
+  const ha = await runPoolSell(honest.host, share(10_000));
+  const bytes = (w: World, a: Awaited<ReturnType<typeof runPoolSell>>) => saleSigs(a).map((sig) => base64.encode(w.c.txs.get(sig)!.tx));
+  const want = bytes(honest, ha);
+  assert.equal(want.length, 2);
+  for (const listed of [[1n, 1n], [T5 * 10n, T3 * 10n], [null, null], [T5, null]] as [bigint | null, bigint | null][]) {
+    const w = await twoBuys({}, listed);
+    const a = await runPoolSell(w.host, share(10_000));
+    assert.deepEqual(bytes(w, a), want, `listed ${String(listed)}: the same two sales, byte for byte`);
+    assert.equal("stage" in a && a.stage, "filled");
+  }
+  // a typed amount is checked against the same reads: one unit over the two RPCs' total is refused, a listed total over
+  // it never lets it through
+  const over = await twoBuys({}, [T5 * 10n, T3 * 10n]);
+  assert.deepEqual(await runPoolSell(over.host, { ...ASK, amount: T5 + T3 + 1n }), { error: "not_funded" });
+});
+
+test("card pool-sell-share-across-wallets: a share with one wallet is today's sale of its whole holding, byte for byte", async () => {
+  const units = await world();
+  const a = await runPoolSell(units.host, ASK);
+  const byShare = await world();
+  const b = await runPoolSell(byShare.host, share(10_000));
+  assert.deepEqual(b, a);
+  assert.deepEqual(base64.encode(byShare.c.txs.get(saleSigs(b)[0]!)!.tx), base64.encode(units.c.txs.get(saleSigs(a)[0]!)!.tx));
+  assert.deepEqual(await ours(byShare.ns), await ours(units.ns));
+  assert.deepEqual(byShare.told, units.told);
+});
+
+test("card pool-sell-share-across-wallets: one sale that fails leaves the other's result true: part_filled, the failed wallet's tokens untouched, nothing retried", async () => {
+  // X cannot pay its sale's fee (0 lamports): refused before anything is built for it; W's sale fills
+  const w = await twoBuys({ others: [{ l: 8n, j: 0, held: T3, lamports: 0 }] });
+  const a = await runPoolSell(w.host, share(10_000));
+  const sw = saleSigs(a)[0]!;
+  assert.deepEqual(a, { stage: "part_filled", txs: [{ chain: "solana", hash: sw }], legs: [{ wallet: X.address, amount: String(T3), tx: null, stage: null, error: "not_funded" }, { wallet: W.address, amount: String(T5), tx: sw, stage: "filled" }] });
+  const xa = w.c.accounts.get(ataOfW(X.address))!;
+  assert.equal(new DataView(xa.data.buffer, xa.data.byteOffset + 64, 8).getBigUint64(0, true), T3, "X still holds its tokens");
+  assert.deepEqual(soldBy(w, [sw]), [{ signer: W.address, units: T5 }]);
+  assert.equal(w.c.calls.filter((c) => c.method === "sendTransaction" && (() => { const m = solanaDecodeMessage(base64.decode(c.params[0] as string).subarray(65)); return m.staticKeys[0] === X.address; })()).length, 0, "nothing of X's sent");
+});
+
+test("card pool-sell-share-across-wallets: units over the two RPCs' total of every wallet are refused before anything is signed; so is a share of nothing", async () => {
+  const w = await twoBuys();
+  assert.deepEqual(await runPoolSell(w.host, { ...ASK, amount: T5 + T3 + 1n }), { error: "not_funded" });
+  assert.equal(w.seeds.length, 0, "the seed never read");
+  assert.ok(!w.c.log.some((x) => /getFeeForMessage|simulateTransaction|sendTransaction/.test(x)), w.c.log.join(" "));
+  // exactly the total: both sold
+  const all = await twoBuys();
+  const a = await runPoolSell(all.host, { ...ASK, amount: T5 + T3 });
+  assert.equal("stage" in a && a.stage, "filled");
+  assert.equal(saleSigs(a).length, 2);
+  // the two RPCs differ on one wallet's holding (read again once): failed before anything is signed, never a share of
+  // a total that misses it
+  const split = await twoBuys({ heldOn1: T5 + 1n });
+  assert.deepEqual(await runPoolSell(split.host, share(10_000)), { error: "failed" });
+  assert.equal(split.seeds.length, 0);
+});
+
+test("card pool-sell-share-across-wallets: each sale's owed rent-back record is written before that sale leaves the device", async () => {
+  const w = await twoBuys();
+  const a = await runPoolSell(w.host, share(10_000));
+  const sendAt = w.c.log.flatMap((x, i) => (x.endsWith(":sendTransaction") ? [i] : []));
+  const sendCalls = w.c.calls.filter((c) => c.method === "sendTransaction").map((c) => base58.encode(base64.decode(c.params[0] as string).subarray(1, 65)));
+  assert.equal(sendAt.length, sendCalls.length);
+  for (const { signer } of soldBy(w, saleSigs(a))) {
+    const sig = saleSigs(a)[soldBy(w, saleSigs(a)).findIndex((s) => s.signer === signer)]!;
+    const firstSend = sendAt[sendCalls.indexOf(sig)]!;
+    const owedAt = w.c.log.indexOf(`owed ${signer}`);
+    assert.ok(owedAt >= 0 && owedAt < firstSend, `${signer}: owed at ${owedAt}, sent at ${firstSend}`);
+  }
+  // the second sale reads its quote after the first left: the first's send comes before the second's seed for its key
+  const xSend = sendAt[sendCalls.indexOf(saleSigs(a)[0]!)]!;
+  const wSend = sendAt[sendCalls.indexOf(saleSigs(a)[1]!)]!;
+  assert.ok(xSend < wSend);
+});
+
+test("card pool-sell-share-across-wallets: the kind records every sale and answers every signature; the app's op shows the units the page read, never which wallet sold", async () => {
+  const w = await twoBuys();
+  const stages: string[] = [];
+  const r = poolSellKind(kindHost(w), fakeLocks())(share(10_000), ctxOf("s1", "aa", stages)) as KindAnswer;
+  await r.after;
+  await until(async () => ((await w.store.get("ops", "s1")) as { stage?: string } | undefined)?.stage === "filled");
+  await until(async () => stages.length > 0);
+  const rec = (await w.store.get("ops", "s1")) as { legs: { tx: string }[] } & Record<string, unknown>;
+  const [sx, sw] = rec.legs.map((l) => l.tx);
+  assert.deepEqual(rec.legs, [{ wallet: X.address, units: "3000000", tx: sx, stage: "filled" }, { wallet: W.address, units: "5000000", tx: sw, stage: "filled" }]);
+  assert.deepEqual(opOf("s1", rec), { id: "s1", kind: "sell", stage: "filled", txs: [{ chain: "solana", hash: sx }, { chain: "solana", hash: sw }], created_ms: 1000, chain: "solana", token: MINT, units: "8000000" });
+  assert.deepEqual(r.answer(), { result: { stage: "filled", txs: [{ chain: "solana", hash: sx }, { chain: "solana", hash: sw }] } });
+  assert.deepEqual(stages, ["filled"]);
+});
+
+test("card pool-sell-share-across-wallets: a page closed between two sales: the load settles the sent one by its signature, and the one that never ran ends refused, the record part_filled", async () => {
+  const { store } = await notes();
+  const legs = [{ wallet: X.address, units: "3000000", tx: "sigX", stage: "sent" }, { wallet: W.address, units: "5000000", tx: null, stage: "pending" }];
+  await store.put("ops", "c1", { kind: "sell", pool: "sol", sha: "aa", stage: "sent", txs: [{ chain: "solana", hash: "sigX" }], created_ms: 1, legs });
+  // the run's own settle (its next sale still to run): the leg written, the record still sent
+  await settleSellOps(store as unknown as TradeStore, "sigX", "filled", true);
+  assert.deepEqual(((await store.get("ops", "c1")) as { stage: string }).stage, "sent");
+  await store.put("ops", "c1", { kind: "sell", pool: "sol", sha: "aa", stage: "sent", txs: [{ chain: "solana", hash: "sigX" }], created_ms: 1, legs });
+  // a load's settle (no sell runs then): the leg that never ran is refused
+  await settleSellOps(store as unknown as TradeStore, "sigX", "filled");
+  const rec = (await store.get("ops", "c1")) as { stage: string; legs: unknown[] };
+  assert.equal(rec.stage, "part_filled");
+  assert.deepEqual(rec.legs, [{ ...legs[0], stage: "filled" }, { ...legs[1], stage: "refused", code: "failed" }]);
+  // every leg ended: a later settle of the same signature changes nothing
+  await settleSellOps(store as unknown as TradeStore, "sigX", "not_landed");
+  assert.equal(((await store.get("ops", "c1")) as { stage: string }).stage, "part_filled");
+});
