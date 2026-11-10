@@ -90,8 +90,9 @@ export interface TokenMarket {
   name: string;
   /** USD per unit, decimal string; null when no price is known (S10.4). */
   price: string | null;
-  /** False when no route sells it now (S10.6: valued at the last price). */
-  route: boolean;
+  /** False when no route sells it now (S10.6: valued at the last price). Null: not read; whether a token sells is the
+   *  device's own sell quote, which no read gives the app yet, never the helper's word (card market-token-reads). */
+  route: boolean | null;
 }
 
 /** What a position carries beyond the kit's row. Not in the kit. */
@@ -240,7 +241,7 @@ function rowOf(p: SignpageState["positions"][number], d: PortfolioData, ops: rea
     bought: cents(x.bought) ?? cost,
     sold: cents(x.sold) ?? 0n,
     realized: cents(x.realized) ?? 0n,
-    mark: x.mark ?? (m && !m.route ? "noRoute" : null),
+    mark: x.mark ?? (m && m.route === false ? "noRoute" : null),
     exit: x.exit ?? null,
     wallets: p.wallets.length,
     addresses: [...new Set(p.wallets)],
