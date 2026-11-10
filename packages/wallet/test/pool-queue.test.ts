@@ -270,6 +270,44 @@ test("at a boundary the old proofs stay ready while the new ones are made: a tap
   await assert.rejects(v.ns.move(y!.noteId, "HELD", "RESERVED", { attempt: y!.attempt }), /held by another attempt/, "the replaced proof can no longer be sent");
 });
 
+// card evm-fee-quiet-epoch: the helper had no fee for the new epoch yet (its provider held no block in it, 503
+// index_behind; 404 before that card), so every bind of the remake is refused. The proofs of the epoch before stay ready,
+// HELD under their own attempts, and a tap takes one; the next pass, with the fee answered, makes the rest again.
+test("a remake whose bind is refused (no relay fee for the new epoch yet) keeps the epoch before's proofs ready: a tap takes one, the next pass remakes", async () => {
+  const v = await vaultWith([usd(5), usd(10)]);
+  const pool = fakePool(v);
+  const bind = pool.bind.bind(pool);
+  let feeAnswered = true;
+  pool.bind = async (b, s) => {
+    if (!feeAnswered && b.epochStartMs === START + E) throw new Error("pool fee: HTTP 503");
+    return bind(b, s);
+  };
+  const q = queue(v, pool);
+  await q.refresh();
+  const [x, y] = q.ready();
+  feeAnswered = false;
+  pool.t.now = START + E + 500n; // half a second into the next epoch
+  const pass = await q.refresh();
+  assert.deepEqual(pass.made, []);
+  assert.deepEqual(pass.remade, []);
+  assert.deepEqual(pass.failed.map((f) => [f.noteId, f.error]).sort(), [x!.noteId, y!.noteId].sort().map((id) => [id, "pool fee: HTTP 503"]));
+  assert.deepEqual(q.ready(), [x, y], "the epoch before's proofs stay ready");
+  for (const r of [x!, y!]) {
+    const n = await state(v, r.noteId);
+    assert.equal(n.state, "HELD");
+    assert.equal(n.attempt, r.attempt, "held by its own attempt, never freed");
+  }
+  const taken = await q.take(x!.noteId);
+  assert.equal(taken, x, "the tap takes the epoch before's proof, its fee bound for that epoch");
+  assert.equal(taken.epochStartMs, START);
+  assert.equal((await state(v, x!.noteId)).state, "RESERVED");
+  feeAnswered = true;
+  const next = await q.refresh();
+  assert.deepEqual(next.remade, [y!.noteId]);
+  assert.deepEqual(next.failed, []);
+  assert.equal(q.ready().find((r) => r.noteId === y!.noteId)!.epochStartMs, START + E);
+});
+
 test("a deposit's own note is proved at once on the newest root, and on the epoch root at the next epoch", async () => {
   const v = await vaultWith([usd(2)]);
   const pool = fakePool(v);
