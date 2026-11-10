@@ -206,7 +206,7 @@ test("the trade's map of the user's wallets: the real buy passes with it, and it
   assert.equal(links.ownerOf(solanaAta(W, F.mint, TOKEN)), W);
 });
 
-test("one long-lived map: it grows only by new wallets and new keys, a wallet joins once its accounts are all derived, and grows run in turn", async () => {
+test("one long-lived map: it grows only by new wallets and new keys, a wallet joins once its accounts are all derived, and grows run in turn", async (t) => {
   const WSOL = "So11111111111111111111111111111111111111112";
   const k1 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 11 + 5) & 0xff));
   const W2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 13 + 1) & 0xff));
@@ -227,13 +227,17 @@ test("one long-lived map: it grows only by new wallets and new keys, a wallet jo
   assert.equal(m.holds([OTHER, W2]), true, "an awaited grow means every earlier one is done");
   await first;
   for (const w of [OTHER, W2]) for (const k of [WSOL, k1]) for (const prog of [TOKEN, T22]) assert.equal(m.ownerOf(solanaAta(w, k, prog)), w, `${w} ${k}`);
-  // a later trade: the same wallets and keys cost nothing; a new key reaches every wallet in the map
-  let t = performance.now();
-  await m.grow([OTHER, W2], [k1, WSOL]);
+  // a later trade: the same wallets and keys cost nothing; a new key reaches every wallet in the map. Counted, not timed:
+  // a grow at slice 0 yields once per derivation, so a grow that never yields derived nothing (add() runs the same
+  // per-key work whole).
+  const yields = t.mock.method(globalThis, "setTimeout");
+  await m.grow([OTHER, W2], [k1, WSOL], 0);
+  assert.equal(yields.mock.callCount(), 0, "nothing derived again");
+  await m.grow([], [base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 19 + 3) & 0xff))], 0);
+  assert.ok(yields.mock.callCount() >= 2, "a new key is derived for each of the two wallets, so the count can see work");
+  yields.mock.restore();
   m.add([k1, WSOL]);
-  assert.ok(performance.now() - t < 20, "nothing derived again");
   const k2 = base58.encode(Uint8Array.from({ length: 32 }, (_, i) => (i * 17 + 9) & 0xff));
-  t = performance.now();
   await m.grow([], [k2]);
   assert.equal(m.ownerOf(solanaAta(W2, k2, T22)), W2);
   // S11 trusts it only while it holds every other wallet
