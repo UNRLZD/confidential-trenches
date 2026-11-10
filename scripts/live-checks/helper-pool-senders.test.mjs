@@ -369,3 +369,58 @@ test("EVM: read() asks the fee twice and anvil 0's code on the venue's two fee p
   }
   assert.equal(nullifiers.size, 4, "a fresh nullifier per plant");
 });
+
+// card evm-fee-quiet-epoch: the EVM branch's fee reads go through evm-pool-fee-epoch.mjs. The helper has no block yet in
+// the first moment of a minute (503 index_behind; 404 not_found before its change): the epoch before is asked, and a
+// chain with no block for a minute is INCONCLUSIVE, never PASS (its plants are then not sent).
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+/** readEvm() and judge() against a fake helper: `first` answers a fee asked for the helper's now, `second` one with
+ *  &epoch=, both for either caller; the good run answers the code reads and the plants, in order. */
+async function evmPlanted(first, second) {
+  const g = evmBase()[0];
+  const f = JSON.parse(g.reads[0].body);
+  const asked = [];
+  let post = 0;
+  const plants = g.reads.filter((x) => x.asked !== "fee");
+  const fetchFn = async (url, init = {}) => {
+    const c = g.code.find((x) => x.url === url);
+    if (c) return new Response(c.body, { status: c.status });
+    const u = new URL(url);
+    asked.push(`${init.method ?? "GET"} ${u.pathname}${u.search}`);
+    if (u.pathname === "/v1/pool/evm/send") {
+      const r = plants[post++];
+      return new Response(r.body, { status: r.status, headers: r.headers });
+    }
+    const a = u.searchParams.has("epoch") ? second : first;
+    const r = init.headers?.origin ? g.reads[0] : g.reads[1];
+    return a === "good" ? new Response(r.body, { status: r.status, headers: r.headers }) : new Response(a[1], { status: a[0], headers: r.headers });
+  };
+  const run = await readEvm("http://h.invalid", g.pool, fetchFn, { nowMs: () => f.epoch_start_ms + 25_000 });
+  return { run, asked, r: judge(run) };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`EVM: the first fee answer ${name} and the epoch before's 200 passes, both asks of each caller recorded`, async () => {
+    const { run, asked, r } = await evmPlanted(first, "good");
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.equal(asked.filter((u) => u.startsWith("GET ")).length, 4);
+    assert.equal(asked.filter((u) => u.includes("&epoch=")).length, 2);
+    assert.deepEqual(run.reads.slice(0, 4).map((x) => [x.asked, x.origin, x.status]), [["fee_first", true, first[0]], ["fee", true, 200], ["fee_first", false, first[0]], ["fee", false, 200]]);
+  });
+}
+
+test("EVM: 503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why; no plant is sent", async () => {
+  const { asked, r } = await evmPlanted(NO_BLOCK, NO_BLOCK);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  assert.ok(r.lines.some((l) => l.startsWith("QUIET") && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+  assert.ok(asked.every((u) => u.startsWith("GET ")), "no POST");
+});
+
+test("EVM: 404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { r } = await evmPlanted(NOT_FOUND, NOT_FOUND);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  assert.ok(bad(r).some((l) => /^BAD \[fee APP_HOST\] GET \/v1\/pool\/fee answers 404/.test(l)), bad(r).join("\n"));
+});

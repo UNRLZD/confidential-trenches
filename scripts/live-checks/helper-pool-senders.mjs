@@ -26,7 +26,10 @@
 //     (M362 (2): every device refuses any other fee, so a helper publishing another one breaks every release);
 //   - every planted transaction answers 422 with its own code (plantsFor: PLANTS, and tip_low on mainnet);
 //   - every answer carries a full-sha X-Helper-Commit, and APP_HOST is echoed only to the read that sent it.
-// An EVM pool (--pool 0x + 40 lower-case hex, card helper-evm-sender-2): the same two fee reads (EvmFeeAnswer's fields,
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (an EVM pool: the helper has no block in the epoch or the one before).
+// An EVM pool (--pool 0x + 40 lower-case hex, card helper-evm-sender-2): the same two fee reads, each through
+// evm-pool-fee-epoch.mjs (the epoch before when the helper has no block yet; a chain with none for that minute either is
+// INCONCLUSIVE, exit 3, and its plants are not sent) (EvmFeeAnswer's fields,
 // helper-evm-sender's FIELDS), then POST /v1/pool/evm/send { pool, data, epoch } four releases of that pool, each in
 // solc's one ABI encoding, at the published fee for the answer's epoch, a fee cap above it, the answer's fee_recipient, a
 // fresh nullifier and junk proof words (under the BN254 field), each refused on the request's bytes before a send:
@@ -49,7 +52,9 @@ import { createHmac, createPublicKey, generateKeyPairSync, pbkdf2Sync, randomByt
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { evmPoolVenues, SOLANA_JITO_TIP_ACCOUNTS, SOLANA_JITO_TIP_MIN, solanaPoolFee, solanaPoolPriorityBudget, solanaRentOf } from "../../packages/kit/src/index.ts";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { FIELDS as EVM_FIELDS } from "./helper-evm-sender.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 
 // @noble from the helper's own dependencies (apps/ is outside Blindfill), for W's keys, signatures and the digests
 const req = createRequire(new URL("../../apps/helper/package.json", import.meta.url));
@@ -478,14 +483,25 @@ function codeProblem(code, urls) {
 export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const fees = run.reads.filter((r) => r.asked === "fee");
+  // the first fee read decides the network, the code reads and the plants; with no block in the epoch or the one before
+  // there is nothing of them to judge
+  const noFee = noBlockYet(fees[0]);
   const network = json(fees[0]?.body ?? "")?.network;
   const v = typeof network === "string" && Object.hasOwn(venues, network) ? venues[network] : undefined;
-  say(v !== undefined && Number.isSafeInteger(v.chainId) && v.feeProviders?.length === 2, `the kit's venue for network ${show(network)}: chain id ${show(v?.chainId)}, fee providers ${show(v?.feeProviders)}`);
+  if (!noFee) say(v !== undefined && Number.isSafeInteger(v.chainId) && v.feeProviders?.length === 2, `the kit's venue for network ${show(network)}: chain id ${show(v?.chainId)}, fee providers ${show(v?.feeProviders)}`);
   say(fees.length === 2, `two fee reads (${fees.length})`);
   const answers = [];
   for (const r of fees) {
     const tag = `[fee ${r.origin ? "APP_HOST" : "no origin"}]`;
+    if (noBlockYet(r)) {
+      // the chain made no block for over a minute: no fee answer to read
+      quiet = true;
+      lines.push(`QUIET ${tag} the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${r.status} index_behind)`);
+      answers.push(null);
+      continue;
+    }
     say(r.status === 200, `${tag} GET /v1/pool/fee answers ${r.status}`);
     const b = json(r.body);
     const keys = b && typeof b === "object" && !Array.isArray(b) ? Object.keys(b) : [];
@@ -498,19 +514,23 @@ export function judgeEvm(run, { venues = evmPoolVenues() } = {}) {
     answers.push(b);
   }
   const [a, b] = answers;
-  say(answers.length === 2 && a?.fee_recipient === b?.fee_recipient && (a?.epoch_start_ms !== b?.epoch_start_ms || a?.fee === b?.fee), `the same fee recipient for both callers, and the same fee within one epoch: ${show(answers.map((x) => [x?.epoch_start_ms, x?.fee, x?.fee_recipient]))}`);
-  const why = codeProblem(run.code, v?.feeProviders ?? []);
-  say(why === null, `eth_getCode of anvil's account 0 (${ANVIL0}) at latest on ${show(v?.feeProviders)}: ${why ?? show((run.code ?? []).map((x) => json(x.body)?.result?.slice(0, 50)))}`);
-  for (const [asked, code] of EVM_PLANTS) {
-    const r = run.reads.find((x) => x.asked === asked);
-    say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/evm/send answers ${r?.status} ${r?.body?.slice(0, 100)} (want 422 ${code})`);
+  if (answers.every((x) => x !== null)) say(answers.length === 2 && a?.fee_recipient === b?.fee_recipient && (a?.epoch_start_ms !== b?.epoch_start_ms || a?.fee === b?.fee), `the same fee recipient for both callers, and the same fee within one epoch: ${show(answers.map((x) => [x?.epoch_start_ms, x?.fee, x?.fee_recipient]))}`);
+  if (!noFee) {
+    const why = codeProblem(run.code, v?.feeProviders ?? []);
+    say(why === null, `eth_getCode of anvil's account 0 (${ANVIL0}) at latest on ${show(v?.feeProviders)}: ${why ?? show((run.code ?? []).map((x) => json(x.body)?.result?.slice(0, 50)))}`);
+    for (const [asked, code] of EVM_PLANTS) {
+      const r = run.reads.find((x) => x.asked === asked);
+      say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/evm/send answers ${r?.status} ${r?.body?.slice(0, 100)} (want 422 ${code})`);
+    }
   }
-  for (const r of run.reads) {
+  // a first fee answer that was stepped back from (fee_first) is no answer the helper was judged on
+  for (const r of run.reads.filter((x) => x.asked !== "fee_first")) {
     say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${r.asked}] X-Helper-Commit: ${show(r.headers?.["x-helper-commit"])}`);
     const echo = r.headers?.["access-control-allow-origin"];
     say(r.origin ? echo === APP : echo === undefined, `[${r.asked}] Access-Control-Allow-Origin: ${show(echo)}`);
   }
-  return { ok: lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** An EVM pool's run: the two fee reads, the two code reads of anvil's account 0, then the four plants. */
@@ -520,12 +540,19 @@ export async function readEvm(base, pool, fetchFn = fetch, { venues = evmPoolVen
     const r = await fetchFn(url, { ...init, redirect: "error", headers: { ...(origin ? { origin: APP } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(15_000) });
     const body = await r.text();
     // only what the judge reads: the two headers, and the body (an error or the fee answer, short)
-    reads.push({ asked, origin, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(EVM_HEADERS.filter((h) => r.headers.has(h)).map((h) => [h, r.headers.get(h)])), body: body.slice(0, 1_000) });
-    return json(body);
+    const read = { asked, origin, readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(EVM_HEADERS.filter((h) => r.headers.has(h)).map((h) => [h, r.headers.get(h)])), body: body.slice(0, 1_000) };
+    reads.push(read);
+    return read;
   };
-  const feeUrl = `${base}/v1/pool/fee?pool=${encodeURIComponent(pool)}`;
-  const f = await get("fee", true, feeUrl);
-  await get("fee", false, feeUrl);
+  // each caller's fee for the epoch and, when the helper has no block in it yet, the one before (evm-pool-fee-epoch.mjs);
+  // the first answer of a stepped-back read is kept as "fee_first"
+  const feeFor = async (origin) => {
+    const { answer, first } = await evmPoolFeeAsk((url) => get("fee", origin, url), base, pool);
+    if (first) first.asked = "fee_first";
+    return answer;
+  };
+  const f = json((await feeFor(true)).body);
+  await feeFor(false);
   const v = typeof f?.network === "string" && Object.hasOwn(venues, f.network) ? venues[f.network] : undefined;
   const code = [];
   for (const url of v?.feeProviders ?? []) {
@@ -564,8 +591,9 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify(run, null, 1)}\n`);
     const r = judge(run);
     for (const l of r.lines) console.log(l);
-    console.log(r.ok ? "PASS helper-pool-senders" : "FAIL helper-pool-senders");
-    process.exit(r.ok ? 0 : 1);
+    const verdict = r.verdict ?? (r.ok ? "PASS" : "FAIL");
+    console.log(`${verdict} helper-pool-senders`);
+    process.exit(EXIT[verdict]);
   } catch (e) {
     console.error(`helper-pool-senders: ${e.message}`);
     process.exit(2);
