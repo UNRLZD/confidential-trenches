@@ -4373,3 +4373,25 @@ test("card pool-sell-share-across-wallets: a sell whose every sale ended before 
   assert.equal(stageOfLegs([{ stage: "not_landed" }, { stage: "not_landed" }]), "not_landed");
   assert.equal(stageOfLegs([{ stage: "filled" }, { stage: null, error: "down" }]), "part_filled");
 });
+
+test("card pool-sell-share-across-wallets review P2-1: a sale and its rent back whose first pool read is a page behind (its sizes moved before the deposit's reads) price and name the pages at the sizes read with them, as when nothing moved", async () => {
+  // the pool read on its own (getAccountInfo) answers each tree one entry short of page 1, as an RPC a block behind would;
+  // the deposit's reads (getMultipleAccounts) answer the pool as it is: one entry onto page 1 on both trees
+  const behind = (rpc: SolanaRpc): SolanaRpc =>
+    (async (method: string, params: readonly unknown[]) => {
+      const out = (await rpc(method, params)) as { value: { data: [string, string] } | null };
+      if (method !== "getAccountInfo" || params[0] !== POOL || out.value === null) return out;
+      const d = base64.decode(out.value.data[0]);
+      const v = new DataView(d.buffer, d.byteOffset, d.length);
+      for (const at of [49, 49 + 1065]) v.setBigUint64(at, v.getBigUint64(at, true) - 2n, true);
+      return { ...out, value: { ...out.value, data: [base64.encode(d), "base64"] } };
+    }) as SolanaRpc;
+  const run = async (stale: boolean) => {
+    const w = await world({ ataLamports: TOKEN_RENT, leaves: 1_025, labelLeaves: 1_025 });
+    const a = await runPoolSell(stale ? { ...w.host, rpcs: [behind(w.c.rpcs[0]), behind(w.c.rpcs[1])] as const } : w.host, ASK);
+    return { stage: "stage" in a ? a.stage : a, w: w.c.accounts.get(W.address)?.lamports ?? 0, deposits: w.c.deposits.map((d) => `${d.sweep ? "sweep" : "sale"}:${d.value}`), told: w.told.map((t) => `${t.step}:${t.state}`) };
+  };
+  const fresh = await run(false);
+  assert.equal(fresh.stage, "filled", JSON.stringify(fresh));
+  assert.deepEqual(await run(true), fresh);
+});
