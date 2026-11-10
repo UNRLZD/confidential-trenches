@@ -418,7 +418,7 @@ test("a listed token whose pool our reads do not find answers 200 empty from our
   assert.equal(off.status, 404);
 });
 
-test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later serves the last good bars of that pool and tf; with none kept, the chain's own bars alone (card helper-crowd-429: the seed is optional, its 429 never the answer)", async () => {
+test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later serves the last good bars of that pool and tf; with none kept, the chain's own bars alone (card helper-crowd-429: the seed is optional, its 429 never the answer while we have bars; with none, the 429)", async () => {
   // app live run 41787804457 (4 Nov 06:49Z): a throttled GeckoTerminal read left a chart with no bars (the Solana
   // path; the EVM path merged GeckoTerminal the same way)
   const { readFileSync } = await import("node:fs");
@@ -447,8 +447,8 @@ test("GeckoTerminal's bars before ours: the newest range asked once; a 429 later
   assert.deepEqual(JSON.parse(kept.body).candles, first.candles);
   assert.equal(kept.src, "chain,geckoterminal");
   const none = await s.candles(ICNT, "5m", null, 500); // paused by the 429, nothing kept for 5m
-  assert.equal(none.status, 200, none.body);
-  assert.deepEqual([none.src, JSON.parse(none.body).candles], ["chain", []], "our own bars alone: none yet");
+  // no bar of ours either: the 429 with its wait, never 200 with no bars (card market-reads-hold-under-load)
+  assert.equal(none.status, 429, none.body);
   s.stop();
 });
 

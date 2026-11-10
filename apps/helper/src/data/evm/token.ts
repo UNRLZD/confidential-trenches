@@ -122,10 +122,23 @@ export function toPage(base: Row, info: Info | null, kept: { pool: string; decim
   };
 }
 
+/** The most tokens' info a process hands the next one (data/warm.ts), newest first [design: CACHE_MAX, the map's own
+ *  bound; an info is under 200 bytes]. */
+export const INFO_HANDOVER_MAX = CACHE_MAX;
+const isCount = (v: unknown, max: number): boolean => v === null || (Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= max);
+/** An info as toInfo makes one for a read started at `at`: every value in its range, its time not ahead of `nowMs` (its
+ *  read's end) and at most a day before the read, as toInfo takes it. */
+const isInfo = (v: unknown, at: number, nowMs: number): v is Info => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const i = v as Record<string, unknown>;
+  return Object.keys(i).length === 4 && isCount(i.decimals, DECIMALS_MAX) && isCount(i.holders, Number.MAX_SAFE_INTEGER) && isCount(i.top10Bps, 10_000) && typeof i.asOfMs === "number" && Number.isFinite(i.asOfMs) && i.asOfMs <= nowMs && at - i.asOfMs <= 86_400_000;
+};
+
 /** A map that keeps at most `max` keys, dropping the oldest written. */
 function bounded<V>(max: number) {
   const m = new Map<string, V>();
   return {
+    entries: () => [...m],
     get: (k: string) => m.get(k),
     set(k: string, v: V) {
       m.delete(k);
@@ -165,8 +178,8 @@ export function createEvmToken(
     return row !== undefined && row.chain === chain && (await deps.lists.listed(token)) ? row : null;
   }
 
-  async function readInfo(token: string, lane: "pages" | "stale" | "refresh"): Promise<Read> {
-    if ((await takeOrWait(deps.gecko, lane, `${chain} info`, now() + GT_PAGE_WAIT_MS, now, sleep)) !== null) return "refused";
+  async function readInfo(token: string, lane: "pages" | "stale" | "refresh", client?: string): Promise<Read> {
+    if ((await takeOrWait(deps.gecko, lane, `${chain} info`, now() + GT_PAGE_WAIT_MS, now, sleep, client)) !== null) return "refused";
     try {
       const r = await doFetch(`${GT_BASE}/networks/${GT_NETWORK[chain]}/tokens/${token}/info`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
       if (r.status === 429) {
@@ -193,14 +206,14 @@ export function createEvmToken(
   /** The info held for the token while servable (under INFO_SERVE_MS) and, when it is not fresh, the read that refreshes
    *  it (one at a time): a page read when nothing servable is held, else a "refresh", which leaves COLD_RESERVE calls
    *  for a read of what nobody holds. The page and holders share it, so either one's read serves the other. */
-  function infoOf(token: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
+  function infoOf(token: string, client?: string): { held: Info | "none" | undefined; read: Promise<Read> | undefined } {
     const h = infos.get(token);
     if (h !== undefined && now() - h.at < INFO_FRESH_MS) return { held: h.info, read: undefined };
     const servable = h !== undefined && now() - h.at < INFO_SERVE_MS;
     let p = running.get(token);
     if (p === undefined) {
       const started = now();
-      p = readInfo(token, servable ? "refresh" : "pages")
+      p = readInfo(token, servable ? "refresh" : "pages", client)
         .then((x) => {
           if (x !== "refused" && x !== "failed") infos.set(token, { info: x, at: started });
           return x;
@@ -219,27 +232,52 @@ export function createEvmToken(
   const usable = (x: unknown): Info | null => (typeof x === "object" && x !== null ? (x as Info) : null);
 
   return {
+    /** The info this process holds, as the next one takes it over (card market-reads-hold-under-load): each token's
+     *  read under INFO_SERVE_MS, the bound it is served within, newest first, at most INFO_HANDOVER_MAX. */
+    state(): [string, { info: Info | "none"; at: number }][] {
+      const t = now();
+      return infos.entries().filter(([, v]) => t - v.at < INFO_SERVE_MS).slice(-INFO_HANDOVER_MAX);
+    },
+    /** A previous process's state (data/warm.ts), hostile input: each entry a token address, its read time not ahead of
+     *  now and under INFO_SERVE_MS, its info as toInfo makes one; any entry that fails, or more than INFO_HANDOVER_MAX,
+     *  restores nothing. Each keeps its read time and its own as_of_ms. Returns whether it restored. */
+    restore(st: unknown): boolean {
+      if (!Array.isArray(st) || st.length > INFO_HANDOVER_MAX) return false;
+      const t = now();
+      const ok = st.every((e) => {
+        if (!Array.isArray(e) || e.length !== 2 || typeof e[0] !== "string" || evmAddress(e[0]) !== e[0]) return false;
+        const v = e[1] as { info?: unknown; at?: unknown } | null;
+        if (typeof v !== "object" || v === null || Object.keys(v).length !== 2 || typeof v.at !== "number" || !Number.isFinite(v.at) || v.at > t || t - v.at >= INFO_SERVE_MS) return false;
+        return v.info === "none" || isInfo(v.info, v.at, t);
+      });
+      if (!ok) return false;
+      for (const [token, v] of st as [string, { info: Info | "none"; at: number }][]) {
+        const had = infos.get(token);
+        if (had === undefined || had.at < v.at) infos.set(token, { info: v.info, at: v.at });
+      }
+      return true;
+    },
     /** 06b TokenPage for a token the chain's lists served; 404 for any other address, 503 while the lists never answered. */
-    async page(token: string): Promise<DataAnswer> {
+    async page(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
       const row = await rowOf(t);
       if (row === undefined) return UPSTREAM;
       if (row === null) return NOT_FOUND;
-      const { held, read } = infoOf(t);
+      const { held, read } = infoOf(t, client);
       const info = held !== undefined ? usable(held) : read === undefined ? null : usable(await within(read, INFO_WAIT_MS));
       const page = toPage(row, info, deps.kept?.(t));
       return { status: 200, body: JSON.stringify(page), src: "geckoterminal", asOfMs: row.as_of_ms as number };
     },
     /** 06b Holders: no rows, GeckoTerminal's count and top 10 share; 429 when the budget refuses a token nothing is held
      *  for (or held past INFO_SERVE_MS), 503 when GeckoTerminal fails it. */
-    async holders(token: string): Promise<DataAnswer> {
+    async holders(token: string, client?: string): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null) return NOT_FOUND;
       const row = await rowOf(t);
       if (row === undefined) return UPSTREAM;
       if (row === null) return NOT_FOUND;
-      const { held, read } = infoOf(t);
+      const { held, read } = infoOf(t, client);
       const got: Read | undefined = read === undefined ? held : await read;
       const info: Info | "none" | undefined = got === "refused" || got === "failed" ? held : got;
       if (info === undefined) {

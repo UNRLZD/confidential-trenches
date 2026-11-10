@@ -50,7 +50,7 @@ import { evmFeeWarm, evmPoolSendersFromEnv, POOL_EVM_BODY_MAX, POOL_EVM_SELL_BOD
 import { clientOf, clientWindow, PROVIDER_PACE, providerHolds, refusalLog, throttled, throttleOf, type ProviderHolds } from "./limits/limits.ts";
 import { openDurableDir } from "./store/durable.ts";
 import { createSlot, type Slot, type SlotName, type SlotState } from "./rpc/slot.ts";
-import { readWarm, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
+import { evmMarketOf, readWarm, restoreEvmMarket, seedGecko, writeWarm, type Warm } from "./data/warm.ts";
 import { TICK_MS } from "./data/evm/lists.ts";
 import { attachPush, closePush, PUSH_PATH } from "./data/push.ts";
 import { randomUUID } from "node:crypto";
@@ -559,8 +559,8 @@ export function handler(
           if (tf === null || to === null || limit === null || !/^(|[1-9]\d{0,10})$/.test(to) || !/^(|[1-9]\d{0,2})$/.test(limit) || Number(limit) > CANDLES_MAX) {
             return send(404, { error: { code: "not_found" } }, cors(req));
           }
-          read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit));
-        } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint) : evmToken.holders(mint);
+          read = swaps !== undefined ? swaps.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req)) : token.candles(mint, tf, to === "" ? null : Number(to), limit === "" ? CANDLES_MAX : Number(limit), clientOf(req));
+        } else if (evmToken !== undefined) read = path === MARKET_TOKEN ? evmToken.page(mint, clientOf(req)) : evmToken.holders(mint, clientOf(req));
         else read = path === MARKET_TOKEN ? token.page(mint, clientOf(req)) : token.holders(mint, clientOf(req));
         settle(read, began);
         return;
@@ -760,7 +760,7 @@ export function solanaTradesFromEnv(env: Record<string, string | undefined>, lis
     streamSlot,
     wsUrl: ws === undefined || ws === "" ? undefined : ws,
     rpcs: solanaTradesRpcs(env),
-    history: (mint, tf, to, limit) => token.candles(mint, tf, to, limit),
+    history: (mint, tf, to, limit, client) => token.candles(mint, tf, to, limit, client),
     log: (line) => console.log(`helper: ${line}`),
     // the walks draw the Solana budget callers draw, behind them (rpc.ts userRoomOf)
     ...(rpc === undefined ? {} : { budget: (u: string, m: string) => rpc.background("solana", u, m), throttled: (u: string, h: globalThis.Headers) => rpc.backgroundThrottled("solana", u, h) }),
@@ -1049,7 +1049,7 @@ if (import.meta.main) {
       }
     } else if (senders.peer) gecko.seed(Array.from({ length: GT_LIMIT_PER_MIN }, () => Date.now()));
     let solanaState = (): unknown => undefined;
-    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState() }));
+    saveWarm = warmWriter(storeDir, senders.held, () => ({ at: Date.now(), gecko: gecko.calls(), geckoLists: gecko.calls("lists"), evm: Object.fromEntries(SERVED_EVM.map((c) => [c, evmLists[c]!.state()])), solana: solanaState(), evmMarket: evmMarketOf(SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] })) }));
     // card helper-solana-failover: every Solana slot's state, for /v1/health
     const slots = new Map<SlotName, Slot>([["rpc", rpc.slot]]);
     const token = solanaTokenFromEnv(process.env, proxy, lists, rpc, gecko, slots);
@@ -1057,7 +1057,7 @@ if (import.meta.main) {
     // (the file it wrote at its stop), so a swap's first loads are answered as the old helper would have answered them
     solanaState = () => token.state();
     if (warm !== null) token.restore(warm.solana);
-    if (senders.peer) void senders.held.then(() => token.restore(readWarm(storeDir, Date.now())?.solana));
+    if (senders.peer) void senders.held.then(() => ((w) => (token.restore(w?.solana), restoreEvmMarket(w, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }))))(readWarm(storeDir, Date.now())));
     const watches = tokenWatchesFromEnv(process.env);
     const fee = senders.fee;
     // each network's carry is held by its own watch only
@@ -1083,6 +1083,7 @@ if (import.meta.main) {
     // card market-data-evm-token: each EVM chain's token page and holders, its rows the lists', its info on the one
     // GeckoTerminal budget, its pool and decimals the swap reads' when they hold them
     const evmTokens: EvmTokens = Object.fromEntries(SERVED_EVM.map((c) => [c, createEvmToken(c, { lists: evmLists[c]!, gecko, kept: swaps[c]?.kept })]));
+    if (warm !== null) restoreEvmMarket(warm, SERVED_EVM, (c) => ({ tokens: evmTokens[c as EvmChain], swaps: swaps[c as EvmChain] }));
     const held = heldFrom(token, evmLists);
     lists.warm();
     for (const l of Object.values(evmLists)) l.warm();

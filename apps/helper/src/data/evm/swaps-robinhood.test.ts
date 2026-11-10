@@ -313,7 +313,7 @@ test("an active token stops after its first step: its first read asks no more sp
   assert.ok(asked <= step + ref + 1, `${asked} getLogs ranges, at most one step (${step}), the ETH price's first read (${ref}) and the head's`);
 });
 
-test("a listed token our reads find no pool of: its candles are GeckoTerminal's bars of its top pool, src geckoterminal, dated by their read; with GeckoTerminal silent, the empty chart as before", async () => {
+test("a listed token our reads find no pool of: its candles are GeckoTerminal's bars of its top pool, src geckoterminal, dated by their read; with GeckoTerminal silent, 503 (unread), never an empty 200", async () => {
   const { readFileSync } = await import("node:fs");
   const FX = JSON.parse(readFileSync(new URL("../solana/fixtures/token-page.json", import.meta.url), "utf8"));
   const { geckoBudget } = await import("../gecko.ts");
@@ -341,8 +341,9 @@ test("a listed token our reads find no pool of: its candles are GeckoTerminal's 
   const tape = JSON.parse((await s.trades(token, 10)).body);
   assert.deepEqual([tape.trades, tape.src], [[], "chain"], "the tape is ours alone: empty, never a vendor's");
   const quiet = open(chain, clock, { pools: new Map(), fetch: ((u: string, i: RequestInit) => ((gtUp = false), fetch(u, i))) as never, gecko: geckoBudget(() => clock.t) });
-  const e = JSON.parse((await quiet.candles(`0x${"35".repeat(20)}`, "1m", null, 60)).body);
-  assert.deepEqual([e.candles, e.src], [[], "chain"], "GeckoTerminal silent: the empty chart");
+  const e = await quiet.candles(`0x${"35".repeat(20)}`, "1m", null, 60);
+  // card market-reads-hold-under-load: its pool not read, the chart is unread (503, the page reads again), never 200 empty
+  assert.equal(e.status, 503, "GeckoTerminal silent: unread, not an empty chart");
   s.stop();
   quiet.stop();
 });

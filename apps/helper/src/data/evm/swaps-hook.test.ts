@@ -97,8 +97,8 @@ test("hookTakes and traderLeg on the real receipts: each buy's leg is the pool's
 });
 
 /** Two providers that answer the fixture alike. */
-function fakeChain() {
-  const all = [...txLogs, ...FIX.ref];
+function fakeChain(logs: RecLog[] = txLogs) {
+  const all = [...logs, ...FIX.ref];
   const match = (want: unknown, have: string | undefined) => want === null || want === undefined || (Array.isArray(want) ? want.includes(have) : want === have);
   return async (_url: string, init: RequestInit): Promise<Response> => {
     const reqs = JSON.parse(String(init.body)) as { id: number; method: string; params: unknown[] }[];
@@ -146,4 +146,53 @@ test("the helper's tape of the hooked pool: every trade's amt is the token its t
   const book = createBook({ decimals: 18, quote: POOL.quote });
   book.ingest(0, events, FIX.head);
   assert.deepEqual(bars.candles, book.candles("1m", null, 60));
+});
+
+test("card market-reads-hold-under-load: a swap the pool's own hook sends (its fees sold in its own pool) is in the bars, price and volume, and off the tape (the trades route, which the push socket sends as it reads it); the trader's own trade stays", async () => {
+  // Base tx 0xa1782de05dafdbdf68a86d347240b385fe10dc5d3f7d9d5f735ce98051a82775 (receipt read from mainnet.base.org
+  // 2026-11-10 20:13Z): the trader's router 0x8f10b468 sold 69,395.85631474 of 0xec91d413 (Swap log 0x30), then the
+  // pool's hook 0x0469a4bd, after its ModifyLiquidity logs, sold 555.166850517920000017 of its fees in the same pool (Swap
+  // log 0x33, sender the hook) and paid the WETH out. The tape showed both as the trader's sells (live run 42887823106).
+  // Here the same shape on the recorded hooked pool: a second Swap of the pool sent by its hook, in one sell's transaction.
+  const [tx, r] = Object.entries(FIX.receipts).find(([t]) => truth.get(t)!.side === "s")!;
+  const swap = r.logs.find((l) => l.t[0] === TOPIC.swap4 && l.t[1] === ID)!;
+  const own: RecLog = { ...swap, i: swap.i + 1000, t: [swap.t[0]!, swap.t[1]!, `0x${HOOK.slice(2).padStart(64, "0")}`] };
+  const logs = [...txLogs, own];
+  const s = createSwaps("robinhood", { fetch: fakeChain(logs), now: () => 1_000_000, listed: async () => true, rpcs: ["https://a.test", "https://b.test"], pools: new Map([[COIN, { pool: POOL, decimals: 18 }]]), tickMs: 0 });
+  const tape = JSON.parse((await s.trades(COIN, 50)).body);
+  const bars = JSON.parse((await s.candles(COIN, "1m", null, 60)).body);
+  s.stop();
+  assert.equal(tape.trades.length, 5, "the five traders' trades, not the hook's");
+  assert.equal(tape.trades.filter((t: { tx: string }) => t.tx === tx).length, 1);
+  for (const t of tape.trades) {
+    const [w, f = ""] = t.amt.split(".");
+    assert.equal(BigInt(w + f.padEnd(18, "0")), truth.get(t.tx)!.amt, `${t.tx}: amt ${t.amt}`);
+  }
+  // the bars hold the hook's swap: a rebuild with it, not without it
+  const rebuild = (with_: RecLog[]) => {
+    const events: Event[] = [];
+    for (const l of with_.map(toLog)) {
+      const x = decodeSwap(POOL, l, "robinhood");
+      if (x !== null) events.push({ ...x, t: l.t! });
+    }
+    for (const l of FIX.ref.map(toLog)) {
+      const x = decodeRef(l, "robinhood");
+      if (x !== null) events.push(x);
+    }
+    events.sort((a, b) => a.block - b.block || a.index - b.index);
+    const book = createBook({ decimals: 18, quote: POOL.quote });
+    book.ingest(0, events, FIX.head);
+    return book.candles("1m", null, 60);
+  };
+  assert.deepEqual(bars.candles, rebuild(logs));
+  assert.notDeepEqual(bars.candles, rebuild(txLogs), "the hook's swap moves the bars' volume");
+});
+
+test("card market-reads-hold-under-load: the book keeps a swap marked off the tape in its bars and out of its tape", () => {
+  const book = createBook({ decimals: 18, quote: { kind: "usd", decimals: 6 } });
+  const swap = (index: number, tape?: false): Event => ({ kind: "swap", block: 10, index, tx: `0x${String(index).repeat(64).slice(0, 64)}`, t: 600, side: "s", amt: 10n ** 18n, quote: 1_000_000n, ...(tape === false ? { tape } : {}) });
+  book.ingest(0, [swap(1), swap(2, false)], 10);
+  assert.equal(book.tape(10).length, 1);
+  assert.equal(book.tape(10)[0]!.index, 1);
+  assert.equal(book.candles("1m", null, 10)[0]![5], "2", "both swaps' volume");
 });
