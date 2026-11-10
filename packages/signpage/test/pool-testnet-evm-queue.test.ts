@@ -458,6 +458,7 @@ test("a state read follows a buy whose tab ended before its end, from its pendin
           asked.push(`${method} ${String(params[0] && typeof params[0] === "string" ? params[0] : "")}`);
           if (method === "eth_getBlockByNumber") return { number: "0x40", timestamp: "0x" + (BigInt(Date.now()) / 1000n).toString(16) };
           if (method === "eth_getLogs") return [];
+          if (method === "eth_blockNumber") return "0x40";
           throw new Error(`no ${method}`);
         },
         { url },

@@ -204,8 +204,8 @@ export type EvmRelease = {
  * (https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum/block-numbers-and-time); the page does not
  * say that a release sequenced again after a reorg gets a later time (it allows a time up to 24 hours earlier than
  * now), so the newest block cannot be taken as final and Robinhood reads `safe` too. The cost: not_landed comes as
- * late as the safe block trails the newest, read 2026-11-10 06:2xZ at 94 s on Base Sepolia and 835 s on Robinhood
- * testnet (both pairs the same), 123 s and 838 s on the mainnets at the review's read.
+ * late as the safe block trails the newest, which moves: read on 2026-11-10 between 06:2xZ and 08:4xZ at 94 to 252 s on
+ * Base Sepolia and 746 to 835 s on Robinhood testnet, and 123 s and 838 s on the mainnets at the review's read.
  */
 export type EvmReleaseRead = { head: { number: bigint; timeMs: bigint }; safe: { number: bigint; timeMs: bigint }; stop: bigint | null; to: bigint; ended: boolean; releases: EvmRelease[] };
 /** The widest log range a read asks, in blocks: under the smallest cap read on the pairs, robinhood-sepolia-rpc.publicnode.com's
@@ -228,11 +228,11 @@ export async function evmHeadNumber(rpc: EvmRpc): Promise<bigint> {
   return n;
 }
 
-const blockOf = async (rpc: EvmRpc, at: "latest" | "safe"): Promise<{ number: bigint; timeMs: bigint }> => {
-  const b = (await rpc("eth_getBlockByNumber", [at, false])) as Record<string, unknown> | null;
+const blockOf = async (rpc: EvmRpc, at: "latest" | "safe" | bigint): Promise<{ number: bigint; timeMs: bigint }> => {
+  const b = (await rpc("eth_getBlockByNumber", [typeof at === "bigint" ? hexQ(at) : at, false])) as Record<string, unknown> | null;
   const number = big(b?.number);
   const time = big(b?.timestamp);
-  if (number === null || time === null) throw new Error("read-back: not a block");
+  if (number === null || time === null || (typeof at === "bigint" && number !== at)) throw new Error("read-back: not a block");
   return { number, timeMs: time * 1_000n };
 };
 
@@ -243,10 +243,18 @@ const blockOf = async (rpc: EvmRpc, at: "latest" | "safe"): Promise<{ number: bi
 export async function evmReleaseRead(rpc: EvmRpc, pool: string, from: bigint, deadlineMs: bigint, stopWas: bigint | null): Promise<EvmReleaseRead> {
   const head = await blockOf(rpc, "latest");
   const safe = await blockOf(rpc, "safe");
-  const stop = safe.timeMs > deadlineMs && (stopWas === null || safe.number < stopWas) ? safe.number : stopWas;
+  let stop = safe.timeMs > deadlineMs && (stopWas === null || safe.number < stopWas) ? safe.number : stopWas;
   const span = from + EVM_BUY_LOG_SPAN - 1n;
   const to = [head.number, stop ?? head.number, span].reduce((a, b) => (b < a ? b : a));
-  const ended = stop !== null && to >= stop;
+  // the range cut short of `stop` (safe gone more than EVM_BUY_LOG_SPAN blocks past `from`): its last block, under a
+  // safe one, is read by number, and when it too is past the deadline the range stops there, so the read can end
+  // (review P1-A; one more read, only then)
+  if (stop !== null && to < stop && to >= from) {
+    const last = await blockOf(rpc, to);
+    if (last.timeMs > deadlineMs) stop = to;
+  }
+  // a range that starts past its own end never ends: no read covered the blocks that would say so
+  const ended = stop !== null && to >= stop && to >= from;
   if (to < from) return { head, safe, stop, to, ended, releases: [] };
   const number = to;
   const logs = (await rpc("eth_getLogs", [{ address: lower(pool), topics: [[TOPIC_BOUGHT, TOPIC_WITHDRAWN]], fromBlock: hexQ(from), toBlock: hexQ(to) }])) as unknown;

@@ -683,8 +683,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; testnet build only
   // until the mainnet pins' card (the mainnet build refuses it not_allowed)
   const evmBuyClaims = new Set<string>();
-  // this tab's sign outs (signingOut): a buy's busy wait ends at once on one started after its tap (review P3-5)
-  let signOuts = 0;
   // the Ws whose buy a run or the load's follow of this page is following now (followPendingEvmBuys skips them)
   const evmBuyFollowing = new Set<string>();
   const evmBuyPage = (chain: "base" | "robinhood"): EvmBuyPage => ({
@@ -764,7 +762,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // proved by the queue's next pass. One pass per chain at a time: a state read during one joins it. A sign out stops
   // it (signingOut): its lock wait and its round end at once, and it writes nothing after. No Web Locks: no pass.
   let evmStop = new AbortController();
-  // the sign outs asked on this page (signingOut): a Solana sell's host stops its sales at the next one
+  // the sign outs asked on this page (signingOut): a Solana sell's host stops its sales at the next one, and an EVM
+  // buy's busy wait ends at once on one started after its tap (review P3-5)
   let signOuts = 0;
   const settleEvmReserved = async (chain: "base" | "robinhood"): Promise<void> => {
     const e = evmPool(chain);

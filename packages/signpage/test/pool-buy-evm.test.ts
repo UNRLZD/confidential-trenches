@@ -113,7 +113,9 @@ const rpcOf = (side: Side, clock: { t: bigint }, calls: Call[]): EvmPoolBuyHost[
   if (method === "eth_blockNumber") return "0x" + (side.start ?? START).toString(16);
   // the safe block is the newest one unless the side sets its time (`safeTime`)
   const safe = method === "eth_getBlockByNumber" && (params as unknown[])[0] === "safe" && side.safeTime !== undefined;
-  if (method === "eth_getBlockByNumber") return { number: "0x" + (side.head?.() ?? START + 0x40n).toString(16), timestamp: "0x" + ((safe ? side.safeTime!() : (side.time?.() ?? clock.t)) / 1000n).toString(16) };
+  // a block asked by number (the read-back's last block of a range cut by EVM_BUY_LOG_SPAN) answers that number
+  const at = method === "eth_getBlockByNumber" && /^0x[0-9a-f]+$/.test(String((params as unknown[])[0])) ? BigInt(String((params as unknown[])[0])) : null;
+  if (method === "eth_getBlockByNumber") return { number: "0x" + (at ?? side.head?.() ?? START + 0x40n).toString(16), timestamp: "0x" + ((safe ? side.safeTime!() : (side.time?.() ?? clock.t)) / 1000n).toString(16) };
   if (method === "eth_getLogs") return typeof side.logs === "function" ? side.logs() : (side.logs ?? []);
   throw new Error(`no ${method}`);
 };
@@ -176,10 +178,10 @@ function host(o: HostOpts = {}): { h: EvmPoolBuyHost; seen: Seen } {
       kept.set(w, structuredClone(rec));
       seen.records.push([w, structuredClone(rec)]);
     },
-    unrecord: async (w, n) => {
+    unrecord: async (w, n, d) => {
       if (o.unrecord) await o.unrecord();
       const mine = kept.get(w);
-      if (mine?.state === "pending" && mine.buy?.nullifier === n.toString()) kept.delete(w);
+      if (mine?.state === "pending" && mine.buy?.nullifier === n.toString() && mine.buy.deadlineMs === d.toString()) kept.delete(w);
     },
     holdings: async () => Object.fromEntries(kept),
     following: o.following ?? new Set(),
@@ -790,7 +792,6 @@ test("(pending end 3, 4) withdrawn keeps the owed record; every end where bytes 
     ["withdrawn", both([release({ kind: "withdrawn" })]), () => {}],
     ["sent, the follow still running", {}, () => {}],
     ["every read failing", {}, () => {}],
-    ["a failed take", { take: () => Promise.reject(new Error("taken by another attempt")) }, () => {}],
     ["a busy answer, then a coded refusal", { send: (() => { let n = 0; return () => Promise.reject(n++ === 0 ? new EvmSendBusy(1_000) : new EvmSendRefused(422, "simulation_failed")); })() }, () => {}],
     ["a sign out during the reads", { a: { logs: () => (stops.at(-1)!.abort(), []) }, b: {} }, () => {}],
   ];
@@ -811,6 +812,104 @@ test("(pending end 3, 4) withdrawn keeps the owed record; every end where bytes 
     const next = host({ holdings: kept, ...both([release()]) });
     assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { error: "failed" }, why);
     assert.deepEqual([next.seen.takes.length, next.seen.sends.length], [0, 0], why);
+  }
+});
+
+test("(pending end, review P2-B) a take that refuses, or gives another attempt, ends the run before anything leaves: the device's own knowledge, so its pending record is removed and the remade proof buys", async () => {
+  for (const why of ["the take throws", "another attempt"] as const) {
+    const kept = new Map<string, EvmHolding>();
+    const first = host(
+      why === "the take throws"
+        ? { holdings: kept, take: () => Promise.reject(new Error("the proof's epoch ended over 15000 ms ago: it is made again first")) }
+        : { holdings: kept },
+    );
+    if (why === "another attempt") {
+      const take = first.h.take;
+      first.h.take = async (id) => ({ ...(await take(id, "a1")), attempt: "a2" });
+    }
+    assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { error: "failed" }, why);
+    assert.deepEqual([first.seen.sends.length, kept.has(W)], [0, false], `${why}: nothing sent, no pending left`);
+    const next = host({ holdings: kept, ready: [readyOf(relayOf(), "n1", "a2")], ...both([release()]) });
+    assert.deepEqual(await runEvmPoolBuy(next.h, ASK), { stage: "filled", txs: [{ chain: "base", hash: TX }] }, why);
+  }
+});
+
+test("(pending end, review P3-D) not_landed with a release of the nullifier to another W (the note spent elsewhere) ends the record too: no load reads it again", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const elsewhere = both([release({ w: OTHER })]);
+  const first = host({ holdings: kept, ...elsewhere });
+  assert.deepEqual(await runEvmPoolBuy(first.h, ASK), { stage: "not_landed", txs: [] });
+  assert.equal(kept.has(W), false);
+  const load = host({ holdings: kept, ...elsewhere });
+  await followPending!(load.h);
+  assert.equal(load.seen.calls.length, 0, "nothing left to read");
+});
+
+test("(pending end, review P3-F) a tap whose W another follow of the page holds leaves that follow's mark: the next state read starts no second follow", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const tab = host({ holdings: kept });
+  await runEvmPoolBuy(tab.h, ASK);
+  stops.at(-1)!.abort();
+  await turns(20);
+  const following = new Set<string>([W.toLowerCase()]);
+  const tap = host({ holdings: kept, following });
+  assert.deepEqual(await runEvmPoolBuy(tap.h, ASK), { error: "failed" });
+  assert.ok(following.has(W.toLowerCase()), "still the load's follow's");
+});
+
+test("(pending end, review P1-A) a pending record read again far past its own start: 50,000 blocks on ends not_landed and is removed, 10,000 as before, and a release inside the capped range still fills", async () => {
+  for (const [blocks, landed] of [[50_000n, false], [10_000n, false], [50_000n, true]] as const) {
+    const kept = new Map<string, EvmHolding>();
+    const tab = host({ holdings: kept });
+    await runEvmPoolBuy(tab.h, ASK);
+    stops.at(-1)!.abort();
+    await turns(20);
+    const from = BigInt(kept.get(W)!.buy!.from);
+    let reads = 0;
+    const logs = () => {
+      if (++reads >= 400) stops.at(-1)!.abort();
+      return landed ? [release({ block: from + 5_000n })] : [];
+    };
+    const side: Side = { logs, head: () => from + blocks, time: () => DEADLINE + 3_600_000n };
+    const load = host({ holdings: kept, a: side, b: side });
+    load.seen.clock.t = NOW + 4_000_000n;
+    await followPending!(load.h);
+    const at = `${blocks} blocks, ${landed ? "landed" : "none"}`;
+    if (landed) assert.equal(kept.get(W)?.state, "filled", at);
+    else assert.equal(kept.has(W), false, `${at}: removed`);
+    assert.ok(reads < 10, `${at}: ended in ${reads} log reads`);
+  }
+});
+
+test("(pending end, review P3-G) the load's follow: the fee recipient is the pin's, never the record's; decimals not an integer 0 to 36, or a start block under the pool's deploy or past both newest blocks, leave the record unread", async () => {
+  const kept = new Map<string, EvmHolding>();
+  const tab = host({ holdings: kept });
+  await runEvmPoolBuy(tab.h, ASK);
+  stops.at(-1)!.abort();
+  await turns(20);
+  const rec = kept.get(W)!;
+  // a record naming another fee recipient: a release paying that one is not this buy's, so it does not fill
+  const BAD_FEE = "0x00000000000000000000000000000000000000bb";
+  const edited = new Map<string, EvmHolding>([[W, { ...rec, buy: { ...rec.buy!, feeRecipient: BAD_FEE } }]]);
+  const paid: Side = { logs: [release({ feeTo: BAD_FEE })], time: () => DEADLINE + 1_000n };
+  const l1 = host({ holdings: edited, a: paid, b: paid });
+  l1.seen.clock.t = NOW + 200_000n;
+  await followPending!(l1.h);
+  assert.notEqual(edited.get(W)?.state, "filled", "not filled by another fee recipient's release");
+  assert.equal(l1.seen.owed.length, 0);
+  for (const [why, bad] of [
+    ["decimals -1", { ...rec, decimals: -1 }],
+    ["decimals 1.5", { ...rec, decimals: 1.5 }],
+    ["decimals 37", { ...rec, decimals: 37 }],
+    ["a start block of 78 digits", { ...rec, buy: { ...rec.buy!, from: "9".repeat(78) } }],
+    ["a start block under the pool's deploy", { ...rec, buy: { ...rec.buy!, from: "0" } }],
+  ] as [string, EvmHolding][]) {
+    const store = new Map<string, EvmHolding>([[W, bad]]);
+    const load = host({ holdings: store, ...both([release()]), ...pastAll() });
+    load.h.pin = { ...load.h.pin, fromBlock: 2n };
+    await followPending!(load.h);
+    assert.deepEqual(store.get(W), bad, `${why}: left as it is`);
+    assert.equal(load.seen.calls.filter((c) => c.method === "eth_getLogs").length, 0, `${why}: unread`);
   }
 });
 
