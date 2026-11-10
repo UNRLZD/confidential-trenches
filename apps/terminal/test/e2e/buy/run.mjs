@@ -236,7 +236,7 @@ const PROBE = ({ app, sign }) => {
 function timing(tapAt, sentAt, answers, end) {
   return {
     sentMs: sentAt ? sentAt - tapAt : null,
-    answers: answers.filter((e) => e.kind === "answer").map((e) => ({ ms: e.at - tapAt, type: e.type, stage: e.stage, ok: e.ok })),
+    answers: answers.filter((e) => e.kind === "answer").map((e) => ({ ms: e.at - tapAt, type: e.type, stage: e.stage, ok: e.ok, code: e.code ?? null })),
     endMs: Date.now() - tapAt,
     end,
     tapAt: new Date(tapAt).toISOString(),
@@ -345,7 +345,8 @@ export async function run({ plant = null, shots = null } = {}) {
       let label = "";
       while (Date.now() - tapAt < END_MS) {
         label = (await cta.innerText()).replace(/\s+/g, " ").trim();
-        if (/^(Filled|Failed|Not landed)\b/.test(label)) break;
+        // a refused trade ends with the button reading Retry under a Failed line (run 4's sell, 10 Nov 22:07Z)
+        if (/^(Filled|Failed|Not landed|Retry)\b/.test(label)) break;
         const word = label.split(" ")[0];
         if (/^(Slow|Stuck)$/.test(word) && !seen.some((x) => x.word === word)) seen.push({ word, label, ms: Date.now() - tapAt });
         await page.waitForTimeout(250);

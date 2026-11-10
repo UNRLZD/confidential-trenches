@@ -5,7 +5,10 @@
 //   run2: a paid run whose buy filled ("Filled 14.9s Final", every tx finalized on both RPCs), then the run's own
 //         token-account scan met the public devnet RPC's 429 before the sell: every buy line ok, FAIL on the sell;
 //   run3: a paid run whose buy landed (finalized on both RPCs) but the box read "Slow 89.9s" at the run's 90 s bound: FAIL
-//         on the buy's end.
+//         on the buy's end;
+//   run4: a paid run whose buy filled ("Filled 7.8s Final", W read on both RPCs) and whose sell was tapped once and sent
+//         one pool.sell, which SIGN_HOST refused at +23.7 s with nothing sent (the box: Failed, Retry; W still holds the
+//         coin on both RPCs): every buy line and the sell's tap ok, FAIL on the sell's end.
 // Planted from run2: W read apart on the two RPCs, a buy tx not read back on one RPC, a host past the devnet RPC and the
 // helper.
 import assert from "node:assert/strict";
@@ -44,6 +47,15 @@ test("run 3: a box that ends Slow fails on the buy's end", () => {
   const v = judge(answers.run3);
   assert.equal(v.ok, false);
   assert.match(bad(v), /the box ended "Slow/);
+});
+
+test("run 4: every buy line and the sell's one tap and one pool.sell are ok; the refused sell fails", () => {
+  const v = judge(answers.run4);
+  for (const re of [...BUY, /the buy's wallet \w+ holds 974924498778 \/ 974924498778/, /the sell tapped once: 1/, /one sell sent: 1 pool.sell/, /the run's own reads: all answered/, /one page from first frame to last: 1/]) assert.ok(ok(v, re), `${re} not ok:\n${bad(v)}`);
+  assert.equal(v.ok, false);
+  assert.match(bad(v), /the sell box ended "Retry"/);
+  assert.match(bad(v), /the sell's transactions sent: 0/);
+  assert.match(bad(v), /after the sell W holds 974924498778 \/ 974924498778/);
 });
 
 test("W read apart on the two RPCs, or none after the buy, fails", () => {
@@ -118,6 +130,6 @@ test("the network table counts each answer by step, host and method: status, JSO
 test("the run waits up to 5 minutes for a trade's end label and records Slow or Stuck on the way", () => {
   assert.match(SRC, /const END_MS = 5 \* 60_000;/);
   assert.equal(/FILL_MS/.test(SRC), false);
-  assert.match(SRC, /\^\(Filled\|Failed\|Not landed\)\\b/);
+  assert.match(SRC, /\^\(Filled\|Failed\|Not landed\|Retry\)\\b/);
   assert.match(SRC, /\^\(Slow\|Stuck\)\$/);
 });

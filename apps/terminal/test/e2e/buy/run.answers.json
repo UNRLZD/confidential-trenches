@@ -277,5 +277,190 @@
     },
     "error": "the buy ended \"Slow 89.9s\"",
     "pages": null
+  },
+  "run4": {
+    "started": "2026-11-10T22:05:25.789Z",
+    "plant": null,
+    "txs": [
+      {
+        "step": "fund",
+        "sig": "4qP5fg6ugydZrtbypYAj7h6KeiWrP97SKivZQpMSjjbcMZqMmDKnzVzfterrVmzNpCYk3tXyUafUKt98D2oJaJ7J",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "deposit",
+        "sig": "5zK9pEWC42wbFMA7eaYhxtgJBkCR5N54bCYMWBcEXW9LhqsVGKGTfLLkTBZnErxUQb4nxTFZCs7DfyyG4AWjQ6Kk",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      },
+      {
+        "step": "buy",
+        "sig": "ujyWmAXxDtPXjEJFus6FSNLsejLu95vH4kt1A3UmSvavTLfjcu194964yzUdmCECNWdeUpGH5wwwYzzZsw2nJ6m",
+        "reads": [
+          {
+            "status": "finalized",
+            "err": null
+          },
+          {
+            "status": "finalized",
+            "err": null
+          }
+        ]
+      }
+    ],
+    "csp": [],
+    "hosts": [
+      "api.devnet.solana.com",
+      "confidential.unrealized.trade",
+      "ct-api.unrealized.trade",
+      "ct-app.unrealized.trade"
+    ],
+    "dialogs": 0,
+    "stub": "market read for AoU3FWPvuFo7WLtP186k6U2hLZ3e44PGeJdFQHVJnw6P answered by the run, shape from apps/terminal/test/e2e/buy/market-token.json",
+    "words": 12,
+    "wordsFile": "app-a2-e2e-2026-11-10T22-05-25-789Z.words",
+    "signedIn": true,
+    "u": "GHdoo4NJoHnBjfVfEc4E6Nas7qM2NxYeSxraRjN56KxS",
+    "funded": {
+      "ok": true,
+      "lamports": "11473120"
+    },
+    "deposit": {
+      "ok": true,
+      "stage": "sent",
+      "txs": 1
+    },
+    "box": {
+      "path": "pool",
+      "proofReady": true,
+      "proofMs": 10694,
+      "line": "Proof ready Max $0.03",
+      "priceMs": 19257
+    },
+    "buy": {
+      "taps": 1,
+      "asks": 1,
+      "amountUsd": "0.03",
+      "end": "Filled 7.8s Final",
+      "seen": [
+        {
+          "word": "Slow",
+          "label": "Slow 5.0s",
+          "ms": 5074
+        }
+      ],
+      "timing": {
+        "sentMs": 3628,
+        "answers": [
+          {
+            "ms": 3628,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 3628,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": "progress",
+            "stage": null,
+            "ok": null
+          },
+          {
+            "ms": 5753,
+            "type": null,
+            "stage": "sent",
+            "ok": true
+          },
+          {
+            "ms": 7849,
+            "type": "progress",
+            "stage": "filled",
+            "ok": null
+          }
+        ],
+        "endMs": 7865,
+        "end": "Filled 7.8s Final",
+        "tapAt": "2026-11-10T22:06:32.590Z"
+      },
+      "kind": "pool.buy"
+    },
+    "readErrors": [],
+    "w": "2FEnUTndzUHhFwWLq46gZHeFquox5cjVdLFUmEv6Ufgz",
+    "heldAfterBuy": [
+      "974924498778",
+      "974924498778"
+    ],
+    "sell": {
+      "taps": 1,
+      "asks": 1,
+      "end": "Retry",
+      "seen": [
+        {
+          "word": "Slow",
+          "label": "Slow 5.0s",
+          "ms": 5081
+        }
+      ],
+      "timing": {
+        "sentMs": null,
+        "answers": [
+          {
+            "ms": 9999,
+            "type": null,
+            "stage": null,
+            "ok": true
+          },
+          {
+            "ms": 23670,
+            "type": null,
+            "stage": null,
+            "ok": false
+          },
+          {
+            "ms": 23670,
+            "type": "progress",
+            "stage": "refused",
+            "ok": null
+          }
+        ],
+        "endMs": 300210,
+        "end": "Retry",
+        "tapAt": "2026-11-10T22:06:41.504Z"
+      },
+      "kind": "pool.sell"
+    },
+    "pages": 1,
+    "heldAfterSell": [
+      "974924498778",
+      "974924498778"
+    ]
   }
 }
