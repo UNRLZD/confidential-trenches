@@ -17,7 +17,8 @@
 // sender pin, it has no admin and no owner, and its deploy transaction made it.
 // After: helper
 //   node scripts/live-checks/helper-sender-fee-proof.mjs [--base <url>] [--record <file>]
-//   PASS exit 0, FAIL exit 1, error exit 2. --record writes the fee answers and every RPC answer read, the shape
+//   PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3 (the helper has no block in the epoch or the one before: the
+//   fee is read through evm-pool-fee-epoch.mjs). --record writes the fee answers and every RPC answer read, the shape
 //   helper-sender-fee-proof.test.mjs replays.
 import "../net-window.mjs";
 import { execFileSync } from "node:child_process";
@@ -25,8 +26,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { evmPoolVenues } from "../../packages/kit/src/index.ts";
 import { check as collectorCheck, recordFile } from "./evm-fee-collector.mjs";
+import { evmPoolFeeAsk, noBlockYet } from "./evm-pool-fee-epoch.mjs";
 import { BASE, evmPoolRecords, NETWORKS } from "./helper-evm-sender.mjs";
 import { recorder } from "./pool-evm-deploy.mjs";
+import { EXIT, verdictOf } from "./provider-answer.mjs";
 
 export const KEY = "helper-sender-fee-proof";
 const ADDRESS = /^0x[0-9a-f]{40}$/;
@@ -72,6 +75,7 @@ export function replayed(answers) {
 export async function judge(run, { commit, records = evmPoolRecords(), collectors = collectorRecords(), venues = evmPoolVenues() } = {}) {
   const lines = [];
   const say = (ok, text) => lines.push(`${ok ? "ok " : "BAD"} ${text}`);
+  let quiet = false;
   const want = Object.entries(records);
   const pools = run.pools ?? [];
   say(want.length > 0, `pools with a deploy record: ${show(want.map(([n]) => n))}`);
@@ -88,12 +92,18 @@ export async function judge(run, { commit, records = evmPoolRecords(), collector
     const b = json(f.body ?? "");
     const coll = lower(b?.fee_collector);
     const seller = lower(b?.sell_sender);
-    say(f.status === 200 && coll !== null && ADDRESS.test(coll) && cpin !== null && coll === cpin && cpin === recorded,
-      `[${n} fee] ${f.status}: fee_collector ${show(b?.fee_collector)} is the kit's pin ${show(cpin)}, which is evm-fee-collector.${n}.json's FeeCollector ${show(recorded)}`);
-    say(f.status === 200 && seller !== null && ADDRESS.test(seller) && spin !== null && seller === spin && spin === sink,
-      `[${n} fee] sell_sender ${show(b?.sell_sender)} is the kit's sell sender pin ${show(spin)} and the collector's sink ${show(sink)}`);
-    const hc = f.headers?.["x-helper-commit"];
-    say(SHA.test(commit ?? "") && hc === commit, `[${n} fee] X-Helper-Commit ${show(hc)} is the commit this check runs at ${show(commit)}`);
+    if (noBlockYet(f)) {
+      // the chain made no block for over a minute: no fee answer to read; the collector's chain reads below still are
+      quiet = true;
+      lines.push(`QUIET [${n} fee] the helper has no block in the epoch or the one before (GET /v1/pool/fee answers ${f.status} index_behind)`);
+    } else {
+      say(f.status === 200 && coll !== null && ADDRESS.test(coll) && cpin !== null && coll === cpin && cpin === recorded,
+        `[${n} fee] ${f.status}: fee_collector ${show(b?.fee_collector)} is the kit's pin ${show(cpin)}, which is evm-fee-collector.${n}.json's FeeCollector ${show(recorded)}`);
+      say(f.status === 200 && seller !== null && ADDRESS.test(seller) && spin !== null && seller === spin && spin === sink,
+        `[${n} fee] sell_sender ${show(b?.sell_sender)} is the kit's sell sender pin ${show(spin)} and the collector's sink ${show(sink)}`);
+      const hc = f.headers?.["x-helper-commit"];
+      say(SHA.test(commit ?? "") && hc === commit, `[${n} fee] X-Helper-Commit ${show(hc)} is the commit this check runs at ${show(commit)}`);
+    }
     if (d === null || d === undefined) {
       say(false, `[${n} collector] no evm-fee-collector.${n}.json record`);
       continue;
@@ -101,15 +111,22 @@ export async function judge(run, { commit, records = evmPoolRecords(), collector
     const r = await collectorCheck({ deployment: d, fetchFn: replayed(run.rpc?.[n]), sleep: async () => {}, venues });
     for (const l of r.lines) say(l.startsWith("ok "), `[${n} collector] ${l.replace(/^(ok|FAIL)\s+/, "")}`);
   }
-  return { ok: lines.length > 0 && lines.every((l) => l.startsWith("ok ")), lines };
+  const verdict = lines.length === 0 ? "FAIL" : verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { ok: verdict === "PASS", verdict, lines };
 }
 
 /** One read of HELPER_HOST and each collector's chain: the fee answers and every RPC answer, for judge(). */
 export async function read(base = BASE, fetchFn = fetch, { records = evmPoolRecords(), collectors = collectorRecords(), rpcFetch = fetch } = {}) {
   const pools = [];
   for (const [network, pool] of Object.entries(records)) {
-    const r = await fetchFn(`${base.replace(/\/$/, "")}/v1/pool/fee?pool=${encodeURIComponent(pool)}`, { redirect: "error", signal: AbortSignal.timeout(15_000) });
-    pools.push({ network, pool, fee: { readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) } });
+    // the epoch's fee and, when the helper has no block in it yet, the one before's (evm-pool-fee-epoch.mjs): the first
+    // answer is kept as fee_first
+    const ask = async (url) => {
+      const r = await fetchFn(url, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+      return { readAt: new Date().toISOString(), status: r.status, headers: Object.fromEntries(r.headers), body: (await r.text()).slice(0, 2_000) };
+    };
+    const { answer, first } = await evmPoolFeeAsk(ask, base, pool);
+    pools.push({ network, pool, fee: answer, ...(first ? { fee_first: first } : {}) });
   }
   const rpc = {};
   for (const [network, d] of Object.entries(collectors)) {
@@ -130,8 +147,8 @@ if (import.meta.main) {
     if (opt("--record")) writeFileSync(opt("--record"), `${JSON.stringify({ commit, ...run }, null, 1)}\n`);
     const r = await judge(run, { commit });
     for (const l of r.lines) console.log(l);
-    console.log(`live-check ${KEY}: ${r.ok ? "PASS" : "FAIL"} (${run.base}, commit ${commit})`);
-    process.exit(r.ok ? 0 : 1);
+    console.log(`live-check ${KEY}: ${r.verdict} (${run.base}, commit ${commit})`);
+    process.exit(EXIT[r.verdict]);
   } catch (e) {
     console.error(`live-check ${KEY}: ERROR: ${String(e.message).split("\n")[0]}`);
     process.exit(2);

@@ -103,8 +103,11 @@ const tracked = (root) => execFileSync("git", ["ls-files"], { cwd: root, encodin
 // lists a folder for its own command (money-gate.mjs reads every live-check record) does not make each importer read
 // the folder, and a path built from a folder and a name (join(ROOT, "scripts/live-checks", file)) reads one file.
 export function reads(seeds, root = ROOT, files = tracked(root)) {
-  const start = files.filter((f) => matches(f, seeds) && !GENERATOR.test(f));
   const have = new Set(files);
+  const own = files.filter((f) => matches(f, seeds) && !GENERATOR.test(f));
+  // a package's scripts start files by a path from its folder (the terminal's test:e2e starts
+  // `node ../../scripts/live-checks/app-sell-mount.mjs --harness`): each such file is a seed too, with its imports
+  const start = [...new Set([...own, ...own.filter((f) => path.posix.basename(f) === "package.json").flatMap((f) => scriptStarts(readFileSync(path.join(root, f), "utf8"), path.posix.dirname(f), have))])];
   const out = new Set(closure(root, start, files));
   for (const f of start) out.add(f);
   for (const f of [...out]) {
@@ -114,6 +117,24 @@ export function reads(seeds, root = ROOT, files = tracked(root)) {
     for (const p of namedPaths(text, files, path.posix.dirname(f))) if (lists || namedFile(text, p, f, have)) out.add(p);
   }
   return [...out].sort();
+}
+
+// The tracked files a package.json's scripts name, each word of a command read as a path from the package's folder.
+function scriptStarts(json, dir, have) {
+  let scripts;
+  try {
+    scripts = JSON.parse(json).scripts ?? {};
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const cmd of Object.values(scripts)) {
+    for (const w of String(cmd).split(/[\s;&|()]+/)) {
+      const p = path.posix.normalize(path.posix.join(dir, w));
+      if (w && have.has(p)) out.push(p);
+    }
+  }
+  return out;
 }
 
 // A fixture generator (fixtures/make-*.mjs) is run by hand and its output committed: the tests read the output, so the

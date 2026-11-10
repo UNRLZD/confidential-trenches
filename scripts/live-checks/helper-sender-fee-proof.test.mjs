@@ -106,3 +106,54 @@ test("read() asks HELPER_HOST's fee answer for each testnet pool and reads each 
   assert.equal(r.ok, true, r.lines.join("\n"));
   for (const n of NETS) assert.equal(new Set(run.rpc[n].map((a) => a.url)).size, 2, `${n}: two RPCs`);
 });
+
+// card evm-fee-quiet-epoch: the fee read goes through evm-pool-fee-epoch.mjs. The helper has no block yet in the first
+// moment of a minute (503 index_behind; 404 not_found before its change): the epoch before is asked, and a chain with no
+// block for a minute is INCONCLUSIVE, never PASS.
+const NO_BLOCK = [503, '{"error":{"code":"index_behind"}}'];
+const NOT_FOUND = [404, '{"error":{"code":"not_found"}}'];
+/** read() and judge() against a fake helper: `first` answers the fee asked for the helper's now, `second` the one with &epoch=. */
+async function planted(first, second) {
+  const asked = [];
+  const fetchFn = async (url) => {
+    asked.push(url);
+    const p = A.made.pools.find((x) => new URL(url).searchParams.get("pool") === x.pool);
+    const a = new URL(url).searchParams.has("epoch") ? second : first;
+    return a === "good" ? new Response(p.fee.body, { status: p.fee.status, headers: p.fee.headers }) : new Response(a[1], { status: a[0], headers: p.fee.headers });
+  };
+  const left = Object.fromEntries(Object.entries(A.made.rpc).map(([n, a]) => [n, [...a]]));
+  const rpcFetch = async (url, init) => {
+    const { method, params } = JSON.parse(init.body);
+    for (const list of Object.values(left)) {
+      const i = list.findIndex((a) => a.url === url && a.method === method && JSON.stringify(a.params) === JSON.stringify(params));
+      if (i >= 0) return new Response(JSON.stringify(list.splice(i, 1)[0].json));
+    }
+    throw new Error(`unrecorded ${method}`);
+  };
+  const run = await read("https://helper.invalid", fetchFn, { rpcFetch });
+  return { run, asked, r: await judge(run, { commit: A.made.commit }) };
+}
+
+for (const [name, first] of [["503 index_behind", NO_BLOCK], ["404 not_found", NOT_FOUND]]) {
+  test(`the first fee answer ${name} and the epoch before's 200 passes, both asks recorded`, async () => {
+    const { run, asked, r } = await planted(first, "good");
+    assert.equal(r.verdict, "PASS", r.lines.join("\n"));
+    assert.equal(asked.length, 2 * run.pools.length);
+    assert.equal(asked.filter((u) => u.includes("&epoch=")).length, run.pools.length);
+    for (const p of run.pools) assert.deepEqual([p.fee_first.status, p.fee.status], [first[0], 200]);
+  });
+}
+
+test("503 index_behind on the epoch and the one before is INCONCLUSIVE, never PASS, with a line that says why", async () => {
+  const { r } = await planted(NO_BLOCK, NO_BLOCK);
+  assert.equal(r.verdict, "INCONCLUSIVE", r.lines.join("\n"));
+  assert.equal(r.ok, false);
+  for (const n of NETS) assert.ok(r.lines.some((l) => l.startsWith(`QUIET [${n} fee]`) && /no block in the epoch or the one before/.test(l)), r.lines.join("\n"));
+  assert.deepEqual(bad(r), []);
+});
+
+test("404 not_found on the epoch and the one before fails: the pool is not carried", async () => {
+  const { r } = await planted(NOT_FOUND, NOT_FOUND);
+  assert.equal(r.verdict, "FAIL", r.lines.join("\n"));
+  for (const n of NETS) assert.ok(bad(r).some((l) => l.startsWith(`BAD [${n} fee] 404:`)), bad(r).join("\n"));
+});

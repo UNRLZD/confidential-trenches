@@ -59,7 +59,19 @@ const STATES = [
   ["pools", "S10.3", ["390", "1440"], false],
   ["pools-noready", "S10.3", ["390", "1440"], false],
   ["pools-empty", "S10.3", ["390", "1440"], false],
+  ["cash-vault", "S10.3", ["390", "1440"], false],
+  ["cash-one", "S10.3", ["390", "1440"], false],
+  ["cash-four", "S10.3", ["390", "1440"], false],
+  ["cash-moving", "S10.3", ["390", "1440"], false],
 ];
+// one balance (card portfolio-one-balance): each fixture's Cash tile in cents and its parts as drawn on hover (desktop) or
+// a tap (phone): [chain, the drawn row's text, data-cents, moving]. Vault $73.18; SOL at $150, ETH at $3,000.
+const CASH = {
+  "cash-vault": ["$73.18", [["near", "NEAR$73.18", "7318", false]]],
+  "cash-one": ["$448.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false]]],
+  "cash-four": ["$1,498.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "Robinhood$300.00", "30000", false]]],
+  "cash-moving": ["$1,198.18", [["near", "NEAR$73.18", "7318", false], ["solana", "Solana$375.00", "37500", false], ["base", "Base$750.00", "75000", false], ["robinhood", "RobinhoodProcessing$0.00", "0", true]]],
+};
 // each fixture's pool view, and per row [chain, Balance, Ready, Pending] as drawn
 const POOLS = {
   loading: ["loading"],
@@ -183,6 +195,34 @@ try {
         const r = await page.evaluate(() => { const rs = [...document.querySelectorAll(".pfd .ai")].map((x) => x.getBoundingClientRect()); const box = document.querySelector(".pfd .alist").getBoundingClientRect(); return { h: rs[0]?.height ?? 0, visible: rs.filter((x) => x.bottom <= box.bottom + 0.5).length }; });
         check(Math.abs(r.h - 54) < 1, `${tag}: Activity rows ${r.h}px`);
         console.log(`@1440 activity: row ${r.h.toFixed(1)} css px, ${r.visible} visible (brief: 9)`);
+      }
+      if (CASH[f]) {
+        // the Cash tile: one total; its parts hidden until a hover (desktop) or a tap (phone), then each chain's row,
+        // inside the viewport and drawn over the panel, never clipped by it
+        const form = phone ? ".pfm" : ".pfd";
+        const tile = page.locator(`${form} [data-tile="cash"]`);
+        if (phone) await page.evaluate((sel) => document.querySelector(sel).scrollIntoView({ block: "center" }), `${form} [data-tile="cash"]`);
+        const [cash, parts] = CASH[f];
+        check((await tile.locator(".pvv").textContent()) === cash, `${tag}: Cash ${await tile.locator(".pvv").textContent()}, want ${cash}`);
+        check(!(await tile.locator(".pvparts").isVisible()), `${tag}: Cash parts shown before a hover or tap`);
+        if (phone) await tile.tap();
+        else await tile.hover();
+        const got = await page.evaluate((sel) => {
+          const box = document.querySelector(`${sel} [data-tile="cash"] .pvparts`);
+          const r = box.getBoundingClientRect();
+          const rows = [...box.querySelectorAll("[data-part]")].map((x) => [x.getAttribute("data-part"), x.textContent, x.getAttribute("data-cents"), x.hasAttribute("data-moving")]);
+          // the element drawn at each row's centre is the row's own: nothing covers it, no ancestor clips it
+          const seen = [...box.querySelectorAll("[data-part]")].every((x) => { const q = x.getBoundingClientRect(); const e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!e && x.contains(e); });
+          return { rows, inside: r.left >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5, seen };
+        }, form);
+        check(JSON.stringify(got.rows) === JSON.stringify(parts), `${tag}: Cash parts ${JSON.stringify(got.rows)}`);
+        check(got.inside && got.seen, `${tag}: Cash parts outside the viewport or covered ${JSON.stringify(got)}`);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `cash-parts-${f}-${w.name}${SCHEME === "dark" ? "" : `-${SCHEME}`}.png`) });
+        if (phone) {
+          await tile.tap();
+          check(!(await tile.locator(".pvparts").isVisible()), `${tag}: a second tap closes the Cash parts`);
+        } else await page.mouse.move(1, 1);
+        await page.evaluate(() => window.scrollTo(0, 0));
       }
       // a pool fixture's phone shot shows the pool rows (the S10.3 bar above scrolled to the segments)
       if (phone && f.startsWith("pools")) await page.evaluate(() => document.querySelector(".pfm .pools").scrollIntoView({ block: "center" }));

@@ -51,6 +51,13 @@ export function useBalance(snapshot: SignpageClientSnapshot): bigint | null {
   return balanceOf(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now());
 }
 
+/** Cash less the SOL and ETH pools (Totals.offPool, card portfolio-one-balance): what the trade box's Bal draws on a
+ *  chain it buys on with no pool, the vault path's money; the pool chains draw their own pool. Null before the first state. */
+export function useOffPool(snapshot: SignpageClientSnapshot): bigint | null {
+  const fixture = useContext(Fixture);
+  return portfolio(snapshot, fixture?.data ?? NO_DATA, fixture?.now() ?? Date.now()).totals?.offPool ?? null;
+}
+
 /** The open position on `chain` of `token` in `snapshot` (heldOf), from the same rows Portfolio draws, so the trade box's
  *  Sell side sells the number Portfolio shows; null with no snapshot (signed out) or no such position. */
 export function useHeld(snapshot: SignpageClientSnapshot | null, chain: Chain, token: string): Row | null {
