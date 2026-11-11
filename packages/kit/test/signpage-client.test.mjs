@@ -474,9 +474,9 @@ test("a request's id is known at once and is the id posted, so progress events c
   assert.deepEqual(seen, [[id, "filled"]]);
 });
 
-// -------------------------------------------------------------------------------------------- the twenty-four kinds
-test("every kind of the twenty-four has a fixture, and only the twenty-four do", () => {
-  assert.equal(SIGNPAGE_KINDS.length, 24);
+// -------------------------------------------------------------------------------------------- the twenty-five kinds
+test("every kind of the twenty-five has a fixture, and only the twenty-five do", () => {
+  assert.equal(SIGNPAGE_KINDS.length, 25);
   assert.deepEqual(Object.keys(FIXTURES).sort(), [...SIGNPAGE_KINDS].sort());
 });
 
@@ -550,6 +550,32 @@ test("card pool-sell-share-across-wallets: pool.sell takes a share of the whole 
     assert.deepEqual(C.signpageBuildRequest("pool.sell", good, "id"), { ...good, v: 1, id: "id", type: "pool.sell" }, JSON.stringify(good));
   for (const b of [base, { ...base, amount: "2", share_bps: 5_000 }, { ...base, share_bps: 0 }, { ...base, share_bps: 10_001 }, { ...base, share_bps: 50.5 }, { ...base, share_bps: "5000" }])
     assert.throws(() => C.signpageBuildRequest("pool.sell", b, "id"), TypeError, JSON.stringify(b));
+});
+
+test("card app-sell-shows-what-you-receive: pool.sell.dry takes pool.sell's params exactly (a share or a typed amount, one of them), and answers out, network and fee_bps only", async () => {
+  const T = "So1aNaMint1111111111111111111111111111111pump";
+  const base = { chain: "solana", token: T, slippage_bps: 1000 };
+  for (const good of [{ ...base, share_bps: 5_000 }, { ...base, amount: "12.5" }, { chain: "base", token: "0xF111111111111111111111111111111111111111", share_bps: 10_000, slippage_bps: 0 }])
+    assert.deepEqual(C.signpageBuildRequest("pool.sell.dry", good, "id"), { ...good, v: 1, id: "id", type: "pool.sell.dry" }, JSON.stringify(good));
+  for (const b of [base, { ...base, amount: "2", share_bps: 5_000 }, { ...base, share_bps: 0 }, { ...base, share_bps: 10_001 }, { ...base, chain: "near", share_bps: 5_000 }, { ...base, share_bps: 5_000, wallet: "W" }])
+    assert.throws(() => C.signpageBuildRequest("pool.sell.dry", b, "id"), TypeError, JSON.stringify(b));
+  const R = FIXTURES["pool.sell.dry"].result;
+  for (const [result, why] of [
+    [{ ...R, out: "-1" }, "an out that is not a decimal"],
+    [{ ...R, network: 0.000005 }, "a network fee that is not a string"],
+    [{ ...R, fee_bps: 10_001 }, "a fee over 100%"],
+    [{ ...R, fee_bps: 1.5 }, "a fee not whole"],
+    [{ out: R.out, network: R.network }, "no fee"],
+    [{ ...R, min_out: "0.1" }, "a field the answer does not have"],
+    [{ ...R, wallet: "W" }, "a wallet on a preview"],
+  ]) {
+    const { h, c } = await readyClient();
+    const { id, settled } = await open(h, c, "pool.sell.dry");
+    h.post(answer(id, result));
+    await flush();
+    assert.equal(settled(), false, why);
+    assert.equal(c.dropped().shape, 1, why);
+  }
 });
 
 test("the deposit sheet's reads (card kit-deposit-assets-dry): deposit.assets takes no field, deposit.dry an asset and a decimal amount only, never an address", () => {
@@ -1373,6 +1399,8 @@ test("each kind's timeout is the table's (app.md §2.1 item 3); restore has none
     "deposit.assets": 15_000, "deposit.dry": 15_000,
     // a pool's deposit address (card pool-deposit-address): the helper's 1Click round trip, as deposit.quote
     "pool.address": 15_000,
+    // the sell box's preview (card app-sell-shows-what-you-receive): pool reads on two providers, as pool.sell's
+    "pool.sell.dry": 10_000,
   });
 });
 

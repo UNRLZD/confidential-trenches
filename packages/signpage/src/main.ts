@@ -94,7 +94,8 @@ import { proverHost } from "./prover-host.ts";
 import { drawPoolWithdrawForm } from "./withdraw/pool-form.ts";
 import { releaseTradeDeps, tradeKind } from "./trade.ts";
 import { settleTradeOps, timedStore, TRADE_STORE_MS, tradeSettleDue } from "./trade.ts";
-import { poolKinds } from "./pool-kinds.ts";
+import { PAGE_TOKEN_DECIMALS, poolKinds } from "./pool-kinds.ts";
+import { poolSellDryKind } from "./pool-sell-dry.ts";
 import { PAGE_SOL_PIN, testnetPool, testnetPoolDeps } from "./pool-testnet.ts";
 import { poolRestore, restoreUxOf } from "./pool-restore.ts";
 import type { PoolChain } from "./rules/pool.ts";
@@ -224,6 +225,26 @@ else {
   );
   const hasSolana = PAGE_POOLS.some((p) => p.chain === "solana");
   const poolKindMap = poolKinds(poolDeps);
+  // the sell box's preview (src/pool-sell-dry.ts): the positions pass's holding, the sale's own quote on the trades' paced
+  // pair, never while a trade's reads hold it: a sell's by its lock, a pool buy's by this count (from its tap to its
+  // answer's wait settled)
+  let poolBuys = 0;
+  const poolBuy = poolKindMap["pool.buy"];
+  poolKindMap["pool.buy"] = (params, ctx) => {
+    const r = poolBuy(params, ctx);
+    if (r !== null && typeof r === "object" && "after" in r) {
+      poolBuys++;
+      void r.after.finally(() => poolBuys--);
+    }
+    return r;
+  };
+  const poolSellDry = poolSellDryKind({
+    pinned: (chain) => poolDeps.pinned(chain),
+    rpcs: () => (poolDeps.rpcs("solana") as unknown as readonly [SolanaRpc, SolanaRpc] | null),
+    positions: async () => (testnet ? testnet.positions() : null),
+    decimals: PAGE_TOKEN_DECIMALS,
+    busy: () => poolBuys > 0,
+  });
   // a pool quote's price reads (pool-deposit-address.ts priced): USDC in at 1 USD on both reads, X's coin at the page's
   // own Pyth read on its two RPCs (src/pool-price.ts); any other origin has none yet, so it gets no quote
   const pricedFor = (chain: PoolChain, origin: string): PoolQuotePricing | null => poolQuotePricing(prices.get(chain), origin);
@@ -322,6 +343,7 @@ else {
       // no pin, mainnet until its pools deploy, refuses every one not_allowed and makes no read); a sell's decimals read
       // on two providers
       ...poolKindMap,
+      "pool.sell.dry": (params) => poolSellDry(params),
       // the rebuild from the chain (src/pool-restore.ts): answered started, its stages in state.ops and as progress
       ...(restore ? { restore: restore.kind } : {}),
     }),

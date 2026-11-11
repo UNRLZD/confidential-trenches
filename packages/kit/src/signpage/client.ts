@@ -93,6 +93,8 @@ export const SIGNPAGE_TIMEOUT_MS = {
   // a pool's deposit address (card pool-deposit-address): with an origin asset, the helper's 1Click round trip, as
   // deposit.quote
   "pool.address": 15_000,
+  // the sell box's preview (card app-sell-shows-what-you-receive): pool reads on two providers, as pool.sell's
+  "pool.sell.dry": 10_000,
 } as const satisfies Record<SignpageKind, number | null>;
 deepFreeze(SIGNPAGE_TIMEOUT_MS);
 
