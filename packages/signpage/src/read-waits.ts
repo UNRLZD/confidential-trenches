@@ -148,6 +148,45 @@ export function keptReads(rpcs: readonly [SolanaRpc, SolanaRpc], stable: (method
   return [keep(rpcs[0]), keep(rpcs[1])];
 }
 
+/** The pair of providers with the reads `shared` names given to every caller that asks the very same read (method and
+ *  params) while it is under `ms` old on `now`, from its ask: one answer for the legs of a sale (card
+ *  pool-sell-legs-side-by-side). A read in flight is shared too; a failed one is never kept, so the next ask reads again.
+ *  `forget` drops every kept read: a sale read again after a wait (a throttle's, a rebuild) reads all of them afresh.
+ *  The same providers to solanaSameProvider and their queues (solanaWrappedRpc). */
+export type YoungReads = readonly [SolanaRpc, SolanaRpc] & { forget(): void };
+export function youngReads(rpcs: readonly [SolanaRpc, SolanaRpc], shared: (method: string, params: readonly unknown[]) => boolean, ms: number, now: () => number): YoungReads {
+  const all: Map<string, unknown>[] = [];
+  const keep = (rpc: SolanaRpc): SolanaRpc => {
+    const kept = new Map<string, { at: number; read: Promise<unknown> }>();
+    all.push(kept);
+    return solanaWrappedRpc(rpc, (method, params) => {
+      if (!shared(method, params)) return rpc(method, params);
+      const key = `${method} ${JSON.stringify(params)}`;
+      const at = now();
+      const k = kept.get(key);
+      if (k && at - k.at < ms) return k.read;
+      const read = Promise.resolve(rpc(method, params));
+      const mine = { at, read };
+      kept.set(key, mine);
+      read.catch(() => {
+        if (kept.get(key) === mine) kept.delete(key);
+      });
+      return read;
+    });
+  };
+  return Object.assign([keep(rpcs[0]), keep(rpcs[1])] as const, { forget: () => all.forEach((m) => m.clear()) });
+}
+/** The pair's kept young reads dropped, when it is youngReads' (any other pair keeps none). */
+export const forgetYoung = (rpcs: readonly [SolanaRpc, SolanaRpc]): void => (rpcs as Partial<YoungReads>).forget?.();
+
+/** A sell's reads that are the same for each of its legs and may be a few seconds old: the coin's market (a
+ *  getMultipleAccounts naming the mint: the reference's curve and PumpSwap reads, the venue's; no read of a W's names
+ *  the mint itself, only its token account) and the blockhash with its check (getLatestBlockhash, isBlockhashValid). */
+export const solanaSaleReads =
+  (mint: string | null) =>
+  (method: string, params: readonly unknown[]): boolean =>
+    method === "getLatestBlockhash" || method === "isBlockhashValid" || (mint !== null && method === "getMultipleAccounts" && Array.isArray(params[0]) && (params[0] as unknown[]).includes(mint));
+
 /** A sell's or a buy's stable reads: the Rent sysvar, and the token's mint account (getAccountInfo of `mint`). */
 export const solanaStableReads =
   (mint: string | null) =>

@@ -33,7 +33,7 @@ import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { BLOCKHASH, FEE_PAYER, POOL, PROGRAM, fx, providers, rent } from "../../kit/test/solana-pool-buy-fx.ts";
-import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
+import { POOL_RENT_BACK_MS, POOL_RENT_BACK_RULES, POOL_SELL_LOCK, POOL_SELL_READS, POOL_SELL_SHARED_READ_MS, POOL_SELL_SIZE_RETRY_MS, POOL_SELL_WAIT_MS, buyMints, leftAfter, owedRentBacks, planPoolSell, poolSellKind, resumeRentBacks, runPoolSell, settleDeadSellOps, settlePoolSells, settleSellOps, solanaSellAfterFull, solanaSellReserve, keptSells, stageOfLegs, type KeptSell, type OwedRentBack, type PoolSellHost, type PoolSellKindHost, type RentBackTold } from "../src/pool-sell.ts";
 import { opOf } from "../src/state.ts";
 import { solanaCompileV0 } from "../../kit/src/trade/solana/build.ts";
 import { checkSolanaSweep, PoolRuleRefused, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, solanaDepositRents, solanaSweepFloor, solanaSweepKeep, solanaWithdrawMinPart, withdrawNoteFloor, type PoolAsk } from "../src/rules/pool.ts";
@@ -4909,7 +4909,7 @@ async function legRounds(w: World, ask: PoolAsk, plant?: (t: ReturnType<typeof t
   return { a: await run, signedAt, sentAt, callsAtSend };
 }
 
-test("card pool-sell-legs-side-by-side: a later leg reads before its turn only what no other sale changes, and signs three read rounds after the leg before it sent (its quote, blockhash, W's accounts, the deposit's pages and the venue all read after that send)", async () => {
+test("card pool-sell-legs-side-by-side: a later leg reads before its turn only what no other sale changes, and signs three read rounds after the leg before it sent (W's accounts and the deposit's pages read after that send; its quote, blockhash and venue the sale's young reads)", async () => {
   const w = await twoBuys({ ataLamports: TOKEN_RENT });
   (w.host as { back?: unknown }).back = undefined;
   const r = await legRounds(w, share(10_000));
@@ -4926,7 +4926,9 @@ test("card pool-sell-legs-side-by-side: a later leg reads before its turn only w
   const earlier = w.c.calls.slice(0, at);
   for (const p of [0, 1] as const) {
     assert.ok(later.some((c) => c.p === p && namesIn(c.method, c.params, ataOfW(W.address))), "W's accounts read again after the first send");
-    assert.ok(later.some((c) => c.p === p && (c.method === "getLatestBlockhash" || c.method === "isBlockhashValid")), "the second leg's blockhash after the first send");
+    // the blockhash, its check and the coin's market: the sale's young reads (POOL_SELL_SHARED_READ_MS on this fake
+    // chain's fixed clock), none of the second leg's own; past the bound it reads its own (the test of the shared reads)
+    assert.ok(!later.some((c) => c.p === p && (c.method === "getLatestBlockhash" || c.method === "isBlockhashValid")), "the second leg takes the sale's young blockhash");
   }
   // before the first send, W's sale asked no blockhash, quote or venue of its own: one getLatestBlockhash (X's) on RPC 0
   assert.equal(earlier.filter((c) => c.method === "getLatestBlockhash").length, 1);
@@ -5074,4 +5076,86 @@ test("a leg refused before it signed keeps its cause in the record and on the co
   const line = warned.find((x) => x.includes("-32016"));
   assert.ok(line, `the console: ${warned.join(" | ")}`);
   for (const x of [bad.cause!, line!]) assert.ok(!/https?:|api-key|secret|rpc\.example/.test(x), `public words only: ${x}`);
+});
+
+// card pool-sell-legs-side-by-side: the paid pass of 11 Nov 07:36Z drew 59 calls in 10 s from the helper, over one
+// caller's 42. Each leg after the first asked again the reads that are the same for every leg of the sale: the coin's
+// market (the reference's curve and PumpSwap reads, the venue's) and the blockhash. A later leg takes the sale's read
+// while it is under POOL_SELL_SHARED_READ_MS old, and reads its own past that.
+test("a sale's legs share its market and blockhash reads while they are young, and a leg past the bound reads its own", async () => {
+  for (const late of [false, true]) {
+    const w = await twoBuys();
+    let now = 1_000n;
+    (w.host as { now: () => bigint }).now = () => now;
+    const sent0 = w.host.sent;
+    // a leg's send moves the clock on by the bound and 1 ms when `late`: the next leg's shared reads are too old
+    let sends = 0;
+    (w.host as { sent: unknown }).sent = (sig: string) => {
+      sends++;
+      if (late) now += BigInt(POOL_SELL_SHARED_READ_MS + 1);
+      sent0?.(sig);
+    };
+    const asked: string[] = [];
+    const f = faulty(w, (p, method, params) => {
+      // the sale's reads up to its last leg's send (the rent backs after it are not the legs')
+      if (sends >= 2) return null;
+      const market = method === "getMultipleAccounts" && (params[0] as string[]).includes(MINT);
+      if (market || method === "getLatestBlockhash" || method === "isBlockhashValid") asked.push(`${p}:${market ? "market" : method}`);
+      return null;
+    });
+    (w.host as { rpcs: unknown }).rpcs = f.rpcs;
+    const a = await runPoolSell(w.host, share(10_000));
+    assert.deepEqual("legs" in a && a.legs!.map((l) => l.stage), ["filled", "filled"], `late ${late}`);
+    const n = (k: string) => asked.filter((x) => x === k).length;
+    // the plan's and the first leg's: the reference's two market reads and the venue's on each RPC, one blockhash read
+    // and its check; the second leg: none of its own while young, all of them again past the bound
+    const legs = late ? 2 : 1;
+    assert.deepEqual([n("0:market"), n("1:market"), n("0:getLatestBlockhash"), n("1:isBlockhashValid")], [3 * legs, 3 * legs, legs, legs], `late ${late}: ${asked.join(" ")}`);
+  }
+});
+
+test("a leg priced on the sale's shared read after an earlier leg's sell moved the curve signs a floor no lower than its own fresh read gives: only stricter, never below the user's slippage", async () => {
+  // the first leg's send moves the curve's virtual SOL reserves down a tenth (its sell landed: the coin is cheaper), and
+  // the clock on by `step`: 0, the second leg takes the sale's young read (priced before the move); past the bound, its own
+  const floorOf = async (step: number): Promise<bigint> => {
+    const w = await twoBuys();
+    let now = 1_000n;
+    (w.host as { now: () => bigint }).now = () => now;
+    // the market as both RPCs read it once the first leg's sell landed: each pump curve's virtual SOL reserves a tenth lower
+    let moved = false;
+    const move = (rpc: SolanaRpc): SolanaRpc =>
+      (async (method: string, params: readonly unknown[]) => {
+        const r = await rpc(method, params);
+        if (!moved || method !== "getMultipleAccounts" || !(params[0] as string[]).includes(MINT)) return r;
+        const c = structuredClone(r) as { value: ({ owner: string; data: [string, string] } | null)[] };
+        for (const a of c.value) {
+          if (a?.owner !== SOLANA_PUMP_PROGRAM) continue;
+          const d = base64.decode(a.data[0]);
+          if (d.length < 83 || d.length >= 300) continue;
+          const v = new DataView(d.buffer, d.byteOffset + 16, 8);
+          v.setBigUint64(0, (v.getBigUint64(0, true) * 9n) / 10n, true);
+          a.data[0] = base64.encode(d);
+        }
+        return c;
+      }) as SolanaRpc;
+    (w.host as { rpcs: unknown }).rpcs = [move(w.c.rpcs[0]), move(w.c.rpcs[1])];
+    const sent0 = w.host.sent;
+    (w.host as { sent: unknown }).sent = (sig: string) => {
+      if (!moved) {
+        moved = true;
+        now += BigInt(step);
+      }
+      sent0?.(sig);
+    };
+    const a = await runPoolSell(w.host, share(10_000));
+    assert.deepEqual("legs" in a && a.legs!.map((l) => l.stage), ["filled", "filled"], `step ${step}: ${JSON.stringify(a)}`);
+    const m = solanaDecodeMessage(w.c.txs.get(saleSigs(a)[1]!)!.tx.subarray(65));
+    const ix = m.instructions.find((x) => x.data.length === 24)!;
+    return new DataView(ix.data.buffer, ix.data.byteOffset + 16, 8).getBigUint64(0, true);
+  };
+  const shared = await floorOf(0);
+  const own = await floorOf(POOL_SELL_SHARED_READ_MS + 1);
+  // the shared read's floor is above the fresh one's: on the chain the venue refuses a sell under it (the leg is refused,
+  // its W keeps its tokens), and no read makes a floor under the fresh read's price less the user's slippage
+  assert.ok(shared > own, `shared ${shared}, own ${own}`);
 });

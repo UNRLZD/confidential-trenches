@@ -73,7 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, forgetYoung, solanaSaleReads, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, youngReads, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
@@ -142,6 +142,12 @@ export type PoolSellAnswer = { stage: TradeStage; txs: TxRef[]; legs?: readonly 
 /** Verdict reads a sell gets, a second apart: past a blockhash's life (~60 to 90 s) and a finalization. */
 export const POOL_SELL_READS = 120;
 export const POOL_SELL_WAIT_MS = 1_000;
+/** How long a sale's market and blockhash reads (solanaSaleReads) serve its later legs (card pool-sell-legs-side-by-side:
+ *  each leg asking them again drew the helper's 429). [design: 4 s, 10 slots at 400 ms: a leg's reference stays under
+ *  SOLANA_POOL_QUOTE_MAX_AGE_SLOTS (25) from its read to the leg's send; past it the leg reads its own.] A shared read
+ *  made before an earlier leg's sell landed prices the coin higher than it now is, so the leg's floor can only be
+ *  stricter: its simulation on both RPCs refuses it, or the chain does, never a sale below the user's slippage. */
+export const POOL_SELL_SHARED_READ_MS = 4_000;
 /** Two providers a slot apart read the pool account at two states: read again once, this long after. */
 export const POOL_SELL_SIZE_RETRY_MS = 500;
 /** One sell at a time on this device, every tab: two runs never pick one return note. */
@@ -613,12 +619,15 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWalle
       const ms = waits.next(later.fault);
       if (ms !== null) {
         await waitUnless(h.wait, ms, h.signal);
+        // every read after the wait its own: none of the sale's young reads from before it
+        forgetYoung(h.rpcs);
         // a sign out during the wait: the sale never starts again (nothing signed)
         if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
         continue;
       }
     }
     if (!later.rebuild || i >= POOL_SELL_REBUILDS) return a;
+    forgetYoung(h.rpcs);
     i++;
   }
 }
@@ -798,7 +807,9 @@ export function stageOfLegs(legs: readonly Pick<PoolSellLeg, "stage" | "error">[
 async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks: LegHooks = {}, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolSellAnswer> {
   let plan: PoolSellPlan;
   // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
-  const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
+  // and its market and blockhash reads, shared by its legs while young (youngReads)
+  const clock = (): number => Number(host.now?.() ?? BigInt(Date.now()));
+  const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: youngReads(keptReads(host.rpcs, solanaStableReads(ask.token)), solanaSaleReads(ask.token), POOL_SELL_SHARED_READ_MS, clock) });
   // one tap's waits: its plan's and every sale's share the rule's one bound (READ_WAIT_TOTAL_MS on the clock)
   // an ask that is not a Solana sell of a token: refused before any read (planPoolSell's own refusal)
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return { error: "not_allowed" };
@@ -851,6 +862,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
         if (ms === null) return { error: "down" };
         await waitUnless(h.wait, ms, h.signal);
         if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
+        forgetYoung(h.rpcs);
         continue;
       }
       return { error: "failed" };

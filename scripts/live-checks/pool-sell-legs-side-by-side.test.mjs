@@ -5,7 +5,8 @@
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
 // checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
 // sale, the seed read with no W, the seed copy not zeroed, a W no record names left unread, read whatever its record,
-// or the finder asked for every W: each FAIL.
+// or the finder asked for every W; a helper seat paced past the helper's share, or under another limit; the sale's reads
+// unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read: each FAIL.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -14,6 +15,8 @@ import { facts, judge } from "./pool-sell-legs-side-by-side.mjs";
 const A = JSON.parse(readFileSync(new URL("./pool-sell-legs-side-by-side.answers.json", import.meta.url), "utf8"));
 const NO_TURN = "BAD a sale of several wallets reads a later leg's sale only after the leg before it sent: each leg's reads wait out every sale before it";
 const NO_LISTED = "BAD a sale reads the finder at the tap: its list of wallets waits on a read the last whole positions pass already made";
+const NO_SHARE = "BAD the page's helper seats are paced past the helper's share per caller: a sale's legs draw its 429 and wait it out";
+const NO_YOUNG = "BAD each leg of a sale asks its market and blockhash again: the legs draw the providers' share with reads that are the same for each";
 
 test("recorded good answer: this card's build: PASS", () => {
   const v = judge(A.good);
@@ -23,7 +26,7 @@ test("recorded good answer: this card's build: PASS", () => {
 test("recorded bad answer: SIGN_HOST as served before this card: FAIL, each fact named", () => {
   const v = judge(A.bad);
   assert.equal(v.ok, false);
-  assert.deepEqual(v.lines, [NO_TURN, NO_LISTED]);
+  assert.deepEqual(v.lines, [NO_TURN, NO_LISTED, NO_SHARE, NO_YOUNG]);
 });
 
 test("planted on the good answer: each fact taken away FAILs", () => {
@@ -32,6 +35,8 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.deepEqual(judge({ ...g, index: "<html></html>" }).lines, ["BAD SIGN_HOST's index.html pins no /app.js"]);
   assert.deepEqual(judge({ ...g, turn: false }).lines, [NO_TURN]);
   assert.deepEqual(judge({ ...g, listed: false }).lines, [NO_LISTED]);
+  assert.deepEqual(judge({ ...g, share: false }).lines, [NO_SHARE]);
+  assert.deepEqual(judge({ ...g, young: false }).lines, [NO_YOUNG]);
   assert.equal(judge(null).ok, false);
 });
 
@@ -40,6 +45,8 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
   const f = facts(A.good.index, js);
   assert.equal(f.turn, true, "the excerpt holds the turn");
   assert.equal(f.listed, true, "the excerpt holds the listing");
+  assert.equal(f.share, true, "the excerpt holds the helper's share");
+  assert.equal(f.young, true, "the excerpt holds the young reads");
   for (const [what, from, to, key] of [
     ["the turn not awaited", "(await T,e.stopped?.())", "(e.stopped?.())", "turn"],
     ["no sign out checked after the turn", "(await T,e.stopped?.())", "(await T,!1)", "turn"],
@@ -51,6 +58,17 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["every W read through the finder, recorded or not", "!Object.hasOwn(o,e)&&!r.has(e)", "!0", "listed"],
     ["the finder asked for every W, not the unrecorded ones only", "{only:u,together:!0}", "{together:!0}", "listed"],
     ["the seed read with no W", "if(t.length===0)return a=[];", "", "listed"],
+    ["the helper's share past its 42", "total:42,", "total:100,", "share"],
+    ["the release's helper seat unpaced by the share", "Fh(SL(dB),bL)]", "Fh(SL(dB))]", "share"],
+    ["the pool pair's helper seat unpaced by the share", "Fh(SL(dB,Hh,e),bL)],", "Fh(SL(dB,Hh,e))],", "share"],
+    ["the settle pair's helper seat unpaced by the share", "Fh(SL(dB,Uh,e),bL)]", "Fh(SL(dB,Uh,e))]", "share"],
+    ["the pass's helper reads unpaced by the share", "`pass`),bL)", "`pass`))", "share"],
+    ["the sale's reads unshared", "rpcs:nR(tR(e.rpcs,aR(t.token)),iR(t.token),rU,", "rpcs:(tR(e.rpcs,aR(t.token)),iR(t.token),rU,", "young"],
+    ["shared past 4 s", "rU=4e3", "rU=6e4", "young"],
+    ["shared at any age", "if(l&&c-l.at<n)return l.read", "if(l)return l.read", "young"],
+    ["a failed read kept", "u.catch(()=>{a.get(s)===d&&a.delete(s)})", "u.catch(()=>{})", "young"],
+    ["a W's read shared (every getMultipleAccounts)", "t===`getMultipleAccounts`&&Array.isArray(n[0])&&n[0].includes(e)", "t===`getMultipleAccounts`", "young"],
+    ["nothing forgotten after a wait", "rR(e.rpcs),e.stopped", "e.stopped", "young"],
   ]) {
     const bad = js.replace(from, to);
     assert.notEqual(bad, js, what);
