@@ -4,9 +4,6 @@
 //     its blockhash and the deposit's pages in one round with its quote (packages/signpage/src/pool-sell.ts sellRun);
 //   - listed: the sale's list of wallets is made with no read at the tap, from the spent notes and the last whole
 //     positions pass (keptListed), the finder only when none is kept (packages/signpage/src/pool-testnet.ts sellHost);
-//   - share: every seat of the page on the helper (the trade's pair, the pool pair, the settle pair, the pass's) is paced
-//     to the helper's own share per caller, 42 per 10 s and 40 of one method (packages/signpage/src/page-rpc.ts
-//     HELPER_SOLANA_LIMIT), so the legs wait their turn on the page, never the helper's 429;
 //   - young: a sale's market and blockhash reads (read-waits.ts solanaSaleReads: getLatestBlockhash, isBlockhashValid, a
 //     getMultipleAccounts naming the mint) are one answer for its legs while under 4 s old (pool-sell.ts
 //     POOL_SELL_SHARED_READ_MS), never a failed one kept, and every one dropped after a wait (forgetYoung).
@@ -34,14 +31,6 @@ const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await \\1,${
 // the listing names read through the finder, those Ws only (review of 55d4c6eb, P2-A: a W from before a sign out)
 const LISTED = new RegExp(`wallets:async\\(\\)=>\\{let ${N}=${N}\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,${N}\\)\\):null;if\\(\\1!==null\\)\\{let (${N})=await ${N}\\(await ${N}\\(\\),${N}\\);if\\(\\2\\.length===0\\)return ${N}=\\[\\];let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\},${N}=await ${N}\\.seed64\\(\\),(${N}),(${N}),(${N})=null;try\\{\\4=${N}\\(${N},\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2\\}\\]\\),\\5=new Set\\(\\4\\.wallets\\.map\\(${N}=>${N}\\.address\\)\\.filter\\((${N})=>!Object\\.hasOwn\\(\\3,\\7\\)&&!\\1\\.has\\(\\7\\)\\)\\),\\4\\.failed\\.length===0&&\\5\\.size>0&&\\(\\6=${N}\\(${N},\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2,reader:${N}\\(${N}\\)\\}\\]\\)\\)\\}finally\\{${N}\\.fill\\(0\\)\\}[^]{0,240}?\\6\\.read\\(\\{only:\\5,together:!0\\}\\)`);
 
-// the helper's share as a limit, and each helper seat paced under it: the release's pair, then pageSolanaRpcs and
-// pageSolanaSettleRpcs (provider A as before, the helper's seat with the limit), and the positions pass's helper reads
-const LIMIT = new RegExp(`(?<![\\w$])(${N})=\\{windowMs:1e4,total:42,perMethod:40\\}`);
-const seats = (l) => [
-  new RegExp(`providers:\\[${N}\\(${N}\\(${N}\\)\\),${N}\\(${N}\\(${N}\\),${l}\\)\\]`),
-  new RegExp(`=\\((${N})=\`trade\`\\)=>\\[${N}\\(${N}\\(${N},\\1\\)\\),${N}\\(${N}\\(${N},${N},\\1\\),${l}\\)\\],${N}=\\((${N})=\`trade\`\\)=>${N}\\(${N}\\(${N},${N},\\2\\)\\),${N}=\\((${N})=\`trade\`\\)=>\\[${N}\\(${N}\\(${N},\\3\\)\\),${N}\\(${N}\\(${N},${N},\\3\\),${l}\\)\\]`),
-  new RegExp(`${N}\\(${N}\\(${N},${N}\\.signal,\`pass\`\\),${l}\\)`),
-];
 // the sale's pair: its stable reads kept, then its sale reads young under the bound on the host's clock; the bound
 // 4 s; the young read: shared while under the bound, a failed one dropped, and a forget that drops all; the sale reads
 // named; and the young reads forgotten after a leg's wait and after the plan's
@@ -62,17 +51,13 @@ const youngOf = (js) => {
     (js.match(new RegExp(`(?<![\\w$])${forget}\\(${N}\\.rpcs\\)`, "g")) ?? []).length >= 3
   );
 };
-const shareOf = (js) => {
-  const l = LIMIT.exec(js)?.[1];
-  return !!l && seats(l.replace(/\$/g, "\\$")).every((r) => r.test(js));
-};
 
 /** What the check keeps of SIGN_HOST's page: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), turn: TURN.test(js), listed: LISTED.test(js), share: shareOf(js), young: youngOf(js) };
+  return { index, sha384: sha384(js), turn: TURN.test(js), listed: LISTED.test(js), young: youngOf(js) };
 }
 
-/** The verdict on an answer { index, sha384, turn, listed, share, young }. */
+/** The verdict on an answer { index, sha384, turn, listed, young }. */
 export function judge(a) {
   const lines = [];
   const bad = (l) => lines.push(`BAD ${l}`);
@@ -81,7 +66,6 @@ export function judge(a) {
   else if (pin !== a.sha384) bad("SIGN_HOST's served /app.js is not the one index.html pins");
   if (a?.turn !== true) bad("a sale of several wallets reads a later leg's sale only after the leg before it sent: each leg's reads wait out every sale before it");
   if (a?.listed !== true) bad("a sale reads the finder at the tap: its list of wallets waits on a read the last whole positions pass already made");
-  if (a?.share !== true) bad("the page's helper seats are paced past the helper's share per caller: a sale's legs draw its 429 and wait it out");
   if (a?.young !== true) bad("each leg of a sale asks its market and blockhash again: the legs draw the providers' share with reads that are the same for each");
   return { ok: !lines.length, lines };
 }

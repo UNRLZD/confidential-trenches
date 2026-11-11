@@ -407,21 +407,3 @@ test("every request the page sends a host counts in that host's lane: the helper
     }
   });
 });
-
-// card pool-sell-legs-side-by-side: the paid devnet pass of 11 Nov 07:36Z drew 59 calls in 10 s from the helper, which
-// serves one caller 42 per 10 s (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED), and its legs waited out the 429s. The
-// page's helper seat is paced to the helper's own share: a call past it waits its turn on the page, never the 429's.
-test("the helper's seat is paced to the helper's share per caller: of 50 reads asked at once, 42 go out in the first 10 s and the rest after, none refused", async () => {
-  const host = new URL(HELPER).host;
-  await onProvider(() => 200, async (sent) => {
-    const rpc = pageSolanaRpcs("trade")[1];
-    const start = sent.length;
-    const all = Array.from({ length: 50 }, (_, i) => rpc(i % 2 === 0 ? "getSlot" : "getHealth", [i]));
-    await tick(9_900);
-    const mine = () => sent.slice(start).filter((s) => s.host === host);
-    assert.equal(mine().length, 42, "the share in the first window");
-    assert.deepEqual(await Promise.all(all), Array(50).fill(7));
-    assert.equal(mine().length, 50);
-    assert.ok(mine().every((s) => s.status === 200));
-  });
-});

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SolanaRpcTransportError, solanaPacedRpc } from "../../kit/src/trade/solana/send.ts";
-import { HELPER_SOLANA_LIMIT, pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
+import { pageHelperRpc, pageHelperRpcStopped, pageRpc } from "../src/page-rpc.ts";
 import { pageSolanaLister, pageSolanaRpcs, testnetPoolDeps } from "../src/pool-testnet.ts";
 import { SOLANA_PROVIDER_A, TRADE_HELPER, releaseTradeDeps } from "../src/trade.ts";
 import { readdirSync, readFileSync } from "node:fs";
@@ -235,15 +235,4 @@ test("the mainnet build's Solana reads: the lister is the helper's marks route; 
     [`${TRADE_HELPER}/v1/rpc/solana`, "getProgramAccounts"],
     [`${TRADE_HELPER}/v1/rpc/solana`, "getMultipleAccounts"],
   ]);
-});
-
-// card pool-sell-legs-side-by-side: the page paces its helper seat to the helper's own share per caller; the helper
-// imports no page code, so its number is read here as text and held equal to the page's: a change of either moves both
-test("the page's helper pace is the helper's share per caller on both Solana routes (apps/helper/src/rpc/rpc.ts RPC_PAGE_NEED)", () => {
-  const helper = readFileSync(new URL("../../../apps/helper/src/rpc/rpc.ts", import.meta.url), "utf8");
-  const need = /export const RPC_PAGE_NEED\b[^=]*= \{([^}]*)\}/.exec(helper)?.[1] ?? "";
-  const of = (route: string) => Number(new RegExp(`(?:^|[\\s,])"?${route}"?: (\\d+)`).exec(need)?.[1]);
-  assert.equal(of("solana"), HELPER_SOLANA_LIMIT.total);
-  assert.equal(of("solana-devnet"), HELPER_SOLANA_LIMIT.total);
-  assert.equal(HELPER_SOLANA_LIMIT.windowMs, 10_000, "the helper's window (RPC_PAGE_NEED is per 10 s)");
 });
