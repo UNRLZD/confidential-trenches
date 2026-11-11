@@ -61,7 +61,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
+import { derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, wantedBuyWallets, type BuyWallet, type HoldingsReader, type ListedBuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmNow, evmPair, evmRetryLag, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -1279,11 +1279,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         signal: run.signal,
         // the sell's own read of the Ws it read when one was fed, the finder's read of the rest with a buy record (a sell
         // reads only the Ws that can hold its token: card wallets-found-in-one-read)
-        wallets: async (only) => {
+        wallets: async (only, o = {}) => {
           const fed = (run.found ?? []).filter((w) => only.has(w.address));
+          for (const w of fed) o.each?.(w);
           const rest = new Set([...only].filter((a) => !fed.some((w) => w.address === a)));
-          return [...fed, ...(rest.size === 0 ? [] : await recordedWallets(st, r, rest, run.signal))];
+          return [...fed, ...(rest.size === 0 ? [] : await recordedWallets(st, r, rest, run.signal, o))];
         },
+        ...(run.shown ? { shown: run.shown } : {}),
         bought: async () => meta(BUY_MINTS_KEY),
         costs: async () => (await meta(POSITION_COSTS_KEY)) as PositionCosts,
         awaited: () => awaited,
@@ -1372,7 +1374,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // The Ws of `only` as the finder reads them. Derived under the seed's shared lock, the seed copy zeroed as soon as
   // they are (a sign out waits only for that derive, never for a read), then read with the pass's stop: one W's failed
   // read is that W's alone (the finder fails a whole pool on one; a sell keeps that rule). No Web Locks: no read.
-  const recordedWallets = async (st: WalletStore, r: readonly [SolanaRpc, SolanaRpc], only: ReadonlySet<string>, signal: AbortSignal): Promise<FoundWallet[]> => {
+  const recordedWallets = async (st: WalletStore, r: readonly [SolanaRpc, SolanaRpc], only: ReadonlySet<string>, signal: AbortSignal, o: { first?: ReadonlySet<string>; each?: (w: FoundWallet) => void } = {}): Promise<FoundWallet[]> => {
     if (!locks) throw new Error("no Web Locks: the seed is not read");
     const inner = finderOf(r);
     const unread = new Set<string>();
@@ -1406,9 +1408,11 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
         seed64.fill(0);
       }
     });
-    const got = await derived.read({ signal, only });
+    const found = (w: BuyWallet): FoundWallet => ({ address: w.address, tokens: unread.has(w.address) ? null : new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) });
+    // the open buys' Ws first, each told to the pass as it is read (card wallets-found-in-one-read)
+    const got = await derived.read({ signal, only, ...(o.first ? { first: o.first } : {}), ...(o.each ? { each: (w) => o.each!(found(w)) } : {}) });
     if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
-    return got.wallets.map((w) => ({ address: w.address, tokens: unread.has(w.address) ? null : new Map([...w.holdings.tokens].map(([m, h]) => [m, h.amount] as const)) }));
+    return got.wallets.map(found);
   };
   // a full sell this device signs (W's rent-back record names it, written before the sell leaves the device): noted for
   // the positions' gone rule (src/positions.ts header); a note that fails changes nothing in the sell. The store's own

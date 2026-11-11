@@ -176,8 +176,9 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
   return derivedBuyWallets(seed64, pools).read(opts);
 }
 
-/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given. */
-export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string> };
+/** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given; the
+ *  Ws of `first` before every other (each group in its own random order), and `each` told each W once it is read. */
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; first?: ReadonlySet<string>; each?: (w: BuyWallet) => void };
 
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
@@ -243,11 +244,18 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
     if (!Number.isInteger(r) || r < 0 || r > i) throw new Error("pick: not an index");
     [jobs[i], jobs[r]] = [jobs[r]!, jobs[i]!];
   }
+  // `first`'s Ws ahead, each group still in the shuffle's order (card wallets-found-in-one-read: a positions pass reads
+  // the Ws of open buys before those it sold)
+  if (opts.first) {
+    const f = opts.first;
+    jobs.sort((x, y) => Number(f.has(y.address)) - Number(f.has(x.address)));
+  }
   for (const { p, k, address } of jobs) {
     if (failed.has(p)) continue;
     opts.signal?.throwIfAborted();
     try {
       found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
+      opts.each?.(found[p]![k]!);
     } catch (e) {
       opts.signal?.throwIfAborted();
       failed.set(p, `wallet ${k}: ${msg(e)}`);

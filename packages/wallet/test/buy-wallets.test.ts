@@ -337,6 +337,21 @@ test("card wallets-found-in-one-read: a list read in part reads only the Ws aske
   assert.deepEqual(await wantedBuyWallets(bad, () => false), { wallets: [], failed: [{ pool: "x", error: "the reader is not of chain evm" }] });
 });
 
+test("card wallets-found-in-one-read: a read's `first` Ws go before the rest, whatever the shuffle, and `each` is told every W as it is read, in that order", async () => {
+  const spent = [0, 1, 2].map((j) => (j === 0 ? { ref: DEP, label: L } : { ref: { kind: "change", l: L, j: j - 1 } as NoteRef, label: L }));
+  const d = derivedBuyWallets(SEED, [{ id: "sol", chain: "sol", spent, reader: solReader() }]);
+  const [w0, w1, w2] = d.wallets.map((w) => w.address);
+  for (const pick of [() => 0, (n: number) => n - 1]) {
+    log.length = 0;
+    const told: string[] = [];
+    await d.read({ pick, first: new Set([w2!]), each: (w) => void told.push(w.address) });
+    const order = [...new Set(log.map(([, p]) => JSON.parse(p)[0] as string))];
+    assert.equal(order[0], w2);
+    assert.deepEqual(new Set(order), new Set([w0, w1, w2]));
+    assert.deepEqual(told, order);
+  }
+});
+
 test("a Solana restore's spends must be its spent notes, each at the queue's (l, j)", () => {
   const leaf = (label: bigint) => ({ value: 1n, label, commitment: 1n, leafIndex: 0n });
   const chg: NoteRef = { kind: "change", l: L, j: 0 };

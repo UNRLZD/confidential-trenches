@@ -75,6 +75,61 @@ test("a pass: one position per token this device bought, from the finder's read 
   assert.deepEqual(none.asked, [], "and no W read");
 });
 
+const W3 = "W3cccccccccccccccccccccccccccccccccccccccccc";
+test("card wallets-found-in-one-read: the open buys' Ws are read first, the sold ones behind, and each row is shown as its W is read: the rest hold their last amount, nothing flickers or goes when the whole pass confirms it", async () => {
+  const costs = { [W1]: rec(MINT, "1"), [W2]: rec(MINT, "2"), [W3]: rec(MINT2, "3") };
+  const memo = passMemo();
+  // the last pass: W1 1, W2 2, W3 3 (W3's token since sold in full by this device, still listed at the finalized read)
+  await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 3_000_000_000n } }, { costs }), memo);
+  const order: string[] = [];
+  const shown: { token: string; amount: string }[][] = [];
+  const now = { [W1]: { [MINT]: 1_500_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 0n } } as Record<string, Record<string, bigint>>;
+  const r: PositionsReads = {
+    ...reads({}, { costs, sold: [`${W3} ${MINT2}`] }),
+    wallets: async (only, o = {}) => {
+      // the finder's order: `first` ahead (here W3 asked first of the set, so the rule alone puts it last)
+      const all = [W3, W2, W1].filter((a) => only.has(a));
+      const list = [...all.filter((a) => o.first?.has(a)), ...all.filter((a) => !o.first?.has(a))];
+      const out: FoundWallet[] = [];
+      for (const address of list) {
+        order.push(address);
+        const w = { address, tokens: new Map(Object.entries(now[address]!)) };
+        out.push(w);
+        o.each?.(w);
+      }
+      return out;
+    },
+    shown: (ps) => void shown.push(ps.map((p) => ({ token: p.token, amount: p.amount }))),
+  };
+  const got = await positionsPass(r, memo);
+  assert.deepEqual(order.slice(-1), [W3], "the sold buy's W read last");
+  assert.deepEqual(new Set(order.slice(0, 2)), new Set([W1, W2]));
+  // a row the moment its W is read; every other at its last amount, never gone before its own read
+  assert.equal(shown.length, 3);
+  for (const ps of shown.slice(0, 2)) assert.ok(ps.some((p) => p.token === MINT2 && p.amount === "3"), `W3's row holds until W3 is read: ${JSON.stringify(ps)}`);
+  assert.ok(shown[0]!.some((p) => p.token === MINT), "W1's and W2's row shown from the first read");
+  assert.deepEqual(shown.at(-1), got.positions.map((p) => ({ token: p.token, amount: p.amount })), "the whole pass confirms the last row shown: no change at its end");
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "3.5"]]);
+});
+
+test("card wallets-found-in-one-read: the cache gives the rows a pass shows while it runs, and a state read meanwhile sees them", async () => {
+  let release!: () => void;
+  const c = positionsCache(async (_m, run) => {
+    run.shown?.([{ chain: "solana", token: MINT, amount: "1", cost: "0", wallets: [W1], decimals: 6 }]);
+    await new Promise<void>((r) => (release = r));
+    return { positions: [{ chain: "solana", token: MINT, amount: "1", cost: "0", wallets: [W1], decimals: 6 }], whole: true };
+  }, { setTimer: () => 0, clearTimer: () => {} });
+  let changes = 0;
+  c.watch(() => void changes++);
+  c.first();
+  await tick();
+  assert.deepEqual(c.get()?.map((p) => p.amount), ["1"], "shown before the pass ends");
+  assert.equal(changes, 1);
+  release();
+  await c.idle();
+  assert.equal(changes, 1, "the end confirms it: no second change");
+});
+
 test("a token this device did not buy (sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it; a W with no buy record is not read", async () => {
   const costs = { [W1]: rec(MINT, "5") };
   const r = reads({ [W1]: { [MINT]: 4_000_000n, [STRANGER]: 9_000_000n } }, { costs });
