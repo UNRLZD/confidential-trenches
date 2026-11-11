@@ -14,6 +14,8 @@
 //   - beside it, one walk of the fee read at the block 60 s back (the oldest first block a bind reads): bound is an ok
 //     line; not bound while the bind did bind is a WARN naming the seats that lacked the state, never silent;
 //   - each seat's own fee read at that block, one ask each: a "--" line with how many held the state.
+// A bind try whose provider still did not know the block on its last lag retry (the child's `lagging`, its hosts) is
+// that provider's moment: tries that each gave no answer or lagged are INCONCLUSIVE naming them, never FAIL.
 // The depth is the pool's own currentTreeSize() at the block, read on two operators of the list (the device counts its
 // sync's leaves there, the same number, with no state read; a cold sync from the deploy block is the pool pair's own
 // limit, carded apart). The bind's helper fee answer is not read here: this card's end state is the device's own read. A seat that
@@ -27,7 +29,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PAGES } from "./page-evm-rpc-csp.mjs";
-import { EXIT, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
+import { EXIT, laggingLine, laggingOf, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 const KEY = "device-evm-fee-read-walks-operators";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -72,9 +74,10 @@ export function judge(run) {
     for (const t of tries.filter((x) => x.ok !== true)) lines.push(`--  ${chain}: the bind at the period from ${t.start} did not bind (${t.name}: ${String(t.error).slice(0, 160)})`);
     if (differ) say(false, `${chain}: two operators answered the bind's fee read differently (${String(differ.error).slice(0, 160)})`);
     else if (bound) say(Array.isArray(bound.hosts) && new Set(bound.operators ?? []).size >= 2, `${chain}: the bind read the chain fee at block ${bound.block} (the period from ${bound.start}${bound === tries[0] ? "" : ", the next period, as the queue's next pass"}) on ${bound.hosts?.join(" and ") ?? "?"}`);
-    else if (tries.length > 0 && tries.every((t) => t.name === "noAnswer")) {
+    else if (tries.length > 0 && tries.every((t) => t.name === "noAnswer" || laggingOf(t) !== null)) {
       quiet = true;
-      lines.push(`--  ${chain}: the bind's reads gave no answer: INCONCLUSIVE`);
+      const behind = [...new Set(tries.flatMap((t) => laggingOf(t) ?? []))];
+      lines.push(behind.length ? laggingLine(`${chain}: the bind`, behind) : `--  ${chain}: the bind's reads gave no answer: INCONCLUSIVE`);
     } else say(false, `${chain}: the bind did not bind in this period or the next (${tries.length} tries)`);
     // one walk at the block 60 s back, and each seat at it
     const answered = c.seats.filter((s) => Array.isArray(s.fee?.result));

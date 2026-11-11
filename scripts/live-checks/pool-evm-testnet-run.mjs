@@ -145,7 +145,13 @@ export function sellTarget(input, selector = SELL_SELECTOR_10) {
 }
 
 /** The check of one run record: { ok, lines }. `transport(url, method, params)` answers { result } or { error }. */
-export async function check(rec, transport, urls = RPCS[rec.chain]) {
+/** A block below both RPCs' newest that one does not hold yet (null by number: a backend behind the one that answered
+ *  "latest") is read again from the newest this often, this far apart (the wallet's EVM_LAG_TRIES, EVM_LAG_WAIT_MS);
+ *  still null on the last read, the check is INCONCLUSIVE naming that RPC, never FAIL. */
+export const LAG_TRIES = 5;
+export const LAG_WAIT_MS = 2_000;
+class Behind extends Error {}
+export async function check(rec, transport, urls = RPCS[rec.chain], sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))) {
   const lines = [];
   const both = async (method, params) => {
     const rs = await Promise.all(urls.map((u) => transport(u, method, params)));
@@ -251,9 +257,16 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     }
 
     // the pool at one block both hold with one hash
-    const tops = await both("eth_getBlockByNumber", ["latest", false]);
-    const n = tops.map((b) => BigInt(b.number)).reduce((a, b) => (a < b ? a : b));
-    const at = await both("eth_getBlockByNumber", [`0x${n.toString(16)}`, false]);
+    let n, at;
+    for (let t = 1; ; t++) {
+      const tops = await both("eth_getBlockByNumber", ["latest", false]);
+      n = tops.map((b) => BigInt(b.number)).reduce((a, b) => (a < b ? a : b));
+      at = await both("eth_getBlockByNumber", [`0x${n.toString(16)}`, false]);
+      const behind = urls.filter((_, k) => at[k] === null);
+      if (behind.length === 0) break;
+      if (t >= LAG_TRIES) throw new Behind(`block ${n}: ${behind.map((u) => new URL(u).host).join(" and ")} did not know it yet after ${LAG_TRIES} reads ${LAG_WAIT_MS} ms apart`);
+      await sleep(LAG_WAIT_MS);
+    }
     if (at[0]?.hash !== at[1]?.hash) throw new Error(`block ${n}: two hashes on the two RPCs`);
     const hash = at[0].hash;
     const view = async (s, arg = "") => BigInt(await one("eth_call", [{ to: rec.pool, data: s + arg }, { blockHash: hash }], `${s} at ${hash}`));
@@ -278,8 +291,8 @@ export async function check(rec, transport, urls = RPCS[rec.chain]) {
     lines.push(`${rec.chain}: the run key ${relayer} keeps ${bal} wei (at most ${DUST}) after its ${sent} transactions`);
     return { ok: true, lines };
   } catch (e) {
-    lines.push(`${rec.chain}: ${e?.message ?? e}`);
-    return { ok: false, lines };
+    lines.push(`${rec.chain}: ${e?.message ?? e}${e instanceof Behind ? ": INCONCLUSIVE" : ""}`);
+    return { ok: false, inconclusive: e instanceof Behind, lines };
   }
 }
 
@@ -314,25 +327,28 @@ async function main(argv) {
   if (files.length === 0) throw new Error("no run record");
   const runs = [];
   let ok = true;
+  let quiet = false;
   for (const file of files) {
     const rec = JSON.parse(readFileSync(file, "utf8"));
     const urls = at("--rpc")?.split(",") ?? RPCS[rec.chain];
     const r0 = recorder();
     const r = await check(rec, r0.transport, urls);
-    for (const l of r.lines) console.log(`${r.ok ? "PASS" : "FAIL"} ${l}`);
-    ok &&= r.ok;
+    for (const l of r.lines) console.log(`${r.ok ? "PASS" : r.inconclusive ? "INCONCLUSIVE" : "FAIL"} ${l}`);
+    quiet ||= r.inconclusive === true;
+    ok &&= r.ok || r.inconclusive === true;
     runs.push({ record: rec, urls, good: r0.log, bad: spoil(r0.log) });
   }
   if (at("--record")) {
     writeFileSync(at("--record"), `${JSON.stringify({ key: KEY, recorded: new Date().toISOString(), runs }, null, 1)}\n`);
     console.log(`recorded ${at("--record")}`);
   }
-  if (ok && argv.includes("--write-record")) {
+  if (ok && !quiet && argv.includes("--write-record")) {
     writeFileSync(RECORD, runRecord(runs.map((r) => r.record)));
     console.log(`wrote ${path.relative(process.cwd(), RECORD)}`);
   }
-  console.log(ok ? `PASS ${KEY}` : `FAIL ${KEY}`);
-  return ok ? 0 : 1;
+  const verdict = !ok ? "FAIL" : quiet ? "INCONCLUSIVE" : "PASS";
+  console.log(`${verdict} ${KEY}`);
+  return { PASS: 0, FAIL: 1, INCONCLUSIVE: 3 }[verdict];
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url))

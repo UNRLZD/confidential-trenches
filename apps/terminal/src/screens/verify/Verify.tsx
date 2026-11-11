@@ -64,7 +64,8 @@ function Row({ id, row, open, toggle }: { id: "code" | "funds"; row: VerifyRow |
 
 function Pool({ chain, row, open, toggle }: { chain: PoolChain; row: PoolRowView | null; open: boolean; toggle(): void }) {
   return (
-    <section className={`vrow-box${open ? " open" : ""}`} data-pool={chain} data-status={row?.status ?? "loading"}>
+    // data-rpcs: the hosts the row was read on, open or closed, which a live check's outage judgment reads (rpc-outage.mjs)
+    <section className={`vrow-box${open ? " open" : ""}`} data-pool={chain} data-status={row?.status ?? "loading"} data-rpcs={row ? row.rpcs.map(host).join(" ") : undefined}>
       <button type="button" className="vrow" aria-expanded={open} disabled={row === null} onClick={toggle} data-control={`verify-pool-${chain}`}>
         <Dot s={row?.status ?? null} />
         <span className="nm">{CHAIN_NAME[chain]}</span>

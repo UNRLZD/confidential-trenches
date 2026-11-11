@@ -75,6 +75,138 @@ test("a pass: one position per token this device bought, from the finder's read 
   assert.deepEqual(none.asked, [], "and no W read");
 });
 
+const W3 = "W3cccccccccccccccccccccccccccccccccccccccccc";
+test("card wallets-found-in-one-read: the open buys' Ws are read first, the sold ones behind, and each row is shown as its W is read: the rest hold their last amount, nothing flickers or goes when the whole pass confirms it", async () => {
+  const costs = { [W1]: rec(MINT, "1"), [W2]: rec(MINT, "2"), [W3]: rec(MINT2, "3") };
+  const memo = passMemo();
+  // the last pass: W1 1, W2 2, W3 3 (W3's token since sold in full by this device, still listed at the finalized read)
+  await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 3_000_000_000n } }, { costs }), memo);
+  const order: string[] = [];
+  const shown: { token: string; amount: string }[][] = [];
+  const now = { [W1]: { [MINT]: 1_500_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 0n } } as Record<string, Record<string, bigint>>;
+  const r: PositionsReads = {
+    ...reads({}, { costs, sold: [`${W3} ${MINT2}`] }),
+    wallets: async (only, o = {}) => {
+      // the finder's order: `first` ahead (here W3 asked first of the set, so the rule alone puts it last)
+      const all = [W3, W2, W1].filter((a) => only.has(a));
+      const list = [...all.filter((a) => o.first?.has(a)), ...all.filter((a) => !o.first?.has(a))];
+      const out: FoundWallet[] = [];
+      for (const address of list) {
+        order.push(address);
+        const w = { address, tokens: new Map(Object.entries(now[address]!)) };
+        out.push(w);
+        o.each?.(w);
+      }
+      return out;
+    },
+    shown: (ps) => void shown.push(ps.map((p) => ({ token: p.token, amount: p.amount }))),
+  };
+  const got = await positionsPass(r, memo);
+  assert.deepEqual(order.slice(-1), [W3], "the sold buy's W read last");
+  assert.deepEqual(new Set(order.slice(0, 2)), new Set([W1, W2]));
+  // a row the moment its W is read; every other at its last amount, never gone before its own read
+  assert.equal(shown.length, 3);
+  for (const ps of shown.slice(0, 2)) assert.ok(ps.some((p) => p.token === MINT2 && p.amount === "3"), `W3's row holds until W3 is read: ${JSON.stringify(ps)}`);
+  assert.ok(shown[0]!.some((p) => p.token === MINT), "W1's and W2's row shown from the first read");
+  assert.deepEqual(shown.at(-1), got.positions.map((p) => ({ token: p.token, amount: p.amount })), "the whole pass confirms the last row shown: no change at its end");
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "3.5"]]);
+});
+
+test("card wallets-found-in-one-read: a pass stopped mid-way keeps each read it made, so the next pass never puts an older amount back before the W is read again (a partial sell's 0.4 stays, a sold-out row stays gone)", async () => {
+  const costs = { [W1]: rec(MINT, "1"), [W2]: rec(MINT, "2"), [W3]: rec(MINT2, "3") };
+  const memo = passMemo();
+  // pass A, whole: W1 1, W2 2, W3 3
+  await positionsPass(reads({ [W1]: { [MINT]: 1_000_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 3_000_000_000n } }, { costs }), memo);
+  const now = { [W1]: { [MINT]: 400_000n }, [W2]: { [MINT]: 2_000_000n }, [W3]: { [MINT2]: 0n } } as Record<string, Record<string, bigint>>;
+  const run = (order: string[], stopAfter: number | null) => {
+    const stop = new AbortController();
+    const shown: [string, string][][] = [];
+    const r: PositionsReads = {
+      ...reads({}, { costs }),
+      signal: stop.signal,
+      wallets: async (only, o = {}) => {
+        const out: FoundWallet[] = [];
+        for (const address of order.filter((a) => only.has(a))) {
+          if (out.length === stopAfter) {
+            stop.abort(); // a sale's read preempts the pass
+            stop.signal.throwIfAborted();
+          }
+          const w = { address, tokens: new Map(Object.entries(now[address]!)) };
+          out.push(w);
+          o.each?.(w);
+        }
+        return out;
+      },
+      shown: (ps) => void shown.push(ps.map((p) => [p.token, p.amount])),
+    };
+    return { r, shown };
+  };
+  // pass B: W1 (a partial sell landed: 0.4) and W3 (sold out: 0) read, then stopped
+  const b = run([W1, W3, W2], 2);
+  await assert.rejects(positionsPass(b.r, memo));
+  assert.deepEqual(b.shown.at(-1), [[MINT, "2.4"]], "pass B showed W1's 0.4 and W3 gone");
+  // pass C reads W2 first: W1 and W3 hold what pass B read, never pass A's
+  const c = run([W2, W1, W3], null);
+  const got = await positionsPass(c.r, memo);
+  assert.equal(c.shown.length, 3);
+  for (const ps of c.shown) assert.deepEqual(ps, [[MINT, "2.4"]], `no row moves back to an older read: ${JSON.stringify(c.shown)}`);
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "2.4"]]);
+});
+
+test("card wallets-found-in-one-read: a token a stopped pass listed is known as listed, so the next pass reading W whole without it shows it gone, never the record's amount back", async () => {
+  const costs = { [W1]: rec(MINT, "1"), [W2]: rec(MINT, "2") };
+  // no pass before: nothing listed yet
+  const memo = passMemo();
+  const pass = (now: Record<string, Record<string, bigint>>, stopAfter: number | null) => {
+    const stop = new AbortController();
+    const shown: [string, string][][] = [];
+    const r: PositionsReads = {
+      ...reads({}, { costs }),
+      signal: stop.signal,
+      wallets: async (only, o = {}) => {
+        const out: FoundWallet[] = [];
+        for (const address of [W1, W2].filter((a) => only.has(a))) {
+          if (out.length === stopAfter) {
+            stop.abort(); // a sale's read preempts the pass
+            stop.signal.throwIfAborted();
+          }
+          const w = { address, tokens: new Map(Object.entries(now[address]!)) };
+          out.push(w);
+          o.each?.(w);
+        }
+        return out;
+      },
+      shown: (ps) => void shown.push(ps.map((p) => [p.token, p.amount])),
+    };
+    return { r, shown };
+  };
+  // pass A: W1 listed holding 0.5, then stopped before W2
+  await assert.rejects(positionsPass(pass({ [W1]: { [MINT]: 500_000n } }, 1).r, memo));
+  // pass B, whole: W1 sold out (the finder lists no account of the token at all), W2 2
+  const b = pass({ [W1]: {}, [W2]: { [MINT]: 2_000_000n } }, null);
+  const got = await positionsPass(b.r, memo);
+  assert.deepEqual(got.positions.map((p) => [p.token, p.amount]), [[MINT, "2"]], "W1 gone: it was listed, so not listed now is none");
+  for (const ps of b.shown) assert.deepEqual(ps, [[MINT, "2"]], `W1's record amount never shown: ${JSON.stringify(b.shown)}`);
+});
+
+test("card wallets-found-in-one-read: the cache gives the rows a pass shows while it runs, and a state read meanwhile sees them", async () => {
+  let release!: () => void;
+  const c = positionsCache(async (_m, run) => {
+    run.shown?.([{ chain: "solana", token: MINT, amount: "1", cost: "0", wallets: [W1], decimals: 6 }]);
+    await new Promise<void>((r) => (release = r));
+    return { positions: [{ chain: "solana", token: MINT, amount: "1", cost: "0", wallets: [W1], decimals: 6 }], whole: true };
+  }, { setTimer: () => 0, clearTimer: () => {} });
+  let changes = 0;
+  c.watch(() => void changes++);
+  c.first();
+  await tick();
+  assert.deepEqual(c.get()?.map((p) => p.amount), ["1"], "shown before the pass ends");
+  assert.equal(changes, 1);
+  release();
+  await c.idle();
+  assert.equal(changes, 1, "the end confirms it: no second change");
+});
+
 test("a token this device did not buy (sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it; a W with no buy record is not read", async () => {
   const costs = { [W1]: rec(MINT, "5") };
   const r = reads({ [W1]: { [MINT]: 4_000_000n, [STRANGER]: 9_000_000n } }, { costs });
@@ -584,7 +716,10 @@ test("the page: a reload with a kept pass answers the first state read with no c
   assert.deepEqual([c.calls.rpc, c.calls.finder], [[0, 0], 0], "no chain read for it");
   release();
   await until(async () => (await tp.positions())![0]?.amount === "2");
-  assert.deepEqual(((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass).positions.map((p) => p.amount), ["2"], "the pass is kept in its place");
+  // the rows show as each W is read (card wallets-found-in-one-read), the pass is kept at its end
+  const keptAmounts = async () => ((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass).positions.map((p) => p.amount);
+  await until(async () => (await keptAmounts())[0] === "2");
+  assert.deepEqual(await keptAmounts(), ["2"], "the pass is kept in its place");
   await w.signOut();
   await tp.signedOut();
   assert.equal(await tp.positions(), null, "sign out: the kept pass went with the store");
@@ -678,6 +813,175 @@ test("the page: a sell's own read is not held behind a running positions pass (t
   await until(async () => (await tp.positions())?.[0]?.amount === String(N * 2));
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(queue.length, 0, "the positions took the sell's read: no read of their own after it");
+});
+
+test("card wallets-found-in-one-read, the page: a sell that reads only the Ws it asks for (one of 3) feeds the positions those and the listing of the rest (what this tab last read of each), so no row is lost; with the kept pass gone, this tab's reads stand for it", async () => {
+  for (const keptPass of [true, false]) {
+    const N = 3;
+    const w = await spentWallet(N);
+    await recorded(w, Object.fromEntries(Array.from({ length: N }, (_, i) => [solanaWallet(i), rec(MINT, "1")])));
+    const queue: { address: string; done: () => void }[] = [];
+    const read: string[] = [];
+    const held = (): Holdings => ({ native: 0n, tokens: new Map([[MINT, { amount: 2_000_000n, frozen: false }]]), unreadable: [] });
+    const paced: HoldingsReader = { chain: "sol", read: (address) => new Promise((done) => queue.push({ address, done: () => (read.push(address), done(held())) })) };
+    // answers every read asked until `f` holds
+    const answer = async (f: () => boolean | Promise<boolean>) => {
+      for (let i = 0; i < 40 && !(await f()); i++) {
+        if (queue.length > 0) queue.shift()!.done();
+        await tick();
+      }
+      assert.ok(await f());
+    };
+    let sellRead: Promise<readonly { address: string; holdings: unknown }[]> | null = null;
+    const sell = (host: () => { wallets(read?: (a: string) => boolean): Promise<readonly { address: string; holdings: unknown }[]> }) => () => {
+      sellRead = host().wallets((a) => a === solanaWallet(0));
+      return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+    };
+    const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => paced, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+    // the first pass, whole: every W read once
+    void tp.positions();
+    await answer(async () => (await tp.positions())?.[0]?.amount === String(N * 2));
+    assert.equal(read.length, N);
+    read.length = 0;
+    // the pass kept (written after its rows show); gone (its write failed): the listing is this tab's own reads all the
+    // same (review P2 of 8da6b97f: what this tab read stands over the kept pass, and stands with none)
+    await until(async () => (await w.get("meta", POSITIONS_KEPT_KEY)) !== undefined);
+    if (!keptPass) await w.delete("meta", POSITIONS_KEPT_KEY);
+    tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
+    await until(() => sellRead !== null);
+    let got: readonly { address: string; holdings: unknown }[] | null = null;
+    void sellRead!.then((x) => void (got = x));
+    await answer(() => got !== null);
+    assert.deepEqual(read, [solanaWallet(0)], "the sell's read: the one W it asked for");
+    // each other W as the listing names it
+    assert.deepEqual(got!.map((x) => [x.address, x.holdings === null]), Array.from({ length: N }, (_, i) => [solanaWallet(i), false]));
+    // the next pass: the sell's W as it read it; the other Ws as the listing names them (no finder read beside the
+    // sale); every row kept
+    await answer(async () => (await tp.positions())?.[0]?.amount === String(N * 2));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(queue.length, 0, "no read after the pass's own");
+    assert.deepEqual(new Set(read), new Set([solanaWallet(0)]), "the sell's W not read again");
+    assert.equal((await tp.positions())?.[0]?.amount, String(N * 2));
+  }
+});
+
+test("card wallets-found-in-one-read, the page: a sale tapped while a pass reads takes, and feeds the positions, what this tab last read of each W, never the kept pass over a newer read: a W sold in part keeps its new amount, a W sold in full stays gone", async () => {
+  // the sold W after the first sale lands: half a token left, or none (sold in full)
+  for (const left of [500_000n, null]) {
+    const N = 6;
+    const w = await spentWallet(N);
+    await recorded(w, Object.fromEntries(Array.from({ length: N }, (_, i) => [solanaWallet(i), rec(MINT, "2")])));
+    const amounts = new Map<string, bigint | null>(Array.from({ length: N }, (_, i) => [solanaWallet(i), 2_000_000n]));
+    // the finder's paced queue, one W a turn; a stopped read ends with its stop, as the finder's does
+    const queue: { address: string; done: () => void }[] = [];
+    const paced: HoldingsReader = {
+      chain: "sol",
+      read: (address, signal) =>
+        new Promise((done, fail) => {
+          const q = { address, done: () => {
+            const a = amounts.get(address);
+            done({ native: 0n, tokens: a == null ? new Map() : new Map([[MINT, { amount: a, frozen: false }]]), unreadable: [] });
+          } };
+          queue.push(q);
+          signal?.addEventListener("abort", () => (queue.splice(queue.indexOf(q) >>> 0, queue.includes(q) ? 1 : 0), fail(signal.reason)));
+        }),
+    };
+    const answer = async (f: () => boolean | Promise<boolean>) => {
+      for (let i = 0; i < 80 && !(await f()); i++) {
+        if (queue.length > 0) queue.shift()!.done();
+        await tick();
+      }
+      assert.ok(await f());
+    };
+    // the first sale lands at once (the positions read again); the second takes the host's list and runs on
+    let taps = 0;
+    let list: Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> | null = null;
+    const sell = (host: () => { wallets(): Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> }) => () => {
+      if (++taps === 1) return { running: true as const, after: Promise.resolve(), answer: () => ({ result: { stage: "filled", txs: [] } }) };
+      list = host().wallets();
+      return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+    };
+    const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => paced, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+    const shown = async () => (await tp.positions())?.find((p) => p.token === MINT);
+    const keptAmount = async () => ((await w.get("meta", POSITIONS_KEPT_KEY)) as KeptPass | undefined)?.positions.find((p) => p.token === MINT)?.amount;
+    const ask = { kind: "pool.sell" as const, chain: "solana" as const, token: MINT, amount: 1n, slippageBps: 100, decimals: 6 };
+    // (1) a whole pass, kept: 12
+    void tp.positions();
+    await answer(async () => (await keptAmount()) === "12" && queue.length === 0);
+    // (2) the first sale lands, from S (the W the pass after it reads first); that pass reads S, its other Ws not yet:
+    // 10.5, or 10 with S's row gone
+    tp.flow(ask, { id: "s1", sha: "00", progress: () => {} } as never);
+    await until(() => queue.length > 0);
+    const S = queue[0]!.address;
+    amounts.set(S, left);
+    queue.shift()!.done();
+    const now = left === null ? "10" : "10.5";
+    await until(async () => (await shown())?.amount === now);
+    assert.equal(await keptAmount(), "12", "that pass is not whole yet: nothing kept");
+    // (3) a second sale tapped before that pass ends: its list, with no finder read (every W recorded and listed)
+    tp.flow(ask, { id: "s2", sha: "00", progress: () => {} } as never);
+    await until(() => list !== null);
+    const got = await list!;
+    // (4) the pass the sale fed: S as read after the kept pass, never the kept pass's 2
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal((await shown())?.amount, now, "Portfolio holds the newer read");
+    assert.equal((await shown())?.wallets.includes(S), left !== null, "a W sold in full stays gone");
+    assert.equal(await keptAmount(), now, "and that is what is kept");
+    assert.equal(queue.length, 0, "the sale's list fed every W: no finder read beside the sale");
+    assert.equal(got.find((x) => x.address === S)?.holdings?.tokens.get(MINT)?.amount, left ?? 0n, "the sale's S as this tab last read it");
+  }
+});
+
+test("card wallets-found-in-one-read, the page: a sale tapped while the first pass reads the kept pass gets the kept pass's listing, never an empty one (the memo counts as loaded only once that read is in it)", async () => {
+  const w = await spentWallet();
+  const W = solanaWallet();
+  await recorded(w, { [W]: rec(MINT, "2") });
+  await w.put("meta", POSITIONS_KEPT_KEY, { positions: [{ chain: "solana", token: MINT, amount: "2", cost: "0", wallets: [W], decimals: 6 }], held: { [`${W} ${MINT}`]: "2000000" }, listed: [`${W} ${MINT}`] } satisfies KeptPass);
+  // the kept pass's reads: the state read's first (ready) answers; the first pass's own waits on `letKept`; any after it answers
+  let keptReads = 0;
+  let letKept!: () => void;
+  const keptGate = new Promise<void>((r) => (letKept = r));
+  let passAtKept = false;
+  const st = new Proxy(w, { get: (t, k) => (k === "get" ? async (s: string, key: string) => {
+    if (s === "meta" && key === POSITIONS_KEPT_KEY && ++keptReads === 2) (passAtKept = true), await keptGate;
+    return t.get(s as never, key);
+  } : Reflect.get(t, k, t)) });
+  let finder = 0;
+  const reader: HoldingsReader = { chain: "sol", read: async () => (finder++, { native: 0n, tokens: new Map([[MINT, { amount: 7_000_000n, frozen: false }]]), unreadable: [] }) };
+  let list: Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> | null = null;
+  const sell = (host: () => { wallets(): Promise<readonly { address: string; holdings: { tokens: ReadonlyMap<string, { amount: bigint }> } | null }[]> }) => () => {
+    list = host().wallets();
+    return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+  };
+  const tp = testnetPool({ store: async () => st as WalletStore, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => reader, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  void tp.positions();
+  await until(() => passAtKept);
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
+  await until(() => list !== null);
+  const got = await list!;
+  assert.equal(got.find((x) => x.address === W)?.holdings?.tokens.get(MINT)?.amount, 2_000_000n, "W as the kept pass lists it");
+  assert.equal(finder, 0, "no finder read at the tap");
+  letKept();
+});
+
+test("card wallets-found-in-one-read, the page: a sign out stops the sale's finder list, each of its reads carrying the sign out's stop", async () => {
+  // no buy record: the sale's list reads both Ws on the finder
+  const w = await spentWallet(2);
+  const signals: (AbortSignal | undefined)[] = [];
+  const stalls: HoldingsReader = { chain: "sol", read: (_a, signal) => (signals.push(signal), new Promise((_, fail) => signal?.addEventListener("abort", () => fail(signal.reason)))) };
+  let list: Promise<unknown> | null = null;
+  const sell = (host: () => { wallets(): Promise<unknown> }) => () => {
+    list = host().wallets();
+    list.catch(() => {});
+    return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
+  };
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, rpcs: chain().rpcs, holdings: () => stalls, tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
+  await until(() => signals.length > 0);
+  assert.ok(signals.every((s) => s !== undefined && !s.aborted), "each read carries a stop");
+  await tp.signedOut();
+  assert.ok(signals.every((s) => s!.aborted), "the sign out stops them");
+  await assert.rejects(list!);
 });
 
 // ---------------------------------------------------- cost, and the pool buy's records
@@ -1386,8 +1690,9 @@ test("P2-2 (ZZPAGE 1): a retry booked before a sell, firing while the sell reads
     await tick();
   }
   await sellRead;
-  assert.equal(sellReadAt, 3_000 * N, "the sell's N reads alone");
-  assert.equal(order.length - readsBefore, N, "no pass read in the sell's turns");
+  // the sell reads the one W the failed pass did not list (the others: this tab's reads, review P2 of 8da6b97f)
+  assert.equal(sellReadAt, 3_000, "the sell's own read alone");
+  assert.equal(order.length - readsBefore, 1, "no pass read in the sell's turns");
   await until(async () => (await tp.positions())?.[0]?.amount === String(N * 2));
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(queue.length, 0, "the positions took the sell's read");
@@ -1400,15 +1705,13 @@ test("P2-2 (PROBE A, the page): a sell whose own read of the Ws fails still ends
   c.amounts[0] = 1_000_000n;
   const timers: (() => void)[] = [];
   let sellFailed = false;
-  const sell = (host: () => { wallets(): Promise<unknown> }) => () => {
-    host().wallets().catch(() => void (sellFailed = true));
+  const sell = (host: () => { wallets(read?: (a: string) => boolean): Promise<unknown> }) => () => {
+    host().wallets(() => true).catch(() => void (sellFailed = true));
     return { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) };
   };
   const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, evmPin: NO_EVM, rpcs: c.rpcs, holdings: () => c.finder, tradeKinds: { sell }, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: (t: unknown) => void timers.splice(timers.indexOf(t as () => void) >>> 0, timers.includes(t as () => void) ? 1 : 0) } } as never);
   await until(async () => ((await tp.positions()) ?? []).length === 1);
-  // no whole pass kept (a restored device before its first): the sale lists its Ws through the finder (card
-  // pool-sell-legs-side-by-side: with one kept, it reads none)
-  await w.delete("meta", POSITIONS_KEPT_KEY);
+  // the sale asks the finder for its W (its fallback's read: with no `read`, a W this tab listed is not read at the tap)
   c.state.fail = true;
   const before = c.calls.finder;
   tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
@@ -1420,7 +1723,9 @@ test("P2-2 (PROBE A, the page): a sell whose own read of the Ws fails still ends
   await until(() => c.calls.finder >= before + 3);
 });
 
-test("P2-2 (the load route): the rent backs a load resumes read the Ws through the sell host; that read failing still ends in a pass", async () => {
+// card wallets-found-in-one-read: a rent back runs on W's owed and buy records alone (pool-sell.ts rentBack), so the
+// load's list of Ws reads no W's holdings through the finder; it still holds the passes off and ends in one
+test("P2-2 (the load route): the rent backs a load resumes take the Ws through the sell host with no holdings read; the pass still runs after", async () => {
   const w = await spentWallet();
   const W = solanaWallet();
   await recorded(w, { [W]: rec(MINT, "1") });
@@ -1439,7 +1744,7 @@ test("P2-2 (the load route): the rent backs a load resumes read the Ws through t
   const before = c.calls.finder;
   await tp.stateRead();
   await until(() => timers.length === 1);
-  assert.ok(c.calls.finder >= before + 2, "the rent back's read failed, then the pass read");
+  assert.equal(c.calls.finder, before + 1, "the pass's read alone: the rent back read no W's holdings");
 });
 
 test("wire-18: a sell a closed page left, settled by the load, reads the positions again", async () => {

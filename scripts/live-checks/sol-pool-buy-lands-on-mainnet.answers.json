@@ -1,0 +1,17 @@
+{
+  "_note": "good: SIGN_HOST's mainnet build of card/sol-pool-buy-lands-on-mainnet at the commit after b756f7b4 (packages/signpage/scripts/build-app.mjs bundle, network mainnet; its index pins its /app.js): the buy tips 100000, the sell builds its compute budget on a form with room for W's room over the need, the preview prices it on mainnet, a partial sell keeps 100000 on W. bad: SIGN_HOST as served 11 Nov 14:5xZ, release 116 (the helper's /v1/health release 116, commit b19f7723): the buy tips Jito's 1000 minimum, no sell priority fee, no preview priced on mainnet, no priority kept, no preview priced on mainnet, no priority kept, no preview priced on mainnet, no priority kept.",
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Gd3yBky0QTDS/qgqVVKXwPZqu8FMlrQPE9WlQpkk5uuUJEEIqvMQx+LBVN5ZZHJm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Gd3yBky0QTDS/qgqVVKXwPZqu8FMlrQPE9WlQpkk5uuUJEEIqvMQx+LBVN5ZZHJm",
+    "buyTip": "100000",
+    "sellBudget": true,
+    "sellPriority": "100000"
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-pqqrny464Eb17q2bKMSCZglUxvY9bJqd5vOYfKxSfEd1w/pxF752KjWfWI0Xglj0\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-pqqrny464Eb17q2bKMSCZglUxvY9bJqd5vOYfKxSfEd1w/pxF752KjWfWI0Xglj0",
+    "buyTip": "1000",
+    "sellBudget": false,
+    "sellPriority": null
+  }
+}
