@@ -1335,3 +1335,31 @@ test("the helper's start check names this page's direct Solana seat (SOLANA_PROV
   const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
   assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
 });
+
+// Card sol-buy-reads-side-by-side: the page's buy host reads the pool's time for the take on the page's pool (its two
+// RPCs, the wallet's solanaNow), the read's start on the monotonic clock
+test("card sol-buy-reads-side-by-side: the page's buy host reads the pool's time on the page's pool, with its start on the monotonic clock", async () => {
+  const { w } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: string[] = [];
+  const rpc = async (m: string) => {
+    asked.push(m);
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpc, async (m: string) => rpc(m)], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const b = buyHost!();
+  try {
+    const before = performance.now();
+    await assert.rejects(b.chainNow!());
+    assert.ok(asked.includes("getSlot"), "the page's own RPCs, as the take's own read");
+    const pooled = { now: async () => 1_234n } as never;
+    let host2: Parameters<typeof poolBuyKind>[0] | undefined;
+    testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: pooled, tradeKinds: { buy: (mk) => ((host2 = mk), poolBuyKind(mk)) } });
+    const n = await host2!().chainNow!();
+    assert.equal(n.ms, 1_234n);
+    assert.ok(n.at >= before && n.at <= performance.now());
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
