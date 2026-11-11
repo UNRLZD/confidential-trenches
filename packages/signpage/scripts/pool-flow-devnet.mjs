@@ -22,6 +22,10 @@
 // - FLOW_BURST=1 injects throttles the way a public devnet provider gives them: on each devnet RPC host, the 1st and 2nd
 //   of every 15 requests answer 429 with Retry-After 1 (never reaching the provider), and the helper's first POST
 //   /v1/pool/solana/send answers its 429 rate_limited with Retry-After 1 (not forwarded). Each injection is logged.
+// - FLOW_REFUSE=1 (card pool-buy-record-never-stays-sent): the helper refuses every POST /v1/pool/solana/send with its
+//   422 check answer (never forwarded, so nothing is sent). The buy ends not_landed once both devnet RPCs read its
+//   blockhash past; the run then reads the page's state once and passes only when the buy's note is UNSPENT again, long
+//   before its proof's deadline, and state.pools' Solana balance is the one before the tap. No sell.
 // - Each kind answers at its send and its run goes on; this waits for the run's end (the seed's lock), then reads the
 //   notes: the deposit landed when its note is UNSPENT, the buy filled when that note is SPENT and no stage but sent or
 //   filled was told, the sell filled when a return note is UNSPENT with a leaf and no stage but sent or filled was told.
@@ -91,6 +95,7 @@ const FEE = 5_000n;
 const log = (s) => console.log(`${new Date().toISOString()} ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BURST = process.env.FLOW_BURST === "1";
+const REFUSE = process.env.FLOW_REFUSE === "1";
 const RPC_HOSTS = new Set(Object.values(TESTNET_RPCS).flat().map((u) => new URL(u).host));
 // FLOW_COPY: the step under way, for the copy's record of each send and failed simulation
 let phase = "start";
@@ -239,6 +244,10 @@ const page = { store: async () => w, seed64: async () => seed64.slice() };
 // the relay fee the helper gave the proof's pass (GET /v1/pool/fee), for a "max" spend
 let relayFee = null;
 const helperFetch = async (url, init) => {
+  if (REFUSE && new URL(url).pathname === "/v1/pool/solana/send") {
+    log("helper POST /v1/pool/solana/send: 422 check_failed injected (not forwarded)");
+    return new Response(JSON.stringify({ error: { code: "check_failed" } }), { status: 422, headers: { "content-type": "application/json" } });
+  }
   if (BURST && injected.send === 0 && new URL(url).pathname === "/v1/pool/solana/send") {
     injected.send++;
     log(`helper POST /v1/pool/solana/send: 429 rate_limited injected (not forwarded)`);
@@ -436,6 +445,10 @@ if (RESUME && process.env.FLOW_SWEEP_W) {
 }
 const landed = deposit.notes?.some((n) => n.ref === "deposit" && n.state === "UNSPENT");
 let buy = null;
+// FLOW_REFUSE: the Solana pool balance from the notes, as state.pools counts it, before the tap and after the run's end
+let refused = null;
+const { poolBalances, solanaBalancePool } = await import("../../wallet/src/pool/balances.ts");
+const poolBalance = async () => poolBalances(await ns.list(), [solanaBalancePool("sol", scope)])[0]?.balance ?? null;
 // a run that stopped after its buy, resumed: its buy's signature, its note SPENT in the restored store
 if (RESUME && process.env.FLOW_BUY_SIG) buy = { answer: { result: { txs: [{ hash: process.env.FLOW_BUY_SIG }] } }, notes: await noteList(), resumedAfterBuy: true };
 else if (landed) {
@@ -456,9 +469,18 @@ else if (landed) {
     log(`max spend on ${VENUE.kind}: ${max} lamports at relay fee ${relayFee}; W keeps ${KEEPS}, its sell's need on any venue`);
   }
   log(`pool.buy of ${spend} SOL of ${MINT}`);
+  const before = REFUSE ? await poolBalance() : null;
   phase = "buy";
   buy = await run("pool.buy", { chain: "solana", token: MINT, amount: spend, slippage_bps: 300 });
   log(`buy ${JSON.stringify(buy)}`);
+  if (REFUSE) {
+    const endedAt = Date.now();
+    await t.stateRead();
+    const after = await poolBalance();
+    const noteBack = (await ns.list()).some((n) => n.state === "UNSPENT" && n.leaf !== undefined) && !(await ns.list()).some((n) => n.state === "RESERVED");
+    refused = { before, after, noteBack, msAfterEnd: Date.now() - endedAt, answer: buy?.answer ?? null };
+    log(`refused send: balance ${before} before, ${after} after; note back ${noteBack}, ${refused.msAfterEnd} ms after the run's end`);
+  }
 }
 let sell = null;
 let rentBack = null;
@@ -544,11 +566,12 @@ const notes = await noteList();
 log(`notes ${JSON.stringify(notes)}`);
 const told = (kind) => !stages.some((x) => x.kind === kind && x.stage !== "sent" && x.stage !== "filled");
 const dusted = !DUST || (dust.sent && dust.burned?.amount === "1" && rentBack !== null && Object.entries(rentBack).every(([k, v]) => k === "W" || v === null));
-const filled = COPY && process.env.FLOW_COPY_STOP === "buy" ? landed && bought && told("pool.buy") : dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
+const back = REFUSE && refused !== null && stages.some((x) => x.kind === "pool.buy" && x.stage === "not_landed") && refused.noteBack && refused.before !== null && refused.after === refused.before;
+const filled = REFUSE ? back : COPY && process.env.FLOW_COPY_STOP === "buy" ? landed && bought && told("pool.buy") : dusted && landed && bought && told("pool.buy") && sell?.answer?.result !== undefined && notes.some((n) => n.ref === "return" && n.state === "UNSPENT" && n.leafIndex !== null) && told("pool.sell");
 seed64.fill(0);
 // FLOW_COPY: each send by its step (the copy's record reads each back), the W of the buy and the tip accounts watched
 const steps = COPY ? copy.sent.map((s) => ({ step: s.phase, signature: s.signature, watch: { W: rentBack?.W ?? null, feePayer: PIN.feePayer, ...Object.fromEntries(SOLANA_JITO_TIP_ACCOUNTS.map((a, i) => [`tip${i}`, a])) } })) : undefined;
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), cluster: COPY ? "mainnet copy" : "devnet", program: PIN.program, seedFile, steps, simFails: copy?.simFails, planted: copy?.planted, fee: copy ? String(copy.fee) : undefined, pool, tables: TABLES, mint: MINT, spend: SPEND, resumed: Boolean(RESUME), burst: BURST, injected, dust: DUST ? { S: dust.S, sent: dust.sent, burned: dust.burned ?? null, txs: dustTxs } : null, U, need: String(NEED), deposit, buy, buyTimeline: timeline, refused, sell, rentBack, sentTxs, stages, notes, filled }, null, 2) + "\n");
 await t.signedOut();
 ns.close();
 w.close();

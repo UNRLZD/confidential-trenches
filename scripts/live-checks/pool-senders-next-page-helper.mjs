@@ -12,8 +12,11 @@
 //     System transfer from W;
 //   - "ten_tag2": tag 2 with a tenth account, which no form of the program takes.
 // The two next-page forms pass every check the helper makes on the bytes and reach its simulation, which refuses the
-// junk proof (422 simulation_failed); a helper that predates the card refuses them on the bytes (422 not_pool). The
-// tenth account is refused on the bytes (422 not_pool) by both. Nothing is signed by the fee payer and nothing is sent.
+// junk proof (422 simulation_failed), or, since the helper names a blockhash its provider does not know (card
+// sol-pool-buy-lands-on-mainnet), the plant's junk blockhash (422 blockhash_not_found): either is the simulation reached;
+// a helper that predates the card refuses them on the bytes (422 not_pool). The
+// tenth account is refused on the bytes (422 not_pool) by both. The fee payer signs nothing that is refused, and nothing
+// is sent.
 // After: helper
 //   node scripts/live-checks/pool-senders-next-page-helper.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
@@ -80,7 +83,8 @@ export function judge(run) {
   say(fee?.status === 200 && f?.chain === "solana" && f?.pool === run.pool && B58.test(f?.program ?? "") && (run.program == null || f.program === run.program) && B58.test(f?.fee_payer ?? "") && DEC.test(f?.fee ?? ""), `GET /v1/pool/fee answers ${fee?.status}: pool ${f?.pool} (asked ${run.pool}), program ${f?.program}${run.program ? ` (want ${run.program})` : ""}, fee payer ${f?.fee_payer}, fee ${f?.fee}`);
   for (const [asked, code] of PLANTS) {
     const r = run.reads.find((x) => x.asked === asked);
-    say(r?.status === 422 && json(r.body)?.error?.code === code, `planted ${asked}: POST /v1/pool/solana/send answers ${r?.status} ${r?.body?.slice(0, 120)} (want 422 ${code})`);
+    const got = json(r?.body ?? "")?.error?.code;
+    say(r?.status === 422 && (got === code || (code === "simulation_failed" && got === "blockhash_not_found")), `planted ${asked}: POST /v1/pool/solana/send answers ${r?.status} ${r?.body?.slice(0, 120)} (want 422 ${code})`);
   }
   for (const r of run.reads) say(SHA.test(r.headers?.["x-helper-commit"] ?? ""), `[${r.asked}] X-Helper-Commit: ${r.headers?.["x-helper-commit"]}`);
   return { ok: lines.length === PLANTS.length + 1 + run.reads.length && lines.every((l) => l.startsWith("ok ")), lines };

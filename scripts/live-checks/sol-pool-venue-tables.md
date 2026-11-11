@@ -32,6 +32,16 @@ Tx: solana-devnet 45rnavPXafBYhMTWWC8nRHycqB8wRBrRwQfes5UCbHacKTuwGsNbM8k3dwCGz9
 Tx: solana-devnet 3cnjBBQn4VLXXcSz5qUcXssMESSJznS7eTXwCkWjmE5jFpxGezQqfnyguXxtzQ5mxVz31rCC5N7gcA2d5aw17EdT
 Tx: solana-devnet 5wm9mapMnCpoPZciQxTDLP8KTFPmgTfmDJ17wygoBZVERsLYKrRf9pRG7rH6eydjPvC4xbQdGG7UpTfAbrqvgguV
 Tx: solana-devnet 2SaUYxnZ4hqsHHsEZw1fsonopSH4mfc6LzwkBS2swXry6be5c8tJSksz4X25NpCf7GxFRVuKZhvmV7YEwM3Qvnjy
+Tx: solana-devnet 4nCnFwQnscaGiifJixPBzsjHWp1y9RLEtjLUkAqHfRY3aL6XgqmS4UZMt8wfNQMu14bPPBfUrxu3ncTaBu1vkmyX
+Tx: solana-devnet 2MYUiUymrREGiUqLRBTrjpXds18P4m75LX7pN3a8sjvx9gGR3JmRGUU6xKomMj1aVDMmuCCU3ZUKC4fDPzh7HZ7G
+Tx: solana-devnet 34YNcFXWHLwi7jf5VaB8zvEy2ZVp1kJ2DDhZBnpSCRf7yS5eSEeR16nmCD1w2HbxF68ZfzaZhudaLVrcnVVRWdXX
+Tx: solana-devnet 4AA4L8CYwjmLh9CCTjMfud1JomCdomiKnNfyZtLYA6sL3YrECCfaFuHLjzxuodASYgzwEnaMQeUU88vV2DsaFaLT
+Tx: solana-devnet 5LrNamvGucCrZLmyphYX93Yjf6M1NQMiRKHqymy6QymcQdh3YBNeUp9SUU22c2YrfZbVsY49B5so1XihpVi2xHXv
+Tx: solana-devnet 2gpXjfS2BzJw8TiWMrr7ePueGjCe7bR7GG4sXpWAuhSpqYQ7Mc3EQ4MzK7kk9F4LKzcRK2p75MWNSN7GWNr7QFyE
+Tx: solana-devnet 2CCwbG7uyJpUhK1tWNQDjGqUBcU5icAioaCJzBEGKU9sdA6sNykLb3mFXz9JZRsJ9VKYB3x1VCBYm8s1zvLN93jF
+Tx: solana-devnet 4CCvP81wcksCu8VtQbG2nyEezPxWMZ4iTWLy9xaxZacQPqTYrM8Dx9znofFbmA1NRRkZLicYYvktimpFaiUmwKMm
+Tx: solana-devnet 261or3RnKi9NFD7ejty9qJKCG6Cht73NAneGShEM6vscryWnaBFwezcWwhnFXKEbnKM3s6UbJixWxVHuShuwWRyH
+Tx: solana-devnet 2MkVV1rhib9BGHcMpvC4VKeJG322NyDn2QMr2WbWzWdggsDPzwJU31n2rGxbWvWTvzAy6LnFRP5EpxBBD83VDJ5c
 
 The devnet run of 9 Nov 2026, 23:12Z to 23:22Z. The Tx lines above are in order:
 
@@ -85,3 +95,13 @@ Tx lines 15 to 32 above are in order:
    - A later load (FLOW_RESUME with FLOW_SWEEP_W) read the return note UNSPENT at leaf 54, 5,714,253 lamports, and W,
      its token account and both volume accounts null at finalized. The first pass ended "filled": false only because
      it read the notes before the settle wrote the return note, as in run 4.
+
+The devnet run of 11 Nov 2026, 15:49Z: PumpSwap's generation 3, 3uym947bDVPRHyzmzTAV8C4p4Du6s2wRjVr4AZpYQtBH, made by venue-table.mjs (card
+sol-pool-buys-mayhem-coins) once the kit's PumpSwap list holds GlobalConfig's reserved fee recipient
+GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS and its wSOL account C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet
+(entries 254 and 255), so generation 2 was no longer the kit's list. The pool's trees held 210 state and 134 label
+entries, so the kit's next range is state pages 0 to 134 and label pages 0 to 88, 256 addresses (it serves entries up to
+138,239 and 91,135 and warns at 110,592 and 72,908). The last 10 Tx lines above are its sends, in order: create and
+extend with 30, eight extends (30 each, then 16), freeze (authority none). The pin: SOL_POOL_TABLES.devnet.pumpswap is
+[4kG4g4fb..., J1R9px8L..., 3uym947b...], oldest first. The live check read it back at 15:52Z: frozen, the same bytes
+on both devnet RPCs, exactly the record's and the kit's list.

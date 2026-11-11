@@ -269,6 +269,11 @@ test("a release whose spend is not read in time keeps the part owed: in_transit,
   assert.deepEqual(wd.pendings.at(-1), a.pending, "the op's last write still owes it");
   assert.deepEqual(wd.order.slice(0, 2), ["owe:RESERVED", "send:1"], "owed before the release left");
   assert.equal(wd.balance.get(W), amount + W_FEE);
+  // card pool-buy-record-never-stays-sent: the release read landed, so the note's mark holds what it took out, and the
+  // balance in every tab counts only its change until the settle writes it
+  const mark = (await wd.ns.marks()).get(wd.ids[0]!);
+  assert.equal(mark?.attempt, held.attempt);
+  assert.equal(typeof mark?.withdrawn === "bigint" && mark.withdrawn > 0n, true, "the landed release's withdrawn value on the note's mark");
   // the state reads' pass: W holds the part, so it goes on to To
   const done = await finishPoolOnward(wd.host, a.pending!);
   assert.equal(done?.stage, "sent");

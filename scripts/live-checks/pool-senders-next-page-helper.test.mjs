@@ -68,6 +68,12 @@ test("made from the good run: a next-page form refused, the tenth carried, a pla
   assert.equal(judgeAll([]).ok, false);
 });
 
+test("a helper that simulates the signed bytes on their own blockhash answers the junk blockhash: the simulation reached, PASS", () => {
+  const nf = (x) => ({ ...x, body: '{"error":{"code":"blockhash_not_found"}}' });
+  assert.equal(judgeAll(edit(edit(A.good, "next_tag2", nf), "next_tag3", nf)).ok, true);
+  assert.equal(judgeAll(edit(A.good, "ten_tag2", nf)).ok, false, "the tenth account is refused on the bytes, never simulated");
+});
+
 test("the plants are what the helper's own byte checks read: both next-page forms pass them, the tenth account is not_pool", () => {
   const program = b58encode(Buffer.alloc(32, 5));
   const pool = solanaPoolAccount(program);

@@ -148,6 +148,12 @@ export const MUTANTS = [
   ['if (minOut < floor) return refuse("min_out");', "", SELL],
   ['if (g.program !== w.program || g.data.length !== w.data.length || g.data.some((b, j) => b !== w.data[j])) return refuse("sell");', "", SELL],
   ['if (sell.length !== want.length) return refuse("sell");', "", SELL],
+  // the sell's accounts from the device's venue, never the wire (card sol-pool-buys-mayhem-coins): the rule unasked, or
+  // the fee recipient it holds the wire to taken from the wire itself
+  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', "", SELL],
+  ["const want = solanaPoolSellSteps(venue, ctx.wallet, ask.amount, minOut);", 'const want = solanaPoolSellSteps(venue.kind === "pump-curve" ? { ...venue, feeRecipient: venueIx.accounts[1]!.key } : venue, ctx.wallet, ask.amount, minOut);', SELL],
+  // the review of 6eb64bdb: one account the wire names, the curve's creator vault (its sell's account 8), taken as the rule's own
+  ['if (!sameList(g.accounts, w.accounts)) return refuse("sell_accounts");', 'if (!sameList(g.accounts, w.accounts.map((a, j) => (j === 8 && g.accounts[8] ? { ...a, key: g.accounts[8].key } : a)))) return refuse("sell_accounts");', SELL],
   ['if (back !== minOut - reserve) return refuse("deposit_amount");', 'if (back > minOut) return refuse("deposit_amount");', SELL],
   // card sol-w-sweep: the reserve's bound on every path (the cap, less what the sweep carries on), the line that
   // replaced the one these two planted
@@ -213,9 +219,9 @@ export const MUTANTS = [
   // the EVM buy's floor, the check's own from the device's quote (card signpage-evm-pool-buy)
   ['if (lower(agreed.token) !== lower(ask.token ?? "")) return refuse("token");', "", EBUY],
   ['ctx.feeCap >= ask.amount || agreed.amountIn !== ask.amount - ctx.feeCap)', "ctx.feeCap >= ask.amount)", EBUY],
-  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");', "", EBUY],
-  ['const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', "const floor = 1n;", EBUY],
-  ['if (typeof floor !== "bigint" || floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
+  ['if (!Number.isInteger(ask.slippageBps) || ask.slippageBps < 0 || ask.slippageBps >= 10_000) return refuse("slippage");\n  if (typeof agreed.amountOut !== "bigint"', 'if (typeof agreed.amountOut !== "bigint"', EBUY],
+  ['typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");\n  const floor = (agreed.amountOut * BigInt(10_000 - ask.slippageBps)) / 10_000n;', 'typeof agreed.amountOut !== "bigint" || agreed.amountOut <= 0n) return refuse("min_out");\n  const floor = 1n;', EBUY],
+  ['if (floor <= 0n || built.minOut < floor) return refuse("min_out");\n  passed("evm.sell"', 'passed("evm.sell"', ESELL],
   // only what a check passed is signed
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', "", "Solana deposit: the pinned pool's tag 1"],
   ['if (!read || read.length !== wire.length || read.some((b, i) => b !== wire[i])) return refuse("unchecked");', 'if (!read) return refuse("unchecked");', "Solana deposit: the pinned pool's tag 1"],
