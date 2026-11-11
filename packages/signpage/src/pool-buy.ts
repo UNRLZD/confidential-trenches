@@ -384,17 +384,28 @@ const BLOCKHASH_LIFE = 151;
  *  lastValidBlockHeight and RPC 1's height (read after it) + 151. A liar can only raise it, which only waits longer.
  *  pool-sell.ts reads its blockhash here too. */
 export async function blockhashOf(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
+  return blockhashValid(rpcs, await blockhashRead(rpcs));
+}
+
+/** blockhashOf's first read: the blockhash on RPC 0, its lastValidBlockHeight and its slot. A sell builds on it while
+ *  blockhashValid runs, and signs only once that check passed (card pool-sell-legs-side-by-side). */
+export async function blockhashRead(rpcs: readonly [SolanaRpc, SolanaRpc]): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number }> {
   const r = (await rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])) as { context?: { slot?: unknown }; value?: { blockhash?: unknown; lastValidBlockHeight?: unknown } };
   const blockhash = r?.value?.blockhash;
   if (typeof blockhash !== "string") return no();
+  return { blockhash, lastValidBlockHeight: int(r.value!.lastValidBlockHeight), slot: int(r.context?.slot) };
+}
+
+/** blockhashOf's check: RPC 0's blockhash valid on RPC 1, and the last height from RPC 1's height (read after it). */
+export async function blockhashValid(rpcs: readonly [SolanaRpc, SolanaRpc], r: { blockhash: string; lastValidBlockHeight: number; slot: number }): Promise<{ blockhash: string; lastValidBlockHeight: number; slot: number; lastHeight: number }> {
   const [ok, height] = await Promise.all([
-    rpcs[1]("isBlockhashValid", [blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
+    rpcs[1]("isBlockhashValid", [r.blockhash, { commitment: "confirmed" }]) as Promise<{ value?: unknown }>,
     rpcs[1]("getBlockHeight", [{ commitment: "confirmed" }]),
   ]);
   if (ok?.value !== true) return no();
-  const said = int(r.value!.lastValidBlockHeight);
+  const said = r.lastValidBlockHeight;
   const cap = int(height) + BLOCKHASH_LIFE;
-  return { blockhash, lastValidBlockHeight: said, slot: int(r.context?.slot), lastHeight: said > cap ? said : cap };
+  return { blockhash: r.blockhash, lastValidBlockHeight: said, slot: r.slot, lastHeight: said > cap ? said : cap };
 }
 
 /** True once both RPCs' finalized block height is past `last`: no transaction on that blockhash can land after, and
