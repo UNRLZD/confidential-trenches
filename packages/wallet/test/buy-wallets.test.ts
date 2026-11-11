@@ -889,3 +889,101 @@ test("item 6: a sale's wallet list on the mainnet pace: one finder round per pas
     assert.ok(got[n]!.ms >= (n - 1) * HOLDINGS_RPC_LIMIT.windowMs && got[n]!.ms < (n - 1) * HOLDINGS_RPC_LIMIT.windowMs + 1_000, `${n} Ws: ${got[n]!.ms} ms from the first round to the last`);
   }
 }));
+
+// ---------- a W's buy from its own history (card restore-rebuilds-buy-records) ----------
+import { SOL_BUY_PAGE, SOL_BUY_PAGES, SOL_BUY_TXS, solanaBuyIn, solanaBuyReader } from "../src/pool/buy-wallets.ts";
+
+const BUY_POOL = key32(40), FEE_PAYER = key32(41), STRANGER_KEY = key32(42), VENUE = key32(43);
+const WSOL = "So11111111111111111111111111111111111111112";
+const tb = (accountIndex: number, mint: string, owner: string, amount: bigint, programId = SOLANA_TOKEN_PROGRAM) => ({ accountIndex, mint, owner, programId, uiTokenAmount: { amount: amount.toString(), decimals: 6 } });
+/** A transaction as getTransaction's json answer has it. `signers` the keys that sign, first; tag 3 to `pool` naming `to`. */
+function txOf(o: { signers: string[]; keys?: string[]; ix?: { program: string; to: string; tag: number }[]; pre?: unknown[]; post?: unknown[]; err?: unknown }) {
+  const keys = [...o.signers, ...(o.keys ?? []), BUY_POOL, VENUE];
+  const at = (k: string) => (keys.includes(k) ? keys.indexOf(k) : keys.push(k) - 1);
+  const instructions = (o.ix ?? []).map((x) => ({ programIdIndex: at(x.program), accounts: [at(BUY_POOL), at(x.to), at(FEE_PAYER)], data: base58.encode(Uint8Array.of(x.tag, 1, 2, 3)) }));
+  return { slot: 9, meta: { err: o.err ?? null, preTokenBalances: o.pre ?? [], postTokenBalances: o.post ?? [] }, transaction: { signatures: o.signers.map(() => "s"), message: { header: { numRequiredSignatures: o.signers.length }, accountKeys: keys, instructions } } };
+}
+const W = solW(0), W2 = solW(1);
+const buyTx = (w = W, mint = MINT_A, program = SOLANA_TOKEN_PROGRAM) => txOf({ signers: [FEE_PAYER, w], ix: [{ program: BUY_POOL, to: w, tag: 3 }], post: [tb(4, mint, w, 5_000_000n, program), tb(5, WSOL, w, 0n)], pre: [tb(5, WSOL, w, 0n)] });
+
+test("a W's buy is read from its own transaction: W signs it, the pinned pool's tag 3 names W, one mint other than wrapped SOL rises in W's accounts", () => {
+  assert.deepEqual(solanaBuyIn(buyTx(), W, BUY_POOL), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM });
+  assert.deepEqual(solanaBuyIn(buyTx(W, MINT_B, SOLANA_TOKEN_2022_PROGRAM), W, BUY_POOL), { mint: MINT_B, program: SOLANA_TOKEN_2022_PROGRAM });
+  // a stranger's send of a token to W: W does not sign it
+  assert.equal(solanaBuyIn(txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] }), W, BUY_POOL), null, "a stranger's send");
+  // a stranger's send dressed as the pool's call: W still does not sign
+  assert.equal(solanaBuyIn(txOf({ signers: [STRANGER_KEY], keys: [W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(2, MINT_B, W, 9n)] }), W, BUY_POOL), null, "the pool's call in a stranger's tx");
+  // W signs, but no release-and-buy of the pinned pool naming W
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: VENUE, to: W, tag: 3 }], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "another program");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 2 }], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "a release with no buy");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W, W2], ix: [{ program: BUY_POOL, to: W2, tag: 3 }], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "a release to another W");
+  assert.equal(solanaBuyIn(buyTx(), W, key32(44)), null, "another pool");
+  // what W's accounts show must be one buy
+  assert.equal(solanaBuyIn({ ...buyTx(), meta: { ...buyTx().meta, err: { InstructionError: [0, "x"] } } }, W, BUY_POOL), null, "a failed transaction");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(4, MINT_A, W, 5n), tb(6, MINT_B, W, 5n)] }), W, BUY_POOL), null, "two mints rise");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(5, WSOL, W, 5n)] }), W, BUY_POOL), null, "wrapped SOL only");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(4, MINT_A, STRANGER_KEY, 5n)] }), W, BUY_POOL), null, "the token rose in an account W does not own");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], post: [tb(4, MINT_A, W, 5n, VENUE)] }), W, BUY_POOL), null, "not a token program");
+  assert.equal(solanaBuyIn(txOf({ signers: [FEE_PAYER, W], ix: [{ program: BUY_POOL, to: W, tag: 3 }], pre: [tb(4, MINT_A, W, 9n)], post: [tb(4, MINT_A, W, 5n)] }), W, BUY_POOL), null, "a sale: the token falls");
+  assert.equal(solanaBuyIn(null, W, BUY_POOL), null);
+});
+
+/** A fake route of W's history: its signatures newest first, each with its transaction; every request logged. */
+function historyRpc(hist: Map<string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }>) {
+  const log: { method: string; params: unknown[] }[] = [];
+  const rpc = (async (method: string, params: readonly unknown[]) => {
+    log.push({ method, params: [...params] });
+    if (method === "getSignaturesForAddress") {
+      const h = hist.get(params[0] as string);
+      const o = params[1] as { limit: number; before?: string };
+      const all = h?.sigs ?? [];
+      const from = o.before === undefined ? 0 : all.findIndex((x) => x.signature === o.before) + 1;
+      return all.slice(from, from + o.limit);
+    }
+    if (method === "getTransaction") {
+      for (const h of hist.values()) if (h.txs.has(params[0] as string)) return h.txs.get(params[0] as string);
+      return null;
+    }
+    throw new Error(`unexpected ${method}`);
+  }) as unknown as SolanaRpc;
+  return { rpc, log };
+}
+
+test("a W's buy from its history: its oldest successful transactions, past a failed try and a stranger's send that came first; every request names one W or one signature", async () => {
+  const hist = new Map([
+    // newest first: a sale, a stranger's send, the buy, a stranger's send before it (W named by a failed try), the failed try
+    [W, { sigs: [{ signature: "sell", err: null }, { signature: "drop2", err: null }, { signature: "buy", err: null }, { signature: "drop1", err: null }, { signature: "try", err: { x: 1 } }], txs: new Map<string, unknown>([["buy", buyTx()], ["drop1", txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] })], ["drop2", txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] })]]) }],
+    [W2, { sigs: [{ signature: "drop3", err: null }], txs: new Map<string, unknown>([["drop3", txOf({ signers: [STRANGER_KEY], keys: [W2], post: [tb(2, MINT_B, W2, 9n)] })]]) }],
+  ]);
+  const { rpc, log } = historyRpc(hist);
+  const r = solanaBuyReader(rpc, BUY_POOL);
+  assert.deepEqual(await r.read(W), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM });
+  assert.deepEqual(log.map((l) => `${l.method} ${String(l.params[0]).slice(0, 5)}`), [`getSignaturesForAddress ${W.slice(0, 5)}`, "getTransaction drop1", "getTransaction buy"], "the failed try is not read; the oldest successful first");
+  // a W whose history holds only a stranger's send: no buy
+  assert.equal(await r.read(W2), null, "a stranger's token is no buy");
+  for (const l of log) {
+    const body = JSON.stringify(l.params);
+    assert.ok(!(body.includes(W) && body.includes(W2)), "no request names two Ws");
+  }
+});
+
+test("a W's history the reader cannot tell is no buy: none at all, a listed transaction the route no longer returns, past SOL_BUY_TXS sends first, past SOL_BUY_PAGES pages", async () => {
+  const drop = (n: number) => ({ signature: `drop${n}`, err: null });
+  const dropTx = txOf({ signers: [STRANGER_KEY], keys: [W], post: [tb(2, MINT_B, W, 9n)] });
+  const cases: [string, { sigs: { signature: string; err: unknown }[]; txs: Map<string, unknown> }, number][] = [
+    ["no history", { sigs: [], txs: new Map() }, 1],
+    ["pruned", { sigs: [{ signature: "buy", err: null }], txs: new Map() }, 2],
+    ["flooded first", { sigs: [{ signature: "buy", err: null }, ...Array.from({ length: SOL_BUY_TXS }, (_, i) => drop(i))], txs: new Map<string, unknown>([["buy", buyTx()], ...Array.from({ length: SOL_BUY_TXS }, (_, i) => [`drop${i}`, dropTx] as [string, unknown])]) }, 1 + SOL_BUY_TXS],
+    ["past the pages", { sigs: [...Array.from({ length: SOL_BUY_PAGE * SOL_BUY_PAGES }, (_, i) => drop(i)), { signature: "buy", err: null }], txs: new Map<string, unknown>([["buy", buyTx()]]) }, SOL_BUY_PAGES],
+  ];
+  for (const [what, h, calls] of cases) {
+    const { rpc, log } = historyRpc(new Map([[W, h]]));
+    assert.equal(await solanaBuyReader(rpc, BUY_POOL).read(W), null, what);
+    assert.equal(log.length, calls, `${what}: ${log.length} calls`);
+  }
+  // within the pages: the buy past a full first page is found
+  const long = new Map([[W, { sigs: [...Array.from({ length: SOL_BUY_PAGE + 2 }, (_, i) => drop(i)).map((x, i) => (i === SOL_BUY_PAGE + 1 ? { signature: "buy", err: null } : x))], txs: new Map<string, unknown>([["buy", buyTx()]]) }]]);
+  const l2 = historyRpc(long);
+  assert.deepEqual(await solanaBuyReader(l2.rpc, BUY_POOL).read(W), { mint: MINT_A, program: SOLANA_TOKEN_PROGRAM }, "a second page read");
+  assert.deepEqual(l2.log.map((l) => l.method), ["getSignaturesForAddress", "getSignaturesForAddress", "getTransaction"]);
+});

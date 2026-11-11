@@ -368,3 +368,148 @@ test("the positions pass on a helper that throttles for good ends within the lis
   assert.ok(asked > 0, "the pass asked");
   assert.equal(late, 0, `${late} of ${asked} reads past the list's bound of ${HOLDINGS_THROTTLE_MAX_MS} ms from its first read`);
 }));
+
+// Card restore-rebuilds-buy-records: a device restored from the 12 words holds the notes (so the Ws) and no buy record.
+// Each W's buy record comes back from its own buy, read on the helper's keyed route, one W a request: W0 bought BOUGHT
+// and holds it with a stranger's token beside it, W1 bought OLD and sold it whole, W2 holds only a stranger's token
+// (its history: that send alone). Every request is logged.
+test("a restored device: each W's buy record back from its own buy on the helper's keyed route, one W a request, so the positions show what it bought and holds; a stranger's token, a sold W and a W with no buy show nothing; a run cut short resumes and never replaces a record", { timeout: 600_000 }, () => onTestClock(async () => {
+  assert.equal(POOL_TESTNET, false, "the mainnet build");
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  after(() => w.close());
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  const ns = await openNoteStore(w);
+  const Ws: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const ref = { kind: "deposit" as const, s: SCOPE, i };
+    const pre = noteSecrets(SEED64, ref).precommitment;
+    const label = BigInt(277 + i);
+    const r = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 10_000_000n, label, commitment: noteCommitment(10_000_000n, label, pre), leafIndex: BigInt(i) } });
+    await ns.move(r.id, "UNSPENT", "SPENT");
+    const fw = freshWallet(SEED64, "sol", label, jOf(ref));
+    fw.secretKey.fill(0);
+    Ws.push(fw.address);
+  }
+  ns.close();
+  const names = new Map<string, string>([[BOUGHT, "BOUGHT"], [OLD, "OLD"], [STRANGER, "STRANGER"]]);
+  Ws.forEach((a, i) => {
+    names.set(a, `W${i}`);
+    for (const m of [BOUGHT, OLD, STRANGER]) for (const p of [SOLANA_TOKEN_PROGRAM, SOLANA_TOKEN_2022_PROGRAM]) names.set(solanaAta(a, m, p), `ATA(W${i})`);
+  });
+  const tokenAccount = (mint: string, owner: string, amount: bigint): string => {
+    const d = new Uint8Array(165);
+    d.set(base58.decode(mint), 0);
+    d.set(base58.decode(owner), 32);
+    new DataView(d.buffer).setBigUint64(64, amount, true);
+    d[108] = 1;
+    return base64.encode(d);
+  };
+  const mintData = new Uint8Array(82);
+  mintData[44] = 6;
+  mintData[45] = 1;
+  // W's transactions as getTransaction answers them (json): W's buy signed by W and the fee payer, the pinned pool's tag 3
+  // naming W; a stranger's send signed by the stranger
+  const FEE = PIN.feePayer, SENDER = key(20);
+  const bal = (accountIndex: number, mint: string, owner: string, amount: string) => ({ accountIndex, mint, owner, programId: SOLANA_TOKEN_PROGRAM, uiTokenAmount: { amount, decimals: 6 } });
+  const buyOf = (W: string, mint: string) => ({ slot: 5, meta: { err: null, preTokenBalances: [], postTokenBalances: [bal(3, mint, W, "4000000")] }, transaction: { message: { header: { numRequiredSignatures: 2 }, accountKeys: [FEE, W, PIN.program, solanaAta(W, mint, SOLANA_TOKEN_PROGRAM)], instructions: [{ programIdIndex: 2, accounts: [2, 1, 0], data: base58.encode(Uint8Array.of(3, 9, 9)) }] } } });
+  const sendOf = (W: string, mint: string) => ({ slot: 6, meta: { err: null, preTokenBalances: [], postTokenBalances: [bal(2, mint, W, "7")] }, transaction: { message: { header: { numRequiredSignatures: 1 }, accountKeys: [SENDER, W, solanaAta(W, mint, SOLANA_TOKEN_PROGRAM)], instructions: [] } } });
+  // newest first, as getSignaturesForAddress answers; a signature names no W
+  const history = new Map<string, { signature: string; err: null; tx: unknown }[]>([
+    [Ws[0]!, [{ signature: "s0drop", err: null, tx: sendOf(Ws[0]!, STRANGER) }, { signature: "s0buy", err: null, tx: buyOf(Ws[0]!, BOUGHT) }]],
+    [Ws[1]!, [{ signature: "s1sell", err: null, tx: null }, { signature: "s1buy", err: null, tx: buyOf(Ws[1]!, OLD) }]],
+    [Ws[2]!, [{ signature: "s2drop", err: null, tx: sendOf(Ws[2]!, STRANGER) }]],
+  ]);
+  const txs = new Map([...history.values()].flat().map((x) => [x.signature, x.tx] as const));
+  const mode = { failTx: "", holdTx: "" };
+  let release = (): void => {};
+  const sentSigs: string[] = [];
+  let phase = "";
+  const log: { phase: string; to: string; method: string; names: string[] }[] = [];
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const u = new URL(String(url));
+    const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    const to = `${u.host}${u.pathname}`;
+    const said = [...names].filter(([k]) => String(init?.body).includes(k)).map(([, v]) => v);
+    log.push({ phase, to, method: b.method, names: said });
+    if (b.method === "getTransaction") sentSigs.push(`${phase} ${String(b.params[0])}`);
+    const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, result }), { status: 200, headers: { "content-type": "application/json" } });
+    if (b.method === "getSignaturesForAddress") return ok((history.get(b.params[0] as string) ?? []).map(({ signature, err }) => ({ signature, err, slot: 5 })));
+    if (b.method === "getTransaction") {
+      if (b.params[0] === mode.holdTx) await new Promise<void>((r) => (release = r));
+      if (b.params[0] === mode.failTx) return new Response(JSON.stringify({ jsonrpc: "2.0", id: b.id, error: { code: -32000, message: "no" } }), { status: 200 });
+      return ok(txs.get(b.params[0] as string) ?? null);
+    }
+    if (b.method === "getBalance") return ok({ context: { slot: 100 }, value: 5000 });
+    if (b.method === "getTokenAccountsByOwner") {
+      const owner = b.params[0] as string;
+      const prog = (b.params[1] as { programId: string }).programId;
+      const held = owner === Ws[0] ? [BOUGHT, STRANGER] : owner === Ws[2] ? [STRANGER] : [];
+      const value = prog === SOLANA_TOKEN_PROGRAM ? held.map((m) => ({ pubkey: solanaAta(owner, m, SOLANA_TOKEN_PROGRAM), account: { owner: prog, lamports: 1, data: [tokenAccount(m, owner, 4_000_000n), "base64"] } })) : [];
+      return ok({ context: { slot: 100 }, value });
+    }
+    if (b.method === "getAccountInfo") return ok({ context: { slot: 100 }, value: { owner: SOLANA_TOKEN_PROGRAM, lamports: 1, data: [base64.encode(mintData), "base64"] } });
+    return ok(null);
+  }) as typeof fetch;
+  const make = () => testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+  const show = (p: readonly Position[] | null) => p?.map((x) => [names.get(x.token), x.amount, x.wallets.map((a) => names.get(a))]);
+  const until = async (f: () => boolean | Promise<boolean>) => {
+    for (let i = 0; i < 1_200 && !(await f()); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(await f(), phase);
+  };
+  // a transaction this phase asked for, by its signature
+  const asked = (sig: string) => sentSigs.includes(`${phase} ${sig}`);
+  const records = async () => (await w.get("meta", "owed/buy-sol")) as Record<string, { mint: string; program: string }> | undefined;
+
+  phase = "1 the load after the restore, W1's buy unread (the route down for it)";
+  mode.failTx = "s1buy";
+  let tp = make();
+  await tp.positions();
+  await tp.settle();
+  await until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify([["BOUGHT", "4", ["W0"]]]));
+  // every W of the run read: its end (W1's read failed, so it keeps none)
+  await until(() => asked("s0buy") && asked("s1buy") && asked("s2drop"));
+  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: SOLANA_TOKEN_PROGRAM } }, "W0's record back; W1's read failed and W2 has no buy: none");
+  phase = "1b a sign out while W1's buy is read: nothing written after it";
+  mode.failTx = "";
+  mode.holdTx = "s1buy";
+  tp = make();
+  await tp.settle();
+  await until(() => asked("s1buy"));
+  await tp.signedOut();
+  release();
+  mode.holdTx = "";
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await records())?.[Ws[1]!], undefined, "W1's buy read after the sign out wrote nothing");
+  phase = "2 the next load reads W1 (and W2, still with none) again, and never W0";
+  mode.failTx = "";
+  await w.update("meta", "owed/buy-sol", (v) => ({ ...(v as object), [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" } }));
+  tp = make();
+  await tp.positions();
+  await tp.settle();
+  await until(async () => (await records())?.[Ws[1]!] !== undefined);
+  assert.deepEqual(await records(), { [Ws[0]!]: { mint: BOUGHT, program: "kept as this device wrote it" }, [Ws[1]!]: { mint: OLD, program: SOLANA_TOKEN_PROGRAM } }, "W1's record back as sold whole (its buy's); W0's never replaced");
+  await until(async () => JSON.stringify(show(await tp.positions())) === JSON.stringify([["BOUGHT", "4", ["W0"]]]));
+  assert.deepEqual(log.filter((l) => l.phase === phase && l.method === "getSignaturesForAddress").map((l) => l.names).sort(), [["W1"], ["W2"]]);
+  phase = "3 a buy on this device writes W1's record while the run reads W1: the run never replaces it";
+  await w.update("meta", "owed/buy-sol", (v) => {
+    const all = { ...(v as Record<string, unknown>) };
+    delete all[Ws[1]!];
+    return all;
+  });
+  mode.holdTx = "s1buy";
+  tp = make();
+  await tp.settle();
+  await until(() => asked("s1buy"));
+  await w.update("meta", "owed/buy-sol", (v) => ({ ...(v as object), [Ws[1]!]: { mint: OLD, program: "this device's buy" } }));
+  release();
+  mode.holdTx = "";
+  await until(() => asked("s2drop"));
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await records())?.[Ws[1]!], { mint: OLD, program: "this device's buy" }, "the record written meanwhile is kept");
+
+  const at = (l: (typeof log)[number]) => `${l.phase} | ${l.to} | ${l.method} | ${l.names.join(",")}`;
+  assert.deepEqual(log.filter((l) => l.to !== HELPER_RPC && l.names.some((n) => n.startsWith("W") || n.startsWith("ATA"))).map(at), [], "no W or W's token account named to a host but the helper's keyed route");
+  assert.deepEqual(log.filter((l) => new Set(l.names.filter((n) => /^W\d$/.test(n))).size > 1).map(at), [], "no request names two Ws");
+  assert.deepEqual(log.filter((l) => l.names.includes("STRANGER")).map(at), [], "the stranger's mint is named nowhere");
+  assert.ok(log.some((l) => l.method === "getSignaturesForAddress" && l.to === HELPER_RPC), "the history read on the helper's keyed route (a sanity check of the log)");
+}));

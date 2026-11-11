@@ -79,6 +79,8 @@ import type { PoolStatePrice, TxRef, WithdrawStage } from "../../kit/src/signpag
 import { finishPoolOnward, runPoolWithdraw, solanaOnwardFee, solanaWithdrawMinPart, withdrawSources, type Arrivals, type HistoryPlaces, type PendingOnward } from "./pool-withdraw.ts";
 import type { PoolFunds, PoolReady, PoolWithdrawFormDeps } from "./withdraw/pool-form.ts";
 import { EVM_POOL_HISTORY } from "../../kit/src/trade/evm/buy-unpinned.ts";
+import { solanaBuysAt, solanaHelperBuys } from "../../wallet/src/pool/buy-wallets.ts";
+import { solBuyRecords } from "./sol-buy-records.ts";
 
 // The freezes are marked pure, so SIGN_HOST's build, which never reads these, drops them whole (scripts/build-network.test.mjs).
 /** Each chain's two testnet RPCs, as the app names the chain. Solana's are mainnet's shape (main.ts: a public provider
@@ -495,6 +497,8 @@ export type TestnetPool = {
   positions(): Promise<readonly Position[] | null>;
   /** A restore wrote buy records of `chain`: its positions read again. */
   evmHoldingsRestored(chain: "base" | "robinhood"): void;
+  /** A restore wrote its notes: each Solana W with no buy record gets it back from its own buy (src/sol-buy-records.ts). */
+  buysRestored(): void;
   /** The positions as held (positions.ts get()): the last pass, or the kept one read before it; null before either or
    *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
   positionsNow(): readonly Position[] | null;
@@ -628,6 +632,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   let follows = new AbortController();
   const signedOut = async (): Promise<void> => {
     stopTurn();
+    buyRecords.stop();
     clears++;
     // every read waiting for its turn on a host ends (card signpage-passes-yield-to-a-trade)
     stopHostLaneWaits();
@@ -1247,7 +1252,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const boughtDecimals = new Map<string, number>();
   const buy = (over.tradeKinds?.buy ?? poolBuyKind)(() => buyHost());
   let settling: Promise<void> | null = null;
-  const settle = (): Promise<void> => Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {});
+  // a signed-in load also gets back the buy records a restore left owed, in the background (src/sol-buy-records.ts)
+  const settle = (): Promise<void> => (buyRecords.run(), Promise.all([settleSolana(), settleEvmOpen().catch(() => {})]).then(() => {}));
   const settleSolana = (): Promise<void> => {
     if (pin === undefined) return Promise.resolve();
     if (settling) return settling;
@@ -1496,6 +1502,52 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       },
     };
   };
+  // W's buy records back after a restore (card restore-rebuilds-buy-records, src/sol-buy-records.ts): the Ws of the
+  // pool's SPENT and RESERVED notes, each read on the finder's route and the finder host's pass turn, one W a request
+  const buyRecords = solBuyRecords({
+    // the finder's derive with a reader that reads nothing: the addresses only, the seed zeroed as soon as they are
+    wallets: async (signal) => {
+      if (scope === null) return [];
+      if (!locks) throw new Error("no Web Locks: the seed is not read");
+      const notes = await openNoteStore(await page.store());
+      let spent: Awaited<ReturnType<typeof spentNotesOf>>;
+      try {
+        spent = await spentNotesOf(notes, scope);
+      } finally {
+        notes.close();
+      }
+      if (spent.length === 0) return [];
+      const none: HoldingsReader = { chain: "sol", read: async () => ({ native: 0n, tokens: new Map(), unreadable: [] }) };
+      const derived = await locks.request(WALLET_SEED_LOCK, { mode: "shared", signal }, async () => {
+        const seed64 = await page.seed64();
+        try {
+          return derivedBuyWallets(seed64, [{ id: pin!.program, chain: "sol", spent, reader: none }]);
+        } finally {
+          seed64.fill(0);
+        }
+      });
+      const got = await derived.read({ signal });
+      if (got.failed.length > 0) throw new Error("the buy wallets could not be derived");
+      return got.wallets.map((w) => w.address);
+    },
+    records: async () => asRecord(await (await page.store()).get("meta", BUY_MINTS_KEY)),
+    write: async (address, buy) => {
+      let wrote = false;
+      await (await page.store()).update("meta", BUY_MINTS_KEY, (v) => {
+        // the store may run this again on a race: each run decides afresh
+        const all = asRecord(v);
+        wrote = !Object.hasOwn(all, address);
+        if (!wrote) return undefined;
+        return { ...all, [address]: { mint: buy.mint, program: buy.program } };
+      });
+      return wrote;
+    },
+    reader: {
+      read: (address, signal) => (POOL_TESTNET ? solanaBuysAt(TESTNET_RPCS.solana[0], pin!.program) : solanaHelperBuys(TRADE_HELPER, pin!.program)).read(address, signal),
+    },
+    turn: (signal) => hostLane(FINDER_HOST).turn("pass", signal, false),
+    wrote: () => positions.refresh(),
+  });
   positions.watch(() => {
     for (const f of watchers) f();
   });
@@ -2049,6 +2101,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // a restore wrote buy records of `chain` (src/pool-restore.ts, restoreEvmHoldings): its positions read again
     evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
+    buysRestored: () => buyRecords.run(),
     positionsNow: () => positions.get(),
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn

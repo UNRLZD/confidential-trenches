@@ -161,7 +161,11 @@ const restore = !framed
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
-      written: () => void testnet?.proofs().catch(() => {}),
+      // and each Solana W's buy record back from its own buy, in the background (src/sol-buy-records.ts)
+      written: () => {
+        void testnet?.proofs().catch(() => {});
+        testnet?.buysRestored();
+      },
       // a pool's U_X reads and carry on its chain (card wallet-restore-reads-ux, src/pool-restore.ts restoreUxOf): the
       // follow's own reader on the restore's two public operators (never our helper relay), and the follow's own deposit
       // (poolFollowDeps below), so a restore and a live pool deposit read U_X and carry it the same way; null on a chain

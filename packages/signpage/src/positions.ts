@@ -12,8 +12,9 @@
 //   position, at the finder's amount. A token the finder lists in W that W's buy mint does not name (one
 //   sent to W by anyone) is no position: not listed, no Sell, and nothing is read for it. A W takes one buy only (a W is
 //   its note's, and a note spends once: wallet/src/pool/queue.ts jOf and derive/keys.ts walletPath), so its buy mint
-//   names W's one holding. A device restored from the words has no buy mints (src/pool-restore.ts writes notes only), so
-//   it shows no position until it buys.
+//   names W's one holding. A device restored from the words gets each W's buy mint back from W's own buy transaction
+//   (src/sol-buy-records.ts, after the restore and at each load, in the background), so its rows come in as their Ws
+//   are read; a W whose buy it cannot read shows nothing.
 // - Display only, from one reader: a position's amount is what the finder's one read of its W says, never a read a
 //   sell signs on; a sell reads its W again on two providers before it signs (pool-sell.ts tokenHeld).
 // - The finder: the Ws the pool's spent notes paid (../../wallet/src/pool/buy-wallets.ts derivedBuyWallets, the one
