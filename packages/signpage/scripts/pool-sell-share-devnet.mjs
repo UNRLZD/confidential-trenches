@@ -323,7 +323,7 @@ if (RESUME && ok) {
     const ata = (await again(() => rpcs[0]("getAccountInfo", [solanaAta(fw.address, MINT, owner), { encoding: "base64", commitment: "finalized" }]))).value;
     const units = ata ? Buffer.from(ata.data[0], "base64").readBigUInt64LE(64) : 0n;
     log(`W ${fw.address} holds ${units} units of the coin`);
-    if (units > 0n) rounds.push({ W: fw.address, resumed: true });
+    if (units > 0n) rounds.push({ W: fw.address, resumed: true, units, ata: solanaAta(fw.address, MINT, owner) });
   }
   if (rounds.length === 0) ok = false;
 }
@@ -380,9 +380,11 @@ if (ok && !buysFinal.every((x) => typeof x === "number")) {
   ok = false;
 } else if (ok) log(`every buy Final before the first sale (${buysFinal.length} buys, Final at ${JSON.stringify(buysFinal)} ms from their taps)`);
 if (ok && ONE_FIRST) {
-  if (FINDER || rounds.length < 2) throw new Error("FLOW_ONE_FIRST takes the kept listing path and two buys at least");
-  const listed = keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
-  const held = rounds.map((r) => ({ W: r.W, units: listed.get(r.W).get(MINT) })).sort((a, b) => (a.units < b.units ? -1 : a.units > b.units ? 1 : 0));
+  // on the finder path (a resumed run: a restored store holds no buy mints, so no pass lists its Ws) each W's holding
+  // is the restore's own read of its token account at finalized
+  if (rounds.length < 2 || (FINDER && !RESUME)) throw new Error("FLOW_ONE_FIRST takes two buys at least, and the finder path only on a resumed run");
+  const listed = FINDER ? null : keptListed(await w.get("meta", POSITIONS_KEPT_KEY));
+  const held = rounds.map((r) => ({ W: r.W, units: FINDER ? r.units : listed.get(r.W).get(MINT) })).sort((a, b) => (a.units < b.units ? -1 : a.units > b.units ? 1 : 0));
   oneW = held[0].W;
   const dec = 6;
   const s_ = held[0].units.toString().padStart(dec + 1, "0");
@@ -396,7 +398,21 @@ if (ok && ONE_FIRST) {
     ok = false;
   }
   shareRounds = rounds.filter((r) => r.W !== oneW);
-  if (ok && (await passLists(shareRounds.map((r) => r.W), [oneW])) === null) {
+  // finder path: the sold W's token account reads empty or gone on both RPCs at finalized (180 s at most), and the
+  // share again starts with no pass kept; kept listing path: a whole pass lists it at 0
+  const soldOut = async () => {
+    const ata = rounds.find((r) => r.W === oneW).ata;
+    for (let i = 0; i < 90; i++) {
+      const got = await Promise.all(rpcs.map(async (r) => (await again(() => r("getAccountInfo", [ata, { encoding: "base64", commitment: "finalized" }]))).value));
+      if (got.every((v) => v === null || Buffer.from(v.data[0], "base64").readBigUInt64LE(64) === 0n)) {
+        await w.delete("meta", POSITIONS_KEPT_KEY);
+        return true;
+      }
+      await sleep(2_000);
+    }
+    return null;
+  };
+  if (ok && (FINDER ? await soldOut() : await passLists(shareRounds.map((r) => r.W), [oneW])) === null) {
     log("BAD no whole positions pass listing the sold W at 0 and the others holding in 180 s");
     ok = false;
   }
@@ -466,7 +482,7 @@ if (sell?.times?.tap !== undefined) {
   report = reportOf(sell, FINDER ? "finder" : "kept listing");
   path = report.path;
 }
-if (one?.times?.tap !== undefined) oneReport = reportOf(one, "kept listing");
+if (one?.times?.tap !== undefined) oneReport = reportOf(one, FINDER ? "finder" : "kept listing");
 // every transaction, F's payments, the page's own sends and each buy (sent through the helper), read back on both RPCs
 const all = [...new Set([...fundTxs, ...sentTxs, ...rounds.map((r) => r.buy?.answer?.result?.txs?.[0]?.hash).filter(Boolean)])];
 const readBack = {};
@@ -491,7 +507,7 @@ const filled =
   !stages.some((x) => x.kind !== "pool.deposit" && x.stage !== "sent" && x.stage !== "filled") &&
   Object.values(readBack).every((r) => r.every((x) => x !== null && x.err === null)) &&
   path === (FINDER ? "finder" : "kept listing") &&
-  (!ONE_FIRST || (oneReport?.path === "kept listing" && one?.record?.stage === "filled"));
+  (!ONE_FIRST || (oneReport?.path === (FINDER ? "finder" : "kept listing") && one?.record?.stage === "filled"));
 log(`notes ${JSON.stringify(notes)}; sell times ${JSON.stringify(sell?.times ?? null)}; filled ${filled}`);
 seed64.fill(0);
 fKey.fill(0);
