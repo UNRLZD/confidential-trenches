@@ -500,7 +500,8 @@ export type TestnetPool = {
    *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
   positionsNow(): readonly Position[] | null;
   /** The Ws bought since the last whole pass that name `token` (pool-sell-dry.ts boughtSincePass: W's buy mint, the kept
-   *  pass, W's buy record), from the store alone: no read, no seed. Signed out: none. */
+   *  pass, W's buy record, the full sells noted), from the store alone: no read, no seed; the store as held (page.held),
+   *  never opened again for it (another tab's sign out may have closed it). Signed out: none. */
   boughtSince(token: string): Promise<readonly BoughtW[]>;
   /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
   proofs(): Promise<QueuePass | null>;
@@ -2097,9 +2098,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
     positionsNow: () => positions.get(),
     boughtSince: async (token: string) => {
-      const st = await page.store();
-      const [mints, kept, costs] = await Promise.all([st.get("meta", BUY_MINTS_KEY), st.get("meta", POSITIONS_KEPT_KEY), st.get("meta", POSITION_COSTS_KEY)]);
-      return boughtSincePass(token, mints, kept, costs);
+      const st = await (page.held ? page.held() : page.store());
+      const [mints, kept, costs, sold] = await Promise.all([st.get("meta", BUY_MINTS_KEY), st.get("meta", POSITIONS_KEPT_KEY), st.get("meta", POSITION_COSTS_KEY), st.get("meta", POSITIONS_SOLD_KEY)]);
+      return boughtSincePass(token, mints, kept, costs, sold);
     },
     proofs,
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn

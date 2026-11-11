@@ -12,9 +12,12 @@
 //   - SIGN_HOST's buy gives its hosts back at its early "sent" (packages/signpage/src/pool-buy.ts, as minified:
 //     `h.release?.()`), so the preview's reads are not held to the buy's Final (33.8 s on devnet run 11);
 //   - SIGN_HOST's preview takes the Ws bought since the last positions pass from the page's store, as the sale's plan
-//     finds W (src/main.ts, as minified: `bought:e=>$q?.boughtSince(e)`; src/pool-testnet.ts boughtSince: the store's
-//     three records, then pool-sell-dry.ts boughtSincePass), so right after a buy's Filled it reads W itself and answers a
-//     number, not not_funded until the pass's finder read (7.6 s on devnet run 116, 11 Nov).
+//     finds W (src/main.ts, as minified: `bought:e=>$q?.boughtSince(e)`; src/pool-testnet.ts boughtSince: the store as
+//     held, its four records, then pool-sell-dry.ts boughtSincePass), so right after a buy's Filled it reads W itself and
+//     answers a number, not not_funded until the pass's finder read (7.6 s on devnet run 116, 11 Nov);
+//   - SIGN_HOST's preview uses them (pool-sell-dry.ts poolSellDry, as minified:
+//     `e.positions()===null?[]:await(async()=>e.bought?.(i))().catch(()=>void 0)??[]).filter(`), so a build that wires
+//     them in and never asks for them fails.
 // The numbers themselves are held by the tests that build them (packages/signpage/test/pool-sell-dry.test.ts on the
 // recorded venues, apps/terminal/test/sell-positions/run.mjs in a browser). The recorded answers are facts() over each
 // host's build (apps/terminal/dist; packages/signpage index.html and public/app.js, the build the deploy makes).
@@ -42,7 +45,9 @@ const AGAIN = new RegExp(`new Set\\(\\[${Q}busy${Q},${Q}not_funded${Q}\\]\\)`);
 const RELEASE = new RegExp(`${N}\\.release\\?\\.\\(\\)`);
 /** The preview's Ws bought since the pass: the page's wiring, and the store's three records read for them. */
 const SINCE = new RegExp(`bought:(${N})=>${N}\\?\\.boughtSince\\(\\1\\)`);
-const SINCE_READ = new RegExp(`boughtSince:async (${N})=>\\{let (${N})=await ${N}\\.store\\(\\),\\[(${N}),(${N}),(${N})\\]=await Promise\\.all\\(\\[\\2\\.get\\(${Q}meta${Q},${N}\\),\\2\\.get\\(${Q}meta${Q},${N}\\),\\2\\.get\\(${Q}meta${Q},${N}\\)\\]\\);return ${N}\\(\\1,\\3,\\4,\\5\\)\\}`);
+const SINCE_READ = new RegExp(`boughtSince:async (${N})=>\\{let (${N})=await\\((${N})\\.held\\?\\3\\.held\\(\\):\\3\\.store\\(\\)\\),\\[(${N}),(${N}),(${N}),(${N})\\]=await Promise\\.all\\(\\[${[0, 1, 2, 3].map(() => `\\2\\.get\\(${Q}meta${Q},${N}\\)`).join(",")}\\]\\);return ${N}\\(\\1,\\4,\\5,\\6,\\7\\)\\}`);
+/** The preview asking for them: signed in, its deps' bought for the token, a store that fails giving none. */
+const SINCE_USE = new RegExp(`\\((${N})\\.positions\\(\\)===null\\?\\[\\]:await\\(async\\(\\)=>\\1\\.bought\\?\\.\\(${N}\\)\\)\\(\\)\\.catch\\(\\(\\)=>void 0\\)\\?\\?\\[\\]\\)\\.filter\\(`);
 
 /** The script an index.html pins, and its integrity. */
 const pinned = (index) => {
@@ -55,11 +60,11 @@ const pinned = (index) => {
 export function facts(app, sign) {
   return {
     app: { index: app.index, sha384: sha384(app.js), ask: ASK.test(app.js), again: AGAIN.test(app.js) },
-    sign: { index: sign.index, sha384: sha384(sign.js), kind: KIND.test(sign.js), release: RELEASE.test(sign.js), since: SINCE.test(sign.js) && SINCE_READ.test(sign.js) },
+    sign: { index: sign.index, sha384: sha384(sign.js), kind: KIND.test(sign.js), release: RELEASE.test(sign.js), since: SINCE.test(sign.js) && SINCE_READ.test(sign.js), uses: SINCE_USE.test(sign.js) },
   };
 }
 
-/** The verdict on an answer { app: { index, sha384, ask, again }, sign: { index, sha384, kind, release, since } }. */
+/** The verdict on an answer { app: { index, sha384, ask, again }, sign: { index, sha384, kind, release, since, uses } }. */
 export function judge(a) {
   const lines = [];
   const bad = (m) => lines.push(`BAD ${m}`);
@@ -73,6 +78,7 @@ export function judge(a) {
   if (a?.app?.again !== true) bad("the sell box does not ask again on busy or not_funded: a preview asked during or just after a buy stays a dash");
   if (a?.sign?.release !== true) bad("the signing page's buy holds its hosts to its Final: the sell box's preview is busy until then");
   if (a?.sign?.since !== true) bad("the signing page's preview does not read a W bought since the positions pass: right after a buy it answers not_funded while the sale would plan W");
+  if (a?.sign?.uses !== true) bad("the signing page's preview never asks for the Ws bought since the positions pass: right after a buy it answers not_funded");
   return { ok: lines.length === 0, lines };
 }
 
