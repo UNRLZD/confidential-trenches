@@ -493,3 +493,24 @@ test("every request the page sends a host counts in that host's lane: the helper
     }
   });
 });
+
+// the device's own send paths beside the helper's (the kit's solanaSendPaths: Sender, Jito and the public RPC, each from
+// the device, src/trade.ts releaseTradeDeps: `fetch: laneFetch()`): each request counted on its own host's lane, as the
+// host counts it, so a trade's sends there leave the passes only what the budget leaves
+test("every request the device's own send paths send counts in its host's lane: sender, jito and the public rpc", async () => {
+  const { releaseTradeDeps } = await import("../src/trade.ts");
+  await onProvider(() => ({ result: "1".repeat(88) }), async (sent) => {
+    const paths = releaseTradeDeps().paths;
+    for (const name of ["sender", "jito", "rpc"]) {
+      const path = paths.find((p) => p.name === name);
+      assert.ok(path, `the device's ${name} path`);
+      const n = sent.length;
+      await path.send("AA==").catch(() => {});
+      const mine = sent.slice(n);
+      assert.ok(mine.length > 0, `${name}: sent nothing`);
+      for (const host of new Set(mine.map((x) => x.host))) {
+        assert.equal(hostLane(`https://${host}/`).inWindow(), mine.filter((x) => x.host === host).length, `${name}: every request to ${host} counted on its lane`);
+      }
+    }
+  });
+});
