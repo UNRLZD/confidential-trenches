@@ -1,6 +1,8 @@
 // The testnet build's restore of EVM buy records (card signpage-evm-pool-sell, src/pool-restore.ts with
 // src/pool-sell-evm.ts restoreEvmHoldings): a wiped browser's restore writes each EVM buy's record again, its route read
-// from the buy's own transaction on the pool's two RPCs, so the restored W sells on the route its buy took. Its own
+// from the buy's own transaction on the pool's two RPCs, so the restored W sells on the route its buy took, and a W
+// written tells the page its chain (holdingsWritten), which reads that chain's positions again with no reload (card
+// signpage-positions-evm: these lines came in at its merge of 534c703a, and are its own). Its own
 // file: the network is read once, at import, so this process runs as the testnet build does
 // (test/pool-restore.test.ts runs the mainnet one, which writes none).
 //   node --test test/pool-restore-evm-holdings.test.ts      (from packages/signpage)
