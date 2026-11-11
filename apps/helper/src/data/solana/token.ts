@@ -24,7 +24,7 @@
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
 import { LOGOS } from "../logo.ts";
 import { LINKS, type Links } from "../links.ts";
-import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
+import { createOrigins, hintsOf, onCurve, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
 import { BURST_MS, QUERY_MAX, VENDOR_WINDOW_MS } from "../../proxy/proxy.ts";
@@ -266,8 +266,10 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
  *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
  *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
  *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false, dev: { bps: number; at: number } | null = null): TokenPage {
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false, dev: { bps: number; at: number } | null = null, top10: { bps: number; at: number } | null = null): TokenPage {
   const row: Row = { ...base };
+  // the top 10 wallets' share read on chain (walletsTop10, the holders read) wins over Jupiter's
+  if (top10 !== null) row.top10_bps = top10.bps;
   // the creator's share read on chain (devShare) where Jupiter's row has none
   if (row.dev_bps === null && dev !== null) row.dev_bps = dev.bps;
   row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
@@ -293,7 +295,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
       freeze_auth: chain(mint.freezeAuth),
       // a launchpad curve is `curve`; other Solana pools have no named read yet (06b `lp`), so null
       lp: onCurve ? chain({ class: "curve", bps: null }) : { ...none },
-      top10_bps: jupiter(row.top10_bps),
+      top10_bps: top10 !== null ? { v: top10.bps, src: "chain", as_of_ms: top10.at } : jupiter(row.top10_bps),
       dev_bps: base.dev_bps === null && dev !== null ? { v: dev.bps, src: "chain", as_of_ms: dev.at } : jupiter(row.dev_bps),
       snipers_bps: { ...none }, // D-S13: no free source at list scale
       holders: jupiter(row.holders),
@@ -337,6 +339,33 @@ export function toHolders(largest: unknown, owners: readonly unknown[], supply: 
       if (addr === INCINERATOR) h.kind = "burn";
       return h;
     });
+}
+
+/**
+ * The top 10 holders' share of the supply, in basis points, as the holder panels of trading terminals count it: the ten
+ * largest wallets, the pool, the launchpad's curve and the burn address left out (the main product's token page does
+ * the same, "NEAR trading terminal" services/engine/src/core/holders.ts:34-63 and :880-906: pools, burn, bridges,
+ * lockers and vesting removed, the rest summed over the total supply). On Solana every account that holds a pool's, a
+ * curve's, a vault's or a locker's tokens is owned by a program address, which is never a point on ed25519, so a holder
+ * off the curve is left out by that rule alone, without a list of programs; the incinerator by its address. Null when
+ * the rows hold no wallet. `rows` are toHolders' (getTokenLargestAccounts' 20 largest accounts, merged by owner), so
+ * the ten wallets are among them whenever fewer than 11 of those 20 are program accounts.
+ */
+/** The holders answer's top 10 share when it is our own chain read: its top_bps and as-of, else null. */
+export function top10Of(a: DataAnswer): { bps: number; at: number } | null {
+  if (a.status !== 200) return null;
+  try {
+    const h = JSON.parse(a.body) as Partial<Holders>;
+    return h.src === "chain" && Number.isInteger(h.top_bps) && h.top_bps! >= 0 && h.top_bps! <= 10_000 && Number.isSafeInteger(h.as_of_ms) ? { bps: h.top_bps!, at: h.as_of_ms! } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function walletsTop10(rows: readonly Holder[]): number | null {
+  const wallets = rows.filter((h) => h.kind !== "burn" && h.addr !== INCINERATOR && h.bps !== null && onCurve(b58decode(h.addr) ?? new Uint8Array()));
+  if (wallets.length === 0) return null;
+  return Math.min(10_000, wallets.slice(0, 10).reduce((s, h) => s + h.bps!, 0));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -774,9 +803,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return origins.get(mint);
   };
   // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
-  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean; dev?: { bps: number; at: number } | null };
+  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean; dev?: { bps: number; at: number } | null; top10?: { bps: number; at: number } | null };
   const built = bounded<Built>(CACHE_MAX);
-  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true, b.dev ?? null)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true, b.dev ?? null, b.top10 ?? null)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
   /** Card helper-page-jup-429: the page's Jupiter row within JUP_PAGE_WAIT_MS, else a row held from an earlier read,
    *  under STALE_MS old, else null (the page is named on chain); the search goes on and its row is held for the next
    *  read. A search that fails (Jupiter's 429 or its hold past SEARCH_HOLD_WAIT_MS) is answered the same way. */
@@ -864,17 +893,24 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     // card token-page-data-complete-and-fast: the creator's holding, read on chain alongside the launch (no wait of its
     // own) where Jupiter's row has no dev share: 9 of 10 pages read 11 Nov 15:10Z had none
     const devRead = base.dev_bps === null && typeof base.creator === "string" ? devShare(mint, base.creator, m.mint.supply, client) : Promise.resolve(null);
-    const [origin, dev] = await Promise.all([
+    // the top 10 wallets' share from the holders read (walletsTop10; the Holders tab's own cache), alongside them
+    // only with a holders provider: without one the Holders tab's answer is Jupiter's, read once by the page already
+    const topRead = deps.holdersRpc === undefined ? Promise.resolve(null) : holders.get(mint, client).then(top10Of);
+    const [origin, dev, top10] = await Promise.all([
       settled(mint, early ?? launch(mint, j?.row ? hintsOf([j.row]).get(mint) : undefined, base.created_s, client)),
       Promise.race([devRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
+      Promise.race([topRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
     ]);
     const timing = [`lists;dur=${listsMs}`, ...m.timing, ...(j?.timing ?? []), `launch;dur=${Math.round(performance.now() - t1)}`, `read;dur=${Math.round(performance.now() - t0)}`];
-    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true, dev };
+    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true, dev, top10 };
     b.answer = { ...pageOf(b), timing: timing.join(", ") };
     built.set(mint, b);
     // a creator's share read after the page was built joins it, as a late launch does
     if (dev === null) void devRead.then((d) => {
       if (d !== null && built.get(mint) === b) (b.dev = d), (b.filled = pageOf(b));
+    }, () => undefined);
+    if (top10 === null) void topRead.then((t) => {
+      if (t !== null && built.get(mint) === b) (b.top10 = t), (b.filled = pageOf(b));
     }, () => undefined);
     return b.answer;
   }, {
@@ -917,11 +953,12 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       const owners = accts.length === 0 ? [] : (await call("getMultipleAccounts", [accts, { encoding: "jsonParsed", commitment: "confirmed" }], deps.holdersRpc, client)).result.value;
       const rows = toHolders(largest.slice(0, HOLDERS_MAX), Array.isArray(owners) ? owners : [], m.mint.supply);
       if (rows === null) throw new Upstream();
-      const top = rows.slice(0, 10).reduce((s, h) => s + (h.bps ?? 0), 0);
+      // the ten largest wallets, pools, curves and the burn address left out (walletsTop10)
+      const top = walletsTop10(rows);
       const r = await rowOf(mint).catch(() => null);
       const total = (r?.row.holders ?? null) as number | null;
       const at = now();
-      const body: Holders = { holders: rows, total, top_bps: rows.length > 0 && m.mint.supply > 0n ? Math.min(10_000, top) : null, src: "chain", as_of_ms: at };
+      const body: Holders = { holders: rows, total, top_bps: m.mint.supply > 0n ? top : null, src: "chain", as_of_ms: at };
       return { status: 200, body: JSON.stringify(body), src: "chain", asOfMs: at };
     } catch {
       // the fallback (06b v1.36): no rows, Jupiter's holder count and top-holders share
