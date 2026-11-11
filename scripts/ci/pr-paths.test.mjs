@@ -196,6 +196,9 @@ export function wiringProblems(ci) {
   if (/\bnode scripts\/ci\/pr-paths\.mjs/.test(changes)) p.push("the changes job runs the head's own pr-paths.mjs");
   const gated = { "test-wallet": "test_wallet", ...Object.fromEntries(Object.keys(JOBS).map((j) => [j, j.replaceAll("-", "_")])) };
   for (const [job, key] of Object.entries(gated)) {
+    // card ci-fast-checks-on-the-pr: the mutant sweeps run nightly and by hand only, on no pull request, so no plan gates
+    // them; scripts/ci/test-shards.test.mjs holds their if
+    if (job === "test-mutants") continue;
     const body = all[job];
     if (!body) {
       p.push(`ci.yml has no job ${job}`);
@@ -218,7 +221,7 @@ test("ci.yml: the changes job runs main's rule, and each gated job reads its out
 });
 
 const PLANTED = {
-  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.test_mutants != 'false')", "(needs.changes.outputs.test_mutants != 'false')", "test-mutants's if is not the pull-request-only gate"],
+  "a gate on every event": ["(github.event_name != 'pull_request' || needs.changes.outputs.test_vault != 'false')", "(needs.changes.outputs.test_vault != 'false')", "test-vault's if is not the pull-request-only gate"],
   "a job gated on another job's output": ["needs.changes.outputs.slither != 'false')", "needs.changes.outputs.test_vault != 'false')", "slither's if is not the pull-request-only gate"],
   // PR #549's first run: a gate that runs only on an explicit true skipped every job on an empty plan
   "a gate that runs only on an explicit true": ["needs.changes.outputs.test_browser != 'false')", "needs.changes.outputs.test_browser == 'true')", "test-browser's if is not the pull-request-only gate"],

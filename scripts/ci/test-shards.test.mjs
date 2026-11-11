@@ -57,9 +57,14 @@ function replay(run, needs, event = "pull_request") {
   }).status;
 }
 
+// card ci-fast-checks-on-the-pr: the mutant sweeps run nightly on main and by hand only, never on a pull request, a
+// queue group or a push, and the required check test never waits on them
+const NIGHTLY = "test-mutants";
+const NIGHTLY_IF = "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
+
 export function shardProblems(ci) {
   const all = jobs(ci);
-  const shards = Object.keys(all).filter((j) => j.startsWith("test-"));
+  const shards = Object.keys(all).filter((j) => j.startsWith("test-") && j !== NIGHTLY);
   const job = all.test;
   if (!job) return ["ci.yml has no job named test"];
   if (!shards.length) return ["ci.yml has no shard job (test-*)"];
@@ -67,11 +72,20 @@ export function shardProblems(ci) {
   const needs = /^ {4}needs:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1].split(",").map((s) => s.trim()).filter(Boolean);
   if (!needs) p.push("test has no one-line needs: [...] list");
   for (const s of shards) if (needs && !needs.includes(s)) p.push(`test does not need ${s}`);
-  for (const n of needs ?? []) if (!shards.includes(n) && n !== "changes") p.push(`test needs ${n}, which is no shard job (test-*)`);
+  if (needs?.includes(NIGHTLY)) p.push(`test needs ${NIGHTLY}, the nightly sweeps: every pull request would wait on them`);
+  for (const n of needs ?? []) if (!shards.includes(n) && n !== "changes" && n !== NIGHTLY) p.push(`test needs ${n}, which is no shard job (test-*)`);
   if (needs && !needs.includes("changes")) p.push("test does not need changes, so it cannot tell a planned skip from a lost shard");
   if (!/^ {4}if:.*\balways\(\)/m.test(job)) p.push("test's if has no always(): a failed shard would skip test, and a skipped required check passes");
+  const nightly = all[NIGHTLY];
+  if (nightly) {
+    if (!nightly.split("\n").includes(NIGHTLY_IF)) p.push(`${NIGHTLY}'s if is not the nightly-and-by-hand one, exactly: ${NIGHTLY_IF.trim()}`);
+    // the changes job skips a scheduled run, and a job that needs a skipped one is skipped with it
+    if (/^ {4}needs:/m.test(nightly)) p.push(`${NIGHTLY} needs another job, so the nightly run can skip it`);
+  }
+  if (!/^on:\n(?: .*\n|\s*\n)*? {2}schedule:\n {4}- cron: "[^"]+"\n/m.test(ci)) p.push("ci.yml has no nightly schedule, so the mutant sweeps never run");
+  if (!/^on:\n(?: .*\n|\s*\n)*? {2}workflow_dispatch:/m.test(ci)) p.push("ci.yml has no workflow_dispatch, so the mutant sweeps cannot run by hand");
   for (const [name, text] of Object.entries(all)) {
-    if (name !== "test" && !shards.includes(name)) continue;
+    if (name !== "test" && name !== NIGHTLY && !shards.includes(name)) continue;
     if (/continue-on-error/.test(text)) p.push(`${name} has continue-on-error`);
     if (name !== "test" && !/^ {4}timeout-minutes:\s*\d+\s*$/m.test(text)) p.push(`${name} has no timeout of its own`);
   }
@@ -89,6 +103,12 @@ export function shardProblems(ci) {
   });
   if (replay(run, ended("success")) !== 0) p.push("test fails when every shard passed");
   for (const r of ["failure", "skipped", "cancelled"]) if (replay(run, ended(r)) === 0) p.push(`test passes when a shard is ${r}`);
+  // each shard on its own, so a step that reads past one (test-packages, say) is caught, not only the first
+  for (const s of list) {
+    const one = ended("success");
+    one[s] = { result: "failure", outputs: {} };
+    if (replay(run, one) === 0) p.push(`test passes when ${s} is failure`);
+  }
   if (replay(run, {}) === 0) p.push("test passes with no shard at all");
   if (replay(run, { changes: ended("success").changes }) === 0) p.push("test passes with no shard at all");
   // card ci-pr-light: the planned skip passes on a pull request, and nowhere else
@@ -183,6 +203,17 @@ const PLANTED = {
   "more mutant parts than sweeps": [/(\n {6}matrix:\n {8})part: \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14\]/, "$1part: [" + Array.from({ length: 40 }, (_, i) => i + 1).join(", ") + "]", "test-mutants: the sweeps are"],
   "no test-mutants job": [/\n {2}test-mutants:\n/, "\n  test-mutantz:\n", "ci.yml has no test-mutants shard"],
   "a shard job left out of the list": [/(\n {2}test:\n)/, "\n  test-extra:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n    steps:\n      - run: \"true\"\n$1", "test does not need test-extra"],
+  // card ci-fast-checks-on-the-pr: the sweeps stay nightly, test never waits on them, and a package job's failure fails test
+  "the sweeps on pull_request": [NIGHTLY_IF + "\n", NIGHTLY_IF + " || github.event_name == 'pull_request'\n", "test-mutants's if is not the nightly-and-by-hand one"],
+  "the sweeps back on every event but the nightly": [NIGHTLY_IF + "\n", "    needs: changes\n    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.test_mutants != 'false')\n", "test-mutants's if is not the nightly-and-by-hand one"],
+  "the sweeps on push": [NIGHTLY_IF + "\n", "    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'\n", "test-mutants's if is not the nightly-and-by-hand one"],
+  "the sweeps needing the changes job, which skips the nightly": [NIGHTLY_IF + "\n", "    needs: changes\n" + NIGHTLY_IF + "\n", "test-mutants needs another job"],
+  "test waiting on the sweeps again": ["needs: [changes, test-wallet, test-packages,", "needs: [changes, test-wallet, test-packages, test-mutants,", "test needs test-mutants, the nightly sweeps"],
+  "a nightly sweep that may fail": [NIGHTLY_IF + "\n", NIGHTLY_IF + "\n    continue-on-error: true\n", "test-mutants has continue-on-error"],
+  "no nightly schedule": [/\n {2}schedule:\n {4}- cron: "[^"]+"\n/, "\n", "ci.yml has no nightly schedule"],
+  "no run by hand": ["\n  workflow_dispatch:\n", "\n", "ci.yml has no workflow_dispatch"],
+  "test passing while test-packages failed": ['select(.key != "changes")', 'select(.key != "changes" and .key != "test-packages")', "test passes when test-packages is failure"],
+  "test-packages left out of test's needs": ["test-wallet, test-packages, test-browser", "test-wallet, test-browser", "test does not need test-packages"],
 };
 for (const [name, [from, to, want]] of Object.entries(PLANTED)) {
   test(`planted: ${name} fails`, () => {
