@@ -180,6 +180,23 @@ export function keptPositions(v: unknown, ...bought: unknown[]): Position[] | nu
   const mints = new Set(bought.flatMap((b) => [...mintsOf(b).values()]));
   return (k.positions as Position[]).filter((p) => mints.has(p?.token));
 }
+/** A kept pass's listing (KeptPass `listed`, each "W mint" the finder listed), by W: each mint with its kept amount
+ *  (`held`; 0 when none kept). Null when `v` is not a kept pass (no whole pass yet). Card pool-sell-legs-side-by-side:
+ *  a sale adds a W to read from it, never an amount. */
+export function keptListed(v: unknown): Map<string, Map<string, bigint>> | null {
+  const k = v as Partial<KeptPass> | null;
+  if (typeof k !== "object" || k === null || !Array.isArray(k.listed)) return null;
+  const out = new Map<string, Map<string, bigint>>();
+  for (const key of k.listed) {
+    if (typeof key !== "string") continue;
+    const [w, m, ...rest] = key.split(" ");
+    if (!w || !m || rest.length > 0) continue;
+    const a = (k.held as Record<string, unknown> | undefined)?.[key];
+    if (!out.has(w)) out.set(w, new Map());
+    out.get(w)!.set(m, typeof a === "string" && BASE.test(a) ? BigInt(a) : 0n);
+  }
+  return out;
+}
 function loadMemo(memo: PassMemo, v: unknown): void {
   const k = v as Partial<KeptPass> | null;
   if (typeof k !== "object" || k === null) return;

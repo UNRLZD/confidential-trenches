@@ -58,6 +58,8 @@ test("the facts read from a bundle", () => {
   assert.deepEqual({ ...f, sha384: null }, { index: "", sha384: null, kinds: true, flows: 3, wire: true, references: 2, sent: true, trade: 2 });
   assert.equal(facts("", js.replace("zT=Object.freeze({error:`down`})", "zT=Object.freeze({error:`not_allowed`})")).kinds, false);
   assert.equal(facts("", js.replace("if(!f&&e instanceof Uf)return{error:`down`};", "")).flows, 2);
+  // a sell leg's down with its cause beside it (card pool-sell-legs-side-by-side) is still a down
+  assert.equal(facts("", js.replace("!a&&e instanceof Uf?{error:`down`}", "!a&&e instanceof Uf?(n.fault=e,{error:`down`,cause:t})")).flows, 3);
   assert.equal(facts("", js.replace("n={error:`down`}", "n={error:`not_allowed`}")).wire, false);
   assert.equal(facts("", js.replace(/throw Error\([^)]*\);/, "")).references, 1);
   assert.equal(facts("", js.replace("if(c.length)return{stage:`sent`,txs:c};", "")).sent, false);
