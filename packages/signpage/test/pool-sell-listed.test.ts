@@ -195,3 +195,29 @@ test("thirty Ws listed: each named in a request of its own on each provider, in 
     }
   }
 });
+
+test("the seed on the listing's every exit: never read with no W; read once and its copy zeroed when the Ws are listed, and when they cannot be derived", async () => {
+  for (const [n, bad] of [[0, false], [2, false], [2, true]] as const) {
+    const w = await spentWallet(n);
+    if (n > 0) await w.update("meta", BUY_MINTS_KEY, () => ({ [wOf(0)]: { mint: MINT, program: SOLANA_TOKEN_PROGRAM } }));
+    await w.put("meta", POSITIONS_KEPT_KEY, kept({}));
+    const c = chain(n > 0 ? [wOf(0), wOf(1)] : [], new Map(n > 0 ? [[wOf(0), 5n]] : []));
+    const copies: Uint8Array[] = [];
+    let host: unknown = null;
+    const sell = (make: () => unknown) => () => ((host = make()), { running: true as const, after: new Promise<void>(() => {}), answer: () => ({ result: { stage: "sent", txs: [] } }) });
+    // a seed copy of the wrong length: no W can be derived from it (the listing's failed exit)
+    const seed64 = async () => (copies.push(bad ? SEED64.slice(0, 10) : SEED64.slice()), copies.at(-1)!);
+    const tp = testnetPool({ store: async () => w, seed64 }, { pin: PIN, rpcs: c.rpcs, holdings: () => ({ chain: "sol", read: async () => assert.fail("no finder read") }), tradeKinds: { sell }, positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
+    tp.flow({ kind: "pool.sell", chain: "solana", token: MINT, amount: 1n, slippageBps: 100, decimals: 6 }, { id: "s", sha: "00", progress: () => {} } as never);
+    for (let i = 0; i < 200 && host === null; i++) await new Promise((r) => setTimeout(r, 2));
+    const h = host as Parameters<typeof planPoolSell>[0] & { end(): void };
+    const got = await planPoolSell(h, ALL).then((p) => p.total, (e: unknown) => String(e));
+    h.end();
+    const what = `${n} spent note(s)${bad ? ", underivable" : ""}`;
+    assert.equal(copies.length, n === 0 ? 0 : 1, `${what}: the seed read ${copies.length} time(s)`);
+    assert.ok(copies.every((x) => x.every((b) => b === 0)), `${what}: every copy zeroed`);
+    if (n === 0) assert.match(String(got), /not_funded/, "no W: nothing to sell");
+    else if (!bad) assert.equal(got, 5n);
+    else assert.match(String(got), /could not be derived/);
+  }
+});

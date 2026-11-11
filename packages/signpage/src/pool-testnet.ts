@@ -1328,6 +1328,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           const listed = sale ? keptListed(await (await page.store()).get("meta", POSITIONS_KEPT_KEY)) : null;
           if (listed !== null) {
             const spent = await spentNotesOf(await store(), scope!);
+            // no W: no seed read (each exit after a read zeroes its copy)
+            if (spent.length === 0) return (found = []);
             const seed64 = await page.seed64();
             let got: ReturnType<typeof buyWalletsOf>;
             try {
