@@ -2,9 +2,10 @@
 // (scripts/live-checks/evm-device-reads-need-no-old-state.mjs runs this file, with scripts/net-window.mjs imported
 // first, and judges what it prints). For each mainnet EVM chain, both at once, as the signing page runs them:
 //   - the hold: at the next period's turn + 3 s (the page's EVM_TURN_PASS_MS, its spread left out), the period's first
-//     block on the pool's pair (evmEpochBlock), the tree depth there (the pool's public currentTreeSize() on two
-//     operators of the kit's read list, as the device counts its sync's leaves), and the chain fee there on two
-//     operators of the list (evmBindChainFee), under the wallet's lag retries: the read the page holds for the period;
+//     block on the pool's pair (evmEpochBlock), then at once the period's fee state there on two operators of the kit's
+//     read list (evmPeriodChainFee: Base the pool's currentTreeSize() then the fee at that depth, Robinhood the fee
+//     alone), under the wallet's lag retries: the read the page holds for the period; feeAgeMs is the block's age when
+//     the fee's answers were in;
 //   - a bind 30 s into the period: the period's first block found again on the pair, by headers alone; the held read
 //     stands when its hash is the same, so the bind asks no state (stateReads counts the eth_calls it made: none);
 //   - the sync's root times: the pool's currentRoot() at the newest agreed block (fresh), then 30 s on its
@@ -13,11 +14,11 @@
 // No key, no seed, nothing signed or sent. It prints one JSON record on stdout:
 //   node --import ./scripts/net-window.mjs packages/wallet/scripts/no-old-state-live.ts
 import { evmPoolProvidersOf, evmPoolVenues, evmReadProvidersOf, evmRpcOperator, evmTwoOperators, solanaJsonRpc, type SolanaRpc } from "@blindfill/kit";
-import { evmAgreedBlock, evmBindChainFee, evmEpochBlock, evmRetryLag, type EvmNetwork } from "../src/pool/evm.ts";
+import { evmAgreedBlock, evmEpochBlock, evmPeriodChainFee, evmRetryLag, type EvmNetwork } from "../src/pool/evm.ts";
 
 const EPOCH_MS = 60_000;
 const TURN_MS = 3_000;
-const SEL = { size: "0xa8f0f95a", root: "0xfdab463d", times: "0x4b278d9c" };
+const SEL = { root: "0xfdab463d", times: "0x4b278d9c" };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
 const err = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 300);
 const v = evmPoolVenues();
@@ -56,17 +57,13 @@ async function chainRun(chain: "base" | "robinhood") {
   try {
     const got = await evmRetryLag(async () => {
       const b = await evmEpochBlock(pair, BigInt(start));
-      const [{ value: word }] = await walk.read(`${chain} currentTreeSize() at block ${b.number}`, (rpc) => rpc("eth_call", [{ to: venue.pool, data: SEL.size }, { blockHash: b.hash }]), (x, y) => x === y);
-      const size = Number(BigInt(String(word)));
-      let depth = 0;
-      while (2 ** depth < size) depth++;
       answered.clear();
-      const chainFee = await evmBindChainFee(walk, chain as EvmNetwork, b, depth);
-      return { b, depth, chainFee };
+      const f = await evmPeriodChainFee(walk, chain as EvmNetwork, venue.pool!, b);
+      return { b, ...f };
     }, sleep);
     held = { number: got.b.number, hash: got.b.hash };
     const used = list.filter((u) => answered.has(u));
-    out.hold = { ok: true, atMs: Date.now() - start, block: got.b.number.toString(), depth: got.depth, chainFee: got.chainFee.toString(), hosts: used.map((u) => new URL(u).host), operators: used.map(evmRpcOperator) };
+    out.hold = { ok: true, atMs: Date.now() - start, block: got.b.number.toString(), depth: got.depth, chainFee: got.chainFee.toString(), feeAgeMs: got.feeAtMs - Number(got.b.timestamp) * 1000, hosts: used.map((u) => new URL(u).host), operators: used.map(evmRpcOperator) };
   } catch (e) {
     out.hold = { ok: false, atMs: Date.now() - start, name: (e as Error)?.name ?? "Error", error: err(e) };
   }

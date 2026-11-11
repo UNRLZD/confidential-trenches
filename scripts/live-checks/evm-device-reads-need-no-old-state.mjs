@@ -8,11 +8,17 @@
 //     packages/wallet/src/pool/evm.ts timesAt), so the deployed page is one that reads no old anchor;
 //   - for each mainnet, as the page runs it (CHILD, packages/wallet/scripts/no-old-state-live.ts: the wallet's own
 //     evmEpochBlock and evmBindChainFee on the kit's read list, under the wallet's lag retries):
-//       the hold at the next period's turn + 3 s binds on two operators that agree; PASS needs it on both chains;
+//       the hold at the next period's turn + 3 s binds on two operators that agree, its fee read while the period's
+//       first block is under FEE_AGE_BOUND_MS old; PASS needs it on both chains;
 //       a bind 30 s in finds the same first block by headers and asks no state (stateReads 0);
 //       the pool's root time read at a fresh block on two operators of the list agrees and is non-zero (0 only for a
 //       pool with no leaf yet, whose root 0 the pool never timed).
 // A seat that gives no answer (a 429, a timeout) alone is INCONCLUSIVE, never a pass; two operators that differ fail.
+// The residue it does not check (removed by card device-evm-read-residuals): a page loaded mid-period whose first
+// block no two operators still keep waits for the next turn, at most 65 s on "Making proof" with no error; Robinhood
+// at +55 s, 1 of 3 periods read 2026-11-10 23:20-23:29Z (robinhood.com alone kept it; drpc.org, pocket.network and
+// publicnode.com refused it), Base 0 of 5 (packages/signpage/src/pool-testnet.ts EVM_TURN_PASS_MS; the bound is held by
+// test/pool-testnet-evm-queue.test.ts "a load mid-period whose first block no two operators hold").
 // After: sign
 //   node scripts/live-checks/evm-device-reads-need-no-old-state.mjs [--record <file>] [--answer <file>]
 //     PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3
@@ -27,6 +33,10 @@ const KEY = "evm-device-reads-need-no-old-state";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 /** SIGN_HOST: the signing page's own origin. */
 export const SIGN = "https://confidential.unrealized.trade";
+/** The oldest the period's first block may be when the hold's fee answers are in: the shortest state window measured
+ *  on the chains' read lists, robinhood-rpc.publicnode.com's (5 of 5 pool reads under 10 s back answered, 12 of 12 at
+ *  10 s and more refused, 2026-11-10 23:21-23:37Z); a hold slower than that would be refused by that operator. */
+export const FEE_AGE_BOUND_MS = 10_000;
 /** The words of the sync's fresh-block read (timesAt) in the page's bundle. */
 export const MARKER = "is below the anchor";
 /** The wallet's own reads, run as a child (the kit's entry is this file's only reach into Blindfill). */
@@ -49,7 +59,10 @@ export function judge(run) {
       continue;
     }
     const h = c.hold ?? {};
-    if (h.ok === true) say(two(h), `${chain}: the period's fee held at its turn (block ${h.block}, ${h.atMs} ms past the turn) on ${h.hosts?.join(" and ") ?? "?"}`);
+    if (h.ok === true) {
+      say(two(h), `${chain}: the period's fee held at its turn (block ${h.block}, ${h.atMs} ms past the turn) on ${h.hosts?.join(" and ") ?? "?"}`);
+      say(Number.isFinite(h.feeAgeMs) && h.feeAgeMs >= 0 && h.feeAgeMs < FEE_AGE_BOUND_MS, `${chain}: the fee read while the period's first block was ${h.feeAgeMs ?? "?"} ms old (under ${FEE_AGE_BOUND_MS} ms)`);
+    }
     else if (NO_ANSWER.test(String(h.error)) && !/answered differently/.test(String(h.error))) {
       quiet = true;
       lines.push(`--  ${chain}: the hold's reads gave no answer (${String(h.error).slice(0, 160)}): INCONCLUSIVE`);

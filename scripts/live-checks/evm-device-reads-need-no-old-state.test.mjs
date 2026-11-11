@@ -34,6 +34,8 @@ test("SIGN is the signing page's own origin", () => {
 test("each rule alone on the good answer", () => {
   assert.equal(one((g) => (g.chains.robinhood.hold = { ok: false, atMs: 9000, name: "EvmOperatorsUnanswered", error: "the chain fee at block 1: one operator alone never passes" })).verdict, "FAIL", "no hold at the turn");
   assert.equal(one((g) => (g.chains.base.hold.operators = ["base.org", "base.org"])).verdict, "FAIL", "a hold on one operator twice");
+  assert.equal(one((g) => (g.chains.robinhood.hold.feeAgeMs = 10_000)).verdict, "FAIL", "the fee read once the block was 10 s old");
+  assert.equal(one((g) => delete g.chains.base.hold.feeAgeMs).verdict, "FAIL", "a hold with no fee age");
   assert.equal(one((g) => (g.chains.base.bind = { ok: true, sameHash: true, stateReads: 2 })).verdict, "FAIL", "a bind that asked state");
   assert.equal(one((g) => (g.chains.robinhood.bind = { ok: false, sameHash: false, stateReads: 0 })).verdict, "FAIL", "the first block moved (a reorg): the bind would read again");
   assert.equal(one((g) => (g.chains.base.times = { ...g.chains.base.times, ok: false, empty: false, root: "0x" + "0".repeat(63) + "7", value: "0x" + "0".repeat(64) })).verdict, "FAIL", "a root the pool made, timed zero");

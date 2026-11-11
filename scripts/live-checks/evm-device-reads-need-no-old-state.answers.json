@@ -1,21 +1,22 @@
 {
  "good": {
   "check": "evm-device-reads-need-no-old-state",
-  "at": "2026-11-10T23:35:39.190Z",
+  "at": "2026-11-11T00:42:38.903Z",
   "sign": {
-   "bytes": 883644,
+   "bytes": 889836,
    "marker": true,
    "source": "the local build of this branch (packages/signpage/public/app.js)"
   },
   "chains": {
    "base": {
-    "start": "2026-11-10T23:35:00.000Z",
+    "start": "2026-11-11T00:42:00.000Z",
     "hold": {
      "ok": true,
-     "atMs": 8264,
-     "block": "55816622",
+     "atMs": 6884,
+     "block": "55836722",
      "depth": 0,
-     "chainFee": "8909173992",
+     "chainFee": "10111188973",
+     "feeAgeMs": 6884,
      "hosts": [
       "mainnet.base.org",
       "base-rpc.publicnode.com"
@@ -46,13 +47,14 @@
     }
    },
    "robinhood": {
-    "start": "2026-11-10T23:35:00.000Z",
+    "start": "2026-11-11T00:42:00.000Z",
     "hold": {
      "ok": true,
-     "atMs": 9217,
-     "block": "111267203",
-     "depth": 0,
+     "atMs": 8144,
+     "block": "111304726",
+     "depth": null,
      "chainFee": "0",
+     "feeAgeMs": 8144,
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
       "robinhood.drpc.org"
@@ -86,7 +88,7 @@
  },
  "bad": {
   "check": "evm-device-reads-need-no-old-state",
-  "at": "2026-11-10T23:36:39.720Z",
+  "at": "2026-11-11T00:43:39.355Z",
   "sign": {
    "bytes": 877928,
    "marker": false,
@@ -94,13 +96,14 @@
   },
   "chains": {
    "base": {
-    "start": "2026-11-10T23:36:00.000Z",
+    "start": "2026-11-11T00:43:00.000Z",
     "hold": {
      "ok": true,
-     "atMs": 7227,
-     "block": "55816922",
+     "atMs": 6852,
+     "block": "55837022",
      "depth": 0,
-     "chainFee": "9021722579",
+     "chainFee": "11000554261",
+     "feeAgeMs": 6852,
      "hosts": [
       "mainnet.base.org",
       "base-rpc.publicnode.com"
@@ -131,13 +134,14 @@
     }
    },
    "robinhood": {
-    "start": "2026-11-10T23:36:00.000Z",
+    "start": "2026-11-11T00:43:00.000Z",
     "hold": {
      "ok": true,
-     "atMs": 8480,
-     "block": "111267780",
-     "depth": 0,
+     "atMs": 8415,
+     "block": "111305312",
+     "depth": null,
      "chainFee": "0",
+     "feeAgeMs": 8415,
      "hosts": [
       "rpc.mainnet.chain.robinhood.com",
       "robinhood.drpc.org"
