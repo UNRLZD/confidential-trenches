@@ -32,6 +32,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { consoleLine } from "./console-errors.mjs";
+import { VERIFY_DOM } from "./rpc-outage.mjs";
 import { footerUrl, FOOTER_QUERY } from "../../apps/terminal/src/shell/footer.ts";
 import * as shell from "./app-shell.mjs";
 import { judge, onConsole, outages, plantTape, rpcRows, ROUTES, TAPE, WIDTHS } from "./app-shell.mjs";
@@ -419,6 +420,36 @@ test("planted: a walked-past EVM read is let through only when its row shows ok 
   assert.equal(outages([failed("https://robinhood.rpc.blxrbdn.com", "the server responded with a status of 400 ()")], dom("ok", good)).kept.length, 1, "an unlisted host's failed load");
   // a 400 with the row amber is no walk: an error, as any 4xx (the page shows it did not read)
   assert.equal(outages([line(400)], dom("warn", [])).kept.length, 1, "a 4xx and an amber row");
+});
+
+// release 116's app live run 43027406881 (app-shell 130545665879, app-verify-mount 130545675235, app-shell-rpc-outage-judge
+// 130545665615): robinhood.drpc.org answered five of Verify's six reads at the fresh height 400, the page walked past it
+// and drew the Robinhood row ok, closed; the page drew a row's hosts only when open, so the judge read "ok on 0 host(s)".
+// The row now names its hosts (data-rpcs, open or closed); VERIFY_DOM reads them, and a closed row with none still fails.
+test("planted: VERIFY_DOM reads a closed pool row's hosts from data-rpcs; a closed row naming none still fails the walk", () => {
+  const row = (pool, status, rpcs, lines = []) => ({ dataset: { pool, status, ...(rpcs === undefined ? {} : { rpcs }) }, querySelectorAll: () => lines.map((t) => ({ textContent: t })) });
+  const panelOf = (rows) => ({ dataset: { state: "read" }, querySelector: (sel) => (/code|funds/.test(sel) ? { dataset: { status: "ok" } } : null), querySelectorAll: () => rows });
+  const domOf = (rows) => {
+    const before = globalThis.document;
+    globalThis.document = { querySelector: (sel) => (sel === ".vfy" ? panelOf(rows) : null) };
+    try {
+      return VERIFY_DOM();
+    } finally {
+      globalThis.document = before;
+    }
+  };
+  const DR = "https://robinhood.drpc.org";
+  const lines = [0, 1, 2, 3, 4].map(() => failed(DR, "the server responded with a status of 400 ()"));
+  const closed = domOf([row("robinhood", "ok", "rpc.mainnet.chain.robinhood.com robinhood.api.pocket.network")]);
+  assert.deepEqual(closed.poolRpcs.robinhood, ["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"]);
+  assert.deepEqual(outages(lines, closed), { kept: [], down: [DR], refused: [], verifyDown: [] }, "walked past, shown on two other operators");
+  const open = domOf([row("robinhood", "ok", undefined, ["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"])]);
+  assert.deepEqual(open.poolRpcs.robinhood, ["rpc.mainnet.chain.robinhood.com", "robinhood.api.pocket.network"], "a page before data-rpcs, row open");
+  const old = domOf([row("robinhood", "ok", undefined, [])]);
+  const r = outages(lines, old);
+  assert.equal(r.kept.length, 5, "a closed row naming no host is no proof of the walk");
+  assert.match(r.kept[0], /\[https:\/\/robinhood\.drpc\.org is a release RPC, a 4xx, not walked past: robinhood ok on 0 host\(s\), not two\]$/);
+  assert.equal(outages(lines, domOf([row("robinhood", "ok", "robinhood.drpc.org robinhood.api.pocket.network")])).kept.length, 5, "data-rpcs naming the host that failed");
 });
 
 test("the NEAR pair feeds the Code and Funds rows: both must show amber, not one", () => {

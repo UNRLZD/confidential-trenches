@@ -19,7 +19,12 @@
 // fork, or a seat behind) are read again from the newest block, FORK_TRIES times FORK_WAIT_MS apart, as the page's own
 // lag retry reads them (the wallet's EVM_LAG_TRIES and EVM_LAG_WAIT_MS); a seat that refuses U's state at the newest
 // block (a state miss is judged a wrong answer, judgeStateMiss) is read again the same way, from a newer block, as the
-// page's next pass reads it. Either fails the check only if it is still so on the last read.
+// page's next pass reads it. Either fails the check only if it is still so on the last read. A seat that does not know a
+// block yet, one at or below the newest block both reported (a null block by number, or a state read at it answered
+// with the words of a block not held: NOT_YET, not a pruned state's STATELESS), is read again the same way, and still
+// behind on the last read is INCONCLUSIVE naming that seat (Lag): Base makes a block every 200 ms and a provider's
+// backends lag one another (release 116's sign live run 43024665974: "base.api.pocket.network: block 56057255: not a
+// block", a block below both seats' latest). A seat that knows the block and answers it wrong still fails.
 // What the bundle rule (OLD_STATE_READ) sees: a state method named as a string literal, then within one list of params
 // with no nested list, a "finalized" or "safe" literal as the last param, in any quote style, with no space after the
 // commas: the shape the page's minified build makes, so SIGN_HOST's bundle before this card is caught by it. It does not
@@ -41,7 +46,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evmPoolProvidersOf, evmPoolVenues } from "../../packages/kit/src/index.ts";
-import { EXIT, rpcAnswer } from "./provider-answer.mjs";
+import { EXIT, NOT_YET, rpcAnswer, STATELESS } from "./provider-answer.mjs";
 
 const KEY = "evm-deposit-note-stays-incoming";
 export const SIGN_HOST = "https://confidential.unrealized.trade/";
@@ -135,12 +140,17 @@ export function replayer(log) {
 /** Two seats on different blocks at one number, or a seat that refuses U's state at the newest block: read again from
  *  the newest block. */
 class Fork extends Error {}
+/** A seat that does not know a block yet: read again from the newest block, INCONCLUSIVE when still so on the last read. */
+class Lag extends Fork {}
 class ReadFailed extends Error {
-  constructor(message, quiet) {
+  constructor(message, quiet, rpcError) {
     super(message);
     this.quiet = quiet;
+    this.rpcError = rpcError;
   }
 }
+/** A JSON-RPC error that says the seat does not hold the block yet (not that it pruned the block's state). */
+const notYet = (e) => typeof e?.message === "string" && NOT_YET.test(e.message) && !STATELESS.test(e.message);
 const host = (u) => new URL(u).host;
 async function ask(transport, url, method, params, what) {
   let a;
@@ -150,7 +160,7 @@ async function ask(transport, url, method, params, what) {
     if (a?.noAnswer === undefined) break; // an RPC error: the page does not ask again either
   }
   if (a.noAnswer !== undefined) throw new ReadFailed(`${what}: no answer: ${a.noAnswer}`, true);
-  throw new ReadFailed(`${host(url)}: ${what}: RPC error ${a.error?.code}: ${a.error?.message ?? JSON.stringify(a.error)}`, false);
+  throw new ReadFailed(`${host(url)}: ${what}: RPC error ${a.error?.code}: ${a.error?.message ?? JSON.stringify(a.error)}`, false, a.error);
 }
 const qty = (x, what) => {
   if (typeof x !== "string" || !QTY.test(x)) throw new Error(`${what}: not a quantity: ${JSON.stringify(x)}`);
@@ -168,6 +178,7 @@ async function pairReads(transport, pair, before, sleep) {
     try {
       return await pairReadsOnce(transport, pair, before);
     } catch (e) {
+      if (e instanceof Lag && t >= FORK_TRIES) throw new ReadFailed(`${e.message}, on ${FORK_TRIES} reads ${FORK_WAIT_MS} ms apart`, true);
       if (!(e instanceof Fork) || t >= FORK_TRIES) throw e;
       await sleep(FORK_WAIT_MS);
     }
@@ -187,12 +198,19 @@ async function pairReadsOnce(transport, { chain, seats, address }, before) {
   }
   const tops = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", ["latest", false], "the latest block"), `${host(u)}: the latest block`));
   const n = tops[0].number < tops[1].number ? tops[0].number : tops[1].number;
-  const at = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", [hx(n), false], `block ${n}`), `${host(u)}: block ${n}`));
+  // a block at or below both seats' newest, by number: null is the seat not holding it yet (Lag), any other non-block fails
+  const byNumber = async (u, k) => {
+    const x = await ask(transport, u, "eth_getBlockByNumber", [hx(k), false], `block ${k}`);
+    if (x === null) throw new Lag(`${host(u)}: block ${k}: not known yet`);
+    return header(x, `${host(u)}: block ${k}`);
+  };
+  const at = await both((u) => byNumber(u, n));
   if (at[0].hash !== at[1].hash) throw new Fork(`${chain}: the seats hold different blocks at ${n} on ${FORK_TRIES} reads`);
   const blk = at[0];
   // U's state at the newest block: a refusal is read again from the newest block (Fork), never asked again as it is
   const fresh = (p) =>
     p.catch((e) => {
+      if (e instanceof ReadFailed && !e.quiet && notYet(e.rpcError)) throw new Lag(`${e.message}: the block not known yet`);
       throw e instanceof ReadFailed && !e.quiet ? new Fork(`${e.message} (on ${FORK_TRIES} reads)`) : e;
     });
   for (const [method, what] of [["eth_getTransactionCount", "U's nonce"], ["eth_getBalance", "U's balance"]])
@@ -201,7 +219,7 @@ async function pairReadsOnce(transport, { chain, seats, address }, before) {
   const fin = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", ["finalized", false], "the finalized header"), `${host(u)}: the finalized header`));
   const low = fin[0].number < fin[1].number ? fin[0].number : fin[1].number;
   if (low > n) throw new Error(`${chain}: a finalized header ${low} above the newest agreed block ${n}`);
-  const f = await both(async (u) => header(await ask(transport, u, "eth_getBlockByNumber", [hx(low), false], `block ${low}`), `${host(u)}: block ${low}`));
+  const f = await both((u) => byNumber(u, low));
   if (f[0].hash !== f[1].hash) throw new Fork(`${chain}: the seats hold different final blocks at ${low} on ${FORK_TRIES} reads`);
   lines.push(`${chain} (${seats.map(host).join(", ")}): newest agreed block ${n}; U's nonce and balance at it, U's nonce at its hash, the finalized header ${low} (${n - low} blocks behind) with one hash on both: all answered`);
   return lines;

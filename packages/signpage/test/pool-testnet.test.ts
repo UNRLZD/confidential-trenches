@@ -27,7 +27,7 @@ import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 const { SOL_POOLS, SOL_POOL_TABLES, solanaPoolOf, SOL_LADDER, SOL_EPOCH_MS, SOL_LIFE_MS, SOL_SEND_MARGIN_MS } = await import("../../wallet/src/pool/solana.ts");
 const { POOL_TESTNET } = await import("../../wallet/src/pool/network.ts");
 const { poolKinds } = await import("../src/pool-kinds.ts");
-const { TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
+const { PAGE_CLUSTER, TESTNET_RPCS, PAGE_SOL_MARK_BATCHES, testnetPoolDeps, testnetPool, poolRelayFee, helperPoolSend, POOL_SEND_TIMEOUT_MS, PAGE_TABLES, settleFreedOps, oweSend, dropSend, keepRelease, mergeWithdrawOp } = await import("../src/pool-testnet.ts");
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -1186,6 +1186,9 @@ test("the page's buy host writes W's buy record in the wallet store's meta/owed/
     await b.bought!.put(A, rec);
     assert.deepEqual(await w.get("meta", "owed/buy-sol"), { [A]: rec });
     assert.deepEqual(await s.bought!.get(A), rec);
+    // card sol-pool-buy-lands-on-mainnet: both hosts carry the page's cluster (the buy's tip, the sell's priority fee)
+    assert.equal(s.cluster, PAGE_CLUSTER);
+    assert.equal((b as { cluster?: string }).cluster, PAGE_CLUSTER);
   } finally {
     (b as { end?: () => void }).end?.();
     (s as { end?: () => void }).end?.();

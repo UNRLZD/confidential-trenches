@@ -96,6 +96,8 @@ const JS = [
 ].join("");
 test("the facts read from a bundle; a planted line with its rule changed FAILs", () => {
   assert.deepEqual(Object.values(facts("", JS).carries), Object.keys(MARKS).map(() => true));
+  // the compute units as a constant of their own, 14e5, as a bundle that uses SOLANA_POOL_CU_LIMIT_MAX elsewhere has it
+  assert.deepEqual(Object.values(facts("", JS.replace("nE=sd+BigInt(14e5)*ad/1000000n", "RD=14e5,nE=sd+BigInt(RD)*ad/1000000n")).carries), Object.keys(MARKS).map(() => true));
   const planted = [
     [JS.replace("n=t>0n||!e.keeps?t:0n", "n=t>0n?t:0n"), 0],
     [JS.replace("+2n*r)", "+r)"), 1],
@@ -134,6 +136,9 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     // the floor end's steadiness mark holds the same owed-or-floor end, so both go
     [JS.replaceAll(/\{end:[ai]>0\?`owed`:`floor`,/g, "{end:`floor`,"), [10, 22]],
     [JS.replace("nE=sd+BigInt(14e5)*ad/1000000n", "nE=sd"), 6],
+    // the compute units a constant of their own: only 14e5 is the cap's
+    [JS.replace("nE=sd+BigInt(14e5)*ad/1000000n", "RD=15e5,nE=sd+BigInt(RD)*ad/1000000n"), 6],
+    [JS.replace("nE=sd+BigInt(14e5)*ad/1000000n", "nE=sd+BigInt(RD)*ad/1000000n"), 6],
     [JS.replace("ad=1000000n", "ad=2000000n"), 6],
     [JS.replace("sd=5000n", "sd=0n"), 6],
     [JS.replace("if(o!==void 0&&o===n.seen)return;", ""), 11],

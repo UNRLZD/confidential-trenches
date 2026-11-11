@@ -1679,6 +1679,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const store = (): Promise<NoteStore> => (notes ??= page.store().then((w) => openNoteStore(w)));
     return {
       pin: pin!,
+      // mainnet: W's sell pays a priority fee (pool-sell.ts solanaSellBudget)
+      cluster: PAGE_CLUSTER,
       rpcs: r,
       notes: store,
       ops: page.store,
