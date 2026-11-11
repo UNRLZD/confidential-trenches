@@ -325,24 +325,31 @@ test("decided before any read: while a trade runs or holds a host, busy at once 
   assert.deepEqual(out, []);
 });
 
-test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past it busy at once, no read and no wait", async () => {
+test("the budget: at most POOL_SELL_DRY_CALLS calls per host in any window; past it busy at once, no read and no wait; a preview of Ws already read in it runs on their reads, no call", async () => {
   const c = clock();
   const log: string[] = [];
-  const k = poolSellDryKind(deps({ log, now: c.now }));
-  const answers: unknown[] = [];
-  for (const bps of [1_000, 2_000, 3_000]) {
-    const r = k(share(MINT, bps));
+  // the holding changes between asks: each a cold preview of other Ws (W1's, W2's, then both)
+  let held: Position[] = [pos(MINT, "4000000", 6, [W1])];
+  const k = poolSellDryKind(deps({ log, now: c.now, positions: () => held }));
+  const ask = async (token: string, bps: number): Promise<object> => {
+    const r = k(share(token, bps));
     await r.after;
-    answers.push(r.answer());
-    c.add(POOL_SELL_DRY_KEEP_MS); // past the kept answers' age: each would read
-  }
-  assert.ok("result" in (answers[0] as object) && "result" in (answers[1] as object), JSON.stringify(answers));
-  assert.deepEqual(answers[2], { error: "busy" }, "the third in 10 s");
-  assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "six calls per host, no more");
+    return r.answer() as object;
+  };
+  assert.ok("result" in (await ask(MINT, 1_000)));
+  held = [pos(MINT, "4000000", 6, [W2])];
+  assert.ok("result" in (await ask(MINT, 2_000)));
+  assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "six calls per host");
+  held = [pos(MINT, "4000000", 6, [W1])];
+  assert.deepEqual(await ask(MINT, 3_000), { error: "busy" }, "W1 again, the last reads W2's: a third cold preview in 10 s");
+  assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "no more");
+  // both Ws: the last preview's reads (W2's), W1 not read, no call
+  held = [pos(MINT, "8000000", 6, [W1, W2])];
+  assert.ok("result" in (await ask(MINT, 5_000)), "the Ws already read: their reads");
+  assert.equal(log.length, 2 * POOL_SELL_DRY_CALLS, "not spent twice");
   c.add(POOL_SELL_DRY_WINDOW_MS);
-  const r = k(share(MINT, 3_000));
-  await r.after;
-  assert.ok("result" in r.answer()!, "the next window");
+  held = [pos(MINT, "8000000", 6, [W1, W2])];
+  assert.ok("result" in (await ask(MINT, 3_000)), "the next window");
 });
 
 test("answered inside the client's 10 s: a read its host holds answers by POOL_SELL_DRY_ANSWER_MS, never later", async (t) => {
@@ -449,13 +456,18 @@ test("the page answers it (src/main.ts): the kind on the trades' paced pair as b
   assert.match(main, /"pool\.sell\.dry": \(params\) => poolSellDry\(params\),/);
   assert.match(main, /PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)/, "the trades' own paced pair, each read a background one on its host's lane");
   assert.match(main, /positions: \(\) => testnet\?\.positionsNow\(\) \?\? null, pin: \(\) => PAGE_SOL_PIN \?\? null,/, "the held positions: no pass, no seed read, no write; the page's pool");
+  assert.match(main, /bought: \(token\) => testnet\?\.boughtSince\(token\) \?\? Promise\.resolve\(undefined\),/, "the Ws bought since the pass, as the sale finds them");
   assert.match(main, /rent: \(\) => \(hasSolana \? rent\.get\(\) : null\),/, "the page's own Rent sysvar read");
   assert.match(main, /const buys = liveRuns\(poolKindMap\["pool\.buy"\]\);\n  poolKindMap\["pool\.buy"\] = buys\.kind;/, "a buy counted to its first answer, its early sent (devnet run 11: to Final it kept the preview busy 33.8 s)");
   assert.match(main, /const sells = liveRuns\(poolKindMap\["pool\.sell"\]\);\n  poolKindMap\["pool\.sell"\] = sells\.kind;/);
   assert.doesNotMatch(main, /liveRuns\([^)]*"final"/, "no trade counted to its final progress post");
+  assert.match(main, /const deposits = liveRuns\(poolKindMap\["pool\.deposit"\]\);\n  poolKindMap\["pool\.deposit"\] = deposits\.kind;\n  const withdraws = liveRuns\(poolKindMap\["pool\.withdraw"\]\);\n  poolKindMap\["pool\.withdraw"\] = withdraws\.kind;/);
+  assert.match(main, /trades: \(\) => buys\.edges\(\) \+ sells\.edges\(\) \+ deposits\.edges\(\) \+ withdraws\.edges\(\),/, "every pool trade's start and end drops the kept reads (review of be303082, P1)");
   assert.match(main, /trading: \(\) => buys\.live\(\) \+ sells\.live\(\) > 0 \|\| \(dryPair\(\) \?\? \[\]\)\.some\(\(r\) => r\.url !== undefined && hostLane\(r\.url\)\.trading\(\)\),/);
   const tp = readFileSync(new URL("../src/pool-testnet.ts", import.meta.url), "utf8");
   assert.match(tp, /positionsNow: \(\) => positions\.get\(\),/);
+  assert.match(tp, /boughtSince: async \(token: string\) => \{\n      const st = await \(page\.held \? page\.held\(\) : page\.store\(\)\);/, "the store as held, never opened again for it (review of b7212a9e, P3-1)");
+  assert.match(tp, /return \{ since: boughtSincePass\(token, mints, kept, costs, sold\), held: keptHeldOf\(token, kept\) \};/, "from the store's buy mints, kept pass, buy records and full sells: no read");
 });
 
 // devnet run 11 (11 Nov): a buy's hold on the pair's hosts lasted to its Final, so every preview asked after its Filled
@@ -491,9 +503,11 @@ test("a pool buy runs from its tap to its first answer, its early \"sent\", whil
   const seen: string[] = [];
   b.kind({}, ctx(seen));
   assert.equal(b.live(), 1);
+  assert.equal(b.edges(), 1, "its start");
   answered();
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(b.live(), 0, "answered sent: no longer running, though its read-backs go on");
+  assert.equal(b.edges(), 2, "and its end");
   post("filled");
   assert.equal(b.live(), 0);
   assert.deepEqual(seen, ["filled"], "progress passes through");
@@ -518,7 +532,7 @@ test("a pool buy runs from its tap to its first answer, its early \"sent\", whil
   assert.equal(late.live(), 0, "the backstop");
 });
 
-test("the kept answers: four shares inside 2 s make three calls per provider in all and four answers; a trade meanwhile costs nothing; past the age one read again; a sign out drops them", async () => {
+test("the kept answers: four shares inside 2 s make three calls per provider in all and four answers; a trade meanwhile: busy, no call, nothing kept taken; past the age one read again; a sign out drops them", async () => {
   const c = clock();
   const log: string[] = [];
   let trading = false;
@@ -538,9 +552,10 @@ test("the kept answers: four shares inside 2 s make three calls per provider in 
   assert.equal(log.length, 6, "three calls per provider for the four");
   assert.equal(new Set(outs).size, 4, `four answers ${outs}`);
   for (const [i, bps] of shares.entries()) assert.equal(((await poolSellDry(deps(), share(MINT, bps))) as { result: { out: string } }).result.out, outs[i], "each share's own answer, as a preview of it alone");
-  // a trade tapped meanwhile (1.6 s in): the ask reads nothing, so the trade's reads wait on nothing of it
+  // a trade tapped meanwhile (1.6 s in): busy, as before the kept answers (the trade may change what they read), and the
+  // ask reads nothing, so the trade's reads wait on nothing of it
   trading = true;
-  assert.ok((await ask(3_000)).result);
+  assert.deepEqual(await ask(3_000), { error: "busy" });
   assert.equal(log.length, 6, "no call while the trade runs");
   trading = false;
   // past the age: one read again
@@ -579,4 +594,499 @@ test("the kept answers are the preview's only: a sale's reference after a previe
   assert.ok(log.length >= n + 4, `the sale's own reads: ${log.length - n}`);
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   assert.match(main, /const dryPair = \(\): readonly \[SolanaRpc, SolanaRpc\] \| null => \(PAGE_SOL_PIN === undefined \? null : pageSolanaRpcs\("pass"\)\);/, "the preview's pair is its own, made per ask");
+});
+
+// Card app-sell-shows-what-you-receive, devnet run 116 (11 Nov): right after a buy's Filled the preview answered
+// not_funded for 7.6 s, waiting for the positions pass's finder read of the new W, while a sale tapped then planned W from
+// its buy mint and W's own read. The preview takes a W bought since the last whole pass as the sale's plan does: its buy
+// mint names the token (boughtSincePass), and W's own read (pool-sell.ts wHeldNow, the sale's wHeld) says what it holds.
+const { solanaAta } = await import("../../kit/src/checks/solana/message.ts");
+const { base58 } = await import("@scure/base");
+const { boughtSincePass, keptHeldOf, readFirst } = await import("../src/pool-sell-dry.ts");
+type BoughtW = import("../src/pool-sell-dry.ts").BoughtW;
+type StoreWs = import("../src/pool-sell-dry.ts").StoreWs;
+const MINT_PROGRAM = (Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { value: { owner: string }[] }).value[0]!.owner;
+const tokenBytes = (amount: bigint, owner: string, state = 1): string => {
+  const d = new Uint8Array(165);
+  d.set(base58.decode(MINT), 0);
+  d.set(base58.decode(owner), 32);
+  new DataView(d.buffer).setBigUint64(64, amount, true);
+  d[108] = state;
+  return Buffer.from(d).toString("base64");
+};
+/** The recorded pair, with W2's own read (its token account, W2, its two volume accounts) answered: W2 holding `held`
+ *  on each provider (null: no token account there), its lamports ENOUGH. Each call's address list logged. */
+function boughtPair(held: readonly [bigint | null, bigint | null], log: string[], lists: string[][], o: { frozen?: true; during?: () => void } = {}): readonly [SolanaRpc, SolanaRpc] {
+  const ata = solanaAta(W2, MINT, MINT_PROGRAM);
+  return pair("pump", log).map((rpc, i) => (async (method: string, params: readonly unknown[]) => {
+    const list = params[0];
+    if (method === "getMultipleAccounts" && Array.isArray(list)) lists.push(list as string[]);
+    o.during?.();
+    if (method === "getMultipleAccounts" && Array.isArray(list) && list[0] === ata) {
+      log.push(method);
+      const h = held[i]!;
+      return { context: { slot: 1 }, value: [h === null ? null : { lamports: 2_039_280, owner: MINT_PROGRAM, data: [tokenBytes(h, W2, o.frozen ? 2 : 1), "base64"] }, { lamports: Number(ENOUGH), owner: "11111111111111111111111111111111", data: ["", "base64"] }, null, null] };
+    }
+    // no W of the pass's: the Ws' call reads the pool account alone
+    if (method === "getMultipleAccounts" && Array.isArray(list) && list.length === 1 && list[0] === POOL) {
+      log.push(method);
+      return { context: { slot: 1 }, value: [{ lamports: 1, owner: PROGRAM, data: [poolBytes(...SIZES), "base64"] }] };
+    }
+    return rpc(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
+/** The store's Ws for a preview: those bought since the pass, the kept pass's amounts none. */
+const sw = (since: readonly BoughtW[], held: ReadonlyMap<string, bigint> = new Map()): StoreWs => ({ since, held });
+const FINDER = /^(getTokenAccountsByOwner|getBalance|getProgramAccounts|getSignaturesForAddress)$/;
+
+test("a preview asked right after a buy's read-back, before the pass lists its W: the buy's amount from W's own read, the same number as the pass's, and no finder read", async () => {
+  const log: string[] = [];
+  const lists: string[][] = [];
+  const since = { address: W2, program: MINT_PROGRAM, decimals: 6 };
+  const got = await poolSellDry(deps({ positions: () => [pos(SWAP_MINT)], rpcs: () => boughtPair([HELD, HELD], log, lists), bought: async (t: string) => sw(t === MINT ? [since] : []) }), share(MINT, 10_000));
+  assert.ok("result" in got, `a number on the first ask: ${JSON.stringify(got)}`);
+  // the same W as the pass would hold it, the same holding: the same answer
+  const passed = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])] }), share(MINT, 10_000));
+  assert.deepEqual(got, passed, "the buy's amount, priced as the pass's holding of it");
+  assert.equal(log.filter((m) => FINDER.test(m)).length, 0, `no finder read: ${log.join(",")}`);
+  // a partial share of it as well
+  const half = await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([HELD, HELD], [], []), bought: async () => sw([since]) }), share(MINT, 5_000));
+  const halfPassed = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])] }), share(MINT, 5_000));
+  assert.deepEqual(half, halfPassed);
+});
+
+test("a W bought since the pass as the sale finds it: empty on both (the buy did not land) adds nothing; apart on the two (its account on one only): not now; beside the pass's W, each W in its own call", async () => {
+  const since = [{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  // not landed: no token account on either provider, so the sale would plan nothing of W
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([null, null], [], []), bought: async () => sw(since) }), share(MINT, 10_000)), { error: "not_funded" });
+  // one provider shows it, the other not yet: neither's word alone, busy (the app asks again)
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([HELD, null], [], []), bought: async () => sw(since) }), share(MINT, 10_000)), { error: "busy" });
+  // signed out: nothing, no read of W
+  const lists: string[][] = [];
+  assert.deepEqual(await poolSellDry(deps({ positions: () => null, rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => sw(since) }), share(MINT, 10_000)), { error: "not_funded" });
+  assert.equal(lists.length, 0);
+  // the pass holds W1, W2 was bought since: both counted, W2's read names W2 alone
+  const both = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])], rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => sw(since) }), share(MINT, 10_000));
+  const passedBoth = await poolSellDry(deps({ positions: () => [pos(MINT, "8000000", 6, [W1, W2])] }), share(MINT, 10_000));
+  assert.ok("result" in both && "result" in passedBoth, JSON.stringify([both, passedBoth]));
+  assert.equal(both.result.out, passedBoth.result.out, "the two Ws' holding, as the pass would hold it");
+  for (const l of lists.filter((x) => x.includes(W2))) assert.ok(!l.includes(W1), `a call naming W2 names no other W: ${l.join(",")}`);
+  // a W the pass already holds is not read again
+  const again: string[][] = [];
+  await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W2])], rpcs: () => boughtPair([HELD, HELD], [], again), bought: async () => sw(since) }), share(MINT, 10_000));
+  assert.equal(again.filter((l) => l[0] === solanaAta(W2, MINT, MINT_PROGRAM)).length, 0, "the pass's W: no own read");
+});
+
+// The review of b7212a9e (P2): buy mints are never deleted, so a W whose buy never landed, or one sold in full before the
+// finder listed it, stayed one of these for good, a call per host on every cold preview (four of them: busy for good).
+// The pass's own rule now: W's buy record names the token with what W received (a not_landed end takes it back,
+// positions.ts recordPoolBuy), and no full sell of it from W is noted (POSITIONS_SOLD_KEY).
+test("boughtSincePass: the Ws whose buy mint and buy record (with what W received) name the token, the kept pass never listed it in and no full sell of it is noted; the program and the record's decimals", () => {
+  const W3 = PROGRAM;
+  const mints = { [W1]: { mint: MINT, program: MINT_PROGRAM }, [W2]: { mint: MINT, program: MINT_PROGRAM }, [W3]: { mint: MINT, program: MINT_PROGRAM }, [POOL]: { mint: SWAP_MINT, program: MINT_PROGRAM } };
+  const costs = { [W1]: { mint: MINT, received: "1000000", decimals: 6 }, [W2]: { mint: MINT, received: "4000000", decimals: 6 }, [POOL]: { mint: SWAP_MINT, received: "5" } };
+  // no whole pass kept yet: every recorded W of the token; W3 (its buy mint alone: never landed, its record taken back)
+  // is none
+  assert.deepEqual(boughtSincePass(MINT, mints, undefined, costs, undefined), [{ address: W1, program: MINT_PROGRAM, decimals: 6, received: "1000000" }, { address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }]);
+  // W1 listed the token once (held or sold since): the pass's, never read here
+  assert.deepEqual(boughtSincePass(MINT, mints, { positions: [], held: {}, listed: [`${W1} ${MINT}`] }, costs, undefined), [{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }]);
+  // W2 sold in full from this device (before the finder listed it): none
+  assert.deepEqual(boughtSincePass(MINT, mints, undefined, costs, { [W2]: [MINT] }), [{ address: W1, program: MINT_PROGRAM, decimals: 6, received: "1000000" }]);
+  // a record with no amount received, or of another mint: none
+  assert.deepEqual(boughtSincePass(MINT, mints, undefined, { [W1]: { mint: MINT }, [W2]: { mint: SWAP_MINT, received: "4" } }, undefined), []);
+  assert.deepEqual(boughtSincePass(MINT, undefined, undefined, costs, undefined), []);
+  assert.deepEqual(boughtSincePass(MINT, { [W2]: { mint: MINT } }, undefined, costs, undefined), [], "no program: not the sale's read");
+});
+
+// The review of b7212a9e (P1): the Ws' call put every W the pass lists for the token, with their volume accounts, in one
+// getMultipleAccounts on both providers: one request named two of the user's wallets. Each W in a call of its own.
+const wNamed = (a: string): string | undefined =>
+  [W1, W2].find((w) => a === w || a === solanaVolumeAccumulator(w, SOLANA_PUMP_PROGRAM) || a === solanaVolumeAccumulator(w, SOLANA_PUMP_AMM_PROGRAM) || a === solanaAta(w, MINT, MINT_PROGRAM));
+const twoNamed = (lists: readonly string[][]): string[][] => lists.filter((l) => new Set(l.map(wNamed).filter((w) => w !== undefined)).size > 1);
+
+test("one W per request: a holding over two Ws reads each W (its lamports and volume accounts) in a call of its own on each provider, none naming the other", async () => {
+  const lists: string[][] = [];
+  const got = await poolSellDry(deps({ positions: () => [pos(MINT, "8000000", 6, [W1, W2])], rpcs: () => boughtPair([HELD, HELD], [], lists) }), share(MINT, 10_000));
+  assert.ok("result" in got, JSON.stringify(got));
+  assert.deepEqual(twoNamed(lists), [], "no request names two Ws");
+  assert.equal(lists.filter((l) => l.includes(W1)).length, 2, "W1's call, once on each provider");
+  assert.equal(lists.filter((l) => l.includes(W2)).length, 2, "W2's call, once on each provider");
+  // with a W bought since the pass beside the pass's W
+  const more: string[][] = [];
+  await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])], rpcs: () => boughtPair([HELD, HELD], [], more), bought: async () => sw([{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }]) }), share(MINT, 10_000));
+  assert.deepEqual(twoNamed(more), [], "no request names two Ws");
+});
+
+/** A preview's turn with `n` calls already made on each host in the window, its kept answers none. */
+const turnWith = (n: number) => ({ newest: () => true, calls: [Array(n).fill(0), Array(n).fill(0)] as [number[], number[]], kept: { get: () => null, put: () => {}, drop: () => {} } });
+
+test("the budget counts each W's call: two calls for the reference and one per W (the pass's and each bought since), past POOL_SELL_DRY_CALLS busy at once with no read", async () => {
+  const since = [{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  for (const [name, o] of [["two Ws of the pass", { positions: () => [pos(MINT, "8000000", 6, [W1, W2])] }], ["the pass's W and one bought since", { positions: () => [pos(MINT, "4000000", 6, [W1])], bought: async () => sw(since) }]] as const) {
+    const lists: string[][] = [];
+    // 2 + 2 calls this preview's: past 6 with 3 made, at 6 with 2
+    assert.deepEqual(await poolSellDry(deps({ ...o, now: () => 0, rpcs: () => boughtPair([HELD, HELD], [], lists) }), share(MINT, 10_000), turnWith(3) as never), { error: "busy" }, name);
+    assert.equal(lists.length, 0, `${name}: no read`);
+    assert.ok("result" in (await poolSellDry(deps({ ...o, now: () => 0, rpcs: () => boughtPair([HELD, HELD], [], []) }), share(MINT, 10_000), turnWith(2) as never)), `${name}: within the budget`);
+  }
+});
+
+test("a W bought since the pass that holds nothing, or is frozen on both, adds nothing: the answer is the pass's W's alone", async () => {
+  const alone = await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])] }), share(MINT, 10_000));
+  assert.ok("result" in alone, JSON.stringify(alone));
+  const since = async () => sw([{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }]);
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])], rpcs: () => boughtPair([null, null], [], []), bought: since }), share(MINT, 10_000)), alone, "empty on both");
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [pos(MINT, "4000000", 6, [W1])], rpcs: () => boughtPair([HELD, HELD], [], [], { frozen: true }), bought: since }), share(MINT, 10_000)), alone, "frozen on both");
+  assert.deepEqual(await poolSellDry(deps({ positions: () => [], rpcs: () => boughtPair([HELD, HELD], [], [], { frozen: true }), bought: since }), share(MINT, 10_000)), { error: "not_funded" }, "frozen on both, nothing else: as the sale, nothing to sell");
+});
+
+test("a sign out at each step ends the preview not_funded, each check its own: before the store is read (nothing read), before the providers are asked (none asked), while they answer (no number)", async () => {
+  const since = [{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  // signed out at the ask: the store is not read for the Ws bought since
+  let asked = 0;
+  assert.deepEqual(await poolSellDry(deps({ positions: () => null, bought: async () => (asked++, sw(since)) }), share(MINT, 10_000)), { error: "not_funded" });
+  assert.equal(asked, 0, "no store read when signed out");
+  // signed out while the store is read: no provider asked
+  let out = false;
+  const lists: string[][] = [];
+  assert.deepEqual(await poolSellDry(deps({ positions: () => (out ? null : []), rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => ((out = true), sw(since)) }), share(MINT, 10_000)), { error: "not_funded" });
+  assert.equal(lists.length, 0, "no provider asked after a sign out");
+  // signed out while the providers answer: no number
+  let gone = false;
+  assert.deepEqual(await poolSellDry(deps({ positions: () => (gone ? null : []), rpcs: () => boughtPair([HELD, HELD], [], [], { during: () => void (gone = true) }), bought: async () => sw(since) }), share(MINT, 10_000)), { error: "not_funded" });
+});
+
+// The review of b7212a9e (P3-2): with a W bought since the pass, the "holding gone" check was skipped: the pass's W sold
+// out meanwhile was still priced.
+test("the pass's holding gone while the preview reads (sold out), a W bought since beside it: not_funded, never the old holding", async () => {
+  let sold = false;
+  const got = await poolSellDry(deps({ positions: () => (sold ? [] : [pos(MINT, "4000000", 6, [W1])]), rpcs: () => boughtPair([HELD, HELD], [], [], { during: () => void (sold = true) }), bought: async () => sw([{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }]) }), share(MINT, 10_000));
+  assert.deepEqual(got, { error: "not_funded" });
+  // gone while the store is read, before any provider is asked: not_funded, none asked
+  let early = false;
+  const lists: string[][] = [];
+  const first = await poolSellDry(deps({ positions: () => (early ? [] : [pos(MINT, "4000000", 6, [W1])]), rpcs: () => boughtPair([HELD, HELD], [], lists), bought: async () => ((early = true), sw([{ address: W2, program: MINT_PROGRAM, decimals: 6, received: "4000000" }])) }), share(MINT, 10_000));
+  assert.deepEqual(first, { error: "not_funded" });
+  assert.equal(lists.length, 0, "no provider asked");
+});
+
+// The review of 6446ec37 (P2): with one call per W against POOL_SELL_DRY_CALLS, two Ws or more answered busy on a second
+// preview inside 10 s, and five Ws or more (or four bought since with no W of the pass) busy on every ask with no call.
+// A preview reads at most POOL_SELL_DRY_CALLS - 2 Ws, the ones the sale would sell first; the others at lamports 0 with
+// their claims unread (the lowest pay-in for them: low, never high); and a preview of Ws already read in the window runs
+// on those reads.
+const MANY = [W1, W2, ...[3, 4, 5, 6, 7, 8].map((i) => base58.encode(new Uint8Array(32).fill(i)))];
+/** The recorded pair answering any of `ws`: each W's call (W, its volume accounts, the pool beside the first) with W's
+ *  lamports ENOUGH and no volume account; each W's own read (its token account first) with `tokens[W]` on both. */
+function manyPair(ws: readonly string[], tokens: Readonly<Record<string, bigint>>, lists: string[][]): readonly [SolanaRpc, SolanaRpc] {
+  const atas = new Map(ws.map((w) => [solanaAta(w, MINT, MINT_PROGRAM), w] as const));
+  const mintRead = (Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { context: unknown; value: unknown[] });
+  const sys = (l: bigint) => ({ lamports: Number(l), owner: "11111111111111111111111111111111", data: ["", "base64"] });
+  return providers("pump").map((rpc) => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getAccountInfo") return { context: mintRead.context, value: mintRead.value[0] };
+    const list = params[0] as string[];
+    if (method === "getMultipleAccounts" && Array.isArray(list)) {
+      const owner = atas.get(list[0]!);
+      if (owner !== undefined) {
+        lists.push(list);
+        const t = tokens[owner];
+        return { context: { slot: 1 }, value: [t === undefined ? null : { lamports: 2_039_280, owner: MINT_PROGRAM, data: [tokenBytes(t, owner), "base64"] }, sys(ENOUGH), null, null] };
+      }
+      if (ws.includes(list[0]!) || (list.length === 1 && list[0] === POOL)) {
+        lists.push(list);
+        return { context: { slot: 1 }, value: list.map((a) => (a === POOL ? { lamports: 1, owner: PROGRAM, data: [poolBytes(...SIZES), "base64"] } : ws.includes(a) ? sys(ENOUGH) : null)) };
+      }
+    }
+    return rpc(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
+const M = 1_000_000n; // one whole token at 6 decimals, base units
+const wsRead = (lists: readonly string[][], ws: readonly string[]): string[] => ws.filter((w) => lists.some((l) => l.includes(w) || l[0] === solanaAta(w, MINT, MINT_PROGRAM)));
+
+test("five Ws or more: the four the sale would sell first are read, one per call; two cold previews in a row both answer, the second on the first's reads", async () => {
+  const ws = MANY.slice(0, 5);
+  // each W's amount as the kept pass holds it: 1, 2, 3, 4 and 5 tokens; a sale of 10% (1.5) takes W 2 alone
+  const held = new Map(ws.map((w, i) => [w, BigInt(i + 1) * M] as const));
+  const lists: string[][] = [];
+  const c = clock();
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => manyPair(ws, {}, lists), positions: () => [pos(MINT, "15", 6, ws)], bought: async () => sw([], held) }));
+  const first = k(share(MINT, 1_000));
+  await first.after;
+  assert.ok("result" in first.answer()!, JSON.stringify(first.answer()));
+  assert.deepEqual(wsRead(lists, ws), [ws[0], ws[1], ws[2], ws[3]], "the sale's W first (2 tokens), then the smallest: W 5 not read");
+  assert.deepEqual(twoNamed(lists), [], "one W per call");
+  const calls = lists.length;
+  c.add(3_000);
+  const second = k(share(MINT, 5_000));
+  await second.after;
+  assert.ok("result" in second.answer()!, `the second preview inside the window: ${JSON.stringify(second.answer())}`);
+  assert.equal(lists.length, calls, "on the first's reads, no call");
+  // readFirst, as pool-sell.ts planOf: the smallest W holding the units alone, else the smallest first
+  assert.deepEqual(readFirst(ws.map((w, i) => ({ address: w, held: BigInt(i + 1) * M })), 3n * M + 1n), [ws[3], ws[0], ws[1], ws[2], ws[4]]);
+  assert.deepEqual(readFirst(ws.map((w, i) => ({ address: w, held: BigInt(i + 1) * M })), 6n * M), ws, "no W alone: the smallest first");
+});
+
+test("never high: the Ws not read (lamports and claims of their own) are priced at lamports 0 with claims unread, so the answer is at most what reading all of them gives", async () => {
+  const ws = MANY.slice(0, 6);
+  const held = new Map(ws.map((w, i) => [w, BigInt(i + 1) * M] as const));
+  for (const bps of [1_000, 10_000]) {
+    const lists: string[][] = [];
+    const got = await poolSellDry(deps({ rpcs: () => manyPair(ws, {}, lists), positions: () => [pos(MINT, "21", 6, ws)], bought: async () => sw([], held) }), share(MINT, bps));
+    assert.ok("result" in got, JSON.stringify(got));
+    assert.equal(wsRead(lists, ws).length, 4, "four read");
+    // all six read, the two unread holding lamports and owing claims on both venues (or none)
+    const units = (21n * M * BigInt(bps)) / 10_000n;
+    const { e, cashback } = await saleOut("pump", MINT, units);
+    for (const claim of [[true, true], [false, false]] as const) {
+      const all: DryWallet[] = ws.map((_, i) => (i < 4 ? { lamports: ENOUGH, claim: [false, false] } : { lamports: ENOUGH, claim }));
+      const truth = poolSellPays(RENT, "pump-curve", all, false, e, solanaSellFloor(e, 1000), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] });
+      assert.ok(!("refused" in truth), `${bps}: all six read is refused`);
+      const [whole, frac = ""] = String(got.result.out).split(".");
+      const out = BigInt(whole!) * 1_000_000_000n + BigInt(frac.padEnd(9, "0"));
+      assert.ok(out <= truth.out, `${bps}: ${out} at most ${truth.out} (claims ${claim})`);
+      if (claim[0]) assert.ok(out < truth.out, `${bps}: below, the unread Ws' claims not counted`);
+    }
+  }
+});
+
+test("four Ws bought since and no W of the pass: three read (the pool account has a call of its own), a number, one W per call", async () => {
+  const ws = MANY.slice(0, 4);
+  const since = ws.map((w) => ({ address: w, program: MINT_PROGRAM, decimals: 6, received: "1" }));
+  const lists: string[][] = [];
+  const got = await poolSellDry(deps({ rpcs: () => manyPair(ws, Object.fromEntries(ws.map((w) => [w, M])), lists), positions: () => [], bought: async () => sw(since) }), share(MINT, 10_000));
+  assert.ok("result" in got, JSON.stringify(got));
+  assert.equal(wsRead(lists, ws).length, 3, "three read, each in its own call");
+  assert.deepEqual(twoNamed(lists), []);
+});
+
+test("the last reads are taken only while each W is where it was: a W bought since that the pass now lists is never counted twice, a W gone is never read", async () => {
+  const ws = MANY.slice(0, 2);
+  const lists: string[][] = [];
+  const c = clock();
+  let held: Position[] = [pos(MINT, "1", 6, [ws[0]!])];
+  let since = [{ address: ws[1]!, program: MINT_PROGRAM, decimals: 6, received: "1" }];
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => manyPair(ws, { [ws[1]!]: M }, lists), positions: () => held, bought: async () => sw(since) }));
+  const ask = async (): Promise<object> => {
+    const r = k(share(MINT, 10_000));
+    await r.after;
+    return r.answer() as object;
+  };
+  const first = await ask();
+  assert.ok("result" in first, JSON.stringify(first));
+  // the pass lists the W bought since: its token now in the pass's amount, so its own read would count it twice
+  held = [pos(MINT, "2", 6, ws)];
+  since = [];
+  c.add(1_000);
+  const calls = lists.length;
+  assert.deepEqual(await ask(), { error: "busy" }, "a cold read of both, past the window's budget: not now");
+  assert.equal(lists.length, calls, "no call");
+  // the first W sold: the W bought since alone, not the reads that named the first
+  held = [];
+  since = [{ address: ws[1]!, program: MINT_PROGRAM, decimals: 6, received: "1" }];
+  assert.deepEqual(await ask(), { error: "busy" }, "the first W's reads not taken");
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  assert.ok("result" in (await ask()), "the next window");
+});
+
+test("two tokens in one window: each keeps the reads its preview made, so going back to either asks nothing", async () => {
+  const c = clock();
+  const log: string[] = [];
+  let token = MINT;
+  const k = poolSellDryKind(deps({ log, now: c.now, rpcs: () => pair(token === MINT ? "pump" : "pumpswap", log) }));
+  const ask = async (t: string): Promise<object> => {
+    token = t;
+    const r = k(share(t, 5_000));
+    await r.after;
+    return r.answer() as object;
+  };
+  for (const t of [MINT, SWAP_MINT]) assert.ok("result" in (await ask(t)), t);
+  const calls = log.length;
+  c.add(3_000);
+  for (const t of [MINT, SWAP_MINT, MINT]) assert.ok("result" in (await ask(t)), `${t} again`);
+  assert.equal(log.length, calls, "no call");
+});
+
+test("the Ws bought since are read before the pass's (their tokens count only when read), then the sale's order; one bought since not read and the amount past what was read: busy, never not_funded", async () => {
+  // two Ws of the pass (1 and 2 tokens) and three bought since (5 each, after both in the sale's order): the three, then
+  // the pass's smallest
+  const pass = MANY.slice(0, 2);
+  const bought = MANY.slice(2, 5);
+  const since = bought.map((w) => ({ address: w, program: MINT_PROGRAM, decimals: 6, received: "5" }));
+  const lists: string[][] = [];
+  const all = [...pass, ...bought];
+  const got = await poolSellDry(deps({ rpcs: () => manyPair(all, Object.fromEntries(bought.map((w) => [w, 5n * M])), lists), positions: () => [pos(MINT, "3", 6, pass)], bought: async () => sw(since, new Map([[pass[0]!, M], [pass[1]!, 2n * M]])) }), share(MINT, 10_000));
+  assert.ok("result" in got, JSON.stringify(got));
+  assert.deepEqual(wsRead(lists, all), [pass[0], ...bought], "the three bought since and the pass's smallest");
+  // five bought since and no W of the pass: three read, two not; all of it typed: busy; a share: a number
+  const five = MANY.slice(0, 5);
+  const since5 = five.map((w) => ({ address: w, program: MINT_PROGRAM, decimals: 6, received: "1" }));
+  const d5 = () => deps({ rpcs: () => manyPair(five, Object.fromEntries(five.map((w) => [w, M])), []), positions: () => [], bought: async () => sw(since5) });
+  assert.deepEqual(await poolSellDry(d5(), { chain: "solana", token: MINT, amount: "5", slippage_bps: 1000 }), { error: "busy" }, "past what was read: not now");
+  assert.ok("result" in (await poolSellDry(d5(), { chain: "solana", token: MINT, amount: "3", slippage_bps: 1000 })), "within what was read: a number");
+  assert.ok("result" in (await poolSellDry(d5(), share(MINT, 10_000))), "a share: a number on what was read");
+});
+
+// The review of be303082 (P1): the kept answers outlived the page's own trades, so a preview right after a sale was
+// priced on reads from before it (a W of the pass sold half: a number with no fresh read; a W bought since halved: 1.1087
+// kept against 1.0537 read). They are dropped at every start and end of a pool trade of this page (deps.trades), and
+// taken only after the trading check.
+type TState = { passWs: string[]; since: Map<string, bigint>; fail: boolean; calls: number };
+/** A pair for the Ws of `st`: the pass's at ENOUGH lamports, each bought since holding `st.since`; failing every call
+ *  while `st.fail`; host 1's calls counted. */
+function tradePair(st: TState): readonly [SolanaRpc, SolanaRpc] {
+  return pair("pump").map((rpc, i) => (async (method: string, params: readonly unknown[]) => {
+    if (i === 0) st.calls++;
+    if (st.fail) throw new Error("a fresh read");
+    const l = params[0] as string[];
+    const sys = { lamports: Number(ENOUGH), owner: "11111111111111111111111111111111", data: ["", "base64"] };
+    if (method === "getMultipleAccounts" && Array.isArray(l)) {
+      for (const [w, h] of st.since) if (l[0] === solanaAta(w, MINT, MINT_PROGRAM)) return { context: { slot: 1 }, value: [{ lamports: 2_039_280, owner: MINT_PROGRAM, data: [tokenBytes(h, w), "base64"] }, sys, null, null] };
+      if (st.passWs.includes(l[0]!) || (l.length === 1 && l[0] === POOL)) return { context: { slot: 1 }, value: l.map((a) => (a === POOL ? { lamports: 1, owner: PROGRAM, data: [poolBytes(...SIZES), "base64"] } : st.passWs.includes(a) ? sys : null)) };
+    }
+    return rpc(method, params);
+  }) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc];
+}
+
+test("a sale on this page: the next preview reads again, never the reads from before it (a W of the pass sold half, every fresh read failing: no number); on devnet and on mainnet", async () => {
+ for (const cluster of [undefined, "mainnet"] as const) {
+  const st: TState = { passWs: [MANY[0]!], since: new Map(), fail: false, calls: 0 };
+  let amount = "4000000";
+  let trades = 0;
+  let trading = false;
+  const k = poolSellDryKind(deps({ ...(cluster ? { cluster } : {}), rpcs: () => tradePair(st), trading: () => trading, trades: () => trades, positions: () => [pos(MINT, amount, 6, st.passWs)], bought: async () => sw([], new Map([[MANY[0]!, HELD]])) }));
+  const ask = async (bps: number): Promise<object> => {
+    const r = k(share(MINT, bps));
+    await r.after;
+    return r.answer() as object;
+  };
+  assert.ok("result" in (await ask(5_000)));
+  // the sale starts: busy while it runs, as before, and the kept reads not taken
+  trades++;
+  trading = true;
+  assert.deepEqual(await ask(5_000), { error: "busy" }, "while the sale runs");
+  trading = false;
+  trades++;
+  amount = "2000000";
+  st.fail = true;
+  const c0 = st.calls;
+  const after = await ask(10_000);
+  assert.ok(!("result" in after), `${cluster}: no number on the reads from before the sale: ${JSON.stringify(after)}`);
+  assert.ok(st.calls > c0, "read again");
+ }
+});
+
+test("a W bought since, half sold on this page: the next preview prices what it holds now, never the kept half more", async () => {
+  const W = MANY[5]!;
+  const st: TState = { passWs: [], since: new Map([[W, HELD]]), fail: false, calls: 0 };
+  const since = [{ address: W, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  let trades = 0;
+  const c = clock();
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => tradePair(st), trades: () => trades, positions: () => [], bought: async () => sw(since) }));
+  const ask = async (): Promise<{ result?: { out: string } }> => {
+    const r = k(share(MINT, 10_000));
+    await r.after;
+    return r.answer() as { result?: { out: string } };
+  };
+  const first = await ask();
+  assert.ok(first.result, JSON.stringify(first));
+  trades += 2;
+  st.since.set(W, HELD / 2n);
+  // right after the sale, the window still spent by the first preview's reads: busy (the box keeps its last number
+  // dimmed), never the kept one; past it, read again
+  assert.deepEqual(await ask(), { error: "busy" }, "inside the window: not now, not the kept number");
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  const kept = await ask();
+  const fresh = await poolSellDry(deps({ rpcs: () => tradePair(st), positions: () => [], bought: async () => sw(since) }), share(MINT, 10_000));
+  assert.ok("result" in fresh && kept.result, JSON.stringify([kept, fresh]));
+  assert.equal(kept.result.out, fresh.result.out, "what W holds now");
+  assert.ok(Number(kept.result.out) < Number(first.result!.out), "less than before the sale");
+});
+
+test("a buy of the same token inside the window: the next preview reads again, the new W with it", async () => {
+  const st: TState = { passWs: [MANY[0]!], since: new Map(), fail: false, calls: 0 };
+  let trades = 0;
+  let since: BoughtW[] = [];
+  const c = clock();
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => tradePair(st), trades: () => trades, positions: () => [pos(MINT, "4000000", 6, st.passWs)], bought: async () => sw(since, new Map([[MANY[0]!, HELD]])) }));
+  const ask = async (): Promise<{ result?: { out: string }; error?: string }> => {
+    const r = k(share(MINT, 10_000));
+    await r.after;
+    return r.answer() as { result?: { out: string }; error?: string };
+  };
+  const first = await ask();
+  assert.ok(first.result, JSON.stringify(first));
+  // the buy: W 2 bought since, holding as much again; the window spent by the first preview's reads is past
+  trades += 2;
+  st.since.set(MANY[1]!, HELD);
+  since = [{ address: MANY[1]!, program: MINT_PROGRAM, decimals: 6, received: "4000000" }];
+  c.add(POOL_SELL_DRY_WINDOW_MS);
+  const c0 = st.calls;
+  const after = await ask();
+  assert.ok(after.result, JSON.stringify(after));
+  assert.ok(st.calls > c0, "read again");
+  const fresh = await poolSellDry(deps({ rpcs: () => tradePair(st), positions: () => [pos(MINT, "4000000", 6, st.passWs)], bought: async () => sw(since, new Map([[MANY[0]!, HELD]])) }), share(MINT, 10_000));
+  const out = after.result!.out;
+  assert.deepEqual(after, fresh, "both Ws, as a preview of them alone");
+  assert.notEqual(out, first.result!.out, "not the one W's number");
+});
+
+test("the kept reads are one token's: another token's preview, every fresh read failing, is never answered on them", async () => {
+  const c = clock();
+  let fail = false;
+  const k = poolSellDryKind(deps({ now: c.now, rpcs: () => pair("pump").map((rpc) => ((m: string, p: readonly unknown[]) => (fail ? Promise.reject(new Error("a fresh read")) : rpc(m, p))) as SolanaRpc) as unknown as readonly [SolanaRpc, SolanaRpc] }));
+  const ask = async (t: string): Promise<object> => {
+    const r = k(share(t, 5_000));
+    await r.after;
+    return r.answer() as object;
+  };
+  assert.ok("result" in (await ask(MINT)));
+  fail = true;
+  assert.ok(!("result" in (await ask(SWAP_MINT))), "SWAP_MINT not on MINT's reads");
+  assert.ok("result" in (await ask(MINT)), "MINT's still kept");
+});
+
+// The merge with the mainnet buy fix (sol-pool-buy-lands-on-mainnet): on mainnet each W's sale pays its priority fee
+// (pool-sell.ts solanaSellPriority: min(SOLANA_POOL_SELL_PRIORITY, what W holds beyond the sale's need)). A W's reserve,
+// fee + priority + costs - lamports, never grows with W's lamports (priority grows at most one for one), so a W priced
+// at fewer lamports than it holds (an unread W at 0: priority 0) is priced at the same pay-in or less: never high.
+test("on mainnet the pay-in never falls as a W's lamports grow, for one W (partial and full) and for several: a W priced at fewer lamports is never high", () => {
+  const need = solanaPoolSellNeed({ kind: "pump-curve", cashback: true }, RENT);
+  const ls = [0n, need - 1n, need, need + 1n, need + 50_000n, need + 100_000n, need + 100_001n, need + 300_000n, ENOUGH];
+  const e = 2_000_000_000n;
+  for (const venue of ["pump-curve", "pumpswap"] as const)
+    for (const cashback of [undefined, false, true])
+      for (const [n, full] of [[1, false], [1, true], [3, false]] as const) {
+        let last: bigint | null = null;
+        for (const l of ls) {
+          const ws: DryWallet[] = [{ lamports: l }, ...Array.from({ length: n - 1 }, (): DryWallet => ({ lamports: ENOUGH, claim: [false, false] }))];
+          const p = poolSellPays(RENT, venue, ws, full, e, solanaSellFloor(e, 1000), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+          const out = "refused" in p ? -1n : p.out;
+          if (last !== null) assert.ok(out >= last, `${venue} ${cashback} ${n} ${full}: ${l} lamports pays ${out}, fewer paid ${last}`);
+          last = out;
+        }
+      }
+});
+
+test("on mainnet a preview over a W of the pass, a W bought since and Ws not read is never above all of them read, one W per request", async () => {
+  const pass = MANY.slice(0, 4);
+  const bought = MANY.slice(4, 6);
+  const since = bought.map((w) => ({ address: w, program: MINT_PROGRAM, decimals: 6, received: "1" }));
+  const held = new Map(pass.map((w, i) => [w, BigInt(i + 1) * M] as const));
+  const all = [...pass, ...bought];
+  for (const bps of [1_000, 10_000]) {
+    const lists: string[][] = [];
+    const got = await poolSellDry(deps({ cluster: "mainnet", rpcs: () => manyPair(all, Object.fromEntries(bought.map((w) => [w, M])), lists), positions: () => [pos(MINT, "10", 6, pass)], bought: async () => sw(since, held) }), share(MINT, bps));
+    assert.ok("result" in got, JSON.stringify(got));
+    assert.deepEqual(wsRead(lists, all), [pass[0], pass[1], ...bought], "the two bought since, then the pass's smallest two; two of the pass not read");
+    assert.deepEqual(twoNamed(lists), [], "one W per request");
+    const units = (12n * M * BigInt(bps)) / 10_000n;
+    const { e, cashback } = await saleOut("pump", MINT, units);
+    for (const claim of [[true, true], [false, false]] as const) {
+      const truth = poolSellPays(RENT, "pump-curve", all.map((): DryWallet => ({ lamports: ENOUGH, claim })), false, e, solanaSellFloor(e, 1000), cashback, { stateSize: SIZES[0], labelSize: SIZES[1] }, true);
+      assert.ok(!("refused" in truth));
+      const [whole, frac = ""] = String(got.result.out).split(".");
+      const out = BigInt(whole!) * 1_000_000_000n + BigInt(frac.padEnd(9, "0"));
+      assert.ok(out <= truth.out, `${bps}: ${out} at most ${truth.out}`);
+    }
+  }
 });

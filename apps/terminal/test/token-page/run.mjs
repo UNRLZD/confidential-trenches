@@ -433,8 +433,10 @@ try {
             check(!(await pressed("chart-scale-log")) && (await pressed("chart-scale-auto")), `${tag}: log off, auto ${await pressed("chart-scale-auto")}`);
             // hover a mark: its card, for the shot
             await f.waitForSelector(`${box} [data-testid="trade-mark"]`, { timeout: 5_000 }).catch(() => {});
+            // the marks take no pointer (card chart-drags-and-tracks-the-pointer): the pointer goes to the mark's centre
+            // and the plot's own events find it
             const m = q("trade-mark").last();
-            await m.hover().catch(() => {});
+            await m.hover({ force: true }).catch(() => {});
             check(await q("trade-mark-card").isVisible().catch(() => false), `${tag}: hovering a mark showed no card`);
           }
         }
@@ -499,7 +501,7 @@ try {
               // close of a new length; this check is the card's).
               const card = () => f.evaluate((box) => document.querySelector(`${box} [data-testid="trade-mark-card"]`)?.getBoundingClientRect().toJSON() ?? null, box);
               const pm = f.locator(`${box} [data-testid="trade-mark"]`).last();
-              if (phone) await pm.tap().catch(() => {});
+              if (phone) await pm.tap({ force: true }).catch(() => {});
               else await pm.focus().catch(() => {});
               await f.waitForSelector(`${box} [data-testid="trade-mark-card"]`, { timeout: 2_000 }).catch(() => {});
               const card0 = await card();
@@ -523,7 +525,7 @@ try {
                 check(log.length === 0, `${tag}: ${log.length} layout shift(s) of the open card while the live read moved its mark [${log.map((e) => `+${e.at}ms ${e.value.toFixed(5)}: ${e.sources.join(" | ") || "no source"}`).join("; ")}]`);
                 console.log(`${tag}: the open card at ${[card0.x, card0.y, card0.width, card0.height].map((v) => v.toFixed(2)).join(",")} followed its mark ${dy} px with ${log.length} layout shift(s)`);
                 if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${s.id}-${w.name}-open-card.png`) });
-                if (phone) await pm.tap().catch(() => {});
+                if (phone) await pm.tap({ force: true }).catch(() => {});
                 else await pm.blur().catch(() => {});
               }
             }

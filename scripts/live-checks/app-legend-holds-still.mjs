@@ -68,7 +68,8 @@ const CLEAR_STEP_PX = 8;
 /**
  * Where a phone's tap meant for the chart lands clear of the trade marks (card app-live-run-judges-the-build): on a phone
  * each mark takes a tap through a 44 px area round it (apps/terminal/src/screens/token/marks.css, the tm-layer's phone
- * rule; TradeMarks.tsx opens the mark's card), so a tap there leaves the crosshair where it was. Live 11 Nov 06:47Z the
+ * rule; TradeMarks.tsx opens the mark's card from the plot's own events, card chart-drags-and-tracks-the-pointer, so the
+ * area is read from each mark's box, not hit by the point), so a tap there opens a card over the crosshair. Live 11 Nov 06:47Z the
  * newest bars' marks sat at the pane's middle, under the walk's rest tap: every rest read the point before it, 0
  * crosshair texts of the check's own, and the opened card's move read as a shift. The height nearest `y` in the pane's
  * middle 80 %, CLEAR_STEP_PX apart, whose point `covered(y)` says no mark covers; null when every one is covered.
@@ -253,7 +254,7 @@ async function watch(browser, w, harness, shots, route) {
     const to = async (x, y) => {
       if (!w.hasTouch) return page.mouse.move(off.x + lg.main.x + x, off.y + lg.main.y + y, { steps: 4 });
       // a tap clear of the trade marks' tap areas (clearY), read in the frame where it lands
-      const clear = await clearY(y, lg.main.h, (yy) => f.evaluate(([px, py]) => Boolean(document.elementFromPoint(px, py)?.closest(".tm")), [lg.main.x + x, lg.main.y + yy]).catch(() => false));
+      const clear = await clearY(y, lg.main.h, (yy) => f.evaluate(([px, py]) => [...document.querySelectorAll(".tm")].some((m) => { const r = m.getBoundingClientRect(); return r.width > 0 && Math.abs(px - (r.left + r.width / 2)) <= 22 && Math.abs(py - (r.top + r.height / 2)) <= 22; }), [lg.main.x + x, lg.main.y + yy]).catch(() => false));
       if (clear === null) load.covered = (load.covered ?? 0) + 1;
       const at = { x: off.x + lg.main.x + x, y: off.y + lg.main.y + (clear ?? y) };
       for (let n = 0; n < 2; n++) {
