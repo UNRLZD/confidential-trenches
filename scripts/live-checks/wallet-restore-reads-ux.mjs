@@ -174,7 +174,9 @@ const WORDS = Object.freeze({
   ux_read: /throw Error\(`no deposit index for its U_X`\)/,
   ux_carry: /, with no deposit note on this device for its index to carry it into the pool`/,
   id_held: /a move out keeps; a restore does not carry it yet/,
-  ux_pair: /`https:\/\/solana\.api\.pocket\.network`/,
+  // the pair as one literal: the page's public Solana seat names Pocket too (trade.ts SOLANA_PUBLIC_SEAT, after provider
+  // A's constant), so Pocket's URL alone is no longer the restore's (card signpage-throttled-provider-has-a-spare)
+  ux_pair: /\[`https:\/\/solana-rpc\.publicnode\.com`,`https:\/\/solana\.api\.pocket\.network`\]/,
 });
 const FOLLOW_DEPS = (d) => new RegExp(`deps:\\((${N}),(${N})\\)=>${esc(d)}\\(\\1,\\2\\)`);
 

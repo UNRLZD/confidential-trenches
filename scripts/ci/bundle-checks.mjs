@@ -125,6 +125,7 @@ export const OUT = {
   "signpage-pool-notes": "devnet RPC reads of the run",
   "signpage-pool-withdraw-form": "devnet RPC reads of the run",
   "signpage-pool-pins": "mainnet RPC reads of the pin's accounts and the helper's mainnet fee answer",
+  "signpage-throttled-provider-has-a-spare": "both public Solana seats' CORS answers to the page's origin and their mainnet reads of the stable accounts",
   "pool-deposits": "devnet RPC reads of the run",
   "wallet-passkey-prf": "a browser",
   "signpage-postmessage": "a browser",
