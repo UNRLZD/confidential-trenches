@@ -115,6 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
+import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -178,6 +179,8 @@ export type PoolBuyHost = {
   claimed?: Set<string>;
   /** Tests only: the venue's fee recipient and the Jito tip account, else random. */
   pick?: (n: number) => number;
+  /** The session's sign out: it ends a wait before the buy's next attempt, and the buy never starts again after it. */
+  signal?: AbortSignal;
 };
 
 export type PoolBuyAnswer = { stage: TradeStage; txs: TxRef[] } | { error: "not_allowed" | "not_funded" | "quote_check_failed" | "venue_not_pinned" | "no_table_fits" | "failed" | "down" };
@@ -512,8 +515,18 @@ export function unitsOf(raw: bigint, decimals: number): string {
 type Ready = ReadyProof<SolanaReleaseRequest>;
 type Got = "none" | "ok" | "failed" | "other";
 
-/** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). */
-export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyAnswer> {
+/** One pool.buy: the ask is the user's own (rules/pool.ts checkPoolRequest passed it). A provider read that still fails
+ *  past the page's own retry before W signs makes the buy again from its first read after a wait on the page's one rule
+ *  (read-waits.ts readWaits: from 1 s, doubling, at most 10 s, until READ_WAIT_TOTAL_MS), then "down" (card
+ *  start-reads-wait-out-a-throttle): each attempt reads its reference, venue, sizes and blockhash again, so nothing it
+ *  signs rests on a read from before a wait; the Rent sysvar is kept per provider across the attempts (keptReads). A
+ *  sign out ends the wait, and the buy answers failed, nothing taken or signed. */
+export async function runPoolBuy(host: PoolBuyHost, ask: PoolAsk, waits: ReadWaits = readWaits(clockOf(host))): Promise<PoolBuyAnswer> {
+  const h: PoolBuyHost = Object.assign(Object.create(host) as PoolBuyHost, { rpcs: keptReads(host.rpcs, solanaStableReads(null)) });
+  return readsWaited((at) => buyRun(h, ask, at), h.wait, h.signal, waits);
+}
+
+async function buyRun(h: PoolBuyHost, ask: PoolAsk, at: { fault?: unknown }): Promise<PoolBuyAnswer> {
   let seed: Uint8Array | null = null;
   let key: Uint8Array | null = null;
   let claim: string | null = null;
@@ -662,8 +675,12 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
     if (e instanceof PoolRuleRefused) return { error: "quote_check_failed" };
-    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down)
-    if (!signing && e instanceof SolanaRpcTransportError) return { error: "down" };
+    // a provider read that still fails after the page's own retry, before W signs: "not now" (card pool-read-down),
+    // after the rule's waits (runPoolBuy)
+    if (!signing && waitsOn(e)) {
+      at.fault = e;
+      return { error: "down" };
+    }
     return { error: "failed" };
   } finally {
     seed?.fill(0);
@@ -901,6 +918,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (before its locks)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
     // true once the run answered "sent" early (its transaction went out): only then is "sent" its end when it ends with
     // no stage of its own
@@ -921,7 +940,7 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
           const a = await runPoolBuy({ ...h, sent: (signature) => {
             if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
-          }, route: (x) => ctx?.route?.(x) }, ask);
+          }, route: (x) => ctx?.route?.(x) }, ask, waits);
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
@@ -942,6 +961,8 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
       })
       .finally(give);
     void run;
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }

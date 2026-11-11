@@ -1,0 +1,76 @@
+{
+  "_note": {
+    "good": "this card SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js from build-app.mjs: one wait rule, only the transport fault waits, a sign out ends it, every kind and the rent back on it",
+    "bad": "the base f5fff9cc SIGN_HOST build (mainnet): flat waits of 1 s, three at most, on a 429 alone, none on a 5xx, the buy and the deposits down at once, no sign out read in a wait: FAIL",
+    "goodTestnet": "this card testnet build of card start-reads-wait-out-a-throttle (build-app.mjs --network testnet), the app devnet run page",
+    "badTestnet": "the base f5fff9cc testnet build: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+    "rule": true,
+    "faults": true,
+    "stop": true,
+    "wired": {
+      "decimals": true,
+      "sell": true,
+      "spent": true,
+      "buy": true,
+      "deposits": 2,
+      "stops": 2,
+      "taps": 4
+    },
+    "rentBack": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-67e9Bba0bgJOD83des31t8xIYPYOGKMYYyqN2GFg4s2xwIyrDE0SRqPpjUgxmvdB\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-67e9Bba0bgJOD83des31t8xIYPYOGKMYYyqN2GFg4s2xwIyrDE0SRqPpjUgxmvdB",
+    "rule": false,
+    "faults": false,
+    "stop": false,
+    "wired": {
+      "decimals": false,
+      "sell": false,
+      "spent": false,
+      "buy": false,
+      "deposits": 0,
+      "stops": 0,
+      "taps": 0
+    },
+    "rentBack": false
+  },
+  "goodTestnet": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qw8i24Sf2knjaa5kO7l8el4hhBAlWpd5HyilYYlPwM5t4nCb3W7Moo6rMkbUCWbm\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-qw8i24Sf2knjaa5kO7l8el4hhBAlWpd5HyilYYlPwM5t4nCb3W7Moo6rMkbUCWbm",
+    "rule": true,
+    "faults": true,
+    "stop": true,
+    "wired": {
+      "decimals": true,
+      "sell": true,
+      "spent": true,
+      "buy": true,
+      "deposits": 2,
+      "stops": 2,
+      "taps": 4
+    },
+    "rentBack": true
+  },
+  "badTestnet": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-zEzLko8I3ugfhe1Ku5Jk4B+C/ke+yFsKK2Mzoqu1JgizX/trCocMcjzbu0w88OEd\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-zEzLko8I3ugfhe1Ku5Jk4B+C/ke+yFsKK2Mzoqu1JgizX/trCocMcjzbu0w88OEd",
+    "rule": false,
+    "faults": false,
+    "stop": false,
+    "wired": {
+      "decimals": false,
+      "sell": false,
+      "spent": false,
+      "buy": false,
+      "deposits": 0,
+      "stops": 0,
+      "taps": 0
+    },
+    "rentBack": false
+  }
+}

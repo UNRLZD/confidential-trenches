@@ -40,16 +40,17 @@ test("planted on the good answer: each fact taken away FAILs", () => {
   assert.equal(judge(null).ok, false);
 });
 
-// the testnet build's code as minified (build-app.mjs --network testnet at 49efdb0c), cut to the pieces read
+// the testnet build's code as minified (build-app.mjs --network testnet at 49efdb0c, the wait as card
+// start-reads-wait-out-a-throttle builds it), cut to the pieces read
 const JS =
   "var sV=1e3,cV=`ct-pool/sell`;var UV=1e4,WV=0;" +
   "var JI=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4});function YI(e,t,n=JI){let r=Number.isFinite(e)&&e>0?Math.min(e*2,n.maxMs):n.firstMs,i=typeof t==`number`&&Number.isFinite(t)&&t>0?Math.min(t,n.afterMaxMs):0;return Math.max(r,i)}" +
   "function kH(){let e=new Map,t=(e,t)=>`${e} ${e===`solana`?t:t.toLowerCase()}`;return{get:(n,r)=>e.get(t(n,r)),keep:(n,r,i)=>{if(MD(n,r))try{e.set(t(n,r),UD(i))}catch{}}}}" +
-  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV});" +
-  "async function MH(e,t,n,r={}){let i=r.kept??AH,a=i.get(e,t);if(a!==void 0)return a;let o=r.waits??3,s=r.wait??(e=>new Promise(t=>setTimeout(t,e))),c=n=>0,l=[void 0,void 0],u=[!1,!1];" +
-  "for(let e=0,t=0;;e++){let r=[];if(await Promise.all([0,1].map(async e=>{if(!u[e])try{l[e]=await c(n[e]),u[e]=!0}catch(e){r.push(e)}})),r.length===0)break;if(e>=o)throw r[0];let i=Math.max(0,...r.map(e=>e instanceof Wh&&e.afterMs!==null?e.afterMs:0));t=YI(t,i,jH),await s(t)}let d=HD(e,l);return i.keep(e,t,d),d}" +
+  "var AH=kH(),jH=Object.freeze({firstMs:sV,maxMs:UV,afterMaxMs:UV}),zL=()=>Date.now(),yL=e=>e instanceof Wh?e.afterMs:null;function bL(e=zL){let t=e(),n=0,r=0,o=!1;return{next(i){let a=YI(n,yL(i),jH);return o||Math.max(e()-t,r)+a>3e4?(o=!0,null):(n=a,r+=a,a)},spent:()=>o}}" +
+  "async function MH(e,t,n,r={}){let i=r.kept??AH,a=i.get(e,t);if(a!==void 0)return a;let o=r.waits===0?null:r.waits??bL(),s=r.wait??(e=>new Promise(t=>setTimeout(t,e))),c=n=>0,l=[void 0,void 0],u=[!1,!1];" +
+  "for(;;){let e=[];if(await Promise.all([0,1].map(async t=>{if(!u[t])try{l[t]=await c(n[t]),u[t]=!0}catch(t){e.push(t)}})),e.length===0)break;let t=e.find(e=>!xL(e));if(t!==void 0)throw t;let i=e.reduce((e,t)=>t),a=o===null?null:o.next(i);if(a===null)throw i;if(await CL(s,a,r.signal),r.signal?.aborted)throw new SL}let d=HD(e,l);return i.keep(e,t,d),d}" +
   "var NH=Object.freeze({error:`not_allowed`}),PH=Object.freeze({error:`down`});" +
-  "return{running:!0,after:MH(o,a.token,s,{kept:t,...e.wait?{wait:e.wait}:{}}).then(async t=>{c=NH},e=>{c=e instanceof jD?NH:PH}),answer:()=>c}};" +
+  "return{running:!0,after:MH(o,a.token,s,{kept:t,...e.wait?{wait:e.wait}:{},...l?{signal:l}:{}}).then(async t=>{c=NH},e=>{c=e instanceof jD?NH:e instanceof SL?kV:PH}),answer:()=>c}};" +
   "function PW(e){return{pinned:e=>!0,rpcs:e=>e===`solana`?bW():null,decimals:AH,...e?{flow:e}:{}}}" +
   "send:(e,n)=>LW(e,n,t.fetch),outDecimals:(e,t,n)=>{le.set(e,t),AH.keep(`solana`,n,t)},settle:0;" +
   "seed64:i.seed64,quote:o_,build:Yw,decimals:t=>MH(e,t,n,{waits:0}),send:0";
@@ -70,13 +71,14 @@ test("the facts read from a bundle", () => {
   assert.equal(facts("", JS.replace("decimals:t=>MH(e,t,n,{waits:0})", "decimals:t=>MH(e,t,n)")).wired.evmBuy, false);
   assert.equal(facts("", JS.replace("quote:o_,build:Yw,decimals:t=>MH(e,t,n,{waits:0})", "")).wired.evmBuy, "none");
   assert.equal(facts("", JS.replace("after:MH(o,a.token,s,{kept:t,", "after:MH(o,a.token,s,{")).wired.sell, false);
-  // the wait: on the wallet's rule, in the sell's bounds, three waits
-  assert.equal(facts("", JS.replace("t=YI(t,i,jH),await s(t)", "t=1e3,await s(t)")).wait, false);
-  assert.equal(facts("", JS.replace("r.waits??3", "r.waits??0")).wait, false);
+  // the wait: on the page's one rule (read-waits.ts readWaits), in its bounds
+  assert.equal(facts("", JS.replace("let a=YI(n,yL(i),jH);", "let a=1e3;")).wait, false);
+  assert.equal(facts("", JS.replace("r.waits===0?null:r.waits??bL()", "null")).wait, false);
+  assert.equal(facts("", JS.replace("if(a===null)throw i;", "")).wait, false);
   assert.equal(facts("", JS.replace("var sV=1e3", "var sV=250")).wait, false);
   assert.equal(facts("", JS.replace("var UV=1e4", "var UV=6e4")).wait, false);
   assert.equal(facts("", JS.replace("Math.min(e*2,n.maxMs)", "Math.min(e,n.maxMs)")).wait, false);
   // down only for a failed read
-  assert.equal(facts("", JS.replace("c=e instanceof jD?NH:PH", "c=e instanceof jD?PH:NH")).down, false);
-  assert.equal(facts("", JS.replace("c=e instanceof jD?NH:PH", "c=PH")).down, false);
+  assert.equal(facts("", JS.replace("c=e instanceof jD?NH:e instanceof SL?kV:PH", "c=e instanceof jD?PH:e instanceof SL?kV:NH")).down, false);
+  assert.equal(facts("", JS.replace("c=e instanceof jD?NH:e instanceof SL?kV:PH", "c=PH")).down, false);
 });
