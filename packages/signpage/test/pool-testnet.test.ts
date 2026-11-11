@@ -39,6 +39,15 @@ const testnetPool = ((...a: Parameters<typeof makePool>) => {
   pages.push(t);
   return t;
 }) as typeof makePool;
+// Whether `p` settles inside `ms` of real time: a hang bound on the real clock, taken before any test clock or mocked
+// timer goes in, for a test on the test clock that waits for work the clock cannot see (fake IndexedDB, a Web Lock)
+const [REAL_SET, REAL_CLEAR] = [globalThis.setTimeout, globalThis.clearTimeout];
+const realWithin = (p: Promise<unknown>, ms: number): Promise<boolean> =>
+  new Promise((ok) => {
+    const t = REAL_SET(() => ok(false), ms);
+    const end = (): void => (REAL_CLEAR(t), ok(true));
+    p.then(end, end);
+  });
 const { SIGNPAGE_TIMEOUT_MS } = await import("../../kit/src/signpage/client.ts");
 // the withdraw tests' world, loaded once here so its stores close after the whole file (its after() is file-level)
 const WORLD = await import("./pool-withdraw-world.ts");
@@ -1397,11 +1406,17 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     // the gate's first pause on the test clock, from the first 429: a call before its timer fires came before the gate opened
     const seen: { host: string; method: string; open: boolean }[] = [];
     let hot = 2, open = false, timed = false;
+    // the fourth getTokenAccountsByOwner, waited for as it comes: before its first read the pass reads fake IndexedDB
+    // and takes the seed's Web Lock, work in real time the test clock cannot see, so a loop of clock ticks ran its
+    // whole bound out first (CI, 11 Nov: no request seen)
+    let fourth = (): void => {};
+    const four = new Promise<void>((ok) => (fourth = ok));
     const real = globalThis.fetch;
     globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
       const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
       if (b.params?.[0] !== fw.address) return new Response("offline", { status: 503 });
       seen.push({ host: new URL(String(u)).host, method: b.method, open });
+      if (seen.filter((x) => x.method === "getTokenAccountsByOwner").length >= 4) fourth();
       if (b.method === "getTokenAccountsByOwner" && hot > 0) {
         if (!timed) (timed = true), setTimeout(() => (open = true), 999);
         return hot--, new Response("slow down", { status: 429 });
@@ -1411,7 +1426,7 @@ test("the testnet finder reads the Ws on the first devnet RPC, one try a call: a
     try {
       const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { positions: { setTimer: () => 0, clearTimer: () => {} } } as never);
       await t.positions();
-      for (let i = 0; i < 200 && seen.filter((x) => x.method === "getTokenAccountsByOwner").length < 4; i++) await new Promise((ok) => setTimeout(ok, 50));
+      await realWithin(four, 8_000);
     } finally {
       globalThis.fetch = real;
     }
