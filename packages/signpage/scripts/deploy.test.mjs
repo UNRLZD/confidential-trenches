@@ -696,6 +696,39 @@ test("planted: a deploy is refused unless HEAD is main's head on GitHub, read tw
   assert.deepEqual(gh.args, ["run", "list", "-R", "UNRLZD/confidential-trenches", "--branch", "main", "--workflow", "ci.yml", "--event", "push", "-L", "200", "--json", "headSha,status,conclusion,databaseId"]);
 });
 
+// The folders a run leaves in a temp folder of its own: TMPDIR is a private folder for the run (os.tmpdir() reads it at each
+// call and the build's child processes inherit it), so a folder another process makes in the shared temp folder meanwhile (the
+// terminal's harness builds the page from its own tests when the packages' tests run side by side, card
+// ci-fresh-run-ends-with-room) is never read as one this run kept. The deploy's own folders (ct-signpage-, -app-, -head-) are.
+async function keptIn(run) {
+  const mine = mkdtempSync(join(tmpdir(), "ct-signpage-test-tmpscan-"));
+  const was = process.env.TMPDIR;
+  process.env.TMPDIR = mine;
+  try {
+    await run();
+    return readdirSync(mine).filter((f) => f.startsWith("ct-signpage-") && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-"));
+  } finally {
+    if (was === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = was;
+    rmSync(mine, { recursive: true, force: true });
+  }
+}
+
+test("planted: the kept-folder scan reads the run's own temp folder only: a stranger's ct-signpage-app-* in the shared one is not read, a folder the run keeps is", async () => {
+  const shared = tmpdir();
+  const strangers = [];
+  try {
+    const none = await keptIn(async () => void strangers.push(mkdtempSync(join(shared, "ct-signpage-app-"))));
+    assert.deepEqual(none, [], "a stranger's folder made in the shared temp folder while the run goes is not the run's");
+    const kept = await keptIn(async () => void mkdtempSync(join(tmpdir(), "ct-signpage-app-")));
+    assert.equal(kept.length, 1, "a folder the run itself keeps is read");
+    assert.match(kept[0], /^ct-signpage-app-/);
+    assert.equal(process.env.TMPDIR === join(shared), process.env.TMPDIR === shared, "TMPDIR is put back");
+  } finally {
+    for (const d of strangers) rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // delta P3-3 and P3-4: a dry run that fails its install or its gate still names what a deploy refuses; a failed build is
 // not kept; a tracked file missing from the tree fails the build, and an untracked one is refused, never left out
 test("planted: a failed --dry-run keeps its refusals and no folder; a missing tracked file fails the build; an untracked one is refused", async () => {
@@ -704,17 +737,17 @@ test("planted: a failed --dry-run keeps its refusals and no folder; a missing tr
   assert.equal(i.code, 1);
   assert.ok(i.err[0].startsWith(`REFUSED HEAD ${HEAD} is not main's head ${OTHER}`) && i.err.some((l) => l.startsWith("REFUSED the install failed")), i.err.join("\n"));
   const bad = pkgWith(swap(" frame-ancestors 'none';", ""));
-  const before = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith("ct-signpage-") && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-")));
   try {
-    for (const argv of [["--dry-run"], ["--build"]]) {
-      const g = recorder({ main: OTHER });
-      const r = await deploy(argv, {}, g.run, bad, {}, RELEASED_TREE());
-      assert.equal(r.code, 1, argv[0]);
-      assert.ok(r.err.some((l) => l.startsWith("REFUSED _headers: CSP frame-ancestors")), r.err.join("\n"));
-      assert.equal(r.err.some((l) => l.startsWith(`REFUSED HEAD ${HEAD} is not main's head`)), argv[0] === "--dry-run", `${argv[0]}: ${r.err.join("\n")}`);
-      assert.ok(!(r.out ?? []).some((l) => /gate ok on/.test(l)));
-    }
-    const left = readdirSync(tmpdir()).filter((f) => f.startsWith("ct-signpage-") && !f.startsWith("ct-signpage-test-") && !f.startsWith("ct-signpage-released-") && !before.has(f));
+    const left = await keptIn(async () => {
+      for (const argv of [["--dry-run"], ["--build"]]) {
+        const g = recorder({ main: OTHER });
+        const r = await deploy(argv, {}, g.run, bad, {}, RELEASED_TREE());
+        assert.equal(r.code, 1, argv[0]);
+        assert.ok(r.err.some((l) => l.startsWith("REFUSED _headers: CSP frame-ancestors")), r.err.join("\n"));
+        assert.equal(r.err.some((l) => l.startsWith(`REFUSED HEAD ${HEAD} is not main's head`)), argv[0] === "--dry-run", `${argv[0]}: ${r.err.join("\n")}`);
+        assert.ok(!(r.out ?? []).some((l) => /gate ok on/.test(l)));
+      }
+    });
     assert.deepEqual(left, [], "a build that failed its gate was kept");
   } finally {
     rmSync(bad, { recursive: true, force: true });

@@ -728,6 +728,20 @@ const quoteOn = (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmR
   verdict(
     evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan),
   );
+// quoteOn with no wall time in it: the device clock stands still (mono fixed, as R6 does) and the scan's 60 s bound is lifted. A
+// test of the quote's pool counts and cuts is pure work over tens of thousands of made-up pools, and its quote's block must
+// not age 30 s, nor its scan reach its bound, on a slow or busy runner: under the packages' tests run side by side KB1, KB3 and
+// KB4 refused stale_quote at 37 to 47 s (card ci-fresh-run-ends-with-room)
+const quoteOnStill = async (pools: ModelPool[], token: string, route: EvmRoute, scan?: EvmRpc, hints?: EvmPoolKey[], chainName: "base" | "robinhood" = "base", headNo = 5_000_000) => {
+  evmScanBound?.(Number.MAX_SAFE_INTEGER / 4);
+  try {
+    return await verdict(
+      evmPoolBuyQuoteWith({ chain: chainName, token, amountIn: AMOUNT, slippageBps: 100, route, ...(hints ? { pools: hints } : {}) } as EvmPoolBuyQuoteRequest, [chain(pools, 0, headNo), chain(pools, 1, headNo)], NOW, scan, undefined, () => 0),
+    );
+  } finally {
+    evmScanBound?.();
+  }
+};
 const below = { accepted: false, code: "below_reference" };
 
 test("N1a a seeded standard pool is held to the token's real pool the device's own scan found", async () => {
@@ -2363,12 +2377,12 @@ const empties = (token: string, n: number) => Array.from({ length: n }, (_, i) =
 test("KB1 the caller's 16 pools never push a token past EVM_QUOTE_MAX_KEYS (review of a9f1d32, LOW 1): 6 under it and 16 made-up pools still quote", { timeout: 60_000 }, async () => {
   const t1 = "0x00000000000000000000000000000000000dbbd0";
   const hints = Array.from({ length: 16 }, (_, i) => keyOf(t1, NATIVE, 900_000 + i, 3, NATIVE));
-  const v1 = await quoteOn([best(t1)], t1, bestRoute(t1), scanner(5_000_000, empties(t1, EVM_QUOTE_MAX_KEYS - 6)), hints);
+  const v1 = await quoteOnStill([best(t1)], t1, bestRoute(t1), scanner(5_000_000, empties(t1, EVM_QUOTE_MAX_KEYS - 6)), hints);
   assert.equal(v1.accepted, true, String((v1 as { code?: string }).code));
 });
 test("KB2 one found pool past EVM_QUOTE_MAX_KEYS refuses (too_many_pools)", { timeout: 60_000 }, async () => {
   const t2 = "0x00000000000000000000000000000000000dccd0";
-  assert.deepEqual(await quoteOn([best(t2)], t2, bestRoute(t2), scanner(5_000_000, empties(t2, EVM_QUOTE_MAX_KEYS + 1))), { accepted: false, code: "too_many_pools" });
+  assert.deepEqual(await quoteOnStill([best(t2)], t2, bestRoute(t2), scanner(5_000_000, empties(t2, EVM_QUOTE_MAX_KEYS + 1))), { accepted: false, code: "too_many_pools" });
 });
 test("KB3 a held X pool whose markets pass what EVM_QUOTE_MAX_KEYS leaves refuses (too_many_pools), never prices the token without them", { timeout: 60_000 }, async () => {
   // two left for X's markets: its standard and pinned shapes are more than two
@@ -2377,7 +2391,7 @@ test("KB3 a held X pool whose markets pass what EVM_QUOTE_MAX_KEYS leaves refuse
   // at the best route's price, so the prune keeps X's markets
   const p3: ModelPool = { key: keyOf(t3, x3, 3000, 60, NATIVE), give: (a) => 10n * a, state: pricedAt(10n) };
   const logs3 = [{ key: p3.key, at: 4_999_000 }, { key: marketOf(x3).key, at: 4_999_001 }, ...empties(t3, EVM_QUOTE_MAX_KEYS - 3)];
-  assert.deepEqual(await quoteOn([best(t3), p3, marketOf(x3)], t3, bestRoute(t3), scanner(5_000_000, logs3)), { accepted: false, code: "too_many_pools" });
+  assert.deepEqual(await quoteOnStill([best(t3), p3, marketOf(x3)], t3, bestRoute(t3), scanner(5_000_000, logs3)), { accepted: false, code: "too_many_pools" });
 });
 test("KB4 an X with no market that holds, whose other pools pass what EVM_QUOTE_MAX_KEYS leaves, refuses (too_many_pools)", { timeout: 60_000 }, async () => {
   // room for X's markets, none of which holds, but not for X's 64 pools with other currencies, read one level further
@@ -2386,7 +2400,7 @@ test("KB4 an X with no market that holds, whose other pools pass what EVM_QUOTE_
   const p4: ModelPool = { key: keyOf(t4, x4, 3000, 60, NATIVE), give: (a) => a };
   const vias = Array.from({ length: 64 }, (_, i) => ({ key: keyOf(x4, xAt(0x1900 + i), 3000, 60, NATIVE), at: 4_999_100 + i }));
   const logs4 = [{ key: p4.key, at: 4_999_000 }, ...vias, ...empties(t4, EVM_QUOTE_MAX_KEYS - 40)];
-  assert.deepEqual(await quoteOn([best(t4), p4], t4, bestRoute(t4), scanner(5_000_000, logs4)), { accepted: false, code: "too_many_pools" });
+  assert.deepEqual(await quoteOnStill([best(t4), p4], t4, bestRoute(t4), scanner(5_000_000, logs4)), { accepted: false, code: "too_many_pools" });
 });
 
 // ------------------------------------------------------------------ the prune (card evm-quote-one-round, review of 13a063e)
@@ -3056,7 +3070,7 @@ const down: EvmRpc = async () => {
   throw new TypeError("fetch failed");
 };
 
-test("V1 a provider that never answers, or fails, is passed over for the next: the quote decides on the two that agree, as two honest providers would", { timeout: 15_000 }, async () => {
+test("V1 a provider that never answers, or fails, is passed over for the next: the quote decides on the two that agree, as two honest providers would", { timeout: 15_000 }, () => onTestClock(async () => {
   const token = "0x00000000000000000000000000000000000ee0f1";
   const pools = [best(token)];
   const honest = await verdict(evmPoolBuyQuoteWith(warmReq(token), [chain(pools, 0), chain(pools, 1)], NOW));
@@ -3072,7 +3086,7 @@ test("V1 a provider that never answers, or fails, is passed over for the next: t
   }
   // with no provider left to ask, a failure still refuses
   assert.deepEqual(await verdict(evmPoolBuyQuoteWith(warmReq(token), [down, chain(pools, 0)], NOW)), { accepted: false, code: "rpc_error" });
-});
+}));
 
 test("V2 a provider that answers differently is outvoted, never used: two others that agree decide, and with no third the quote refuses", async () => {
   const token = "0x00000000000000000000000000000000000ee0f2";
@@ -7224,7 +7238,7 @@ test("GF13 evmBuySwapFitCall refuses an amount outside (0, 2^127) and a gas cap 
 const sixACall = (f: () => Promise<void>) => async () => {
   quoteMod.evmReadsPerCall(6);
   try {
-    await f();
+    await onTestClock(f); // a stalled or late provider's wait is the clock's, not the runner's (card ci-fresh-run-ends-with-room)
   } finally {
     quoteMod.evmReadsPerCall();
   }
