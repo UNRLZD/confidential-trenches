@@ -19,6 +19,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { gzipSync } from "node:zlib";
 import { Throttled } from "../../limits/limits.ts";
+import { LOGOS } from "../logo.ts";
 import { createOrigins, hintsOf, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 
 /** fields.ts ROW_FIELDS in its order, then the two added for the Trending column. */
@@ -203,7 +204,7 @@ export function toRow(raw: unknown, asOfMs: number): Row | null {
     token,
     symbol,
     name,
-    icon: false, // GET /v1/logo/{chain}/{token} is not served yet; the app draws its own
+    icon: LOGOS.remember("solana", token, j.icon), // GET /v1/logo/solana/{token} serves it (../logo.ts)
     venue: null,
     label: null,
     created_s: seconds(obj(j.firstPool).createdAt, asOfMs) ?? seconds(j.createdAt, asOfMs),

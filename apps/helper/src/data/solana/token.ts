@@ -22,6 +22,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
+import { LOGOS } from "../logo.ts";
 import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
@@ -195,10 +196,10 @@ export function identityOf(mintAccount: unknown, metadataAccount: unknown, mint:
 }
 const b58encodeKey = (k: Uint8Array): string | null => (k.length === 32 ? address(b58encode(k)) : null);
 /** A cold page's Row before its Jupiter row is read: the name on chain (src "chain"), every other field null (06b: "a
- *  value no source has is null"); `icon` false, as every row has it until the logo route is served (lists.ts toRow). */
+ *  value no source has is null"); `icon` true when the lists hold its logo's URL (../logo.ts). */
 export function chainRow(mint: string, id: Identity, asOfMs: number): Row {
   const row = Object.fromEntries(ROW_FIELDS.map((f) => [f, null])) as Row;
-  return { ...row, chain: "solana", token: mint, symbol: id.symbol, name: id.name, icon: false, src: "chain", as_of_ms: asOfMs };
+  return { ...row, chain: "solana", token: mint, symbol: id.symbol, name: id.name, icon: LOGOS.has("solana", mint), src: "chain", as_of_ms: asOfMs };
 }
 
 /** An authority as jsonParsed writes it: null when none, else an address; anything else is not a mint. */
