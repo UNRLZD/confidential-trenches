@@ -5,7 +5,8 @@
 // (pool-sell-legs-side-by-side.excerpt.txt, cut from this card's public/app.js): the turn not awaited, a sign out not
 // checked after it, the tap's spent waits not checked after it, the blockhash read before it, the finder read for every
 // sale, the seed read with no W, the seed copy not zeroed, a W no record names left unread, read whatever its record,
-// or the finder asked for every W; the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read;
+// the finder asked for every W, its Ws read one after another, or a W it did not read given no listing (the listing
+// pieces re-cut from card wallets-found-in-one-read's build: one list for a sale's first read and its fallback); the sale's reads unshared, shared past 4 s, shared on a failed read, never forgotten after a wait, or naming a W's read;
 // the young reads kept at a leg's turn; a sale's wait off the tap's bound, not marking it old, or not ended at a sign
 // out; the plan's wait off the bound; an old sale signed, or the plan's wait not making it old; a sale's simulation
 // refused while an earlier leg is in flight not priced again, or its cause naming no provider: each FAIL.
@@ -56,11 +57,13 @@ test("planted in the bundle's excerpt: each break in place FAILs", () => {
     ["the young reads kept at the turn (review of 55d4c6eb..dbf63c98, P2-1)", "return{error:`down`};nR(y)}", "return{error:`down`}}", "turn"],
     ["the blockhash read whatever the turn", "if(O){A=", "{A=", "turn"],
     ["the finder for every sale", "let r=t?", "let r=!1?", "listed"],
-    ["the seed copy not zeroed", "finally{s.fill(0)}", "finally{}", "listed"],
-    ["an unrecorded W never read (review of 55d4c6eb, P2-A)", "l.failed.length===0&&u.size>0&&(d=", "!1&&(d=", "listed"],
-    ["every W read through the finder, recorded or not", "!Object.hasOwn(o,e)&&!r.has(e)", "!0", "listed"],
-    ["the finder asked for every W, not the unrecorded ones only", "{only:u,together:!0}", "{together:!0}", "listed"],
-    ["the seed read with no W", "if(t.length===0)return a=[];", "", "listed"],
+    ["the seed copy not zeroed", "finally{o.fill(0)}", "finally{}", "listed"],
+    ["an unrecorded W never read (review of 55d4c6eb, P2-A)", "o=e=>!Object.hasOwn(t,e)&&r?.has(e)!==!0", "o=e=>!1", "listed"],
+    ["every W read through the finder, recorded or not", "!Object.hasOwn(t,e)&&", "", "listed"],
+    ["the finder asked for every W, not the unrecorded ones only", "await Be(await u(),i,o)", "await Be(await u(),i)", "listed"],
+    ["the seed read with no W", "if(a.length===0)return[];", "", "listed"],
+    ["the finder's Ws read one after another (card wallets-found-in-one-read)", "BV(s,i,{together:!0})", "BV(s,i,{})", "listed"],
+    ["each W the finder did not read with no listing (card wallets-found-in-one-read)", "c=e=>r?.has(e)?new Map(r.get(e)):null;", "c=e=>null;", "listed"],
     ["the sale's reads unshared", "rpcs:tR(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "rpcs:(eR(e.rpcs,iR(t.token)),rR(t.token),nU,", "young"],
     ["shared past 4 s", "nU=4e3", "nU=6e4", "young"],
     ["shared at any age", "if(l&&c-l.at<n)return l.read", "if(l)return l.read", "young"],

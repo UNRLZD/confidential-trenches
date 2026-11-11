@@ -4,7 +4,8 @@
 //     its blockhash and the deposit's pages in one round with its quote (packages/signpage/src/pool-sell.ts sellRun),
 //     the sale's young reads forgotten at its turn, so it never prices on a read from before the leg before it sent;
 //   - listed: the sale's list of wallets is made with no read at the tap, from the spent notes and the last whole
-//     positions pass (keptListed), the finder only when none is kept (packages/signpage/src/pool-testnet.ts sellHost);
+//     positions pass (keptListed), the finder reading only the Ws neither a buy record nor that pass names
+//     (packages/signpage/src/pool-testnet.ts sellHost);
 //   - young: a sale's market and blockhash reads (read-waits.ts solanaSaleReads: getLatestBlockhash, isBlockhashValid, a
 //     getMultipleAccounts naming the mint) are one answer for its legs while under 4 s old (pool-sell.ts
 //     POOL_SELL_SHARED_READ_MS), never a failed one kept, and every one dropped after a wait (forgetYoung);
@@ -32,10 +33,17 @@ const N = "[\\w$]+";
 // reads forgotten, the quote marked asked, then (its venue reader between) the blockhash and the deposit's pages started
 // only when there was a turn
 export const TURN = new RegExp(`(${N})=${N}\\?\\.opened;if\\(\\1\\)\\{if\\(await \\1,${N}\\.stopped\\?\\.\\(\\)\\)return\\{error:\`failed\`\\};if\\(${N}\\.spent\\?\\.\\(\\)\\)return\\{error:\`down\`\\};${N}\\(${N}\\)\\}${N}=!0;[^;]{0,200};if\\(\\1\\)\\{${N}=${N}\\(${N}\\(${N}\\)\\),${N}=${N}\\(Promise\\.all\\(\\[${N},${N}\\]\\)\\.then\\(`);
-// the sale's wallets: the passes held off, then (for a sale) the kept pass's listing read; a listing: no spent note, no
-// seed read; else the Ws derived from the spent notes with no read, the seed copy zeroed; a W neither a buy record nor
-// the listing names read through the finder, those Ws only (review of 55d4c6eb, P2-A: a W from before a sign out)
-const LISTED = new RegExp(`wallets:async\\(\\)=>\\{let ${N}=${N}\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,${N}\\)\\):null;if\\(\\1!==null\\)\\{let (${N})=await ${N}\\(await ${N}\\(\\),${N}\\);if\\(\\2\\.length===0\\)return ${N}=\\[\\];let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\},${N}=await ${N}\\.seed64\\(\\),(${N}),(${N}),(${N})=null;try\\{\\4=${N}\\(${N},\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2\\}\\]\\),\\5=new Set\\(\\4\\.wallets\\.map\\(${N}=>${N}\\.address\\)\\.filter\\((${N})=>!Object\\.hasOwn\\(\\3,\\7\\)&&!\\1\\.has\\(\\7\\)\\)\\),\\4\\.failed\\.length===0&&\\5\\.size>0&&\\(\\6=${N}\\(${N},\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2,reader:${N}\\(${N}\\)\\}\\]\\)\\)\\}finally\\{${N}\\.fill\\(0\\)\\}[^]{0,240}?\\6\\.read\\(\\{only:\\5,together:!0\\}\\)`);
+// the sale's wallets: the passes held off, then (for a sale) the kept pass's listing read; the Ws the finder reads with no
+// `read` given: those neither a buy record nor the listing names (review of 55d4c6eb, P2-A: a W from before a sign out;
+// card wallets-found-in-one-read: one list for a sale's first read and its fallback), each other W its listing
+const LISTED = new RegExp(`wallets:async ${N}=>\\{let ${N}=${N}\\.preempt\\(\\),${N}=null;try\\{let (${N})=${N}\\?${N}\\(await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,${N}\\)\\):null,(${N})=${N};if\\(\\2===void 0\\)\\{let (${N})=await\\(await ${N}\\.store\\(\\)\\)\\.get\\(\`meta\`,\`owed/buy-sol\`\\)\\?\\?\\{\\};\\2=(${N})=>!Object\\.hasOwn\\(\\3,\\4\\)&&\\1\\?\\.has\\(\\4\\)!==!0\\}let ${N}=await (${N})\\(await ${N}\\(\\),${N},\\2\\),(${N})=(${N})=>\\1\\?\\.has\\(\\7\\)\\?new Map\\(\\1\\.get\\(\\7\\)\\):null;`);
+// that list: no spent note, no seed read; else the Ws derived from the spent notes, the seed copy zeroed, and the finder
+// asked for only those the list's `read` names, side by side in its steps
+const LISTER = (f) => new RegExp(`[,;\\s]${f.replace(/\$/g, "\\$")}=async\\(${N},${N},(${N})=\\(\\)=>!0\\)=>\\{let (${N})=await ${N}\\(${N},${N}\\);if\\(\\2\\.length===0\\)return\\[\\];let (${N})=await ${N}\\.seed64\\(\\),(${N});try\\{\\4=${N}\\(\\3,\\[\\{id:${N}\\.program,chain:\`sol\`,spent:\\2,reader:${N}\\(${N}\\)\\}\\]\\)\\}finally\\{\\3\\.fill\\(0\\)\\}[^]{0,120}?let ${N}=await ${N}\\(\\4,\\1,\\{together:!0\\}\\)`);
+const listedOf = (js) => {
+  const f = LISTED.exec(js)?.[5];
+  return f !== undefined && LISTER(f).test(js);
+};
 
 // the sale's pair: its stable reads kept, then its sale reads young under the bound on the host's clock; the bound
 // 4 s; the young read: shared while under the bound, a failed one dropped, and a forget that drops all; the sale reads
@@ -79,7 +87,7 @@ const freshOf = (js) => {
 
 /** What the check keeps of SIGN_HOST's page: the index, the served bundle's sha384, and which marks the bundle holds. */
 export function facts(index, js) {
-  return { index, sha384: sha384(js), turn: TURN.test(js), listed: LISTED.test(js), young: youngOf(js), fresh: freshOf(js) };
+  return { index, sha384: sha384(js), turn: TURN.test(js), listed: listedOf(js), young: youngOf(js), fresh: freshOf(js) };
 }
 
 /** The verdict on an answer { index, sha384, turn, listed, young, fresh }. */
