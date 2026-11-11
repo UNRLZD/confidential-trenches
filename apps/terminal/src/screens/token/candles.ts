@@ -110,22 +110,33 @@ export function toCandleData(body: unknown, tf: ChartTf, headerSrc: string | nul
   return bars.length === 0 ? { status: "empty", gecko, held: true } : { status: "ready", tf, bars, gecko, precision: pricePrecision(bars), own };
 }
 
-/** Reads after a 429 (the helper's GeckoTerminal budget is shared by every page: apps/helper/src/data/gecko.ts), each
- *  after the answer's Retry-After, at most THROTTLE_WAIT_MAX_S; the chart stays loading meanwhile. */
-export const THROTTLE_RETRIES = 2;
-export const THROTTLE_WAIT_MAX_S = 10;
+/** How long a first read keeps reading after a 429 (the helper's GeckoTerminal budget is shared by every page:
+ *  apps/helper/src/data/gecko.ts): one budget window, 75 s (its WINDOW_MS; the helper's Retry-After is never past it,
+ *  apps/helper/src/limits/limits.ts RETRY_AFTER_MAX_S), by when every call of a spent window has left it. The chart
+ *  stays loading meanwhile, reading again at each Retry-After (card evm-chart-opens-without-a-vendor-call: two reads 10 s
+ *  apart at most ended in the error state while the helper's honest wait was longer). */
+export const THROTTLE_SPAN_S = 75;
+/** The wait before reading again after a 429 whose Retry-After is `retryAfter` (a second when it names none), at most
+ *  what is left of THROTTLE_SPAN_S after `waitedMs`; null once the span is used up (the error state). */
+export function throttleWaitMs(retryAfter: string | null, waitedMs: number): number | null {
+  const left = THROTTLE_SPAN_S * 1000 - waitedMs;
+  if (left <= 0) return null;
+  const after = Number(retryAfter);
+  return Math.min(1000 * (retryAfter !== null && Number.isFinite(after) && after > 0 ? after : 1), left);
+}
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** One candle read: the bars, the empty state when the helper holds none (an answer of no bars, or a 404 for a token or
- *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After, THROTTLE_RETRIES
- *  times, then is the error state (Retry reads again). */
+ *  chain it draws no candles for), else the error state. A 429 is read again after its Retry-After until THROTTLE_SPAN_S
+ *  is waited, then is the error state (Retry reads again). */
 export async function loadCandles(chain: MarketChain, token: string, tf: ChartTf, fetchFn: typeof fetch = fetch, wait: (ms: number) => Promise<void> = sleep): Promise<CandleData> {
   try {
-    for (let i = 0; ; i++) {
+    for (let waited = 0; ; ) {
       const r = await fetchFn(CANDLES_URL(chain, token, tf), { ...HELPER_FETCH_INIT, signal: AbortSignal.timeout(TIMEOUT_MS) });
-      if (r.status === 429 && i < THROTTLE_RETRIES) {
-        const after = Number(r.headers.get("Retry-After"));
-        await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
+      const w = r.status === 429 ? throttleWaitMs(r.headers.get("Retry-After"), waited) : null;
+      if (w !== null) {
+        await wait(w);
+        waited += w;
         continue;
       }
       if (r.status === 404) return { status: "empty", gecko: false, held: false };

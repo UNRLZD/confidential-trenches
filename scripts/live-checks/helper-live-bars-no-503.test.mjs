@@ -7,6 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { HELD_MIN, judge, read, READS, shapeOf, TOKENS, tokensOf } from "./helper-live-bars-no-503.mjs";
+import { candlesReader } from "./candles-read.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "helper-live-bars-no-503.answers.json"), "utf8"));
@@ -89,4 +90,41 @@ test("read() asks the lists with the app's Origin, reads each token once in full
   assert.equal(run.first.find((f) => f.address === a(5)).status, 503);
   const r = judge(run);
   assert.equal(r.ok, true, r.lines.join("\n"));
+});
+
+// card evm-chart-opens-without-a-vendor-call: the first reads as the token page's first read (candles-read.mjs)
+test("a first read's 429 that clears inside the span is a held token; one still 429 after it, or an empty 200, is not, and too few held FAIL", async () => {
+  const clock = { t: 0 };
+  // waits side by side: each ends at its own start plus its length, the clock at the latest end
+  const wait = async (ms) => {
+    const end = clock.t + ms;
+    await new Promise((ok) => setImmediate(ok));
+    clock.t = Math.max(clock.t, end);
+  };
+  const reader = candlesReader({ now: () => clock.t, wait });
+  const a = (i) => `0x${i.toString(16).padStart(40, "0")}`;
+  const bar = [1, "1", "1", "1", "1", "0"];
+  const seen = new Map();
+  const fetchFn = async (url) => {
+    if (url.includes("/v1/market/lists")) return new Response(JSON.stringify({ lists: { trending_1h: Array.from({ length: 5 }, (_, i) => ({ token: a(i + 1) })) } }), { status: 200 });
+    const t = new URL(url).searchParams.get("token");
+    const n = (seen.get(t) ?? 0) + 1;
+    seen.set(t, n);
+    // token 1 refused twice then served; token 2 refused for good; token 3 an empty chart
+    if (!url.includes("limit=2") && ((t === a(1) && n <= 2) || t === a(2))) return new Response("{}", { status: 429, headers: { "retry-after": "30" } });
+    const candles = t === a(3) ? [] : url.includes("limit=2") ? [bar, bar] : [bar, bar, bar];
+    return new Response(JSON.stringify({ tf: "15m", candles, src: "chain", as_of_ms: Date.now() }), { status: 200 });
+  };
+  const run = await read("https://helper.test", fetchFn, 0, reader);
+  const f = (i) => run.first.find((x) => x.address === a(i));
+  assert.deepEqual([f(1).status, f(1).bars, f(1).waits], [200, 3, [30_000, 30_000]]);
+  assert.deepEqual([f(2).status, f(2).waits], [429, [30_000, 30_000, 15_000]]);
+  assert.deepEqual([f(3).status, f(3).bars], [200, 0]);
+  assert.ok(clock.t <= 75_000, "one span for the run, the tokens side by side");
+  const r = judge(run);
+  assert.ok(r.lines.some((l) => l === `    first read ${a(2)}: 429 after 75 s of reads at each Retry-After (30, 30, 15 s) {} in ${f(2).ms} ms`), r.lines.join("\n"));
+  assert.ok(r.lines.some((l) => l.startsWith(`    first read ${a(1)}: 200 after 60 s of reads at each Retry-After (30, 30 s) 3 bars`)));
+  // three held of the five (1, 4, 5): under HELD_MIN, FAIL
+  assert.ok(HELD_MIN > 3);
+  assert.ok(bad(r).some((l) => /^BAD 3 tokens held/.test(l)), r.lines.join("\n"));
 });

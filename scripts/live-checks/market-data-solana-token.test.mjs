@@ -14,6 +14,7 @@ import { ROW_FIELDS as TERMINAL_FIELDS } from "../../apps/terminal/src/screens/d
 import { CANDLES_FIELDS, HOLDERS_FIELDS, PAGE_FIELDS, RISK_FIELDS } from "../../apps/helper/src/data/solana/token.ts";
 import { ROW_FIELDS as HELPER_ROW } from "../../apps/helper/src/data/solana/lists.ts";
 import { CANDLES, HOLDERS, judge, MINT, PAGE, read, READS, RISK, ROW } from "./market-data-solana-token.mjs";
+import { candlesReader } from "./candles-read.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const A = JSON.parse(readFileSync(path.join(HERE, "market-data-solana-token.answers.json"), "utf8"));
@@ -164,4 +165,27 @@ test("card helper-restart-fresh: read() dates each answer by its own request", a
     assert.ok(t >= last && t <= after && Number.isSafeInteger(r.reads[k].ms), k);
     last = t;
   }
+});
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("the candles 429 that clears inside the span passes; one still standing after it, or an empty 200, FAILs", async () => {
+  const clock = { t: 0 };
+  const reader = candlesReader({ now: () => clock.t, wait: async (ms) => void (clock.t += ms) });
+  let refused = 2;
+  const base = replay(A.good);
+  const url = `https://ct-api.unrealized.trade${READS.candles(MINT)}`;
+  const r = await read(undefined, undefined, async (u, init) => (u === url && refused-- > 0 ? new Response("{}", { status: 429, headers: { "retry-after": "20" } }) : base(u, init)), reader);
+  assert.deepEqual(r.reads.candles.waits, [20_000, 20_000]);
+  r.readAt = A.good.readAt;
+  for (const k of Object.keys(r.reads)) {
+    if (A.good.reads[k]?.at === undefined) delete r.reads[k].at;
+    else Object.assign(r.reads[k], { at: A.good.reads[k].at, ms: A.good.reads[k].ms });
+  }
+  assert.deepEqual(bad(judge(r)), []);
+  const stood = structuredClone(A.good);
+  Object.assign(stood.reads.candles, { status: 429, body: '{"error":{"code":"rate_limited"}}', waits: [60_000, 15_000] });
+  // judged as recorded: a replay would read the 429 again for the span
+  assert.ok(bad(judge(stood)).some((l) => l.endsWith("answers 429 after 75 s of reads at each Retry-After (60, 15 s)")), bad(judge(stood)).join("\n"));
+  const empty = edit("candles", (b) => (b.candles = []));
+  assert.ok(bad(await run(empty)).some((l) => /candles: exactly the frozen fields in their wire forms: (keys|candles 0|own_from_s)/.test(l)));
 });

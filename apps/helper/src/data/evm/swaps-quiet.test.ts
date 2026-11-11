@@ -207,9 +207,8 @@ for (const stable of [false, true])
     const a = await s.candles(COIN, "1h", null, 500);
     s.stop();
     if (stable) {
-      // no bar of ours, GeckoTerminal's budget spent: our own reads' empty chart, never a 429 (swaps-cold-chart.test.ts)
-      assert.equal(a.status, 200, a.body);
-      assert.deepEqual([a.src, JSON.parse(a.body).candles], ["chain", []]);
+      // no bar of ours, GeckoTerminal's budget spent: the 429 with the wait, never an empty 200 (swaps-cold-chart.test.ts)
+      assert.equal(a.status, 429, a.body);
       return;
     }
     assert.equal(a.status, 200, a.body);

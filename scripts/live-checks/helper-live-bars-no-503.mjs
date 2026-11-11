@@ -12,10 +12,13 @@
 // It passes only when at least HELD_MIN tokens are held and every live read answers 200 JSON { tf: "15m", candles: [1 or
 // 2 bars], src, as_of_ms }. A failing read is named by its token, status and time; the answers' age (read time less
 // as_of_ms) is printed, so a stale serve stays on record.
+// Each first read is read as the token page's first read is (candles-read.mjs): a 429 again at its Retry-After, the
+// tokens side by side within one 75 s span; one still 429 after it, or a 200 with no bars, is a token not held.
 // After: helper
 //   node scripts/live-checks/helper-live-bars-no-503.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read, so the check's test can replay it.
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 
 const KEY = "helper-live-bars-no-503";
@@ -36,7 +39,7 @@ async function get(base, path, fetchFn) {
   try {
     const r = await fetchFn(`${base.replace(/\/$/, "")}${path}`, { redirect: "manual", headers: { origin: APP, "cache-control": "no-cache" }, signal: AbortSignal.timeout(30_000) });
     const body = await r.text();
-    return { status: r.status, at: Date.now(), ms: Math.round(performance.now() - t0), body };
+    return { status: r.status, at: Date.now(), ms: Math.round(performance.now() - t0), body, ...(r.status === 429 ? { retryAfter: r.headers.get("retry-after") } : {}) };
   } catch (e) {
     return { status: 0, at: Date.now(), ms: Math.round(performance.now() - t0), body: "", error: String(e?.message ?? e).slice(0, 200) };
   }
@@ -77,14 +80,18 @@ const row = (address, a) => {
     ms: a.ms,
     ...(s === null ? { body: a.body.slice(0, 120) } : s.bad !== undefined ? { shape: s.bad } : { bars: s.bars, ageMs: a.at - s.asOfMs }),
     ...(a.error ? { error: a.error } : {}),
+    ...(a.waits ? { waits: a.waits } : {}),
   };
 };
 
-export async function read(base = BASE, fetchFn = fetch, paceMs = PACE_MS) {
+/** `reader`: the run's candles reader (candles-read.mjs): a first read's 429 is read again at its Retry-After, as the
+ *  page's first read is, the tokens side by side, so the run waits one span at most; a live read is the page's live
+ *  read, judged as it answers. */
+export async function read(base = BASE, fetchFn = fetch, paceMs = PACE_MS, reader = candlesReader()) {
   const at = new Date().toISOString();
   const lists = await get(base, "/v1/market/lists?chain=base", fetchFn);
   const tokens = lists.status === 200 ? tokensOf(lists.body) : [];
-  const first = await Promise.all(tokens.map(async (t) => row(t, await get(base, `/v1/market/candles?chain=base&token=${t}&tf=15m`, fetchFn))));
+  const first = await Promise.all(tokens.map(async (t) => row(t, await reader.read(() => get(base, `/v1/market/candles?chain=base&token=${t}&tf=15m`, fetchFn)))));
   const held = first.filter((f) => f.status === 200 && f.bars > 0).map((f) => f.address);
   const live = [];
   for (let i = 0; held.length > 0 && i < READS; i++) {
@@ -107,7 +114,7 @@ export function judge(run) {
   const live = run.live ?? [];
   const held = new Set(first.filter((f) => f.status === 200 && f.bars > 0).map((f) => f.address));
   say(run.lists?.status === 200 && first.length === run.lists.tokens, `GET /v1/market/lists?chain=base answers ${run.lists?.status}, ${first.length} listed tokens read`);
-  for (const f of first) lines.push(`    first read ${f.address}: ${f.status}${f.bars !== undefined ? ` ${f.bars} bars` : ` ${f.shape ?? f.body ?? ""}`}${f.error ? ` ${f.error}` : ""} in ${f.ms} ms${held.has(f.address) ? " (held)" : ""}`);
+  for (const f of first) lines.push(`    first read ${f.address}: ${f.status}${waitsText(f)}${f.bars !== undefined ? ` ${f.bars} bars` : ` ${f.shape ?? f.body ?? ""}`}${f.error ? ` ${f.error}` : ""} in ${f.ms} ms${held.has(f.address) ? " (held)" : ""}`);
   say(held.size >= HELD_MIN, `${held.size} tokens held (at least ${HELD_MIN})`);
   say(live.length === READS, `${live.length} live reads (limit 2) made (${READS})`);
   for (const a of live) {

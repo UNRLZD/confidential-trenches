@@ -764,3 +764,45 @@ test("HostLane: a probe that fails any other way settles it (the host still in d
   assert.deepEqual(order, ["a", "b", "c"], "a lost probe is given up at its try's timeout");
   await Promise.all([a, b, c]);
 });
+
+// The review of card signpage-throttled-provider-has-a-spare (row b, its case T1): no test held `by` on a trade's held
+// wait, so `Math.min(by, ...)` in HostLane.turn's held bound could go. A probe in flight holds t2; t2's own bound (by,
+// 3 s) ends its wait there, never at the probe's held bound past its known waits'.
+/** A planted lane whose sleeps wake each at its own time, in order, as the clock reaches it. */
+function plantedInOrder(): { l: HostLane; clock: { t: number }; advance: (t: number) => Promise<void>; flush: () => Promise<void> } {
+  const clock = { t: 0 };
+  const sleeps: { at: number; r: () => void }[] = [];
+  const l = new HostLane({ now: () => clock.t, sleep: (ms) => new Promise<void>((r) => void sleeps.push({ at: clock.t + ms, r })) });
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  };
+  const advance = async (t: number): Promise<void> => {
+    for (;;) {
+      const next = sleeps.filter((s) => s.at <= t).sort((a, b) => a.at - b.at)[0];
+      if (!next) break;
+      clock.t = Math.max(clock.t, next.at);
+      sleeps.splice(sleeps.indexOf(next), 1);
+      next.r();
+      await flush();
+    }
+    clock.t = t;
+    await flush();
+  };
+  return { l, clock, advance, flush };
+}
+test("HostLane: a trade's held wait behind a probe ends at the reader's own bound (by), never at the probe's held bound", async () => {
+  const { l, clock, advance, flush } = plantedInOrder();
+  const out: string[] = [];
+  const turn = (n: string, o: { by?: number } = {}) =>
+    l.turn("trade", undefined, true, { reports: true, ...o }).then(() => void out.push(`${n}:sent@${clock.t}`), (e: unknown) => void out.push(`${n}:${e instanceof HostPaused ? `refused@${clock.t}` : String(e)}`));
+  l.throttled(l.gate.epoch(), 1_000);
+  await advance(5);
+  const a = turn("t1");
+  await advance(1_005);
+  const b = turn("t2", { by: 3_000 });
+  await flush();
+  await advance(20_000);
+  await Promise.all([a, b]);
+  assert.deepEqual(out, ["t1:sent@1000", "t2:refused@3000"]);
+  assert.ok(PROBE_HELD_MAX_MS > 3_000 - 1_005, "the probe's held bound is past t2's own");
+});

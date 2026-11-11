@@ -13,7 +13,7 @@ import { after, test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
 import { entropyToWords, wordsToSeed64 } from "@blindfill/wallet/derive";
 import { openWalletStore, type WalletStore } from "@blindfill/wallet/store";
-import { noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
+import { noteCommitment, noteSecrets, type NoteRef } from "../../wallet/src/notes/secrets.ts";
 import { openNoteStore, type NoteStore } from "../../wallet/src/notes/store.ts";
 import { signalsProver } from "../../wallet/test/withdraw-fixture.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -263,6 +263,70 @@ test("the buy's host gives its hosts back at its release, once: its end after it
   });
 });
 
+// Card sell-right-after-a-buy (devnet run 11): the buy's reads to Final went as a trade's, never on the host's budget, and
+// drew the 20 throttles a sell tapped 1 s after Filled met. The same release that gives its hosts back switches them, once:
+// its pair and its settle (its pair and lister) read as a background pass's from its land on (pool-buy.ts landed), never
+// at its sent alone: sent can come before both RPCs report it succeeded, and the reads to Filled are a trade's (review of
+// 29a9e506, P2).
+test("card sell-right-after-a-buy: the buy's host reads as a trade's to its land, past its release too, then as a pass's: its pair and its settle, once", async () => {
+  const { w, ns } = await wallet();
+  // a landed note for the settle to read (its reads are what is timed here; their answers end it)
+  const ref: NoteRef = { kind: "deposit", s: SCOPE, i: 0 };
+  const pre = noteSecrets(SEED64, ref).precommitment;
+  const n = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 5_000_000n, label: 9n, commitment: noteCommitment(5_000_000n, 9n, pre), leafIndex: 0n } });
+  await onProvider(() => 200, async (sent) => {
+    const made: { buy?: () => { rpcs: readonly [(m: string, p: unknown[]) => Promise<unknown>, (m: string, p: unknown[]) => Promise<unknown>]; settle(id: string): Promise<unknown>; release(): void; landed(): void; end(): void } } = {};
+    testnetPool(
+      { store: async () => w, seed64: async () => SEED64.slice() },
+      { evmPin: () => undefined, cache: {}, tradeKinds: { buy: ((h: never) => ((made.buy = h), () => ({ error: "not_allowed" }))) as never } } as never,
+    );
+    const h = made.buy!();
+    // a sale holds both hosts, a pass just went on each, and the sale's reads fill each window: a pass waits for the floor
+    const sale = holdHosts([DEVNET, HELPER]);
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    // each time below is a request's own, as the fake provider logged it on the test clock (sent[].at)
+    const devnet = new URL(DEVNET).host;
+    const lastOn = (host: string): number => sent.filter((x) => x.host === host).at(-1)!.at;
+    const passAt = lastOn(devnet);
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(lastOn(devnet) - passAt < 100, "before its release: its reads a trade's, at once past every budget");
+    // the settle's first request on api.devnet, from the request before it (its note store opens first: fake IndexedDB)
+    const firstFrom = async (from: number): Promise<number> => {
+      for (let i = 0; i < 2_000 && !sent.slice(from).some((x) => x.host === devnet); i++) await tick(5);
+      return sent.slice(from).find((x) => x.host === devnet)!.at - sent[from - 1]!.at;
+    };
+    let n1 = sent.length;
+    void h.settle(n.id).catch(() => {});
+    const settleBefore = await firstFrom(n1);
+    assert.ok(settleBefore < 1_000, `a settle before its release: a trade's, at once (${settleBefore.toFixed(0)} ms)`);
+    h.release();
+    assert.equal(hostLane(DEVNET).trading(), true, "the sale's hold stands");
+    // released, not landed (its sent before both RPCs report it succeeded): still a trade's, at once
+    const released = lastOn(devnet);
+    await Promise.all([h.rpcs[0]("getSlot", []), h.rpcs[1]("getSlot", [])]);
+    assert.ok(lastOn(devnet) - released < 100, "after its release alone: a trade's, at once");
+    h.landed();
+    // a pass on each host now, so the next pass there waits PASS_FLOOR_MS
+    await Promise.all([pageSolanaRpcs("pass")[0]("getSlot", []), pageSolanaRpcs("pass")[1]("getSlot", [])]);
+    fill(DEVNET, 100);
+    fill(HELPER, 100);
+    const pass2 = lastOn(devnet);
+    await h.rpcs[0]("getSlot", []);
+    assert.ok(lastOn(devnet) - pass2 >= PASS_FLOOR_MS - 100, `after its land: a pass's, at the floor (${(lastOn(devnet) - pass2).toFixed(0)} ms)`);
+    n1 = sent.length;
+    void h.settle(n.id).catch(() => {});
+    const afterMs = await firstFrom(n1);
+    assert.ok(afterMs >= PASS_FLOOR_MS - 1_000, `its settle after its land: a pass's, at the floor (${afterMs.toFixed(0)} ms)`);
+    h.release();
+    h.end();
+    assert.equal(hostLane(DEVNET).trading(), true, "given back once: the sale's hold stands");
+    sale();
+    resetHostLanes();
+  });
+});
+
 test("the EVM buy kind's host holds its chain's pool list hosts from its making to its end", async () => {
   await onProvider(() => 200, async () => {
     const made: { h?: { end?(): void } } = {};
@@ -465,6 +529,27 @@ test("every request the page sends a host counts in that host's lane: the helper
       const went = sent.filter((x) => x.host === new URL(TRADE_HELPER).host).length - out;
       assert.ok(went > 0, `${name}: sent nothing to the helper`);
       assert.equal(counted() - before, went, `${name}: ${went} request(s) sent to the helper, ${counted() - before} counted on its lane`);
+    }
+  });
+});
+
+// the device's own send paths beside the helper's (the kit's solanaSendPaths: Sender, Jito and the public RPC, each from
+// the device, src/trade.ts releaseTradeDeps: `fetch: laneFetch()`): each request counted on its own host's lane, as the
+// host counts it, so a trade's sends there leave the passes only what the budget leaves
+test("every request the device's own send paths send counts in its host's lane: sender, jito and the public rpc", async () => {
+  const { releaseTradeDeps } = await import("../src/trade.ts");
+  await onProvider(() => ({ result: "1".repeat(88) }), async (sent) => {
+    const paths = releaseTradeDeps().paths;
+    for (const name of ["sender", "jito", "rpc"]) {
+      const path = paths.find((p) => p.name === name);
+      assert.ok(path, `the device's ${name} path`);
+      const n = sent.length;
+      await path.send("AA==").catch(() => {});
+      const mine = sent.slice(n);
+      assert.ok(mine.length > 0, `${name}: sent nothing`);
+      for (const host of new Set(mine.map((x) => x.host))) {
+        assert.equal(hostLane(`https://${host}/`).inWindow(), mine.filter((x) => x.host === host).length, `${name}: every request to ${host} counted on its lane`);
+      }
     }
   });
 });

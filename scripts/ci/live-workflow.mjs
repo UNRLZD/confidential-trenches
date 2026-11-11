@@ -21,7 +21,11 @@
 //   - a single check runs through scripts/ci/live-rerun.mjs, and both runners (it and live-serial.mjs) run an INCONCLUSIVE
 //     check (exit 3) again after a pause, up to a bound, and never anything else (card live-inconclusive-rerun): RERUN_CASES,
 //     played on each runner with stand-in checks. A provider's 429 read once undid a good deploy; a FAIL or an ERROR read
-//     twice would let a real red through;
+//     twice would let a real red through. Each case also holds the result: pass, FAIL (red), ERROR (red: a crash too), or
+//     inconclusive (card live-run-red-means-the-build: its job passes, named with its reason, never a pass and never red);
+//   - the live job reads every job's verdict file through the workflow's own scripts/ci/live-verdicts.mjs (VERDICTS_LINE),
+//     after the plan's checks and before the check jobs' result, and each check job uploads its verdict file `if:
+//     always()`, so a FAIL stays red in every path and an inconclusive check is listed on every run;
 //   - the two runner steps are held whole (SINGLE_STEP, SERIAL_STEP): the runner line is the step's only command and
 //     writes the log itself, so no `|| true`, `; exit 0`, tee without pipefail or line before it turns a red job green; no
 //     other line of the check job runs a check; no continue-on-error, shell or defaults key anywhere; the live job fails on a check job that
@@ -130,6 +134,18 @@ const RUN_HEAD = `        run: |
 `;
 export const RUN_LINE = 'node .live-runner/scripts/ci/live-rerun.mjs --log "$out/$ID.log" "$KEY" $ARGS';
 export const SERIAL_LINE = 'node .live-runner/scripts/ci/live-serial.mjs --log "$out/$ID.log" $GROUP';
+/** The live job's line that reads every job's verdicts (scripts/ci/live-verdicts.mjs, the workflow's own). */
+export const VERDICTS_LINE = 'node .live-verdicts/scripts/ci/live-verdicts.mjs --dir "$RUNNER_TEMP/verdicts" --matrix "$MATRIX" --summary "$GITHUB_STEP_SUMMARY"';
+/** The live job's checkout of the verdicts' reader: this workflow's own commit. */
+export const verdictsCheckout = () => `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: \${{ github.workflow_sha }}
+          path: .live-verdicts
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci/live-verdicts.mjs
+          sparse-checkout-cone-mode: false
+`;
 /** The single-check step, whole: the runner line is its only command. */
 export const SINGLE_STEP = `      - name: \${{ matrix.name }}
         if: matrix.group == ''
@@ -176,7 +192,7 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
   for (const job of ["plan", "check", "live", "browser-e2e"]) want(new RegExp(`^  ${job}:`, "m").test(text), `no ${job} job`);
   want(/^  plan:\n    if: github\.event_name == 'workflow_dispatch'\n/m.test(text), "the plan job runs on something other than a dispatch (a deploy's commit and host come only from its inputs)");
   const jobText = (name) => new RegExp(`^  ${name}:\\n((?:   .*\\n|\\s*\\n|  #.*\\n)*)`, "m").exec(text)?.[0] ?? "";
-  want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
+  want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)\n\s+with:\n\s+name: live-/.test(jobText("check")), "the check job's artifact step does not run `if: always()`");
   want(/^  live:\n(?:.*\n)*?    if: always\(\)/m.test(jobText("live") || ""), "the live job does not run `if: always()`");
   // card helper-live-jup-serial: a serial group is one step, a single check the other, and each runs on its own `if`;
   // card live-inconclusive-rerun (review P2-1, P2-2): each held whole, through the workflow's own runner
@@ -204,6 +220,14 @@ export function liveProblems(text, hosts = Object.keys(HOSTS), exists = (k) => e
     if (k > 1) p.push(`${file}: names .live-runner outside the held runner checkout and runner lines: \`${a}\` ${k} times, want once`);
   }
   const verdict = jobText("live");
+  // card live-run-red-means-the-build: the live job reads every job's verdicts, red on a FAIL, an error, a check not run or
+  // a job with no verdict, between the plan's checks and the check jobs' result
+  // the line whole, its own: no || or ; after it that swallows its exit
+  const vAt = verdict.indexOf(`\n          ${VERDICTS_LINE}\n`);
+  want(vAt >= 0 && vAt > verdict.indexOf('echo "the plan lists no check to run"; exit 1; fi') && vAt < verdict.indexOf('if [ "$CHECKS" != success ]'), `the live job does not read every check job's verdicts (\`${VERDICTS_LINE}\`, after the plan's checks and before the check jobs' result): an inconclusive check is not listed, or a FAIL could pass unread`);
+  want(wholeCount(verdict, verdictsCheckout()) === 1, "the live job's checkout of the verdicts' reader is not the one the gate holds: actions/checkout at ${{ github.workflow_sha }} into .live-verdicts, sparse on scripts/ci/live-verdicts.mjs alone");
+  want(/uses: actions\/download-artifact@[0-9a-f]{40}.*\n\s+if: needs\.plan\.result == 'success'\n\s+with:\n\s+pattern: verdict-\*\n\s+path: \$\{\{ runner\.temp \}\}\/verdicts\n\s+merge-multiple: true/.test(verdict), "the live job does not download every check job's verdict artifact (verdict-*) into $RUNNER_TEMP/verdicts");
+  want(/uses: actions\/upload-artifact@[0-9a-f]{40}.*\n\s+if: always\(\)\n\s+with:\n\s+name: verdict-\$\{\{ matrix\.id \}\}\n\s+path: \$\{\{ runner\.temp \}\}\/live\/\$\{\{ matrix\.id \}\}\.verdict\.json/.test(check), "the check job does not upload its verdict file (verdict-${{ matrix.id }}, `if: always()`)");
   want(/^ {10}CHECKS: \$\{\{ needs\.check\.result \}\}$/m.test(verdict) && verdict.includes('if [ "$CHECKS" != success ]; then echo "a check job ended $CHECKS"; exit 1; fi'), "the live job does not fail when a check job did not succeed (CHECKS: ${{ needs.check.result }}, and exit 1 unless it is success)");
   want(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.test(jobText("check")) && (([, g, o]) => Number(g) > Number(o))(/timeout-minutes: \$\{\{ matrix\.group != '' && (\d+) \|\| (\d+) \}\}/.exec(jobText("check"))), "a serial group's job has no longer limit than a single check's (timeout-minutes: ${{ matrix.group != '' && <longer> || <shorter> }})");
   want(/KEY: \$\{\{ matrix\.key \}\}/.test(jobText("check")), "the check job's key is not the matrix's");
@@ -230,13 +254,18 @@ const QUIET_HOSTS = ["rpc-a.example.org", "rpc-b.example.org"];
 /** What each runner must do with a check's exit codes in turn (card live-inconclusive-rerun): `codes` the stand-in check's
  *  exits, run by run (the last repeats); `pass` the verdict; `runs` how many times it ran (RERUN.runs: the bound);
  *  `code` the single runner's exit; `named` that the last line names the providers that did not answer. */
+// `pass` is whether the job is green; `verdict` the result it records (card live-run-red-means-the-build: an inconclusive
+// check's job is green, its verdict inconclusive, never pass); `output` the stand-in's last line, when not the default.
 export const RERUN_CASES = Object.freeze([
-  { name: "exit 0 passes on its one run", codes: [0], pass: true, runs: 1, code: 0 },
-  { name: "exit 3 then exit 0 passes on the rerun", codes: [3, 0], pass: true, runs: 2, code: 0 },
-  { name: "exit 3 throughout is red at the bound and names the providers", codes: [3], pass: false, runs: "bound", code: 3, named: true },
-  { name: "exit 3 then exit 1 is red and not run again", codes: [3, 1], pass: false, runs: 2, code: 1 },
-  { name: "exit 1 (FAIL) is never run again", codes: [1], pass: false, runs: 1, code: 1 },
-  { name: "exit 2 (ERROR) is never run again", codes: [2], pass: false, runs: 1, code: 2 },
+  { name: "exit 0 passes on its one run", codes: [0], pass: true, runs: 1, code: 0, verdict: "pass" },
+  { name: "exit 3 then exit 0 passes on the rerun", codes: [3, 0], pass: true, runs: 2, code: 0, verdict: "pass" },
+  { name: "exit 3 throughout is inconclusive at the bound, green, and names the providers", codes: [3], pass: true, runs: "bound", code: 0, verdict: "inconclusive", named: true },
+  { name: "exit 3 then exit 1 is red and not run again", codes: [3, 1], pass: false, runs: 2, code: 1, verdict: "fail" },
+  { name: "exit 1 (FAIL) is never run again", codes: [1], pass: false, runs: 1, code: 1, verdict: "fail" },
+  { name: "exit 2 (ERROR) is never run again", codes: [2], pass: false, runs: 1, code: 2, verdict: "error" },
+  { name: "exit 2 whose last verdict line is INCONCLUSIVE is inconclusive, green, never run again", codes: [2], output: "live-check k: INCONCLUSIVE (no burn landed between two reads)", pass: true, runs: 1, code: 0, verdict: "inconclusive" },
+  { name: "exit 2 whose last verdict line is FAIL after an INCONCLUSIVE one is an ERROR, red", codes: [2], output: "live-check k: INCONCLUSIVE (x)\nlive-check k: FAIL (y)", pass: false, runs: 1, code: 2, verdict: "error" },
+  { name: "a check that crashed (no exit code: killed by a signal) is an ERROR, red, never run again", codes: [null], pass: false, runs: 1, code: 2, verdict: "error" },
 ]);
 
 const IDLE = Object.freeze({ idle: true, probes: 1, waitedMs: 0, why: "idle" });
@@ -259,7 +288,8 @@ export async function rerunProblems(impl = { single: (k, o) => rerun(k, [], o), 
           const code = c.codes[Math.min(runs.length, c.codes.length - 1)];
           runs.push(code);
           if (runs.length > 8) return 0;
-          return code === 3 ? { code, output: QUIET.map((q) => `--- base ${q}`).join("\n") } : code;
+          if (c.output !== undefined) return { code, output: c.output };
+          return code === 3 ? { code, output: QUIET.map((q) => `--- base ${q}`).join("\n") } : code === null ? { code: null, output: "" } : code;
         },
         sleep: async (ms) => void pauses.push(ms),
         say: (l) => lines.push(l),
@@ -275,10 +305,12 @@ export async function rerunProblems(impl = { single: (k, o) => rerun(k, [], o), 
         continue;
       }
       const want = c.runs === "bound" ? bound : c.runs;
-      const passed = kind === "single" ? r?.code === 0 : r?.ok === true;
+      const passed = kind === "single" ? r?.exit === 0 : r?.ok === true;
       if (passed !== c.pass) p.push(`${at}: ${passed ? "passed" : "was red"}, want ${c.pass ? "a pass" : "red"}`);
       if (runs.length !== want) p.push(`${at}: ran ${runs.length} times, want ${want}`);
-      if (kind === "single" && r?.code !== c.code) p.push(`${at}: exit ${r?.code}, want ${c.code}`);
+      if (kind === "single" && r?.exit !== c.code) p.push(`${at}: exit ${r?.exit}, want ${c.code}`);
+      const verdict = kind === "single" ? r?.verdict : r?.results?.find((x) => x.key === "k")?.verdict;
+      if (verdict !== c.verdict) p.push(`${at}: recorded ${verdict}, want ${c.verdict}`);
       if (pauses.length !== Math.max(0, Math.min(runs.length, want) - 1)) p.push(`${at}: paused ${pauses.length} times between ${runs.length} runs`);
       if (pauses.some((ms) => !(ms >= policy.baseMs / 2))) p.push(`${at}: a pause of ${Math.min(...pauses)} ms, under half the base (${policy.baseMs / 2} ms): a provider's window has not moved on`);
       if (c.named) {

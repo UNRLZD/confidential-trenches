@@ -2,7 +2,7 @@
 // and every planted bad answer refused whole (the chart's error state, never a partly drawn chart).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CANDLES_URL, THROTTLE_RETRIES, THROTTLE_WAIT_MAX_S, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
+import { CANDLES_URL, THROTTLE_SPAN_S, isGecko, loadCandles, pricePrecision, priceText, toCandleData, volumeText } from "../src/screens/token/candles.ts";
 
 const T0 = 1_762_000_200; // a 15m bucket start
 const good = () => ({
@@ -127,21 +127,23 @@ test("the read: 404 is empty, another status, a bad body or a failed fetch is th
   assert.match(asked, /chain=base&token=0xab&tf=4h&limit=500$/);
 });
 
-test("a 429: read again after its Retry-After (capped), then the error state", async () => {
+test("a 429: read again at each Retry-After until one budget window (THROTTLE_SPAN_S) is waited, then the error state", async () => {
   const waits: number[] = [];
   const wait = async (ms: number) => void waits.push(ms);
   let n = 0;
+  // card evm-chart-opens-without-a-vendor-call: the helper's honest wait on a spent budget is up to 75 s; two reads at
+  // most 10 s apart ended in the error state before the bars came (red at ffb2ec33: waits [3000, 10000], then error)
   const throttledThenGood = async () => {
     n++;
-    return n <= 2 ? new Response("{}", { status: 429, headers: { "Retry-After": n === 1 ? "3" : "600" } }) : new Response(JSON.stringify(good()), { status: 200, headers: { "X-Helper-Source": "geckoterminal" } });
+    return n <= 3 ? new Response("{}", { status: 429, headers: { "Retry-After": n === 1 ? "3" : n === 2 ? "40" : "600" } }) : new Response(JSON.stringify(good()), { status: 200, headers: { "X-Helper-Source": "geckoterminal" } });
   };
   const d = await loadCandles("solana", "M", "15m", throttledThenGood, wait);
   assert.equal(d.status, "ready");
-  assert.deepEqual(waits, [3000, THROTTLE_WAIT_MAX_S * 1000]);
+  assert.deepEqual(waits, [3000, 40000, (THROTTLE_SPAN_S - 43) * 1000], "each Retry-After, the last cut to what is left of the window");
   n = 0;
   waits.length = 0;
   const always = async () => (n++, new Response("{}", { status: 429 }));
   assert.deepEqual(await loadCandles("solana", "M", "15m", always, wait), { status: "error" });
-  assert.equal(n, THROTTLE_RETRIES + 1);
-  assert.deepEqual(waits, [1000, 1000], "no Retry-After: a second");
+  assert.equal(n, THROTTLE_SPAN_S + 1, "no Retry-After: a second apart, the window through");
+  assert.ok(waits.every((w) => w === 1000));
 });
