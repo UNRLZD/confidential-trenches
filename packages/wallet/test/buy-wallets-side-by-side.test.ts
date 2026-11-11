@@ -78,3 +78,39 @@ test("buyWalletsOf: the same Ws as the finder's derivation, each with no holding
   assert.deepEqual(twice.wallets, []);
   assert.equal(twice.failed.length, 1);
 });
+
+// The finder at a sale's tap (a restored device before its first whole pass): its Ws in steps, so one sale never puts
+// more than 20 reads on one host inside 1 s. A W's read is one round of three calls (getBalance and both
+// getTokenAccountsByOwner), so 6 Ws a step: 18 calls. A paid devnet pass (11 Nov 05:52Z) burst about 15 at the tap and
+// drew six 429s at 0.5 s. A failed read starts no later step, and every pool a later step would have read fails.
+test("the finder reads 30 Ws in steps of 6 a second apart (never over 20 calls on a host inside 1 s); a failed read starts no later step", async () => {
+  const STEP = 6;
+  const STEP_MS = 1_000;
+  const many = Array.from({ length: 30 }, (_, i) => ({ ref: { kind: "deposit" as const, s: 1001n, i }, label: 10n + BigInt(i) }));
+  for (const fail of [false, true]) {
+    const clock = { t: 0 };
+    const at: number[] = [];
+    const reader: HoldingsReader = {
+      chain: "sol",
+      read: async () => {
+        at.push(clock.t);
+        if (fail && at.length === 2) throw new Error("getBalance: http 429");
+        return none;
+      },
+    };
+    const waits: number[] = [];
+    const got = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: many, reader }], { pick: () => 0, together: true, wait: async (ms: number) => void (waits.push(ms), (clock.t += ms)) });
+    const calls = (s: number) => 3 * at.filter((t) => t >= s && t < s + 1_000).length;
+    assert.ok(Math.max(...at.map(calls)) <= 20, `${Math.max(...at.map(calls))} calls inside 1 s`);
+    if (!fail) {
+      assert.equal(at.length, 30);
+      assert.deepEqual(waits, Array(4).fill(STEP_MS), "30 Ws: five steps a second apart");
+      assert.equal(got.wallets.length, 30);
+    } else {
+      assert.equal(at.length, STEP, "the failed read's step only");
+      assert.deepEqual(waits, [STEP_MS], "the step's wait, then no later step");
+      assert.equal(got.wallets.length, 0);
+      assert.equal(got.failed.length, 1);
+    }
+  }
+});

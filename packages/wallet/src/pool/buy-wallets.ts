@@ -159,7 +159,13 @@ export async function buyWallets(seed64: Uint8Array, pools: readonly BuyPool[], 
 /** How derived buy wallets are read: `only` the Ws of these addresses (none else read or answered), when given;
  *  `together`, every W asked at once (a sale's list), else one W after another (the positions' passes, which a stop
  *  ends between two Ws). */
-export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; together?: true };
+export type BuyWalletsRead = { signal?: AbortSignal; pick?: (n: number) => number; only?: ReadonlySet<string>; together?: true; wait?: (ms: number) => Promise<void> };
+/** A sale's finder (`together`) asks this many Ws at once, FINDER_STEP_MS apart: a W's read is one round of three calls
+ *  (getBalance and both getTokenAccountsByOwner), so a step is 18 calls and one sale never puts more than 20 reads on
+ *  one host inside 1 s (the helper's keyed provider is paced at 10 a second upstream; a public one counts connections).
+ *  A paid devnet pass of 5 Ws (11 Nov 05:52Z) asked its 15 at once and drew six HTTP 429s at 0.5 s. */
+export const FINDER_W_STEP = 6;
+export const FINDER_STEP_MS = 1_000;
 
 /** buyWallets in two steps: the Ws derived from the seed now, which the result keeps no copy of (the caller zeroes its
  *  seed at once), then read when asked; a read of `only` some Ws reads and answers only those. */
@@ -221,17 +227,33 @@ async function readDerived(pools: readonly BuyPool[], derived: readonly (BuyWall
     // a sale's list (card pool-sell-legs-side-by-side): the Ws read side by side, asked in that order; the reader's
     // route paces its calls within the provider's budget (holdingsRoute), so no W waits on another's answers. A pool's
     // first failure, in the order the answers come, fails it
+    // in steps of FINDER_W_STEP Ws, FINDER_STEP_MS apart; a failed read starts no later step, and every pool a later
+    // step would have read fails (none answers with a W left unread)
     opts.signal?.throwIfAborted();
-    await Promise.all(
-      jobs.map(async ({ p, k, address }) => {
-        try {
-          const holdings = await pools[p]!.reader.read(address, opts.signal, by);
-          found[p]![k]!.holdings = holdings;
-        } catch (e) {
-          if (!failed.has(p)) failed.set(p, `wallet ${k}: ${msg(e)}`);
-        }
-      }),
-    );
+    const wait = opts.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+    let readFailed = false;
+    const asked: Promise<void>[] = [];
+    let i = 0;
+    for (; i < jobs.length && !readFailed; i += FINDER_W_STEP) {
+      if (i > 0) {
+        await wait(FINDER_STEP_MS);
+        opts.signal?.throwIfAborted();
+        if (readFailed) break;
+      }
+      for (const { p, k, address } of jobs.slice(i, i + FINDER_W_STEP))
+        asked.push(
+          (async () => {
+            try {
+              found[p]![k]!.holdings = await pools[p]!.reader.read(address, opts.signal, by);
+            } catch (e) {
+              readFailed = true;
+              if (!failed.has(p)) failed.set(p, `wallet ${k}: ${msg(e)}`);
+            }
+          })(),
+        );
+    }
+    for (const { p, k } of jobs.slice(i)) if (!failed.has(p)) failed.set(p, `wallet ${k}: not read, an earlier read failed`);
+    await Promise.all(asked);
     opts.signal?.throwIfAborted();
   } else
     for (const { p, k, address } of jobs) {
