@@ -266,8 +266,10 @@ export function jupiterPool(jup: Record<string, unknown>): string | null {
  *  and the token's launch as read on chain (origin.ts; null for none, undefined when not read). The launch names the
  *  row's launchpad: a Discover row keeps its own (read on chain by the lists, with Jupiter's config) when this read
  *  finds none; a row from Jupiter's search never keeps Jupiter's tag alone. */
-export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false): TokenPage {
+export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Origin | null | undefined, listed: boolean, chainAtMs: number, jupAtMs: number, filling = false, dev: { bps: number; at: number } | null = null): TokenPage {
   const row: Row = { ...base };
+  // the creator's share read on chain (devShare) where Jupiter's row has none
+  if (row.dev_bps === null && dev !== null) row.dev_bps = dev.bps;
   row.launchpad = origin?.pad ?? (listed ? base.launchpad : null);
   const curveBps = origin?.curveBps ?? null;
   if (curveBps !== null) row.curve_bps = curveBps;
@@ -292,7 +294,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
       // a launchpad curve is `curve`; other Solana pools have no named read yet (06b `lp`), so null
       lp: onCurve ? chain({ class: "curve", bps: null }) : { ...none },
       top10_bps: jupiter(row.top10_bps),
-      dev_bps: jupiter(row.dev_bps),
+      dev_bps: base.dev_bps === null && dev !== null ? { v: dev.bps, src: "chain", as_of_ms: dev.at } : jupiter(row.dev_bps),
       snipers_bps: { ...none }, // D-S13: no free source at list scale
       holders: jupiter(row.holders),
       liq_usd: jupiter(row.liq_usd),
@@ -772,9 +774,9 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     return origins.get(mint);
   };
   // each token's last page as built, `answer` as the cache keeps it and `filled` once its launch came in after
-  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean };
+  type Built = { m: Mint; base: Row; pool: string | null; listed: boolean; chainAt: number; jupAt: number; origin: Origin | null | undefined; answer?: DataAnswer; filled?: DataAnswer; rowLater?: boolean; dev?: { bps: number; at: number } | null };
   const built = bounded<Built>(CACHE_MAX);
-  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
+  const pageOf = (b: Built): DataAnswer => ({ status: 200, body: JSON.stringify(toPage(b.m, b.base, b.pool, b.origin, b.listed, b.chainAt, b.jupAt, b.rowLater === true, b.dev ?? null)), src: b.base.src === "chain" ? "chain" : "jupiter", asOfMs: Math.min(b.chainAt, b.jupAt) });
   /** Card helper-page-jup-429: the page's Jupiter row within JUP_PAGE_WAIT_MS, else a row held from an earlier read,
    *  under STALE_MS old, else null (the page is named on chain); the search goes on and its row is held for the next
    *  read. A search that fails (Jupiter's 429 or its hold past SEARCH_HOLD_WAIT_MS) is answered the same way. */
@@ -801,6 +803,23 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
       row.mc_usd = dec(close * (Number(m.supply) / 10 ** m.decimals));
     }
     return row;
+  }
+
+  /** The creator's share of the supply in basis points: its token accounts of the mint, one getTokenAccountsByOwner
+   *  (jsonParsed), every account checked to be of this mint; null when the supply is 0 or the answer is off. */
+  async function devShare(mint: string, creator: string, supply: bigint, client?: string): Promise<{ bps: number; at: number } | null> {
+    if (supply <= 0n || address(creator) === null) return null;
+    const v = (await call("getTokenAccountsByOwner", [creator, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }], rpc, client)).result.value;
+    if (!Array.isArray(v) || v.length > 100) return null;
+    let held = 0n;
+    for (const a of v) {
+      const info = obj(obj(obj(obj(obj(a).account).data).parsed).info);
+      const amt = obj(info.tokenAmount).amount;
+      if (info.mint !== mint || typeof amt !== "string" || !/^\d{1,30}$/.test(amt)) return null;
+      held += BigInt(amt);
+    }
+    const bps = Number((held * 10_000n) / supply);
+    return bps > 10_000 ? null : { bps, at: now() };
   }
 
   async function jupiterWithin(mint: string, cold: boolean): Promise<JupRow | null> {
@@ -842,11 +861,21 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }
     if (base === null || base.token !== mint) return NOT_FOUND;
     const t1 = performance.now();
-    const origin = await settled(mint, early ?? launch(mint, j?.row ? hintsOf([j.row]).get(mint) : undefined, base.created_s, client));
+    // card token-page-data-complete-and-fast: the creator's holding, read on chain alongside the launch (no wait of its
+    // own) where Jupiter's row has no dev share: 9 of 10 pages read 11 Nov 15:10Z had none
+    const devRead = base.dev_bps === null && typeof base.creator === "string" ? devShare(mint, base.creator, m.mint.supply, client) : Promise.resolve(null);
+    const [origin, dev] = await Promise.all([
+      settled(mint, early ?? launch(mint, j?.row ? hintsOf([j.row]).get(mint) : undefined, base.created_s, client)),
+      Promise.race([devRead.catch(() => null), new Promise<null>((ok) => setTimeout(() => ok(null), LAUNCH_WAIT_MS).unref?.())]),
+    ]);
     const timing = [`lists;dur=${listsMs}`, ...m.timing, ...(j?.timing ?? []), `launch;dur=${Math.round(performance.now() - t1)}`, `read;dur=${Math.round(performance.now() - t0)}`];
-    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true };
+    const b: Built = { m: m.mint, base, pool, listed: listed !== null, chainAt: m.at, jupAt: at, origin, rowLater: j?.later === true, dev };
     b.answer = { ...pageOf(b), timing: timing.join(", ") };
     built.set(mint, b);
+    // a creator's share read after the page was built joins it, as a late launch does
+    if (dev === null) void devRead.then((d) => {
+      if (d !== null && built.get(mint) === b) (b.dev = d), (b.filled = pageOf(b));
+    }, () => undefined);
     return b.answer;
   }, {
     revalidate: true,
