@@ -1769,17 +1769,6 @@ export function evmTreeSync(a: EvmSyncArgs): EvmTreeSync {
   };
 }
 
-/** p, or the signal's reason once it is aborted first (p runs on for its other callers). */
-function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (signal === undefined) return p;
-  return new Promise<T>((res, rej) => {
-    if (signal.aborted) return rej(signal.reason);
-    const off = () => rej(signal.reason);
-    signal.addEventListener("abort", off, { once: true });
-    p.then((v) => (signal.removeEventListener("abort", off), res(v)), (e: unknown) => (signal.removeEventListener("abort", off), rej(e)));
-  });
-}
-
 /**
  * The period's chain fee at its first block, its state reads first and with the fewest (card
  * evm-device-reads-need-no-old-state; review of 7fbf2af3, P2-2): a keyless operator keeps a block's state seconds
@@ -1972,9 +1961,37 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
   // period and the one before it, for a pass that crosses the turn; older ones are dropped.
   // One read per period, by its first block's hash: shared by every caller while it is in flight and kept once agreed,
   // so a read after it that lags (a retry) or a second bind asks no state again (delta review of 3e13d4e2, P3-1 and
-  // P3-6); one that fails is dropped, so the next asks again. It runs under no caller's signal (each caller stops on
-  // its own), within the reads' own bound.
-  const heldFees = new Map<bigint, { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }> }>();
+  // P3-6); one that fails is dropped, so the next asks again. It has its own stop, fired when its last waiting caller
+  // stops (delta review of 4b070771, P2: a page signed out asks no fee host after); a caller joining later keeps it
+  // alive, and a read every caller left is dropped, never kept for the next.
+  type HeldFee = { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }>; done: boolean; waiting: number; stop: AbortController };
+  const heldFees = new Map<bigint, HeldFee>();
+  /** h's answer for one caller: its stop ends its wait, and the last waiting caller's stop ends the read. */
+  const joinFee = (epochStartMs: bigint, h: HeldFee, signal?: AbortSignal): Promise<{ depth: number | null; chainFee: bigint }> => {
+    if (h.done) return h.read;
+    h.waiting++;
+    return new Promise((res, rej) => {
+      let out = false;
+      const end = (): boolean => {
+        if (out) return false;
+        out = true;
+        h.waiting--;
+        signal?.removeEventListener("abort", leave);
+        return true;
+      };
+      const leave = () => {
+        if (!end()) return;
+        if (h.waiting === 0 && !h.done) {
+          h.stop.abort(signal!.reason);
+          if (heldFees.get(epochStartMs) === h) heldFees.delete(epochStartMs);
+        }
+        rej(signal!.reason);
+      };
+      if (signal?.aborted) return leave();
+      signal?.addEventListener("abort", leave, { once: true });
+      h.read.then((v) => void (end() && res(v)), (e: unknown) => void (end() && rej(e)));
+    });
+  };
   const feeAt = (epochStartMs: bigint, signal?: AbortSignal) =>
     evmRetryLag(async () => {
       const block = await evmEpochBlock(rpcs, epochStartMs, signal, sleep);
@@ -1982,13 +1999,14 @@ export function evmPool(a: EvmPoolArgs): EvmPoolOf {
       if (h === undefined || h.hash !== block.hash) {
         // the period's fee state read while its block is fresh, straight after the block (review of 7fbf2af3, P2-2);
         // held by the block's hash (a reorg that replaced the block is another block)
-        const held: { hash: string; read: Promise<{ depth: number | null; chainFee: bigint }> } = { hash: block.hash, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, undefined, sleep) };
-        held.read.catch(() => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
+        const stop = new AbortController();
+        const held: HeldFee = { hash: block.hash, read: evmPeriodChainFee(feeRpcs, a.pin.network, pool, block, stop.signal, sleep), done: false, waiting: 0, stop };
+        held.read.then(() => void (held.done = true), () => void (heldFees.get(epochStartMs) === held && heldFees.delete(epochStartMs)));
         heldFees.set(epochStartMs, (h = held));
         const newest = [...heldFees.keys()].reduce((x, y) => (y > x ? y : x));
         for (const e of heldFees.keys()) if (e < newest - EVM_EPOCH_MS) heldFees.delete(e);
       }
-      const { depth, chainFee } = await untilAborted(h.read, signal);
+      const { depth, chainFee } = await joinFee(epochStartMs, h, signal);
       // the depth on the block's own chain from the pool's logs (depthAt refuses, a retry, when that block is no longer
       // at its height), never from state; where the fee is of the depth (Base: G(depth)) the state's must be the same
       const logs = await sync.depthAt(block.number, signal, block.hash);

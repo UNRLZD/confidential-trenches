@@ -916,24 +916,95 @@ test("a fee read that lags is dropped, so the retry reads it again; a caller tha
     await p.holdFee(EPOCH);
     assert.ok(waits.includes(EVM_LAG_WAIT_MS), "a retry");
   }
-  // the hold's caller stops while the read is in flight: it ends at once; a bind sharing the read binds on it
+});
+
+// delta review of 4b070771, P2: the shared fee read stops when its last waiting caller stops, so a page signed out asks
+// no fee host after; a caller still waiting keeps it alive, and a read every caller left is dropped, never kept
+/** Fee seats whose every request is logged as it begins, and whose currentTreeSize() at a block waits for `free()`. */
+function sizeGated(c: Chain) {
+  const begun: string[] = [];
+  let free: () => void = () => {};
+  const gate = new Promise<void>((r) => (free = r));
+  const seats = freshOnly(c, 100, []).map((r) => Object.assign(async (m: string, q: readonly unknown[]) => {
+    begun.push(`${(r as { url?: string }).url} ${m} ${JSON.stringify(q)}`);
+    if (m === "eth_call" && JSON.stringify(q).includes(sel("currentTreeSize()"))) await gate;
+    return r(m, q);
+  }, { url: (r as { url?: string }).url }));
+  return { seats, begun, free: () => free() };
+}
+test("the period's fee read stops with its last caller: none begun after a lone caller's stop, the other caller's read lives, none after both stop", async () => {
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  // a lone caller stops while the size read is out: no request begun after the stop
   {
     const c = { ...CB(), head: 31 };
-    const log: string[] = [];
-    let free: () => void = () => {};
-    const gate = new Promise<void>((r) => (free = r));
-    const gated = (r: EvmRpc): EvmRpc => Object.assign(async (m: string, q: readonly unknown[]) => (m === "eth_call" && JSON.stringify(q).includes("0x420000000000000000000000000000000000000f") ? (await gate, r(m, q)) : r(m, q)), { url: (r as { url?: string }).url });
-    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: freshOnly(c, 100, log).map(gated), relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const g = sizeGated(c);
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: g.seats, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const stop = new AbortController();
+    const hold = p.holdFee(EPOCH, stop.signal);
+    await settle();
+    assert.ok(g.begun.some((x) => x.includes(sel("currentTreeSize()"))), "the size read is out");
+    const at = g.begun.length;
+    stop.abort(new Error("signed out"));
+    await assert.rejects(hold, /signed out/);
+    g.free();
+    await settle();
+    assert.deepEqual(g.begun.slice(at), [], "no request after the stop");
+    // dropped, not kept: the next caller reads again, and binds
+    await p.holdFee(EPOCH);
+    assert.ok(g.begun.length > at);
+  }
+  // two callers, one stops: the other binds on the same read, which lives
+  {
+    const c = { ...CB(), head: 31 };
+    const g = sizeGated(c);
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: g.seats, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
     const stop = new AbortController();
     const hold = p.holdFee(EPOCH, stop.signal);
     const bind = p.bind(bindArgs());
-    await new Promise((r) => setTimeout(r, 30));
+    await settle();
     stop.abort(new Error("signed out"));
     await assert.rejects(hold, /signed out/);
-    free();
-    await bind;
-    assert.equal(feeCalls(log), 4, "one read, finished for the bind");
+    g.free();
+    const b = await bind;
+    assert.ok(b.feeCap > 0n, "the other caller bound");
+    assert.equal(g.begun.filter((x) => x.includes(sel("currentTreeSize()"))).length, 2, "one read: the size on two operators, once");
   }
+  // both stop: no request begun after the second stop
+  {
+    const c = { ...CB(), head: 31 };
+    const g = sizeGated(c);
+    const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: g.seats, relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async () => undefined });
+    const s1 = new AbortController(), s2 = new AbortController();
+    const one = p.holdFee(EPOCH, s1.signal), two = p.bind(bindArgs(), s2.signal);
+    await settle();
+    s1.abort(new Error("signed out 1"));
+    await assert.rejects(one, /signed out 1/);
+    const at = g.begun.length;
+    s2.abort(new Error("signed out 2"));
+    await assert.rejects(two, /signed out 2/);
+    // the stopped read is dropped at once: a caller after it, while that read's last call is still out, reads anew
+    const three = p.holdFee(EPOCH);
+    await settle();
+    const after = g.begun.slice(at);
+    g.free();
+    await three;
+    assert.ok(after.every((x) => !x.includes("0x420000000000000000000000000000000000000f")), "the stopped read asked no fee host after the last stop");
+    assert.ok(after.some((x) => x.includes(sel("currentTreeSize()"))), "the third caller's own read");
+  }
+});
+
+// delta review of 4b070771, P3-2: the size read is a lag (a retry) only when every operator's answer was one; a lag
+// beside another refusal (here an HTTP 500) is that refusal, never retried
+test("the pool's size read: a lag beside another refusal is no retry", async () => {
+  const c = { ...CB(), head: 31 };
+  const lagging = rpc(c, { url: "https://robinhood.drpc.org", call: (data) => { if (data.startsWith(`0x${sel("currentTreeSize()")}`)) throw new Error(UNKNOWN_STATE); } });
+  const answering = rpc(c, { url: "https://robinhood.api.pocket.network" });
+  const failing = rpc(c, { url: "https://robinhood-rpc.publicnode.com", call: (data) => { if (data.startsWith(`0x${sel("currentTreeSize()")}`)) throw new Error("HTTP 500: internal error"); } });
+  const waits: number[] = [];
+  // side 0 walks drpc.org (a lag), then publicnode.com (the HTTP 500): its refusal holds both
+  const p = evmPool({ pin: PIN, rpcs: pair(c, c), feeRpcs: [lagging, answering, failing], relayFee: async () => answer(), epochFee: feeRule([]), salt: () => new Uint8Array(16), sleep: async (ms: number) => void waits.push(ms) });
+  await assert.rejects(p.holdFee(EPOCH), (e: Error) => e.name !== "EvmLagError" && /HTTP 500/.test(e.message));
+  assert.ok(!waits.includes(EVM_LAG_WAIT_MS), "no lag retry");
 });
 
 // delta review of 3e13d4e2, P3-5: the pool's size at the block is two operators' word, and it is the logs' depth
