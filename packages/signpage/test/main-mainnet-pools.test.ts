@@ -350,3 +350,25 @@ test("pool.address's quote reads the price for the origin asked (main.ts pricedF
   assert.equal(other.error?.code, "not_allowed", JSON.stringify(other));
   assert.deepEqual(calls.slice(from).filter((c) => c.url.includes("/oneclick/")), [], "no quote asked for an unpriced origin");
 });
+
+test("review of d5699312: on the mainnet build pool.address gives no Base or Robinhood U_X (the pools are pinned, but a deposit there has no carry into the pool nor a way out yet): refused not_allowed, as Solana's is answered", async () => {
+  const ask = async (data: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: { code: string } }> => {
+    const id = crypto.randomUUID();
+    const e = new Event("message");
+    Object.defineProperties(e, { origin: { value: APP_ORIGIN }, source: { value: frameWindow }, data: { value: { v: 1, id, type: "pool.address", ...data } } });
+    win.dispatchEvent(e);
+    for (let t = 0; t < 1500; t++) {
+      const a = posted.find((m) => m.id === id);
+      if (a) return a;
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    throw new Error("no answer to pool.address");
+  };
+  let named: { ok?: boolean } = {};
+  for (let t = 0; t < 50 && !named.ok; t++) named = await ask({ chain: "solana" });
+  assert.equal(named.ok, true, JSON.stringify(named));
+  for (const chain of ["base", "robinhood"]) {
+    const got = await ask({ chain });
+    assert.equal(got.error?.code, "not_allowed", `${chain}: ${JSON.stringify(got)}`);
+  }
+});

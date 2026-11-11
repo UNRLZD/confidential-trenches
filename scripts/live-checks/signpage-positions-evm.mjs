@@ -14,9 +14,9 @@
 // and on SIGN_HOST:
 //   4. the served /app.js is the one its index.html pins; it carries the state read that joins each EVM chain's
 //      positions after Solana's (JOIN), so a deploy that drops it serves a page whose Base and Robinhood positions are
-//      never read; and, as the mainnet build pins no EVM pool, it carries no EVM positions pass (its agreed balance's
-//      refusal, PASS_MARK, is left out of the bundle with the pass: POOL_TESTNET is a build constant). When mainnet
-//      EVM pools are pinned, the card that pins them turns this part over, as it does signpage-evm-pool-buy's.
+//      never read; and, as the mainnet build pins both EVM pools (card evm-pools-on-mainnet, which turned this part
+//      over), it carries the EVM positions pass (its agreed balance's refusal, PASS_MARK), so a deploy that leaves the
+//      pass out serves a page that never shows a Base or Robinhood position.
 // What it cannot see from outside: the page's state itself. It needs the run's seed, which a runner never holds; the
 // positions after the buy and after the sell are the run's (its out record) and the card's tests hold the pass
 // (packages/signpage/test/positions-evm.test.ts).
@@ -112,7 +112,7 @@ export function judge(rec) {
   const p = rec.page;
   say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no pin"}`);
   say(p?.marks?.join >= 1, `[SIGN_HOST] /app.js joins each EVM chain's positions into the state read (join ${p?.marks?.join ?? "?"})`);
-  say(p?.marks?.pass === 0, `[SIGN_HOST] the mainnet build carries no EVM positions pass (no pinned mainnet EVM pool; pass ${p?.marks?.pass ?? "?"})`);
+  say(p?.marks?.pass >= 1, `[SIGN_HOST] the mainnet build carries the EVM positions pass (both mainnet EVM pools pinned; pass ${p?.marks?.pass ?? "?"})`);
   if (blocks.buy[0] && blocks.sell[0]) say(BigInt(blocks.sell[0]) > BigInt(blocks.buy[0]), `[sell] after the buy: block ${BigInt(blocks.sell[0])} > ${BigInt(blocks.buy[0])}`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };

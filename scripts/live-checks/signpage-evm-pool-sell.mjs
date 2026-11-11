@@ -10,10 +10,11 @@
 //      with a sale that is not one (the selector alone, no authorization) for each testnet pool, refuses it bad_shape
 //      before any send and echoes SIGN_HOST in Access-Control-Allow-Origin;
 //   3. SIGN_HOST's served /app.js is the one its index.html pins, and it is the mainnet build with no EVM sell in it
-//      (no "owed/sell-evm", the open sale's key; no "nonce()", its read of W's SellDelegate nonce): the mainnet build pins no EVM
-//      pool, so pool.sell on Base or Robinhood is refused not_allowed there (packages/signpage/test/pool-network.test.ts)
-//      and the sell code is left out of it (POOL_TESTNET is a build constant). The card that pins mainnet EVM pools
-//      turns this part over.
+//      (no "nonce()", its read of W's SellDelegate nonce): the mainnet build pins both EVM pools (card
+//      evm-pools-on-mainnet) but keeps the sale closed there until a restored device has buy records to sell from, so
+//      pool.sell on Base or Robinhood is refused not_allowed before any read (packages/signpage/test/
+//      pool-mainnet-evm.test.ts) and the sell code is left out of it (POOL_TESTNET is a build constant). The open sales'
+//      and the buy records' keys are no marks: the positions pass, open on mainnet, reads both.
 // RPCS, CHAIN_IDS, DEPOSITED, SELL_SELECTOR and SELL_PINS are this file's own (it reaches no package code:
 // check:imports holds it); packages/signpage/test/pool-sell-evm.test.ts holds each equal to the page's own.
 // After: sign
@@ -43,10 +44,10 @@ export const SELL_PINS = Object.freeze({
   "base-sepolia": Object.freeze({ sellDelegate: "0x7a034461193cc6b1a7d5d0f5fe4a36b34e7ebc12", sellSender: "0xd378cda68babba6a9dc1d52335bb76ca9e6a7553" }),
   "robinhood-testnet": Object.freeze({ sellDelegate: "0xcec6c1b18be682cfa1679568eab309db79fe3cce", sellSender: "0xd12d83097671d731df2db731e973ad9a07673607" }),
 });
-/** Strings only the EVM sell's code carries in a bundle (src/pool-sell-evm.ts: the open sale's key, the SellDelegate
- *  nonce() call it reads on W; src/pool-buy-evm.ts: the buy records' key, which the testnet restore writes and the
- *  sale reads). The helper's route table names /v1/pool/evm/sell in every build, so it is no mark. */
-export const EVM_SELL_MARKS = Object.freeze(["owed/sell-evm", "nonce()", "owed/cost-evm"]);
+/** Strings only the EVM sell's code carries in a bundle (src/pool-sell-evm.ts: the SellDelegate nonce() call it reads
+ *  on W). The helper's route table names /v1/pool/evm/sell in every build, and the positions pass reads the open
+ *  sales' and the buy records' keys (owed/sell-evm, owed/cost-evm), so none of them is a mark. */
+export const EVM_SELL_MARKS = Object.freeze(["nonce()"]);
 const RECORD = new URL("./signpage-evm-pool-sell.md", import.meta.url);
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 const lower = (s) => (typeof s === "string" ? s.toLowerCase() : null);
@@ -120,7 +121,7 @@ export function judge(run) {
   }
   const p = run.page;
   say(typeof p?.pin === "string" && p.pin === p.sha384, `[SIGN_HOST] the served /app.js is the one index.html pins: ${p?.pin ?? "no pin"}`);
-  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM sell (no pinned mainnet EVM pool): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
+  say(Array.isArray(p?.marks) && p.marks.length === 0, `[SIGN_HOST] the mainnet build carries no EVM sell (closed on mainnet: refused before any read): ${Array.isArray(p?.marks) ? p.marks.join(", ") || "none" : "not read"}`);
   const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
   return { ok: verdict === "PASS", verdict, lines };
 }

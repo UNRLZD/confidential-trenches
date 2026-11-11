@@ -822,6 +822,23 @@ test("planted: a U_X under one deposit's floor (the rent a carried U_X keeps) is
   assert.deepEqual(v.steps, [{ retry: [], held: [], named: [], tries: 1, last: true }]);
 });
 
+test("review of d5699312 P2: a chain this build gives no deposit address on is no stall reason: a Solana-only restore walking an EVM pool too ends as it does with the Solana pool alone, its ids unread", async () => {
+  // the mainnet build: Solana's U_X read, Base's pool pinned and walked but given no deposit address (main.ts
+  // pagePoolScopes), so its ids and U_X hold nothing a restore could miss
+  const solOnly = uxOf(new Map());
+  const alone = await world({ pools: () => SOL_ONLY, solana: emptyWalk, ids: nearOf().ids, ux: () => solOnly.reads });
+  assert.equal(await whole(alone), "done");
+  const ux = uxOf(new Map());
+  const n = nearOf();
+  const both = await world({ solana: emptyWalk, evm: emptyWalk, ids: n.ids, ux: (chain) => (chain === "solana" ? ux.reads : null), addressed: (chain) => chain === "solana" });
+  assert.equal(await whole(both), "done");
+  assert.deepEqual(both.ends, alone.ends);
+  assert.deepEqual(both.steps, alone.steps);
+  assert.deepEqual(both.ends, [{ stage: "done", why: [] }]);
+  assert.equal(n.found.get(EVM_SCOPE), undefined, "no id of the EVM scope read");
+  assert.ok(n.found.get(SOL_SCOPE) !== undefined, "the Solana scope's ids read");
+});
+
 test("planted: the U_X reads are keyed by the pool's chain from its pin: an EVM pool reads U^evm_{s,i}'s address, a chain with none names U_X unread", async () => {
   const ux = uxOf(new Map());
   const chains: string[] = [];

@@ -1,8 +1,7 @@
 // SIGN_HOST's build on Base and Robinhood (card evm-pools-on-mainnet): the wallet's mainnet EVM pins (EVM_POOLS.base,
-// EVM_POOLS.robinhood) turn on pool.deposit, pool.buy and pool.sell there, on those pins, and the page's USD price pair
-// (the pool list's two seats). A sale's finding reads, on the pool's two RPCs, only the Ws whose own buy record names
-// the token sold (planEvmSell). The chains' positions read each W on the helper's route alone (pageEvmPassReads), so a
-// public provider is never named one device's Ws together; the last test drives both through the page.
+// EVM_POOLS.robinhood), the page's USD price pair (the pool list's two seats) and the chains' positions, which read
+// each W on the helper's route alone (pageEvmPassReads), so a public provider is never named one device's Ws. pool.deposit,
+// pool.buy, pool.sell, pool.withdraw and the buy's and sale's follows stay refused there, each read nothing.
 //   node --test test/pool-mainnet-evm.test.ts      (from packages/signpage)
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -86,52 +85,114 @@ test("a Base and a Robinhood pool.sell read the token's decimals on the chain's 
   assert.ok(calls.length > 0 && calls.every((c) => String(c.to ?? TOKEN).toLowerCase() === TOKEN.toLowerCase()), "only the token is read, never a W");
 });
 
-test("a Base and a Robinhood pool.deposit reach the EVM deposit runner on the mainnet pin (an empty U answered not_funded)", async () => {
+// Closed on SIGN_HOST's build until what each needs exists (review of d5699312): a buy whose swap misses its floor
+// leaves the chunk on W with no way back yet, a restored device has no buy record to sell from, and a pool deposit has
+// no way out (no EVM withdraw, no exit tool). Each kind and both follows refuse on both chains, and read nothing.
+test("on SIGN_HOST's build a Base and a Robinhood pool.deposit, pool.buy, pool.sell and pool.withdraw are refused not_allowed, a deposit from U too, and none reads the chain or reaches its runner", async () => {
+  const WITHDRAW: Ask = { kind: "pool.withdraw", chain: "base", token: null, amount: 10n ** 15n, slippageBps: 0, decimals: 18 };
   for (const chain of ["base", "robinhood"] as const) {
     const r = rpcs();
-    const pins: unknown[] = [];
-    const flow = testnetPool(page(), { evmRpcs: () => r.pair, evmRound: (p) => (pins.push(p), async () => ({ events: [], finalBlock: 100n })) }).flow;
-    const run = flow({ ...DEPOSIT, chain }, ctx) as { running: true; after: Promise<void>; answer(): unknown };
-    assert.equal(run.running, true, `${chain}: a run of the runner`);
-    await run.after;
-    assert.deepEqual(run.answer(), { error: "not_funded" });
-    assert.ok(pins.length > 0 && pins.every((p) => p === EVM_POOLS[chain]), `${chain}: the run's pool is EVM_POOLS.${chain}`);
-    assert.ok(r.calls.includes("eth_getBalance"), `${chain}: U read`);
+    const ran: string[] = [];
+    const withdrawn: string[] = [];
+    const t = testnetPool({ ...page(), openWithdraw: (c) => (withdrawn.push(c), { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent" } }) }) as never }, {
+      evmRpcs: () => r.pair,
+      evmRound: () => async () => (ran.push("round"), { events: [], finalBlock: 100n }),
+      evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+      tradeKinds: {
+        evmBuy: () => () => (ran.push("buy"), { error: "not_allowed" }),
+        evmSell: () => () => (ran.push("sell"), { error: "not_allowed" }),
+      },
+    });
+    for (const ask of [DEPOSIT, BUY, SELL, { ...SELL, amount: 0n, shareBps: 2_500 }, WITHDRAW] as Ask[]) {
+      assert.deepEqual(t.flow({ ...ask, chain }, ctx), { error: "not_allowed" }, `${chain}: ${ask.kind} refused`);
+    }
+    assert.deepEqual(t.depositFrom({ chain, token: null, amount: "0.001", slippage_bps: 0 }, { s: "1", i: 0 } as never, ctx), { error: "not_allowed" }, `${chain}: a deposit from U refused`);
+    assert.deepEqual(ran, [], `${chain}: no runner reached`);
+    assert.deepEqual(withdrawn, [], `${chain}: the withdraw form is not opened`);
+    assert.deepEqual(r.calls, [], `${chain}: nothing read`);
+    await t.signedOut();
   }
 });
 
-test("a Base and a Robinhood pool.buy and pool.sell reach the EVM buy and sell on the mainnet pin", async () => {
+test("on SIGN_HOST's build a state read follows no Base or Robinhood buy left pending, nor a sale left open: neither follow reads the chain", async () => {
+  const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+  const { EVM_OPEN_SELLS_KEY } = await import("../src/pool-sell-evm.ts");
   for (const chain of ["base", "robinhood"] as const) {
-    const r = rpcs();
-    const bought: string[] = [];
-    let sold = 0;
-    const t = testnetPool(page(), {
-      evmRpcs: () => r.pair,
-      evmSync: () => ({ events: async () => assert.fail("no sync read") }),
-      tradeKinds: {
-        evmBuy: (host) => () => {
-          const h = host();
-          bought.push(`${h.chain} ${h.pin.network} ${h.pin.pool}`);
-          h.end?.();
-          return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
-        },
-        evmSell: (host) => () => {
-          const h = host();
-          sold++;
-          assert.equal(h.pin, EVM_POOLS[chain], `${chain}: the sale's pool is the mainnet pin`);
-          return { running: true, after: Promise.resolve(), answer: () => ({ result: { stage: "sent", txs: [] } }) };
-        },
-      },
+    const pin = EVM_POOLS[chain]!;
+    const from = pin.fromBlock.toString();
+    const w = await openWalletStore({ indexedDB: new IDBFactory() });
+    stores.push(w);
+    await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+    const W = "0x" + "4b".repeat(20);
+    const buy = { nullifier: "123", from, deadlineMs: String(Date.now() + 60_000), minOut: "1", value: "1000", feeCap: "1", feeRecipient: pin.feeRecipient.toLowerCase() };
+    await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: TOKEN.toLowerCase(), decimals: 6, chain, state: "pending", route: { venue: "uniswap-v3", adapter: "0x" + "22".repeat(20), path: { venue: "uniswap-v3", tokens: [], fees: [] } }, buy } }));
+    await w.update("meta", EVM_OPEN_SELLS_KEY, () => ({ n1: { note: "n1", chain, w: W, token: TOKEN.toLowerCase(), amount: "1", precommitment: "7", nonce: "0", deadline: String(Math.floor(Date.now() / 1000) + 300), from, least: "1" } }));
+    const asked: string[] = [];
+    const head = (url: string): EvmRpc => Object.assign(async (method: string) => {
+      asked.push(method);
+      if (method === "eth_blockNumber") return "0x" + (pin.fromBlock + 1_000n).toString(16);
+      throw new Error(`unmocked ${method}`);
+    }, { url });
+    const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED.slice() }, {
+      evmRpcs: (c) => (c === chain ? [head("https://a.example"), head("https://b.example")] : null),
+      evmSync: () => ({ events: async () => ({ events: [], fin: { number: 0n } }) as never }),
     });
-    const got = t.flow({ ...BUY, chain }, ctx);
-    assert.ok("after" in got, `${chain}: the buy runs`);
-    await got.after;
-    assert.deepEqual(bought, [`${chain} ${chain} ${EVM_POOLS[chain]!.pool}`], `${chain}: on the mainnet pin`);
-    const sale = t.flow({ ...SELL, chain }, ctx);
-    assert.ok("after" in sale, `${chain}: the sell runs`);
-    await sale.after;
-    assert.equal(sold, 1, `${chain}: the EVM sell ran`);
+    await t.stateRead();
+    await new Promise((ok) => setTimeout(ok, 50));
+    assert.deepEqual(asked.filter((m) => m === "eth_blockNumber"), [], `${chain}: no follow read either RPC's head`);
     await t.signedOut();
+  }
+});
+
+test("on SIGN_HOST's build a chain whose pool list is not exactly two providers shows no positions and reads nothing for them", async () => {
+  const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
+  const { noteCommitment, noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
+  const { evmPoolScopeOf, EVM_CHAIN_IDS } = await import("../../wallet/src/pool/evm.ts");
+  const { vaultLabelOf } = await import("../../kit/src/vault/shapes.ts");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const pin = EVM_POOLS.base!;
+  const scope = evmPoolScopeOf(pin.pool.toLowerCase(), EVM_CHAIN_IDS.base);
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  stores.push(w);
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  const ns = await openNoteStore(w);
+  const ref = { kind: "deposit" as const, s: scope, i: 0 };
+  const l = vaultLabelOf(keccak_256, scope, 1n);
+  const pre = noteSecrets(SEED, ref).precommitment;
+  const n = await ns.add({ ref, scope, precommitment: pre, state: "UNSPENT", leaf: { value: 10n ** 15n, label: l, commitment: noteCommitment(10n ** 15n, l, pre), leafIndex: 0n } });
+  await ns.move(n.id, "UNSPENT", "SPENT");
+  ns.close();
+  // W's filled buy, as the positions pass reads it (its record names the token)
+  const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
+  const { freshWallet } = await import("../../wallet/src/derive/keys.ts");
+  const { jOf } = await import("../../wallet/src/pool/queue.ts");
+  const k = freshWallet(SEED, "evm", l, jOf(ref));
+  k.secretKey.fill(0);
+  const W = k.address.toLowerCase();
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W]: { mint: TOKEN.toLowerCase(), decimals: 6, chain: "base", state: "filled", received: "1", route: { venue: "uniswap-v3", adapter: "0x" + "ad".repeat(20), path: { kind: "v3", fee: 500 }, tx: "0x" + "11".repeat(32), block: "90" } } }));
+  const asked: string[] = [];
+  const any = (url: string): EvmRpc => Object.assign(async (method: string) => (asked.push(`${url} ${method}`), method === "eth_blockNumber" ? "0x64" : { number: "0x64", hash: "0x" + "4b".repeat(32) }), { url });
+  const fetched: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => (fetched.push(String(input instanceof Request ? input.url : input)), new Response("{}", { status: 429 }))) as typeof fetch;
+  try {
+    for (const list of [[any("https://a.example")], [any("https://a.example"), any("https://b.example"), any("https://c.example")]]) {
+      const timers: (() => void)[] = [];
+      const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED.slice() }, {
+        evmRpcs: (chain) => (chain === "base" ? list : null),
+        evmSync: () => ({ events: async () => ({ events: [], fin: { number: 0n } }) as never }),
+        positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} },
+      });
+      for (let i = 0; i < 10; i++) {
+        assert.deepEqual(((await t.positions()) ?? []).filter((p) => p.chain === "base"), [], `${list.length} providers: no row`);
+        for (const f of timers.splice(0)) f();
+        await new Promise((ok) => setTimeout(ok, 10));
+      }
+      assert.deepEqual([...asked, ...fetched].filter((x) => !x.endsWith("eth_getLogs")), [], `${list.length} providers: no positions read`);
+      await t.signedOut();
+    }
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });
 
@@ -139,9 +200,8 @@ test("a Base and a Robinhood pool.buy and pool.sell reach the EVM buy and sell o
 // in the positions pass names every W to the public pair, and no lower-level test sees it). Three Ws of one device on
 // Base: W1 and W2 bought TOKEN, W3 another token. The public pair answers the chain; the helper's route (POST
 // TRADE_HELPER/v1/rpc/base, through a stubbed fetch) answers four times W1's and W2's amounts.
-test("on SIGN_HOST's build the page's positions name Ws only to the helper, a share sale reads only its token's Ws on the public pair and sizes on the pair's total, and a helper 429 keeps the last amounts", async () => {
+test("on SIGN_HOST's build the page's positions name Ws only to the helper, a share sale is refused and names none, and a helper 429 keeps the last amounts", async () => {
   const { EVM_POSITION_COSTS_KEY } = await import("../src/pool-buy-evm.ts");
-  const { planEvmSell } = await import("../src/pool-sell-evm.ts");
   const { TRADE_HELPER } = await import("../src/trade.ts");
   const { openNoteStore } = await import("../../wallet/src/notes/store.ts");
   const { noteCommitment, noteSecrets } = await import("../../wallet/src/notes/secrets.ts");
@@ -214,16 +274,13 @@ test("on SIGN_HOST's build the page's positions name Ws only to the helper, a sh
   }) as typeof fetch;
   try {
     const timers: (() => void)[] = [];
-    let plan: Awaited<ReturnType<typeof planEvmSell>> | null = null;
+    let sold = 0;
     const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED.slice() }, {
       evmRpcs: (chain) => (chain === "base" ? pair : null),
       evmSync: () => ({ events: async () => assert.fail("no sync read") }),
       positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} },
       tradeKinds: {
-        evmSell: (host) => () => {
-          const after = (async () => void (plan = await planEvmSell(host(), { ...SELL, amount: 0n, shareBps: 2_500 })))();
-          return { running: true, after, answer: () => ({ result: { stage: "sent", txs: [] } }) };
-        },
+        evmSell: () => () => (sold++, { error: "not_allowed" }),
       },
     });
     const rowsOf = async () => ((await t.positions()) ?? []).filter((p) => p.chain === "base").map((p) => `${p.token.toLowerCase()} ${p.amount}`).sort();
@@ -239,17 +296,13 @@ test("on SIGN_HOST's build the page's positions name Ws only to the helper, a sh
     // (a) the positions named every W to the helper, none to the public pair
     assert.deepEqual([...new Set(helperNamed)].sort(), [...ws].sort());
     assert.equal(publicNamed.length, 0, `the positions named no W to a public provider: ${JSON.stringify(publicNamed)}`);
-    // a share sale: its finding on the public pair, its token's Ws only, sized on the pair's agreed total
+    // a share sale: refused on this build before any read (the sale reaches no runner, names no W anywhere)
     phase = "sale";
-    const sale = t.flow({ ...SELL, amount: 0n, shareBps: 2_500 }, ctx);
-    assert.ok("after" in sale);
-    await sale.after;
-    assert.ok(plan !== null && "legs" in plan!, JSON.stringify(plan, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
-    const p = plan as unknown as { units: bigint; total: bigint };
-    // (b) the pair's total is 4.0; 25 % of it, never of the helper's 16.0
-    assert.equal(p.total, 4_000_000n);
-    assert.ok(p.units <= (p.total * 2_500n) / 10_000n && p.units === 1_000_000n, String(p.units));
-    assert.deepEqual([...new Set(publicNamed.map((x) => `${x.phase} ${x.w} ${x.to}`))].sort(), [W1, W2].map((x) => `sale ${x} ${TOKEN.toLowerCase()}`).sort(), "the sale named only its token's Ws, at the token");
+    const before = helperNamed.length;
+    assert.deepEqual(t.flow({ ...SELL, amount: 0n, shareBps: 2_500 }, ctx), { error: "not_allowed" });
+    assert.equal(sold, 0);
+    assert.equal(helperNamed.length, before, "the refused sale named no W to the helper");
+    assert.deepEqual(publicNamed, [], "the refused sale named no W to a public provider");
     // (c) a helper 429: the next passes keep the last amounts (no row lost, never a failure)
     helperDown = true;
     t.evmHoldingsRestored("base");
@@ -259,7 +312,7 @@ test("on SIGN_HOST's build the page's positions name Ws only to the helper, a sh
       assert.deepEqual(await rowsOf(), rows, `pass ${i}: the last amounts kept`);
     }
     assert.ok(throttled > 0, "the passes met the helper's 429");
-    assert.ok(publicNamed.every((x) => x.phase === "sale"), "a helper 429 never sends a W's read to a public provider");
+    assert.deepEqual(publicNamed, [], "a helper 429 never sends a W's read to a public provider");
     await t.signedOut();
   } finally {
     globalThis.fetch = realFetch;

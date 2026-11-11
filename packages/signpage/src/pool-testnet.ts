@@ -826,7 +826,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       };
     });
   };
-  const evmDeposit = (chain: "base" | "robinhood") => evmKind(chain);
+  // the kit-call deposit: the testnet build only, folded at build time. On mainnet a pool deposit has no way out yet (no
+  // EVM withdraw, no exit tool), so it stays closed there as the deposit-address path is (main.ts); the RESERVED
+  // settle above is a deposit's own end and stays on every pinned network
+  const evmDeposit = (chain: "base" | "robinhood") => (POOL_TESTNET ? evmKind(chain) : null);
   // pool.buy on an EVM chain (card signpage-evm-pool-buy, src/pool-buy-evm.ts): the chain's queue, the kit's quote and
   // build, the helper's send, the deposit's pair for the read-back, and the chain's RESERVED settle; on each build whose
   // network pins the chain's pool (card evm-pools-on-mainnet: SIGN_HOST's too). The buy names no W to a pool RPC
@@ -863,6 +866,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     stopped: ((at) => () => signOuts !== at)(signOuts),
   });
   const evmBuy = (chain: "base" | "robinhood") => {
+    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the buy. On
+    // mainnet a swap that misses its floor leaves the chunk on W with no way back yet, so the buy stays closed there
+    if (!POOL_TESTNET) return null;
     const e = evmPool(chain);
     if (e === null) return null;
     // the buy holds the list's hosts from its run's start to its end: the passes' reads wait, the buy's own go first
@@ -907,6 +913,8 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // a buy whose tab ended before its end (the pending record's own follow died with it): followed from its record at
   // each state read, until filled, withdrawn or not_landed (src/pool-buy-evm.ts followPendingEvmBuys); as the buy is
   const evmBuyFollow = (chain: "base" | "robinhood"): void => {
+    // the testnet build only, as the buy (folded at build time)
+    if (!POOL_TESTNET) return;
     const e = evmPool(chain);
     if (e === null) return;
     void followPendingEvmBuys(evmBuyHost(chain, e.pin, e.rpcs, evmBuyClaims, evmBuyPage(chain))).catch(() => {});
@@ -991,14 +999,18 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     };
   };
   const evmSell = (chain: "base" | "robinhood") => {
-    // on each build whose network pins the chain's pool (card evm-pools-on-mainnet): the sale's finding reads, on the
-    // pool's two RPCs at one agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
+    // first, alone: the testnet build only, folded at build time, so SIGN_HOST's bundle carries none of the sale (on
+    // mainnet nothing can be bought, and a restored device holds no buy record to sell from). The sale's finding reads,
+    // on the pool's two RPCs at one agreed block, only the Ws whose own buy record names the token sold (planEvmSell)
+    if (!POOL_TESTNET) return null;
     const e = evmPool(chain);
     if (e === null) return null;
     return (over.tradeKinds?.evmSell ?? poolSellEvmKind)(() => evmSellOf(chain, e));
   };
   // a sale whose tab ended before its end: followed from its open record at each state read (followEvmSells)
   const evmSellFollow = (chain: "base" | "robinhood"): void => {
+    // the testnet build only, as the sale (folded at build time)
+    if (!POOL_TESTNET) return;
     const e = evmPool(chain);
     if (e === null) return;
     const h = evmSellOf(chain, e);

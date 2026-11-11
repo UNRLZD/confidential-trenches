@@ -158,6 +158,8 @@ const restore = !framed
         s?.entropy.fill(0);
         return s !== undefined;
       },
+      // a chain this build gives no deposit address on (pagePoolScopes): no U_X there to read, so no stall reason
+      addressed: (chain) => pagePoolScopes().some((p) => p.chain === chain),
       // a chain's buy records written (card signpage-positions-evm): its positions read again, with no reload; ahead of
       // `written`, whose neighbours wallet-restore-reads-ux's bundle check reads
       holdingsWritten: (chain) => testnet?.evmHoldingsRestored(chain),
@@ -778,9 +780,10 @@ function pageScope(): bigint | null {
   return vaultScope(PAGE_NETWORK);
 }
 // each pool the network pins is named the same way, under its own scope (card pool-deposit-address): pool.address
-// answers its U_X from that record
+// answers its U_X from that record. On mainnet, Solana's alone: a Base or Robinhood pool there has no carry from U_X
+// into the pool nor a way out of it yet, so its U_X is neither named nor given, and money sent there has no address
 function pagePoolScopes(): { chain: PoolChain; scope: bigint }[] {
-  return PAGE_POOLS.flatMap((p) => (p.chain === "near" ? [] : [{ chain: p.chain, scope: p.scope }]));
+  return PAGE_POOLS.flatMap((p) => (p.chain === "near" || (PAGE_NETWORK === "mainnet" && p.chain !== "solana") ? [] : [{ chain: p.chain, scope: p.scope }]));
 }
 const namer = depositNamer({
   top: !framed,

@@ -34,10 +34,15 @@ const TESTNET_ONLY = [
   // build (card evm-pools-on-mainnet): each testnet pool
   "0xeb967dfc1b4ffb22942f833c76866ea85fc42266", // the Base Sepolia pool
   "0xed9fac860e6bc5e932455232eedca8b71c44da4d", // the Robinhood testnet pool
+  // the EVM pool buy and sale, testnet only while mainnet keeps them closed (card evm-pools-on-mainnet, src/pool-testnet.ts)
+  "buy((address,bytes),", // the EVM pool buy's signature (src/evm-send.ts)
+  "owed/back-evm", // the EVM buy's owed-back record (src/pool-buy-evm.ts EVM_OWED_BACK_KEY)
+  "uniswap-v4", // the EVM buy's route search
+  "nonce()", // the sale's read of W's SellDelegate nonce (src/pool-sell-evm.ts)
 ];
 /** The mainnet pins (packages/wallet/src/pool/solana.ts SOL_POOLS.mainnet and SOL_MAINNET_DEPLOY, card
  *  sol-pools-mainnet-pin; packages/wallet/src/pool/evm.ts EVM_POOLS.base and .robinhood, card evm-pools-on-mainnet):
- *  the testnet build carries none of them. Since that card the EVM pool buy and sell (src/evm-send.ts) are in both. */
+ *  the testnet build carries none of them. */
 const MAINNET_ONLY = [
   // (each pool's address is also in the kit's venue table, which both builds carry: its fee recipient is the pin's own)
   "0x4611338bf66389a2d2d3e67301dbb7ac9fb1fb9d", // the Base mainnet pool's fee recipient
