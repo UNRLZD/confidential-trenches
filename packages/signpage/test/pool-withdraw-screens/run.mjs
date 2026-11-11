@@ -1,10 +1,11 @@
 // node packages/signpage/test/pool-withdraw-screens/run.mjs [--shots <dir>]: the pool withdraw screen's states at 390 and
-// 1440 wide, on Solana and on Base, in headless Chrome under SIGN_HOST's own content security policy (public/_headers,
+// 1440 wide, on Solana and on Base, in the sheet it opens in over the app (src/sheet.ts), in headless Chrome under SIGN_HOST's own content security policy (public/_headers,
 // the /* rule), card withdraw-form-shows-what-you-can-send: empty, typing (a half address, before the idle check),
 // refused To (Invalid address), refused amount (Insufficient: 0.1 SOL against a 0.05 SOL deposit), both refused, and
 // ready by a tap on what can be sent, then the press. The page is test/pool-withdraw-screens/entry.ts, bundled by Vite as
 // the page's own build bundles src/main.ts, served with no network; the page's clock is the test's, so each state is the
-// one named. For each state it checks the form's data-state and lines, and on every state: the chain's mark loaded and
+// one named. For each state it checks the form's data-state and lines, Withdraw offered and drawn as the paper button
+// only when ready, and on every state: the chain's mark loaded and
 // its name, the asset's symbol at the amount, what can be sent drawn as its value (at least 44 px tall at 390), no
 // page wider than the window, no policy violation, no page error. PASS exit 0, FAIL exit 1.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -101,14 +102,15 @@ for (const chain of ["solana", "base"]) {
           mark: mark?.dataset.mark ?? null, loaded: !!img && img.complete && img.naturalWidth > 0, name: mark?.textContent ?? null,
           symbol: symbol?.textContent ?? null, can: can.parentElement.hidden ? null : can.textContent, canValue: can.dataset.value, canH: box.height, canW: box.width,
           wide: document.scrollingElement.scrollWidth > window.innerWidth, go: f.querySelector('[data-action="withdraw"]').disabled,
+          goPaper: getComputedStyle(f.querySelector('[data-action="withdraw"]')).backgroundColor === "rgb(244, 244, 242)",
         };
       });
       const lineOk = (k) => (want[k] ? got[k]?.[0] === want[k][0] && got[k]?.[1] === want[k][1] : got[k] === null);
       const shownOk = want.lines ? got.shown.to === want.lines.to && got.amountValue === c.can.split(" ")[0] : Object.keys(got.shown).length === 0;
       const drawnOk = got.mark === chain && got.loaded && got.name === c.name && got.symbol === c.symbol && got.can === c.can && got.canValue === c.sendable
         && (width > 400 || got.canH >= 44) && got.canW >= 44 && !got.wide;
-      const ok = got.state === want.state && lineOk("to") && lineOk("amount") && shownOk && drawnOk && got.go === (want.state !== "ready");
-      say(ok, `${chain} ${wname} ${name}: ${got.state}, to ${JSON.stringify(got.to)}, amount ${JSON.stringify(got.amount)}, mark ${got.mark}${got.loaded ? " loaded" : " NOT LOADED"} ${got.name}, symbol ${got.symbol}, can ${JSON.stringify(got.can)} ${Math.round(got.canW)}x${Math.round(got.canH)} px, field ${JSON.stringify(got.amountValue)}${want.lines ? `, To line ${got.shown.to}` : ""}${got.wide ? ", WIDER THAN THE WINDOW" : ""}, Withdraw ${got.go ? "off" : "on"}`);
+      const ok = got.state === want.state && lineOk("to") && lineOk("amount") && shownOk && drawnOk && got.go === (want.state !== "ready") && got.goPaper === (want.state === "ready");
+      say(ok, `${chain} ${wname} ${name}: ${got.state}, to ${JSON.stringify(got.to)}, amount ${JSON.stringify(got.amount)}, mark ${got.mark}${got.loaded ? " loaded" : " NOT LOADED"} ${got.name}, symbol ${got.symbol}, can ${JSON.stringify(got.can)} ${Math.round(got.canW)}x${Math.round(got.canH)} px, field ${JSON.stringify(got.amountValue)}${want.lines ? `, To line ${got.shown.to}` : ""}${got.wide ? ", WIDER THAN THE WINDOW" : ""}, Withdraw ${got.go ? "off" : "on"} ${got.goPaper ? "paper" : "quiet"}`);
       if (SHOTS) await page.screenshot({ path: join(SHOTS, `pool-withdraw-${chain}-${name}-${wname}.png`), fullPage: true });
     }
     // the press: checked again, then handed over once, the answer drawn

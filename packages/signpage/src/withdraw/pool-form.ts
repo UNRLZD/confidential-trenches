@@ -310,6 +310,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
     const can = funds === null ? null : poolSendable(funds);
     canRow.hidden = can === null;
     sendable.disabled = !can;
+    Object.assign(sendable.style, { opacity: can ? "" : "0.5", cursor: can ? "pointer" : "default" }); // 0: shown, not offered
     sendable.textContent = can === null ? "" : `${formatUnits(can, decimals)} ${symbol}`;
     if (can === null) delete sendable.dataset.value;
     else sendable.dataset.value = String(can);

@@ -1,7 +1,9 @@
 // The pool withdraw screen run's page (test/pool-withdraw-screens/run.mjs): the real screen (src/withdraw/pool-form.ts)
-// mounted with stub funds, on the chain the query names (?chain=solana or ?chain=base), so every state can be drawn.
+// in the real sheet it opens in over the app (src/sheet.ts drawSheet, its layer shown as the shell shows it), mounted with
+// stub funds, on the chain the query names (?chain=solana or ?chain=base), so every state can be drawn.
 // Solana: one 0.05 SOL deposit (the owner's case of 11 Nov 17:53Z) at the mainnet relay fee 1300000 and W's 5000; Base:
 // one 0.01 ETH deposit at stand-in fees. The press is handed to window.__handed.
+import { drawSheet } from "../../src/sheet.ts";
 import { drawPoolWithdrawForm, type PoolFunds, type PoolReady } from "../../src/withdraw/pool-form.ts";
 
 const FUNDS: Record<"solana" | "base", PoolFunds> = {
@@ -31,4 +33,8 @@ root.append(
     (step) => void step(),
   ),
 );
-document.body.append(root);
+Object.assign(document.body.style, { margin: "0", background: "#0a0a0a" });
+const sheet = drawSheet(document);
+document.body.append(sheet.layer);
+sheet.layer.hidden = false;
+sheet.body.append(root);
