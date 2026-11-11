@@ -42,7 +42,8 @@
 //    v3Rates, getBuyTokenAmountFromSolAmountQuote, getBuySolAmountFromTokenAmountQuote,
 //    getSellSolAmountFromTokenAmount; src/onlineSdk.ts fetchBuyState (the curve's token account under either token
 //    program); src/state.ts Global (pool_migration_fee after enable_migrate); src/fees.ts computeFeesBps, selectCurveFeeSchedule, calculateFeeTier, fee (ceil).
-//  - PumpSwap math: @pump-fun/pump-swap-sdk 2.2.0 (npm, published 2026-10-19, tarball sha256 b3afc4bc…2a57),
+//  - PumpSwap math: @pump-fun/pump-swap-sdk 2.2.0 (npm, published 2026-10-19, tarball sha256
+//    b3afc4bcb1cca18c4460c3f41c08be8022bf44b4d6f7de22fac28b7c3edf2a57; a source, not a dependency of the kit),
 //    src/sdk/buy.ts buyQuoteInput, src/sdk/sell.ts sellBaseInput and sellAmounts, src/sdk/fees.ts computeFeesBps and
 //    feesForQuoteMint, src/sdk/util.ts fee (ceil) and poolMarketCap, src/sdk/pda.ts (the PDAs below).
 import { base58, base64 } from "@scure/base";
@@ -245,13 +246,17 @@ export function solanaDecodePumpSwapPool(acc: SolanaPoolAccount): SolanaPumpSwap
   };
 }
 /** The pool's fields that move with each trade, masked before the providers' bytes are compared, each exactly one field
- * of pump-swap-sdk 2.2.0's Pool (dist/index.js, POOL_SIZE 287): virtual_quote_reserves (i128, 245..261), held instead in
- * the quote reserve's band, and protocol_fees and creator_fees (u64 each, 271..287). The SDK's README (v2 migration
- * notes): "every v2 accrual is subtracted from" virtual_quote_reserves, which the fee buckets add. Read on 11 Nov
- * 00:03-00:22Z (card solana-reference-read-holds-a-slot-apart), on three canonical pools on both public RPCs (281 pairs),
- * these were the only pool bytes that moved, between the providers or over time; in one pair, A at slot 467915586 and B
- * at 467915587 (9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump), virtual_quote_reserves read -14063185 and -14367986,
- * protocol_fees 6007858 and 6312659. */
+ * of the Pool layout in @pump-fun/pump-swap-sdk 2.2.0, the npm tarball pump-swap-sdk-2.2.0.tgz (sha256
+ * b3afc4bcb1cca18c4460c3f41c08be8022bf44b4d6f7de22fac28b7c3edf2a57, read 11 Nov; the source of the layout, not a
+ * dependency of the kit), dist/index.js: the Pool struct from line 10512 and POOL_SIZE 287 at line 11964.
+ * virtual_quote_reserves (i128, 245..261) is held instead in the quote reserve's band; protocol_fees and creator_fees
+ * (u64 each, 271..287) are each provider's own, as its read is priced on them (a sell's real quote reserve). The
+ * tarball's README.md (v2 migration notes): "every v2 accrual is subtracted from" virtual_quote_reserves, which the fee
+ * buckets add. The recorded pairs in scripts/live-checks/solana-mint-supply-moves.answers.json (good and slotApart, 40
+ * rounds, each pool read on both providers; its test reads them all) differ only inside these two masks. The one pair
+ * that moved is slotApart's round 10 (bytes 245-247 and 271-273): A at slot 467915586 and B at 467915587
+ * (9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump), virtual_quote_reserves -14063185 and -14367986, protocol_fees
+ * 6007858 and 6312659. A wider census read on 11 Nov 00:03-00:22Z, on three pools, was not kept. */
 const POOL_MOVING: readonly (readonly [number, number])[] = [[245, 261], [271, 287]];
 
 export type SolanaPumpSwapConfig = { lpFeeBps: bigint; protocolFeeBps: bigint; coinCreatorFeeBps: bigint; disableFlags: number; creatorFeeConfigurable: boolean };
@@ -451,6 +456,13 @@ type Read = { slot: number; accounts: (SolanaPoolAccount | null)[] } | null;
 
 /** A getMultipleAccounts answer for n accounts, base64; null when it is not one. */
 export function solanaParseAccountsAnswer(answer: unknown, n: number): Read {
+  try {
+    return parseAccounts(answer, n);
+  } catch {
+    return null; // a getter or a proxy trap that throws: no answer, never a throw
+  }
+}
+function parseAccounts(answer: unknown, n: number): Read {
   if (typeof answer !== "object" || answer === null || Array.isArray(answer)) return null;
   const slot = (answer as { context?: { slot?: unknown } }).context?.slot;
   const value = (answer as { value?: unknown }).value;
@@ -518,7 +530,13 @@ const PROVIDER = ["provider A", "provider B"] as const;
 /** A failed call's fault in fixed words: its HTTP status, its JSON-RPC error code or its timeout, never the error's own
  *  text, which can carry a provider's URL and key (a reason reaches the caller and the live check's public log). */
 export function solanaCallFault(e: unknown): string {
-  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  let m: unknown;
+  try {
+    m = e instanceof Error ? e.message : e;
+  } catch {
+    return "the call failed"; // a getter or a proxy trap that throws: nothing of it is read
+  }
+  if (typeof m !== "string") return "the call failed";
   const http = /\bHTTP (\d{3})\b/.exec(m);
   if (http) return `HTTP ${http[1]}`;
   const rpc = /\bRPC error (-?\d{1,6})\b/.exec(m);

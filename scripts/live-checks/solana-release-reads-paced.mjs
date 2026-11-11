@@ -42,6 +42,28 @@ const PACED = new RegExp(`function (${N})\\((${N}),${N}=${N}\\)\\{${NOFN}{0,200}
 // the provider's queue already names
 const TIMED = (p) =>
   new RegExp(`function (${N})\\((${N}),(${N}),(${N})\\)\\{let (${N})=${N}\\(\\2,\\((${N}),(${N})\\)=>\\{let (${N}),(${N});try\\{\\9=typeof \\3==${Q}function${Q}\\?\\3\\(\\):\\3,\\8=Promise\\.resolve\\(\\2\\(\\6,\\7\\)\\)\\}catch\\((${N})\\)\\{return Promise\\.reject\\(\\10\\)\\}return ${N}\\(\\8,\\9,\\4\\)\\}\\)${NOFN}{0,200}?\\.limits\\.values\\(\\)\\.next\\(\\)\\.value;return (${N})\\?${esc(p)}\\(\\5,\\11\\):\\5\\}`);
+// a minified shape: each @X a name (the first its group, the rest the same name), every other character as it is, a
+// quote any of the three
+const shape = (src) => {
+  const seen = new Set();
+  const parts = src.split(/(@[A-Z])/).map((x, i) => {
+    if (i % 2 === 0) return x.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&").replace(/`/g, Q);
+    const k = x[1];
+    if (seen.has(k)) return `\\k<${k}>`;
+    seen.add(k);
+    return `(?<${k}>${N})`;
+  });
+  return new RegExp(parts.join(""));
+};
+// the reference's fault builder (pool.ts solanaCallFault, card solana-reference-read-holds-a-slot-apart): the error's
+// message read only as a string, inside a try, and only fixed words returned, its status, code or timeout digits, or
+// "the call failed"; never the message itself, which can carry a provider's URL and key
+const FAULT = shape(
+  "function @F(@E){let @T;try{@T=@E instanceof Error?@E.message:@E}catch{return`the call failed`}if(typeof @T!=`string`)return`the call failed`;" +
+    "let @H=/\\bHTTP (\\d{3})\\b/.exec(@T);if(@H)return`HTTP ${@H[1]}`;" +
+    "let @R=/\\bRPC error (-?\\d{1,6})\\b/.exec(@T);if(@R)return`RPC error ${@R[1]}`;" +
+    "let @L=/\\bno answer in (\\d{1,7}) ms\\b/.exec(@T);return @L?`no answer in ${@L[1]} ms`:`the call failed`}",
+);
 // every name the bundle binds to `url` (a module may keep its own copy of the constant), as one alternation
 const urlVar = (js, url) => {
   const names = [...js.matchAll(new RegExp(`(?<![\\w$])(${N})=${Q}${url.replace(/[.]/g, "\\.")}${Q}`, "g"))].map((m) => esc(m[1]));
@@ -54,6 +76,7 @@ export function facts(index, js) {
   const a = urlVar(js, "https://solana-rpc.publicnode.com");
   const h = urlVar(js, "https://ct-api.unrealized.trade");
   const t = p ? TIMED(p).exec(js)?.[1] : undefined;
+  const f = FAULT.exec(js)?.groups?.F;
   const release =
     !!(p && a && h) &&
     new RegExp(`providers:\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],reference:\\((${N}),(${N})\\)=>${N}\\(\\2,\\1\\)`).test(js);
@@ -69,9 +92,10 @@ export function facts(index, js) {
     new RegExp(`(?<![\\w$])${m}=${Q}\\$\\{${h}\\}/v1/rpc/solana-marks${Q},${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h}\\)\\)\\],${N}=\\(\\)=>${esc(p)}\\(${N}\\(${m}\\)\\),${N}=\\(\\)=>\\[${esc(p)}\\(${N}\\(${a}\\)\\),${esc(p)}\\(${N}\\(${h},${N}\\)\\)\\],${N}=Object\\.freeze\\(\\[\\d+,\\d+\\]\\)[,;]`).test(js);
   const timed =
     !!t &&
-    // the reference's reads, a failed one read as no answer with its fault named (pool.ts readSolanaReferenceWhy, card
-    // solana-reference-read-holds-a-slot-apart)
-    new RegExp(`\\.map\\((${N})=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>${esc(t)}\\(\\1,${N}\\)\\(${Q}getMultipleAccounts${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)\\)\\.then\\((${N})=>\\(\\{read:${N}\\(\\2,${N}\\.length\\),fault:null\\}\\),(${N})=>\\(\\{read:null,fault:${N}\\(\\3\\)\\}\\)\\)`).test(js) &&
+    !!f &&
+    // the reference's reads, a failed one read as no answer with its fault in the builder's fixed words (pool.ts
+    // readSolanaReferenceWhy, card solana-reference-read-holds-a-slot-apart)
+    new RegExp(`\\.map\\((${N})=>Promise\\.resolve\\(\\)\\.then\\(\\(\\)=>${esc(t)}\\(\\1,${N}\\)\\(${Q}getMultipleAccounts${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)\\)\\.then\\((${N})=>\\(\\{read:${N}\\(\\2,${N}\\.length\\),fault:null\\}\\),(${N})=>\\(\\{read:null,fault:${esc(f)}\\(\\3\\)\\}\\)\\)`).test(js) &&
     // the rent read (pool-buy.ts readSolanaRent)
     new RegExp(`${esc(t)}\\(${N},${N}\\)\\(${Q}getAccountInfo${Q},\\[${N},\\{encoding:${Q}base64${Q},commitment:${Q}confirmed${Q}\\}\\]\\)`).test(js) &&
     // the tx-end reads (send.ts readSolanaTxEnd)

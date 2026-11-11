@@ -115,6 +115,29 @@ test("recorded slotApart run: round 10's two pool reads are a slot apart and dif
   // its re-read on each provider: the same pair again
   for (const p of [0, 1]) assert.deepEqual(poolCalls(S, p)[1].result, poolCalls(S, p)[0].result);
 });
+test("every recorded pool pair (good and slotApart, 40 rounds, each pool read on both providers) differs only inside the kit's two pool masks, virtual_quote_reserves 245..261 and the fee buckets 271..287", () => {
+  let pairs = 0;
+  let moved = 0;
+  const offsets = new Set();
+  for (const run of [A.good, S]) {
+    for (const round of run.rounds) {
+      const reads = [0, 1].map((p) => round.calls[p].filter((c) => JSON.parse(c.key)[1][0].length === 7)[0]?.result);
+      assert.ok(reads[0] && reads[1], "each round read the pool on both providers");
+      const [pa, pb] = reads.map((r) => Buffer.from(r.value[1].data[0], "base64"));
+      assert.equal(pa.length, 301);
+      assert.equal(pb.length, 301);
+      const off = [...pa.keys()].filter((i) => pa[i] !== pb[i]);
+      for (const i of off) offsets.add(i);
+      pairs++;
+      if (off.length) moved++;
+    }
+  }
+  assert.equal(pairs, 40);
+  assert.ok(moved > 0, "some pair moved");
+  const outside = [...offsets].filter((i) => !((i >= 245 && i < 261) || (i >= 271 && i < 287)));
+  assert.deepEqual(outside, [], `bytes outside the masks: ${outside}`);
+});
+
 test("planted: slotApart's round 10 with provider B's virtual_quote_reserves moving its quote reserve 3%, every read: FAIL, the line naming the band", async () => {
   const r = copy(S);
   for (const c of poolCalls(r, 1)) {
