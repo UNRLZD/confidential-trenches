@@ -59,7 +59,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -895,7 +895,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
-  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER));
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
   const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];

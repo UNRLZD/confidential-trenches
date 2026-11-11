@@ -1760,3 +1760,65 @@ test("r02: a mint answer that is not a mint is refused, never read as 0 decimals
   for (const junk of [null, {}, { value: null }, { value: { owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } }, mint(6, 0), { value: { owner: "Other1111111111111111111111111111111111111", data: mint(6).value.data } }])
     assert.throws(() => tokenDecimalsShown("solana", junk), () => true, JSON.stringify(junk));
 });
+
+// card signpage-throttled-read-is-not-asked-again-at-once: the app's devnet run (app-a2-e2e run 4) met 638 answers of
+// 429 to getTokenAccountsByOwner in 300 s while this cache ran its pass again every 5 s, and a sell tapped then was
+// refused at 23.7 s: the page's own asks kept the provider's per-method window full, so it never cleared. On the kit's
+// test clock (no real wait): the cache as the page runs it, the finder on the helper's route (the transport the testnet
+// build's devnet RPC now has too), a provider that refuses getTokenAccountsByOwner past 5 in any 10 s, every ask counted
+// (its window full at the start, as another tab or a run's own reads leave it), nine buys ending (each a refresh), and
+// a sell tapped at 20 s (its own read, holding the passes off).
+test("a provider throttled by the page's own asks clears: the passes, buys ending and a sell ask at most the route's bound, and the sell reads", async () => {
+  const { onTestClock } = await import("../../kit/test/test-clock.ts");
+  const { buyWallets, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings } = await import("../../wallet/src/pool/buy-wallets.ts");
+  const origin = "https://positions-throttle.example";
+  const seed = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+  const pools = (reader: HoldingsReader) => [{ id: "sol", chain: "sol" as const, spent: [{ ref: { kind: "deposit" as const, s: 1n, i: 0 }, label: 5n }], reader }];
+  await onTestClock(async () => {
+    // the provider's window: one entry per getTokenAccountsByOwner asked, each gone 10 s after it (a timer on the clock)
+    let inWindow = 0;
+    const ask = () => {
+      inWindow++;
+      setTimeout(() => inWindow--, 10_000);
+    };
+    for (let k = 0; k < 5; k++) ask();
+    let minute = true;
+    setTimeout(() => (minute = false), 60_000);
+    const refused: boolean[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      if (!String(u).startsWith(origin)) return real(u, init);
+      const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+      const no = q.method === "getTokenAccountsByOwner" && inWindow >= 5;
+      if (q.method === "getTokenAccountsByOwner") ask();
+      if (minute) refused.push(no);
+      if (no) return new Response("slow down", { status: 429 });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const reader = solanaHelperHoldings(origin);
+    const cache = positionsCache(async (_m, run) => {
+      const r = await buyWallets(seed, pools(reader), { signal: run.signal });
+      return { positions: [], whole: r.failed.length === 0 };
+    });
+    let sold = "not yet";
+    try {
+      cache.first();
+      for (const at of [2_000, 4_000, 6_000, 8_000, 10_000, 15_000, 30_000, 35_000, 40_000]) setTimeout(() => cache.refresh(), at);
+      await new Promise((r) => setTimeout(r, 20_000));
+      // the sell's own read, as pool-testnet.ts sellHost.wallets runs it
+      const hold = cache.preempt();
+      const r = await buyWallets(seed, pools(reader));
+      sold = r.failed.length === 0 ? "read" : `refused: ${r.failed[0]!.error}`;
+      if (sold === "read") hold.feed([]);
+      else hold.release();
+      await new Promise((r) => setTimeout(r, 60_000));
+      await cache.idle();
+    } finally {
+      cache.clear();
+      globalThis.fetch = real;
+    }
+    assert.equal(sold, "read", "the sell tapped during the throttle waits inside its bound and reads");
+    const n429 = refused.filter((x) => x).length;
+    assert.ok(n429 <= 2 * HOLDINGS_THROTTLED_ROUNDS_60S, `${n429} answers of 429 in the first 60 s, bound ${2 * HOLDINGS_THROTTLED_ROUNDS_60S} (two getTokenAccountsByOwner a round)`);
+  });
+});

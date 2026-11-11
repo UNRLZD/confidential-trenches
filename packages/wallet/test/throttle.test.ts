@@ -1,0 +1,244 @@
+// node --test packages/wallet/test/throttle.test.ts (card signpage-throttled-read-is-not-asked-again-at-once): a
+// provider that answers 429 is not asked again at once. The rule (src/throttle.ts) and the holdings readers' gate
+// (src/pool/buy-wallets.ts), on both transports the page reads holdings on: the helper's keyed route (mainnet) and the
+// devnet RPC reached directly (the testnet build, solanaHoldingsAt). Every provider is a fake on the kit's test clock,
+// so no test waits in real time; time is judged by timers on that clock, never by a difference of clock reads.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { solanaJsonRpc, solanaPacedRpc } from "@blindfill/kit";
+import { onTestClock } from "../../kit/test/test-clock.ts";
+import * as d from "../src/derive/index.ts";
+import { THROTTLE_BOUNDS, THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS, ThrottleGate, throttleWaitMs } from "../src/throttle.ts";
+import { buyWallets, HOLDINGS_THROTTLE_MAX_MS, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings, solanaHoldingsAt, type HoldingsReader } from "../src/pool/buy-wallets.ts";
+
+const SEED = d.wordsToSeed64(d.entropyToWords(new Uint8Array(16)));
+const L = 5n;
+const spent = (n: number) => Array.from({ length: n }, (_, i) => ({ ref: i === 0 ? { kind: "deposit" as const, s: 1n, i: 0 } : { kind: "change" as const, l: L, j: i - 1 }, label: L }));
+
+test("the rule: a pause doubling from the first to the cap; a Retry-After the wait when longer, finite and above 0, capped", () => {
+  assert.deepEqual([THROTTLE_PAUSE_FIRST_MS, THROTTLE_PAUSE_MAX_MS, THROTTLE_RETRY_AFTER_MAX_MS], [1_000, 10_000, 10_000]);
+  const seq: number[] = [];
+  for (let p = 0, k = 0; k < 7; k++) seq.push((p = throttleWaitMs(p, null)));
+  assert.deepEqual(seq, [1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000]);
+  assert.equal(throttleWaitMs(0, 7_000), 7_000, "a Retry-After past the pause");
+  assert.equal(throttleWaitMs(4_000, 3_000), 8_000, "a Retry-After under the pause: the pause");
+  assert.equal(throttleWaitMs(0, 300_000), 10_000, "a Retry-After past the cap: the cap");
+  for (const v of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, "7", undefined, null]) assert.equal(throttleWaitMs(0, v), 1_000, `${String(v)} is never the wait`);
+  for (const v of [Number.NaN, Number.POSITIVE_INFINITY, -1]) assert.equal(throttleWaitMs(v, null), 1_000, `a previous pause of ${v} starts again`);
+  // another loop's own bounds (the buy's read-back pace after PR #604 takes the same rule)
+  assert.equal(throttleWaitMs(400, null, { firstMs: 400, maxMs: 8_000, afterMaxMs: 10_000 }), 800);
+  assert.equal(THROTTLE_BOUNDS.maxMs, THROTTLE_PAUSE_MAX_MS);
+});
+
+test("the gate: one round's throttles count once, any answer after them sets the pause back, a late Retry-After only moves the time on", () => {
+  let now = 0;
+  const g = new ThrottleGate({ now: () => now });
+  assert.equal(g.left(), 0);
+  // a round of three, all 429
+  const e0 = g.epoch();
+  g.throttled(e0, null), g.throttled(e0, null), g.throttled(e0, null);
+  assert.equal(g.left(), 1_000, "three 429s of one round: one pause");
+  now = 1_000;
+  const e1 = g.epoch();
+  g.throttled(e1, null);
+  assert.equal(g.left(), 2_000, "the next round's: doubled");
+  // a call of the counted round answers late with a longer Retry-After: the time moves, the pause does not grow
+  g.throttled(e0, 5_000);
+  assert.equal(g.left(), 5_000);
+  now = 6_000;
+  const e2 = g.epoch();
+  g.answered(e2);
+  g.throttled(g.epoch(), null);
+  assert.equal(g.left(), 1_000, "after an answer, the first pause again");
+  // an answer from before the last counted throttle sets nothing back
+  now = 7_000;
+  const e3 = g.epoch();
+  g.throttled(e3, null);
+  g.answered(e3);
+  now = 9_000;
+  g.throttled(g.epoch(), null);
+  assert.equal(g.left(), 4_000, "a stale answer leaves the pause growing");
+});
+
+test("HOLDINGS_THROTTLED_ROUNDS_60S is the rule's count: rounds whose start falls in the first 60 s of 429s", () => {
+  let at = 0, pause = 0, rounds = 0;
+  while (at < 60_000) {
+    rounds++;
+    at += pause = throttleWaitMs(pause, null);
+  }
+  assert.equal(HOLDINGS_THROTTLED_ROUNDS_60S, rounds);
+  assert.equal(HOLDINGS_THROTTLED_ROUNDS_60S, 9);
+  assert.equal(HOLDINGS_THROTTLE_MAX_MS, 30_000);
+});
+
+// ---------- a fake provider on the test clock ----------
+type Fake = { calls: { method: string; throttled: boolean }[]; restore: () => void };
+/** globalThis.fetch for `origin`: a 429 (Retry-After `after` when given) while throttling() holds, else a Solana answer
+ *  at slot 1 (no lamports, no accounts); every call kept with whether it was throttled. */
+function fakeSolana(origin: string, throttling: () => boolean, after?: string): Fake {
+  const real = globalThis.fetch, calls: Fake["calls"] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (!String(u).startsWith(origin)) return real(u, init);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    const t = throttling();
+    calls.push({ method: q.method, throttled: t });
+    if (t) return new Response("slow down", { status: 429, headers: after === undefined ? {} : { "retry-after": after } });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  return { calls, restore: () => void (globalThis.fetch = real) };
+}
+/** A flag that turns true `ms` from now on the clock. */
+const after = (ms: number): (() => boolean) => {
+  let past = false;
+  setTimeout(() => (past = true), ms);
+  return () => past;
+};
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** A positions pass's loop as positions.ts runs it: a list read, again 5 s after each failed one, and again at once
+ *  each time a buy ends (`kicks`: the times buys end), until a read succeeds or `until` passes. */
+async function passes(reader: HoldingsReader, untilMs: number, kicks: readonly number[] = []): Promise<number> {
+  const over = after(untilMs);
+  let reads = 0;
+  const kicked: (() => boolean)[] = kicks.map((k) => after(k));
+  let used = 0;
+  for (;;) {
+    reads++;
+    const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(1), reader }]);
+    if (r.failed.length === 0 || over()) return reads;
+    // a buy that ended meanwhile runs the pass again at once (positions.refresh), else the 5 s retry
+    const fresh = kicked.filter((k) => k()).length;
+    if (fresh > used) used = fresh;
+    else await wait(5_000);
+  }
+}
+
+for (const [name, make] of [
+  ["the helper's keyed route (mainnet)", (o: string) => solanaHelperHoldings(o)],
+  ["the devnet RPC on the holdings transport (testnet)", (o: string) => solanaHoldingsAt(`${o}/`)],
+] as const) {
+  test(`${name}: under 60 s of 429s a pass run again asks at most HOLDINGS_THROTTLED_ROUNDS_60S rounds, and reads once the provider answers`, async () => {
+    const origin = `https://t60-${name.length}.example`;
+    await onTestClock(async () => {
+      const quiet = after(60_000);
+      const f = fakeSolana(origin, () => !quiet());
+      try {
+        await passes(make(origin), 300_000);
+      } finally {
+        f.restore();
+      }
+      const hot = f.calls.filter((c) => c.throttled);
+      assert.ok(hot.length <= 3 * HOLDINGS_THROTTLED_ROUNDS_60S, `${hot.length} calls under 60 s of 429s, bound ${3 * HOLDINGS_THROTTLED_ROUNDS_60S}`);
+      assert.ok(hot.filter((c) => c.method === "getTokenAccountsByOwner").length <= 2 * HOLDINGS_THROTTLED_ROUNDS_60S);
+      assert.ok(hot.length >= 3 * 5, `the route is still asked while it throttles: ${hot.length}`);
+      assert.equal(f.calls.filter((c) => !c.throttled).length, 3, "one round once it answers");
+      // the request list: the three calls of a round, nothing else
+      assert.deepEqual([...new Set(f.calls.map((c) => c.method))].sort(), ["getBalance", "getTokenAccountsByOwner"]);
+    });
+  });
+}
+
+test("a run of buys ending during a throttle (each running the pass again at once) does not multiply the calls past the bound", async () => {
+  const origin = "https://kicks.example";
+  await onTestClock(async () => {
+    const quiet = after(60_000);
+    const f = fakeSolana(origin, () => !quiet());
+    try {
+      await passes(solanaHelperHoldings(origin), 300_000, [2_000, 4_000, 6_000, 8_000, 10_000, 20_000, 30_000, 40_000, 50_000]);
+    } finally {
+      f.restore();
+    }
+    const hot = f.calls.filter((c) => c.throttled).length;
+    assert.ok(hot <= 3 * HOLDINGS_THROTTLED_ROUNDS_60S, `${hot} calls under 60 s of 429s with nine buys ending`);
+  });
+});
+
+test("a provider that throttles one method and answers the others: the pause still grows, round after round", async () => {
+  // Solana's public RPC limits each method: getBalance answers while getTokenAccountsByOwner draws 429s, so one call's
+  // answer never sets the pause back; only a whole round does
+  const origin = "https://one-method.example";
+  await onTestClock(async () => {
+    const quiet = after(60_000);
+    const real = globalThis.fetch, hot: string[] = [];
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      if (!String(u).startsWith(origin)) return real(u, init);
+      const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+      if (q.method === "getTokenAccountsByOwner" && !quiet()) return hot.push(q.method), new Response("slow down", { status: 429 });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    try {
+      await passes(solanaHoldingsAt(`${origin}/`), 300_000);
+    } finally {
+      globalThis.fetch = real;
+    }
+    assert.ok(hot.length <= 2 * HOLDINGS_THROTTLED_ROUNDS_60S, `${hot.length} getTokenAccountsByOwner 429s in 60 s, bound ${2 * HOLDINGS_THROTTLED_ROUNDS_60S}`);
+  });
+});
+
+test("a Retry-After is waited out: the next round of the route goes after it, not before", async () => {
+  const origin = "https://ra7.example";
+  await onTestClock(async () => {
+    const early = after(6_900), late = after(7_100);
+    let n = 0;
+    const seen: [boolean, boolean][] = [];
+    const f = fakeSolana(origin, () => (seen.push([early(), late()]), ++n <= 3), "7");
+    try {
+      const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(1), reader: solanaHoldingsAt(`${origin}/`) }]);
+      assert.deepEqual(r.failed, []);
+    } finally {
+      f.restore();
+    }
+    assert.equal(f.calls.length, 6);
+    assert.deepEqual(seen.slice(3), [[true, false], [true, false], [true, false]], "the second round at 7 s");
+  });
+});
+
+test("a sell's read during a throttle that ends inside its bound waits and reads; one that outlasts it is refused at the bound, asking nothing more", async () => {
+  await onTestClock(async () => {
+    // the route throttled for 25 s: the sell's list read (two Ws) from its tap reads both
+    const quiet = after(25_000);
+    const f = fakeSolana("https://sell-25.example", () => !quiet());
+    try {
+      const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(2), reader: solanaHelperHoldings("https://sell-25.example") }]);
+      assert.deepEqual(r.failed, []);
+      assert.equal(r.wallets.length, 2);
+    } finally {
+      f.restore();
+    }
+  });
+  await onTestClock(async () => {
+    // throttled for good: refused once its next wait would end past HOLDINGS_THROTTLE_MAX_MS from the tap
+    const bound = after(HOLDINGS_THROTTLE_MAX_MS);
+    let pastBound = 0;
+    const f = fakeSolana("https://sell-hot.example", () => (bound() && pastBound++, true));
+    try {
+      const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(2), reader: solanaHelperHoldings("https://sell-hot.example") }]);
+      assert.equal(r.failed.length, 1);
+      assert.match(r.failed[0]!.error, /its reads drew the provider's 429 past 30 s$/);
+      assert.equal(pastBound, 0, "no call after the bound");
+    } finally {
+      f.restore();
+    }
+  });
+});
+
+test("the gate is the holdings route's own: a throttled route never holds back the trade path's read on the same URL", async () => {
+  const origin = "https://own-gate.example";
+  await onTestClock(async () => {
+    const f = fakeSolana(origin, () => true);
+    const trade = solanaPacedRpc(solanaJsonRpc(`${origin}/`), { windowMs: 10_000, total: 100, perMethod: 40 });
+    try {
+      const reader = solanaHoldingsAt(`${origin}/`);
+      const read = buyWallets(SEED, [{ id: "sol", chain: "sol", spent: spent(1), reader }]);
+      await wait(100); // the first round drew its 429s: the route's gate is closed for 1 s
+      const before = f.calls.length;
+      const ahead = after(500);
+      const got = await trade("getBalance", ["x", { commitment: "finalized" }]).then(() => "answered", (e: unknown) => String(e));
+      assert.match(got, /HTTP 429/);
+      assert.equal(ahead(), false, "the trade path's read went out at once");
+      assert.equal(f.calls.length, before + 1);
+      await read;
+    } finally {
+      f.restore();
+    }
+  });
+});
