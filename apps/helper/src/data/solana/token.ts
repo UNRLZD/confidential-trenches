@@ -22,7 +22,7 @@
 // vendor and RPC value is hostile input: a mint must be an account the token programs own, typed `mint`; every number
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
-import { LOGOS } from "../logo.ts";
+import { LOGOS, type Logos } from "../logo.ts";
 import { LINKS, type Links } from "../links.ts";
 import { readFirstBuys, readHeld, shares, type FirstBuys, type Shares } from "./first-buyers.ts";
 import { createOrigins, hintsOf, onCurve, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
@@ -599,7 +599,7 @@ const rpcBody = (method: string, params: unknown[]) => JSON.stringify({ jsonrpc:
  *  429 on it would be the device's own reads' and sends' 429 too. */
 /** `sleep`: the GeckoTerminal budget's wait (setTimeout unless a test passes its clock's beside `now`, card
  *  helper-pace-test-clock). */
-export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget } = {}) {
+export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch; now?: () => number; sleep?: (ms: number) => Promise<unknown>; listed?: () => Promise<DataAnswer>; holdersRpc?: Rpc; gecko?: GeckoBudget; metaLogos?: Pick<Logos, "fromMeta"> } = {}) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   const doFetch = deps.fetch ?? fetch;
@@ -960,6 +960,11 @@ export function createSolanaToken(proxy: Proxy, rpc: Rpc, deps: { fetch?: Fetch;
     }, () => undefined);
     if (top10 === null) void topRead.then((t) => {
       if (t !== null && built.get(mint) === b) (b.top10 = t), (b.filled = pageOf(b));
+    }, () => undefined);
+    // a token whose list source gave no logo takes its metadata's image (../logo.ts fromMeta), once Jupiter has
+    // answered (its row would give one first); its row's icon is set when the URL is known
+    if (deps.metaLogos !== undefined && j?.later !== true && base.icon !== true && m.id.uri !== null) void deps.metaLogos.fromMeta("solana", mint, m.id.uri).then((ok) => {
+      if (ok && built.get(mint) === b) (b.base = { ...b.base, icon: true }), (b.filled = pageOf(b));
     }, () => undefined);
     return b.answer;
   }, {

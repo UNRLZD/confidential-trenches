@@ -747,7 +747,7 @@ export function solanaTokenFromEnv(env: Record<string, string | undefined>, prox
   const holdersRpc =
     holders === undefined || holders === "" ? undefined : createRpc({ SOLANA_RPC_URL: holders }, { slot: "holders", publicFallback: false, ...(holders === env.SOLANA_RPC_URL ? { pacer: rpc.pacer } : {}) });
   if (holdersRpc !== undefined) slots?.set("holders", holdersRpc.slot);
-  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc });
+  return createSolanaToken(proxy, rpc, { gecko, listed: lists.get, holdersRpc, metaLogos: LOGOS });
 }
 
 /**
