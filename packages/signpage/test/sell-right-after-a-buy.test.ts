@@ -74,12 +74,16 @@ async function freed(w: WalletStore): Promise<void> {
 
 /** The finder, which reads at finalized: W known (its note RESERVED), its token not listed until `listed` is set. */
 function finder() {
-  const st = { listed: null as bigint | null, fail: false, failW: false, reads: 0, held: null as Promise<void> | null };
+  const st = { listed: null as bigint | null, fail: false, failW: false, reads: 0, held: null as Promise<void> | null, parked: 0 };
   const reader: HoldingsReader = {
     chain: "sol",
     read: async (address) => {
       st.reads++;
-      if (st.held !== null) await st.held;
+      if (st.held !== null) {
+        st.parked++;
+        await st.held;
+        st.parked--;
+      }
       if (st.fail) throw new Error("the finder did not answer");
       if (st.failW) throw new Error("its reads drew the provider's 429");
       assert.equal(address, W);
@@ -346,6 +350,9 @@ test("the preview right after a buy's read-back, the pass's finder read still he
   f.st.held = new Promise<void>((r) => (free = r));
   assert.ok("running" in tapBuy(tp));
   await until(() => b.run.told, "the run told its amount");
+  // the pass the buy's record started: its finder read of W parked (one pass at a time, so no other finder read starts
+  // until it is freed); every finder read from here on would be the preview's
+  await until(() => f.st.parked === 1, "the pass's finder read of W, held");
   assert.equal((tp.positionsNow() ?? []).find((p) => p.token === MINT), undefined, "the pass has not listed W's token yet");
   const mintRead = Object.entries(fx.pump.reads[0]).find(([k]) => JSON.parse(k)[0] === MINT)![1] as { context: unknown; value: unknown[] };
   const ask = (held: [bigint | null, bigint | null]) => {
