@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Live check of card sol-settle-failed-is-not-unspent on SIGN_HOST (https://confidential.unrealized.trade). What it
 // holds, and only that: the served /app.js is the one index.html pins (its sha384), it is a released build from
-// release-111 on (a packages/signpage/releases/release-<N>.json, N >= 111, names its sha384 for SIGN_HOST), and in it, as
+// release-115 on (a packages/signpage/releases/release-<N>.json, N >= 115, names its sha384 for SIGN_HOST), and in it, as
 // minified, the Solana pool send's read-back (src/pool-buy.ts sendAndSettle, the buy's and each withdraw part's):
 //   - settle: the note's settle that throws is not known yet (null), never "unspent", and it is asked with the slots it
 //     is handed;
 //   - verdict: not_landed only when the settle RETURNS unspent, asked at each RPC's slot of the read that saw the
-//     blockhash past (pastAt: one getEpochInfo at finalized per RPC, the height and the slot one bank's); a settle that
+//     blockhash past (pastAt: one getEpochInfo at finalized per RPC, the height and the slot one bank's, a read that throws
+//     not past, handed to the read's slow-down); a settle that
 //     throws decides nothing, and past the reads the answer is "sent" (a withdraw keeps its owed send);
 //   - hosts: the page's buy and withdraw settles hand those slots to the wallet's solanaSettleSpent (minSlots);
 //   - none of the old shape: no settle's throw read as {kind: "unspent"} anywhere in the bundle.
@@ -14,8 +15,8 @@
 // settle that throws, C3's seats from before the spend, each ending's time; test/pool-withdraw.test.ts and
 // test/pool-testnet.test.ts: the withdraw's 502 with the settle throwing, its owed send kept and carried). The recorded
 // answers are facts() over a tree's packages/signpage/index.html and public/app.js (build-app.mjs), or SIGN_HOST's own
-// page. A build of release-110 or earlier carries the old shape, and the release ledger tells a release-111-or-later
-// build from any other. This file reaches no package code (the import check holds it). The PR's own build runs
+// page. A build of release-110 or earlier carries the old shape, release-111 to release-114 pastAt's two-argument one,
+// and the release ledger tells a release-115-or-later build from any other. This file reaches no package code (the import check holds it). The PR's own build runs
 // judge(read, { ledger: false }) in scripts/ci/bundle-checks.mjs, since it is cut as a release only after its merge.
 // After: sign
 //   node scripts/live-checks/sol-settle-failed-is-not-unspent.mjs [--record <file>] [--answer <file>]
@@ -28,8 +29,10 @@ import { fileURLToPath } from "node:url";
 
 const KEY = "sol-settle-failed-is-not-unspent";
 export const SIGN = "https://confidential.unrealized.trade";
-/** The first release whose pool send holds the rule: release-110 (73b79695) is the last without it. */
-export const FIXED_FROM = 111;
+/** The first release whose pool send holds the rule as these marks read it: release-110 (73b79695) is the last without
+ *  the rule; release-111 to release-114 hold it with pastAt's earlier shape (two arguments, a throw read silently), which
+ *  card signpage-throttled-read-is-not-asked-again-at-once re-anchored on release-115's. */
+export const FIXED_FROM = 115;
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
 
 const I = "[\\w$]+"; // a minified name
@@ -39,11 +42,13 @@ const count = (js, re) => (js.match(new RegExp(re.source, "g")) ?? []).length;
 // the settle: `spent = async (minSlots) => { if (settled) return true; const s = await h.settle(noteId, minSlots).then(
 // spent?, () => null); settled = s === true; return s }`
 const SETTLE = new RegExp(String.raw`(?<g>${I})=async (?<m>${I})=>\{if\((?<h>${I})\)return!0;let (?<r>${I})=await ${I}\.settle\(${I}\.noteId,\k<m>\)\.then\((?<x>${I})=>\k<x>\.kind===\`spent\`,\(\)=>null\);return \k<h>=\k<r>===!0,\k<r>\}`);
-// the verdict, in the unlanded reads: `past = await pastAt(rpcs, last); s = await spent(past ?? undefined); if (s) {...}
-// else if (s === false && past !== null) return not_landed`
-const VERDICT = (g) => new RegExp(String.raw`let (?<p>${I})=await (?<pa>${I})\(${I}\.rpcs,${I}\),(?<s>${I})=await ${esc(g)}\(\k<p>\?\?void 0\);if\(\k<s>\)\{let (?<a>${I})=await ${I}\(${I},${I}\);if\(\k<a>\)return \k<a>\}else if\(\k<s>===!1&&\k<p>!==null\)return\{stage:\`not_landed\`,txs:${I}\}`);
-// pastAt: each RPC's finalized slot once both are past, one getEpochInfo bank each, else null
-const PAST_AT = (pa) => new RegExp(String.raw`async function ${esc(pa)}\((${I}),(${I})\)\{try\{let (${I})=await Promise\.all\(\1\.map\(async (${I})=>\{let (${I})=await \4\(\`getEpochInfo\`,\[\{commitment:\`finalized\`\}\]\);return (${I})\(\5\?\.blockHeight\)>\2\?\6\(\5\?\.absoluteSlot\):null\}\)\);return \3\[0\]!==null&&\3\[1\]!==null\?\[\3\[0\],\3\[1\]\]:null\}catch\{return null\}\}`);
+// the verdict, in the unlanded reads: `f0 = faults; past = await pastAt(rpcs, last, slow); s = await spent(past ??
+// undefined); if (s) {...} else if (s === false && past !== null) return not_landed` (release-115 on: pastAt is handed
+// the read's slow-down as its third argument, and a round's failure count is taken before it)
+const VERDICT = (g) => new RegExp(String.raw`let (?:${I}=${I},)?(?<p>${I})=await (?<pa>${I})\(${I}\.rpcs,${I},${I}\),(?<s>${I})=await ${esc(g)}\(\k<p>\?\?void 0\);if\(\k<s>\)\{let (?<a>${I})=await ${I}\(${I},${I}\);if\(\k<a>\)return \k<a>\}else if\(\k<s>===!1&&\k<p>!==null\)return\{stage:\`not_landed\`,txs:${I}\}`);
+// pastAt: each RPC's finalized slot once both are past, one getEpochInfo bank each, else null; a read that throws is
+// null (not past), after it is handed to the third argument, the read's slow-down
+const PAST_AT = (pa) => new RegExp(String.raw`async function ${esc(pa)}\((${I}),(${I}),(${I})\)\{try\{let (${I})=await Promise\.all\(\1\.map\(async (${I})=>\{let (${I})=await \5\(\`getEpochInfo\`,\[\{commitment:\`finalized\`\}\]\);return (${I})\(\6\?\.blockHeight\)>\2\?\7\(\6\?\.absoluteSlot\):null\}\)\);return \4\[0\]!==null&&\4\[1\]!==null\?\[\4\[0\],\4\[1\]\]:null\}catch\((${I})\)\{return \3\?\.\(\8\),null\}\}`);
 // the page's buy and withdraw settles: solanaSettleSpent({ ..., noteId, program: pin.program, minSlots, rpcs: ... })
 const HOSTS = new RegExp(String.raw`noteId:${I},program:${I}\.program,minSlots:${I},rpcs:${I}\(\)`);
 // the old shape: a settle's throw read as unspent

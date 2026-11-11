@@ -1589,6 +1589,99 @@ test("review P3e of 1caf0b17: a Retry-After that is no number (NaN) never become
   assert.deepEqual(w.waits, [800]);
 });
 
+// Card signpage-throttled-read-is-not-asked-again-at-once (the review of PR #604, pool-buy.ts's landed loop): every read
+// of the buy that fails waits the one rule's growing pause (the wallet's throttleWaitMs, from the slot's pace to
+// POOL_BUY_BACKOFF_MAX_MS, a Retry-After when longer), a 503 as a 429, back to the pace only after a round that went
+// through whole. Before: a read that failed without a 429 was asked again at the slot's pace (300 asks in 120 s), and a
+// failed whose-spend read after the settle, 429 or not, the same.
+const shift = (w: World, at: (p: 0 | 1, method: string, now: number) => Error | null) => {
+  let t = 0;
+  const inner = w.host.rpcs;
+  const seat = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    const e = at(p, method, t);
+    if (e) throw e;
+    return inner[p](method, params);
+  }) as SolanaRpc;
+  return { host: { ...w.host, rpcs: [seat(0), seat(1)] as [SolanaRpc, SolanaRpc], reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms: number) => void ((t += ms), w.waits.push(ms)) } as PoolBuyHost, t: () => t };
+};
+const fiveOhThree = () => new SolanaRpcTransportError("http_5xx", "HTTP 503", 3, "rpc1", null);
+
+test("a 503 on one RPC's finalized slot after the land: the other is asked at a growing wait, not the slot's pace, and the buy fills once it answers", async () => {
+  const w = await world();
+  let sentAt: number | null = null, asked = 0;
+  const s = shift(w, (p, m, now) => {
+    if (m !== "getSlot" || sentAt === null || now - sentAt >= 60_000) return null;
+    if (p === 0) return asked++, null;
+    return fiveOhThree();
+  });
+  const send = w.host.send;
+  const host: PoolBuyHost = { ...s.host, send: async (pool, tx) => ((sentAt = s.t()), send(pool, tx)) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  // 800, 1,600, 3,200, 6,400 then the 8 s cap: about ten in 60 s, where the slot's pace is 150
+  assert.ok(asked <= 15, `RPC 0's getSlot asked ${asked} times in 60 s of RPC 1's 503`);
+});
+
+test("a whose-spend read that fails after the settle (a 429, Retry-After 5 s) is asked again after that wait, not at the slot's pace", async () => {
+  const w = await world();
+  let settledAt: number | null = null, asked = 0;
+  const s = shift(w, (p, m, now) => {
+    if (m !== "getTransaction" || p !== 1 || settledAt === null || now - settledAt >= 60_000) return null;
+    asked++;
+    return new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", 5_000);
+  });
+  const settle = w.host.settle;
+  const host: PoolBuyHost = { ...s.host, settle: async (id, m) => ((settledAt ??= s.t()), settle(id, m)) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  assert.ok(asked <= 13, `RPC 1's getTransaction asked ${asked} times in 60 s of 429 (Retry-After 5 s)`);
+});
+
+test("a read-back that fails without a 429 (a 503 for 30 s) waits the same growing pause as a throttle", async () => {
+  const w = await world();
+  let asked = 0;
+  const s = shift(w, (p, m, now) => (m === "getTransaction" && p === 1 && now < 30_000 ? (asked++, fiveOhThree()) : null));
+  assert.equal((await runPoolBuy(s.host, ASK) as { stage?: string }).stage, "filled");
+  assert.ok(asked <= 8, `${asked} calls in 30 s of 503`);
+  assert.ok(w.waits.every((ms) => ms <= 8_000), w.waits.join(","));
+});
+
+test("the read-back's growing wait under a 429 (Retry-After 7 s) never runs past the blockhash's life: a read comes at its end", async () => {
+  const w = await world();
+  let t = 0;
+  const spans: [number, number][] = [];
+  const inner = w.host.rpcs;
+  const seat = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getTransaction" && p === 1 && t < 100_000) throw new SolanaRpcTransportError("http_429", "HTTP 429", 3, "rpc1", 7_000);
+    return inner[p](method, params);
+  }) as SolanaRpc;
+  const host: PoolBuyHost = { ...w.host, rpcs: [seat(0), seat(1)], reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (spans.push([t, ms]), (t += ms)) };
+  assert.equal((await runPoolBuy(host, ASK) as { stage?: string }).stage, "filled");
+  const across = spans.filter(([at, ms]) => at < POOL_BLOCKHASH_LIFE_MS && at + ms > POOL_BLOCKHASH_LIFE_MS);
+  assert.deepEqual(across, [], `a wait across the blockhash's end: ${across.map(([a, m]) => `${a}+${m}`).join(", ")}`);
+  assert.ok(spans.some(([at, ms]) => at + ms === POOL_BLOCKHASH_LIFE_MS), "a read at the blockhash's end");
+});
+
+test("the not-landed reads: a 503 on one RPC's height read waits the growing pause, and once it answers the reads go back to their second", async () => {
+  // the helper refuses the send (no busy): the reads decide; each RPC's finalized height stays short of the blockhash's
+  // last until 100 s, RPC 1's read failing with a 503 for the first 60 s
+  const w = await world();
+  let t = 0, hot = 0, after = 0;
+  const inner = w.host.rpcs;
+  const seat = (p: 0 | 1): SolanaRpc => (async (method: string, params: readonly unknown[]) => {
+    if (method === "getEpochInfo" && t < 100_000) {
+      if (p === 0) t < 60_000 ? hot++ : after++;
+      if (p === 1 && t < 60_000) throw new SolanaRpcTransportError("http_5xx", "HTTP 503", 3, "rpc1", null);
+      return { blockHeight: 0, absoluteSlot: 0 };
+    }
+    return inner[p](method, params);
+  }) as SolanaRpc;
+  const host: PoolBuyHost = { ...w.host, rpcs: [seat(0), seat(1)], reads: POOL_BUY_READS, now: () => BigInt(t), wait: async (ms) => void (t += ms),
+    send: async () => { throw new Error("HTTP 502"); } };
+  const a = (await runPoolBuy(host, ASK)) as { stage?: string };
+  assert.notEqual(a.stage, "filled");
+  assert.ok(hot <= 15, `RPC 0's height read ${hot} times in 60 s of RPC 1's 503, where a second's pace is 60`);
+  assert.ok(after >= 20, `${after} reads in the 40 s after RPC 1 answers: back to a second's pace`);
+});
+
 // Card sol-buy-reads-side-by-side: the pool's time for the take is read beside the first round (the host's chainNow,
 // the wallet's chainNow on the queue's pool) and handed to the take, which uses it within NOW_REUSE_MS of its start and
 // reads again past it (packages/wallet/src/pool/queue.ts): no chain-time read waits between the signature and the send.

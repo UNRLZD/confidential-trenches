@@ -26,7 +26,7 @@
 //   spent, freed past the deadline, or held), so no outcome of a send leaves a note RESERVED for good.
 // - pool.sell (card signpage-pool-sell): src/pool-sell.ts on the devnet pool, W one of the page's buy wallets: the Ws
 //   of the pool's SPENT and RESERVED notes (../../wallet/src/pool/buy-wallets.ts spentNotesOf, buyWallets) with their
-//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsReader on the first),
+//   holdings. A testnet-only choice: those holdings are read on ONE devnet RPC (solanaHoldingsAt on the first),
 //   since devnet has no helper route, and a read naming W reaches that public RPC (mainnet reads them on the helper's
 //   keyed route, buy-wallets.ts). They pick W and nothing more: the sell reads W's token account and lamports again on
 //   both RPCs, and the rent back after it runs only on W's buy record (pool-buy.ts BuyMints, written by the buy before
@@ -59,7 +59,7 @@ import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { askWhileBusy, type BusyOpts } from "../../wallet/src/busy.ts";
 import { POOL_SEND_BUSY_WAIT_MS, PoolSendBusy, poolBuyKind, type PoolBuyHost } from "./pool-buy.ts";
 import { BUY_MINTS_KEY, buyMints, keptSells, owedRentBacks, poolSellKind, resumeRentBacks, settleDeadSellOps, settlePoolSells, settleSellOps, type PoolSellKindHost } from "./pool-sell.ts";
-import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsReader, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
+import { buyWallets, derivedBuyWallets, evmHelperKeyedRpc, solanaHelperHoldings, solanaHoldingsAt, spentNotesOf, type HoldingsReader } from "../../wallet/src/pool/buy-wallets.ts";
 import { keptPositions, POSITION_COSTS_KEY, POSITIONS_KEPT_KEY, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, routeInto, type BuyRecordStore, type FoundWallet, type PoolBuyFacts, type Position, type PositionCosts } from "./positions.ts";
 import { evmStoredHold } from "../../wallet/src/pool/evm-hold-store.ts";
 import { EVM_CHAIN_IDS, EVM_EPOCH_MS, EVM_POOLS, evmPair, evmPool as walletEvmPool, evmPoolScopeOf, evmTreeSync, type EvmFeeAnswer, type EvmPoolOf, type EvmPoolPin, type EvmPoolRequest, type EvmRpc, type EvmSyncHold, type EvmTreeSync } from "../../wallet/src/pool/evm.ts";
@@ -1039,7 +1039,7 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   const scope = pin === undefined ? null : solanaPoolOf(pin.program).scope;
   // the pool's Ws with their holdings, the one finder a sell and the positions use: on mainnet through the helper's keyed
   // route, in the testnet build on one devnet RPC (the header's testnet-only choice); none: no read
-  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsReader(r[0]) : solanaHelperHoldings(TRADE_HELPER));
+  const finderOf = (r: readonly [SolanaRpc, SolanaRpc]): HoldingsReader => over.holdings?.(r) ?? (POOL_TESTNET ? solanaHoldingsAt(TESTNET_RPCS.solana[0]) : solanaHelperHoldings(TRADE_HELPER));
   const poolBuyWallets = async (notes: NoteStore, r: readonly [SolanaRpc, SolanaRpc], reader: HoldingsReader = finderOf(r)) => {
     const spent = await spentNotesOf(notes, scope!);
     if (spent.length === 0) return [];
@@ -1112,9 +1112,10 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     const unread = new Set<string>();
     const reader: HoldingsReader = {
       chain: inner.chain,
-      read: async (address, s) => {
+      read: async (address, s, by) => {
         try {
-          return await inner.read(address, s);
+          // the list's bound from its start (buy-wallets.ts readDerived's `by`), as a sell's read keeps it
+          return await inner.read(address, s, by);
         } catch (e) {
           if (s?.aborted) throw e;
           unread.add(address);

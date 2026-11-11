@@ -16,6 +16,7 @@ import { noteCommitment, noteSecrets, type NoteRef } from "../src/notes/secrets.
 import { openNoteStore, refKey, type NoteStore } from "../src/notes/store.ts";
 import { openWalletStore, type WalletStore } from "../src/store/index.ts";
 import { SOL_LAG_SLOTS, SOL_LAG_WAIT_MS } from "../src/pool/solana.ts";
+import { ThrottleGate } from "../src/throttle.ts";
 import { type ReaderOpts, buyWallets, derivedBuyWallets, EVM_HOLDINGS_ROUNDS, evmHelperHoldings, HOLDINGS_RPC_LIMIT, evmHoldingsReader, RETRY_AFTER_DEFAULT_MS, RETRY_AFTER_MAX_MS, retryAfterMs, SOL_HOLDINGS_ROUNDS, solanaHelperHoldings, solanaHoldingsReader, solanaSpentNotes, spentNotesOf, type BuyPool, type HoldingsReader, type JsonRpc } from "../src/pool/buy-wallets.ts";
 
 const A8 = JSON.parse(readFileSync(new URL("./vectors/a8.json", import.meta.url), "utf8")) as { inputs: { entropy: string }; l: string; wallets: { name: string; c: string; l: string; j: number; path: string; address: string }[] };
@@ -602,24 +603,31 @@ test("b07: the EVM reader stopped with its block read in flight sends no balance
 });
 
 test("b08: the EVM reader's token read waiting its turn on the route when its read is stopped is never sent", () => onTestClock(async () => {
-  const f = slowFetch("https://b08.example", 200);
+  // W's own first three calls (block, balance, the first token) fill the route's window (HOLDINGS_RPC_LIMIT: 3 in 3 s),
+  // so its second token read waits its turn in the queue; another reader of the route waits for the gate's turn
+  // (card signpage-throttled-read-is-not-asked-again-at-once), so it never fills the window under W
+  const real = globalThis.fetch;
+  const sent: { method: string; body: string }[] = [];
+  globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+    if (!String(u).startsWith("https://b08.example")) return real(u, init);
+    const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+    sent.push({ method: q.method, body: String(init?.body) });
+    await new Promise((r) => setTimeout(r, 200));
+    return q.method === "eth_call" ? ok(q.id, `0x${"0".repeat(64)}`) : evmOk(q.method, q.id);
+  }) as typeof fetch;
   try {
-    const r = evmHelperHoldings("https://b08.example", "base", [USDC]);
+    const r = evmHelperHoldings("https://b08.example", "base", [USDC, TOKEN_X, TOKEN_R]);
     const stop = new AbortController();
     const w = evmW(L, 1);
-    // W's block and balance go out; another reader's calls fill the window, so W's token read waits its turn
     const end = endOf(r.read(w, stop.signal), stop.signal);
-    await new Promise((r) => setTimeout(r, 100));
-    const other = r.read(evmW(L, 0)).catch(() => {});
-    await new Promise((r) => setTimeout(r, 900));
-    assert.ok(f.sent.some((x) => x.method === "eth_getBalance" && names(x.body, w)), "W's balance read went out");
+    await new Promise((r) => setTimeout(r, 1_000));
+    assert.ok(sent.some((x) => x.method === "eth_call" && names(x.body, w) && names(x.body, USDC)), "W's first token read went out");
     stop.abort();
     assert.equal(await end, "stopped");
-    await other;
-    await new Promise((r) => setTimeout(r, 500));
-    assert.deepEqual(f.sent.filter((x) => x.method === "eth_call" && names(x.body, w)).map((x) => x.method), [], "W's token read sent after the stop");
+    await new Promise((r) => setTimeout(r, 5_000));
+    assert.deepEqual(sent.filter((x) => x.method === "eth_call" && (names(x.body, TOKEN_X) || names(x.body, TOKEN_R))).map((x) => x.method), [], "W's token read sent after the stop");
   } finally {
-    f.restore();
+    globalThis.fetch = real;
   }
 }));
 
@@ -734,19 +742,26 @@ test("the helper's 429 is a failed round on both chains: the reader waits its Re
   assert.ok(w >= RETRY_AFTER_DEFAULT_MS - 10 && w < 2_000, `no Retry-After waits 1 s: ${w} ms`);
 }));
 
-test("a 429 on every round is a refusal at the bound, after a wait between rounds; another HTTP status fails at once", async () => {
-  const always429: JsonRpc = async () => { throw new Error("HTTP 429"); };
+test("a 429 on every round is a refusal at the bound, after a growing wait between rounds; another HTTP status fails at once", async () => {
+  // each reader on a provider of its own (a reader's gate is its rpc's); the waits grow from the route's Retry-After
+  // (1234), doubled by the gate's rule (card signpage-throttled-read-is-not-asked-again-at-once), never a flat one
+  // (a gate on a clock that only its reader's waits move, so each wait is the rule's exactly)
+  const always429 = (): JsonRpc => async () => { throw new Error("HTTP 429"); };
   const waits: number[] = [];
-  const opts = { wait429: () => 1234, sleep: async (ms: number) => { waits.push(ms); } };
+  const opts = { wait429: () => 1234, sleep: async (ms: number) => void waits.push(ms) };
+  const own = () => {
+    let t = 0;
+    return { wait429: () => 1234, sleep: async (ms: number) => void (waits.push(ms), (t += ms)), gate: new ThrottleGate({ now: () => t }) };
+  };
   const runs = [
-    ["sol", solanaHoldingsReader(always429, opts), SOL_HOLDINGS_ROUNDS],
-    ["evm", evmHoldingsReader(always429, [], opts), EVM_HOLDINGS_ROUNDS],
+    ["sol", solanaHoldingsReader(always429(), own()), SOL_HOLDINGS_ROUNDS, [1234, 2468, 4936, 9872, 10_000, 10_000, 10_000]],
+    ["evm", evmHoldingsReader(always429(), [], own()), EVM_HOLDINGS_ROUNDS, [1234, 2468, 4936]],
   ] as const;
-  for (const [chain, reader, rounds] of runs) {
+  for (const [chain, reader, rounds, want] of runs) {
     waits.length = 0;
     const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
     assert.deepEqual(r.failed, [{ pool: chain, error: `wallet 0: its reads drew the helper's 429 in ${rounds} rounds` }], chain);
-    assert.deepEqual(waits, Array(rounds - 1).fill(1234), `${chain}: a wait between rounds, none after the last`);
+    assert.deepEqual(waits, want, `${chain}: a growing wait between rounds, none after the last`);
   }
   // a 429 in a later round, after reads at different slots, is still a failed round and the next reads again
   let n = 0;
@@ -758,7 +773,7 @@ test("a 429 on every round is a refusal at the bound, after a wait between round
     return o;
   };
   waits.length = 0;
-  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solanaHoldingsReader(solRpc(solChain(), late), opts) }]);
+  const r = await buyWallets(SEED, [{ id: "sol", chain: "sol", spent: [{ ref: DEP, label: L }], reader: solanaHoldingsReader(solRpc(solChain(), late), own()) }]);
   assert.deepEqual(r.failed, []);
   assert.deepEqual(waits, [1234]);
   for (const [chain, reader] of [["sol", solanaHoldingsReader(async () => { throw new Error("HTTP 503"); }, opts)], ["evm", evmHoldingsReader(async () => { throw new Error("HTTP 503"); }, [], opts)]] as const) {
@@ -814,7 +829,8 @@ test("a throttle as the kit's JSON-RPC client throws it (HTTP 429, or -32029 in 
       }) as never;
       const rpc = solanaJsonRpc("https://throttle.invalid", { fetch, retry: { deadlineMs: 100, backoffMs: 60 } });
       const waits: number[] = [];
-      const opts = { wait429: () => 1234, sleep: async (ms: number) => { slept = true; waits.push(ms); } };
+      let t = 0; // the gate's clock: only the reader's waits move it
+      const opts = { wait429: () => 1234, sleep: async (ms: number) => { slept = true; waits.push(ms); t += ms; }, gate: new ThrottleGate({ now: () => t }) };
       const reader = chain === "sol" ? solanaHoldingsReader(rpc, opts) : evmHoldingsReader(rpc, [], opts);
       const r = await buyWallets(SEED, [{ id: chain, chain, spent: [{ ref: chain === "sol" ? DEP : { kind: "deposit", s: EVM_SCOPE, i: 0 }, label: L }], reader }]);
       assert.deepEqual(r.failed, [], `${what}, ${chain}`);

@@ -1,0 +1,1 @@
+var tV=Object.freeze({firstMs:1e3,maxMs:1e4,afterMaxMs:1e4});function nV(e,t,n=tV){let r=Number.isFinite(e)&&e>0?Math.min(e*2,n.maxMs):n.firstMs,i=typeof t==`number`&&Number.isFinite(t)&&t>0?Math.min(t,n.afterMaxMs):0;return Math.max(r,i)}var SV={min:1e3,max:5e3},CV=9e4,wV=12e4,TV=1e3,EV=8e3,DV=Object.freeze({firstMs:400,maxMs:EV,afterMaxMs:1e4}),OV=3e4;

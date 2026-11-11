@@ -18,6 +18,7 @@ import { openNoteStore } from "../../wallet/src/notes/store.ts";
 import { solanaPoolOf } from "../../wallet/src/pool/solana.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
+import { HOLDINGS_THROTTLE_MAX_MS } from "../../wallet/src/pool/buy-wallets.ts";
 import { POOL_TESTNET } from "../../wallet/src/pool/network.ts";
 import { solanaAta } from "../../kit/src/checks/solana/message.ts";
 import { onTestClock } from "../../kit/test/test-clock.ts";
@@ -315,4 +316,47 @@ test("the positions across a buy with no record, a sell, a sign out mid-pass and
   assert.deepEqual(log.filter((l) => l.b && l.names.some((n) => n.startsWith("A.") || n.includes("(A.") || ["BOUGHT", "OLD", "NEW"].includes(n))).map(row), [], "nothing of A's after B signed in");
   assert.ok(log.some((l) => l.phase.startsWith("2") && l.names.includes("NEW") && l.method === "getAccountInfo"), "the buy with no record: its mint's decimals read once, on the helper's keyed route (a sanity check of the log)");
   assert.ok(log.some((l) => l.b && l.names.includes("B.X0")), "B's Ws read (a sanity check of the log)");
+}));
+
+// The review of 8522bdf8, F3: the positions pass reads its Ws under one bound from the list's start, as a sell's read
+// does (pool-testnet.ts recordedWallets passes the list's `by` on): five Ws on a helper that answers 429 for good end
+// within HOLDINGS_THROTTLE_MAX_MS of the pass's start, never one bound a W (5 x 30 s).
+test("the positions pass on a helper that throttles for good ends within the list's bound from its start, however many Ws it reads", { timeout: 300_000 }, () => onTestClock(async () => {
+  const w = await openWalletStore({ indexedDB: new IDBFactory() });
+  after(() => w.close());
+  await w.insertSeed({ v: 1, entropy: new Uint8Array(16), source: "code", code_saved: true, created_ms: 1 });
+  const ns = await openNoteStore(w);
+  const costs: Record<string, { mint: string; received: string; decimals: number }> = {};
+  for (let i = 0; i < 5; i++) {
+    const ref = { kind: "deposit" as const, s: SCOPE, i };
+    const pre = noteSecrets(SEED64, ref).precommitment;
+    const label = BigInt(177 + i);
+    const r = await ns.add({ ref, scope: SCOPE, precommitment: pre, state: "UNSPENT", leaf: { value: 10_000_000n, label, commitment: noteCommitment(10_000_000n, label, pre), leafIndex: BigInt(i) } });
+    await ns.move(r.id, "UNSPENT", "SPENT");
+    const fw = freshWallet(SEED64, "sol", label, jOf(ref));
+    fw.secretKey.fill(0);
+    costs[fw.address] = { mint: BOUGHT, received: "5", decimals: 6 };
+  }
+  ns.close();
+  await w.put("meta", POSITION_COSTS_KEY, costs);
+  const named = new Set(Object.keys(costs));
+  // a timer at the bound from the list's first read (its start: readDerived takes its bound just before it), on the
+  // test clock: a read after it fires is one past the list's bound
+  let past = false, asked = 0, late = 0;
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const b = JSON.parse(String(init?.body)) as { id: string; method: string; params: unknown[] };
+    if (named.has(b.params[0] as string)) {
+      if (asked++ === 0) setTimeout(() => (past = true), HOLDINGS_THROTTLE_MAX_MS);
+      if (past) late++;
+    }
+    return new Response("slow down", { status: 429 });
+  }) as typeof fetch;
+  const timers: (() => void)[] = [];
+  const tp = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pin: PIN, positions: { setTimer: (f: () => void) => (timers.push(f), f), clearTimer: () => {} } } as never);
+  await tp.positions();
+  // the pass ends when it sets its retry; a W's read past the list's bound would keep it going for minutes
+  for (let i = 0; i < 4_000 && timers.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(timers.length > 0, "the pass ended");
+  assert.ok(asked > 0, "the pass asked");
+  assert.equal(late, 0, `${late} of ${asked} reads past the list's bound of ${HOLDINGS_THROTTLE_MAX_MS} ms from its first read`);
 }));
