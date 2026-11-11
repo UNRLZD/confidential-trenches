@@ -137,6 +137,16 @@ globalThis.fetch = async (u, init) => {
   }
   const r = await realFetch(u, init);
   if (r.status === 429 || r.status >= 500) log(`rpc ${host}: HTTP ${r.status} from the provider (request ${n})`);
+  // the helper's own split of each buy read (its Server-Timing: its wait for the upstream and its own time), so a round's
+  // length is put on the network, the helper or the RPC behind it
+  const st = r.headers.get("server-timing");
+  if (st && tapAt !== null) {
+    let m = "?";
+    try {
+      m = JSON.parse(String(init?.body ?? "")).method ?? "?";
+    } catch {}
+    log(`server-timing ${host} ${m} ${st.slice(0, 200)}`);
+  }
   return r;
 };
 // the buy's timeline (card pool-buy-send-fast): from the tap, every RPC call (its provider, method, start and length)
@@ -166,6 +176,18 @@ const logged = (rpc) => {
   return p;
 };
 const rpcs = [logged(testnetRpc(TESTNET_RPCS.solana[0])), logged(testnetRpc(TESTNET_RPCS.solana[1]))];
+// the script's own reads (never the page's): a throttled one waits out the provider's Retry-After and is asked again, up
+// to 4 tries, so a devnet 429 after a filled buy never ends the run before its checks (run 1 of card
+// sol-buy-reads-side-by-side: Retry-After 10 s on getTokenAccountsByOwner, past the transport's deadline)
+const own = async (method, params, tries = 1) => {
+  try {
+    return await rpcs[0](method, params);
+  } catch (e) {
+    if (tries >= 4 || !/^http_(429|5\d\d)$/.test(String(e?.fault))) throw e;
+    await sleep(Math.min(Math.max(e.afterMs ?? 0, 1_000 * 2 ** (tries - 1)), 15_000));
+    return own(method, params, tries + 1);
+  }
+};
 
 // the prover: snarkjs's fullProve in this process, on the release's pinned withdraw files
 const KIT_ZK = new URL("../../kit/zk/", import.meta.url);
@@ -295,7 +317,7 @@ const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const dustTxs = [];
 /** One transaction of `ixs`, `signers` ({ pub, key }) the payer first, sent on both RPCs and read confirmed on both. */
 const sendOwn = async (what, ixs, signers) => {
-  const { blockhash } = (await rpcs[0]("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
+  const { blockhash } = (await own("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
   const { message } = solanaCompileV0(signers[0].pub, ixs, blockhash, [], signers.map((x) => x.pub));
   const m = solanaDecodeMessage(message);
   const wire = new Uint8Array(1 + 64 * m.requiredSignatures + message.length);
@@ -314,8 +336,8 @@ const sendOwn = async (what, ixs, signers) => {
   }
   throw new Error(`${what} not confirmed on both RPCs`);
 };
-const tokenProgram = (await rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.owner;
-const decimals = Buffer.from((await rpcs[0]("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.data[0], "base64")[44];
+const tokenProgram = (await own("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.owner;
+const decimals = Buffer.from((await own("getAccountInfo", [MINT, { encoding: "base64", commitment: "confirmed" }])).value.data[0], "base64")[44];
 const transfer = (from, to, owner, signer) => {
   const data = new Uint8Array(10);
   data[0] = 12; // TransferChecked(amount 1, decimals)
@@ -380,13 +402,13 @@ if (RESUME && process.env.FLOW_SWEEP_W) {
   if (!n) throw new Error("W is no spent note's W");
   const { owedRentBacks } = await import("../src/pool-sell.ts");
   await owedRentBacks(page.store).put({ address: W, l: String(n.leaf.label), j: jOf(n.ref), mints: [{ mint: MINT, program: tokenProgram }], passes: 0 });
-  const lamports = async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value?.lamports ?? null;
+  const lamports = async (a) => (await own("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value?.lamports ?? null;
   log(`a later load of W ${W} (${await lamports(W)} lamports at finalized): the page's state read`);
   await t.stateRead();
   // the rent back runs under the seed's shared lock, asked for inside the state read: this waits for it to end
   await navigator.locks.request(WALLET_SEED_LOCK, { mode: "exclusive" }, () => {});
   for (let i = 0; i < 45; i++) {
-    const st = sentTxs.length ? (await rpcs[0]("getSignatureStatuses", [sentTxs])).value : [];
+    const st = sentTxs.length ? (await own("getSignatureStatuses", [sentTxs])).value : [];
     if (st.every((x) => x?.confirmationStatus === "finalized")) break;
     await sleep(2_000);
   }
@@ -426,7 +448,7 @@ if (bought) {
   const sig = buy.answer.result.txs[0].hash;
   let t = null;
   for (let i = 0; i < 60 && !t; i++) {
-    t = await rpcs[0]("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    t = await own("getTransaction", [sig, { encoding: "json", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
     if (!t) await sleep(2_000);
   }
   const W = t.transaction.message.accountKeys[1];
@@ -457,14 +479,14 @@ if (bought) {
     }
     // the sell's amount is read at finalized below: wait until the setup is finalized
     for (let i = 0; i < 60; i++) {
-      const st = (await rpcs[0]("getSignatureStatuses", [[dustTxs.at(-1).sig]])).value[0];
+      const st = (await own("getSignatureStatuses", [[dustTxs.at(-1).sig]])).value[0];
       if (st?.confirmationStatus === "finalized") break;
       await sleep(2_000);
     }
   }
-  const accs = (await rpcs[0]("getTokenAccountsByOwner", [W, { mint: MINT }, { encoding: "jsonParsed", commitment: "finalized" }])).value;
+  const accs = (await own("getTokenAccountsByOwner", [W, { mint: MINT }, { encoding: "jsonParsed", commitment: "finalized" }])).value;
   const amount = accs[0].account.data.parsed.info.tokenAmount.uiAmountString;
-  log(`W ${W} holds ${(await rpcs[0]("getBalance", [W, { commitment: "finalized" }])).value} lamports after the buy`);
+  log(`W ${W} holds ${(await own("getBalance", [W, { commitment: "finalized" }])).value} lamports after the buy`);
   log(`pool.sell of ${amount} of ${MINT} from W ${W}`);
   if (DUST) dust.armed = sentTxs.length;
   sell = await run("pool.sell", { chain: "solana", token: MINT, amount, slippage_bps: 300 });
@@ -473,11 +495,11 @@ if (bought) {
   // and W's own lamports: each closed (null) and W at 0 when it all came back; read once every transaction the page
   // sent is finalized (90 s at most), since the page reads its rent back at confirmed
   for (let i = 0; i < 45; i++) {
-    const st = (await rpcs[0]("getSignatureStatuses", [sentTxs])).value;
+    const st = (await own("getSignatureStatuses", [sentTxs])).value;
     if (st.every((s) => s?.confirmationStatus === "finalized")) break;
     await sleep(2_000);
   }
-  const info =async (a) => (await rpcs[0]("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
+  const info =async (a) => (await own("getAccountInfo", [a, { encoding: "base64", commitment: "finalized" }])).value;
   const program = (await info(MINT)).owner;
   const { solanaVolumeAccumulator, SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM } = await import("../../kit/src/checks/solana/checks.ts");
   const left = async (a) => (await info(a))?.lamports ?? null;
