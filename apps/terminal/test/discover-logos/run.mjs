@@ -54,11 +54,13 @@ function serve(dir) {
     const p = new URL(req.url, "http://x").pathname;
     const file = path.join(dir, p === "/" ? "index.html" : p);
     if (!file.startsWith(dir)) return res.writeHead(403).end();
+    let body;
     try {
-      res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(readFileSync(file));
+      body = readFileSync(file);
     } catch {
-      res.writeHead(404).end();
+      return res.writeHead(404).end();
     }
+    res.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" }).end(body);
   });
   return new Promise((r) => server.listen(0, "127.0.0.1", () => r(server)));
 }
