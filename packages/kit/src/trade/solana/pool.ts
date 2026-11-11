@@ -515,6 +515,18 @@ function heldBy(acc: SolanaPoolAccount | null, m: string, owner: string, program
 /** One provider's read of one venue: its parsed answer, or why there is none (the call's own fault, or a malformed answer). */
 type Got = { read: Read; fault: string | null };
 const PROVIDER = ["provider A", "provider B"] as const;
+/** A failed call's fault in fixed words: its HTTP status, its JSON-RPC error code or its timeout, never the error's own
+ *  text, which can carry a provider's URL and key (a reason reaches the caller and the live check's public log). */
+export function solanaCallFault(e: unknown): string {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  const http = /\bHTTP (\d{3})\b/.exec(m);
+  if (http) return `HTTP ${http[1]}`;
+  const rpc = /\bRPC error (-?\d{1,6})\b/.exec(m);
+  if (rpc) return `RPC error ${rpc[1]}`;
+  const late = /\bno answer in (\d{1,7}) ms\b/.exec(m);
+  if (late) return `no answer in ${late[1]} ms`;
+  return "the call failed";
+}
 
 function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: ReturnType<typeof solanaPoolAddresses>, ga: Got, gb: Got): Verdict {
   const a = ga.read;
@@ -577,6 +589,7 @@ function judge(venue: SolanaPoolVenue, req: SolanaReferenceRequest, addr: Return
     if (!solanaReservesAgree(bases[0], bases[1]) || !solanaReservesAgree(quotes[0], quotes[1])) return { kind: "bad", why: "the pool's vaults are outside the band" };
     // the quote reserve the price and the depth are built from: the vault and virtual_quote_reserves, each provider's own
     const qs = [quotes[0] + pool.virtualQuoteReserves, quotes[1] + poolB.virtualQuoteReserves] as const;
+    if (qs[0] <= 0n || qs[1] <= 0n) return { kind: "bad", why: "the pool's quote reserve is not positive" };
     if (!solanaReservesAgree(qs[0], qs[1])) return { kind: "bad", why: "the pool's quote reserve is outside the band" };
     const cfg = solanaDecodePumpSwapConfig(at(A, PI.ammGlobalConfig) ?? fail("no GlobalConfig"));
     const feeConfig = solanaDecodeFeeConfig(at(A, PI.ammFeeConfig) ?? fail("no PumpSwap fee config"));
@@ -630,7 +643,7 @@ export async function readSolanaReferenceWhy(providers: readonly [SolanaRpc, Sol
     Promise.all(providers.map((rpc) =>
       Promise.resolve().then(() => solanaTimedRpc(rpc, READ_TIMEOUT_MS)("getMultipleAccounts", [list, { encoding: "base64", commitment: "confirmed" }])).then(
         (ans): Got => ({ read: solanaParseAccountsAnswer(ans, list.length), fault: null }),
-        (e: unknown): Got => ({ read: null, fault: String(e instanceof Error ? e.message : e).slice(0, 200) }),
+        (e: unknown): Got => ({ read: null, fault: solanaCallFault(e) }),
       ),
     )) as Promise<[Got, Got]>;
   const lists: Record<SolanaPoolVenue, string[]> = { "pump-curve": addr.curveList, pumpswap: addr.poolList };

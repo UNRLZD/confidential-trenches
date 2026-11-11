@@ -281,6 +281,13 @@ test("card solana-reference-read-holds-a-slot-apart: every read with no referenc
     ["the vaults outside the band", () => pair(s, pool(1, (a) => edit(a.value[PI.quote]!, (d) => putU64(d, 64, (u64(d, 64) * 10_300n) / 10_000n)))), "pumpswap: the pool's vaults are outside the band, after a re-read"],
     ["the quote reserve outside the band", () => pair(s, traded((q) => (q * 300n) / 10_000n)), "pumpswap: the pool's quote reserve is outside the band, after a re-read"],
     ["no candidate", () => pair(s, (_p, _v, _n, ans) => { ans.value[1] = null; }), "no reference pool"],
+    // Q = the quote vault + virtual_quote_reserves at zero or below, on one provider or both: never priced, never a pass of
+    // the band on two equal non-positive values
+    ...([[0n, [1]], [0n, [0, 1]], [-1n, [1]], [-1n, [0, 1]], [-5_000_000n, [0, 1]]] as const).map(([q, who]): [string, () => readonly [SolanaRpc, SolanaRpc], string] => [
+      `Q ${q} on ${who.join(",")}`,
+      () => pair(s, (p, v, _n, ans) => { if (v === "pool" && (who as readonly number[]).includes(p)) edit(ans.value[PI.pool]!, (d) => putI128(d, 245, q - tokenAmount(ans.value[PI.quote]!))); }),
+      "pumpswap: the pool's quote reserve is not positive, after a re-read",
+    ]),
   ];
   for (const [name, providers, why] of cases) {
     const got = await onTestClock(() => readSolanaReferenceWhy(providers(), req(ammToken, s)));
@@ -293,6 +300,34 @@ test("card solana-reference-read-holds-a-slot-apart: every read with no referenc
   const good = await readSolanaReferenceWhy(pair(s), req(ammToken, s));
   assert.ok("reference" in good && good.reference.expectedOut > 0n);
   assert.deepEqual(good.reference, await readSolanaReference(pair(s), req(ammToken, s)));
+});
+
+test("card solana-reference-read-holds-a-slot-apart: a failed call's reason is fixed words, its status, code or timeout, never the error's text (a provider URL with its key)", async () => {
+  const s = scenario(ammToken, "buy");
+  const KEY = "PLANTED";
+  const URL = `https://rpc.example.test/v1/${KEY}?api-key=${KEY}&token=${KEY}`;
+  for (const [msg, words] of [
+    [`HTTP 429 at ${URL}`, "HTTP 429"],
+    [`request to ${URL} failed, reason: HTTP 503 (http_5xx, 3 tries at rpc.example.test)`, "HTTP 503"],
+    [`RPC error -32016: ${URL} is behind`, "RPC error -32016"],
+    [`no answer in 5000 ms from ${URL}`, "no answer in 5000 ms"],
+    [`fetch failed: getaddrinfo ENOTFOUND ${URL}`, "the call failed"],
+    [URL, "the call failed"],
+  ] as const) {
+    const [a] = pair(s);
+    const b = Object.assign(async () => { throw new Error(msg); }, { url: fx.rpcs[1] });
+    const got = await readSolanaReferenceWhy([a, b], req(ammToken, s));
+    assert.ok("refused" in got, msg);
+    assert.equal(got.refused, `pump-curve: provider B gave no answer (${words}), after a re-read; pumpswap: provider B gave no answer (${words}), after a re-read`, msg);
+    assert.ok(!got.refused.includes(KEY) && !got.refused.includes("example") && !/https?:/.test(got.refused), got.refused);
+  }
+  // not an Error: a thrown string or object is named the same way
+  for (const thrown of [`HTTP 429 ${URL}`, { message: URL }, null]) {
+    const [a] = pair(s);
+    const b = Object.assign(async () => { throw thrown; }, { url: fx.rpcs[1] });
+    const got = await readSolanaReferenceWhy([a, b], req(ammToken, s));
+    assert.ok("refused" in got && !got.refused.includes(KEY), JSON.stringify(got));
+  }
 });
 
 test("a candidate that still disagrees after the re-read refuses the route, even with another candidate agreed", async () => {
