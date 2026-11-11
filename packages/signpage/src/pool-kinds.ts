@@ -39,7 +39,7 @@
 //   pool-restore-wired). Any other error is answered as before.
 import { EvmNotFinalError } from "../../wallet/src/pool/evm-restore.ts";
 import type { KindContext, Deferred, HostAnswer, HostRefusal, Running } from "./api.ts";
-import { afterOf, readWaits, ReadStopped, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, readWaits, ReadStopped, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { PoolRuleRefused, checkPoolRequest, poolTokenAddress, tokenDecimalsKeptOf, tokenDecimalsOf, type PoolAsk, type PoolChain, type PoolRequest } from "./rules/pool.ts";
 
 /** One provider's JSON-RPC call: the method's result, or a throw. */
@@ -234,7 +234,7 @@ export function poolKinds(deps: PoolKindsDeps): { [K in PoolKind]: Handler<K> } 
         (e: unknown) => {
           answer = e instanceof PoolRuleRefused ? NO : e instanceof ReadStopped ? FAILED : DOWN;
         },
-      );
+      ).then(() => tapDone(ctx, waits));
       return { running: true, after, answer: () => answer };
     };
   return { "pool.deposit": handler("pool.deposit"), "pool.buy": handler("pool.buy"), "pool.sell": handler("pool.sell"), "pool.withdraw": handler("pool.withdraw") };

@@ -63,7 +63,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
-import { clockOf, readsWaited, readWaits, stopOf, tapWaits, type ReadWaits } from "./read-waits.ts";
+import { clockOf, readsWaited, readWaits, stopOf, tapDone, tapWaits, type ReadWaits } from "./read-waits.ts";
 import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -785,6 +785,8 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
         if (!answer) answer = { error: "failed" };
         give();
       });
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     // the end, read with no lock held (a sign out never waits on it) and nothing written; a wait that rejects stops it
     void run.then(() => {
       const f = follow;

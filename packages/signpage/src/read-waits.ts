@@ -66,8 +66,9 @@ export function readWaits(clock: ReadClock = deviceClock): ReadWaits {
     spent: () => spent,
   };
 }
-// each request's bound by its id (a kind's host passes the request's context on as a copy, so the id names it), kept
-// past its bound for a minute, then dropped: the page holds a few at most
+// each request's bound by its id (a kind's host passes the request's context on as a copy, so the id names it), dropped
+// when its run ends (tapDone), so an id asked again (the page's follow deposits all share one) starts a bound of its
+// own; one whose run never ends is dropped a minute past its bound
 const taps = new Map<string, { waits: ReadWaits; at: number }>();
 const TAP_KEPT_MS = READ_WAIT_TOTAL_MS + 60_000;
 /** A request's one bound (`tap`: its KindContext, by its id), started by its first reader; a fresh one with none. */
@@ -78,6 +79,10 @@ export function tapWaits(tap: { id?: unknown } | null | undefined, clock?: ReadC
   let t = taps.get(tap.id);
   if (t === undefined) taps.set(tap.id, (t = { waits: readWaits(clock), at: now }));
   return t.waits;
+}
+/** A request's run ended: its bound is dropped (only that one: a run of the same id begun since keeps its own). */
+export function tapDone(tap: { id?: unknown } | null | undefined, waits: ReadWaits): void {
+  if (typeof tap?.id === "string" && taps.get(tap.id)?.waits === waits) taps.delete(tap.id);
 }
 /** A host's clock (its `now`, a bigint or a number of ms), else the device's. */
 export const clockOf = (h: { now?: () => bigint | number }): ReadClock => () => Number(h.now?.() ?? Date.now());

@@ -66,7 +66,7 @@ export function facts(index, js) {
   }
   // down only for a failed read: a rule's refusal (two answers that disagree) is not_allowed (a sign out's stop, since
   // card start-reads-wait-out-a-throttle, failed)
-  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(?:\\1 instanceof ${N}\\?${N}:)?(${N})\\}\\),answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
+  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(?:\\1 instanceof ${N}\\?${N}:)?(${N})\\}\\)(?:\\.then\\(\\(\\)=>${N}\\(${N},${N}\\)\\))?,answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
   if (no) out.down = new RegExp(`[,; ]${esc(no[4])}=Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`).test(js) && new RegExp(`[,; ]${esc(no[3])}=Object\\.freeze\\(\\{error:${Q}not_allowed${Q}\\}\\)`).test(js);
   return out;
 }

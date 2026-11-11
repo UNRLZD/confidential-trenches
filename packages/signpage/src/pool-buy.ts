@@ -115,7 +115,7 @@ import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRe
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
 import { spendOwner, type HistoryPlaces, type SpendOwner } from "./pool-spend.ts";
-import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
+import { clockOf, keptReads, readsWaited, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 /** The page's own copy of the kit's route bound: a frozen RegExp's matcher can still be swapped
@@ -961,6 +961,8 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
       })
       .finally(give);
     void run;
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }

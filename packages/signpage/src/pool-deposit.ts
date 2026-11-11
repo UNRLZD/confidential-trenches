@@ -104,7 +104,7 @@ import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { SOL_LADDER, solanaPoolOf, solanaTreeSync, type SolanaPoolPin } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaDeposit, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
-import { clockOf, readsWaited, readWaits, stopOf, tapWaits, type ReadWaits } from "./read-waits.ts";
+import { clockOf, readsWaited, readWaits, stopOf, tapDone, tapWaits, type ReadWaits } from "./read-waits.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
 export type PoolDepositHost = {
@@ -923,6 +923,8 @@ export function poolDepositKind(host: () => PoolDepositHost, locks: Locks | null
         if (!answer) answer = { error: "failed" };
       })
       .finally(give);
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     // the end, read with no lock held (a sign out never waits on it) and nothing written; a wait that rejects stops it
     void run.then(() => {
       const f = follow;

@@ -94,7 +94,8 @@ const EVM_LEFT = new RegExp(`finally\\{${N}\\.fill\\(0\\);for\\(let ${N} of ${N}
 // a kind's end: filled, or part_filled with no open note; anything else read on once its locks are let go, its end
 // posted unless the reads gave up (null)
 const ENDED = `\`stage\`in (${N})&&\\(\\1\\.stage===${Q}filled${Q}\\|\\|\\1\\.stage===${Q}part_filled${Q}&&\\((${N})===null\\|\\|\\2\\.notes\\.length===0\\)\\)`;
-const AFTER = `\\.then\\(\\(\\)=>\\{let (${N})=${N};if\\(\\1!==null&&(${N})!==null\\)return ${N}\\(\\1\\.h,\\1\\.left\\)\\.then\\((${N})=>void\\(\\3!==null&&\\2\\.progress\\(\\3\\)\\),\\(\\)=>\\{\\}\\)\\}\\)`;
+// (since card start-reads-wait-out-a-throttle the run's end also drops the request's read bound first: tapDone)
+const AFTER = `(?:;return ${N}\\.then\\(\\(\\)=>${N}\\(${N},${N}\\),\\(\\)=>${N}\\(${N},${N}\\)\\),${N})?\\.then\\(\\(\\)=>\\{let (${N})=${N};if\\(\\1!==null&&(${N})!==null\\)return ${N}\\(\\1\\.h,\\1\\.left\\)\\.then\\((${N})=>void\\(\\3!==null&&\\2\\.progress\\(\\3\\)\\),\\(\\)=>\\{\\}\\)\\}\\)`;
 // the Solana kind: its run awaited in a try whose finally reads the hand-off (a throw too); the run takes the follow's
 // fixed source as a third argument since card pool-deposit-follow
 // answered, an end goes as the run's own stage (filled or part_filled), once
