@@ -192,3 +192,21 @@ test("the facts read from a bundle; a planted line with its rule changed FAILs",
     assert.deepEqual(Object.entries(c).filter(([, v]) => !v).map(([k]) => k), [i].flat().map((n) => Object.keys(MARKS)[n]), js.slice(0, 80));
   }
 });
+
+// card pool-sell-legs-side-by-side: W's volume accounts read with W's own accounts and the keep counting each owed, cut
+// from that card's build of public/app.js (sol-w-sweep.side.excerpt.txt): it holds; broken in place (one RPC's read
+// needed on both, the owed claims left out of the count, the keep priced without them): each FAIL
+test("the side-by-side sell's owed claims hold, and each break of them in place FAILs", () => {
+  const KEY = "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read";
+  const ex = readFileSync(new URL("./sol-w-sweep.side.excerpt.txt", import.meta.url), "utf8");
+  assert.equal(MARKS[KEY].test(ex), true);
+  for (const [what, from, to] of [
+    ["both RPCs' reads needed", ".some(t=>t[2+n]", ".every(t=>t[2+n]"],
+    ["the owed claims left out", "||x.owes[t]", ""],
+    ["the keep priced without them", /SO\(y,ae\)/, "SO(y,0)"],
+  ]) {
+    const bad = ex.replace(from, to);
+    assert.notEqual(bad, ex, what);
+    assert.equal(MARKS[KEY].test(bad), false, what);
+  }
+});

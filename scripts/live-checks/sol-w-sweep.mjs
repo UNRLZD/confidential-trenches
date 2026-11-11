@@ -70,10 +70,20 @@ const tied = (re, more) => ({
   },
 });
 /** Each rule's mark in the bundle, by what it holds. */
+/** A mark held by either shape: `one`, or every one of `all`. */
+const either = (one, all) => ({ test: (js) => one.test(js) || all.every((re) => re.test(js)) });
 export const MARKS = Object.freeze({
   "a full sell deposits W's surplus": new RegExp(`(${I})=(${I})\\.fee\\+\\2\\.made\\+\\2\\.rents\\+\\2\\.after-\\2\\.lamports,${I}=\\1>0n\\|\\|!\\2\\.keeps\\?\\1:0n`),
   "a full sell keeps what lifts the sweep to the floor, a page's opening on each tree and each owed claim's cost": new RegExp(`function ${I}\\((${I}),(${I})=0\\)\\{let (${I})=${I}\\(\\1\\)>1000000n\\?${I}\\(\\1\\):${I},(${I})=(${I})\\(\\1,88\\),${I}=\\3\\+\\((${I})\\+\\5\\(\\1,${I}\\)\\+2n\\*\\4\\)\\+\\6-\\5\\(\\1,165\\)\\+${I}\\(\\1,\\2\\)`),
-  "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read": new RegExp(`\\.map\\(async (${I})=>(${I})\\.cashback&&\\1===${I}\\?!0:\\(await ${I}\\(${I},${I}=>${I}\\(${I},${I}\\(${I}\\.address,\\1\\),\`confirmed\`\\)\\)\\)\\.some\\((${I})=>!\\(\`none\`in \\3\\)&&\\3\\.owner===\\1&&${I}\\(\\1,\\3\\.data\\)>0n\\)\\)\\)\\.then\\((${I})=>\\4\\.filter\\(Boolean\\)\\.length\\)\\]\\),${I}=${I}\\?${I}\\(${I},${I}\\):${I}\\(${I},${I}\\)`),
+  "the full sell's keep counts W's volume accounts owed a claim, on either RPC's read": either(
+    new RegExp(`\\.map\\(async (${I})=>(${I})\\.cashback&&\\1===${I}\\?!0:\\(await ${I}\\(${I},${I}=>${I}\\(${I},${I}\\(${I}\\.address,\\1\\),\`confirmed\`\\)\\)\\)\\.some\\((${I})=>!\\(\`none\`in \\3\\)&&\\3\\.owner===\\1&&${I}\\(\\1,\\3\\.data\\)>0n\\)\\)\\)\\.then\\((${I})=>\\4\\.filter\\(Boolean\\)\\.length\\)\\]\\),${I}=${I}\\?${I}\\(${I},${I}\\):${I}\\(${I},${I}\\)`),
+    // since card pool-sell-legs-side-by-side: W's volume accounts read with W's own accounts (each owes a claim when
+    // either RPC's read of it pays out), and the full sell's keep counts each owed, or the venue's own on a cashback coin
+    [
+      new RegExp(`owes:(${I})\\.map\\(\\((${I}),(${I})\\)=>(${I})\\.some\\((${I})=>\\5\\[2\\+\\3\\]!=null&&\\5\\[2\\+\\3\\]\\.owner===\\2&&${I}\\(\\2,\\5\\[2\\+\\3\\]\\.data\\)>0n\\)\\)`),
+      new RegExp(`(${I})=\\[${I},${I}\\]\\.filter\\(\\((${I}),(${I})\\)=>(${I})\\.cashback&&\\2===${I}\\|\\|${I}\\.owes\\[\\3\\]\\)\\.length,${I}=${I}\\?${I}\\(\\4,${I}\\):${I}\\(${I},\\1\\)`),
+    ],
+  ),
   "rent(0) only when a full sell's keep is refused or leaves its note under the floor": new RegExp(`function (${I})\\((${I})\\)\\{if\\(!\\2\\.keeps&&\\2\\.base!==void 0\\)\\{let (${I})=\\1\\(\\{\\.\\.\\.\\2,base:void 0\\}\\);return\`refused\`in \\3\\|\\|\\3\\.value<\\(\\2\\.floor\\?\\?0n\\)\\?\\1\\(\\{\\.\\.\\.\\2,after:\\2\\.base,swept:0n,base:void 0\\}\\):\\3\\}`),
   "the sell prices a full sell with that fallback, at the sweep's floor": new RegExp(`(?<f>${I})=(?<he>${I})\\((?<rent>${I})\\)>1000000n\\?\\k<he>\\(\\k<rent>\\):${I},[\\s\\S]{0,3000}?let (?<r0>${I})=${I}\\(\\k<rent>,0\\),${I}=${I}\\(\\{[^{}]*?\\.\\.\\.${I}\\?\\{\\}:\\{swept:${I}-\\k<r0>,base:\\k<r0>,floor:\\k<f>\\}`),
   "the reserve cap leaves out what the sweep carries on": new RegExp(`(${I})-\\((${I})\\.swept\\?\\?0n\\)>${I}\\|\\|\\1>=\\2\\.minOut`),
