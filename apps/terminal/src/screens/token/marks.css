@@ -2,11 +2,13 @@
    round token logo with a #6e6e6e ring, the side dot at its bottom-right with a 1px #0a0a0a stroke, the "+k" chip. */
 .tm-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .tm-pane { position: absolute; }
-.tm { position: absolute; left: 0; top: 0; display: block; padding: 0; margin: 0; border: 0; border-radius: 50%; background: #0a0a0a; box-shadow: 0 0 0 1px #0a0a0a; cursor: default; pointer-events: auto; -webkit-tap-highlight-color: transparent; }
+.tm { position: absolute; left: 0; top: 0; display: block; padding: 0; margin: 0; border: 0; border-radius: 50%; background: #0a0a0a; box-shadow: 0 0 0 1px #0a0a0a; cursor: default; pointer-events: none; -webkit-tap-highlight-color: transparent; }
 .tm::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1.4px solid #6e6e6e; pointer-events: none; }
-/* The phone's tap area (BAR-10, 44 px): a 44 px square round the 12 px mark, nothing drawn. Areas of marks close
-   together overlap, so the tap's point picks the mark (TradeMarks.tsx tapped): the disc under it, else the nearest
-   centre. The desktop's hover target stays the disc. */
+/* The marks take no pointer: the chart under them takes every drag, wheel and hover, and the plot's own events find
+   the mark (TradeMarks.tsx, card chart-drags-and-tracks-the-pointer). The phone's tap area (BAR-10, 44 px): a 44 px
+   square round the 12 px mark, nothing drawn, the square TradeMarks.tsx hit-tests a tap in. Areas of marks close
+   together overlap, so the tap's point picks the mark: the disc under it, else the nearest centre. The desktop's hover
+   target stays the disc. */
 .tm-layer[data-phone] .tm::before { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; }
 .tm-dot { position: absolute; left: 69%; top: 69%; z-index: 1; box-sizing: border-box; width: 34%; height: 34%; border: 1px solid #0a0a0a; border-radius: 50%; background: var(--acc, #50e397); }
 .tm[data-side="sell"] .tm-dot { background: var(--sell, #ff5d4d); }
