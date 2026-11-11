@@ -537,7 +537,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
       <div className="tkp-main">
         <header className="tkp-head">
           <div className="tkp-ident">
-            {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
+            {v ? <Avatar symbol={v.symbol} size={54} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} /> : <span className="tkp-sk tkp-skc" style={{ width: 54, height: 54 }} />}
             <div className="tkp-idtext">
               <div className="tkp-symrow">
                 {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={120} />}
@@ -587,7 +587,7 @@ function Desktop({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c
 function SheetHead({ v }: { v: TokenView }) {
   return (
     <div className="tkp-shead">
-      <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} />
+      <Avatar symbol={v.symbol} size={40} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} />
       <div className="tkp-stitle">
         <span className="tkp-ssym" title={v.symbol}>{v.symbol}</span>
         {v.price === null ? <SkLine cls="tkp-sprice" w={80} /> : <span className="tkp-sprice">{v.price}</span>}
@@ -624,7 +624,7 @@ function Phone({ v, r, c, t, tape }: { v: TokenView | null; r: Ready | null; c: 
     <div className="tkp-phone">
       <div className="tkp-nav" data-testid="token-nav">
         <button type="button" className="tkp-navbtn" aria-label={WORDS.back.text} onClick={back}><Ic n="back" size={20} stroke={1.4} /></button>
-        {v ? <Avatar symbol={v.symbol} size={30} pad={v.launchpad} chain={v.chain} /> : <span className="tkp-sk tkp-skc" style={{ width: 30, height: 30 }} />}
+        {v ? <Avatar symbol={v.symbol} size={30} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} /> : <span className="tkp-sk tkp-skc" style={{ width: 30, height: 30 }} />}
         {v ? <h1 className="tkp-sym" title={v.symbol}>{v.symbol}</h1> : <SkLine cls="tkp-sym" w={100} />}
         {v && <Star v={v} cls="tkp-navbtn tkp-star" size={20} />}
         {v && <button type="button" className="tkp-navbtn" aria-label={WORDS.share.text} onClick={() => share(v)}><Ic n="share" size={19} /></button>}

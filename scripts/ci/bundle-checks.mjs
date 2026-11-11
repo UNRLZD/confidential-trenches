@@ -60,6 +60,7 @@ export const IN_PROCESS = [
   viaRead("pool-deposit-address", () => import("../live-checks/pool-deposit-address.mjs")),
   viaRead("pool-deposit-follow", () => import("../live-checks/pool-deposit-follow.mjs")),
   viaRead("solana-release-reads-paced", () => import("../live-checks/solana-release-reads-paced.mjs")),
+  viaRead("pool-buy-record-never-stays-sent", () => import("../live-checks/pool-buy-record-never-stays-sent.mjs")),
   viaRead("solana-legs-checked", () => import("../live-checks/solana-legs-checked.mjs")),
   viaRead("signers-own-bytes", () => import("../live-checks/signers-own-bytes.mjs")),
   viaRead("solana-written-accounts-whole", () => import("../live-checks/solana-written-accounts-whole.mjs")),
@@ -111,6 +112,7 @@ export const CHILD_RUNS = [
   { key: "app-orders-coming-soon", host: "app", args: ["--root", "apps/terminal/dist"] },
   { key: "words-nov8-final", host: "sign", args: ["--local", "--host", "sign"] },
   { key: "words-nov8-final", host: "app", args: ["--local", "--host", "app"] },
+  { key: "signing-views-open-over-the-app", host: "sign", args: ["--local"] },
 ];
 /** The deploys' checks left out, with the reason. */
 export const OUT = {
@@ -180,6 +182,7 @@ export const OUT = {
   "app-sell-mount": "a browser",
   "app-list-age": "a browser and the helper",
   "app-discover-toolbar": "a browser and the helper",
+  "discover-matches-the-main-app": "a browser and the helper",
   "app-pool-withdraw": "a browser",
   "app-hop-sync-lock": "a browser",
   "balances-per-chain": "a browser and chain RPCs",

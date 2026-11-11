@@ -67,8 +67,9 @@ export const HEADERS = {
   "x-content-type-options": "nosniff",
   "permissions-policy":
     "accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), clipboard-write=(self), " +
-    "display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), " +
-    "publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), usb=(), xr-spatial-tracking=()",
+    "display-capture=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), " +
+    "payment=(), picture-in-picture=(), publickey-credentials-create=(self), publickey-credentials-get=(self), serial=(), " +
+    "usb=(), xr-spatial-tracking=()", // fullscreen and picture-in-picture denied: card signing-views-open-over-the-app
 };
 // X-Frame-Options would repeat frame-ancestors, so it is not sent; no cross-origin isolation (COEP would make the APP_HOST
 // frame need CORP and COEP of its own); no policy left report-only

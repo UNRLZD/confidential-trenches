@@ -8,9 +8,11 @@
 //     hidden and the terminal shows; the frame setting top.location does not move the top window;
 //   - the frame gets one `ready` per frame load before the stranger step, and its first `state` answer is exactly the
 //     signed-out state;
-//   - Chromium only (its virtual authenticator, no PRF): signin.open {way: passkey} is answered pending, the layer opens
-//     and the frame leaves the document; Create passkey lands on the backup screen; Saved signs in, the layer closes and
-//     the new frame answers signed in, way passkey, code_saved true; a sign out in another tab (the store's "signout"
+//   - Chromium only (its virtual authenticator, no PRF): signin.open {way: passkey} is answered pending and the layer
+//     opens (as a sheet over the app, the frame kept in the page under it since card signing-views-open-over-the-app,
+//     whose own checks pin that; before it, the frame left the document); Create passkey lands on the backup screen;
+//     Saved signs in, the layer closes and the frame answers signed in, way passkey, code_saved true (the kept frame, or
+//     before that card a new one); a sign out in another tab (the store's "signout"
 //     on its channel, then the database deleted) gives the frame exactly signed out;
 //   - signin.open {way: words} the same; then the test words (the a8 vector's entropy, all zero: BIP-39's first
 //     published vector) are typed with trusted keys while the APP_HOST page calls focus() on its own input every 20 ms:
@@ -160,31 +162,34 @@ export function judge(rec) {
   say(typeof st.topNav?.href === "string" && st.topNav.href === `${SIGN}${START}` && st.topNav.tried === true,
     `the frame cannot move the top window (top.location set to ${STRANGER}: the top stays at ${st.topNav?.href ?? "none"})`);
 
-  // one ready per load of the frame: the open, each close of the layer (a new frame), the reload and the backfill.
+  // one ready per load of the frame: the open, each close of the layer that made a new frame (Saved's close keeps the
+  // frame under the sheet since card signing-views-open-over-the-app: no load there), the reload and the backfill.
   // The stranger step comes after: WebKit fires a load on the frame for the navigation its CSP refuses.
-  const loads = [-Infinity, ...(rec.engine === "chromium" ? [st.saved?.t] : []), st.words?.t, st.reload?.t, st.backfill?.t, st.stranger?.t ?? Infinity].map((t) => t ?? Infinity);
+  const loads = [-Infinity, ...(rec.engine === "chromium" && st.saved?.kept !== true ? [st.saved?.t] : []), st.words?.t, st.reload?.t, st.backfill?.t, st.stranger?.t ?? Infinity].map((t) => t ?? Infinity);
   const perLoad = loads.slice(0, -1).map((t, i) => msgs.filter((m) => isObj(m.data) && m.data.type === "ready" && m.t >= t && m.t < loads[i + 1]).length);
   say(perLoad.every((n) => n === 1), `the frame gets one ready per frame load before the stranger step (${perLoad.join(", ")})`);
   say(signedOut(result(st.first?.id)), `the first state answer is exactly the signed-out state (${show(result(st.first?.id))})`);
 
-  const opened = (s, label) =>
-    say(pending(s?.openId) && s?.layer?.layerHidden === false && s?.layer?.frames === 0,
-      `signin.open ${label}: answered pending, the layer opens and the frame leaves the document (${answer(s?.openId) ? JSON.stringify(answer(s.openId).data.ok ? result(s.openId) : answer(s.openId).data.error) : "no answer"}, layer ${s?.layer?.layerHidden === false ? "open" : "closed"}, ${s?.layer?.frames ?? "?"} frames)`);
+  // the words' screen has a field typed into: the frame leaves the document (packages/signpage/src/shell.ts seal); the
+  // passkey screen has none: the sheet keeps the frame under it (0 frames on a build before that card)
+  const opened = (s, label, frames) =>
+    say(pending(s?.openId) && s?.layer?.layerHidden === false && frames.includes(s?.layer?.frames),
+      `signin.open ${label}: answered pending, the layer opens${frames.includes(1) ? "" : " and the frame leaves the document"} (${answer(s?.openId) ? JSON.stringify(answer(s.openId).data.ok ? result(s.openId) : answer(s.openId).data.error) : "no answer"}, layer ${s?.layer?.layerHidden === false ? "open" : "closed"}, ${s?.layer?.frames ?? "?"} frames)`);
   const signedOutEvent = (s, label) => {
     const e = eventAfter(rec, s?.t, (x) => x.signed_in === false);
     say(s?.top?.state === "signed-out" && !!e && e.ms <= EVENT_MS && signedOut(e.state),
       `${label}: the frame gets exactly the signed-out state (${s?.top?.state ?? "none"}, ${show(e?.state)}${e ? `, ${e.ms} ms` : ""})`);
   };
   if (rec.engine === "chromium") {
-    opened(st.passkeyIn, "passkey");
+    opened(st.passkeyIn, "passkey", [0, 1]);
     say(st.created?.top?.state === "backup", `Create passkey with no PRF lands the shell on the backup screen (${st.created?.top?.state ?? "none"})`);
     const s = st.saved;
     say(s?.top?.state === "signed-in" && s?.top?.layerHidden === true && full("passkey")(result(s?.id)),
-      `Saved: the layer closes and the new frame answers signed in, way passkey, code_saved true (${s?.top?.state ?? "none"}, layer ${s?.top?.layerHidden ? "closed" : "open"}, ${show(result(s?.id))})`);
+      `Saved: the layer closes and the ${s?.kept === true ? "kept" : "new"} frame answers signed in, way passkey, code_saved true (${s?.top?.state ?? "none"}, layer ${s?.top?.layerHidden ? "closed" : "open"}, ${show(result(s?.id))})`);
     signedOutEvent(st.passkeyOut, "Sign out in another tab");
   }
   const w = st.words;
-  opened(st.wordsIn, "words");
+  opened(st.wordsIn, "words", [0]);
   say(st.wordsIn?.typed?.shellHasWords === true && st.wordsIn?.typed?.appChars === 0,
     `the 12 words typed while the app calls focus() every 20 ms: the shell holds all of them, the app none (shell ${st.wordsIn?.typed?.shellHasWords ? "all 12" : "not all"}, app ${st.wordsIn?.typed?.appChars ?? "?"} characters)`);
   say(w?.top?.state === "signed-in" && w?.top?.layerHidden === true && full("words")(result(w?.id)),
@@ -441,6 +446,14 @@ export async function collect({ engine, site, live, width = "desktop" }) {
     s.id = (await ask()).id;
     return s;
   };
+  // a sheet with no typed field closed (card signing-views-open-over-the-app): the frame it kept asks, with no new load;
+  // a build that still makes a new frame there gives its ready, as newFrameAsks
+  const closedFrameAsks = async (s) => {
+    s.kept = !(await until(async () => msgs().some((m) => m.t >= s.t && m.data?.type === "ready"), 2_000));
+    s.top = await top("loading");
+    s.id = (await ask()).id;
+    return s;
+  };
   const press = async (action) => {
     await sleep(PROTECT_MS + 300);
     const t = Date.now();
@@ -456,7 +469,8 @@ export async function collect({ engine, site, live, width = "desktop" }) {
   // the app asks for the sign-in: the answer, then the layer open over no frame
   const signinOpen = async (way) => {
     const openId = await send("signin.open", { return_key: "deposit", way });
-    const layer = await until(async () => { const l = await top("loading"); return l.layerHidden === false && l.frames === 0 ? l : null; }, 3_000) ?? (await top("loading"));
+    const want = way === "words" ? 0 : 1; // a typed field takes the frame out; the passkey screen keeps it
+    const layer = await until(async () => { const l = await top("loading"); return l.layerHidden === false && l.frames === want ? l : null; }, 3_000) ?? (await top("loading"));
     return { openId, layer };
   };
   // another tab signs out (the store's own sign out: "signout" on its channel, then the database deleted)
@@ -505,7 +519,7 @@ export async function collect({ engine, site, live, width = "desktop" }) {
       });
       rec.steps.passkeyIn = await signinOpen("passkey");
       rec.steps.created = await step("create", "signed-out");
-      rec.steps.saved = await newFrameAsks(await step("saved", "backup"));
+      rec.steps.saved = await closedFrameAsks(await step("saved", "backup"));
       rec.steps.passkeyOut = await signOutElsewhere();
     }
     // the words, typed by trusted keys while the app takes the focus back every 20 ms

@@ -4,7 +4,9 @@
 // deploy.mjs --dry-run's build, 2026-11-07, its pre-card answer kept as beforeEvm: FAIL; and on a Mac for card held-move-forgotten-tx's
 // archival RPC, 2026-11-08, the answer before it kept as beforeArchival: FAIL; on a Mac for card wallet-restore-reads-ux's Pocket
 // Solana gateway, deploy.mjs --build's build, 2026-11-09, the answer before it kept as beforePocket: FAIL; and on a Mac for card evm-pool-sync-holds' Base bloXroute beside it
-// (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
+// (deploy.mjs --build served by wrangler 4.151.1's pages dev, 2026-11-09), the answer before it kept as beforeHistory: FAIL;
+// and on a Mac for card signing-views-open-over-the-app's Permissions-Policy (deploy.mjs --build served by wrangler 4.151.1's
+// pages dev, 2026-11-12), the answer before it kept as beforePip: FAIL; SIGN_HOST answered 522 before any deploy, so no served answer existed
 // yet): PASS. The bad answers are that same answer with frame-ancestors taken out of the CSP, and with
 // frame-ancestors *: FAIL. predeploy: SIGN_HOST's real 522 before any deploy: FAIL. framed: the live SIGN_HOST before
 // card signpage-shell (APP_HOST framed it; no frame-src, no Origin-Agent-Cluster): FAIL.
@@ -15,10 +17,13 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { evmOrigins } from "./page-evm-rpc-csp.mjs";
-import { CSP, frameAllowed, judge, POOL_HISTORY, read } from "./signpage-skeleton.mjs";
+import { CSP, frameAllowed, HEADERS, judge, POOL_HISTORY, read } from "./signpage-skeleton.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "signpage-skeleton.answers.json"), "utf8"));
+// every answer recorded before card signing-views-open-over-the-app predates its Permissions-Policy (picture-in-picture
+// and fullscreen denied): it fails that line too, and on nothing else that card changed
+const PRE_PP = (rec) => `BAD permissions-policy: "${rec.headers["permissions-policy"]}", want "${HEADERS["permissions-policy"]}"`;
 const GOOD = ANSWERS.good;
 const APP = "https://ct-app.unrealized.trade";
 
@@ -40,6 +45,11 @@ test("recorded good answer: every header equals the policy: PASS", async () => {
   assert.ok(r.lines.includes('ok  origin-agent-cluster: "?1"'));
   assert.ok(r.lines.includes("ok  framed from https://example.com: blocked"));
   assert.ok(r.lines.includes('ok  integrity-policy: "blocked-destinations=(script)"'));
+});
+
+test("recorded bad answer: the good build before card signing-views-open-over-the-app (picture-in-picture and fullscreen not denied): FAIL on the Permissions-Policy alone", () => {
+  const r = judge(ANSWERS.beforePip);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [PRE_PP(ANSWERS.beforePip)]);
 });
 
 test("recorded bad answer: a CSP with no frame-ancestors: FAIL", async () => {
@@ -67,6 +77,7 @@ test("recorded bad answer: the live SIGN_HOST before the shell (APP_HOST framed 
     `BAD CSP frame-ancestors: "${APP}", want "'none'"`,
     `BAD framed from ${APP}: allowed`,
     'BAD origin-agent-cluster: none, want "?1"',
+    PRE_PP(ANSWERS.framed),
   ]);
 });
 
@@ -75,7 +86,7 @@ test("recorded bad answer: the good build before card page-evm-rpc-csp (no kit E
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeEvm.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeEvm)]);
 });
 
 test("recorded bad answer: the good build before card held-move-forgotten-tx (no archival RPC in connect-src): FAIL on connect-src alone", () => {
@@ -83,7 +94,7 @@ test("recorded bad answer: the good build before card held-move-forgotten-tx (no
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeArchival.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeArchival)]);
 });
 
 test("recorded bad answer: the good build before card evm-pool-sync-holds (no Base bloXroute in connect-src): FAIL on connect-src alone", () => {
@@ -91,7 +102,7 @@ test("recorded bad answer: the good build before card evm-pool-sync-holds (no Ba
   assert.equal(r.ok, false);
   const site = ANSWERS.beforeHistory.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforeHistory)]);
 });
 
 test("card evm-pool-sync-holds: every origin of the kit's EVM_POOL_HISTORY is in the pinned connect-src, and POOL_HISTORY is exactly those the kit's venue origins leave out", async () => {
@@ -110,7 +121,7 @@ test("recorded bad answer: the good build before card wallet-restore-reads-ux (n
   const site = ANSWERS.beforePocket.headers["content-security-policy"].split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src "));
   const want = CSP.find(([k]) => k === "connect-src")[1];
   assert.ok(want.includes(" https://solana.api.pocket.network "), "the policy names the restore's second U_X operator");
-  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`]);
+  assert.deepEqual(r.lines.filter((l) => l.startsWith("BAD")), [`BAD CSP connect-src: "${site.slice("connect-src ".length)}", want "${want}"`, PRE_PP(ANSWERS.beforePocket)]);
 });
 
 test("an origin not on the list beside Pocket's Solana gateway, or in its place, is still refused: FAIL", () => {

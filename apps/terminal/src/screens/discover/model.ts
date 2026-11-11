@@ -75,6 +75,8 @@ export interface RowView {
   stage: { pill: string; fill: number; curve: boolean };
   launchpad: string | null;
   chain: string;
+  /** The helper serves the token's logo (06b `icon`, GET /v1/logo/{chain}/{token}). */
+  icon: boolean;
 }
 
 /** A row's drawn values for a window: its change, volume, and buys and sells. */
@@ -110,6 +112,7 @@ export function rowView(r: MarketRow, win: Win, nowMs: number): RowView {
     stage,
     launchpad: r.launchpad,
     chain: r.chain,
+    icon: r.icon === true,
   };
 }
 

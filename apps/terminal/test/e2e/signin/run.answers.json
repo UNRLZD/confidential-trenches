@@ -1,6 +1,1344 @@
 {
- "note": "recorded-run: good is the three launches with the CPU slowed 4x, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only.",
+ "note": "recorded-run: good is the three launches with the CPU slowed 4x, bad each planted prf launch, written by run.mjs --record. States, counts, times and boxes only. good was recorded again with card signing-views-open-over-the-app (11 Nov, the sign-in landing in the same APP_HOST document under the sheet); goodPageOfItsOwn is the good before it (a new document after the sign-in).",
  "good": [
+  {
+   "run": "prf",
+   "plant": null,
+   "cpu": 4,
+   "browser": "156.0.8078.79",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png",
+      "fr-P4-hop-390.png",
+      "fr-P5-S1.3-390.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 138,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "sheetState": null,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 226,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 54
+      },
+      {
+       "step": "passkey",
+       "t": 598
+      },
+      {
+       "step": "create",
+       "t": 1034
+      },
+      {
+       "step": "end",
+       "t": 2129
+      }
+     ],
+     "blank": {
+      "frames": 14,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 76,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "passkey",
+        "ms": 105,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "create",
+        "ms": 295,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       null
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "hjcr1l",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "c93u0s",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "iwvzmq",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.0020846903708362343,
+        "sources": [
+         "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "passkey",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "create",
+        "sum": 0.0020846903708362343,
+        "sources": [
+         "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+        ],
+        "entries": [
+         {
+          "value": 0.0020846903708362343,
+          "sources": [
+           "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+           "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+          ]
+         }
+        ],
+        "landed": true
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "P4-hop",
+      "P5-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png",
+      "fr-P4-hop-1440.png",
+      "fr-P5-S1.3-1440.png"
+     ],
+     "taps": 3,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 172,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "sheetState": null,
+      "dot": true,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 177,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": true
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 71
+      },
+      {
+       "step": "passkey",
+       "t": 621
+      },
+      {
+       "step": "create",
+       "t": 1055
+      },
+      {
+       "step": "end",
+       "t": 2119
+      }
+     ],
+     "blank": {
+      "frames": 22,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 100,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "passkey",
+        "ms": 98,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "create",
+        "ms": 264,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       null
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "xqisq7",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "hjx0he",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "ig5bhe",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.00155109461403678,
+        "sources": [
+         "div.search 651,8,390,30 -> 583,8,390,30",
+         "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "passkey",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "create",
+        "sum": 0.00155109461403678,
+        "sources": [
+         "div.search 651,8,390,30 -> 583,8,390,30",
+         "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+        ],
+        "entries": [
+         {
+          "value": 0.00155109461403678,
+          "sources": [
+           "div.search 651,8,390,30 -> 583,8,390,30",
+           "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+           "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+          ]
+         }
+        ],
+        "landed": true
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 8457
+  },
+  {
+   "run": "no-prf",
+   "plant": null,
+   "cpu": 4,
+   "browser": "156.0.8078.79",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "N4-S3.1",
+      "N5-hop",
+      "N6-S1.3"
+     ],
+     "shots": [
+      "fr-N4-S3.1-390.png",
+      "fr-N5-hop-390.png",
+      "fr-N6-S1.3-390.png",
+      "fr-P0-S5.6-390.png",
+      "fr-P1-S2.1-390.png",
+      "fr-P2-hop-390.png",
+      "fr-P3-S2.2-390.png"
+     ],
+     "taps": 4,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 200,
+     "words": 12,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "sheetState": null,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": -619,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 58
+      },
+      {
+       "step": "passkey",
+       "t": 580
+      },
+      {
+       "step": "create",
+       "t": 1044
+      },
+      {
+       "step": "saved",
+       "t": 1972
+      },
+      {
+       "step": "end",
+       "t": 3022
+      }
+     ],
+     "blank": {
+      "frames": 23,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 71,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "passkey",
+        "ms": 125,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "create",
+        "ms": 252,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "saved",
+        "ms": 248,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       null
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "fb16q0",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "3omtlw",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "qelh69",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.0020846903708362343,
+        "sources": [
+         "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "passkey",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "create",
+        "sum": 0.0020846903708362343,
+        "sources": [
+         "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+        ],
+        "entries": [
+         {
+          "value": 0.0020846903708362343,
+          "sources": [
+           "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+           "button.hit44.sfi 251,6,44,44 -> 182,6,44,44"
+          ]
+         }
+        ],
+        "landed": true
+       },
+       {
+        "step": "saved",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "P1-S2.1",
+      "P2-hop",
+      "P3-S2.2",
+      "N4-S3.1",
+      "N5-hop",
+      "N6-S1.3"
+     ],
+     "shots": [
+      "fr-N4-S3.1-1440.png",
+      "fr-N5-hop-1440.png",
+      "fr-N6-S1.3-1440.png",
+      "fr-P0-S5.6-1440.png",
+      "fr-P1-S2.1-1440.png",
+      "fr-P2-hop-1440.png",
+      "fr-P3-S2.2-1440.png"
+     ],
+     "taps": 4,
+     "doubleTap": true,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 162,
+     "words": 12,
+     "landing": {
+      "header": "S1.3",
+      "sheet": 0,
+      "sheetState": null,
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": -597,
+     "pages": 1,
+     "creates": [
+      {
+       "rpId": "confidential.unrealized.trade",
+       "prfAsked": true,
+       "prf": false
+      }
+     ],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "backup",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 50
+      },
+      {
+       "step": "passkey",
+       "t": 597
+      },
+      {
+       "step": "create",
+       "t": 1030
+      },
+      {
+       "step": "saved",
+       "t": 1905
+      },
+      {
+       "step": "end",
+       "t": 2847
+      }
+     ],
+     "blank": {
+      "frames": 28,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 103,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "passkey",
+        "ms": 99,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "create",
+        "ms": 217,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "saved",
+        "ms": 141,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       null
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "emyfxs",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "aqphwu",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "2lytbr",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.00155109461403678,
+        "sources": [
+         "div.search 651,8,390,30 -> 583,8,390,30",
+         "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "passkey",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "create",
+        "sum": 0.00155109461403678,
+        "sources": [
+         "div.search 651,8,390,30 -> 583,8,390,30",
+         "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+        ],
+        "entries": [
+         {
+          "value": 0.00155109461403678,
+          "sources": [
+           "div.search 651,8,390,30 -> 583,8,390,30",
+           "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+           "div.srch-chip 1295,10,60,26 -> 1160,10,60,26"
+          ]
+         }
+        ],
+        "landed": true
+       },
+       {
+        "step": "saved",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 9989
+  },
+  {
+   "run": "wallet",
+   "plant": null,
+   "cpu": 4,
+   "browser": "156.0.8078.79",
+   "widths": [
+    {
+     "width": "390",
+     "frames": [
+      "P0-S5.6",
+      "W1-S2.1",
+      "W2-choose",
+      "W2-existing",
+      "W2-words",
+      "W6-hop",
+      "W7-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-390.png",
+      "fr-W1-S2.1-390.png",
+      "fr-W2-choose-390.png",
+      "fr-W2-existing-390.png",
+      "fr-W2-words-390.png",
+      "fr-W6-hop-390.png",
+      "fr-W7-S1.3-390.png"
+     ],
+     "taps": 5,
+     "doubleTap": false,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        390,
+        56
+       ],
+       "shell": [
+        0,
+        0,
+        390,
+        844
+       ]
+      }
+     },
+     "readyMs": 207,
+     "newAccount": "wallet-signature",
+     "landing": {
+      "header": "S1.3",
+      "sheet": 1,
+      "sheetState": "S19.5",
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 328,
+     "pages": 1,
+     "creates": [],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "choose",
+      "existing",
+      "words",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open",
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 58
+      },
+      {
+       "step": "wallet",
+       "t": 572
+      },
+      {
+       "step": "have-one",
+       "t": 984
+      },
+      {
+       "step": "recovery",
+       "t": 1114
+      },
+      {
+       "step": "continue",
+       "t": 1242
+      },
+      {
+       "step": "end",
+       "t": 2381
+      }
+     ],
+     "blank": {
+      "frames": 32,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 57,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "wallet",
+        "ms": 73,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "have-one",
+        "ms": 96,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "recovery",
+        "ms": 73,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "continue",
+        "ms": 338,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       51
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "9wmf0r",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "369mzt",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "cmkiqz",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "90t62z",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.013797561824756856,
+        "sources": [
+         "div.phh-acct 299,6,79,44 -> 230,6,148,44",
+         "button.hit44.sfi 251,6,44,44 -> 182,6,44,44",
+         "div.sgn-box 0,682,390,163 -> 0,641,390,204"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "wallet",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "have-one",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "recovery",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "continue",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       }
+      ]
+     }
+    },
+    {
+     "width": "1440",
+     "frames": [
+      "P0-S5.6",
+      "W1-S2.1",
+      "W2-choose",
+      "W2-existing",
+      "W2-words",
+      "W6-hop",
+      "W7-S1.3"
+     ],
+     "shots": [
+      "fr-P0-S5.6-1440.png",
+      "fr-W1-S2.1-1440.png",
+      "fr-W2-choose-1440.png",
+      "fr-W2-existing-1440.png",
+      "fr-W2-words-1440.png",
+      "fr-W6-hop-1440.png",
+      "fr-W7-S1.3-1440.png"
+     ],
+     "taps": 5,
+     "doubleTap": false,
+     "boxes": {
+      "before": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      },
+      "after": {
+       "header": [
+        0,
+        0,
+        1440,
+        45
+       ],
+       "shell": [
+        0,
+        0,
+        1440,
+        900
+       ]
+      }
+     },
+     "readyMs": 137,
+     "newAccount": "wallet-signature",
+     "landing": {
+      "header": "S1.3",
+      "sheet": 1,
+      "sheetState": "S19.5",
+      "dot": false,
+      "topPath": "/discover",
+      "framePath": "/discover",
+      "scrollY": 0
+     },
+     "landMs": 336,
+     "pages": 1,
+     "creates": [],
+     "signinStates": [
+      "loading",
+      "signed-out",
+      "choose",
+      "existing",
+      "words",
+      "signed-in"
+     ],
+     "messages": [
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav",
+      "signin.open",
+      "hello",
+      "state",
+      "hello",
+      "state",
+      "nav"
+     ],
+     "csp": [],
+     "marks": [
+      {
+       "step": "P0",
+       "t": 0
+      },
+      {
+       "step": "signin",
+       "t": 54
+      },
+      {
+       "step": "wallet",
+       "t": 555
+      },
+      {
+       "step": "have-one",
+       "t": 973
+      },
+      {
+       "step": "recovery",
+       "t": 1077
+      },
+      {
+       "step": "continue",
+       "t": 1208
+      },
+      {
+       "step": "end",
+       "t": 2410
+      }
+     ],
+     "blank": {
+      "frames": 42,
+      "white": 0,
+      "longestMs": 0,
+      "steps": [
+       {
+        "step": "signin",
+        "ms": 64,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "wallet",
+        "ms": 69,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "have-one",
+        "ms": 67,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "recovery",
+        "ms": 73,
+        "blankMs": 0,
+        "colour": null
+       },
+       {
+        "step": "continue",
+        "ms": 401,
+        "blankMs": 0,
+        "colour": null
+       }
+      ],
+      "resting": [],
+      "signhost": [],
+      "hops": [
+       54
+      ]
+     },
+     "cls": {
+      "pages": [
+       {
+        "doc": "zg5ba6",
+        "host": "ct-app.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "v48vjc",
+        "host": "confidential.unrealized.trade",
+        "top": true,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "vwmbg8",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0,
+        "sources": []
+       },
+       {
+        "doc": "2fisax",
+        "host": "ct-app.unrealized.trade",
+        "top": false,
+        "sum": 0.002551799909175669,
+        "sources": [
+         "div.search 651,8,390,30 -> 583,8,390,30",
+         "div.tb-acct 1364,7,63,32 -> 1229,7,198,32",
+         "div.srch-chip 1295,10,60,26 -> 1160,10,60,26",
+         "div.sgn-box 465,327,510,291 -> 465,315,510,315"
+        ]
+       }
+      ],
+      "steps": [
+       {
+        "step": "signin",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "wallet",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "have-one",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "recovery",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       },
+       {
+        "step": "continue",
+        "sum": 0,
+        "sources": [],
+        "entries": [],
+        "landed": false
+       }
+      ]
+     }
+    }
+   ],
+   "ms": 8872
+  }
+ ],
+ "goodPageOfItsOwn": [
   {
    "run": "prf",
    "plant": null,

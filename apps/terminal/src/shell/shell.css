@@ -78,9 +78,9 @@ svg { display: block; flex: none; }
 .hit44 { height: 44px; display: flex; align-items: center; flex: none; }
 @media (max-width: 767.98px) {
   .tb, .ft { display: none; }
-  .shell { padding-top: 56px; padding-bottom: 68px; }
-  .phh { position: fixed; z-index: 60; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: rgba(10,10,10,.84); backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%); box-shadow: inset 0 -1px 0 rgba(255,255,255,.05); }
-  .tabbar { position: fixed; z-index: 65; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: rgba(9,9,9,.86); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  .shell { padding-top: 56px; padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  .phh { position: fixed; z-index: 60; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: var(--m-ink); box-shadow: inset 0 -1px 0 rgba(255,255,255,.05); }
+  .tabbar { position: fixed; z-index: 65; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: var(--m-ink); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
   .tabbar .tb4 { height: 54px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-3); font-size: 11px; font-weight: 500; }
   .tabbar .tb4 .pl { width: 54px; height: 30px; border-radius: 15px; display: flex; align-items: center; justify-content: center; }
   .tabbar .tb4.on { color: var(--text-1); font-weight: 600; }
