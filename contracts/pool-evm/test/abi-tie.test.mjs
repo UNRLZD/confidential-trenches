@@ -175,10 +175,17 @@ const MONEY_PATHS = {
   "packages/signpage/src/evm-send.ts": [
     // the device builds the pool's buy calldata itself, the call the helper sends (card signpage-evm-pool-buy)
     "buy((address,bytes),(uint256[2],uint256[2][2],uint256[2],uint256[8]),uint256,(address,bytes,uint256,address),bytes)",
+    // the sale's selector, which the read-back's deposit tx input must start with (card signpage-evm-pool-sell)
+    "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)",
   ],
   "packages/signpage/src/pool-deposit-evm.ts": [
     "currentLabelTreeDepth()", // the deposit's gas headroom reads both trees' depths (card pool-deposits)
     "currentTreeDepth()",
+  ],
+  "packages/signpage/src/pool-sell-evm.ts": [
+    // a restore reads each buy's route from its own Bought log (card signpage-evm-pool-sell, restoreEvmHoldings)
+    "Bought(address,address,uint256,uint256,uint256,uint256,address,uint256)",
+    "nonce()", // W's Sell nonce on its SellDelegate code, read on both RPCs before a sale signs and while it lands
   ],
   "packages/signpage/src/rules/pool.ts": [
     "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",

@@ -399,9 +399,13 @@ test("no second key derivation: only derive/keys.ts holds BIP-32, SLIP-10 or a w
   // the arm's own three W, each key zeroed at once for the address, no signer exported; test/pool-zeroing.test.ts; card
   // wallet-restore-id-reader). And where an EVM pool buy signs at the tap (signpage src/pool-buy-evm.ts runEvmPoolBuy:
   // W_{evm,l,j} of the ready proof, refused unless it is the proof's W and the relay data's recipient, signs only the buy
-  // checkEvmBuy passed, its key zeroed once it has signed and again in a finally; card signpage-evm-pool-buy).
+  // checkEvmBuy passed, its key zeroed once it has signed and again in a finally; card signpage-evm-pool-buy). And where
+  // an EVM pool sell signs at the tap (signpage src/pool-sell-evm.ts signPicked: W_{evm,l,j} of the buy record it sells,
+  // refused unless it is that record's W, after its return note's evmNextNote pick, signs only the sim checkEvmSellSim,
+  // the Sell checkEvmSell and the authorization checkEvmAuthorization passed, its key zeroed once it has signed and again
+  // in signLeg's finally; card signpage-evm-pool-sell).
   const calls = files.filter((f) => /\bfreshWallet\s*\(/.test(readFileSync(f, "utf8"))).map((f) => f.slice(root.length)).sort();
-  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
+  assert.deepEqual(calls, ["packages/signpage/src/pool-buy-evm.ts", "packages/signpage/src/pool-buy.ts", "packages/signpage/src/pool-sell-evm.ts", "packages/signpage/src/pool-sell.ts", "packages/signpage/src/pool-withdraw.ts", "packages/wallet/src/arming/records.ts", "packages/wallet/src/derive/keys.ts", "packages/wallet/src/pool/buy-wallets.ts", "packages/wallet/src/pool/evm-restore.ts", "packages/wallet/src/pool/queue.ts", "packages/wallet/src/pool/solana-restore.ts", "packages/wallet/src/restore/arms.ts", "packages/wallet/src/restore/wallets.ts"]);
 });
 
 // ---------- fold 2 ----------
