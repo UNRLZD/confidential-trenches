@@ -183,6 +183,13 @@ test("a request's decimals are never the caller's: the pool asset's for a deposi
   ] as const) {
     assert.throws(() => sell(chain, reads), refusedAs("decimals"), `${chain} ${JSON.stringify(reads)?.slice(0, 120)}`);
   }
+  // the number two reads agreed on earlier this session (src/pool-kinds.ts keptTokenDecimals): taken as the reads' own,
+  // 0 to 255 only (card sell-first-read-waits-out-a-throttle)
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "2.5", slippage_bps: 1 }, 6).amount, 2_500_000n);
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, share_bps: 10_000, slippage_bps: 1 }, 255).decimals, 255);
+  assert.equal(checkPoolRequest({ kind: "pool.sell", chain: "base", token: evm, amount: "1", slippage_bps: 1 }, 0).amount, 1n);
+  assert.throws(() => checkPoolRequest({ kind: "pool.sell", chain: "solana", token: sol, amount: "0.0000001", slippage_bps: 1 }, 6), refusedAs("amount"));
+  for (const d of [256, -1, 1.5, NaN, Infinity]) assert.throws(() => sell("base", d), refusedAs("decimals"), String(d));
 });
 
 // ---------- Solana deposit (tag 1) ----------

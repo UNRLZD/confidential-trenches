@@ -1,0 +1,32 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet): packages/signpage/index.html and public/app.js on this card's branch (build-app.mjs); a PR build, judged as scripts/ci/bundle-checks.mjs judges it (ledger: false) until release-115 is cut and its list names the served bundle",
+    "bad": "the SIGN_HOST build of main at eebfdc88 (build-app.mjs), before this card: the holdings readers wait a flat Retry-After or 1 s after every 429, with no gate"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-5qtc262f1oWlOsKE09jCBwXhGns3RRYKt2Cf7knylk1fxQyPeFl23byaFNcx65Kq\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-5qtc262f1oWlOsKE09jCBwXhGns3RRYKt2Cf7knylk1fxQyPeFl23byaFNcx65Kq",
+    "rule": true,
+    "gate": true,
+    "held": true,
+    "turn": true,
+    "reader": true,
+    "throttled": true,
+    "answered": true,
+    "by": true,
+    "old": false
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-iZU0EECsXK6pEINpaNlwfdpye2A9wVU9rXJVdZ9H9G6w+XjMSNkAOxq3uNCsQRuY\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-iZU0EECsXK6pEINpaNlwfdpye2A9wVU9rXJVdZ9H9G6w+XjMSNkAOxq3uNCsQRuY",
+    "rule": false,
+    "gate": false,
+    "held": false,
+    "turn": false,
+    "reader": false,
+    "throttled": false,
+    "answered": false,
+    "by": false,
+    "old": true
+  }
+}

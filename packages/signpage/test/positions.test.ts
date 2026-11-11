@@ -23,7 +23,8 @@ import { freshWallet } from "../../wallet/src/derive/keys.ts";
 import { jOf } from "../../wallet/src/pool/queue.ts";
 import { keptPositions, passMemo, POSITION_COSTS_KEY, positionCost, POSITIONS_KEPT_KEY, POSITIONS_RETRIES, POSITIONS_SOLD_KEY, POSITIONS_SOLD_TX_KEY, POSITIONS_UNLANDED_KEY, positionsCache, positionsPass, recordPoolBuy, usdOf, withPositions, type KeptPass, type PassMemo, type PassResult, type FoundWallet, type PassRun, type Position, type PositionCosts, type PositionsReads } from "../src/positions.ts";
 import { stateFor } from "../src/kit-version.ts";
-import { testnetPool } from "../src/pool-testnet.ts";
+import { testnetPool, testnetPoolDeps } from "../src/pool-testnet.ts";
+import { poolKinds, type PoolRpc } from "../src/pool-kinds.ts";
 import { tokenDecimalsShown } from "../src/rules/pool.ts";
 import { BUY_MINTS_KEY, buyMints } from "../src/pool-sell.ts";
 
@@ -774,6 +775,36 @@ test("the page: a pool buy's end writes its records, the decimals its run told a
   assert.deepEqual(routed, [{ wallet: solanaWallet() }, { out: "1081590.213565" }], "the run's route facts still reach the app");
   const op = (await w.get("ops", "pb1")) as { stage: string; amount_usd: string; token: string };
   assert.deepEqual([op.stage, op.amount_usd, op.token], ["filled", "1.5", MINT], "the pool buy shows in state.ops (review P3-1)");
+});
+
+// card sell-first-read-waits-out-a-throttle: the app's devnet run 5 tapped Sell 2.26 s after its buy filled, and the
+// sell's first read, the mint's decimals, met four 429s and answered down. The buy's run already read them (with the
+// amount W received, on both RPCs: pool-buy.ts outDecimals), and the page keeps them, so the sell asks none.
+test("the page: a sell after a pool buy on this page asks no decimals read: the buy's own read is kept for the session", async () => {
+  const w = await spentWallet();
+  const c = chain();
+  const buy = (host: () => { outDecimals?(w: string, d: number, mint: string): void }) => (_ask: unknown, ctx: { route?: (r: unknown) => void }) => {
+    ctx.route?.({ wallet: solanaWallet() });
+    host().outDecimals?.(solanaWallet(), 6, MINT);
+    ctx.route?.({ out: "1081590.213565" });
+    return { running: true as const, after: new Promise<void>(() => {}), answer: () => null };
+  };
+  const tp = testnetPool(
+    { store: async () => w, seed64: async () => SEED64.slice(), price: () => PRICE },
+    // @ts-expect-error a stand-in buy kind: only its route facts matter here
+    { pin: PIN, rpcs: c.rpcs, table: "Table111111111111111111111111111111111111111", holdings: () => c.finder, tradeKinds: { buy }, positions: { setTimer: () => {}, clearTimer: () => {} } },
+  );
+  assert.ok("running" in tp.flow({ kind: "pool.buy", chain: "solana", token: MINT, amount: 10_000_000n, slippageBps: 100, decimals: 9 }, { id: "pb1", sha: "00", progress: () => {}, route: () => {} } as never));
+  // the sell on the page's own deps (testnetPoolDeps), its two providers counting every ask
+  const asks: string[] = [];
+  const rpc: PoolRpc = async (method) => (asks.push(method), null);
+  const flows: { decimals: number; amount: bigint }[] = [];
+  const k = poolKinds({ ...testnetPoolDeps((ask) => (flows.push(ask), { error: "busy" })), pinned: () => true, rpcs: () => [rpc, rpc] });
+  const r = k["pool.sell"]({ chain: "solana", token: MINT, amount: "2.5", slippage_bps: 100 }, { id: "ps1", sha: "00", progress: () => {} }) as { after: Promise<unknown>; answer: () => unknown };
+  await r.after;
+  assert.deepEqual(r.answer(), { error: "busy" }, "the flow's own answer: the sell went on");
+  assert.deepEqual(asks, [], "no decimals read");
+  assert.deepEqual(flows.map((a) => [a.decimals, a.amount]), [[6, 2_500_000n]]);
 });
 
 test("the page: a pool buy answered early as sent (its fill read later) is recorded at the end stage its run posts, once", async () => {
@@ -1759,4 +1790,66 @@ test("r02: a mint answer that is not a mint is refused, never read as 0 decimals
   assert.equal(tokenDecimalsShown("solana", mint(9)), 9);
   for (const junk of [null, {}, { value: null }, { value: { owner: SOLANA_TOKEN_PROGRAM, data: ["", "base64"] } }, mint(6, 0), { value: { owner: "Other1111111111111111111111111111111111111", data: mint(6).value.data } }])
     assert.throws(() => tokenDecimalsShown("solana", junk), () => true, JSON.stringify(junk));
+});
+
+// card signpage-throttled-read-is-not-asked-again-at-once: the app's devnet run (app-a2-e2e run 4) met 638 answers of
+// 429 to getTokenAccountsByOwner in 300 s while this cache ran its pass again every 5 s, and a sell tapped then was
+// refused at 23.7 s: the page's own asks kept the provider's per-method window full, so it never cleared. On the kit's
+// test clock (no real wait): the cache as the page runs it, the finder on the helper's route (the transport the testnet
+// build's devnet RPC now has too), a provider that refuses getTokenAccountsByOwner past 5 in any 10 s, every ask counted
+// (its window full at the start, as another tab or a run's own reads leave it), nine buys ending (each a refresh), and
+// a sell tapped at 20 s (its own read, holding the passes off).
+test("a provider throttled by the page's own asks clears: the passes, buys ending and a sell ask at most the route's bound, and the sell reads", async () => {
+  const { onTestClock } = await import("../../kit/test/test-clock.ts");
+  const { buyWallets, HOLDINGS_THROTTLED_ROUNDS_60S, solanaHelperHoldings } = await import("../../wallet/src/pool/buy-wallets.ts");
+  const origin = "https://positions-throttle.example";
+  const seed = wordsToSeed64(entropyToWords(new Uint8Array(16)));
+  const pools = (reader: HoldingsReader) => [{ id: "sol", chain: "sol" as const, spent: [{ ref: { kind: "deposit" as const, s: 1n, i: 0 }, label: 5n }], reader }];
+  await onTestClock(async () => {
+    // the provider's window: one entry per getTokenAccountsByOwner asked, each gone 10 s after it (a timer on the clock)
+    let inWindow = 0;
+    const ask = () => {
+      inWindow++;
+      setTimeout(() => inWindow--, 10_000);
+    };
+    for (let k = 0; k < 5; k++) ask();
+    let minute = true;
+    setTimeout(() => (minute = false), 60_000);
+    const refused: boolean[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string | URL | Request, init?: RequestInit) => {
+      if (!String(u).startsWith(origin)) return real(u, init);
+      const q = JSON.parse(String(init?.body)) as { id: string; method: string };
+      const no = q.method === "getTokenAccountsByOwner" && inWindow >= 5;
+      if (q.method === "getTokenAccountsByOwner") ask();
+      if (minute) refused.push(no);
+      if (no) return new Response("slow down", { status: 429 });
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: q.id, result: { context: { slot: 1 }, value: q.method === "getBalance" ? 0 : [] } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const reader = solanaHelperHoldings(origin);
+    const cache = positionsCache(async (_m, run) => {
+      const r = await buyWallets(seed, pools(reader), { signal: run.signal });
+      return { positions: [], whole: r.failed.length === 0 };
+    });
+    let sold = "not yet";
+    try {
+      cache.first();
+      for (const at of [2_000, 4_000, 6_000, 8_000, 10_000, 15_000, 30_000, 35_000, 40_000]) setTimeout(() => cache.refresh(), at);
+      await new Promise((r) => setTimeout(r, 20_000));
+      // the sell's own read, as pool-testnet.ts sellHost.wallets runs it
+      const hold = cache.preempt();
+      const r = await buyWallets(seed, pools(reader));
+      sold = r.failed.length === 0 ? "read" : `refused: ${r.failed[0]!.error}`;
+      if (sold === "read") hold.feed([]);
+      else hold.release();
+      await new Promise((r) => setTimeout(r, 60_000));
+      await cache.idle();
+    } finally {
+      cache.clear();
+      globalThis.fetch = real;
+    }
+    assert.equal(sold, "read", "the sell tapped during the throttle waits inside its bound and reads");
+    const n429 = refused.filter((x) => x).length;
+    assert.ok(n429 <= 2 * HOLDINGS_THROTTLED_ROUNDS_60S, `${n429} answers of 429 in the first 60 s, bound ${2 * HOLDINGS_THROTTLED_ROUNDS_60S} (two getTokenAccountsByOwner a round)`);
+  });
 });

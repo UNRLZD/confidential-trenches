@@ -38,6 +38,7 @@ export const IN_PROCESS = [
   viaRead("signpage-error-after-timeout", () => import("../live-checks/signpage-error-after-timeout.mjs")),
   viaRead("sol-buy-rent-back", () => import("../live-checks/sol-buy-rent-back.mjs")),
   viaRead("pool-read-down", () => import("../live-checks/pool-read-down.mjs")),
+  viaRead("sell-first-read-waits-out-a-throttle", () => import("../live-checks/sell-first-read-waits-out-a-throttle.mjs")),
   viaRead("evm-pool-sync-wide-pages", () => import("../live-checks/evm-pool-sync-wide-pages.mjs")),
   viaRead("wallet-near-prepay-taken", () => import("../live-checks/wallet-near-prepay-taken.mjs")),
   viaRead("held-deposit-way-out", () => import("../live-checks/held-deposit-way-out.mjs")),
@@ -61,6 +62,7 @@ export const IN_PROCESS = [
   // the PR's build is cut as a release only after its merge, so its run reads the marks and the pin, not the ledger
   { key: "pool-senders-next-page", host: "sign", load: () => import("../live-checks/pool-senders-next-page.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   { key: "sol-settle-failed-is-not-unspent", host: "sign", load: () => import("../live-checks/sol-settle-failed-is-not-unspent.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
+  { key: "signpage-throttled-read-is-not-asked-again-at-once", host: "sign", load: () => import("../live-checks/signpage-throttled-read-is-not-asked-again-at-once.mjs"), run: async (m, f) => m.judge(await m.read(f), { ledger: false }) },
   viaRead("solana-teardown-cashback", () => import("../live-checks/solana-teardown-cashback.mjs")),
   viaRead("sol-w-sweep", () => import("../live-checks/sol-w-sweep.mjs")),
   viaRead("intents-u-registered-first", () => import("../live-checks/intents-u-registered-first.mjs")),

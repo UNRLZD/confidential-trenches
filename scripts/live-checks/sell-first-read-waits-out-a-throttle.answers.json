@@ -1,0 +1,60 @@
+{
+  "_note": {
+    "good": "this card's SIGN_HOST build (mainnet) at 49efdb0c: packages/signpage/index.html and public/app.js from build-app.mjs: the decimals kept, the wait on throttleWaitMs, down only for a failed read; the EVM buy host is in the testnet build only (none here)",
+    "bad": "the base 10317f87's SIGN_HOST build (mainnet): the sell's first read answers down at once and keeps nothing: FAIL",
+    "goodTestnet": "this card's testnet build at 49efdb0c (build-app.mjs --network testnet), the app's devnet run's page: the EVM buy reads through the kept store with no wait",
+    "badTestnet": "the base 10317f87's testnet build: FAIL"
+  },
+  "good": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-0xq9c5h7MJ0qKg4Ykr4fl7S2FoQ3GtQLbqYyRg/7q2TwkhCzRHm12/zN2KyldtZI\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-0xq9c5h7MJ0qKg4Ykr4fl7S2FoQ3GtQLbqYyRg/7q2TwkhCzRHm12/zN2KyldtZI",
+    "kept": true,
+    "wired": {
+      "page": true,
+      "solanaBuy": true,
+      "evmBuy": "none",
+      "sell": true
+    },
+    "wait": true,
+    "down": true
+  },
+  "bad": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-Zjxz9euj6RQ15K4iHnDAYY+0eIN1WDQPVWbKwq0mAIqSAIpXXSAzup/RMWYS4Mkw\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-Zjxz9euj6RQ15K4iHnDAYY+0eIN1WDQPVWbKwq0mAIqSAIpXXSAzup/RMWYS4Mkw",
+    "kept": false,
+    "wired": {
+      "page": false,
+      "solanaBuy": false,
+      "evmBuy": false,
+      "sell": false
+    },
+    "wait": false,
+    "down": false
+  },
+  "goodTestnet": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-ODjldQjBUJQHGPtadI6ESq7tGawjqVsGIFmids90y3N3eEx5oZ1yL4N7VDtnwyfs\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-ODjldQjBUJQHGPtadI6ESq7tGawjqVsGIFmids90y3N3eEx5oZ1yL4N7VDtnwyfs",
+    "kept": true,
+    "wired": {
+      "page": true,
+      "solanaBuy": true,
+      "evmBuy": true,
+      "sell": true
+    },
+    "wait": true,
+    "down": true
+  },
+  "badTestnet": {
+    "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-bVJyXCf8MrneYksR1j3j1cLKAOhB+xriT2XA927Hc8h/C4JWrxU6sRLmbcMU6gO2\"></script>\n  </head>\n  <body></body>\n</html>\n",
+    "sha384": "sha384-bVJyXCf8MrneYksR1j3j1cLKAOhB+xriT2XA927Hc8h/C4JWrxU6sRLmbcMU6gO2",
+    "kept": false,
+    "wired": {
+      "page": false,
+      "solanaBuy": false,
+      "evmBuy": false,
+      "sell": false
+    },
+    "wait": false,
+    "down": false
+  }
+}
