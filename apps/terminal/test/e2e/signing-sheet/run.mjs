@@ -6,10 +6,10 @@
 //   signin   the app's sign-in sheet, the passkey way: SIGN_HOST's sign-in screen
 //   words    Recovery code on it: the typed 12 words
 //   backup   Create passkey: the 12 words (masked in the shot), then Saved
-//   backup2  the account's Backup: the 12 words again, left by Esc
+//   backup2  the account's Backup: the 12 words again, left by the scrim (1440) or Esc (390)
 //   signout  the account's Sign out: the sign-out screen
 //   choose   the app's sign-in sheet, the wallet way: New account or I already have one
-//   existing I already have one: Use passkey or Recovery code; Esc back
+//   existing I already have one: Use passkey or Recovery code; Cancel back
 //   withdraw the account's Withdraw: the withdraw form
 //   poolwithdraw  pool.withdraw as the portfolio's pool row sends it (PortfolioMount.tsx), posted from the app's own
 //            document: the pool withdraw form (the harness holds no pool balance to draw the row)
@@ -18,9 +18,17 @@
 // Per view it records: the sheet's box on screen, the frame #app still in the page and visible (its box the window's)
 // or out of it, the top window's path (never a bare page: the app's own route), the app's own document (a mark set in
 // it before the first view) and its open sheet after the close. The verdict: every view draws in the sheet, the top
-// path stays the app's, and a close (Esc, the x, the scrim) comes back to the same app document with its state; a view
-// with a field typed into (words, withdraw) has the frame out of the page while it shows (src/shell.ts seal), every
-// other view keeps it in the page, visible under the scrim.
+// path stays the app's, and a close (Esc, the x, the scrim, Cancel) comes back to the same app document with its state; a
+// view with a field typed into (words, withdraw) or the 12 words shown (backup) has the frame out of the page while it
+// shows (src/shell.ts seal), every other view keeps it in the page, visible under the scrim. A close by a tap (the x, the
+// scrim, Saved, Cancel) is a double tap: its second tap, where the first was, lands on no app control (the frame stays
+// inert for 500 ms after a close; src/shell.ts close), counted by the app document's own trusted pointerdowns.
+// Then, under the choose sheet (the frame kept, its opening tap's activation fresh), the frame tries what a frame that
+// holds an activation could: copy to the clipboard (execCommand and the Clipboard API), Picture-in-Picture and
+// fullscreen, as SIGN_HOST's Permissions-Policy allows them to it (the Clipboard API, Picture-in-Picture and fullscreen
+// must be refused; execCommand copy, which no policy governs, is read and not judged: no view that keeps the frame has a
+// Copy); it takes the focus, and the sheet must take it back;
+// and a key's timeStamp is read against performance.now (the shell's guard compares the two).
 //   node apps/terminal/test/e2e/signing-sheet/run.mjs [--shots <dir>] [--record <file>]   PASS exit 0, FAIL exit 1, error 2
 // Needs the terminal's build (pnpm --filter terminal build). Records hold states and boxes only: never the 12 words.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -34,7 +42,10 @@ export const WIDTHS = [
   { name: "1440", viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 ];
 /** The views with a field typed into: the frame is out of the page while they show. */
-export const TYPED = new Set(["words", "withdraw", "poolwithdraw"]);
+// the views the frame leaves the page before (packages/signpage/src/main.ts TYPED): a field typed into, or the 12 words
+export const TYPED = new Set(["words", "withdraw", "poolwithdraw", "backup", "backup2"]);
+// the closing controls a tap closes by: each is tapped twice, the second tap where the first was, as a double tap
+const TAPPED = new Set(["x", "scrim", "saved", "cancel"]);
 export const VIEWS = ["signin", "words", "choose", "existing", "backup", "backup2", "signout", "withdraw", "poolwithdraw"];
 const ROUTE = "/discover";
 const GUARD_MS = 600; // past SIGN_HOST's 500 ms activation guard (packages/signpage/src/guard.ts)
@@ -65,11 +76,100 @@ export function judge(rec) {
         if (TYPED.has(name) && v.closed.hidden && (!p?.veil || p.fadeMs == null || p.firstPaintMs == null || p.fadeMs < p.firstPaintMs)) bad.push(`the dim faded before the app painted (${JSON.stringify(p ?? null)})`);
         if (!TYPED.has(name) && v.closed.appSheet !== v.appSheet) bad.push(`the app's sheet ${v.appSheet} became ${v.closed.appSheet}`);
         if (v.closed.topPath !== v.topPath) bad.push(`after close the top path is ${v.closed.topPath}`);
+        if (TAPPED.has(v.closed.by) && v.closed.appTaps !== 0) bad.push(`the double tap's second tap landed in the app (${v.closed.appTaps ?? "not counted"})`);
       }
-      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} ${tag}: frame ${v.frame}, top ${v.topPath}${v.closed ? `, closed by ${TAPPED.has(v.closed.by) ? "a double tap on " : ""}${v.closed.by}${v.closed.sameDoc ? " to the same app document" : " to a new app document"}${TAPPED.has(v.closed.by) ? `, ${v.closed.appTaps} tap(s) in the app` : ""}` : ""}${v.closed?.paint ? `, app painted ${v.closed.paint.firstPaintMs} ms (content ${v.closed.paint.contentPaintMs} ms) after the close, dim faded at ${v.closed.paint.fadeMs} ms` : ""}${bad.length ? ` (${bad.join("; ")})` : ""}`);
+    }
+    const b = w.probes;
+    if (!b) lines.push(`FAIL frame probes @${w.width}: not run (${w.error ?? "no record"})`);
+    else {
+      const bad = [];
+      if (b.policy.clipboardWrite !== false) bad.push("clipboard-write allowed to the frame");
+      if (b.policy.pip !== false) bad.push("picture-in-picture allowed to the frame");
+      if (b.policy.fullscreen !== false) bad.push("fullscreen allowed to the frame");
+      if (b.activation !== true) bad.push("the frame held no activation, so the tries below prove nothing");
+      // execCommand copy is not under Permissions-Policy: a frame holding an activation writes the clipboard under any
+      // sheet that keeps it, as it can when the user taps the app with no sheet at all. Only the 12 words offer a Copy of
+      // SIGN_HOST's own, and the frame is out under them (backup in TYPED, judged above), so it is read here, not judged.
+      if (b.writeText !== "refused") bad.push(`Clipboard API write ${b.writeText}`);
+      if (b.pip !== "refused") bad.push(`Picture-in-Picture ${b.pip}`);
+      if (b.fullscreen !== "refused") bad.push(`fullscreen ${b.fullscreen}`);
+      if (b.inert !== true) bad.push("the kept frame is not inert under the sheet");
+      if (b.focusAfter !== "sheet") bad.push(`the focus after the frame took it: ${b.focusAfter}`);
+      if (!(Math.abs(b.clockSkewMs) < 50)) bad.push(`a key's timeStamp is ${b.clockSkewMs} ms off performance.now`);
+      lines.push(`${bad.length ? "FAIL" : "ok  "} frame probes @${w.width}: under the choose sheet, the frame with its tap's activation: execCommand copy ${b.execCopy}, Clipboard API ${b.writeText}${b.writeTextError ? ` (${b.writeTextError})` : ""}, Picture-in-Picture ${b.pip}${b.pipError ? ` (${b.pipError})` : ""}, fullscreen ${b.fullscreen}${b.fullscreenError ? ` (${b.fullscreenError})` : ""}; policy to the frame: clipboard-write ${b.policy.clipboardWrite}, picture-in-picture ${b.policy.pip}, fullscreen ${b.policy.fullscreen}; frame inert ${b.inert}; focus: the frame took it (${b.focusTaken}), then ${b.focusAfter} after ${b.focusAfterMs} ms (blur ${b.blurBefore ? "before" : "after"} the frame's focus event); a key's timeStamp ${b.clockSkewMs} ms off performance.now${bad.length ? ` (${bad.join("; ")})` : ""}`);
     }
   }
   return { ok: lines.every((l) => !l.startsWith("FAIL")), lines };
+}
+
+/** In the app's frame under a kept-frame sheet, right after the tap that opened it: what the frame can still do. */
+async function probes(page) {
+  const frame = page.frames().find((f) => f !== page.mainFrame() && new URL(f.url()).hostname === REAL.app);
+  const top = await page.evaluate(() => {
+    window.__blurAt = null;
+    addEventListener("blur", () => (window.__blurAt ??= performance.now()), { once: true });
+    return { inert: document.querySelector("iframe#app")?.inert === true };
+  });
+  const inFrame = await frame.evaluate(async () => {
+    const allows = (f) => (document.featurePolicy ? document.featurePolicy.allowsFeature(f) : null);
+    const policy = { clipboardWrite: allows("clipboard-write"), pip: allows("picture-in-picture"), fullscreen: allows("fullscreen") };
+    const activation = navigator.userActivation?.isActive ?? null;
+    const t = document.createElement("textarea");
+    t.value = "probe";
+    document.body.append(t);
+    t.select();
+    let execCopy;
+    try {
+      execCopy = document.execCommand("copy");
+    } catch (e) {
+      execCopy = `threw ${e.name}`;
+    }
+    t.remove();
+    const tryIt = async (f) => {
+      try {
+        await f();
+        return ["done", null];
+      } catch (e) {
+        return ["refused", `${e.name}: ${String(e.message).slice(0, 80)}`];
+      }
+    };
+    const [writeText, writeTextError] = await tryIt(() => navigator.clipboard.writeText("probe"));
+    const c = document.createElement("canvas");
+    c.getContext("2d").fillRect(0, 0, 4, 4);
+    const v = document.createElement("video");
+    v.muted = true;
+    v.srcObject = c.captureStream();
+    document.body.append(v);
+    await Promise.race([new Promise((ok) => v.addEventListener("loadedmetadata", ok, { once: true })), new Promise((ok) => setTimeout(ok, 1000))]);
+    const [pip, pipError] = await tryIt(() => v.requestPictureInPicture());
+    v.remove();
+    const [fullscreen, fullscreenError] = await tryIt(() => document.documentElement.requestFullscreen());
+    // the frame takes the focus as a frame under the sheet would, to read the keys typed next
+    window.__focusAt = null;
+    addEventListener("focus", () => (window.__focusAt ??= performance.timeOrigin + performance.now()), { once: true });
+    window.focus();
+    const b = document.querySelector("button");
+    b?.focus();
+    return { policy, activation, execCopy, writeText, writeTextError, pip, pipError, fullscreen, fullscreenError, focusTaken: document.hasFocus() };
+  });
+  await page.waitForTimeout(100);
+  const after = await page.evaluate(() => {
+    const a = document.activeElement;
+    return {
+      focusAfter: a?.matches?.('#screen [data-sheet="box"]') ? "sheet" : a?.tagName === "IFRAME" ? "frame" : (a?.tagName ?? "none"),
+      blurAt: window.__blurAt === null ? null : performance.timeOrigin + window.__blurAt,
+    };
+  });
+  const focusAt = await frame.evaluate(() => window.__focusAt).catch(() => null);
+  // a key's timeStamp against performance.now in the top window, the clock the shell's open is read on
+  await page.evaluate(() => {
+    window.__skew = null;
+    addEventListener("keydown", (e) => void (window.__skew = Math.round(performance.now() - e.timeStamp)), { once: true, capture: true });
+  });
+  await page.keyboard.press("Shift");
+  const clockSkewMs = await page.evaluate(() => window.__skew);
+  return { ...top, ...inFrame, focusAfter: after.focusAfter, focusAfterMs: 100, blurBefore: after.blurAt !== null && focusAt !== null ? after.blurAt <= focusAt : null, clockSkewMs };
 }
 
 async function oneWidth(h, w, shotDir) {
@@ -129,9 +229,18 @@ async function oneWidth(h, w, shotDir) {
           if (veil && veil.style.opacity === "0" && at.fade === undefined) at.fade = t();
         }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ["hidden", "style"] });
       });
+    if (TAPPED.has(by)) await countAppTaps();
     if (by === "esc") await page.keyboard.press("Escape");
-    else if (by === "x") await tap(top('#screen [data-sheet="close"]')).catch(() => {});
-    else await page.mouse.click(4, Math.round(w.viewport.height / 2));
+    else {
+      // a double tap: the second where the first was, 120 ms after it, as a finger's or a mouse's double tap
+      const sel = { x: '#screen [data-sheet="close"]', saved: '#signin button[data-action="saved"]', cancel: '#signin button[data-action="cancel"]' }[by];
+      const bb = sel ? await top(sel).boundingBox() : null;
+      const at = bb ? { x: Math.round(bb.x + bb.width / 2), y: Math.round(bb.y + bb.height / 2) } : { x: 4, y: Math.round(w.viewport.height / 2) };
+      const one = () => (w.hasTouch ? page.touchscreen.tap(at.x, at.y) : page.mouse.click(at.x, at.y));
+      await one();
+      await page.waitForTimeout(120);
+      await one();
+    }
     const shut = await top("#screen").waitFor({ state: "hidden", timeout: 3_000 }).then(() => true, () => false);
     if (!shut) {
       // no such close on this build: recorded as not closed, then its own Cancel, so the run goes on to the next view
@@ -147,6 +256,7 @@ async function oneWidth(h, w, shotDir) {
     await page.waitForTimeout(400);
     const d = await appDoc();
     v.closed = { by, hidden: await top("#screen").isHidden(), sameDoc: d?.mark === v.mark, appSheet: d?.sheet ?? null, topPath: new URL(page.url()).pathname };
+    if (TAPPED.has(by)) v.closed.appTaps = await app.locator(":root").evaluate(() => window.__appTaps ?? null).catch(() => null);
     if (TYPED.has(name)) {
       const at = await page.evaluate(() => window.__closeAt ?? {});
       const paint = await app.locator(":root").evaluate(() => {
@@ -160,6 +270,13 @@ async function oneWidth(h, w, shotDir) {
     }
     await shot(`${name}-closed`);
   };
+  // the app documents' own trusted pointerdowns, from each document's start (a new one after a typed view's close too)
+  await context.addInitScript((host) => {
+    if (location.hostname !== host) return;
+    window.__appTaps = 0;
+    addEventListener("pointerdown", (e) => void (e.isTrusted && (window.__appTaps += 1)), true);
+  }, REAL.app);
+  const countAppTaps = () => app.locator(":root").evaluate(() => void (window.__appTaps = 0)).catch(() => {});
   const account = async (control) => {
     if (w.name === "390") {
       if (!(await vis(`.amenu [data-control="${control}"]`).isVisible().catch(() => false))) await tap(vis('a[href="/profile"]'));
@@ -201,11 +318,12 @@ async function oneWidth(h, w, shotDir) {
     await tap(vis('.sgn-opt[data-way="wallet"]'));
     await top('#screen:not([hidden]) #signin[data-signin="choose"]').waitFor({ timeout: WAIT_MS });
     await look("choose", m);
+    out.probes = await probes(page);
     await page.waitForTimeout(GUARD_MS);
     await tap(top('#signin[data-signin="choose"] button[data-action="have-one"]'));
     await top('#screen:not([hidden]) #signin[data-signin="existing"]').waitFor({ timeout: WAIT_MS });
     await look("existing", m);
-    await closed("existing", "esc");
+    await closed("existing", "cancel");
 
     // backup: the passkey way, Create passkey (no PRF): the 12 words, masked; Saved back, signed in
     m = await newMark();
@@ -217,16 +335,8 @@ async function oneWidth(h, w, shotDir) {
     const list = top('#screen:not([hidden]) #signin[data-signin="backup"] [data-words="12"]');
     await list.waitFor({ timeout: WAIT_MS });
     await look("backup", m, [list]);
-    await page.waitForTimeout(GUARD_MS);
-    await tap(top('#signin[data-signin="backup"] button[data-action="saved"]'));
-    await top("#screen").waitFor({ state: "hidden", timeout: WAIT_MS });
+    await closed("backup", "saved");
     await vis('[data-header="S1.3"], [data-header="S1.4"]').waitFor({ timeout: WAIT_MS });
-    await page.waitForTimeout(400);
-    const d = await appDoc();
-    out.views.backup.closed = { by: "saved", hidden: true, sameDoc: d?.mark === m, appSheet: d?.sheet ?? null, topPath: new URL(page.url()).pathname };
-    // the app's sign-in sheet closes on its own once signed in: the same document, its own sheet's end
-    out.views.backup.appSheet = out.views.backup.closed.appSheet;
-    await shot("backup-closed");
 
     // backup2: the account's Backup, the scrim back (a desktop width) or Esc
     await account("acct-backup");
