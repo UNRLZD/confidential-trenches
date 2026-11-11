@@ -32,7 +32,7 @@
 //   One run at a time; one asked while a run is on runs once more after it. A W whose read fails, or whose history the
 //   reader cannot tell, gets nothing this run. A sale's own read of the Ws (pool-testnet.ts wallets) holds the run off
 //   as it holds the positions' pass: the run on stops (the W it was reading gets nothing), none starts while a sale
-//   reads, and once the last sale's read ends the run starts again (review of 42a99f81, P2).
+//   reads, and once the last sale's read ends the run starts again (review of 42a99f81, P2; positions.ts preempted).
 import type { SolanaBuy, SolanaBuyReader } from "../../wallet/src/pool/buy-wallets.ts";
 
 /** The Ws whose history was read for good with no buy, in the wallet store's meta, by W's address. */

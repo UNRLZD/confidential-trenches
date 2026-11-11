@@ -498,12 +498,11 @@ export type TestnetPool = {
   positions(): Promise<readonly Position[] | null>;
   /** A restore wrote buy records of `chain`: its positions read again. */
   evmHoldingsRestored(chain: "base" | "robinhood"): void;
-  /** A restore wrote its notes: each Solana W with no buy record gets it back from its own buy (src/sol-buy-records.ts). */
-  buysRestored(): void;
   /** The positions as held (positions.ts get()): the last pass, or the kept one read before it; null before either or
    *  signed out. Starts nothing: no pass, no seed read, no store write (the sell box's preview, src/pool-sell-dry.ts). */
   positionsNow(): readonly Position[] | null;
-  /** The proof queue's pass, the queue opened first when none is: what each landed note runs. */
+  /** The proof queue's pass, the queue opened first when none is: what each landed note runs. Called by the restore once
+   *  it wrote its notes (src/main.ts `written`), so it also starts the buy records' rebuild (src/sol-buy-records.ts). */
   proofs(): Promise<QueuePass | null>;
   /** state.pools' `ready` (src/pools.ts) with `read`'s notes, in one turn of the queue's view (queue.ts readyWith), so
    * a remake's swap never falls between the two (card pool-ready-no-flicker); `ready` undefined while no queue is open.
@@ -1346,6 +1345,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     {
       ...over.positions,
+      // a sale's own read of the Ws stops the buy records' rebuild too, which runs again after it (its reads share the
+      // finder's queue: review of 42a99f81, P2)
+      preempted: () => buyRecords.hold(),
       kept: async () => {
         if (scope === null) return null;
         const st = await page.store();
@@ -1686,8 +1688,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       // fails still ends the hold, and the next pass reads the finder (a rent back at load reads here too)
       wallets: async (read) => {
         const hold = positions.preempt();
-        // the buy records' rebuild stops too and starts again after (its reads share the finder's queue)
-        const rebuild = buyRecords.hold();
         let found: FoundWallet[] | null = null;
         try {
           // a sale's list (cards wallets-found-in-one-read, pool-sell-legs-side-by-side): every W the pool's spent notes
@@ -1722,7 +1722,6 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
           // waits): the next pass reads
           if (found === null) hold.release();
           else hold.feed(found);
-          rebuild();
         }
       },
       // the rent backs owed (card sol-buy-rent-back), run again at the next load while owed
@@ -2155,9 +2154,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
     },
     // a restore wrote buy records of `chain` (src/pool-restore.ts, restoreEvmHoldings): its positions read again
     evmHoldingsRestored: (chain: "base" | "robinhood") => void evmPositions(chain)?.refresh(),
-    buysRestored: () => buyRecords.run(),
     positionsNow: () => positions.get(),
-    proofs,
+    // the restore's notes written: each Solana W with no buy record gets it back from its own buy, in the background
+    proofs: () => (buyRecords.run(), proofs()),
     // every open queue's ready list (Solana's, then each EVM pool's; each proof names its pool) with `read`, in one turn
     // of every queue's view: each queue's readyWith holds its view while the next one's and then `read` run, always in
     // the same order, so no swap of any queue falls between its list and the notes

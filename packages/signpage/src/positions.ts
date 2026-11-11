@@ -512,7 +512,7 @@ export type PassHold = { feed(found: readonly FoundWallet[]): void; release(): v
 export type PassRun = { signal: AbortSignal; found?: readonly FoundWallet[]; shown?: (positions: Position[]) => void };
 
 /** The positions of `pass`, one pass at a time, kept between passes. */
-export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void } = {}): PositionsCache {
+export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<PassResult>, o: { kept?: () => Promise<readonly Position[] | null>; retryMs?: number | ((tries: number) => number); retries?: number; setTimer?: (f: () => void, ms: number) => unknown; clearTimer?: (t: unknown) => void; preempted?: () => () => void } = {}): PositionsCache {
   // a fixed wait, or the wait before the try after `tries` tries (a back off)
   const retryMs = (tries: number): number => (typeof o.retryMs === "function" ? o.retryMs(tries) : (o.retryMs ?? POSITIONS_RETRY_MS));
   const retries = o.retries ?? POSITIONS_RETRIES;
@@ -626,10 +626,15 @@ export function positionsCache(pass: (memo: PassMemo, run: PassRun) => Promise<P
       holds++;
       current?.abort();
       if (timer !== null) clearTimer(timer), (timer = null);
+      // another background read the sell's read stops too (`preempted`: the buy records' rebuild), its end given back
+      // once, a sign out between included
+      const also = o.preempted?.();
       let ended = false;
       const end = (found: readonly FoundWallet[] | null): void => {
-        if (ended || g !== gen) return;
+        if (ended) return;
         ended = true;
+        also?.();
+        if (g !== gen) return;
         holds--;
         if (!started) return;
         if (found !== null) fed = found;
