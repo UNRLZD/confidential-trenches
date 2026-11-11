@@ -63,3 +63,24 @@ test("the star keeps the token on this device and toggles back; a broken or miss
   assert.equal(toggleWatch({ getItem: blocked, setItem: blocked }, "solana/A"), true);
   assert.equal(toggleWatch(null, "solana/A"), true);
 });
+
+// card token-page-data-complete-and-fast: the token's own site, X and Telegram (the helper's token read `links`) and
+// its launchpad's page are drawn when they exist; the X account takes Search on X's place
+test("the token's own links are drawn when the helper's read carries them, each checked, named by its address", async () => {
+  const { socialLinks } = await import("../src/screens/token/model.ts");
+  const mint = "Dbo4K8s93qPsB2t6ae1MCJPr4aNND2RtZNFSWc8Jpump";
+  const social = socialLinks({ site: "https://bubble.fun/", x: "https://x.com/bubble", telegram: "https://t.me/bubble", extra: "https://a.b" });
+  assert.deepEqual(tokenLinks("solana", mint, social, "pump.fun"), [
+    { id: "site", href: "https://bubble.fun/", label: "bubble.fun" },
+    { id: "x", href: "https://x.com/bubble", label: "x.com/bubble" },
+    { id: "telegram", href: "https://t.me/bubble", label: "t.me/bubble" },
+    { id: "pad", href: `https://pump.fun/coin/${mint}`, label: "pump.fun" },
+    { id: "explorer", name: "solscan", href: `https://solscan.io/token/${mint}` },
+  ]);
+  // a launchpad with no known page path draws none; no X account keeps Search on X
+  assert.deepEqual(tokenLinks("solana", mint, {}, "letsbonk.fun").map((l) => l.id), ["xSearch", "explorer"]);
+  // hostile links are no links: a script URL, data, an IP, credentials, X or Telegram on another host
+  assert.deepEqual(socialLinks({ site: "javascript:alert(1)", x: "https://evil.example/x.com", telegram: "https://t.me.evil.example/a" }), {});
+  for (const bad of ["data:text/html,<b>", "https://127.0.0.1/", "https://u:p@a.b/", `https://a.b/${"x".repeat(300)}`, 5, null]) assert.deepEqual(socialLinks({ site: bad }), {});
+  assert.deepEqual(socialLinks("not an object"), {});
+});
