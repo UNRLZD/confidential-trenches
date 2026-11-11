@@ -23,6 +23,7 @@
 // is checked finite and in range or becomes null; the caches hold at most CACHE_MAX tokens each.
 import { address, b58decode, b58encode, dec, ROW_FIELDS, text, toRow, type Row } from "./lists.ts";
 import { LOGOS } from "../logo.ts";
+import { LINKS, type Links } from "../links.ts";
 import { createOrigins, hintsOf, pda, rpcAccounts, type Hint, type Origin } from "./origin.ts";
 import { geckoBudget, GT_LIMIT_PER_MIN, GT_PAGE_WAIT_MS, GT_SERVE_MS, refreshLane, takeOrWait, throttledUntil, type GeckoBudget } from "../gecko.ts";
 import { retryAfterOf, secondsUntil, Throttled } from "../../limits/limits.ts";
@@ -127,8 +128,10 @@ export type Risk = Record<(typeof RISK_FIELDS)[number], Field<unknown>>;
 /** 06b's TokenPage fields, then `filling` (card token-page-fills-after, added after the frozen list): true only while
  *  the page is named on chain and its Jupiter row is still coming (its search was late), so the app draws those fields
  *  loading; false for a Discover row, a Jupiter row, and a mint Jupiter answered it does not list. */
-export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route", "filling"] as const;
-export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown"; filling: boolean };
+export const PAGE_FIELDS = ["row", "decimals", "pool", "risk", "route", "filling", "links"] as const;
+/** `links` (card token-page-data-complete-and-fast): the token's site, X and Telegram as its Jupiter row gives them,
+ *  each only when given and checked (../links.ts); {} when it has none. */
+export type TokenPage = { row: Row; decimals: number; pool: string | null; risk: Risk; route: "ok" | "none" | "unknown"; filling: boolean; links: Links };
 export type Holder = { addr: string; amt: string; bps: number | null; kind?: "burn" };
 export const HOLDERS_FIELDS = ["holders", "total", "top_bps", "src", "as_of_ms"] as const;
 export type Holders = { holders: Holder[]; total: number | null; top_bps: number | null; src: string; as_of_ms: number };
@@ -304,6 +307,7 @@ export function toPage(mint: Mint, base: Row, jupPool: string | null, origin: Or
     // whether a token routes is the device's reference-pool read at the quote (S12), never the data part's call
     route: "unknown",
     filling,
+    links: LINKS.of("solana", String(row.token)),
   };
 }
 

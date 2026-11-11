@@ -151,8 +151,9 @@ function Star({ v, cls, size }: { v: TokenView; cls: string; size: number }) {
 function Links({ v }: { v: TokenView }) {
   return (
     <>
-      {tokenLinks(v.chain, v.token).map((l) => {
-        const name = l.id === "xSearch" ? WORDS.searchX.text : WORDS[l.name].text;
+      {tokenLinks(v.chain, v.token, v.social, v.launchpad).map((l) => {
+        // the token's own links are named by their address (data); the search and the explorer by their words
+        const name = l.id === "xSearch" ? WORDS.searchX.text : l.id === "explorer" ? WORDS[l.name].text : l.label;
         return (
           <a key={l.id} className="tkp-ib" href={l.href} target="_blank" rel="noopener noreferrer" aria-label={name} title={name} data-link={l.id}>
             <Ic n={l.id === "xSearch" ? "search" : "link"} size={l.id === "xSearch" ? 12 : 13} />
@@ -721,7 +722,7 @@ export function TokenPage({ data, nowMs, onRetry, pushed = false }: { data: Toke
         {data.status === "error" && <button type="button" className="tkp-retry" onClick={onRetry}>{WORDS.retry.text}</button>}
       </section>
     );
-  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true) : null;
+  const v = data.status === "ready" ? tokenView(data.row, nowMs, data.filling === true, data.links) : null;
   const ready = data.status === "ready" ? { data, nowMs } : null;
   // the coin unit's price: the device's own read the trade box holds (signed in, on a chain with a pool), else none
   const c: ChartState = { sym: v?.symbol ?? null, chain: row?.chain ?? null, tf, onTf, data: candles, retry, ctl, set, supply: supplyOf(row), coin: coinUsd(trade.price), trades: tape.trades };
