@@ -34,8 +34,8 @@ export function facts(index, js) {
   // (`poolSellPays(..., sizes, c===mainnet)`) with network the fee plus its priority
   const sellBuilds = new RegExp(`${ID}\\.cluster===\`mainnet\`&&${ID}\\(${ID}\\.kind,${ID}\\.cashback\\)\\?${ID}-${ID}:0n,${ID}=${ID}\\(null,${ID}\\(${ID}\\)\\)`).test(js);
   const previewPriced = new RegExp(`${ID}\\.sizes,${ID}\\.cluster===\`mainnet\`\\)`).test(js) && new RegExp(`network:${ID}\\(${ID}\\+${ID}\\.priority,`).test(js);
-  // a partial sell's keep: the next sell's need plus the priority on mainnet (`need+(c===mainnet?PRIORITY:0n)`)
-  const kept = new RegExp(`\\)\\+\\(${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n\\)`).exec(js);
+  // a partial sell's keep: the next sell's need plus the priority on mainnet (`kept=keeps&&c===mainnet?PRIORITY:0n`)
+  const kept = new RegExp(`${ID}=${ID}&&${ID}\\.cluster===\`mainnet\`\\?(${ID}):0n[,;]`).exec(js);
   return { index, sha384: sha384(js), buyTip: buy ? valueOf(js, buy[1]) : null, sellBudget: sellBuilds && previewPriced, sellPriority: kept ? valueOf(js, kept[1]) : null };
 }
 

@@ -57,9 +57,11 @@ const capOf = (re) => ({
     const cap = re.exec(js)?.groups?.cap;
     const terms = cap && new RegExp(`[,;]${esc(cap)}=(${I})\\+145n\\*(${I})\\+2n\\*216n\\*\\2[,;]`).exec(js);
     if (!terms) return false;
-    const fee = new RegExp(`[,;]${esc(terms[1])}=(${I})\\+BigInt\\(14e5\\)\\*(${I})/1000000n[,;]`).exec(js);
+    // the compute units inlined (BigInt(14e5)) or a constant of their own that is 14e5 (a bundle that uses
+    // SOLANA_POOL_CU_LIMIT_MAX elsewhere keeps it a name)
+    const fee = new RegExp(`[,;]${esc(terms[1])}=(${I})\\+BigInt\\((14e5|${I})\\)\\*(${I})/1000000n[,;]`).exec(js);
     const is = (name, v) => new RegExp(`[,; ]${esc(name)}=${v}[,;]`).test(js);
-    return Boolean(fee) && is(terms[2], "6960n") && is(fee[1], "5000n") && is(fee[2], "1000000n");
+    return Boolean(fee) && is(terms[2], "6960n") && is(fee[1], "5000n") && (fee[2] === "14e5" || is(fee[2], "14e5")) && is(fee[3], "1000000n");
   },
 });
 /** A mark whose named groups name other code the bundle must hold too: `more(groups)` gives each further pattern. */

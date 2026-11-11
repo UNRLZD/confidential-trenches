@@ -1227,16 +1227,11 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const owed = [SOLANA_PUMP_PROGRAM, SOLANA_PUMP_AMM_PROGRAM].filter((vp, k) => (venue.cashback && vp === venueProgram) || tokens.owes[k]).length;
     // a sell that empties W's holding keeps what lets the rent back's sweep reach the floor (solanaSellAfterFull, card
     // sol-w-sweep): every lamport over it goes into this sell's note
-    const after = keeps ? solanaPoolBuySellNeed(venue, rent) + (h.cluster === "mainnet" ? SOLANA_POOL_SELL_PRIORITY : 0n) : solanaSellAfterFull(rent, owed);
+    const after = keeps ? solanaPoolBuySellNeed(venue, rent) : solanaSellAfterFull(rent, owed);
+    // on mainnet a partial sell keeps the next sell's priority on W too, so the rest sells with it
+    const keepPriority = keeps && h.cluster === "mainnet" ? SOLANA_POOL_SELL_PRIORITY : 0n;
     const holds = deposit.held;
     sizes = deposit.sizes;
-    // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
-    // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
-    // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
-    // does not; the size does not depend on the value), and on a partial sell only when both trees sit within
-    // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
-    // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
-    const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
     // mainnet: W's compute budget first (solanaSellBudget), its limit sized once the simulation has read the units, for
     // what W holds beyond the sell's need, at most SOLANA_POOL_SELL_PRIORITY (never a reason to refuse: none, no budget),
     // and only on a form with room for it (solanaSellBudgetFits, the preview's decision too)
@@ -1245,6 +1240,13 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     const cap = budget === null ? 0n : solanaSellPriority(room);
     // the largest form decides (above); this sell's own six, compiled, never over the size with it either
     if (budget !== null && wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, false)], bh.blockhash, []).message).length > SOLANA_MAX_TX_BYTES) budget = null;
+    // the deposit's form: the eight names each tree's next page, so it lands when inserts that land first carry an entry
+    // onto that page; the six (as before d3edab1) then fails WrongAccount and is rebuilt from new reads (below). The
+    // eight only when the transaction still fits 1,232 bytes with it (a PumpSwap cashback sell with no lookup table
+    // does not; the size does not depend on the value), and on a partial sell only when both trees sit within
+    // SOLANA_POOL_NEXT_PAGE_WINDOW of their page's end: the reserve prices a next page's opening only there, and a tree
+    // further out that more inserts turn would open its next page out of what W keeps for its next sell (review LOW 1)
+    const near = (size: number): boolean => SOLANA_POOL_PAGE_ENTRIES - (size % SOLANA_POOL_PAGE_ENTRIES) <= SOLANA_POOL_NEXT_PAGE_WINDOW;
     const fits = wireOf(solanaCompileV0(w.address, [...budgetIxs(budget), ...steps, depositIx(program, pool, w.address, sizes, pre, minOut, true)], bh.blockhash, []).message).length <= SOLANA_MAX_TX_BYTES;
     const eight = fits && (!keeps || (near(sizes.stateSize) && near(sizes.labelSize)));
     const floor = solanaSweepFloor(rent) > SOLANA_POOL_MIN_DEPOSIT ? solanaSweepFloor(rent) : SOLANA_POOL_MIN_DEPOSIT;
@@ -1267,7 +1269,7 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
       // the eight priced at the kit's window (an insert landing first can carry an entry onto the next page, which the
       // deposit then opens at W's cost); what it does not spend stays on W for its next sell or the sweep
       const r0 = solanaRentMin(rent, 0);
-      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after, lamports, minOut, keeps, noteFloor, ...(keeps ? {} : { swept: after - r0, base: r0, floor }) });
+      const r = solanaSellReserve({ fee: fa, made, rents: solanaDepositRents(rent, sizes, holds, next), after: after + keepPriority, lamports, minOut, keeps, noteFloor, ...(keeps ? {} : { swept: after - r0, base: r0, floor }) });
       if ("refused" in r) return no(r.refused);
       // the eight's deposit back under noteFloor: refused here, so the six, priced exactly, is tried for a note
       if (next && r.value === 0n) return no("quote_check_failed");

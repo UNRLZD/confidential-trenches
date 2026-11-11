@@ -44,7 +44,7 @@ test("planted on the good answer: each fact taken away FAILs", () => {
 });
 
 test("facts read the minified shapes: the buy's pick, the sell's budget and the preview priced on mainnet, the partial sell's keep", () => {
-  const js = "var Sd=1000n,Cd=100000n,HU=100000n;let v=e.cluster===`mainnet`?Cd:0n,y=new Map;Se=ye?nb(le,N)+(e.cluster===`mainnet`?HU:0n):AO(N,xe),Te=e.cluster===`mainnet`&&KU(le.kind,le.cashback)?R-pe:0n,Ee=UU(null,WU(Te));g=kW(p,m,f.wallets,h,f.sizes,e.cluster===`mainnet`);x={network:ik(Qy+g.priority,_)}";
+  const js = "var Sd=1000n,Cd=100000n,HU=100000n;let v=e.cluster===`mainnet`?Cd:0n,y=new Map;Se=ye?nb(le,N):AO(N,xe),Oe=ye&&e.cluster===`mainnet`?HU:0n,Te=e.cluster===`mainnet`&&KU(le.kind,le.cashback)?R-pe:0n,Ee=UU(null,WU(Te));g=kW(p,m,f.wallets,h,f.sizes,e.cluster===`mainnet`);x={network:ik(Qy+g.priority,_)}";
   const f = facts("", js);
   assert.deepEqual([f.buyTip, f.sellBudget, f.sellPriority], ["100000", true, "100000"]);
   // the sale's budget without the preview priced on mainnet, or the other way: no
