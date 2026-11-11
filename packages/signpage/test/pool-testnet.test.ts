@@ -1335,3 +1335,59 @@ test("the helper's start check names this page's direct Solana seat (SOLANA_PROV
   const helper = readFileSync(new URL("../../../apps/helper/src/env-check.ts", import.meta.url), "utf8");
   assert.equal(/export const PAGE_SOLANA_DIRECT = "([^"]+)";/.exec(helper)?.[1], SOLANA_PROVIDER_A);
 });
+
+// Card sol-buy-reads-side-by-side: the page's buy host reads the pool's time for the take on the page's pool (its two
+// RPCs, the wallet's solanaNow: the lower finalized block time), and its take hands that read to the queue (review of
+// 6b3bd660, P3-D)
+test("card sol-buy-reads-side-by-side: the page's buy host reads the pool's time on both of the page's RPCs, the lower block time", async () => {
+  const { w } = await wallet();
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const asked: [string[], string[]] = [[], []];
+  const rpcOf = (i: 0 | 1, slot: number, sec: number) => async (m: string) => {
+    asked[i].push(m);
+    if (m === "getSlot") return slot;
+    if (m === "getBlockTime") return sec;
+    throw new Error(`offline ${m}`);
+  };
+  testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { rpcs: [rpcOf(0, 100, 1_800_000_010), rpcOf(1, 99, 1_800_000_000)], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  const b = buyHost!();
+  try {
+    const before = performance.now();
+    const n = await b.chainNow!();
+    assert.equal(n.ms, 1_800_000_000_000n, "the lower of the two RPCs' block times");
+    assert.ok(n.at >= before && n.at <= performance.now());
+    assert.equal(typeof n.wall, "number");
+    assert.deepEqual(asked, [["getSlot", "getBlockTime"], ["getSlot", "getBlockTime"]], "each RPC asked once");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});
+
+test("card sol-buy-reads-side-by-side: the page's buy host hands the early read to the queue's take, which then reads no time of its own", async () => {
+  const { w, ns } = await wallet();
+  const { pool, land } = fakePool();
+  let nows = 0;
+  const counted = { ...pool, now: async () => (nows++, NOW) };
+  const { poolBuyKind } = await import("../src/pool-buy.ts");
+  let buyHost: Parameters<typeof poolBuyKind>[0] | undefined;
+  const offline = async () => {
+    throw new Error("offline");
+  };
+  const t = testnetPool({ store: async () => w, seed64: async () => SEED64.slice() }, { pool: counted, prover: { vault: signalsProver(), stop: () => {} }, hardwareConcurrency: 4, rpcs: [offline, async () => offline()], tradeKinds: { buy: (mk) => ((buyHost = mk), poolBuyKind(mk)) } });
+  await land(ns, await incoming(ns, null, 9));
+  await t.stateRead();
+  await t.proofs();
+  const b = buyHost!();
+  try {
+    const [r] = await b.ready();
+    assert.ok(r, "a ready proof");
+    const early = b.chainNow!();
+    await early;
+    const before = nows;
+    assert.equal((await b.take(r.noteId, r.attempt, early)).noteId, r.noteId);
+    assert.equal(nows, before, "the take used the early read");
+  } finally {
+    (b as { end?: () => void }).end?.();
+  }
+});

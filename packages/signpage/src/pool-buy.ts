@@ -108,7 +108,7 @@ import type { VaultSnarkjsProof } from "../../kit/src/vault/shapes.ts";
 import type { BuyRoute, TradeStage, TxRef } from "../../kit/src/signpage/messages.ts";
 import { SIGNPAGE_ROUTE_OUT } from "../../kit/src/signpage/schema.ts";
 import { freshWallet } from "../../wallet/src/derive/keys.ts";
-import type { ReadyProof } from "../../wallet/src/pool/pool.ts";
+import type { ChainNow, ReadyProof } from "../../wallet/src/pool/pool.ts";
 import { solanaContextOf, solanaPoolOf, type SolanaPoolPin, type SolanaReleaseRequest } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkSolanaBuy, PoolRuleRefused, signSolana, type PoolAsk } from "./rules/pool.ts";
@@ -141,7 +141,11 @@ export type PoolBuyHost = {
   ready(): Promise<readonly ReadyProof<SolanaReleaseRequest>[]>;
   /** The queue's take of this attempt: HELD -> RESERVED, written before it returns; refused, the note HELD, when the
    *  note's ready proof is another attempt. */
-  take(noteId: string, attempt: string): Promise<ReadyProof<SolanaReleaseRequest>>;
+  take(noteId: string, attempt: string, early?: Promise<ChainNow>): Promise<ReadyProof<SolanaReleaseRequest>>;
+  /** The pool's time read now, for the take (the wallet's chainNow on the queue's pool; card sol-buy-reads-side-by-side):
+   *  a buy starts it with its first round, so the take, which uses it within NOW_REUSE_MS of its start, waits on no read
+   *  of its own between the signature and the send. */
+  chainNow?(): Promise<ChainNow>;
   /** The 64-byte seed; zeroed here when the run ends. */
   seed64(): Promise<Uint8Array>;
   /** POST /v1/pool/solana/send: the helper's answer as it came (hostile). */
@@ -523,6 +527,10 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
     const mine = (list: readonly Ready[]): Ready[] => list.filter((p) => p.wallet.chain === "sol" && !h.claimed?.has(p.noteId));
     // the ready proofs first: none (or every one held by another tap of this page) and no read is made
     if (mine(await h.ready()).length === 0) return no("not_funded");
+    // the pool's time for the take, read beside the first round (card sol-buy-reads-side-by-side); a failed read is the
+    // take's to read again, and one never awaited (a buy refused before its take) is not left unhandled
+    const early = h.chainNow?.();
+    early?.catch(() => {});
     // the reads go out in rounds by their inputs alone (card pool-buy-filled-2s), each on both RPCs as before: first
     // the rent, each venue's pinned tables, the pool account and the reference, which need only the pin and the ask;
     // then the root pages (the sizes name them), the venue (the reference names it) and the device's blockhash and slot,
@@ -640,7 +648,7 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
           /* thrown */
         }
       };
-      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals });
+      return await sendAndSettle(h, r, release, pool, signed, bh.lastHeight, wait, { token, minOut, tell, bound, decimals, early });
     }
   } catch (e) {
     if (e instanceof Refused) return { error: e.code };
@@ -661,10 +669,11 @@ export async function runPoolBuy(h: PoolBuyHost, ask: PoolAsk): Promise<PoolBuyA
  *  out once the transaction reads back); none for a pool withdraw, whose release tells no buy route. */
 export async function sendAndSettle(
   h: Pick<PoolBuyHost, "rpcs" | "take" | "send" | "settle" | "now" | "reads" | "named" | "sent">, r: Ready, release: SolanaPoolRelease, pool: string, signed: Uint8Array, lastHeight: number, wait: (ms: number) => Promise<void>,
-  fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void },
+  fill?: { token: string; minOut: bigint; tell: (x: BuyRoute) => void; bound: readonly BuyRoute[]; decimals?: (d: number) => void; early?: Promise<ChainNow> },
 ): Promise<PoolBuyAnswer> {
-  // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD
-  const taken = await h.take(r.noteId, r.attempt);
+  // the take, awaited before anything leaves: the queue hands out this very attempt, or refuses with the note HELD; a
+  // buy's early read of the pool's time is its time when still fresh
+  const taken = await h.take(r.noteId, r.attempt, fill?.early);
   if (taken.attempt !== r.attempt || !sameBytes(solanaProofBytes(taken.proof), release.proof)) return no();
   // the take holds the note for this very transaction: W and the venue with its pool, told before it leaves
   if (fill) for (const x of fill.bound) fill.tell(x);
@@ -871,6 +880,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.buy"> => {
     if (ask.kind !== "pool.buy" || ask.chain !== "solana" || !locks) return { error: "not_allowed" };
     let answer: HostAnswer<"pool.buy"> | HostRefusal | null = null;
+    // true once the run answered "sent" early (its transaction went out): only then is "sent" its end when it ends with
+    // no stage of its own
+    let early = false;
     // the run's final stage, posted once
     let ended = false;
     const end = (stage: TradeStage): void => {
@@ -885,10 +897,9 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
         const h = host();
         try {
           const a = await runPoolBuy({ ...h, sent: (signature) => {
-            if (!answer) answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } };
+            if (!answer) (answer = { result: { stage: "sent", txs: [{ chain: "solana", hash: signature }] } }), (early = true);
             give();
           }, route: (x) => ctx?.route?.(x) }, ask);
-          const early = answer !== null;
           if (!answer) answer = "error" in a ? { error: a.error } : { result: a };
           // the run's stage goes out as progress too, answered early or not: an answer that comes only at the run's end
           // (no read-back within the client's 10 s) is one the kit's client has dropped, and the app waits on progress
@@ -902,9 +913,10 @@ export function poolBuyKind(host: () => PoolBuyHost & { end?(): void }, locks: L
         }
       })
       .catch(() => {
-        // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"
+        // a run that threw past its own catch: its error is the answer, or, after the early answer, "sent"; a run that
+        // answered its own error (nothing sent) and then threw (the host's end) posts nothing more
         if (!answer) answer = { error: "failed" };
-        else end("sent");
+        else if (early) end("sent");
       })
       .finally(give);
     void run;
