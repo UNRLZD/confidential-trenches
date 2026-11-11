@@ -643,8 +643,13 @@ export function handler(
               : rpc.handle(chain, req.headers["content-type"], body, clientOf(req), false, flag.length === 1),
           )
           // card solana-quote-under-1s: every answer's waits, its send and the provider's environment name (rpc.ts Trace),
-          // in the standard Server-Timing header, 429 and 503 included
-          .then((a) => reply("timing" in a && Array.isArray(a.timing) ? { ...a, headers: { ...(a as { headers?: Headers }).headers, "Server-Timing": (a.timing as string[]).join(", ") } } : a))
+          // in the standard Server-Timing header, 429 and 503 included; card helper-serves-many-users-at-once: the
+          // chain's budget in the IETF RateLimit-Policy field (rpc.ts policyOf), every answer of a known chain
+          .then((a) => {
+            const policy = rpc.policyOf?.(chain);
+            const extra: Headers = { ...("timing" in a && Array.isArray(a.timing) ? { "Server-Timing": (a.timing as string[]).join(", ") } : {}), ...(policy === undefined ? {} : { "RateLimit-Policy": policy }) };
+            return reply(Object.keys(extra).length === 0 ? a : { ...a, headers: { ...(a as { headers?: Headers }).headers, ...extra } });
+          })
           .catch(() => (res.headersSent ? res.destroy() : send(500, { error: "internal" }, cors(req))));
         return;
       }

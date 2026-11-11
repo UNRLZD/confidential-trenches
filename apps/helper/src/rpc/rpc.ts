@@ -85,7 +85,8 @@ export const RPC_CLIENT_MAX = 16;
  *     page's background passes read them, never a trade's reads, and the page's budget per host holds those to 30.
  *   - near: none; the page reads NEAR on its own providers, so its share stays RPC_CLIENT_MAX.
  * The share of a chain on our keyed providers (keyedBudget) and the least RPC_BUDGET_<CHAIN> may name. Callers at their
- * full share at once: (the total less RPC_RESERVE) / this; at Helius free's 100 per 10 s (the header), two on Solana.
+ * full share at once: (the total less RPC_RESERVE) / this; on the deployed lists (summedTotal: Helius free's 100 and
+ * QuickNode's half, 135) three on Solana.
  */
 export const RPC_PAGE_NEED: Readonly<Partial<Record<RpcChain, number>>> = { solana: 42, "solana-devnet": 42, "solana-marks": 30, base: 30, robinhood: 30 };
 /**
@@ -134,7 +135,7 @@ const HOLD_MARGIN_MS = 5;
  * At b07b71a the trade walks sent to the main key unpaced (SOLANA_TRADES_RPC_URL is SOLANA_RPC_URL's URL on the host):
  * 12 walks and 10 callers in one second, the provider's 429, and the chain held for every caller (live run 41911437956).
  */
-export function createPacer() {
+export function createPacer(clock: () => number = () => performance.now()) {
   const booked = new Map<string, number[]>();
   /** Per URL: when each send left, oldest first. */
   const left = new Map<string, number[]>();
@@ -148,7 +149,7 @@ export function createPacer() {
      * 4 Nov 22:14Z), and bookings on it let 11 sends into one real second, then refused callers for the step's length.
      */
     at(url: string, n: number, perSecond: number, opts: { fromMs?: number; maxWaitMs: number; share?: number; book?: boolean }): number {
-      const t = performance.now();
+      const t = clock();
       const cap = Math.max(1, opts.share ?? perSecond);
       const s = (booked.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
       booked.set(url, s);
@@ -165,7 +166,7 @@ export function createPacer() {
      * counts each send where it leaves.
      */
     go(url: string, n: number, perSecond: number): number {
-      const t = performance.now();
+      const t = clock();
       const q = (left.get(url) ?? []).filter((x) => x > t - PACE_SECOND_MS);
       left.set(url, q);
       const i = q.length + n - Math.max(perSecond, n) - 1;
@@ -190,8 +191,8 @@ export const RPC_RESERVE: Readonly<Record<RpcChain, number>> = { solana: 3, base
  * helper-ready-gate): the trade walks and the SOL price reads (data/solana/trades.ts) go only while half stays free,
  * whatever callers drew, so a walk that would take the whole budget leaves a caller's read its room (4 Nov 06:24-06:30Z:
  * the walks, outside this budget, drew the public endpoint's 100 and every token read answered 429 for six minutes).
- * [design: half: the public 100 keeps 50 for callers, three at their full RPC_CLIENT_MAX share (on a keyed plan of 100,
- * one page at its RPC_PAGE_NEED share while the walks hold their half, two once they do not); the walks keep 47, a cold
+ * [design: half: the public 100 keeps 50 for callers, three at their full RPC_CLIENT_MAX share (on Solana's summed 135,
+ * one page at its RPC_PAGE_NEED share while the walks hold their half, three once they do not); the walks keep 47, a cold
  * read of COLD_SIGS transactions a few seconds, and move to their next provider when it is spent.]
  */
 export const userRoomOf = (limit: number): number => Math.ceil(limit / 2);
@@ -303,6 +304,29 @@ function evmCapSpan(chain: RpcChain, answer: unknown): bigint | null {
  *  100 per 10 s on Solana, the rpc.ts header) and one page's share (RPC_PAGE_NEED), no limit per method (a keyed plan
  *  names its own as a third number). Not the public endpoint's share: there 42 of one method would leave others none. */
 export const keyedBudget = (chain: RpcChain): BudgetLimits => ({ total: RPC_BUDGETS[chain].total, perClient: RPC_PAGE_NEED[chain] ?? RPC_CLIENT_MAX });
+/**
+ * The part of each company key's 10 s pace (limits.ts KEYED_PACE: QuickNode 7 a second, each dRPC key 8) a route's
+ * total counts (card helper-serves-many-users-at-once). [design: half: the same keys serve the market-data reads (the
+ * EVM swap and maker reads, server.ts evmSwapRpcs; Solana's trade walks, solanaTradesRpcs) and Solana's mark list
+ * (solana-marks), which draw their buckets first come (limits.ts take), so /v1/rpc's callers may take at most half and
+ * the token page always finds the other half.]
+ */
+export const KEYED_ROUTE_SHARE = 0.5;
+/** The routes whose total sums their keyed providers: the ones the signing page reads beside a trade (RPC_PAGE_NEED).
+ *  NEAR keeps its total, which the helper's own reads draw on; solana-marks walks its keys (all company keys, each
+ *  paced on its own) under its total as before. */
+const SUMMED: ReadonlySet<RpcChain> = new Set(["solana", "base", "robinhood"]);
+/** A route's 10 s total on its keyed providers: its first key's plan (`own`: RPC_BUDGET_<CHAIN>'s total, else the
+ *  default, when an existing name such as SOLANA_RPC_URL is set; none when only company keys are) plus
+ *  KEYED_ROUTE_SHARE of each company key's 10 s pace; never under the share and the reserve (a one-key route whose
+ *  key's pace is smaller still sends no more than that pace: callList takes each send from its bucket). */
+export function summedTotal(chain: RpcChain, keyed: readonly { env: string }[], own: number, share: number): number {
+  const companies = keyed.filter((k) => KEYED_PROVIDER[k.env] !== undefined);
+  if (!SUMMED.has(chain) || companies.length === 0) return own;
+  const plan = keyed.some((k) => KEYED_PROVIDER[k.env] === undefined) ? own : 0;
+  const room = companies.reduce((n, k) => n + Math.floor(KEYED_PACE[KEYED_PROVIDER[k.env]!].perS * (LIMIT_WINDOW_MS / 1000) * KEYED_ROUTE_SHARE), 0);
+  return Math.max(plan + room, share + RPC_RESERVE[chain] + 1);
+}
 /** The least share RPC_BUDGET_<CHAIN> (a keyed plan's) may name: a full batch, and what one page draws (RPC_PAGE_NEED). */
 export const rpcLeastShare = (chain: RpcChain): number => Math.max(RPC_BATCH_MAX, RPC_PAGE_NEED[chain] ?? 0);
 export const rpcBudgetEnv = (chain: RpcChain): string => `RPC_BUDGET_${chain.toUpperCase().replace(/-/g, "_")}`;
@@ -595,11 +619,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   const slot: Slot = createSlot(deps.slot ?? "rpc", keyed, { now, log });
   const publicFallback = deps.publicFallback ?? true;
   const publicLimits = { ...RPC_BUDGETS.solana, reserve: RPC_RESERVE.solana, userRoom: userRoomOf(RPC_BUDGETS.solana.total) };
+  // each chain's first key's plan: RPC_BUDGET_<CHAIN>'s total, else the default; its pace (pacedOf, ownPace) is this
+  // plan's second, never the chain's summed total (card helper-serves-many-users-at-once)
+  const plans = {} as Record<RpcChain, number>;
   const limits = Object.fromEntries(
     RPC_CHAINS.map((ch) => {
       // a share under what one page draws is refused (RPC_PAGE_NEED), as deploy/redeploy.sh budget_ok refuses it first
       const b = budgetFromEnv(env, rpcBudgetEnv(ch), upstreams[ch].keyed.length > 0 ? keyedBudget(ch) : RPC_BUDGETS[ch], { minShare: rpcLeastShare(ch), perMethod: true, reserve: RPC_RESERVE[ch] });
-      return [ch, { ...b, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(b.total) }];
+      plans[ch] = b.total;
+      // the route's total: the first key's plan and its share of each company key it holds (summedTotal)
+      const total = summedTotal(ch, upstreams[ch].keyed, b.total, b.perClient);
+      return [ch, { ...b, total, reserve: RPC_RESERVE[ch], userRoom: userRoomOf(total) }];
     }),
   ) as Record<RpcChain, BudgetLimits & { perMethod?: number }>;
   // a key is a chain, or "<chain> <method>" for one method's budget on it (no share: the chain's share bounds a caller)
@@ -641,7 +671,7 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** An existing name's URL on a chain whose reads were paced by its chain's pacer before the walk (NEAR_RPC_URL and
    *  NEAR_RPC_URL_B; call() paces the first): its sends a second there, else 0. An EVM chain's walk never paced them. */
   const ownPace = (c: RpcChain, url: string): number =>
-    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(limits[c].total / (LIMIT_WINDOW_MS / 1000))) : 0;
+    !EVM_CHAINS.has(c) && upstreams[c].keyed.some((k) => k.url === url && KEYED_PROVIDER[k.env] === undefined) ? Math.max(1, Math.ceil(plans[c] / (LIMIT_WINDOW_MS / 1000))) : 0;
   /** Whether `c` has a new keyed name set (KEYED_PROVIDER): then every read walks its list (listOf). */
   const walks = (c: RpcChain): boolean => upstreams[c].keyed.some((k) => KEYED_PROVIDER[k.env] !== undefined);
   /** The providers a read on `c` asks, in order: its keyed URLs (else its public fallback first, as before), an EVM chain's
@@ -655,13 +685,21 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
   /** A keyed provider's URL and its sends a second, or null for the public endpoint and a chain on its default
    *  provider, which are not paced (their published limits are per 10 s). */
   const pacedOf = (key: string): { url: string; perSecond: number } | null =>
-    key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0 ? null : { url: upstreams[key as RpcChain].url, perSecond: Math.max(1, Math.ceil(limitsOf(key).total / (LIMIT_WINDOW_MS / 1000))) };
-  /** How long `n` sends to `key` wait for their second's room, from a hold's end on, booked when within `maxWaitMs`;
-   *  0 when not paced. A batch larger than a second's room goes alone in its own second. */
-  const pace = (key: string, n: number, maxWaitMs: number, url?: string): number => {
+    key === PUBLIC_KEY || upstreams[key as RpcChain].forms.length === 0 ? null : { url: upstreams[key as RpcChain].url, perSecond: Math.max(1, Math.ceil(plans[key as RpcChain] / (LIMIT_WINDOW_MS / 1000))) };
+  /** How long `n` sends to `key` wait for their second's room, from a hold's end on, booked when within `maxWaitMs`
+   *  (and `book`); 0 when not paced. A batch larger than a second's room goes alone in its own second. */
+  const pace = (key: string, n: number, maxWaitMs: number, url?: string, book = true): number => {
     const p = pacedOf(key);
-    return p === null ? 0 : pacer.at(p.url, n, p.perSecond, { fromMs: Math.max(0, heldUntilOf(key, url) - now()), maxWaitMs });
+    return p === null ? 0 : pacer.at(p.url, n, p.perSecond, { fromMs: Math.max(0, heldUntilOf(key, url) - now()), maxWaitMs, book });
   };
+  /** Whether a Solana keyed spare can take `n` sends now: not held, inside its day, its bucket holding them (card
+   *  helper-serves-many-users-at-once: a read the first key has no room for goes there at once). */
+  const spareHasRoom = (n: number): boolean =>
+    upstreams.solana.keyed.slice(1).some((k) => {
+      if (holdsAll.heldMs(k.url) > 0 || holdsAll.dayOut(k.url, n)) return false;
+      const p = holdsAll.paceOf(k.url);
+      return p === undefined || holdsAll.room(k.url) * p.burst >= n;
+    });
   const sleep = deps.sleep ?? ((ms: number) => new Promise((ok) => setTimeout(ok, ms)));
   /** When `key`'s hold ends (epoch ms, 0 when free), and with `url`, an EVM provider's hold for every path of the helper
    *  (Deps holds, card helper-robinhood-capacity) beside it. */
@@ -1010,6 +1048,10 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
     let sent = now();
     for (let tries = 0; ; tries++) {
       const room = Math.max(0, Math.min(PACE_MAX_MS, deadline - now()));
+      // card helper-serves-many-users-at-once: the first Solana key full for this second, a keyed spare with room takes
+      // the read now; it drew the chain's budget above and draws nothing again (solanaRest with no key). A spare with
+      // no room: the first key's wait, and its 429 past PACE_MAX_MS, as before
+      if (viaSlot && tries === 0 && upstreams.solana.keyed.length > 1 && pace(key, methods.length, room, shared, false) > 0 && spareHasRoom(methods.length)) return solanaRest(forward, methods, client, reserved, by);
       const paced = pace(key, methods.length, room, shared);
       if (paced > room) return throttled(Math.max(1, Math.ceil((paced - room) / 1000)), undefined, `${key} pace`);
       if (paced > 0) await rest(paced);
@@ -1187,7 +1229,17 @@ export function createRpc(env: Record<string, string | undefined>, deps: Deps = 
    *  Solana provider is set (its fallback, whose budget every reader of it shares), else none (another provider). */
   const keyOf = (chain: RpcChain, url: string): string | null => (url === upstreams[chain].url && !companyUrls.has(url) ? chain : chain === "solana" && keyed && url === SOLANA_PUBLIC ? PUBLIC_KEY : null);
 
-  return { handle, background, backgroundThrottled, slot, pacer, keyed: keyedHealth, probe };
+  /** A chain's budget (card helper-serves-many-users-at-once) as the IETF RateLimit-Policy field
+   *  (draft-ietf-httpapi-ratelimit-headers-11, 23 May 2026, read 11 Nov 06:01Z: `"burst";q=100;w=60`): "chain", what
+   *  every caller together may draw in its window, and "client", one caller's share; numbers only, no provider, URL or
+   *  key. Undefined for a name that is no chain. /v1/health has no room for it (the kit's 1 KB at the longest config). */
+  const policyOf = (chain: string): string | undefined => {
+    if (!(RPC_CHAINS as readonly string[]).includes(chain)) return undefined;
+    const l = limits[chain as RpcChain];
+    const w = LIMIT_WINDOW_MS / 1000;
+    return `"chain";q=${l.total};w=${w}, "client";q=${l.perClient};w=${w}`;
+  };
+  return { handle, background, backgroundThrottled, slot, pacer, keyed: keyedHealth, probe, policyOf };
 }
 
 /**
