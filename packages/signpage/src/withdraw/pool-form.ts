@@ -25,14 +25,16 @@
 //   top (./chain-mark.ts, the app's own), the asset's symbol at the amount, and the amount that can be sent now, a value
 //   and its symbol that fills the field when tapped: exactly the largest amount the amount check accepts (poolSendable),
 //   so a tap never draws Insufficient or Try. No word is added: values, symbols and marks only.
-// - A pasted To carries what a copy carries: every whitespace (spaces, a tab, a line break) and every invisible format
-//   character (a zero-width space, a byte-order mark, a direction mark) is taken out before the check, anywhere in it
-//   (toCleaned); anything else, a "solana:" link's prefix included, is checked as typed and refused. The To line drawn
-//   before the press shows the address the check passed, the one handed over.
+// - A pasted To carries what a copy carries (toCleaned): whitespace and invisible format characters are taken off its two
+//   ends, and the invisible joiners (zero-width space, non-joiner and joiner, word joiner, byte-order mark, soft hyphen)
+//   out of it anywhere. Whitespace inside is never taken out: it would glue two pieces of a row ("3<tab>address",
+//   "address 5") into one valid key nobody holds, so it is refused. A direction control anywhere (it can show other
+//   characters than the field holds) is refused, and so is anything else not an address, a "solana:" link's prefix
+//   included. The To line drawn before the press shows the address the check passed, the one handed over.
 // - DOM by createElement and textContent only: the page's CSP requires Trusted Types for every script sink.
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { base58 } from "@scure/base";
-import { nearestPlannable, plannableAmounts, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
+import { nearestPlannable, planPoolWithdraw, poolWithdrawable, type WithdrawSource } from "../pool-withdraw.ts";
 import { EVM_ADDRESS, SOL_KEY, SOLANA_RESERVED_KEYS, type PoolChain } from "../rules/pool.ts";
 import { POOL_CHAIN_MARK } from "./chain-mark.ts";
 import { CHECK_IDLE_MS, markDraft, WITHDRAW_WORDS } from "./form.ts";
@@ -90,17 +92,23 @@ export function eip55(address: string): string {
   return "0x" + [...lower].map((c, i) => (((h[i >> 1]! >> (i % 2 === 0 ? 4 : 0)) & 15) >= 8 ? c.toUpperCase() : c)).join("");
 }
 
-/** Every whitespace and every invisible format character (Unicode Cf: zero-width space and joiners, the byte-order mark,
- *  the soft hyphen, the direction marks): what a paste carries around or inside an address. No address holds one. */
-const UNSEEN = /[\p{White_Space}\p{Cf}]/gu;
+/** What a copy carries around an address: whitespace and invisible format characters at either end. */
+const ENDS = /^[\p{White_Space}\p{Cf}]+|[\p{White_Space}\p{Cf}]+$/gu;
+/** The invisible joiners a copy can leave inside an address: zero-width space, non-joiner and joiner, word joiner,
+ *  byte-order mark, soft hyphen. They separate nothing a person sees. */
+const JOINERS = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/gu;
+/** The direction controls (Arabic letter mark, LRM and RLM, the embeddings and overrides, the isolates): a field holding
+ *  one can show other characters, or another order, than it holds. */
+const DIRECTION = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
-/** A typed or pasted To with what a copy carries taken out (UNSEEN), anywhere in it; nothing else is changed. */
-export const toCleaned = (raw: string): string => raw.replace(UNSEEN, "");
+/** A typed or pasted To with what a copy carries taken out (ENDS, then JOINERS); null when it holds a direction control. */
+export const toCleaned = (raw: string): string | null => (DIRECTION.test(raw) ? null : raw.replace(ENDS, "").replace(JOINERS, ""));
 
 /** To, on the pool's chain. */
 export function checkPoolTo(chain: PoolChain, raw: string, keys: PoolKeys): PoolAddressCheck {
   const to = toCleaned(raw);
   const no: PoolAddressCheck = { ok: false, code: "address" };
+  if (to === null) return no;
   if (chain === "solana") {
     if (!SOL_KEY(to) || base58.encode(base58.decode(to)) !== to) return no;
     // nor a key the runtime keeps read-only (a sysvar or a builtin program, System among them): nothing lands there
@@ -141,17 +149,10 @@ export function checkPoolAmount(chain: PoolChain, raw: string, funds: PoolFunds 
   return { ok: true, amount, parts: plan.length, maxFee: BigInt(plan.length) * (funds.fee + funds.wFee) };
 }
 
-/** What can be sent now: the largest amount checkPoolAmount accepts, so not above poolWithdrawable (the Insufficient rule)
- *  and plannable (no Try); the largest plannable one when that is less. 0n when no amount can be. */
-export function poolSendable(funds: PoolFunds): bigint {
-  const most = poolWithdrawable(funds.notes, funds);
-  let top = 0n;
-  for (const [lo, hi] of plannableAmounts(funds.notes, funds)) {
-    const x = hi < most ? hi : most;
-    if (lo <= most && x > top) top = x;
-  }
-  return top >= funds.minPart && planPoolWithdraw(funds.notes, top, funds) !== null ? top : 0n;
-}
+/** What can be sent now: poolWithdrawable, the Insufficient rule's own sum. It is the largest amount checkPoolAmount
+ *  accepts: each note sent whole is a plan, so the sum always has one (test/pool-withdraw-sendable.test.ts holds it on
+ *  random note sets); 0n when no note gives the smallest part. */
+export const poolSendable = (funds: PoolFunds): bigint => poolWithdrawable(funds.notes, funds);
 
 /** The screen's view of both fields, checked now. */
 export function evaluatePool(chain: PoolChain, to: string, amount: string, keys: PoolKeys, funds: PoolFunds | null): PoolFormView {

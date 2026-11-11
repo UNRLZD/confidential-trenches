@@ -49,14 +49,14 @@ test("what can be sent: the notes less their fees, the largest the amount check 
   assert.equal(poolSendable(TWO), 40_000_000n - 2n * (FEE + W_FEE));
   assert.equal(poolSendable({ ...ONE, notes: [] }), 0n);
   assert.equal(poolSendable({ ...ONE, notes: [{ id: "dust", value: FEE + W_FEE + MIN - 1n }] }), 0n, "a note under the smallest part sends nothing");
-  // random note sets: the value is accepted, one unit more is Insufficient or has no plan
+  // random note sets: the sum the Insufficient rule allows is accepted (it always has a plan), one unit more is refused
   let seed = 7;
   const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % n);
   for (let i = 0; i < 300; i++) {
     const notes = Array.from({ length: 1 + rnd(6) }, (_, j) => ({ id: `n${j}`, value: BigInt(1 + rnd(60_000_000)) }));
     const f: PoolFunds = { notes, fee: FEE, wFee: W_FEE, minPart: MIN };
     const s = poolSendable(f);
-    assert.ok(s <= poolWithdrawable(notes, f), "never above the Insufficient rule's sum");
+    assert.equal(s, poolWithdrawable(notes, f), "the Insufficient rule's own sum");
     if (s === 0n) {
       { const most = poolWithdrawable(notes, f); assert.ok(!plannableAmounts(notes, f).some(([lo, hi]) => lo <= most && (hi < most ? hi : most) >= MIN), "0 only when nothing can be sent"); }
       continue;

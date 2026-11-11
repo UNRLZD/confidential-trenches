@@ -51,7 +51,7 @@ const states = (c) => [
   ["refused-to", c.to.slice(0, 22), "", false, { state: "refused", to: ["address", "Invalid address"] }],
   ["refused-amount", c.to, c.over, false, { state: "refused", amount: ["insufficient", "Insufficient"] }],
   ["refused-both", c.to.slice(0, 22), c.over, false, { state: "refused", to: ["address", "Invalid address"], amount: ["insufficient", "Insufficient"] }],
-  ["ready", ` ${c.to}​`, "", true, { state: "ready", lines: { to: c.to } }],
+  ["ready", ` ${c.to}\u200b`, "", true, { state: "ready", lines: { to: c.to } }],
 ];
 
 const browser = await launchBrowser("chromium");
