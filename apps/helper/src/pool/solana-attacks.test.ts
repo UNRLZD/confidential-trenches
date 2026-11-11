@@ -911,3 +911,34 @@ test("review R-S4: send with queue limit 0 answers at once when every second is 
   const j5 = jitoSender({ regions: ["https://a.invalid/x", "https://b.invalid/x"], fetch: async () => new Response("", { status: 502 }), timeoutMs: 500, intervalMs: 0 });
   assert.deepEqual(await j5.send("AA==", "SIG", 0), { kind: "busy", detail: "HTTP 502", throttled: false });
 });
+
+// card sol-pool-buy-lands-on-mainnet: a mainnet tag 3's note for the send's log line: the region that took it, whether
+// the engine named its bundle, the end, the rebroadcasts counted, and for one that did not fill the engine's word on the
+// bundle (one getInflightBundleStatuses read at that region); none of it a signature, an address or a bundle id
+test("a bundle that did not fill: the note names the region, the end, the rebroadcasts and the engine's word on it", async () => {
+  const id = "ab".repeat(32);
+  const seen: { url: string; method: string; params: unknown }[] = [];
+  const fetchFn: JitoFetch = async (url, init) => {
+    const b = JSON.parse(String(init.body));
+    seen.push({ url, method: b.method, params: b.params });
+    if (b.method === "getInflightBundleStatuses") return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { context: { slot: 1 }, value: [{ bundle_id: id, status: "Failed", landed_slot: null }] } }), { status: 200 });
+    const w = Buffer.from(b.params[0], "base64");
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: base58(w.subarray(1, 65)) }), { status: 200, headers: { "x-bundle-id": id } });
+  };
+  const sends = [{ path: "jito", ok: true }, { path: "jito", ok: true }, { path: "jito", ok: false }];
+  const s = mainnet({ engine: { fetchFn }, done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: "expired", sends: sends as never }] }) });
+  const a = await s.carry(body(tipped()));
+  assert.equal(code(a), "not_landed");
+  assert.equal(a.status, 503);
+  assert.deepEqual(a.note, { tag: 3, via: "jito", region: "amsterdam", bundle: true, end: "expired", rebroadcasts: 2, misses: 1, status: "failed" });
+  assert.deepEqual(seen.map((x) => [new URL(x.url).host.split(".")[0], new URL(x.url).pathname, x.method]), [["amsterdam", "/api/v1/transactions", "sendTransaction"], ["amsterdam", "/api/v1/getInflightBundleStatuses", "getInflightBundleStatuses"]]);
+  assert.deepEqual(seen[1]!.params, [[id]]);
+  // a fill reads nothing more; an engine that names no bundle is not asked
+  const f = await mainnet({ engine: { fetchFn }, done: (x) => Promise.resolve({ txs: [{ signature: x.sig, state: "filled", sends: [] }] }) }).carry(body(tipped({ r: { existingNullifierHash: f32(91) } })));
+  assert.deepEqual(f.note, { tag: 3, via: "jito", region: "amsterdam", bundle: true, end: "filled", rebroadcasts: 0, misses: 0 });
+  const bare = blockEngine(() => "ok");
+  const u = await mainnet({ engine: bare }).carry(body(tipped({ r: { existingNullifierHash: f32(92) } })));
+  assert.equal(u.note?.bundle, false);
+  assert.equal(u.note?.status, undefined);
+  assert.equal(bare.seen.length, 1);
+});
