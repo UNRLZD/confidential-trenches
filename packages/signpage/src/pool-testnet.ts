@@ -1316,7 +1316,9 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       const timer = over.positions?.setTimer ?? ((f: () => void, ms: number) => (setTimeout(f, ms) as { unref?: () => void }).unref?.());
       evmPositionsCaches.set(
         chain,
-        e === null || !POOL_TESTNET
+        // only on a list of exactly two providers: on more, the pair's walking seats can both land on one provider, whose
+        // word alone would then read as two agreeing (a stuck or throttled seat leaves the rows waiting instead)
+        e === null || !POOL_TESTNET || e.list.length !== 2
           ? null
           : positionsCache(
               (memo, run) =>

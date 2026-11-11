@@ -762,6 +762,45 @@ test("P3-2: a floor the Deposited named never lapses: read at 1002 on both RPCs,
   await t.signedOut();
 });
 
+test("P3-1: a chain whose pool list has three providers reads no positions (the pair's walking seats can agree on one provider's word): a lies 9 and throttles one call, b throttles; truth 5", async () => {
+  const w = await wallet();
+  await w.update("meta", EVM_POSITION_COSTS_KEY, () => ({ [W1]: rec("base", "filled") }));
+  const clock = pageClock();
+  const asked: string[] = [];
+  const provider = (host: string, balance: bigint, throttles: () => boolean): EvmRpc =>
+    Object.assign(
+      async (method: string, params: readonly unknown[]) => {
+        const c = params[0] as { data?: string } | undefined;
+        asked.push(`${host} ${method === "eth_call" ? (c?.data === "0x313ce567" ? "decimals" : "balanceOf") : method}`);
+        if (method === "eth_blockNumber") return hex(100n);
+        if (c?.data !== "0x313ce567" && throttles()) throw new Error("HTTP 429 Too Many Requests");
+        return word(c?.data === "0x313ce567" ? 6 : balance);
+      },
+      { url: `https://${host}.example` },
+    );
+  let aOnce = true;
+  const list = [provider("a", 9_000_000n, () => (aOnce ? ((aOnce = false), true) : false)), provider("b", 5_000_000n, () => true), provider("c", 5_000_000n, () => false)];
+  const t = testnetPool({ store: async () => w, held: async () => w, seed64: async () => SEED64.slice() }, {
+    prover: { vault: signalsProver(), stop: () => {} },
+    evmPin: (c) => PINS[c],
+    evmRpcs: (c) => (c === "base" ? list : fakeChain().rpcs),
+    evmSync: () => ({ events: async () => assert.fail("no sync read") }),
+    evmQueuePool: () => fakeEvmPool(),
+    positions: { setTimer: clock.setTimer, clearTimer: () => {} },
+    positionsNow: clock.now,
+  });
+  const seen: string[][] = [];
+  for (let s = 0; s < 60; s++) {
+    await t.positions();
+    await clock.go(1_000);
+    seen.push(((await t.positions()) ?? []).filter((p) => p.chain === "base").map((p) => p.amount));
+  }
+  assert.ok(seen.every((r) => !r.includes("9")), `never one provider's word: ${JSON.stringify(seen.find((r) => r.includes("9")))}`);
+  assert.deepEqual(seen.at(-1), []);
+  assert.deepEqual(asked.filter((x) => x.endsWith("balanceOf")), [], "no balance read on a list of three");
+  await t.signedOut();
+});
+
 test("P2-2b: a full sale whose send's answer is lost: never the old amount as agreed, a retry booked, until a pass reads past the lower newest block taken after the send ended; its Deposited, read later, holds the row again until both RPCs are past it", async () => {
   const { ch, clock, t, rows, sell } = await salePage(async () => {
     throw new TypeError("the connection closed");
