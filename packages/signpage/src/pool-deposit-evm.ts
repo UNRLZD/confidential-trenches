@@ -63,7 +63,7 @@ import { evmSameChainDeposit } from "../../wallet/src/pool/same-chain.ts";
 import { ladderSplit } from "../../wallet/src/pool/ladder.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { checkEvmDeposit, EVM_DEPOSIT_GAS_MAX, evmDepositHeadroom, PoolRuleRefused, signEvmDeposit, type EvmOnwardSend, type PoolAsk } from "./rules/pool.ts";
-import { clockOf, readsWaited, readWaits, tapWaits, type ReadWaits } from "./read-waits.ts";
+import { clockOf, readsWaited, readWaits, stopOf, tapDone, tapWaits, type ReadWaits } from "./read-waits.ts";
 import { followWait, POOL_DEPOSIT_FOLLOW_MAX_MS, POOL_DEPOSIT_LOCK, stopped, type PoolDepositAnswer } from "./pool-deposit.ts";
 import type { HostAnswer, HostRefusal, KindContext, Running } from "./api.ts";
 
@@ -106,6 +106,9 @@ export type PoolDepositEvmHost = {
   settle?(): void;
   /** Aborted when the page leaves the deposit (sign out): the end's reads stop, telling nothing. */
   signal?: AbortSignal;
+  /** The session's sign out, aborted at its tap (before the seed lock this run holds): it ends a wait between an ask's
+   *  attempts, and none starts after it (review of f0e7bd38, P2-1). */
+  stop?: AbortSignal;
 };
 
 /** An ask's notes still INCOMING at its run's end (each: its precommitment, its recorded value, the highest nonce of its
@@ -560,7 +563,7 @@ export async function runPoolDepositEvm(h: PoolDepositEvmHost, ask: PoolAsk | nu
   // an ask's provider read that still fails before U signs: the run again from its first read after a wait on the
   // page's one rule (read-waits.ts readWaits), then "down" (card start-reads-wait-out-a-throttle); a sign out ends it
   if (ask === null) return depositRunEvm(h, ask, {});
-  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, h.signal, waits);
+  return readsWaited((at) => depositRunEvm(h, ask, at), h.wait, stopOf(h), waits);
 }
 
 async function depositRunEvm(h: PoolDepositEvmHost, ask: PoolAsk | null, at: { fault?: unknown }): Promise<PoolDepositAnswer> {
@@ -739,6 +742,8 @@ type Locks = Pick<LockManager, "request">;
 export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk | null, ctx: KindContext | null): HostRefusal | Running<"pool.deposit"> => {
     if ((ask !== null && (ask.kind !== "pool.deposit" || ask.chain === "solana")) || !locks) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (before its locks)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.deposit"> | HostRefusal | null = null;
     let give!: () => void;
     let fail!: (e: unknown) => void;
@@ -759,7 +764,7 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
           const progress = (stage: TradeStage): void => (stage === "sent" && first ? void (first = false) : ctx?.progress(stage));
           let left: PoolDepositEvmLeft | null = null;
           try {
-            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask, tapWaits(ctx, clockOf(h)));
+            const a = await runPoolDepositEvm({ ...h, sent, progress, left: (l) => void (left = l) }, ask, waits);
             const l = left as PoolDepositEvmLeft | null;
             // filled or part_filled is the ask's end; anything else past a send of the ask (sent, not_landed, a fault)
             // is no end: its open notes are read on, and the end goes as progress once each is landed or dead
@@ -780,6 +785,8 @@ export function poolDepositEvmKind(host: () => PoolDepositEvmHost, locks: Locks 
         if (!answer) answer = { error: "failed" };
         give();
       });
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     // the end, read with no lock held (a sign out never waits on it) and nothing written; a wait that rejects stops it
     void run.then(() => {
       const f = follow;

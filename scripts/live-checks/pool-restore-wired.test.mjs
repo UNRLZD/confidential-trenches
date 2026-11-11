@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { FIRST_PAUSE_MS, idReadOf, judge } from "./pool-restore-wired.mjs";
+import { FIRST_PAUSE_MS, idReadOf, judge, WAIT_MS } from "./pool-restore-wired.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ANSWERS = JSON.parse(readFileSync(path.join(HERE, "pool-restore-wired.answers.json"), "utf8"));
@@ -152,4 +152,16 @@ test("idReadOf counts a step 5 id read alone", () => {
   assert.equal(idReadOf(JSON.stringify({ jsonrpc: "2.0", id: "1", method: "block", params: { finality: "final" } })), false);
   assert.equal(idReadOf("not json"), false);
   assert.equal(idReadOf(undefined), false);
+});
+
+// card restore-first-sign-in-under-two-minutes: the run with no tap is held to WAIT_MS from Continue, the bound set from
+// its measure (pool-restore-wired.mjs's header); a run that never ended, or ended past it, fails
+test("planted: the run with no tap ended at WAIT_MS: PASS; a ms past it, never, or no number: FAIL", () => {
+  const at = mut((rec) => (rec.steps.auto.ms = WAIT_MS));
+  assert.equal(at.ok, true, at.lines.join("\n"));
+  assert.ok(at.lines.some((l) => l.startsWith("OK ") && l.includes(`it ended within ${WAIT_MS / 1000} s of Continue (${WAIT_MS} ms)`)), at.lines.join("\n"));
+  fails(mut((rec) => (rec.steps.auto.ms = WAIT_MS + 1)), /it ended within .* s of Continue/);
+  fails(mut((rec) => (rec.steps.auto.ms = null)), /of Continue \(never\)/);
+  fails(mut((rec) => (rec.steps.auto.ms = "fast")), /of Continue/);
+  fails(mut((rec) => (rec.steps.auto.ms = -1)), /of Continue/);
 });

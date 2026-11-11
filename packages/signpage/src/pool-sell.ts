@@ -73,7 +73,7 @@ import type { BuyWallet } from "../../wallet/src/pool/buy-wallets.ts";
 import { solanaPoolOf, solanaTreeSync, type SolanaPoolPin, type SolanaTreeSync } from "../../wallet/src/pool/solana.ts";
 import { WALLET_SEED_LOCK } from "@blindfill/wallet/store";
 import { blockhashOf, blockhashRead, blockhashValid, pastOnBoth, readBack, readBackFailure, readBackMeta, type BuyMints } from "./pool-buy.ts";
-import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, solanaStableReads, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
+import { afterOf, clockOf, keptReads, READ_WAIT, readWaits, solanaStableReads, tapDone, tapWaits, waitsOn, waitUnless, type ReadWaits } from "./read-waits.ts";
 import { throttleWaitMs } from "../../wallet/src/throttle.ts";
 import { fromRecord, timedStore, TRADE_STORE_MS, tradeLock, type TradeStore } from "./trade.ts";
 import { checkSolanaSell, checkSolanaSweep, checkSolanaTeardownFrames, PoolRuleRefused, poolUnits, signSolana, SOLANA_POOL_MIN_DEPOSIT, SOLANA_POOL_SELL_RESERVE_MAX, SOLANA_SWEEP_OWED_MAX, solanaDepositRents, solanaSellAfterFull, solanaSweepFloor, solanaSweepKeep, type PoolAsk, type SolanaDepositHeld } from "./rules/pool.ts";
@@ -593,7 +593,6 @@ export const buyMints = (store: () => Promise<Pick<TradeStore, "get" | "update">
 
 /** One W's sale, built again (POOL_SELL_REBUILDS at most) while its deposit meets a page another deposit filled first. */
 async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, waits: ReadWaits, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   for (let i = 0; ; ) {
     delete later.rebuild;
     delete later.fault;
@@ -605,7 +604,7 @@ async function sellRuns(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWalle
     if ("error" in a && "fault" in later && !h.stopped?.()) {
       const ms = waits.next(later.fault);
       if (ms !== null) {
-        await waitUnless(wait, ms, h.signal);
+        await waitUnless(h.wait, ms, h.signal);
         // a sign out during the wait: the sale never starts again (nothing signed)
         if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
         continue;
@@ -751,7 +750,6 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
   let plan: PoolSellPlan;
   // the sell's reads that cannot change while it waits, kept per provider across its attempts (read-waits.ts)
   const h: PoolSellHost = Object.assign(Object.create(host) as PoolSellHost, { rpcs: keptReads(host.rpcs, solanaStableReads(ask.token)) });
-  const wait = h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   // one tap's waits: its plan's and every sale's share the rule's one bound (READ_WAIT_TOTAL_MS on the clock)
   // an ask that is not a Solana sell of a token: refused before any read (planPoolSell's own refusal)
   if (ask.kind !== "pool.sell" || ask.chain !== "solana" || ask.token === null) return { error: "not_allowed" };
@@ -773,7 +771,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       const got = await planReads(h, ask, (ws) => {
         if (ws.length === 0) return;
         early.rent = quiet(readSolanaRent(h.rpcs));
-        early.sizes = quiet(treeSizes(h.rpcs, program, pool, wait));
+        early.sizes = quiet(treeSizes(h.rpcs, program, pool, h.wait ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)))));
         const w = ws[0];
         if (ws.length !== 1 || ask.token === null) return;
         lone = w!.address;
@@ -802,7 +800,7 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       if (waitsOn(e)) {
         const ms = h.stopped?.() ? null : waits.next(e);
         if (ms === null) return { error: "down" };
-        await waitUnless(wait, ms, h.signal);
+        await waitUnless(h.wait, ms, h.signal);
         if (h.stopped?.() || h.signal?.aborted) return { error: "failed" };
         continue;
       }
@@ -844,7 +842,9 @@ async function sellAll(host: PoolSellHost, ask: PoolAsk, laters: Later[], hooks:
       },
     });
     return Promise.resolve()
-      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits, i === 0 ? first : shared, i === 0 ? { venues } : { opened: prior, venues })))
+      // a wallet whose turn comes once the tap's waits are spent (another wallet's sale was refused its next wait):
+      // down without its priced reads, nothing signed (review of f0e7bd38, P2-2; sellRun checks again at its turn)
+      .then((): Promise<LegAnswer> | LegAnswer => (h.stopped?.() ? { error: "failed" } : waits.spent() ? { error: "down" } : sellRuns(leg, { ...ask, amount: l.units, shareBps: undefined }, later, l.w, waits, i === 0 ? first : shared, i === 0 ? { venues, spent: () => waits.spent() } : { opened: prior, venues, spent: () => waits.spent() })))
       .catch((): LegAnswer => ({ error: "failed" }))
       .then((a) => {
         open();
@@ -899,7 +899,7 @@ async function noteFor(h: Pick<PoolSellHost, "settled">, rpcs: Rpcs, program: st
 
 /** A leg's turn (sellAll): `opened` once the leg before it sent or ended (none for the first leg); `venues`, the venue the
  *  last leg's reference chose, which a leg after it reads beside its own reference and keeps only when its own chose it. */
-type LegTurn = { opened?: Promise<void>; venues: { kind?: "pump-curve" | "pumpswap" } };
+type LegTurn = { opened?: Promise<void>; venues: { kind?: "pump-curve" | "pumpswap" }; spent?: () => boolean };
 
 async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet, early?: Early, turn?: LegTurn): Promise<LegAnswer> {
   const seeds: Uint8Array[] = [];
@@ -938,6 +938,9 @@ async function sellRun(h: PoolSellHost, ask: PoolAsk, later: Later, w: BuyWallet
     if (opened) {
       await opened;
       if (h.stopped?.()) return { error: "failed" };
+      // the tap's waits spent while it waited its turn (another wallet's sale was refused its next wait): down, none of
+      // its priced reads asked, nothing signed (review of f0e7bd38, P2-2)
+      if (turn!.spent?.()) return { error: "down" };
     }
     const venueOf = (kind: "pump-curve" | "pumpswap") => readSolanaPoolBuyVenue(rpcs, kind, token, ...(h.pick ? [h.pick] : []));
     // after its turn, a leg after the first asks all of them in one round: the blockhash (its check on RPC 1 as soon as
@@ -1415,7 +1418,8 @@ async function rentBack(h: PoolSellHost, x: RentBack, hold?: Hold): Promise<Ende
   // a step up to its send, again from its first read on a fault, each fault told; null: it gave up
   const again = async <T>(step: "teardown" | "sweep", f: () => Promise<T>): Promise<{ ok: T } | null> => {
     for (let i = 0, pause = 0, last: unknown = null; i < POOL_RENT_BACK_TRIES && (i === 0 || clock() < deadline); i++) {
-      if (i > 0) await wait((pause = throttleWaitMs(pause, afterOf(last), READ_WAIT)));
+      // a provider's fault doubles the wait on the rule; any other failure waits its first step
+      if (i > 0) await wait(waitsOn(last) ? (pause = throttleWaitMs(pause, afterOf(last), READ_WAIT)) : READ_WAIT.firstMs);
       try {
         return { ok: await f() };
       } catch (e) {
@@ -1885,6 +1889,8 @@ export async function settleSellOps(ops: TradeStore, signature: string, stage: T
 export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null = globalThis.navigator?.locks ?? null) {
   return (ask: PoolAsk, ctx: KindContext | null): HostRefusal | Running<"pool.sell"> => {
     if (ask.kind !== "pool.sell" || ask.chain !== "solana" || !locks || !ctx) return { error: "not_allowed" };
+    // the tap's one bound, from its arrival (pool-kinds started it already when the sell came through its decimals read)
+    const waits = tapWaits(ctx);
     let answer: HostAnswer<"pool.sell"> | HostRefusal | null = null;
     let give!: () => void;
     const answered = new Promise<void>((r) => (give = r));
@@ -1957,7 +1963,7 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
                   give();
                 },
                 ended: (i, leg) => setLeg(i, leg.error !== undefined ? { tx: null, stage: "refused", code: leg.error } : { tx: leg.tx, stage: leg.stage ?? "refused" }),
-              }, tapWaits(ctx, clockOf(h)));
+              }, waits);
               if ("error" in a) write({ stage: "refused", code: a.error });
               else write({ stage: a.stage, txs: a.txs });
               await writes;
@@ -1985,6 +1991,8 @@ export function poolSellKind(host: () => PoolSellKindHost, locks: Locks | null =
       })
       .finally(give);
     void run;
+    // the request's run ended: its bound dropped (read-waits.ts tapDone)
+    void run.then(() => tapDone(ctx, waits), () => tapDone(ctx, waits));
     return { running: true, after: answered, answer: () => answer ?? { error: "failed" } };
   };
 }

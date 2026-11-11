@@ -56,7 +56,7 @@ export function facts(index, js) {
   // the wait: none with waits 0, else the request's waits or the rule's own; null (its bound spent): the failure thrown
   const loop = new RegExp(`(${N})=(${N})\\.waits===0\\?null:(?:\\2\\.waits\\?\\?)?(${N})\\(\\)[^]*?(${N})=\\1===null\\?null:\\1\\.next\\((${N})\\);if\\(\\4===null\\)throw \\5;`).exec(body);
   // the rule: next(e) = T(pause, Retry-After of e, B), its bound on a clock (card start-reads-wait-out-a-throttle)
-  const fn = loop ? new RegExp(`function ${esc(loop[3])}\\((${N})=${N}\\)\\{let (${N})=\\1\\(\\),(${N})=0,(${N})=0;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\3,(${N})\\(\\5\\),(${N})\\);`).exec(js) : null;
+  const fn = loop ? new RegExp(`function ${esc(loop[3])}\\((${N})=${N}\\)\\{let (${N})=\\1\\(\\),(${N})=0,(${N})=0(?:,${N}=!1)?;return\\{next\\((${N})\\)\\{let (${N})=(${N})\\(\\3,(${N})\\(\\5\\),(${N})\\);`).exec(js) : null;
   const def = fn ? new RegExp(`[,; ]${esc(fn[9])}=Object\\.freeze\\(\\{firstMs:(${N}),maxMs:(${N}),afterMaxMs:\\2\\}\\)`).exec(js) : null;
   if (fn && def) {
     const T = fn[7];
@@ -66,7 +66,7 @@ export function facts(index, js) {
   }
   // down only for a failed read: a rule's refusal (two answers that disagree) is not_allowed (a sign out's stop, since
   // card start-reads-wait-out-a-throttle, failed)
-  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(?:\\1 instanceof ${N}\\?${N}:)?(${N})\\}\\),answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
+  const no = new RegExp(`,(${N})=>\\{(${N})=\\1 instanceof ${N}\\?(${N}):(?:\\1 instanceof ${N}\\?${N}:)?(${N})\\}\\)(?:\\.then\\(\\(\\)=>${N}\\(${N},${N}\\)\\))?,answer:\\(\\)=>\\2\\}`).exec(js.slice(js.indexOf(`after:${F}(`)));
   if (no) out.down = new RegExp(`[,; ]${esc(no[4])}=Object\\.freeze\\(\\{error:${Q}down${Q}\\}\\)`).test(js) && new RegExp(`[,; ]${esc(no[3])}=Object\\.freeze\\(\\{error:${Q}not_allowed${Q}\\}\\)`).test(js);
   return out;
 }
