@@ -195,7 +195,7 @@ function rpcStub(simErr: unknown = null, calls: Calls = []): SolanaRpc {
       calls.push({ method, params });
       if (method === "simulateTransaction") {
         const opts = params[1] as { sigVerify?: boolean };
-        // sigVerify as a public mainnet RPC answers it (11 Nov 18:13Z): value.err "SignatureFailure"; "sigVerify" plants a
+        // sigVerify as a public mainnet RPC answers it (11 Nov 18:10Z): value.err "SignatureFailure"; "sigVerify" plants a
         // provider whose own check refuses the signatures, whatever they are
         if (opts.sigVerify && (simErr === "sigVerify" || !signaturesHold(Buffer.from(params[0] as string, "base64")))) return { context: { slot: 1 }, value: { err: "SignatureFailure", logs: [] } };
         return { context: { slot: 1 }, value: { err: simErr, logs: [] } };

@@ -615,7 +615,7 @@ export function solanaPoolSender(cfg: { cluster: string; program: string; feePay
       }
       const v = (sim as { value?: { err?: unknown } } | null)?.value;
       if (typeof v !== "object" || v === null || !("err" in v)) return no(503, "upstream");
-      // as a public mainnet RPC answers (read 11 Nov 18:13Z): a signature that does not hold is value.err
+      // as a public mainnet RPC answers (read 11 Nov 18:10Z): a signature that does not hold is value.err
       // "SignatureFailure", a blockhash it does not know "BlockhashNotFound"
       if (v.err === "SignatureFailure") return { ...no(422, "signature_failed"), note: { err: "signature" } };
       if (v.err === "BlockhashNotFound") return { ...no(422, "blockhash_not_found"), note: { err: simErrText(v.err) } };
