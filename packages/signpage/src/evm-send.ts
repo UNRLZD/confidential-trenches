@@ -319,6 +319,8 @@ export function evmBuyVerdict(reads: readonly [EvmReleaseRead, EvmReleaseRead], 
 /** SellDelegate.sell's signature, as the delegate compiles it (contracts/pool-evm/src/SellDelegate.sol). */
 export const EVM_SELL_SIGNATURE = "sell((address,uint256,address,bytes,uint256,address,uint256,uint256,address,uint256,uint256),uint256,bytes)";
 const SELL_SELECTOR = /* @__PURE__ */ selectorOf(EVM_SELL_SIGNATURE);
+/** SellDelegate.sell's selector, 0x and 8 hex digits (made at the call: a bundle with no sale keeps none of it). */
+export const evmSellSelector = (): string => `0x${hexOf(selectorOf(EVM_SELL_SIGNATURE))}`;
 
 /** The Sell W signed, as the calldata carries it (the kit's EvmPoolSell fields). */
 export type EvmSellFields = { token: string; amount: bigint; target: string; data: string; minOut: bigint; pool: string; precommitment: bigint; feeCap: bigint; feeRecipient: string; deadline: bigint; nonce: bigint };
@@ -349,9 +351,13 @@ const retryAfterMs = (res: Response): number | null => {
 
 /** POST /v1/pool/evm/sell: the hash the helper names (lowercase, a hint only), or a throw: EvmSendBusy (a 429, or a
  *  503 naming a Retry-After), EvmSendRefused or EvmSendNoAnswer. */
-export async function evmSellSend(helper: string, body: { pool: string; w: string; data: Uint8Array; authorization: EvmSellAuthorization }, fetchFn: typeof fetch = fetch): Promise<string> {
+export async function evmSellSend(helper: string, body: { pool: string; w: string; data: Uint8Array; authorization: EvmSellAuthorization }, fetchFn: typeof fetch = fetch, stop?: AbortSignal): Promise<string> {
   const window = new AbortController();
   const t = setTimeout(() => window.abort(new DOMException(`pool evm sell: no answer in ${EVM_SEND_TIMEOUT_MS} ms`, "TimeoutError")), EVM_SEND_TIMEOUT_MS);
+  // a sign out ends the POST in flight (`stop`, the page's follows' signal): no answer, the record kept for the chain
+  const onStop = (): void => window.abort(new DOMException("pool evm sell: signed out", "AbortError"));
+  if (stop?.aborted) onStop();
+  else stop?.addEventListener("abort", onStop, { once: true });
   try {
     let res: Response;
     let bytes: Uint8Array;
@@ -391,6 +397,7 @@ export async function evmSellSend(helper: string, body: { pool: string; w: strin
     return lower(hash);
   } finally {
     clearTimeout(t);
+    stop?.removeEventListener("abort", onStop);
   }
 }
 

@@ -771,10 +771,26 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
   // their buy records, the kit's sell quote and build, the helper's sell sender, the pool's pair and round; testnet build
   // only until the mainnet pins' card. One note store per run, closed at its end
   const evmSellFollowing = new Set<string>();
+  const evmSellSending = new Set<string>();
   const evmSellOf = (chain: "base" | "robinhood", e: NonNullable<ReturnType<typeof evmPool>>) => {
     let notes: Promise<NoteStore> | null = null;
+    // the store is closed once the tap has ended and every part it handed on (a send past the tap's bound, a
+    // read-back) has ended too (review P2-1: a sale that lands after the tap still writes its note)
+    let ended = false;
+    let kept = 0;
+    const close = (): void => {
+      if (ended && kept === 0) void notes?.then((n) => n.close(), () => {});
+    };
     const host = evmSellHost(chain, e.pin, e.scope, e.rpcs, {
       following: evmSellFollowing,
+      sending: evmSellSending,
+      keep: (p) => {
+        kept++;
+        void p.finally(() => {
+          kept--;
+          close();
+        });
+      },
       notes: () => (notes ??= page.store().then(openNoteStore)),
       seed64: page.seed64,
       held: () => (page.held ? page.held() : Promise.reject(new Error("no wallet store is open"))),
@@ -784,7 +800,13 @@ export function testnetPool(page: TestnetPage, over: TestnetOver = {}): TestnetP
       signal: follows.signal,
       stopped: ((at) => () => signOuts !== at)(signOuts),
     });
-    return { ...host, end: () => void notes?.then((n) => n.close(), () => {}) };
+    return {
+      ...host,
+      end: () => {
+        ended = true;
+        close();
+      },
+    };
   };
   const evmSell = (chain: "base" | "robinhood") => {
     // first, alone: folded at build time, so the mainnet bundle carries none of the sale

@@ -105,6 +105,9 @@ export const NOTE_EDGES: Readonly<Record<NoteState, readonly NoteState[]>> = Obj
   TAKEN: Object.freeze([] as const),
 });
 const LANDED: readonly NoteState[] = ["UNSPENT", "HELD", "RESERVED", "SPENT"];
+/** The empty second arrivals in a row an EVM chain's restore reads past, plus one: pool/evm-restore.ts SECOND_GAP (its
+ *  test holds the two equal; that file imports this one, so the number is written here too). */
+export const EVM_SECOND_GAP = 20;
 
 /** What the vault's `deposits` pages give a note, read on two RPCs. */
 export type Leaf = { value: bigint; label: bigint; commitment: bigint; leafIndex: bigint };
@@ -697,7 +700,18 @@ export async function openNoteStore(store: WalletStore, opts: NoteStoreOptions =
         const before = note.ref.n === 0 ? firstOf(id) : { kind: "second" as const, id, n: note.ref.n - 1 };
         const prev = before === null ? undefined : all.find((x) => refKey(x.ref) === refKey(before));
         // a note before it that another deposit took (TAKEN) is done too: it never lands
-        if (before !== null && (prev === undefined || !(LANDED.includes(prev.state) || prev.state === "TAKEN"))) throw new Error(`second arrival ${note.ref.n} of ${idKey} waits until the note before it has landed`);
+        const done = prev !== undefined && (LANDED.includes(prev.state) || prev.state === "TAKEN");
+        // The rule's reason: a restore from the words walks a chain's second arrivals in order and stops at a run of
+        // empty ones (Solana at the first, pool/solana-restore.ts; an EVM chain past EVM_SECOND_GAP - 1 of them,
+        // pool/evm-restore.ts SECOND_GAP), and a note planned past one that never lands leaves such an empty note
+        // before it. An EVM sale's R chain may plan its next note while the one before is still INCOMING (card
+        // signpage-evm-pool-sell: the rest of a W sold while the first sale's deposit is on chain but not final yet):
+        // its walk reads past EVM_SECOND_GAP - 1 empty notes, and the store holds at most that many of the chain not
+        // landed, so even if none of them ever lands the restore still reads past them all to every later note.
+        const evmR = id.id === "R" && id.c === "evm";
+        const open = evmR ? all.filter((x) => x.ref.kind === "second" && secondIdKey(x.ref.id) === idKey && (x.state === "PLANNED" || x.state === "INCOMING")).length : 0;
+        const waits = !done && !(evmR && prev?.state === "INCOMING" && open + 1 <= EVM_SECOND_GAP - 1);
+        if (before !== null && waits) throw new Error(`second arrival ${note.ref.n} of ${idKey} waits until the note before it has landed`);
       }
     } else if (note.state === "UNSPENT") {
       n.leaf = checkLeaf(note.leaf, precommitment);
