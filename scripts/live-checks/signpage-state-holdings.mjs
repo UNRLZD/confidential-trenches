@@ -87,13 +87,18 @@ export const SOLD = "owed/sold-sol";
  *  signpage-positions-evm the same read first in the page's join of Solana's and each EVM chain's:
  *  `positions:async()=>{let[e,...t]=await Promise.all([c.read(),...`. */
 export const FIRST = /positions:\(\)=>[\w$]+\.read\(\)|positions:async\(\)=>\{let ?(?:[\w$]+=[\w$]+,)*\[[\w$]+,\.\.\.[\w$]+\]=await Promise\.all\(\[[\w$]+\.read\(\),/g;
-/** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`. */
-export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,\.\.\.[\w$]+===null\?\{\}:\{found:[\w$]+\}\}\)/g;
-/** positionsPass asks the finder for the Ws this device bought only: `.wallets(new Set(c.map(({address:e})=>e)))`. */
-export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\{address:[\w$]+\}\)=>[\w$]+\)\)\)/g;
+/** positionsCache's run calls the pass with its stop and a fed read: `e(c,{signal:g.signal,..._===null?{}:{found:_}})`;
+ *  since card wallets-found-in-one-read with where it shows its rows between the two:
+ *  `e(C,{signal:_.signal,shown:e=>{...},...v===null?{}:{found:v}})`. */
+export const RUN = /[\w$]+\([\w$]+,\{signal:[\w$]+\.signal,(?:shown:[\w$]+=>\{[^]{0,200}?\},)?\.\.\.[\w$]+===null\?\{\}:\{found:[\w$]+\}\}\)/g;
+/** positionsPass asks the finder for the Ws this device bought only: `.wallets(new Set(c.map(({address:e})=>e)))`;
+ *  since card wallets-found-in-one-read with the open buys' Ws first and each W as read:
+ *  `.wallets(new Set(l.map(({address:e})=>e)),{first:p,...h?{each:h}:{}})`. */
+export const RECORDS = /\.wallets\(new Set\([\w$]+\.map\(\(\{address:[\w$]+\}\)=>[\w$]+\)\)(?:,\{first:[\w$]+(?:,\.\.\.[\w$]+\?\{each:[\w$]+\}:\{\})?\})?\)/g;
 /** The sell host's read holds the passes off first, then feeds or releases them in a finally: `wallets:async()=>{let
- *  e=c.preempt(),t=null;try{...}finally{t===null?e.release():e.feed(t)}`. */
-export const PREEMPT = /wallets:async\(\)=>\{let ([\w$]+)=[\w$]+\.preempt\(\),([\w$]+)=null;try\{[^]{0,400}?\}finally\{\2===null\?\1\.release\(\):\1\.feed\(\2\)\}/g;
+ *  e=c.preempt(),t=null;try{...}finally{t===null?e.release():e.feed(t)}`; since card wallets-found-in-one-read it takes
+ *  which Ws the finder reads: `wallets:async e=>{let t=c.preempt(),...`. */
+export const PREEMPT = /wallets:async(?:\(\)| [\w$]+|\([\w$]+\))=>\{let ([\w$]+)=[\w$]+\.preempt\(\),([\w$]+)=null;try\{[^]{0,400}?\}finally\{\2===null\?\1\.release\(\):\1\.feed\(\2\)\}/g;
 const countOf = (text, k) => (k instanceof RegExp ? [...text.matchAll(k)].length : text.split(k).length - 1);
 
 /** The verdict on a record: { pass, lines }, against the release lists' /app.js files (none with `ledger: false`). */

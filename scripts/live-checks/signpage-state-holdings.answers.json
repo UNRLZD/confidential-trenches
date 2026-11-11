@@ -2,18 +2,18 @@
  "good": {
   "key": "signpage-state-holdings",
   "url": "local build",
-  "at": "2026-11-10T08:04:53.779Z",
+  "at": "2026-11-11T12:36:49.762Z",
   "index": {
    "status": 200,
    "scripts": 1,
    "src": "/app.js",
-   "integrity": "sha384-NOqqiIsnqs1KcZeGZjFu8YGtu+pACAIC8zcf2KktIFeW0qNQcaoERmRwtdXSFn9b",
+   "integrity": "sha384-rHKy5/O3BaEJzLjMEAJCqZw/ddzZlTrWL7GXNzGr5P/MlHNPnBb/vvBDNd4+0c4+",
    "module": true
   },
   "app": {
    "status": 200,
-   "bytes": 871259,
-   "sha384": "sha384-NOqqiIsnqs1KcZeGZjFu8YGtu+pACAIC8zcf2KktIFeW0qNQcaoERmRwtdXSFn9b",
+   "bytes": 919015,
+   "sha384": "sha384-rHKy5/O3BaEJzLjMEAJCqZw/ddzZlTrWL7GXNzGr5P/MlHNPnBb/vvBDNd4+0c4+",
    "marks": {
     "sum": 1,
     "fill": 1,
