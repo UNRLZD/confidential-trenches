@@ -193,10 +193,12 @@
   .dsc-chips { display: none; }
 }
 /* the compact row of a narrow column (UNRLZD Discover.module.css `@container dcol`): the market block goes and the MC
-   moves to the end of line 1, so nothing in the row draws over another part of it */
+   moves to the end of line 1, so nothing in the row draws over another part of it. Widths are design px (the shell's
+   fit zoom, fit.ts): a column is about 465 at 1440 (the full row fits) and 345 at 1024 (it does not); the main app
+   goes compact under 478 */
 .dsc-col { container: dcol / inline-size; }
 .dsc-mcin { display: none; flex: none; margin-left: auto; font: 13px var(--font-num); color: var(--text-1); white-space: nowrap; }
-@container dcol (width < 340px) {
+@container dcol (width < 400px) {
   .dsc-row { grid-template-columns: 68px minmax(0, 1fr); gap: 12px; padding: 13px 12px; }
   .dsc-row .dsc-mkt { display: none; }
   .dsc-row .dsc-mcin { display: inline; }
