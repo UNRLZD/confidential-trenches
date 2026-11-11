@@ -8,6 +8,7 @@ import { ageLine, WORDS } from "./words.ts";
 import type { WordId } from "./words.ts";
 import "./discover.css";
 import { Avatar } from "../market/Avatar.tsx";
+import { padRing } from "../market/pads.ts";
 import { pickData, useDiscoverData } from "./data.ts";
 import { usePick } from "../../shell/chain-pick.ts";
 import { ColSearch, Dock, Ic, PadChip, PauseIcon, Presets, QuickBuyField, T } from "./Toolbar.tsx";
@@ -55,19 +56,20 @@ function Glyph({ k }: { k: ColumnKey }) {
   );
 }
 
-/** The stage ring around the avatar (UNRLZD CurveRing): a curve's progress, full blue once listed. */
+/** The stage ring around the avatar (UNRLZD CurveRing): a curve's progress, full once listed, in its launchpad's colour
+ *  (pads.ts padRing, the main app's padColors method); a row with no known pad keeps the stage colour, blue once listed. */
 export function Ring({ v, size, stroke, av }: { v: RowView; size: number; stroke: number; av: number }) {
   const h = size / 2, R = h - stroke / 2 - 1, c = 2 * Math.PI * R;
   const f = v.stage.fill;
-  const col = !v.stage.curve ? (f > 0 ? "var(--blue)" : "var(--border-strong)") : f >= 0.75 ? "var(--text-1)" : f >= 0.2 ? "#bcbcbc" : "#808080";
+  const col = padRing(v.launchpad) ?? (!v.stage.curve ? (f > 0 ? "var(--blue)" : "var(--border-strong)") : f >= 0.75 ? "var(--text-1)" : f >= 0.2 ? "#bcbcbc" : "#808080");
   return (
     <span className="dsc-ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size} aria-hidden="true">
+      <svg width={size} height={size} aria-hidden="true" data-ring={col}>
         <circle cx={h} cy={h} r={R} fill="none" stroke="var(--border-strong)" strokeWidth={stroke} />
         {f > 0 && <circle cx={h} cy={h} r={R} fill="none" stroke={col} strokeWidth={stroke} strokeDasharray={`${(c * f).toFixed(2)} ${c.toFixed(2)}`} strokeLinecap="round" transform={`rotate(-90 ${h} ${h})`} />}
       </svg>
       <span className="dsc-ravatar" style={{ inset: (size - av) / 2 }}>
-        <Avatar symbol={v.symbol} size={av} pad={v.launchpad} chain={v.chain} />
+        <Avatar symbol={v.symbol} size={av} pad={v.launchpad} chain={v.chain} logo={{ chain: v.chain, token: v.token, icon: v.icon }} />
       </span>
     </span>
   );
@@ -115,6 +117,10 @@ function Row({ v, win, href }: { v: RowView; win: Win; href: string }) {
           <span className="dsc-l1">
             <span className="dsc-sym" title={v.symbol}>{v.symbol}</span>
             <span className="dsc-name" title={v.name}>{v.name}</span>
+            <span className="dsc-mcin" title={`${WORDS.price.text} ${v.price}`}>
+              <span className="dsc-lbl">{WORDS.mc.text}</span>
+              {v.mc}
+            </span>
           </span>
           <span className="dsc-l2">
             <span className="dsc-age" data-fresh={v.fresh}>{v.age}</span>

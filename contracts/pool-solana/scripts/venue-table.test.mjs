@@ -496,6 +496,21 @@ test("--dry-run: the generation, its range, the entries it covers and where it w
   assert.equal(k.sends.length, 0, "a dry run sends nothing");
 });
 
+test("a newest generation whose pages, with the venue's accounts as they are now, no longer fit one table is the next generation's reason, never a crash (card sol-pool-buys-mayhem-coins: GlobalConfig's reserved recipient and its wSOL account, 2 more)", async () => {
+  // devnet's PumpSwap generation 2 as it is: 30 venue accounts and 226 pages (state 0 to 135, label 0 to 89); the same
+  // pages with today's 32 venue accounts are 258 addresses
+  const pages = { state: [0, 135], label: [0, 89] };
+  assert.throws(() => kit.solanaPoolVenueTableList(CFG, tvOf("pumpswap"), pages), /at most 256 addresses, not 258/);
+  const old = Array.from({ length: 256 }, (_, i) => b58encode(new Uint8Array(32).fill(1).map((x, j) => (j === 0 ? i : x))));
+  const dir = recordDir({ ...MAINNET.tables, pumpswap: [{ ...SWAP_G1, pages, addresses: old }] });
+  // devnet's trees on 11 Nov 15:4xZ (210 and 134 entries): the next range, pages 0 to 134 and 0 to 88, is inside it
+  const k = fakeCluster({ sizes: [{ state: 210, label: 134 }, { state: 210, label: 134 }] });
+  const p = await planOn(k, "pumpswap", dir);
+  assert.equal(p.generation, 2);
+  assert.equal(p.list.length, 256);
+  assert.ok(p.list.includes("GesfTA3X2arioaHp8bbKdjG9vJtskViWACZoYvxp4twS") && p.list.includes("C93K8DX4YsABYJtHX9awzgZW3LWzBqBVezEbbLJH4yet"));
+});
+
 // ------------------------------------------------------------------------------------------------ run() on a fake cluster
 
 test("run: a record with one generation and grown trees makes generation 2 with the right range, read back frozen, recorded, swept", async () => {
