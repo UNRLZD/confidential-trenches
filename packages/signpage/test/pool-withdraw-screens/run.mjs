@@ -99,7 +99,7 @@ for (const chain of ["solana", "base"]) {
         return {
           state: f.dataset.state, to: line("to"), amount: line("amount"), shown, amountValue: f.querySelector('[data-input="amount"]').value,
           mark: mark?.dataset.mark ?? null, loaded: !!img && img.complete && img.naturalWidth > 0, name: mark?.textContent ?? null,
-          symbol: symbol?.textContent ?? null, can: can.hidden ? null : can.textContent, canValue: can.dataset.value, canH: box.height, canW: box.width,
+          symbol: symbol?.textContent ?? null, can: can.parentElement.hidden ? null : can.textContent, canValue: can.dataset.value, canH: box.height, canW: box.width,
           wide: document.scrollingElement.scrollWidth > window.innerWidth, go: f.querySelector('[data-action="withdraw"]').disabled,
         };
       });

@@ -250,12 +250,16 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   head.append(badge, chainName);
   const to = field("to");
   const amount = field("amount");
-  // what can be sent now, a value and its symbol, drawn once the funds are read; a tap puts it in the amount
+  // what can be sent now, a value and its symbol, drawn once the funds are read; a tap puts it in the amount. Its row
+  // carries `hidden`, so a style given to the button itself (display) can never show it before the funds are read.
+  const canRow = doc.createElement("div");
+  canRow.dataset.row = "sendable";
+  canRow.hidden = true;
   const sendable = doc.createElement("button");
   sendable.type = "button";
   sendable.dataset.action = "sendable";
-  sendable.hidden = true;
-  Object.assign(sendable.style, { alignSelf: "flex-start", minHeight: "44px", minWidth: "44px", padding: "0 12px", fontVariantNumeric: "tabular-nums" });
+  Object.assign(sendable.style, { minHeight: "44px", minWidth: "44px", padding: "0 12px", fontVariantNumeric: "tabular-nums" });
+  canRow.append(sendable);
   // the lines shown before the press: where the money lands and the most the relayer takes
   const shown = doc.createElement("dl");
   shown.dataset.lines = "pool-withdraw";
@@ -266,7 +270,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   const rose = doc.createElement("div");
   rose.dataset.lines = "fee-rose";
   rose.hidden = true;
-  form.append(head, rose, to.label, to.line, amount.label, sendable, amount.line, shown, go);
+  form.append(head, rose, to.label, to.line, amount.label, canRow, amount.line, shown, go);
   if (deps.owedFees && deps.redraw) {
     const redraw = deps.redraw;
     const owedFees = deps.owedFees;
@@ -304,7 +308,7 @@ export function drawPoolWithdrawForm(doc: Document, deps: PoolWithdrawFormDeps, 
   let funds: PoolFunds | null = null;
   const drawSendable = (): void => {
     const can = funds === null ? null : poolSendable(funds);
-    sendable.hidden = can === null;
+    canRow.hidden = can === null;
     sendable.disabled = !can;
     sendable.textContent = can === null ? "" : `${formatUnits(can, decimals)} ${symbol}`;
     if (can === null) delete sendable.dataset.value;

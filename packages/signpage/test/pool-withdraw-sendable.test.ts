@@ -120,6 +120,7 @@ function drawn(chain: (typeof CHAINS)[number], funds: () => Promise<PoolFunds>, 
   return {
     form, handed, input,
     can: form.find((e) => e.dataset.action === "sendable")!,
+    row: form.find((e) => e.dataset.row === "sendable")!,
     type: (k: "to" | "amount", v: string) => { input(k).value = v; input(k).fire("input"); },
     press: async () => { form.find((e) => e.dataset.action === "withdraw")!.fire("click"); await Promise.all(steps.splice(0)); },
   };
@@ -143,10 +144,10 @@ test("the screen draws the chain's mark and name first, and the asset's symbol r
 test("what can be sent: hidden until the funds are read, then the value and its symbol; none sendable draws 0, not tappable", async () => {
   let open: (f: PoolFunds) => void = () => {};
   const f = drawn("solana", () => new Promise((r) => (open = r)));
-  assert.equal(f.can.hidden, true);
+  assert.equal(f.row.hidden, true);
   open(ONE);
   await tick();
-  assert.equal(f.can.hidden, false);
+  assert.equal(f.row.hidden, false);
   assert.equal(f.can.textContent, "0.048695 SOL");
   assert.equal(f.can.disabled, false);
   assert.equal(f.can.style.minHeight, "44px", "the phone's tap target");
@@ -156,7 +157,7 @@ test("what can be sent: hidden until the funds are read, then the value and its 
   assert.equal(none.can.disabled, true);
   const unread = drawn("solana", async () => Promise.reject(new Error("down")));
   await tick();
-  assert.equal(unread.can.hidden, true, "unread: no figure drawn");
+  assert.equal(unread.row.hidden, true, "unread: no figure drawn");
 });
 
 test("the tap fills the amount with what can be sent: ready, never Insufficient or Try, and the press hands over exactly what was drawn", async () => {
