@@ -13,10 +13,13 @@
 //   - the fresh trade's signature is on the tape in a read that answered within 2 s of the check holding the trade, with
 //     its side, its time (the event's clock) and its trader (the event's user);
 //   - the 1s candles hold a bar at the trade's second with a volume above 0.
+// The candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
+// one 75 s span; a 429 still standing after it, or no bar at the trade's second, is BAD as any other answer.
 // After: helper
 //   node scripts/live-checks/index-sol-trades.mjs [--base <url>] [--record <file>]
 //   PASS exit 0, FAIL exit 1, error exit 2.
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 import { fromLogs, poolMints, PUMP_AMM, USDC, WSOL } from "../../apps/helper/src/data/solana/decode.ts";
 
@@ -57,7 +60,7 @@ export function tradesFault(t) {
 /** The checks on one recorded answer's headers and body; returns the parsed body or undefined. */
 function answer(say, name, r, readAtMs) {
   const h = r?.headers ?? {};
-  say(r?.status === 200, `${name} answers ${r?.status}`);
+  say(r?.status === 200, `${name} answers ${r?.status}${waitsText(r)}`);
   if (r?.status !== 200) return undefined;
   say(SHA.test(h["x-helper-commit"] ?? ""), `${name} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
   say(h["x-helper-source"] === "chain", `${name} X-Helper-Source: ${show(h["x-helper-source"])}, our own chain reads`);
@@ -189,7 +192,8 @@ export function keepOpen(base, open, fetchFn = fetch, everyMs = 20_000) {
 }
 
 /** One live run against `base`. */
-export async function read(base = BASE, fetchFn = fetch, ws = WS) {
+/** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
+export async function read(base = BASE, fetchFn = fetch, ws = WS, reader = candlesReader()) {
   const lists = await get(base, LISTS_PATH, fetchFn);
   if (lists.status !== 200) throw new Error(`lists answered ${lists.status}`);
   const rows = Object.values(JSON.parse(lists.body).lists ?? {}).flat();
@@ -221,7 +225,7 @@ export async function read(base = BASE, fetchFn = fetch, ws = WS) {
     if (p.status !== 200 || JSON.parse(p.body).trades?.some((r) => r.tx === fresh.sig)) break;
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
-  const candles = await get(base, CANDLES_PATH(fresh.coin), fetchFn);
+  const candles = await reader.read(() => get(base, CANDLES_PATH(fresh.coin), fetchFn));
   const { coin, ...rest } = fresh;
   return { base, coin, fresh: rest, polls, candles };
 }

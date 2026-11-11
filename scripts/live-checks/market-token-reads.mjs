@@ -13,10 +13,13 @@
 // read of that answer names every token; each listed token's candles read answers 200 with hourly bars the kit takes (at
 // least one; the off-list token's is reported only: the helper reads an EVM token's swaps only once its lists carried
 // it, so the value line holds that token at its present price); and NEAR answers 404. Display data only: nothing it reads feeds a signature.
+// Each candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
+// one 75 s span in the run; a 429 still standing after it, or a 200 with no bars, is BAD as any other answer.
 // After: helper
 //   node scripts/live-checks/market-token-reads.mjs [--base <url>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes what the run read; --speed times n more held reads a chain.
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 import { readHeldHistory, readHeldMarket } from "../../packages/kit/src/index.ts";
 
@@ -100,7 +103,7 @@ export async function judge(run) {
     for (const t of asked) {
       const k = c.candles?.[t] ?? { status: 0, headers: {}, body: "" };
       const bars = k.status === 200 ? await readHeldHistory(run.base, { chain, token: t }, answering(k)) : [];
-      const line = `${chain}: GET ${READS.candles(chain, t)} answers ${k.status}, the kit takes ${bars.length} hourly bars`;
+      const line = `${chain}: GET ${READS.candles(chain, t)} answers ${k.status}${waitsText(k)}, the kit takes ${bars.length} hourly bars`;
       // an EVM token the lists do not carry has no history from the helper (its swap reads open only listed tokens):
       // the value line holds it at its present price, so its candles are reported, not required
       if (t === OFF_LIST[chain]) lines.push(`--  ${line} (off the lists: not required)`);
@@ -122,7 +125,8 @@ async function get(base, path, fetchFn) {
   return { at, ms: Math.round(performance.now() - t0), status: r.status, headers, body };
 }
 
-export async function read(base = BASE, fetchFn = fetch) {
+/** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
+export async function read(base = BASE, fetchFn = fetch, reader = candlesReader()) {
   const readAt = new Date().toISOString();
   const chains = {};
   for (const chain of CHAINS) {
@@ -132,7 +136,7 @@ export async function read(base = BASE, fetchFn = fetch) {
     if (asked.length === 0) continue;
     chains[chain].held = await get(base, READS.held(chain, asked), fetchFn);
     chains[chain].candles = {};
-    for (const t of asked) chains[chain].candles[t] = await get(base, READS.candles(chain, t), fetchFn);
+    for (const t of asked) chains[chain].candles[t] = await reader.read(() => get(base, READS.candles(chain, t), fetchFn));
   }
   return { base, readAt, chains, near: await get(base, READS.near(), fetchFn) };
 }

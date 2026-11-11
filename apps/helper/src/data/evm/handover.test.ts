@@ -106,7 +106,7 @@ function swapsPart(clock: { t: number }, spent = false) {
   return { s, NOPOOL, calls: () => calls };
 }
 
-test("a chart the old helper read from GeckoTerminal is served by the next one on a spent budget, dated by the old read; past GT_SERVE_MS our own empty chart, never the old bars and never a 429", async () => {
+test("a chart the old helper read from GeckoTerminal is served by the next one on a spent budget, dated by the old read; past GT_SERVE_MS the 429, never the old bars", async () => {
   const clock = { t: Date.parse("2026-11-02T13:53:00Z") };
   const old = swapsPart(clock);
   const first = await old.s.candles(old.NOPOOL, "1m", null, 60);
@@ -128,10 +128,9 @@ test("a chart the old helper read from GeckoTerminal is served by the next one o
   assert.equal(late.s.restore(handed), true);
   const l = await late.s.candles(late.NOPOOL, "1m", null, 60);
   late.s.stop();
-  // the newest bars past their bound are not served: our own reads' empty chart, never the old bars and never a 429
-  // (card evm-chart-opens-without-a-vendor-call)
-  assert.equal(l.status, 200, l.body);
-  assert.deepEqual([l.src, JSON.parse(l.body).candles], ["chain", []], "the newest bars past their bound are not served");
+  // the newest bars past their bound are not served, and nothing of ours: the 429, never an empty 200 while the read
+  // is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054)
+  assert.equal(l.status, 429, "the newest bars past their bound are not served");
 });
 
 test("a handed-over swaps state that fails any check restores nothing: bars malformed, a key not ours, a read time ahead, too many entries", async () => {
@@ -156,7 +155,7 @@ test("a handed-over swaps state that fails any check restores nothing: bars malf
     assert.equal(next.s.restore(st), false, why);
     const c = await next.s.candles(next.NOPOOL, "1m", null, 60);
     next.s.stop();
-    assert.deepEqual([c.status, c.src, JSON.parse(c.body).candles], [200, "chain", []], `${why}: nothing restored, our own empty chart, never a 429`);
+    assert.equal(c.status, 429, `${why}: nothing restored`);
   }
 });
 

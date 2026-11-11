@@ -156,10 +156,11 @@ test("the top token's chart holds 3 bars and a 111-bar token is below it: the se
   assert.equal(rec.route, null);
 });
 
-test("a 429 on a token is read again after its Retry-After (as the page does), then skipped with its status; the token below it is picked", async () => {
+test("a 429 on a token is read again at each Retry-After for one budget window (as the page does), then skipped with its status; the token below it is picked", async () => {
   const waits = [];
   const pick = await pickToken({ fetchFn: helper(ANSWERS.pick.throttled), chains: ["solana"], wait: (ms) => (waits.push(ms), Promise.resolve()) });
-  assert.deepEqual(waits, [2000, 2000]);
+  // Retry-After 2 s each time: 37 waits of 2 s and the window's last second (candles.ts THROTTLE_SPAN_S, 75 s)
+  assert.deepEqual(waits, [...Array(37).fill(2000), 1000]);
   assert.equal(pick.read[0].bars, null);
   assert.equal(pick.read[0].why, "bars 429");
   assert.equal(pick.picked.bars, 30);
@@ -231,4 +232,28 @@ test("recorded live answers on one token (PAYDAY, 142 bars): the rest tap on a t
   const after = judge(ANSWERS.goodClearTap);
   assert.equal(after.verdict, "PASS", after.lines.join("\n"));
   assert.equal(ANSWERS.goodClearTap.route, ANSWERS.badMarkUnderTap.route, "the same token");
+});
+
+// card evm-chart-opens-without-a-vendor-call: the candles read as the token page reads it (candles-read.mjs)
+test("a 429 that clears inside the span: that token read again and picked; an empty 200 is skipped as no bars", async () => {
+  const fx = structuredClone(ANSWERS.pick.throttled);
+  const first = fx.list.body.lists.trending_1h[0].addr;
+  const below = fx.list.body.lists.trending_1h[1].addr;
+  const served = fx.candles[below];
+  let refused = 3;
+  const base = helper(fx);
+  const fetchFn = async (url) => {
+    const t = new URL(String(url)).searchParams.get("token");
+    if (t === first) return refused-- > 0 ? new Response("{}", { status: 429, headers: { "retry-after": "2" } }) : new Response(JSON.stringify(served.body), { status: 200, headers: { "x-helper-source": served.src ?? "chain" } });
+    return base(url);
+  };
+  const waits = [];
+  const pick = await pickToken({ fetchFn, chains: ["solana"], wait: (ms) => (waits.push(ms), Promise.resolve()) });
+  assert.deepEqual(waits, [2000, 2000, 2000]);
+  assert.equal(pick.picked.addr, first, "the token whose 429 cleared is picked");
+  const empty = structuredClone(ANSWERS.pick.throttled);
+  empty.candles[first] = { status: 200, src: "chain", body: { ...served.body, candles: [] } };
+  const p2 = await pickToken({ fetchFn: helper(empty), chains: ["solana"], wait: noWait });
+  assert.notEqual(p2.picked?.addr, first);
+  assert.ok(p2.read[0].bars === null || p2.read[0].bars === 0, JSON.stringify(p2.read[0]));
 });

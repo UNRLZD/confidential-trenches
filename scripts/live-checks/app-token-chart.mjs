@@ -17,6 +17,7 @@
 // --build serves that terminal build at APP_HOST's name inside the stand-in shell (app-in-shell.mjs harnessRoute), the
 // helper still answered live; --record writes what the run read, so the check's test can replay it through judge().
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,7 +51,7 @@ export function judge(rec) {
   if (!c) cbad.push("no candle read");
   else {
     if (!mint || c.mint !== mint || c.tf !== "15m" || c.limit !== "500" || c.chain !== "solana") cbad.push(`read for ${c.chain}/${c.mint} at ${c.tf} (limit ${c.limit})`);
-    if (c.status !== 200) cbad.push(`status ${c.status}`);
+    if (c.status !== 200) cbad.push(`status ${c.status}${waitsText(c)}`);
     const d = c.status === 200 ? toCandleData(c.body, "15m", c.src ?? null) : null;
     if (c.status === 200 && d === null) cbad.push("an answer the page's mapping refuses");
     else if (d && d.status !== "ready") cbad.push("no bars");
@@ -111,14 +112,10 @@ export async function collect({ build = null, shots = path.join(tmpdir(), `${KEY
   const mint = lists.trending ? pickOf(lists.trending) : null;
   const rec = { source: build ? `harness: the build ${named(build)} at APP_HOST's name in the stand-in shell, HELPER_HOST live` : "live", at: new Date().toISOString(), lists, candles: null, loads: [] };
   if (mint) {
-    // the helper's GeckoTerminal budget is shared: a 429 is read again after its Retry-After, as the page does
-    let cr = null;
-    for (let i = 0; i < 4; i++) {
-      cr = await fetch(CANDLES_URL(mint), { headers: { origin: APP_HOST } });
-      if (cr.status !== 429) break;
-      await new Promise((r) => setTimeout(r, 1000 * Math.min(15, Math.max(1, Number(cr.headers.get("retry-after")) || 1))));
-    }
-    rec.candles = { ...query(CANDLES_URL(mint)), status: cr.status, src: cr.headers.get("x-helper-source"), body: await cr.json().catch(() => null) };
+    // the helper's GeckoTerminal budget is shared: a 429 is read again at its Retry-After, as the page does
+    // (candles-read.mjs, card evm-chart-opens-without-a-vendor-call)
+    const cr = await candlesReader().read(() => fetch(CANDLES_URL(mint), { headers: { origin: APP_HOST } }));
+    rec.candles = { ...query(CANDLES_URL(mint)), status: cr.status, src: cr.headers.get("x-helper-source"), body: await cr.json().catch(() => null), ...(cr.waits ? { waits: cr.waits } : {}) };
   }
   let harness = null;
   if (build) {

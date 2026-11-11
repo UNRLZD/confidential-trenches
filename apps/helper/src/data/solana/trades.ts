@@ -709,10 +709,10 @@ export function createSolanaTrades(deps: {
         const before = ownFrom === null ? (to ?? Math.floor(now() / 1000)) : Math.min(ownFrom, to ?? ownFrom);
         // with no bars of ours the history's newest range is asked as such (`to` null: one cache key, not one per second)
         const h = await deps.history(mint, tf, ownFrom === null ? to : before, limit, client).catch(() => UPSTREAM);
-        // nothing of ours and no history to serve: a failed read is the history's 503, so the page retries; a refused
-        // one is our own reads' empty chart, which the page reads again (AWAY_MS), never a 429 (card
-        // evm-chart-opens-without-a-vendor-call: one rule with the EVM chains' candles, swaps.ts)
-        if (own.length === 0 && h.status !== 200 && h.status !== 404 && h.status !== 429) return h;
+        // nothing of ours and no history to serve: the history's 429 or 503, so the page retries, never an empty chart
+        // while its fill is owed (card evm-chart-opens-without-a-vendor-call: live run 42995547054 read an empty 200
+        // for sUSDai's 1h at 09:29:51Z, 101 bars at 09:50Z; one rule with the EVM chains' candles, swaps.ts)
+        if (own.length === 0 && h.status !== 200 && h.status !== 404) return h;
         const old = h.status === 200 ? ((JSON.parse(h.body) as { candles?: Candle[] }).candles ?? []).filter((c) => c[0] < before) : [];
         if (old.length > 0) {
           bars = old.concat(own).slice(-limit);

@@ -40,7 +40,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { columnRows } from "../../apps/terminal/src/screens/discover/model.ts";
-import { CANDLES_URL, DEFAULT_TF, THROTTLE_RETRIES, THROTTLE_WAIT_MAX_S, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
+import { CANDLES_URL, DEFAULT_TF, toCandleData } from "../../apps/terminal/src/screens/token/candles.ts";
+import { candlesReader } from "./candles-read.mjs";
 import { INIT, WIDTHS } from "./app-shell.mjs";
 import { launchBrowser } from "../browsers.mjs";
 import { named } from "./record-names.mjs";
@@ -181,6 +182,8 @@ const LEGEND = () => {
  *  `bars` is the token page's own count of the candles answer (null when the page would draw none, with `why`); a token's id
  *  is kept under `addr` (an id under a `token` key reads to gitleaks as a secret). */
 export async function pickToken({ fetchFn = fetch, chains = CHAINS, max = MAX_READS, minBars = MIN_BARS, wait = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  let waited = 0;
+  const reader = candlesReader({ now: () => waited, wait: async (ms) => void (await wait(ms), (waited += ms)) });
   const pick = { tf: DEFAULT_TF, lists: [], read: [], picked: null };
   const asked = (u) => fetchFn(u, { signal: AbortSignal.timeout(10_000) });
   for (const chain of chains) {
@@ -201,13 +204,9 @@ export async function pickToken({ fetchFn = fetch, chains = CHAINS, max = MAX_RE
       const one = { chain, addr: row.token, status: 0, bars: null, why: "not read" };
       pick.read.push(one);
       try {
-        // a 429 is read again after its Retry-After, as the page does (candles.ts loadCandles)
-        let r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
-        for (let i = 0; r.status === 429 && i < THROTTLE_RETRIES; i++) {
-          const after = Number(r.headers.get("Retry-After"));
-          await wait(1000 * (Number.isFinite(after) && after > 0 ? Math.min(after, THROTTLE_WAIT_MAX_S) : 1));
-          r = await asked(CANDLES_URL(chain, row.token, DEFAULT_TF));
-        }
+        // a 429 is read again at its Retry-After, as the page does (candles-read.mjs; the reads one after another, so the
+        // run's span is the time waited)
+        const r = await reader.read(() => asked(CANDLES_URL(chain, row.token, DEFAULT_TF)));
         one.status = r.status;
         if (r.status === 404) one.why = "no bars held (404)";
         else if (r.status !== 200) one.why = `bars ${r.status}`;

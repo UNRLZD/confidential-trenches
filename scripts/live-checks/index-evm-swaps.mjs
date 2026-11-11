@@ -37,10 +37,13 @@
 // open and its wait for the providers' paces and in-flight queues, evm-open and evm-queue), so a late read names its
 // cause (live run 42122733397 attempt 1: the judged token's candles came 23 s after the read, the reads before it named
 // nowhere).
+// Each candles read is read as the token page reads it (candles-read.mjs): a 429 again at its Retry-After, for at most
+// one 75 s span in the run; a candidate whose candles still answer 429 after it is skipped as before, its waits named.
 // After: helper
 //   node scripts/live-checks/index-evm-swaps.mjs [--chain base|robinhood] [--base <url>] [--token <0x..>] [--record <file>] [--speed <n>]
 //   PASS exit 0, FAIL exit 1, error exit 2. --record writes the run (every answer read).
 import "../net-window.mjs";
+import { candlesReader, waitsText } from "./candles-read.mjs";
 import { writeFileSync } from "node:fs";
 import { BLOCK_CLOCK, blockAt } from "../../apps/helper/src/data/evm/lists.ts";
 import { HEADER_TIMED, SWAP_RPCS, TOPIC, VENUES } from "../../apps/helper/src/data/evm/swaps.ts";
@@ -234,7 +237,7 @@ export function judge(run) {
   ]) {
     const r = run.reads?.[k] ?? { status: 0, headers: {}, body: "" };
     const h = r.headers ?? {};
-    say(r.status === 200, `GET ${path} answers ${r.status}`);
+    say(r.status === 200, `GET ${path} answers ${r.status}${k === "candles" ? waitsText(r) : ""}`);
     say(/^application\/json/i.test(h["content-type"] ?? ""), `${k} Content-Type: ${show(h["content-type"])}`);
     say(SHA.test(h["x-helper-commit"] ?? ""), `${k} X-Helper-Commit: ${show(h["x-helper-commit"])}`);
     say(source.includes(h["x-helper-source"]), `${k} X-Helper-Source: ${show(h["x-helper-source"])}, our own chain reads`);
@@ -389,7 +392,7 @@ export function judge(run) {
 function withReads(run, lines) {
   const ok = lines.every((l) => l.startsWith("ok ") || l.startsWith("-- "));
   if (!ok) {
-    const st = (r) => `${r?.status ?? "none"} in ${r?.ms ?? "?"} ms, Server-Timing ${show(r?.headers?.["server-timing"])}`;
+    const st = (r) => `${r?.status ?? "none"}${waitsText(r)} in ${r?.ms ?? "?"} ms, Server-Timing ${show(r?.headers?.["server-timing"])}`;
     if (run.listsRead !== undefined) lines.push(`--  read: lists ${st(run.listsRead)}`);
     for (const t of run.tried ?? []) lines.push(`--  read: ${t.token} before it: candles ${st(t.candles)}${t.trades === undefined ? "" : `; trades ${st(t.trades)}`}`);
     for (const k of ["candles", "trades"]) if (run.reads?.[k] !== undefined) lines.push(`--  read: ${run.coin} ${k} ${st(run.reads[k])}`);
@@ -437,14 +440,15 @@ async function agreed(method, params, fetchFn, rpcs = SWAP_RPCS.base, pick = (x)
   return got.length === 2 && got[0] === got[1] ? JSON.parse(got[0]) : null;
 }
 
-export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "base") {
+/** `reader`: the run's candles reader (candles-read.mjs): a 429 is read again at its Retry-After, as the page reads it. */
+export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "base", reader = candlesReader()) {
   rpcs ??= SWAP_RPCS[net];
   const readAt = new Date().toISOString();
   let candidates = token === undefined ? [] : [token];
   /** Each read the helper answered before the judged token's, for the FAIL lines (withReads). */
   let listsRead;
   const tried = [];
-  const seen = (r) => ({ status: r.status, ms: r.ms, headers: { "server-timing": r.headers["server-timing"] } });
+  const seen = (r) => ({ status: r.status, ms: r.ms, headers: { "server-timing": r.headers["server-timing"] }, ...(r.waits === undefined ? {} : { waits: r.waits }) });
   if (token === undefined) {
     const l = await get(base, LISTS_PATH(net), fetchFn);
     listsRead = seen(l);
@@ -464,7 +468,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   let reads;
   let quiet;
   for (const t of candidates.slice(0, 12)) {
-    const candles = await get(base, CANDLES_PATH(t, net), fetchFn);
+    const candles = await reader.read(() => get(base, CANDLES_PATH(t, net), fetchFn));
     if (candles.status !== 200) {
       tried.push({ token: t, candles: seen(candles) });
       continue;
@@ -488,7 +492,7 @@ export async function read(base = BASE, token, fetchFn = fetch, rpcs, net = "bas
   if (reads === undefined) {
     // the first candidate's answers, so a run that found none shows why
     const t0 = candidates[0];
-    const r = t0 === undefined ? {} : { candles: await get(base, CANDLES_PATH(t0, net), fetchFn), trades: await get(base, TRADES_PATH(t0, net), fetchFn) };
+    const r = t0 === undefined ? {} : { candles: await reader.read(() => get(base, CANDLES_PATH(t0, net), fetchFn)), trades: await get(base, TRADES_PATH(t0, net), fetchFn) };
     return { base, ...at, coin: t0 ?? null, readAt, reads: r, chain: {} };
   }
   const t = reads.token;
