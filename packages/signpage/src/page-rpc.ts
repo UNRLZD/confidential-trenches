@@ -58,9 +58,10 @@ export function lanedRpc(url: string, o: { kind?: ReadKind; retry?: SolanaRpcRet
     const wait = throttles(e) ? lane.gate.left() : retry.backoffMs;
     if (performance.now() + wait >= end) throw e;
     await sleep(wait, laneSignal(o.signal));
-    // a trade's re-ask goes once the pause it waited is over (its turn's deadline is its bound); a pass's takes its turn
-    if (kind === "pass") await lane.turn("pass", o.signal);
-    else lane.sent("trade");
+    // its turn again, whichever kind: another reader's 429 may have moved the host's pause on while it slept (a paid
+    // devnet run of 11 Nov: a deposit's re-ask sent into it drew a 429 and doubled the pause). A trade's turn waits only
+    // the pause, at most TRADE_TURN_MAX_MS; the bound below still ends it
+    await lane.turn(kind, o.signal);
     if (performance.now() >= end) throw e;
     return ask(end, method, params);
   };

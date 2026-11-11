@@ -340,3 +340,34 @@ test("a host that throttles for good with Retry-After 3600: a trade's read ends 
     await renew;
   });
 }));
+
+// A paid devnet run on 1e15ba0f (11 Nov): a deposit asked beside a state read's settle answered down. A trade's re-ask
+// after a 429 slept the pause it read at its fault, then went out without looking again: a pause another reader's 429
+// moved on meanwhile (the helper's route answers 429 with a Retry-After) was sent into, drew another 429 and doubled
+// the host's pause. The re-ask takes its turn again, so nothing leaves the page while its host is paused.
+test("a deposit's read and a settle's read both meet 429 on one host: neither re-ask leaves inside the host's pause, a re-ask never doubles it, and the deposit's next attempt answers inside its tap's 30 s", async () => {
+  // the helper's devnet route: answers in 300 ms; the first two requests 429, the second with a Retry-After of 3 s; any
+  // request it gets before that window ends 429 too, after it 200
+  let windowEnd = Infinity;
+  await onProvider((host, n) => {
+    if (host !== new URL(HELPER).host) return 200;
+    if (n === 1) return { status: 429, ms: 300 };
+    if (n === 2) return { status: 429, ms: 300, retryAfter: "3" };
+    return performance.now() < windowEnd ? { status: 429, ms: 300 } : { ms: 300 };
+  }, async (sent, t0) => {
+    windowEnd = t0 + 500 + 3_000;
+    const deposit = pageSolanaRpcs("trade")[1]("getAccountInfo", []).then(() => "answered", (e: unknown) => String(e));
+    await tick(200);
+    const settle = pageSolanaSettleRpcs("trade")[1]("getMultipleAccounts", []).then(() => "answered", (e: unknown) => String(e));
+    const [d, s] = await Promise.all([deposit, settle]);
+    const line = (): string => sent.filter((x) => x.host === new URL(HELPER).host).map((x) => `${x.method}@${Math.round(x.at)}ms:${x.status}`).join(" ");
+    const inPause = sent.filter((x) => x.host === new URL(HELPER).host && x.at >= 500 && x.at < 3_450);
+    assert.deepEqual(inPause, [], `a re-ask left inside the host's pause (500 to 3500 ms): ${line()}`);
+    assert.equal(sent.filter((x) => x.status === 429).length, 2, `only the two first reads drew 429: ${line()}`);
+    // the deposit's attempt, asked again after the kind's 1 s wait, as read-waits.ts does: inside its tap's 30 s
+    const again = d === "answered" ? d : await tick(1_000).then(() => pageSolanaRpcs("trade")[1]("getAccountInfo", []).then(() => "answered", (e: unknown) => String(e)));
+    assert.equal(again, "answered", `the deposit's read: ${d}; asked again: ${again}; ${line()}`);
+    assert.equal(s, "answered", `the settle's read: ${s}; ${line()}`);
+    assert.ok(performance.now() - t0 < 30_000);
+  });
+});
