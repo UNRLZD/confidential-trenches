@@ -217,7 +217,7 @@ test("a sale the recorded Mayhem curve cannot pay from its real SOL has no refer
   assert.equal(await readSolanaReference(providers(), sale), null);
   assert.deepEqual(await readSolanaReferenceWhy(providers(), sale), { refused: "no pool pays out for this amount" });
   // a sale whose gross is within the 2 lamports still pays nothing once its fees are taken
-  assert.equal(await readSolanaReference(providers(), { ...sale, amount: 400_000n, amounts: undefined }), null);
+  assert.equal(await readSolanaReference(providers(), { side: "sell", token: MX.mint, amount: 400_000n }), null);
   // the same curve holding 1 SOL of real SOL: the same sale is priced, gross less its fees, each leg too
   const funded = (p: 0 | 1) => replay(p, (a, d) => { if (a === MX.curve) new DataView(d.buffer, d.byteOffset).setBigUint64(32, 1_000_000_000n, true); });
   const ref = await readSolanaReference([funded(0), funded(1)], sale);
