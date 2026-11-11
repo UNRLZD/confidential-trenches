@@ -10,14 +10,18 @@
 //   - each seat's getMultipleAccounts of STABLE (ten accounts whose bytes do not change: programs, and the pool program
 //     the page pins), finalized, base64: the same value on both, every account there.
 // It passes when the script names both, each seat allows the page's origin, and the two values are byte for byte one.
+// Every read goes through provider-answer.mjs (rpcAnswer with the page's Origin, preflight as the page's browser sends
+// it): a seat that refuses the page, a JSON-RPC error or a wrong count FAILs; a seat's no-answer (a 429, a 5xx, no
+// answer) is INCONCLUSIVE, never a pass.
 // The census that chose the spare (Chrome, 11 Nov) is in PROBE below and in the answers file.
 // After: sign
 //   node scripts/live-checks/signpage-throttled-provider-has-a-spare.mjs [--record <file>]
-// PASS exit 0, FAIL exit 1, error exit 2. --record writes the run, for the test's replay
+// PASS exit 0, FAIL exit 1, error exit 2, INCONCLUSIVE exit 3. --record writes the run, for the test's replay
 // (signpage-throttled-provider-has-a-spare.answers.json). Reads only: no key, no transaction, never the helper.
 import "../net-window.mjs";
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { EXIT, pageRefuses, preflight, preflightRefuses, rpcAnswer, verdictOf } from "./provider-answer.mjs";
 
 export const SIGN = "https://confidential.unrealized.trade";
 /** The seat, in its order (provider A, then the spare), as the page's source names it. */
@@ -45,55 +49,65 @@ export const PROBE = {
 };
 
 const sha384 = (s) => `sha384-${createHash("sha384").update(s).digest("base64")}`;
-const allows = (o) => o === "*" || o === SIGN;
 
-/** The verdict on a run { index, app: { sha384, names: [url...] }, seats: { [url]: { preflight: { status, allow,
- *  headers }, post: { status, allow, accounts, sha256 } } } }: `accounts` the value's accounts that are there, `sha256`
- *  the value's JSON hashed (the Token program alone is some 130 KB, so the run keeps the hash). */
+/** The verdict on a run { index, app: { sha384, names: [url...] }, seats: { [url]: { preflight: preflight()'s answer,
+ *  post: rpcAnswer()'s status, acao and noAnswer or error, and of a result `accounts` (the value's accounts that are
+ *  there) and `sha256` (the value's JSON hashed: the Token program alone is some 130 KB, so the run keeps the hash) } } }:
+ *  { verdict: PASS | FAIL | INCONCLUSIVE, ok, lines }. */
 export function check(a) {
   const lines = [];
+  let quiet = false;
   const say = (ok, m) => lines.push(`${ok ? "OK" : "BAD"} ${m}`);
-  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a.index ?? "")?.[1];
+  const pin = /src="\/app\.js" integrity="([^"]+)"/.exec(a?.index ?? "")?.[1];
   say(pin !== undefined && pin === a.app?.sha384, `the served /app.js is the one index.html pins`);
-  for (const u of SEATS) say((a.app?.names ?? []).includes(u), `the page's script names the seat ${u}`);
+  for (const u of SEATS) say((a?.app?.names ?? []).includes(u), `the page's script names the seat ${u}`);
   const hashes = [];
   for (const u of SEATS) {
-    const s = a.seats?.[u];
+    const s = a?.seats?.[u];
+    // a refusal of the page is judged before a no-answer (a non-JSON 403 is both): the page gets nothing there
     const p = s?.preflight;
-    say(p !== undefined && p.status >= 200 && p.status < 300 && allows(p.allow) && (p.headers === "*" || /(^|,)\s*content-type\s*(,|$)/i.test(p.headers ?? "")), `${u} preflight from ${SIGN}: ${p ? `${p.status}, allow-origin ${p.allow ?? "none"}, allow-headers ${p.headers ?? "none"}` : "not read"}`);
+    const off = preflightRefuses(u, p, SIGN);
+    if (off !== null) say(false, off);
+    else if (p?.noAnswer !== undefined) (quiet = true), lines.push(`NO-ANSWER ${p.noAnswer}`);
+    else say(true, `${u} preflight from ${SIGN}: ${p.status}, allow-origin ${p.acao}`);
     const q = s?.post;
-    const listed = q?.accounts === STABLE.length && typeof q?.sha256 === "string";
-    say(q !== undefined && q.status === 200 && allows(q.allow) && listed, `${u} getMultipleAccounts of the ${STABLE.length} stable accounts: ${q ? `${q.status}, allow-origin ${q.allow ?? "none"}, ${q.accounts ?? 0} there${q.error ? `, error ${JSON.stringify(q.error).slice(0, 80)}` : ""}` : "not read"}`);
+    const no = pageRefuses(u, q, SIGN);
+    if (no === null && q?.noAnswer !== undefined) {
+      quiet = true;
+      lines.push(`NO-ANSWER ${q.noAnswer}`);
+      hashes.push(undefined);
+      continue;
+    }
+    const listed = no === null && q?.noAnswer === undefined && q?.error === undefined && q?.accounts === STABLE.length && typeof q?.sha256 === "string";
+    say(listed, no ?? `${u} getMultipleAccounts of the ${STABLE.length} stable accounts: ${q?.error !== undefined ? `error ${JSON.stringify(q.error).slice(0, 80)}` : `${q?.accounts ?? 0} there`}`);
     hashes.push(listed ? q.sha256 : null);
   }
-  const same = hashes.length === SEATS.length && hashes[0] !== null && hashes.every((h) => h === hashes[0]);
-  say(same, same ? `both seats answer the same bytes (sha256 ${hashes[0].slice(0, 16)})` : `the seats answer different bytes: ${SEATS.map((u, i) => `${new URL(u).host} ${hashes[i]?.slice(0, 16) ?? "none"}`).join(", ")}`);
-  return { ok: !lines.some((l) => l.startsWith("BAD")), lines };
+  const read = hashes.filter((h) => h !== undefined);
+  if (read.length === SEATS.length) {
+    const same = read[0] !== null && read.every((h) => h === read[0]);
+    say(same, same ? `both seats answer the same bytes (sha256 ${read[0].slice(0, 16)})` : `the seats answer different bytes: ${SEATS.map((u, i) => `${new URL(u).host} ${hashes[i]?.slice(0, 16) ?? "none"}`).join(", ")}`);
+  }
+  const verdict = verdictOf(lines.some((l) => l.startsWith("BAD")), quiet);
+  return { verdict, ok: verdict === "PASS", lines };
 }
 
-/** Reads SIGN_HOST and both seats as the page does (its origin), once each. */
-export async function read() {
-  const index = await (await fetch(`${SIGN}/`, { signal: AbortSignal.timeout(20_000) })).text();
-  const js = await (await fetch(`${SIGN}/app.js`, { signal: AbortSignal.timeout(20_000) })).text();
+/** Reads SIGN_HOST and both seats as the page does (its origin), each through provider-answer.mjs. */
+export async function read(fetchFn = fetch) {
+  const index = await (await fetchFn(`${SIGN}/`, { signal: AbortSignal.timeout(20_000) })).text();
+  const js = await (await fetchFn(`${SIGN}/app.js`, { signal: AbortSignal.timeout(20_000) })).text();
   const run = { at: new Date().toISOString(), index, app: { sha384: sha384(js), names: SEATS.filter((u) => ['"', "'", "`"].some((q) => js.includes(`${q}${u}${q}`))) }, seats: {} };
   for (const u of SEATS) {
-    const seat = {};
-    try {
-      const p = await fetch(u, { method: "OPTIONS", headers: { Origin: SIGN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type" }, signal: AbortSignal.timeout(15_000) });
-      seat.preflight = { status: p.status, allow: p.headers.get("access-control-allow-origin"), headers: p.headers.get("access-control-allow-headers") };
-    } catch (e) {
-      seat.preflight = { status: 0, error: String(e?.message ?? e) };
+    const pre = await preflight(u, SIGN, { fetchFn });
+    const a = await rpcAnswer(u, "getMultipleAccounts", [STABLE, { encoding: "base64", commitment: "finalized" }], { fetchFn, headers: { origin: SIGN }, redirect: "error" });
+    const value = a.result?.value;
+    const post = { status: a.status ?? null, acao: a.acao ?? null };
+    if (a.noAnswer !== undefined) post.noAnswer = a.noAnswer;
+    else if (a.error !== undefined) post.error = a.error;
+    else {
+      post.accounts = Array.isArray(value) ? value.filter((v) => v !== null && typeof v === "object").length : 0;
+      post.sha256 = Array.isArray(value) ? createHash("sha256").update(JSON.stringify(value)).digest("hex") : null;
     }
-    try {
-      const r = await fetch(u, { method: "POST", headers: { "content-type": "application/json", Origin: SIGN }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getMultipleAccounts", params: [STABLE, { encoding: "base64", commitment: "finalized" }] }), signal: AbortSignal.timeout(15_000) });
-      const j = await r.json().catch(() => null);
-      const value = j?.result?.value;
-      const accounts = Array.isArray(value) ? value.filter((v) => v !== null && typeof v === "object").length : 0;
-      seat.post = { status: r.status, allow: r.headers.get("access-control-allow-origin"), accounts, sha256: Array.isArray(value) ? createHash("sha256").update(JSON.stringify(value)).digest("hex") : null, ...(j?.error ? { error: j.error } : {}) };
-    } catch (e) {
-      seat.post = { status: 0, error: String(e?.message ?? e), accounts: 0, sha256: null };
-    }
-    run.seats[u] = seat;
+    run.seats[u] = { preflight: pre, post };
   }
   return run;
 }
@@ -105,10 +119,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (rec > 0) writeFileSync(process.argv[rec + 1], JSON.stringify(run, null, 1));
     const v = check(run);
     for (const l of v.lines) console.log(l);
-    console.log(v.ok ? "PASS signpage-throttled-provider-has-a-spare" : "FAIL signpage-throttled-provider-has-a-spare");
-    process.exit(v.ok ? 0 : 1);
+    console.log(`${v.verdict} signpage-throttled-provider-has-a-spare`);
+    process.exit(EXIT[v.verdict]);
   } catch (e) {
     console.log(`ERROR signpage-throttled-provider-has-a-spare: ${e?.message ?? e}`);
-    process.exit(2);
+    process.exit(EXIT.ERROR);
   }
 }

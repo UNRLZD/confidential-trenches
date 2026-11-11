@@ -1,10 +1,15 @@
 {
+ "_note": {
+  "good": "a real run from the build Mac (`--record`, its `at`): SIGN_HOST and both public seats read with the page's Origin",
+  "bad": "planted on good: the spare answers other bytes for the stable accounts",
+  "bad2": "planted on good: the spare refuses the page (a non-JSON 403 with no allow-origin, as api.mainnet-beta answers a page)",
+  "quiet": "planted on good: the spare answers 429 to the read (a no-answer): INCONCLUSIVE, never PASS"
+ },
  "good": {
-  "note": "SIGN_HOST and both seats read from this Mac at 2026-11-11T05:56:53.215Z (release as deployed then)",
-  "at": "2026-11-11T05:56:53.215Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-11T06:21:19.840Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network"
@@ -14,12 +19,12 @@
    "https://solana-rpc.publicnode.com": {
     "preflight": {
      "status": 204,
-     "allow": "*",
-     "headers": "content-type"
+     "acao": "*",
+     "allowHeaders": "content-type"
     },
     "post": {
      "status": 200,
-     "allow": "*",
+     "acao": "*",
      "accounts": 10,
      "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
     }
@@ -27,12 +32,12 @@
    "https://solana.api.pocket.network": {
     "preflight": {
      "status": 204,
-     "allow": "https://confidential.unrealized.trade",
-     "headers": "content-type"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
     },
     "post": {
      "status": 200,
-     "allow": "https://confidential.unrealized.trade",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
      "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
     }
@@ -40,10 +45,10 @@
   }
  },
  "bad": {
-  "at": "2026-11-11T05:56:53.215Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-11T06:21:19.840Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network"
@@ -53,12 +58,12 @@
    "https://solana-rpc.publicnode.com": {
     "preflight": {
      "status": 204,
-     "allow": "*",
-     "headers": "content-type"
+     "acao": "*",
+     "allowHeaders": "content-type"
     },
     "post": {
      "status": 200,
-     "allow": "*",
+     "acao": "*",
      "accounts": 10,
      "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
     }
@@ -66,24 +71,23 @@
    "https://solana.api.pocket.network": {
     "preflight": {
      "status": 204,
-     "allow": "https://confidential.unrealized.trade",
-     "headers": "content-type"
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
     },
     "post": {
      "status": 200,
-     "allow": "https://confidential.unrealized.trade",
+     "acao": "https://confidential.unrealized.trade",
      "accounts": 10,
      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
    }
-  },
-  "note": "planted: the good run with the spare drifted, its answer to the same request hashing other than provider A (a provider that answers differently must fail the check, never pass it)"
+  }
  },
  "bad2": {
-  "at": "2026-11-11T05:56:53.215Z",
-  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "at": "2026-11-11T06:21:19.840Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
   "app": {
-   "sha384": "sha384-26aZznw6r261vIDzaINH1jf2kV8EnT3vYFSmB4Ts9tT7Uzvg5FEQqKAjn08XuJFR",
+   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
    "names": [
     "https://solana-rpc.publicnode.com",
     "https://solana.api.pocket.network"
@@ -93,12 +97,12 @@
    "https://solana-rpc.publicnode.com": {
     "preflight": {
      "status": 204,
-     "allow": "*",
-     "headers": "content-type"
+     "acao": "*",
+     "allowHeaders": "content-type"
     },
     "post": {
      "status": 200,
-     "allow": "*",
+     "acao": "*",
      "accounts": 10,
      "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
     }
@@ -106,17 +110,53 @@
    "https://solana.api.pocket.network": {
     "preflight": {
      "status": 403,
-     "allow": null,
-     "headers": null
+     "acao": null,
+     "allowHeaders": null
     },
     "post": {
      "status": 403,
-     "allow": null,
-     "accounts": 0,
-     "sha256": null
+     "acao": null,
+     "noAnswer": "solana.api.pocket.network HTTP 403: not JSON (Forbidden)"
     }
    }
+  }
+ },
+ "quiet": {
+  "at": "2026-11-11T06:21:19.840Z",
+  "index": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />\n    <meta name=\"color-scheme\" content=\"dark\" />\n    <script type=\"module\" src=\"/app.js\" integrity=\"sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA\"></script>\n  </head>\n  <body></body>\n</html>\n",
+  "app": {
+   "sha384": "sha384-qpf/NZP1G58Eni2RXfd0VOq/z4PBJr2QvQNkKdqA8/95VGr7Czg+zSXLvrE+TIBA",
+   "names": [
+    "https://solana-rpc.publicnode.com",
+    "https://solana.api.pocket.network"
+   ]
   },
-  "note": "planted: the good run with the spare refusing the page (its preflight 403, no allow-origin, as api.mainnet-beta.solana.com answers a page)"
+  "seats": {
+   "https://solana-rpc.publicnode.com": {
+    "preflight": {
+     "status": 204,
+     "acao": "*",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 200,
+     "acao": "*",
+     "accounts": 10,
+     "sha256": "8db39047d5c88dc061a39a4c3906f04e3d62a16e5e4825329aaf6fb4bfdb46d4"
+    }
+   },
+   "https://solana.api.pocket.network": {
+    "preflight": {
+     "status": 204,
+     "acao": "https://confidential.unrealized.trade",
+     "allowHeaders": "content-type"
+    },
+    "post": {
+     "status": 429,
+     "acao": null,
+     "noAnswer": "solana.api.pocket.network HTTP 429: 429 Too Many Requests"
+    }
+   }
+  }
  }
 }
