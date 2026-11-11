@@ -241,9 +241,10 @@
   .dsc-mpend { display: flex; justify-content: center; padding: 10px 0 2px; }
   .dsc-ppill { position: relative; height: 28px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 14px; background: #1c1c1c; box-shadow: inset 0 0 0 1px #2a2a2a; color: var(--blue); font: 600 12px var(--font-ui); cursor: pointer; }
   .dsc-ppill::after { content: ""; position: absolute; inset: -8px 0; }
-  /* R5 Dock.tsx (.md-dock, .md-bar): floats over the last rows, above the tab bar; the list keeps room for it */
+  /* R5 Dock.tsx (.md-dock, .md-bar): above the tab bar, on a band in the tab bar's ink from 8 px over the bar down to the
+     tab bar, so no row shows beside or under it; the list keeps room for it */
   .dsc-phone > .dsc-rows { padding-bottom: 70px; }
-  .dsc-dock { position: fixed; left: 12px; right: 12px; bottom: calc(68px + env(safe-area-inset-bottom) + 10px); z-index: 8; display: flex; flex-direction: column; gap: 8px; }
+  .dsc-dock { position: fixed; left: 0; right: 0; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 8; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 10px; background: var(--m-ink); }
   .dsc-dockbar { height: 50px; width: 100%; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border: 0; border-radius: 16px; background: var(--bg-raised); box-shadow: inset 0 0 0 1px #2a2a2a, 0 12px 36px rgba(0, 0, 0, 0.5); color: var(--text-1); font: inherit; cursor: pointer; }
   .dsc-docktitle { flex: 1; min-width: 0; text-align: left; font-size: 14px; font-weight: 600; }
   .dsc-dockamt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px var(--font-num); }

@@ -10,7 +10,8 @@
 //   logos as served (icon false on every row): no logo request is made and every avatar draws its initials;
 //   ?logos=1 (icon true on every row but one): every row in view draws its own loaded logo (naturalWidth > 0, shown),
 //     the icon-false row asks for none and draws initials, the 404 row draws initials and no broken image, and no
-//     avatar changes size when its logo arrives; a scrolled column loads the rows it brings into view;
+//     avatar changes size when its logo arrives; a scrolled column loads the rows it brings into view; on the phone,
+//     mid-scroll, no row shows from the Quick buy dock's top edge down to the tab bar;
 //   1024: the four columns sit side by side in one row, as the main app's do from 1024 px.
 //   node apps/terminal/test/discover-logos/run.mjs [--shots <dir>]     PASS exit 0, FAIL exit 1
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -177,6 +178,22 @@ try {
         else check(r.img?.loaded === true && r.img?.shown === true, `${w.name} ${r.symbol}: logo ${JSON.stringify(r.img)}`);
       }
       check(rows.some((r) => r.token === missing.token), `${w.name}: the 404 row is not in view`);
+      // phone, mid-scroll: no row shows from the Quick buy dock's top edge down to the tab bar's (the dock sits on a band)
+      if (w.name === "390") {
+        await page.evaluate(() => window.scrollTo(0, 700));
+        await page.waitForTimeout(200);
+        const seen = await page.evaluate(() => {
+          const dock = document.querySelector('[data-testid="m-dock-bar"]')?.getBoundingClientRect();
+          const tabs = document.querySelector(".tabbar")?.getBoundingClientRect();
+          if (!dock || !tabs) return ["no dock or tab bar"];
+          const out = [];
+          for (let y = Math.ceil(dock.top); y < tabs.top; y += 2)
+            for (const x of [2, 8, innerWidth / 2, innerWidth - 8, innerWidth - 2])
+              if (document.elementFromPoint(x, y)?.closest('[role="listitem"]')) out.push(`${x},${y}`);
+          return out;
+        });
+        check(seen.length === 0, `390 mid-scroll: a row shows between the dock's top and the tab bar at ${seen.slice(0, 6).join(" ")}${seen.length > 6 ? ` and ${seen.length - 6} more` : ""}`);
+      }
       // off-screen rows load as they come into view
       if (w.name !== "390") {
         await page.evaluate(() => document.querySelector('.dsc-grid .dsc-col[data-col="new"] .dsc-rows')?.scrollTo(0, 1e6));
