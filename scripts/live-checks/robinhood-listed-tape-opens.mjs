@@ -10,7 +10,7 @@
 // none in WAIT_MS is named and proves nothing.
 // A cold tape answers at the route's bound with what it holds and `filling: true` while its reads go on (card
 // token-page-data-complete-and-fast: ten cold Base tapes opened at once from the Mac answered 503 at 12 s in 6 of 10
-// before it), so a tape
+// before it, two seconds after the token page had given up on them at 10 s), so a tape
 // that answers filling is read again every FILL_POLL_MS until the mark goes, for FILLED_MS at most from its first read.
 // PASS when at least one chain dropped a token and every dropped token's tape answers 200 JSON { trades: [...] } within
 // ANSWER_MS and, when it answered filling, is filled within FILLED_MS; FAIL when one answers otherwise (a 404 is the
@@ -31,12 +31,14 @@ export const CHAINS = ["robinhood", "base", "solana"];
 export const WAIT_MS = 300_000;
 export const POLL_MS = 15_000;
 export const DROPPED_MAX = 6;
-/** A tape's first answer: the route's bound (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 12 s) and its transit, as
- *  helper-robinhood-search-ahead.mjs ANSWER_MS. */
-export const ANSWER_MS = 15_000;
-/** A filling tape is filled within this of its first read [design: over twice the slowest measured: ten cold Base tapes
- *  opened at once on the public providers from the Mac, 2026-11-11 17:45Z, filled at 13.0-19.1 s, ten Robinhood ones all
- *  answered whole by 11.0 s]. */
+/** A tape's first answer: within the token page's read of it, which gives up at 10 s (apps/terminal/src/screens/token/
+ *  trades.ts TIMEOUT_MS); past it the page shows no tape whatever the helper answers. The route answers at its bound
+ *  (apps/helper/src/data/evm/swaps.ts OPEN_BOUND_MS, 8 s) with what it holds. */
+export const ANSWER_MS = 10_000;
+/** A filling tape is filled within this of its first read [design: over twice the slowest measured, ten cold Base tapes
+ *  and their charts opened at once on the public providers from the Mac: at a 12 s bound (17:50Z) eight filled 1.0 to
+ *  20.2 s after their first answer; at the 8 s bound (17:58Z) three filled 4.3 to 5.9 s after it, and ten Robinhood ones
+ *  answered whole by 7.8 s]. */
 export const FILLED_MS = 45_000;
 export const FILL_POLL_MS = 2_000;
 const ADDRESS = { robinhood: /^0x[0-9a-f]{40}$/, base: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ };

@@ -128,7 +128,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** A first read the helper answers `filling` (no bars yet, its read of a cold Base or Robinhood book still going on past
  *  its bound, apps/helper/src/data/evm/swaps.ts candles) is read again this long after, the chart loading meanwhile,
  *  within the same THROTTLE_SPAN_S as a 429, then the error state (Retry reads again) [design: the tape's own read
- *  interval, trades.ts TRADES_POLL_MS less a second: a cold book measured filled 1.0 to 7.1 s past the bound]. */
+ *  interval, trades.ts TRADES_POLL_MS, less a second: cold Base books opened ten at once from the Mac filled 1.0 to 20.2 s
+ *  past the helper's bound, well inside the span]. */
 export const FILL_WAIT_MS = 2_000;
 
 /** One candle read: the bars, the empty state when the helper holds none (an answer of no bars, or a 404 for a token or

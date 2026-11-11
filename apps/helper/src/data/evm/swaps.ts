@@ -424,10 +424,13 @@ export const HEDGE_MS = 2_000;
  *  the index is shared, never anyone's wait (the same card: its first read never landed for 135 s and every cold tape
  *  waited on it). [design: one hedge, the time a healthy index chunk is agreed in.] */
 export const INDEX_WAIT_MS = HEDGE_MS;
-/** A first open's answer bound: past it the tape or chart answers 503 and its read goes on, so the next ask finds it
- *  (the same card: requests held 60 s and more). [design: 12 s, under the 15 s the live checks give an answer
- *  (helper-robinhood-search-ahead ANSWER_MS) with room for the way to the page.] */
-export const OPEN_BOUND_MS = 12_000;
+/** A first open's answer bound: past it the tape or chart answers what it holds with `filling` true and its read goes
+ *  on, so the next ask finds it (the same card: requests held 60 s and more; card token-page-data-complete-and-fast:
+ *  503 before). It must end before the page gives up on the read: the token page aborts its tape and chart reads at
+ *  10 s (apps/terminal/src/screens/token/trades.ts and candles.ts TIMEOUT_MS), so at 12 s a cold tape was the page's
+ *  empty Trades tab and a cold chart its error state, whatever the helper answered (swaps-hang.test.ts pins the two).
+ *  [design: 8 s, the page's 10 s less 2 s for the way to it.] */
+export const OPEN_BOUND_MS = 8_000;
 /** `p`'s value, or LATE once `ms` have passed (`p` goes on). */
 const LATE = Symbol("late");
 function within<T>(p: Promise<T>, ms: number): Promise<T | typeof LATE> {
@@ -2534,8 +2537,8 @@ export function createSwaps(chain: EvmChain, deps: { fetch?: Fetch; now?: () => 
     async trades(token: string, limit: number): Promise<DataAnswer> {
       const t = evmAddress(token);
       if (t === null || !Number.isSafeInteger(limit) || limit < 1 || limit > TRADES_MAX) return NOT_FOUND;
-      // a first open past its bound answers 503 and its read goes on (OPEN_BOUND_MS); the traders are looked up within
-      // what is left of it, and one not read by then is null this time, asked again the next
+      // a first open past its bound answers filling and its read goes on (OPEN_BOUND_MS); the traders are looked up
+      // within what is left of it, and one not read by then is null this time, asked again the next
       const until = performance.now() + OPEN_BOUND_MS;
       // a caller's reads, in the foreground lane, their wait named in the answer (as candles)
       const lane = newLane(true);

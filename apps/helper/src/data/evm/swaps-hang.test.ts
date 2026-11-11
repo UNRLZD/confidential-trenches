@@ -5,6 +5,7 @@
 // timing out at 8 s on about one post in five, and every first read's range (swaps.ts agreedRange) waited on that index
 // read with no bound; each round of the open then waited the full 8 s for the provider that hung before asking the next.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { CURVE_TOKEN, fakeChain, MAG, open, REC } from "../../../test/evm-swaps/robinhood.ts";
 import { onVirtualTime } from "../../../test/evm-swaps/virtual-time.ts";
@@ -57,6 +58,19 @@ for (const [what, token, pools] of [
     assert.ok(ms <= BOUND_MS, `answered in ${ms} ms, past ${BOUND_MS} ms`);
   });
 }
+
+// card token-page-data-complete-and-fast: the bound ends before the page gives up on the read (its tape and chart reads'
+// TIMEOUT_MS), with 2 s for the way: at 12 s, past the page's 10 s, a cold tape was the page's empty Trades tab and a
+// cold chart its error state whatever the helper answered
+test("card token-page-data-complete-and-fast: OPEN_BOUND_MS ends 2 s before the token page's tape and chart reads give up", () => {
+  for (const f of ["trades.ts", "candles.ts"]) {
+    const src = readFileSync(new URL(`../../../../terminal/src/screens/token/${f}`, import.meta.url), "utf8");
+    const m = /^(?:export )?const TIMEOUT_MS = ([\d_]+);$/m.exec(src);
+    assert.ok(m !== null, `${f} names its TIMEOUT_MS`);
+    const pageMs = Number(m[1]!.replaceAll("_", ""));
+    assert.ok(OPEN_BOUND_MS + 2_000 <= pageMs, `${f}: the page gives up at ${pageMs} ms, the helper answers at ${OPEN_BOUND_MS} ms`);
+  }
+});
 
 // card token-page-data-complete-and-fast: a cold tape at its bound is filling, not failed: it answers 200 with what is
 // held and `filling` true while its reads go on, and 503 only once a read failed (every provider hung past its aborts)

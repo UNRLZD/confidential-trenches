@@ -2,9 +2,10 @@
 // (robinhood-listed-tape-opens.answers.json):
 //   good: the branch helper at 61f16646 on the Mac: 14 tokens dropped from the three chains' lists, every tape 200: PASS;
 //   bad:  the helper at 358d8f4f (what is deployed) beside it: 7 dropped tokens' tapes 404 not_found: FAIL;
-//   good_filling: the good answer with its four Base tapes as the route answers a cold tape at its bound (card
-//     token-page-data-complete-and-fast), each first answer and fill time the ones read for four of ten cold Base tapes
-//     opened at once by the branch's createSwaps on the public providers from the Mac, 2026-11-11 17:45Z: PASS.
+//   good_filling: the good answer with three of its Base tapes as the route answers a cold tape at its bound (card
+//     token-page-data-complete-and-fast), each first answer and fill time the ones read for the three of ten cold Base
+//     tapes that answered filling when opened at once by the branch's createSwaps on the public providers from the Mac,
+//     2026-11-11 17:58Z: PASS.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -57,8 +58,8 @@ test("planted on the good answer: a 503 or a body without trades fails; no chain
 test("card token-page-data-complete-and-fast: a cold tape that answers 200 filling inside ANSWER_MS and fills within FILLED_MS passes", () => {
   const r = judge(A.good_filling);
   assert.equal(r.verdict, "PASS", r.lines.join("\n"));
-  assert.equal(r.lines.filter((l) => /^ok  base trades 0x[0-9a-f]{40} \(dropped\): 200 tape filling in 12\d{3} ms$/.test(l)).length, 4, r.lines.join("\n"));
-  assert.equal(r.lines.filter((l) => /^ok  base trades 0x[0-9a-f]{40} \(dropped\): filled \d+ ms after its first read \(\d+ reads\)$/.test(l)).length, 4, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => /^ok  base trades 0x[0-9a-f]{40} \(dropped\): 200 tape filling in 8001 ms$/.test(l)).length, 3, r.lines.join("\n"));
+  assert.equal(r.lines.filter((l) => /^ok  base trades 0x[0-9a-f]{40} \(dropped\): filled \d+ ms after its first read \(\d+ reads\)$/.test(l)).length, 3, r.lines.join("\n"));
 });
 
 test("card token-page-data-complete-and-fast: planted on the filling answer: a 200 past ANSWER_MS, a tape still filling at FILLED_MS, a 503 after filling, a filling tape never read again each fail", () => {
